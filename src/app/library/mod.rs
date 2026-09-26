@@ -14,6 +14,7 @@ pub enum Action {
     Develop(i64),
     RelinkRoot(i64),
     RelinkFolder(i64),
+    AddFolder,
 }
 pub struct Library {
     pub catalog: Catalog,
@@ -322,6 +323,23 @@ impl Library {
                             }
                             None => {}
                         }
+                    }
+                    if self.roots.is_empty() {
+                        ui.add_space(4.);
+                        ui.label(
+                            egui::RichText::new("No folders yet")
+                                .size(11.)
+                                .color(Color32::from_gray(120)),
+                        );
+                    }
+                    ui.add_space(6.);
+                    if add_row(ui, "Add Folder…")
+                        .on_hover_text(
+                            "Add a folder of photos to this catalog. Photos stay where they are.",
+                        )
+                        .clicked()
+                    {
+                        action = Action::AddFolder;
                     }
                 });
             });
@@ -954,6 +972,30 @@ fn filter_caption(text: &str) -> egui::RichText {
     egui::RichText::new(text)
         .size(11.)
         .color(Color32::from_gray(150))
+}
+/// A quiet full-width "+ label" row, Lightroom's add action in a panel.
+fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
+    let hovered = response.hovered();
+    if hovered {
+        ui.painter().rect_filled(rect, 3., Color32::from_gray(43));
+    }
+    let color = Color32::from_gray(if hovered { 235 } else { 165 });
+    let c = egui::pos2(rect.left() + 18., rect.center().y);
+    let stroke = egui::Stroke::new(1.4, color);
+    ui.painter()
+        .line_segment([c - Vec2::new(5., 0.), c + Vec2::new(5., 0.)], stroke);
+    ui.painter()
+        .line_segment([c - Vec2::new(0., 5.), c + Vec2::new(0., 5.)], stroke);
+    ui.painter().text(
+        egui::pos2(rect.left() + 32., rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.),
+        color,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 /// A Catalog panel row: name on the left, photo count right-aligned.
 fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui::Response {

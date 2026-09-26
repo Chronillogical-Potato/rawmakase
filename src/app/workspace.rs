@@ -345,6 +345,9 @@ impl Editor {
                 crate::app::library::Action::RelinkFolder(id) => {
                     self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), &ctx)
                 }
+                crate::app::library::Action::AddFolder => {
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx)
+                }
                 crate::app::library::Action::None => {}
             }
         }
