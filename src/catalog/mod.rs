@@ -17,6 +17,42 @@ pub struct Catalog {
 pub mod lightroom;
 mod models;
 pub use models::{Collection, Folder, Photo, SavedEdit};
+/// Lightroom's develop history per photo: one full settings snapshot per step.
+const LIGHTROOM_HISTORY_TABLE: &str = "CREATE TABLE IF NOT EXISTS lightroom_history(
+    photo INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    created REAL,
+    text TEXT NOT NULL,
+    PRIMARY KEY(photo, position));";
+/// Copies history steps from an attached Lightroom catalog named `lr`.
+pub(crate) const COPY_LIGHTROOM_HISTORY: &str =
+    "INSERT OR IGNORE INTO lightroom_history(photo,position,name,created,text)
+    SELECT image, row_number() OVER (PARTITION BY image ORDER BY dateCreated, id_local),
+           COALESCE(name,''), dateCreated, text
+    FROM lr.Adobe_libraryImageDevelopHistoryStep
+    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos);";
+/// Lightroom stores history snapshots either as text or as a 4-byte
+/// big-endian length followed by a zlib stream.
+fn decode_history_text(bytes: &[u8]) -> Option<String> {
+    if bytes.len() > 6 && bytes[4] == 0x78 {
+        use std::io::Read;
+        let mut text = String::new();
+        flate2::read::ZlibDecoder::new(&bytes[4..])
+            .read_to_string(&mut text)
+            .ok()?;
+        return Some(text);
+    }
+    String::from_utf8(bytes.to_vec()).ok()
+}
+/// One Lightroom history step.
+#[derive(Clone, Debug)]
+pub struct HistoryStep {
+    pub name: String,
+    /// Seconds since 2001-01-01 (Lightroom's epoch).
+    pub created: Option<f64>,
+    pub text: String,
+}
 // Compatibility for existing clients.
 pub use lightroom::{convert_develop, import_lightroom};
 impl Catalog {
@@ -46,6 +82,8 @@ impl Catalog {
         );
         db.busy_timeout(Duration::from_secs(5))?;
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
+        // Added after version 1 shipped; additive, so older catalogs gain it on open.
+        db.execute_batch(LIGHTROOM_HISTORY_TABLE)?;
         Ok(Self {
             path: path.into(),
             db,
@@ -241,6 +279,77 @@ impl Catalog {
         } else {
             Ok(None)
         }
+    }
+    /// Lightroom's history for a photo, oldest step first.
+    pub fn lightroom_history(&self, id: i64) -> Result<Vec<HistoryStep>> {
+        let mut q = self.db.prepare(
+            "SELECT name, created, text FROM lightroom_history WHERE photo=? ORDER BY position",
+        )?;
+        let rows = q
+            .query_map([id], |r| {
+                let text = match r.get_ref(2)? {
+                    rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
+                        t.to_vec()
+                    }
+                    _ => Vec::new(),
+                };
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<f64>>(1)?, text))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(name, created, bytes)| {
+                Some(HistoryStep {
+                    name,
+                    created,
+                    text: decode_history_text(&bytes)?,
+                })
+            })
+            .collect())
+    }
+    /// Catalogs imported before history was kept still hold the original
+    /// Lightroom catalog; copy its history steps once. Returns steps added.
+    pub fn backfill_lightroom_history(&mut self) -> Result<usize> {
+        let have: i64 = self
+            .db
+            .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
+        if have > 0 {
+            return Ok(0);
+        }
+        let original: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(original) = original else {
+            return Ok(0);
+        };
+        let snapshot = tempfile::NamedTempFile::new()?;
+        std::fs::write(snapshot.path(), original)?;
+        self.db.execute(
+            "ATTACH DATABASE ? AS lr",
+            [snapshot.path().to_string_lossy()],
+        )?;
+        let result = (|| -> Result<usize> {
+            let exists = self
+                .db
+                .query_row(
+                    "SELECT 1 FROM lr.sqlite_master WHERE type='table' AND name='Adobe_libraryImageDevelopHistoryStep'",
+                    [],
+                    |r| r.get::<_, i32>(0),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                return Ok(0);
+            }
+            Ok(self.db.execute(COPY_LIGHTROOM_HISTORY, [])?)
+        })();
+        self.db.execute_batch("DETACH DATABASE lr")?;
+        result
     }
     pub fn lightroom_develop(&self, id: i64) -> Result<Option<String>> {
         Ok(self.db.query_row(

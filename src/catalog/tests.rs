@@ -216,3 +216,17 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     assert!(develop_fields("s = { a = 1, a = 2 }").is_err());
     Ok(())
 }
+#[test]
+fn lightroom_history_text_decodes_plain_and_compressed() {
+    use std::io::Write;
+    let text = "s = { Exposure2012 = 0.5 }";
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(text.as_bytes()).unwrap();
+    let mut blob = (text.len() as u32).to_be_bytes().to_vec();
+    blob.extend(z.finish().unwrap());
+    assert_eq!(super::decode_history_text(&blob).as_deref(), Some(text));
+    assert_eq!(
+        super::decode_history_text(text.as_bytes()).as_deref(),
+        Some(text)
+    );
+}

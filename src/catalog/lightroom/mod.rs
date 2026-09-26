@@ -103,6 +103,9 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     if has("Adobe_imageDevelopSettings")? {
         tx.execute_batch("UPDATE photos SET lightroom_develop=(SELECT text FROM lr.Adobe_imageDevelopSettings WHERE image=photos.id LIMIT 1);")?;
     }
+    if has("Adobe_libraryImageDevelopHistoryStep")? {
+        tx.execute_batch(crate::catalog::COPY_LIGHTROOM_HISTORY)?;
+    }
     if has("AgLibraryCollection")? {
         tx.execute_batch("INSERT INTO collections SELECT id_local,name,parent,creationId FROM lr.AgLibraryCollection;")?;
     }
