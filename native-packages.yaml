@@ -1,0 +1,35 @@
+schema: 1
+tool:
+  version: '0.7.0'
+  nfpm: '2.47.0'
+nfpm:
+  name: rawmakase
+  maintainer: pch <https://github.com/pch>
+  description: A fast, non-destructive RAW photo developer
+  license: MIT
+release:
+  repository: pch/rawmakase
+  prereleases: true
+  checksums: SHA256SUMS
+version_file: Cargo.toml
+targets:
+  macos-arm64:
+    platform: macos
+    arch: arm64
+    formats: [dmg]
+    input:
+      kind: directory
+      local: dist/RAWmakase.app
+    native:
+      command: [ruby, packaging/release/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
+      output: 'rawmakase-@VERSION@-macos-arm64.dmg'
+  macos-amd64:
+    platform: macos
+    arch: amd64
+    formats: [dmg]
+    input:
+      kind: directory
+      local: dist/RAWmakase.app
+    native:
+      command: [ruby, packaging/release/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
+      output: 'rawmakase-@VERSION@-macos-x86_64.dmg'

@@ -6,7 +6,7 @@ pkgdesc='A fast, non-destructive RAW photo developer (development version)'
 arch=('x86_64')
 url='https://github.com/pch/rawmakase'
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'lcms2' 'libraw' 'libxkbcommon' 'vulkan-icd-loader' 'wayland')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'lcms2' 'libraw>=0.22' 'libxkbcommon' 'libxkbcommon-x11' 'vulkan-icd-loader' 'wayland' 'libx11' 'libxcb' 'libxcursor' 'libxi' 'libxrandr' 'libglvnd')
 optdepends=('xdg-desktop-portal: native file dialogs')
 makedepends=('cargo' 'git' 'pkgconf')
 # makepkg's LTO flags turn bundled C code (SQLite, LibRaw glue) into GCC bytecode rustc

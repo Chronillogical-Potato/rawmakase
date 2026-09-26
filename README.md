@@ -17,20 +17,39 @@ It is a personal project in active development. Rendering aims for close, not ex
 
 ## Install
 
+Download the package for your system from [GitHub Releases](https://github.com/pch/rawmakase/releases). Older releases may have only the original Arch-built Linux archive; use the requirements in that release's notes.
+
+### macOS (15 or newer)
+
+Choose `rawmakase-<version>-macos-arm64.dmg` for Apple Silicon or `rawmakase-<version>-macos-x86_64.dmg` for Intel. Open the DMG, drag **RAWmakase** into **Applications**, and launch it there. Release DMGs are signed and notarized, and include their imaging libraries; Homebrew is not required.
+
 ### Linux (x86_64)
 
-Each [GitHub release](https://github.com/pch/rawmakase/releases) has a prebuilt `rawmakase-<version>-x86_64-linux.tar.gz` built on Arch Linux. It links against the system LibRaw (0.22 or newer) and Little CMS 2, so install those first. On Arch:
+Download the package, then run the matching command from its folder, replacing the filename with the one you downloaded:
 
-```sh
-sudo pacman -S libraw lcms2
-sudo tar -C / -xzf rawmakase-*-x86_64-linux.tar.gz
-```
+| System | Package | Install |
+| --- | --- | --- |
+| Ubuntu 24.04+ / Debian 13+ | `.deb` | `sudo apt install ./rawmakase_<version>_amd64.deb` |
+| Fedora 43+ | `.rpm` | `sudo dnf install ./rawmakase-<version>-1.x86_64.rpm` |
+| Arch Linux | `.pkg.tar.zst` | `sudo pacman -U ./rawmakase-<version>-1-x86_64.pkg.tar.zst` |
 
-On Arch Linux you can instead download the release's `PKGBUILD` into an empty folder, or use the development recipe in [packaging/rawmakase-git](packaging/rawmakase-git/PKGBUILD), and build a package:
+DEB/RPM packages include LibRaw and Little CMS. Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
+
+**AUR publication is paused.** Install the Arch package directly, or download and extract `rawmakase-<version>-arch-recipe.tar.gz` into an empty folder and build as a normal user:
 
 ```sh
 makepkg -si
 ```
+
+The development recipe is in [packaging/rawmakase-git](packaging/rawmakase-git/PKGBUILD).
+
+The `rawmakase-<version>-x86_64-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
+
+### Updates and verification
+
+To update, download a newer release and repeat the installation steps (replace the app in Applications on macOS). Settings and catalogs are kept separately from the installed application. There is currently no in-app updater or automatic package repository.
+
+Each new packaged release includes `SHA256SUMS`. After downloading it beside your package, verify downloaded files on Linux with `sha256sum --ignore-missing -c SHA256SUMS`. On macOS, use `shasum -a 256 <downloaded-file>` and compare the result with that file's entry in `SHA256SUMS`.
 
 ### From source (Linux and macOS)
 
@@ -122,7 +141,7 @@ RAWMAKASE_FIXTURES=~/raw-fixtures cargo test --release --test raw_fixtures -- --
 
 GPU tests are ignored as well; run them with `cargo test --lib gpu -- --ignored` on a machine with a compute adapter.
 
-CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. Pushing a `v*` tag that matches the `Cargo.toml` version builds the x86_64 Linux tarball and `PKGBUILD` and publishes them as a GitHub release.
+CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. A stable `vX.Y.Z` tag on `main` matching `Cargo.toml` builds both macOS DMGs and the Linux packages. Publication waits for Apple notarization and package checks. See [packaging/RELEASING.md](packaging/RELEASING.md) for credentials, rehearsal runs, supported systems and the AUR pause.
 
 ## License
 

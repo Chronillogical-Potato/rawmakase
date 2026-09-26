@@ -1,6 +1,8 @@
 # Native dependencies
 
-The project dynamically links the system `libraw_r`, `lcms2`, C++ runtime and OpenMP runtime. LibRaw is separately licensed under LGPL-2.1/CDDL alternatives; see the installed package and [upstream license files](https://github.com/LibRaw/LibRaw). Little CMS and Rust dependencies retain their own licenses. The project's MIT license applies to RAWmakase's original code, not those libraries. Do not bundle native libraries without their notices and applicable distribution requirements.
+Source builds dynamically link the system `libraw_r`, `lcms2`, C++ runtime and OpenMP runtime. LibRaw is separately licensed under LGPL-2.1/CDDL alternatives; see the installed package and [upstream license files](https://github.com/LibRaw/LibRaw). Little CMS and Rust dependencies retain their own licenses. The project's MIT license applies to RAWmakase's original code, not those libraries. Do not bundle native libraries without their notices and applicable distribution requirements.
+
+Release DMGs and DEB/RPM packages bundle private copies of LibRaw 0.22.2 and Little CMS 2.19.1, with their notices. The native source archives and build script are attached to the GitHub release. Mac apps also bundle their non-system runtime dependencies; Linux packages retain system C++/OpenMP/graphics dependencies. Arch packages continue to use system libraries. See [release packaging](../packaging/RELEASING.md).
 
 Rust dependencies are resolved in Cargo.lock. The UI uses eframe 0.36.1; its compatible egui ecosystem dependencies currently resolve to 0.36.2. Build.rs verifies LibRaw >=0.22 and Little CMS through pkg-config. The tested native versions are LibRaw 0.22.2 and Little CMS 2.19.
 

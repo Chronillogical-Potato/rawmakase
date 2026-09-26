@@ -1,0 +1,32 @@
+name: Packaging checks
+
+on:
+  pull_request:
+    paths: ['packaging/**', 'native-packages.yaml', '.github/workflows/**']
+  push:
+    branches: [main]
+    paths: ['packaging/**', 'native-packages.yaml', '.github/workflows/**']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+      - name: Validate workflows and package configuration
+        run: |
+          GOBIN="$RUNNER_TEMP/tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+          "$RUNNER_TEMP/tools/actionlint"
+          shellcheck packaging/release/*.sh
+          ruby -c packaging/release/dmg.rb
+          python3 -m py_compile packaging/release/*.py
+          gem install native-packages --version 0.7.0 --no-document
+          native-packages validate
