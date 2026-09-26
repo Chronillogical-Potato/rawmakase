@@ -73,6 +73,7 @@ pub(super) struct Onboarding {
     cameras: BTreeSet<String>,
     /// Adobe base and Camera Matching profiles for those cameras, then looks.
     adobe_profiles: Vec<PathBuf>,
+    /// Your profiles named for those cameras ("Sony ILCE-7M2 Portra 400 SO.dcp").
     user_profiles: Vec<PathBuf>,
     user_presets: Vec<PathBuf>,
     message: String,
@@ -123,10 +124,19 @@ impl Onboarding {
             }
         }
         let user = user_camera_raw();
+        // Third-party packs ship a DCP per camera model, often thousands in all;
+        // only those for the catalog's cameras are useful.
+        let cameras: Vec<String> = self.cameras.iter().map(|c| format!("{c} ")).collect();
         self.user_profiles = user
             .as_ref()
             .map(|d| find_files(&d.join("CameraProfiles"), &["dcp"]))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| {
+                let name = p.file_name().unwrap_or_default().to_string_lossy();
+                cameras.iter().any(|c| name.starts_with(c.as_str()))
+            })
+            .collect();
         self.user_presets = user
             .as_ref()
             .map(|d| find_files(&d.join("Settings"), &["xmp"]))
@@ -245,34 +255,35 @@ impl Editor {
                     "Choose a catalog first so RAWmakase can find your cameras.".to_string()
                 } else if self.onboarding.cameras.is_empty() {
                     "No RAW photos in the catalog yet.".to_string()
-                } else if adobe == 0 {
-                    format!("No Adobe profiles found for {cameras}.")
+                } else if adobe + user_profiles == 0 {
+                    format!("No profiles found for {cameras}.")
                 } else {
-                    format!("Cameras in your catalog: {cameras}")
+                    format!(
+                        "Found {adobe} Adobe and {user_profiles} of your profiles for {cameras}"
+                    )
                 },
             );
             ui.add_space(10.);
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
-                    if adobe > 0 && primary(ui, "Import Adobe profiles").clicked() {
-                        let paths = self.onboarding.adobe_profiles.clone();
-                        self.onboarding.message = match crate::camera_profiles::import_files(&paths)
-                        {
-                            Ok(done) => {
-                                format!("Imported {} Adobe profiles for {cameras}", done.len())
-                            }
-                            Err(e) => format!("Adobe profiles not imported: {e:#}"),
-                        };
-                    }
-                    if user_profiles > 0
-                        && secondary(ui, &format!("Import yours ({user_profiles})")).clicked()
+                    if adobe + user_profiles > 0
+                        && primary(ui, &format!("Import {} profiles", adobe + user_profiles))
+                            .clicked()
                     {
-                        let paths = self.onboarding.user_profiles.clone();
-                        self.onboarding.message = match crate::camera_profiles::import_files(&paths)
-                        {
-                            Ok(done) => format!("Imported {} of your profiles", done.len()),
-                            Err(e) => format!("Profiles not imported: {e:#}"),
-                        };
+                        let mut messages = Vec::new();
+                        for (kind, failed, paths) in [
+                            ("Adobe", "Adobe", &self.onboarding.adobe_profiles),
+                            ("of your", "Your", &self.onboarding.user_profiles),
+                        ] {
+                            if paths.is_empty() {
+                                continue;
+                            }
+                            messages.push(match crate::camera_profiles::import_files(paths) {
+                                Ok(done) => format!("Imported {} {kind} profiles", done.len()),
+                                Err(e) => format!("{failed} profiles not imported: {e:#}"),
+                            });
+                        }
+                        self.onboarding.message = format!("{} for {cameras}", messages.join("; "));
                     }
                     if secondary(ui, "Choose files…").clicked() {
                         self.dialog(FileDialog::CameraProfile, ctx);
