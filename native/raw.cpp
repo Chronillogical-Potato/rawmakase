@@ -120,6 +120,53 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
     } catch(const std::exception& e) { message(err,e.what()); return -1; }
     catch(...) { message(err,"Native RAW development failed"); return -1; }
 }
+// Unpacked sensor data for RAWmakase's own demosaic. Returns 0 with the visible size and
+// a 48×48 colour pattern (covers 2-, 6- and 16-pixel periods) (0 red, 1 green, 2 blue) for single-channel Bayer or X-Trans
+// data; nonzero means the caller should use ora_develop instead.
+int ora_cfa_open(void* ptr, unsigned* w, unsigned* h, unsigned char* pattern, char* err) {
+    try {
+        auto& raw=static_cast<Handle*>(ptr)->raw;
+        int rc=raw.unpack();
+        if(rc) { message(err,libraw_strerror(rc)); return rc; }
+        auto& d=raw.imgdata;
+        if(!d.rawdata.raw_image || d.idata.colors!=3 || !d.idata.filters || d.rawdata.color.maximum<=d.rawdata.color.black) {
+            message(err,"Not single-channel CFA data"); return 1;
+        }
+        if(size_t(d.sizes.top_margin)+d.sizes.height>d.sizes.raw_height
+           || size_t(d.sizes.left_margin)+d.sizes.width>d.sizes.raw_width) {
+            message(err,"Visible area outside raw data"); return 1;
+        }
+        *w=d.sizes.width; *h=d.sizes.height;
+        for(int r=0;r<48;++r) for(int c=0;c<48;++c) {
+            int v=raw.COLOR(r,c);
+            pattern[r*48+c]=(unsigned char)(v==3 ? 1 : v);
+        }
+        return 0;
+    } catch(const std::exception& e) { message(err,e.what()); return -1; }
+    catch(...) { message(err,"Native RAW unpack failed"); return -1; }
+}
+// Fills width×height values: (raw − black) / (white − black) per pixel, not white balanced.
+void ora_cfa_copy(void* ptr, float* out) {
+    auto& raw=static_cast<Handle*>(ptr)->raw;
+    auto& d=raw.imgdata;
+    const auto& col=d.rawdata.color;
+    const unsigned w=d.sizes.width, h=d.sizes.height;
+    const size_t pitch=d.sizes.raw_pitch/2;
+    const unsigned cr=col.cblack[4], cc=col.cblack[5];
+    const bool pat = cr>0 && cc>0 && size_t(cr)*cc<=LIBRAW_CBLACK_SIZE-6;
+    #pragma omp parallel for schedule(static)
+    for(int row=0; row<(int)h; ++row) {
+        const ushort* src=d.rawdata.raw_image+size_t(row+d.sizes.top_margin)*pitch+d.sizes.left_margin;
+        float* dst=out+size_t(row)*w;
+        for(unsigned c=0;c<w;++c) {
+            int k=raw.COLOR(row,c);
+            float black=float(col.black+col.cblack[k<4?k:1]);
+            if(pat) black+=float(col.cblack[6+(row%cr)*cc+(c%cc)]);
+            float white=float(col.maximum);
+            dst[c]=std::max(0.f,(float(src[c])-black)/std::max(1.f,white-black));
+        }
+    }
+}
 void ora_copy(void* ptr, float* out) {
     auto& r=static_cast<Handle*>(ptr)->raw;
     size_t n=size_t(r.imgdata.sizes.width)*r.imgdata.sizes.height;

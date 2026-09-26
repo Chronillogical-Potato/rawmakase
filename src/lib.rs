@@ -17,6 +17,7 @@ pub mod camera_profiles;
 pub mod catalog;
 mod color_math;
 pub mod comparison;
+pub mod demosaic;
 pub mod develop;
 pub mod dng;
 pub mod export;

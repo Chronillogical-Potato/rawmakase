@@ -184,9 +184,6 @@ fn tone_stage(
 }
 /// Basic curves, point curves, color controls and output encoding.
 fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -> [f32; 3] {
-    // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
-    let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
-    let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut)
     } else if r.wide_gamut_curves {
@@ -197,6 +194,12 @@ fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -
     } else {
         rgb
     };
+    // Lightroom grades after the tone curves: a faded point curve changes which tones
+    // count as shadows.
+    // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
+    // Applied after the tone curves, which matches Lightroom references with point curves.
+    let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
+    let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let mut lab = srgb_to_lab(rgb);
     lab[1] *= clipped_chroma;
     lab[2] *= clipped_chroma;
