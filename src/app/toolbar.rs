@@ -167,6 +167,10 @@ impl Editor {
                                 self.dialog(FileDialog::CameraProfile, &ctx);
                                 ui.close();
                             }
+                            if menu_item(ui, "Import Lens Profiles…", "", true, false) {
+                                self.dialog(FileDialog::LensProfile, &ctx);
+                                ui.close();
+                            }
                             menu_separator(ui);
                             if menu_item(
                                 ui,

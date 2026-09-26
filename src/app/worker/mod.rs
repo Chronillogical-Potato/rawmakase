@@ -48,6 +48,7 @@ pub enum Event {
     ExportPath(PathBuf),
     Monitor(PathBuf),
     CameraProfile(Vec<PathBuf>),
+    LensProfiles(Vec<PathBuf>),
     Profiles {
         id: u64,
         profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,

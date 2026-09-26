@@ -11,6 +11,7 @@ pub(super) enum FileDialog {
     LoadPreset,
     SavePreset,
     CameraProfile,
+    LensProfile,
     ImportXmp,
 }
 
@@ -55,6 +56,16 @@ impl Editor {
                 ctx.request_repaint();
                 return;
             }
+            if matches!(kind, FileDialog::LensProfile) {
+                let event = rfd::FileDialog::new()
+                    .add_filter("Adobe lens profiles", &["lcp"])
+                    .pick_files()
+                    .map(Event::LensProfiles)
+                    .unwrap_or(Event::DialogClosed);
+                let _ = tx.send(event);
+                ctx.request_repaint();
+                return;
+            }
             let selected = match kind {
                 FileDialog::OpenRaw => rfd::FileDialog::new()
                     .add_filter("Camera RAW", &crate::storage::RAW_EXTENSIONS)
@@ -71,7 +82,9 @@ impl Editor {
                 FileDialog::ImportXmp => rfd::FileDialog::new()
                     .add_filter("XMP preset", &["xmp"])
                     .pick_file(),
-                FileDialog::CameraProfile => unreachable!("Handled by the multi-file chooser"),
+                FileDialog::CameraProfile | FileDialog::LensProfile => {
+                    unreachable!("Handled by the multi-file chooser")
+                }
                 FileDialog::LoadPreset => rfd::FileDialog::new()
                     .add_filter("RAWmakase preset", &["json"])
                     .pick_file(),
@@ -84,7 +97,7 @@ impl Editor {
                     FileDialog::OpenRaw | FileDialog::OpenFolder => Event::Open(p),
                     FileDialog::Export => Event::ExportPath(p),
                     FileDialog::MonitorProfile => Event::Monitor(p),
-                    FileDialog::CameraProfile => unreachable!(),
+                    FileDialog::CameraProfile | FileDialog::LensProfile => unreachable!(),
                     FileDialog::ImportXmp => Event::XmpImport(p),
                     FileDialog::LoadPreset => Event::PresetLoad(p),
                     FileDialog::SavePreset => Event::PresetSave(p),

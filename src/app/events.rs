@@ -65,6 +65,7 @@ impl Editor {
                     self.refresh_preset_support();
                 }
                 Event::CameraProfile(p) => self.camera_profile_ready(p),
+                Event::LensProfiles(p) => self.lens_profiles_ready(p),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
                     match crate::presets::save_preset(&p, &self.document.recipe) {
@@ -172,6 +173,20 @@ impl Editor {
         }
     }
 
+    fn lens_profiles_ready(&mut self, paths: Vec<std::path::PathBuf>) {
+        self.activity.finish_dialog();
+        match crate::lens::lcp::import_files(&paths) {
+            Ok(imported) => {
+                self.status = format!("Imported {} lens profiles", imported.len());
+                // Lens profiles are matched when a photo opens: reopen it.
+                if let Some(path) = self.document.path.clone() {
+                    let photo = self.document.catalog_photo;
+                    self.open_raw(path, photo);
+                }
+            }
+            Err(e) => self.status = format!("Lens profiles not imported: {e:#}"),
+        }
+    }
     fn camera_profile_ready(&mut self, paths: Vec<std::path::PathBuf>) {
         self.activity.finish_dialog();
         match crate::camera_profiles::import_files(&paths) {

@@ -297,6 +297,7 @@ impl Editor {
         self.tool_strip(ui);
         ui.add_space(6.);
         let mut import_profiles = false;
+        let mut import_lens = false;
         let mut import_adobe = false;
         // Cached per camera: this scans Adobe's profile folders.
         let adobe_key = self
@@ -815,19 +816,77 @@ impl Editor {
 
         if adjustment_section(ui, "Lens Corrections", |ui| {
             subheading(ui, "Profile");
-            match metadata.as_ref().and_then(|m| m.lens.as_ref()) {
-                Some(lens) => {
-                    ui.add_enabled_ui(r.engine >= 4, |ui| {
-                        ui.checkbox(&mut r.lens_builtin, "Enable Profile Corrections")
-                            .on_hover_text("Correct distortion, vignetting and color fringing with the lens data the camera stored in the RAW file.")
-                            .on_disabled_hover_text("Update the process version in Calibration to use built-in lens corrections.");
-                    });
-                    ui.small(format!("Built-in profile: {}", lens.source));
-                }
-                None => {
-                    ui.small("No built-in lens profile in this file");
-                }
+            let builtin = metadata.as_ref().and_then(|m| m.lens.as_ref());
+            let adobe = metadata.as_ref().and_then(|m| m.profile_lens.as_ref());
+            ui.add_enabled_ui(r.engine >= 4, |ui| {
+                control_row(ui, "", |ui| {
+                    if ui
+                        .checkbox(&mut r.lens_profile, "Enable Profile Corrections")
+                        .on_hover_text("Correct distortion and vignetting with an Adobe lens profile, or the lens data the camera stored in the RAW.")
+                        .on_disabled_hover_text("Update the process version in Calibration to use lens corrections.")
+                        .changed()
+                        // Sony's built-in data is off by default, so it follows the
+                        // checkbox; Fuji and DNG built-ins stay on, as in Lightroom.
+                        && builtin.is_some_and(|l| !l.default_on)
+                    {
+                        r.lens_builtin = r.lens_profile;
+                    }
+                });
+            });
+            let lens = metadata
+                .as_ref()
+                .map(|m| m.lens_model.clone())
+                .filter(|l| !l.is_empty());
+            control_row(ui, "Lens", |ui| {
+                ui.label(
+                    egui::RichText::new(lens.as_deref().unwrap_or("Unknown"))
+                        .size(11.)
+                        .color(Color32::from_gray(200)),
+                );
+            });
+            control_row(ui, "Profile", |ui| {
+                ui.label(
+                    egui::RichText::new(
+                        adobe
+                            .or(builtin)
+                            .map_or("No matching profile", |l| l.source.as_str()),
+                    )
+                    .size(11.)
+                    .color(Color32::from_gray(200)),
+                );
+            });
+            if r.lens_profile {
+                subheading(ui, "Amount");
+                ui.push_id("lens-amount", |ui| {
+                    slider_with(
+                        ui,
+                        "Distortion",
+                        &mut r.lens_distortion,
+                        0. ..=2.,
+                        1.,
+                        Some((100., 0)),
+                        None,
+                    );
+                    slider_with(
+                        ui,
+                        "Vignetting",
+                        &mut r.lens_vignetting,
+                        0. ..=2.,
+                        1.,
+                        Some((100., 0)),
+                        None,
+                    );
+                });
             }
+            control_row(ui, "", |ui| {
+                if ui
+                    .small_button("Import Lens Profiles…")
+                    .on_hover_text("Import Adobe .lcp lens profiles, e.g. from /Library/Application Support/Adobe/CameraRaw/LensProfiles")
+                    .clicked()
+                {
+                    import_lens = true;
+                }
+            });
             subheading(ui, "Defringe");
             for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
                 ui.push_id(("defringe", i), |ui| {
@@ -882,6 +941,10 @@ impl Editor {
             if let Some(m) = &metadata {
                 r.lens_builtin = m.lens.as_ref().is_none_or(|l| l.default_on);
             }
+            let defaults = Recipe::default();
+            r.lens_profile = defaults.lens_profile;
+            r.lens_distortion = defaults.lens_distortion;
+            r.lens_vignetting = defaults.lens_vignetting;
             let d = Recipe::default().effects;
             r.effects.defringe = d.defringe;
             r.effects.defringe_ranges = d.defringe_ranges;
@@ -1061,6 +1124,9 @@ impl Editor {
         }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());
+        }
+        if import_lens {
+            self.dialog(FileDialog::LensProfile, &ui.ctx().clone());
         }
         if import_adobe && let Some(m) = self.document.metadata.clone() {
             if let Some(key) = adobe_key {
