@@ -184,6 +184,9 @@ fn tone_stage(
 }
 /// Basic curves, point curves, color controls and output encoding.
 fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -> [f32; 3] {
+    // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
+    let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
+    let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut)
     } else if r.wide_gamut_curves {
@@ -202,7 +205,12 @@ fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         let mut delta = [0.; 3];
         let weights = hue_weights(hue);
-        for (band, weight) in r.hsl.iter().zip(weights) {
+        let (hsl, saturation, vibrance) = if lut.basic_curves {
+            ([[0.; 3]; 8], 0., 0.)
+        } else {
+            (r.hsl, r.saturation, r.vibrance)
+        };
+        for (band, weight) in hsl.iter().zip(weights) {
             for c in 0..3 {
                 delta[c] += band[c] * weight;
             }
@@ -210,11 +218,11 @@ fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -
         delta[2] *= (chroma / 0.04).clamp(0., 1.);
         let angle = (hue + delta[0] / 8.) * std::f32::consts::TAU;
         let vibrance = if r.reference_color {
-            crate::develop::color::vibrance_gain(hue, chroma, r.vibrance)
+            crate::develop::color::vibrance_gain(hue, chroma, vibrance)
         } else {
-            1. + r.vibrance * (1. - (chroma / 0.3).clamp(0., 1.))
+            1. + vibrance * (1. - (chroma / 0.3).clamp(0., 1.))
         };
-        let sat = (1. + r.saturation) * vibrance * (1. + delta[1]);
+        let sat = (1. + saturation) * vibrance * (1. + delta[1]);
         let luminance_response = if r.reference_color {
             0.5 * lab[0].clamp(0., 1.) * (1. - lab[0].clamp(0., 1.))
         } else {
@@ -241,7 +249,11 @@ fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -
         lab[0] = lab[0].clamp(0., 1.);
     }
     let rgb = if r.reference_color {
-        let rgb = crate::develop::color::grade(lab_to_srgb(lab), r);
+        let rgb = if lut.grade.is_some() {
+            lab_to_srgb(lab)
+        } else {
+            crate::develop::color::grade(lab_to_srgb(lab), r)
+        };
         lab = srgb_to_lab(rgb);
         rgb
     } else {
@@ -299,6 +311,10 @@ struct CurveSet {
     basic: Option<crate::develop::basic_tone::BasicTone>,
     /// Engine 4 Shadows/Highlights base level, built per image by `with_local`.
     local: Option<crate::develop::local_tone::LocalToneMap>,
+    /// Engine 4 measured color mixer, Saturation and Vibrance.
+    mixer: Option<crate::develop::color_mixer::ColorMixer>,
+    /// Engine 4 measured color grading, when its settings are covered by the tables.
+    grade: Option<crate::develop::color_grade::ColorGrade>,
     /// Engine 4: the DNG exposure ramp's black point (Adobe's default Shadows of 5).
     black_ramp: Option<ExposureRamp>,
     color_adjustments: bool,
@@ -335,6 +351,12 @@ impl CurveSet {
                 })
                 .flatten(),
             local: None,
+            mixer: basic_curves
+                .then(|| crate::develop::color_mixer::ColorMixer::new(r))
+                .flatten(),
+            grade: (basic_curves && r.reference_color)
+                .then(|| crate::develop::color_grade::ColorGrade::new(r))
+                .flatten(),
             black_ramp: basic_curves.then(|| {
                 ExposureRamp::new(DNG_SHADOWS_BLACK * 2f32.powf(r.exposure + r.camera_exposure))
             }),
