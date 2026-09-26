@@ -90,7 +90,9 @@ pub(super) fn folder_tree_row(
         );
     }
     let indent = depth.min(12) as f32 * 14.;
-    let x = rect.left() + indent + 10.;
+    // Triangle in the gutter, folder icon at the same 10 px inset as the
+    // Catalog rows' text.
+    let x = rect.left() + indent + 3.;
     let y = rect.center().y;
     if !node.children.is_empty() {
         let points = if open {
@@ -111,7 +113,7 @@ pub(super) fn folder_tree_row(
             Stroke::new(1.2, Color32::from_gray(150)),
         ));
     }
-    let icon = Rect::from_min_size(Pos2::new(x + 10., y - 4.), Vec2::new(12., 9.));
+    let icon = Rect::from_min_size(Pos2::new(x + 7., y - 4.), Vec2::new(12., 9.));
     painter.rect_stroke(
         icon,
         1.,
@@ -134,7 +136,7 @@ pub(super) fn folder_tree_row(
     );
     let can_relink = node.root.is_some() || node.folder.is_some();
     let label_rect = Rect::from_min_max(
-        Pos2::new(x + 29., rect.top()),
+        Pos2::new(x + 26., rect.top()),
         Pos2::new(rect.right() - 62., rect.bottom()),
     );
     let text = egui::WidgetText::from(node.name.clone()).into_galley(
@@ -174,7 +176,7 @@ pub(super) fn folder_tree_row(
         let pointer = response.interact_pointer_pos().unwrap_or(rect.center());
         if can_relink && pointer.x > rect.right() - 24. {
             action = relink()
-        } else if !node.children.is_empty() && pointer.x < x + 8. {
+        } else if !node.children.is_empty() && pointer.x < x + 6. {
             if open {
                 expanded.remove(&node.key);
             } else {

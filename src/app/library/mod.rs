@@ -332,7 +332,7 @@ impl Library {
                                 .color(Color32::from_gray(120)),
                         );
                     }
-                    ui.add_space(6.);
+                    ui.add_space(12.);
                     if add_row(ui, "Add Folder…")
                         .on_hover_text(
                             "Add a folder of photos to this catalog. Photos stay where they are.",
@@ -982,14 +982,15 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
         ui.painter().rect_filled(rect, 3., Color32::from_gray(43));
     }
     let color = Color32::from_gray(if hovered { 235 } else { 165 });
-    let c = egui::pos2(rect.left() + 18., rect.center().y);
+    // Same columns as folder rows: icon at 10 px, text at 29 px.
+    let c = egui::pos2(rect.left() + 16., rect.center().y);
     let stroke = egui::Stroke::new(1.4, color);
     ui.painter()
         .line_segment([c - Vec2::new(5., 0.), c + Vec2::new(5., 0.)], stroke);
     ui.painter()
         .line_segment([c - Vec2::new(0., 5.), c + Vec2::new(0., 5.)], stroke);
     ui.painter().text(
-        egui::pos2(rect.left() + 32., rect.center().y),
+        egui::pos2(rect.left() + 29., rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(12.),
