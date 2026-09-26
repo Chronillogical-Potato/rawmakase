@@ -211,8 +211,10 @@ impl Raw {
             crop = dng.crop.or(crop);
         }
         if let Some([left, top, width, height]) = crop
-            && left + width <= metadata.width
-            && top + height <= metadata.height
+            && left.checked_add(width).is_some_and(|r| r <= metadata.width)
+            && top
+                .checked_add(height)
+                .is_some_and(|b| b <= metadata.height)
         {
             // Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
             // 2 px larger per side than LibRaw's).

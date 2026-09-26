@@ -49,6 +49,14 @@ struct Handle {
     Raw raw;
     Cancel cancel = nullptr;
     void* context = nullptr;
+    // LibRaw rejects a second unpack(); the CFA path may unpack before falling back.
+    bool unpacked = false;
+    int unpack() {
+        if(unpacked) return 0;
+        int rc=raw.unpack();
+        unpacked = rc==0;
+        return rc;
+    }
 };
 static int progress(void* p, LibRaw_progress, int, int) {
     auto h = static_cast<Handle*>(p);
@@ -111,7 +119,7 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
         // AHD for Bayer. For X-Trans, quality 2 selects 1-pass Markesteijn (darktable's
         // default), about three times faster than the 3-pass variant.
         p.half_size=fast; p.user_qual=fast ? 0 : (raw.imgdata.idata.filters==9 ? 2 : 3);
-        int rc=raw.unpack();
+        int rc=handle.unpack();
         if(!rc) rc=raw.dcraw_process();
         if(rc) { message(err,libraw_strerror(rc)); return rc; }
         *w=raw.imgdata.sizes.width; *h=raw.imgdata.sizes.height;
@@ -125,8 +133,8 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
 // data; nonzero means the caller should use ora_develop instead.
 int ora_cfa_open(void* ptr, unsigned* w, unsigned* h, unsigned char* pattern, char* err) {
     try {
-        auto& raw=static_cast<Handle*>(ptr)->raw;
-        int rc=raw.unpack();
+        auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
+        int rc=handle.unpack();
         if(rc) { message(err,libraw_strerror(rc)); return rc; }
         auto& d=raw.imgdata;
         if(!d.rawdata.raw_image || d.idata.colors!=3 || !d.idata.filters || d.rawdata.color.maximum<=d.rawdata.color.black) {

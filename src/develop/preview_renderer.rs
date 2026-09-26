@@ -139,7 +139,10 @@ impl PreviewRenderer {
         let full = Geometry::new(image, recipe, 0);
         let [x, y, w, h] = region;
         anyhow::ensure!(
-            w > 0 && h > 0 && x + w <= full.width && y + h <= full.height,
+            w > 0
+                && h > 0
+                && x.checked_add(w).is_some_and(|r| r <= full.width)
+                && y.checked_add(h).is_some_and(|b| b <= full.height),
             "Invalid viewport region"
         );
         // Halve until the preview has at most PREVIEW_PIXELS.

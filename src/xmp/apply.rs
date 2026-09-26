@@ -646,7 +646,10 @@ impl Preset {
     ) -> Result<()> {
         let v = settings.values;
         settings.seen.insert("AutoTone".into());
+        // Lightroom stores the exposure Auto Tone chose; recompute only when it is absent,
+        // so every route (open, reset, history, hover) renders the same edit.
         if boolean(v, "AutoTone")? == Some(true)
+            && !v.contains_key("Exposure2012")
             && let Some(im) = image
         {
             let mut l: Vec<f32> = im

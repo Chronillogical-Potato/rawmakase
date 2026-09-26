@@ -230,3 +230,20 @@ fn lightroom_history_text_decodes_plain_and_compressed() {
         Some(text)
     );
 }
+#[test]
+fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> {
+    let text = r#"s = { ProcessVersion = "5.7", Exposure = 0.75, Contrast = 40, Brightness = 50, Clarity = 0 }"#;
+    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    assert_eq!(r.exposure, 0.75);
+    assert!(w.iter().any(|s| s.starts_with("Contrast")));
+    // Controls at their legacy defaults are not reported.
+    assert!(
+        !w.iter()
+            .any(|s| s.starts_with("Brightness") || s.starts_with("Clarity"))
+    );
+    // With 2012 keys present the legacy ones are ignored.
+    let text = r#"s = { ProcessVersion = "11.0", Exposure = 0.75, Exposure2012 = 0.25 }"#;
+    let (r, _) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    assert_eq!(r.exposure, 0.25);
+    Ok(())
+}

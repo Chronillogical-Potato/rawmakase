@@ -785,7 +785,10 @@ fn sample_region(
 ) -> Result<Samples> {
     let [x0, y0, w, h] = region;
     ensure!(
-        w > 0 && h > 0 && x0 + w <= g.width && y0 + h <= g.height,
+        w > 0
+            && h > 0
+            && x0.checked_add(w).is_some_and(|r| r <= g.width)
+            && y0.checked_add(h).is_some_and(|b| b <= g.height),
         "Invalid viewport region"
     );
     let warp = LensWarp::new(&im, r);
@@ -976,7 +979,10 @@ fn render_region_inner(
     let lut = CurveSet::for_image(im, r, matrix);
     let [x0, y0, w, h] = region;
     ensure!(
-        w > 0 && h > 0 && x0 + w <= g.width && y0 + h <= g.height,
+        w > 0
+            && h > 0
+            && x0.checked_add(w).is_some_and(|r| r <= g.width)
+            && y0.checked_add(h).is_some_and(|b| b <= g.height),
         "Invalid viewport region"
     );
     let mut pixels = vec![[0.; 3]; w as usize * h as usize];

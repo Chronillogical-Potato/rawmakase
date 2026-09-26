@@ -93,6 +93,12 @@ pub fn convert_develop(
         notes: Vec::new(),
     };
     let mut warnings = Vec::new();
+    // A record from before process version 2012 (6.7) with no 2012 tone keys.
+    let legacy = fields
+        .get("ProcessVersion")
+        .and_then(|v| v.trim_matches('"').parse::<f32>().ok())
+        .is_some_and(|v| v < 6.7)
+        && !fields.keys().any(|k| k.ends_with("2012"));
     for (key, value) in &fields {
         if value.starts_with('{') {
             if key == "Look" && !value[1..value.len() - 1].trim().is_empty() {
@@ -145,12 +151,27 @@ pub fn convert_develop(
                 );
                 value.clone()
             };
-            // Legacy controls coexist with PV2012 settings; never apply both generations.
+            // Process version 2003/2010 basic controls. Newer records keep them next to
+            // their 2012 counterparts; never apply both generations. Older records have
+            // only these: exposure converts directly, the rest cannot be converted
+            // faithfully and are reported instead of silently dropped.
             if matches!(
                 key.as_str(),
-                "Exposure" | "Contrast" | "Brightness" | "Shadows" | "Clarity"
-            ) && fields.contains_key("ProcessVersion")
-            {
+                "Exposure"
+                    | "Contrast"
+                    | "Brightness"
+                    | "Shadows"
+                    | "Clarity"
+                    | "FillLight"
+                    | "HighlightRecovery"
+            ) {
+                if legacy {
+                    if key == "Exposure" {
+                        preset.settings.insert("Exposure2012".into(), value);
+                    } else if value.parse::<f64>().is_ok_and(|v| v != legacy_default(key)) {
+                        warnings.push(format!("{key} (process version 2003/2010, not converted)"));
+                    }
+                }
                 continue;
             }
             if matches!(
@@ -213,4 +234,14 @@ pub fn convert_develop(
     warnings.sort();
     warnings.dedup();
     Ok((recipe, warnings))
+}
+
+/// Lightroom's defaults for process version 2003/2010 basic controls.
+fn legacy_default(key: &str) -> f64 {
+    match key {
+        "Contrast" => 25.,
+        "Brightness" => 50.,
+        "Shadows" => 5.,
+        _ => 0.,
+    }
 }
