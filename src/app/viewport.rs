@@ -123,7 +123,12 @@ impl Editor {
     /// Before the first image arrives: the Library preview of the photo being
     /// opened with a spinner, or a hint when nothing is open.
     fn loading_placeholder(&self, ui: &mut egui::Ui, area: Rect) {
-        if !self.load.is_running() {
+        // A photo counts as opening until its first render arrives, even after
+        // the decode has finished; only an empty document shows the hint.
+        let opening = self.load.is_running()
+            || self.document.catalog_photo.is_some()
+            || self.document.path.is_some();
+        if !opening {
             ui.painter().text(
                 area.center(),
                 egui::Align2::CENTER_CENTER,
