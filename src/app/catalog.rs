@@ -166,12 +166,14 @@ impl Editor {
         match result {
             Ok((r, warnings)) => {
                 self.document.recipe = r;
+                // Short for the status bar; the full list shows on hover.
                 self.document.lightroom_notice = if warnings.is_empty() {
-                    String::new()
+                    "Lightroom edit applied".into()
                 } else {
                     format!(
-                        "Lightroom edit applied; not rendered: {}",
-                        warnings.join("; ")
+                        "Lightroom edit applied · {} settings not rendered yet\n\n{}",
+                        warnings.len(),
+                        warnings.join("\n")
                     )
                 };
             }

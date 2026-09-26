@@ -449,7 +449,10 @@ impl Editor {
                     ui.separator();
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.document.lightroom_notice).small(),
+                            egui::RichText::new(
+                                self.document.lightroom_notice.lines().next().unwrap_or(""),
+                            )
+                            .small(),
                         )
                         .truncate(),
                     )
