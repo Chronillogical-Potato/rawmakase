@@ -118,7 +118,11 @@ def main():
     finally:
         shutil.rmtree(iconset)
     # Ad-hoc signatures allow local verification; release signing replaces them.
-    for destination in copies.values():
+    # Signing the main executable can validate its enclosing bundle, so sign
+    # every nested library first (Intel libraries may arrive unsigned).
+    signing_order = [path for path in copies.values() if path != executable]
+    signing_order.append(executable)
+    for destination in signing_order:
         subprocess.run(["codesign", "--force", "--sign", "-", str(destination)], check=True)
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
     for destination in copies.values():
