@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RAWmakase
+Comment=Develop RAW photographs
+Exec=rawmakase %f
+Icon=rawmakase
+Terminal=false
+Categories=Graphics;Photography;
+MimeType=image/x-dcraw;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-nikon-nef;image/x-sony-arw;image/x-fuji-raf;image/x-olympus-orf;image/x-panasonic-rw2;image/x-pentax-pef;
+StartupWMClass=RAWmakase

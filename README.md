@@ -1,0 +1,129 @@
+# RAWmakase
+
+RAWmakase is a fast, non-destructive RAW photo developer for Linux and macOS, written in Rust. It opens RAW files from any camera LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+
+It is a personal project in active development. Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
+
+## Features
+
+- **Develop**: white balance and picker, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
+- **Library**: SQLite catalogs, folders and collections, ratings, flags, color labels, keywords, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
+- **Presets and profiles**: Lightroom XMP presets, plus DCP and XMP camera profiles you import yourself.
+- **Non-destructive**: originals are never modified. Edits live in sidecar JSON files or in the catalog, and all writes are atomic.
+- **Fast previews**: a quick draft first, then full quality, with GPU finishing (Metal on macOS, Vulkan on Linux) and CPU fallback.
+- **Command line**: inspect, render, export thumbnails, import catalogs and benchmark without the GUI.
+
+## Install
+
+### Linux (x86_64)
+
+Each [GitHub release](https://github.com/pch/rawmakase/releases) has a prebuilt `rawmakase-<version>-x86_64-linux.tar.gz` built on Arch Linux. It links against the system LibRaw (0.22 or newer) and Little CMS 2, so install those first. On Arch:
+
+```sh
+sudo pacman -S libraw lcms2
+sudo tar -C / -xzf rawmakase-*-x86_64-linux.tar.gz
+```
+
+On Arch Linux you can instead download the release's `PKGBUILD` into an empty folder, or use the development recipe in [packaging/rawmakase-git](packaging/rawmakase-git/PKGBUILD), and build a package:
+
+```sh
+makepkg -si
+```
+
+### From source (Linux and macOS)
+
+You need Rust 1.95 or newer, a C++17 compiler with OpenMP, pkg-config, LibRaw 0.22 or newer, and Little CMS 2.
+
+- Arch Linux: `sudo pacman -S rust base-devel pkgconf libraw lcms2`
+- macOS: `brew install pkg-config libraw little-cms2 libomp`. Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon); `LIBOMP_PREFIX` points the build at a non-Homebrew OpenMP.
+
+```sh
+make                                  # cargo build --release --locked
+make install PREFIX="$HOME/.local"    # binary, desktop entry, icon and licenses
+```
+
+`make install` never builds, so `make && sudo make install PREFIX=/usr` does not compile as root. `make uninstall` removes the installed files.
+
+On macOS, `packaging/macos-app.sh` builds `target/release/RAWmakase.app`, which you can open from Finder. It uses the Homebrew libraries installed on your Mac and is not a signed, self-contained distribution.
+
+## Usage
+
+```sh
+rawmakase                  # reopen the last catalog or photo
+rawmakase ~/Pictures/raw   # open a folder
+rawmakase photo.dng        # open one photo
+```
+
+You can also drop a file or folder onto the window. The first launch offers to create a catalog or import a Lightroom catalog; both are available later from the **Catalog** menu. The camera's embedded JPEG shows immediately while the RAW develops.
+
+Useful shortcuts:
+
+| Key | Action |
+| --- | --- |
+| Left / Right | Previous / next photo |
+| F / Z | Fit / toggle Fit and 100% |
+| 0–5, 6–9 | Rating; red, yellow, green, blue label |
+| P / X / U | Pick / reject / clear flag |
+| Shift + rating, label or flag key | Apply and advance |
+| R or C | Crop |
+| J | Clipping indicators |
+| Backslash | Before / after |
+| Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
+
+Double-click a slider to reset it, or type its value for precision.
+
+### Camera profiles
+
+RAWmakase does not ship any camera profiles. Without one, it renders with the camera matrix LibRaw provides. For Lightroom-like color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) with **Edit → Import profiles…** or `rawmakase import-profiles`. They are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
+
+### Command line
+
+```sh
+rawmakase inspect photo.dng
+rawmakase thumbnail photo.dng embedded.jpg
+rawmakase render photo.dng edited.jpg --exposure 0.7 --max-edge 2400
+rawmakase render photo.dng edited.tiff --xmp preset.xmp
+rawmakase import-catalog Lightroom.lrcat Photos.rawmakase
+rawmakase help
+```
+
+`render` applies the photo's saved edits unless `--recipe` or `--xmp` supplies settings, and it needs `--overwrite` to replace an existing file.
+
+### Where data lives
+
+- Edits for photos opened outside a catalog: `photo.dng.rawmakase.json` next to the RAW, or in the data directory's `sidecars/` folder for read-only locations.
+- Catalogs: the `.rawmakase` file you choose.
+- Profiles, presets, previews and session state: `~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` (default `~/.local/share/rawmakase`) on Linux. `RAWMAKASE_DATA_DIR` overrides it.
+
+Exports are always sRGB. The display defaults to sRGB; pick a monitor ICC profile under **More** only if your compositor does not already manage color.
+
+## Development
+
+Start with the [code map](docs/code-map.md) and the [architecture guide](docs/architecture.md).
+
+```sh
+make check    # cargo fmt --check, clippy -D warnings, cargo test
+```
+
+The repository contains no RAW photos, Lightroom catalogs or camera profiles, so tests that need them are ignored by default. Run them with your own files:
+
+| Environment variable | Test target | Needs |
+| --- | --- | --- |
+| `RAWMAKASE_FIXTURES` | `--test raw_fixtures` | A folder of RAW files (the test currently expects both a Bayer and an X-Trans file) |
+| `RAWMAKASE_PROFILES` | `--test private_profiles` | A folder of DCP files |
+| `RAWMAKASE_TEST_DCP` | `--lib camera_profiles` | A DCP file (the assertions currently match RawTherapee's `SONY ILCE-7M2.dcp`) |
+| `RAWMAKASE_LRCAT` | `--lib catalog` | A Lightroom catalog |
+
+```sh
+RAWMAKASE_FIXTURES=~/raw-fixtures cargo test --release --test raw_fixtures -- --ignored --nocapture
+```
+
+GPU tests are ignored as well; run them with `cargo test --lib gpu -- --ignored` on a machine with a compute adapter.
+
+CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. Pushing a `v*` tag that matches the `Cargo.toml` version builds the x86_64 Linux tarball and `PKGBUILD` and publishes them as a GitHub release.
+
+## License
+
+RAWmakase is released under the [MIT License](LICENSE). The DNG default tone curve and temperature table come from the Adobe DNG SDK, under the license in [licenses/Adobe-DNG-SDK.txt](licenses/Adobe-DNG-SDK.txt). LibRaw, Little CMS and the Rust dependencies keep their own licenses; see [dependencies](docs/dependencies.md).
+
+Adobe, Lightroom and Camera Raw are trademarks of Adobe Inc. RAWmakase is not affiliated with or endorsed by Adobe.

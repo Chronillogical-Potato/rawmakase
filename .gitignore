@@ -1,0 +1,11 @@
+/target/
+*.ARW
+*.arw
+*.RAF
+*.raf
+*.rawmakase.json
+
+*.lrcat
+*.lrcat-*
+*.rawmakase
+*.rawmakase-*

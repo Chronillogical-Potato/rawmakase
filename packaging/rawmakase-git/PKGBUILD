@@ -1,0 +1,50 @@
+# Maintainer: pch <https://github.com/pch>
+pkgname=rawmakase-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A fast, non-destructive RAW photo developer (development version)'
+arch=('x86_64')
+url='https://github.com/pch/rawmakase'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'lcms2' 'libraw' 'libxkbcommon' 'vulkan-icd-loader' 'wayland')
+optdepends=('xdg-desktop-portal: native file dialogs')
+makedepends=('cargo' 'git' 'pkgconf')
+# makepkg's LTO flags turn bundled C code (SQLite, LibRaw glue) into GCC bytecode rustc
+# cannot link.
+options=('!lto' '!debug')
+provides=('rawmakase')
+conflicts=('rawmakase')
+source=('rawmakase::git+https://github.com/pch/rawmakase.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd rawmakase
+  local version
+  version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+  printf '%s.r%s.%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd "rawmakase"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "rawmakase"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "rawmakase"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen
+}
+
+package() {
+  cd "rawmakase"
+  make install DESTDIR="$pkgdir" PREFIX=/usr PKGNAME="$pkgname"
+}

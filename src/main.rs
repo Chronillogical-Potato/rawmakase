@@ -1,0 +1,273 @@
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use rawmakase::{
+    develop::{self, Recipe},
+    export::ExportOptions,
+    raw,
+};
+use std::{path::PathBuf, sync::atomic::AtomicBool, time::Instant};
+#[derive(Parser)]
+#[command(version, about = "A personal RAW photo editor")]
+struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
+    /// Open a RAW file or folder in the editor
+    path: Option<PathBuf>,
+}
+#[derive(Subcommand)]
+enum Command {
+    /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
+    ImportProfiles {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+    },
+    ImportCatalog {
+        source: PathBuf,
+        output: PathBuf,
+    },
+    CatalogInfo {
+        catalog: PathBuf,
+    },
+    RelinkCatalog {
+        catalog: PathBuf,
+        root: i64,
+        folder: PathBuf,
+    },
+    Compare {
+        input: PathBuf,
+        reference: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+        #[arg(long, num_args = 2)]
+        origin: Option<Vec<u32>>,
+    },
+    Inspect {
+        input: PathBuf,
+    },
+    Thumbnail {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    Render {
+        input: PathBuf,
+        /// Save the resolved rendering recipe for reproducible comparisons.
+        #[arg(long)]
+        save_recipe: Option<PathBuf>,
+        #[arg(long)]
+        profile: Option<PathBuf>,
+        #[arg(long)]
+        xmp: Option<PathBuf>,
+        output: PathBuf,
+        #[arg(long)]
+        exposure: Option<f32>,
+        #[arg(long, default_value_t = 0)]
+        max_edge: u32,
+        #[arg(long)]
+        fast: bool,
+        #[arg(long)]
+        overwrite: bool,
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+    },
+    Benchmark {
+        input: PathBuf,
+        #[arg(long, default_value_t = 20)]
+        iterations: usize,
+    },
+}
+fn main() -> Result<()> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(std::thread::available_parallelism().map_or(4, |n| n.get().min(8)))
+        .build_global()
+        .ok();
+    let a = Args::parse();
+    match a.command {
+        Some(Command::ImportProfiles { files }) => {
+            for p in rawmakase::camera_profiles::import_files(&files)? {
+                println!("Imported {}", p.display());
+            }
+        }
+        Some(Command::ImportCatalog { source, output }) => {
+            let path = rawmakase::catalog::lightroom::import_lightroom(&source, &output)?;
+            let c = rawmakase::catalog::Catalog::open(&path)?;
+            println!(
+                "Imported {} photographs into {}",
+                c.photos()?.len(),
+                path.display()
+            );
+        }
+        Some(Command::CatalogInfo { catalog }) => {
+            let c = rawmakase::catalog::Catalog::open(&catalog)?;
+            let photos = c.photos()?;
+            println!(
+                "{} photographs · {} folders · {} collections · {} offline",
+                photos.len(),
+                c.folders()?.len(),
+                c.collections()?.len(),
+                photos.iter().filter(|p| !p.path.is_file()).count()
+            );
+            for (id, source, mapped) in c.roots()? {
+                println!(
+                    "Root {id}: {source} → {}",
+                    mapped.unwrap_or_else(|| "not relinked".into())
+                );
+            }
+        }
+        Some(Command::RelinkCatalog {
+            catalog,
+            root,
+            folder,
+        }) => {
+            rawmakase::catalog::Catalog::open(&catalog)?.relink_root(root, &folder)?;
+            println!("Root folder relinked");
+        }
+
+        Some(Command::Compare {
+            input,
+            reference,
+            output,
+            recipe,
+            origin,
+        }) => {
+            rawmakase::comparison::compare(
+                &input,
+                &reference,
+                &output,
+                recipe.as_deref(),
+                origin.map(|p| [p[0], p[1]]),
+            )?;
+        }
+        Some(Command::Inspect { input }) => {
+            let r = raw::Raw::open(&input)?;
+            let (profiles, errors) = rawmakase::camera_profiles::installed(&r.metadata);
+            eprintln!(
+                "Profile folders: {:?}\nAvailable profiles: {:?}\nProfile errors: {:?}",
+                rawmakase::camera_profiles::library_dirs(),
+                profiles.iter().map(|p| &p.name).collect::<Vec<_>>(),
+                errors
+            );
+            println!(
+                "LibRaw {}\n{}",
+                raw::version(),
+                serde_json::to_string_pretty(&r.metadata)?
+            );
+        }
+        Some(Command::Thumbnail { input, output }) => {
+            use std::io::Write;
+            let data = raw::Raw::open(&input)?.thumbnail()?;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(output)?;
+            f.write_all(&data)?;
+        }
+        Some(Command::Render {
+            input,
+            save_recipe,
+            profile,
+            xmp,
+            output,
+            exposure,
+            max_edge,
+            fast,
+            overwrite,
+            recipe,
+        }) => {
+            let t = Instant::now();
+            let r = raw::Raw::open(&input)?;
+            let mut edit = if let Some(p) = recipe {
+                rawmakase::presets::load_preset(&p)?
+            } else {
+                rawmakase::storage::load(&input)?
+                    .map(|s| s.recipe)
+                    .unwrap_or_else(|| {
+                        Recipe::with_profiles(
+                            &r.metadata,
+                            &rawmakase::camera_profiles::installed(&r.metadata).0,
+                        )
+                    })
+            };
+            if let Some(e) = exposure {
+                edit.exposure = e;
+            }
+            if let Some(p) = profile {
+                edit.profile = Some(rawmakase::camera_profiles::load(&p, &r.metadata)?);
+                edit.engine = edit.engine.max(3);
+                edit.profile_tone = true;
+                edit.reference_curves = true;
+                edit.wide_gamut_curves = true;
+                edit.use_camera_baseline(&r.metadata);
+                edit.sync_white_balance_controls(&r.metadata);
+            }
+            edit.validate()?;
+            let im = r.develop(fast, &AtomicBool::new(false))?;
+            if let Some(path) = xmp {
+                let preset = rawmakase::xmp::parse(&path, &std::fs::read_to_string(&path)?)?;
+                let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
+                edit = preset.apply(&edit, &im.metadata, &profiles, Some(&im))?;
+                if let Some(e) = exposure {
+                    edit.exposure = e;
+                }
+            }
+            if let Some(path) = save_recipe {
+                anyhow::ensure!(!path.exists(), "Recipe output already exists");
+                rawmakase::presets::save_preset(&path, &edit)?;
+            }
+            let developed = t.elapsed();
+            let out = develop::render(&im, &edit, max_edge)?;
+            let rendered = t.elapsed() - developed;
+            rawmakase::export::export(
+                &output,
+                &input,
+                &out,
+                &im.metadata,
+                &ExportOptions {
+                    max_edge,
+                    ..Default::default()
+                },
+                overwrite,
+            )?;
+            let max = im.pixels.iter().flatten().copied().fold(0f32, f32::max);
+            println!(
+                "{}x{} | develop {:?} | render {:?} | total {:?} | camera max {:.4} | scale {:.6} | integer clipped {}",
+                out.width,
+                out.height,
+                developed,
+                rendered,
+                t.elapsed(),
+                max,
+                im.scale_factor,
+                im.scale_clipped
+            );
+        }
+        Some(Command::Benchmark { input, iterations }) => {
+            anyhow::ensure!(
+                (1..=1000).contains(&iterations),
+                "Iterations must be 1–1000"
+            );
+            let t = Instant::now();
+            let im = raw::Raw::open(&input)?.develop(false, &AtomicBool::new(false))?;
+            let decode = t.elapsed();
+            let small = develop::preview(&im, 1600);
+            let mut r = Recipe::for_metadata(&im.metadata);
+            let mut times = Vec::new();
+            for i in 0..iterations {
+                r.exposure = (i % 8) as f32 / 8.;
+                let t = Instant::now();
+                std::hint::black_box(develop::render(&small, &r, 1600)?);
+                times.push(t.elapsed().as_secs_f64() * 1000.);
+            }
+            times.sort_by(f64::total_cmp);
+            println!(
+                "development: {decode:?}; preview median {:.1}ms p95 {:.1}ms",
+                times[times.len() / 2],
+                times[((times.len() - 1) as f64 * 0.95).ceil() as usize]
+            );
+        }
+        None => {
+            rawmakase::app::run(a.path)?;
+        }
+    }
+    Ok(())
+}

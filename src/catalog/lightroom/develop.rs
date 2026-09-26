@@ -1,0 +1,216 @@
+use crate::develop::Recipe;
+use anyhow::{Context, Result, ensure};
+use std::path::PathBuf;
+/// Parse Lightroom's serialized Lua table as data only. No interpreter is used.
+pub(in crate::catalog) fn develop_fields(
+    text: &str,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    ensure!(text.len() < 16_000_000, "Develop settings too large");
+    let text = text.trim();
+    let text = text
+        .strip_prefix("s")
+        .context("Expected Lightroom settings table")?
+        .trim_start()
+        .strip_prefix('=')
+        .context("Expected settings assignment")?
+        .trim_start();
+    ensure!(
+        text.starts_with('{') && text.ends_with('}'),
+        "Malformed settings table"
+    );
+    let body = &text[1..text.len() - 1];
+    let mut fields = std::collections::BTreeMap::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote = None;
+    let mut escape = false;
+    let mut insert = |part: &str| -> Result<()> {
+        let part = part.trim();
+        if part.is_empty() {
+            return Ok(());
+        }
+        let (key, value) = part.split_once('=').context("Malformed Develop field")?;
+        let key = key.trim();
+        ensure!(
+            !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "Invalid Develop key"
+        );
+        ensure!(
+            fields.insert(key.into(), value.trim().into()).is_none(),
+            "Duplicate Develop field {key}"
+        );
+        Ok(())
+    };
+    for (i, c) in body.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false
+            } else if c == '\\' {
+                escape = true
+            } else if c == q {
+                quote = None
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '{' => {
+                depth += 1;
+                ensure!(depth < 128, "Develop nesting too deep");
+            }
+            '}' => {
+                depth -= 1;
+                ensure!(depth >= 0, "Unbalanced Develop table");
+            }
+            ',' if depth == 0 => {
+                insert(&body[start..i])?;
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    ensure!(quote.is_none() && depth == 0, "Unterminated Develop value");
+    insert(&body[start..])?;
+    Ok(fields)
+}
+pub fn convert_develop(
+    text: &str,
+    m: &crate::raw::Metadata,
+    profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+    image: Option<&crate::raw::CameraImage>,
+) -> Result<(Recipe, Vec<String>)> {
+    let fields = develop_fields(text)?;
+    let mut preset = crate::xmp::Preset {
+        photo_settings: true,
+        id: String::new(),
+        name: "Imported Lightroom edit".into(),
+        group: String::new(),
+        path: PathBuf::new(),
+        settings: Default::default(),
+        curves: Default::default(),
+        look: String::new(),
+        blockers: Vec::new(),
+        notes: Vec::new(),
+    };
+    let mut warnings = Vec::new();
+    for (key, value) in &fields {
+        if value.starts_with('{') {
+            if key == "Look" && !value[1..value.len() - 1].trim().is_empty() {
+                let look = develop_fields(&format!("s = {value}"))?;
+                if let Some(name) = look.get("Name") {
+                    preset.look = serde_json::from_str(name)?;
+                }
+                if let Some(uuid) = look.get("UUID") {
+                    preset
+                        .settings
+                        .insert("RAWmakaseLookUUID".into(), serde_json::from_str(uuid)?);
+                }
+                if let Some(amount) = look.get("Amount") {
+                    ensure!(
+                        amount.parse::<f32>()? == 1.,
+                        "Profile Amount other than 100% is not supported"
+                    );
+                }
+            } else if key.starts_with("ToneCurve") && !key.contains("Name") {
+                let values = value
+                    .trim_matches(['{', '}'])
+                    .split(',')
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| s.trim().parse::<f32>())
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                ensure!(values.len() % 2 == 0 && values.len() >= 4, "Invalid {key}");
+                let points: Vec<_> = values
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|p| [p[0] / 255., p[1] / 255.])
+                    .collect();
+                let curve = crate::develop::curve::ToneCurve {
+                    points,
+                    ..Default::default()
+                };
+                curve.validate()?;
+                preset.curves.insert(key.clone(), curve);
+            } else if !value[1..value.len() - 1].trim().is_empty() {
+                warnings.push(key.clone())
+            }
+        } else {
+            let value = if value.starts_with('"') {
+                serde_json::from_str::<String>(value)
+                    .with_context(|| format!("Unsupported string encoding in {key}"))?
+            } else {
+                ensure!(
+                    matches!(value.as_str(), "true" | "false") || value.parse::<f64>().is_ok(),
+                    "Unsupported literal for {key}"
+                );
+                value.clone()
+            };
+            // Legacy controls coexist with PV2012 settings; never apply both generations.
+            if matches!(
+                key.as_str(),
+                "Exposure" | "Contrast" | "Brightness" | "Shadows" | "Clarity"
+            ) && fields.contains_key("ProcessVersion")
+            {
+                continue;
+            }
+            if matches!(
+                key.as_str(),
+                "CustomTemperature"
+                    | "CustomTint"
+                    | "CropConstrainAspectRatio"
+                    | "AutoGrayscaleMix"
+                    | "OverrideLookVignette"
+            ) {
+                continue;
+            }
+            preset.settings.insert(key.clone(), value);
+        }
+    }
+    // Build a compatible patch before application. Related fields are validated together.
+    let mut accepted = preset.clone();
+    accepted.settings.clear();
+    let mut grouped = std::collections::BTreeSet::new();
+    for keys in [
+        vec!["WhiteBalance", "Temperature", "Tint"],
+        vec![
+            "CropLeft",
+            "CropTop",
+            "CropRight",
+            "CropBottom",
+            "CropAngle",
+        ],
+        vec![
+            "ParametricShadowSplit",
+            "ParametricMidtoneSplit",
+            "ParametricHighlightSplit",
+        ],
+    ] {
+        let mut p = preset.clone();
+        p.settings.retain(|k, _| keys.contains(&k.as_str()));
+        for k in &keys {
+            grouped.insert(k.to_string());
+        }
+        match p.apply(&Recipe::with_profiles(m, profiles), m, profiles, image) {
+            Ok(_) => accepted.settings.extend(p.settings),
+            Err(e) => warnings.push(e.to_string()),
+        }
+    }
+    for (key, value) in &preset.settings {
+        if grouped.contains(key) {
+            continue;
+        }
+        let mut p = preset.clone();
+        p.settings.clear();
+        p.settings.insert(key.clone(), value.clone());
+        match p.apply(&Recipe::with_profiles(m, profiles), m, profiles, image) {
+            Ok(_) => {
+                accepted.settings.insert(key.clone(), value.clone());
+            }
+            Err(e) => warnings.push(e.to_string()),
+        }
+    }
+    let recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    warnings.sort();
+    warnings.dedup();
+    Ok((recipe, warnings))
+}

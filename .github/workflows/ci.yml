@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Lint, test, and smoke test
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    steps:
+      - name: Install dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed
+          rust git libraw lcms2 pkgconf desktop-file-utils
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Check minimum Rust version
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          have=$(rustc --version | cut -d' ' -f2)
+          printf '%s\n%s\n' "$msrv" "$have" | sort -VC || { echo "rustc $have < MSRV $msrv"; exit 1; }
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
+      - run: cargo test --locked
+      - name: CLI smoke test
+        run: |
+          cargo build --release --locked
+          target/release/rawmakase --help
+      - name: Validate desktop entry
+        run: desktop-file-validate packaging/rawmakase.desktop
+
+  package:
+    name: Build Arch package
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed rust git libraw lcms2 pkgconf namcap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: makepkg (current checkout)
+        run: |
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          # Build the -git recipe from this checkout rather than the published repository.
+          sed -i "s|git+https://github.com/pch/rawmakase.git|git+file://$GITHUB_WORKSPACE|" packaging/rawmakase-git/PKGBUILD
+          su builder -c "git config --global --add safe.directory '*' && cd packaging/rawmakase-git && makepkg --noconfirm"
+          namcap packaging/rawmakase-git/PKGBUILD packaging/rawmakase-git/*.pkg.tar.zst
+
+  audit:
+    name: Dependency licenses and advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
