@@ -146,6 +146,17 @@ impl Raw {
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: crate::lens::embedded::read(path_ref),
         };
+        let mut metadata = metadata;
+        if let Some([left, top, width, height]) = fuji_crop(path_ref)
+            && left + width <= metadata.width
+            && top + height <= metadata.height
+        {
+            // Adobe's default crop for Fujifilm files, 2 px larger per side than LibRaw's.
+            metadata.crop_left = left;
+            metadata.crop_top = top;
+            metadata.crop_width = width;
+            metadata.crop_height = height;
+        }
         Ok(Self { handle, metadata })
     }
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {
@@ -200,6 +211,39 @@ impl Raw {
         })
     }
 }
+/// The camera's recommended crop from the RAF header directory: tags 0x110 (top, left)
+/// and 0x111 (height, width), big-endian. Lightroom uses it as the default crop.
+fn fuji_crop(path: &Path) -> Option<[u32; 4]> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 100];
+    f.read_exact(&mut head).ok()?;
+    if !head.starts_with(b"FUJIFILMCCD-RAW") {
+        return None;
+    }
+    let dir = u32::from_be_bytes(head[92..96].try_into().ok()?) as u64;
+    let len = u32::from_be_bytes(head[96..100].try_into().ok()?) as usize;
+    if !(4..=1 << 20).contains(&len) {
+        return None;
+    }
+    let mut b = vec![0; len];
+    f.seek(SeekFrom::Start(dir)).ok()?;
+    f.read_exact(&mut b).ok()?;
+    let be16 = |o: usize| Some(u16::from_be_bytes(b.get(o..o + 2)?.try_into().ok()?) as u32);
+    let count = u32::from_be_bytes(b[..4].try_into().ok()?) as usize;
+    let (mut o, mut origin, mut size) = (4, None, None);
+    for _ in 0..count.min(256) {
+        let (tag, n) = (be16(o)?, be16(o + 2)? as usize);
+        if n == 4 && tag == 0x110 {
+            origin = Some([be16(o + 6)?, be16(o + 4)?]);
+        } else if n == 4 && tag == 0x111 {
+            size = Some([be16(o + 6)?, be16(o + 4)?]);
+        }
+        o += 4 + n;
+    }
+    let ([left, top], [width, height]) = (origin?, size?);
+    (width > 0 && height > 0).then_some([left, top, width, height])
+}
 pub fn srgb_profile() -> Result<Vec<u8>> {
     let size = unsafe { ora_srgb_profile(std::ptr::null_mut(), 0) };
     ensure!(size > 0, "Cannot create sRGB profile");
@@ -240,6 +284,26 @@ pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
 mod tests {
     unsafe extern "C" {
         fn ora_scale_probe(wb: f32, error: *mut f32) -> i32;
+    }
+    #[test]
+    fn reads_fujifilm_default_crop() {
+        let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+        raf.resize(128, 0);
+        let mut dir = 2u32.to_be_bytes().to_vec();
+        for (tag, a, b) in [(0x110u16, 16u16, 16u16), (0x111, 4000, 6000)] {
+            dir.extend(tag.to_be_bytes());
+            dir.extend(4u16.to_be_bytes());
+            dir.extend(a.to_be_bytes());
+            dir.extend(b.to_be_bytes());
+        }
+        raf[92..96].copy_from_slice(&128u32.to_be_bytes());
+        raf[96..100].copy_from_slice(&(dir.len() as u32).to_be_bytes());
+        raf.extend(dir);
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), raf).unwrap();
+        assert_eq!(super::fuji_crop(f.path()), Some([16, 16, 6000, 4000]));
+        std::fs::write(f.path(), b"FUJIFILMCCD-RAW").unwrap();
+        assert_eq!(super::fuji_crop(f.path()), None);
     }
     #[test]
     fn corrupt_raw_is_an_error() {
