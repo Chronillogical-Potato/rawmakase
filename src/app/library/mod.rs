@@ -633,6 +633,49 @@ impl Library {
             image,
         });
     }
+    /// The folder shown, as a tree key ("" is All Photographs).
+    pub(super) fn source_key(&self) -> &str {
+        &self.selected_folder
+    }
+    /// Shows a folder saved with `source_key` again, including its subfolders,
+    /// and selects `photo` if it is in it.
+    pub(super) fn restore_source(&mut self, key: &str, photo: Option<i64>) {
+        if let Some(rest) = key.strip_prefix("root:") {
+            let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
+            if let Ok(root) = root.parse::<i64>() {
+                let ids: HashSet<i64> = self
+                    .folders
+                    .iter()
+                    .filter(|f| {
+                        let path = f.relative.trim_end_matches('/');
+                        f.root == root
+                            && (relative.is_empty()
+                                || path == relative
+                                || path.starts_with(&format!("{relative}/")))
+                    })
+                    .map(|f| f.id)
+                    .collect();
+                if !ids.is_empty() {
+                    self.selected_folder = key.to_string();
+                    self.folder_scope = Some(ids);
+                    self.collection = None;
+                    // Unfold the path down to the folder.
+                    let mut open = format!("root:{root}");
+                    self.expanded.insert(open.clone());
+                    for part in relative.split('/').filter(|p| !p.is_empty()) {
+                        open = format!("{open}/{part}");
+                        self.expanded.insert(open.clone());
+                    }
+                }
+            }
+        }
+        self.filter();
+        if let Some(id) = photo
+            && self.visible.iter().any(|i| self.photos[*i].id == id)
+        {
+            self.selected = Some(id);
+        }
+    }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does
     /// when switching to Develop.

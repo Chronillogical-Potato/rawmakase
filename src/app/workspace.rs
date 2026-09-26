@@ -95,6 +95,11 @@ impl Editor {
             self.collapsed = collapsed;
             let _ = self.save_session();
         }
+        let place = self.current_place();
+        if self.library.is_some() && place != self.saved_place {
+            self.saved_place = place;
+            let _ = self.save_session();
+        }
     }
     fn workspace_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.egui_wants_keyboard_input() {

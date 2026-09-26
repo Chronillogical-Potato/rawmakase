@@ -37,6 +37,10 @@ pub struct Editor {
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
+    /// Library/Develop position to restore once the session's catalog opens.
+    restore: Option<(String, Option<i64>, bool)>,
+    /// That position as last written to the session.
+    saved_place: (String, Option<i64>, bool),
     status: String,
     close_confirm: bool,
 }
@@ -150,6 +154,16 @@ impl Editor {
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
+            restore: Some((
+                session.library_source.clone(),
+                session.selected_photo,
+                session.develop,
+            )),
+            saved_place: (
+                session.library_source.clone(),
+                session.selected_photo,
+                session.develop,
+            ),
             status: "Open a RAW photo to begin".into(),
             close_confirm: false,
         };
@@ -169,10 +183,26 @@ impl Editor {
                     monitor: self.view.monitor.clone(),
                     collapsed: self.collapsed.clone(),
                     onboarding_done: self.onboarding_done,
+                    library_source: self.saved_place.0.clone(),
+                    selected_photo: self.saved_place.1,
+                    develop: self.saved_place.2,
                 },
             )?;
         }
         Ok(())
+    }
+    /// The Library folder, selected photo and module, as saved in the session.
+    fn current_place(&self) -> (String, Option<i64>, bool) {
+        let Some(library) = &self.library else {
+            return Default::default();
+        };
+        let develop = !self.library_mode && self.document.catalog_photo.is_some();
+        let photo = if develop {
+            self.document.catalog_photo
+        } else {
+            library.selected
+        };
+        (library.source_key().to_string(), photo, develop)
     }
     fn session_path(&self) -> Option<PathBuf> {
         self.library

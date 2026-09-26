@@ -185,6 +185,15 @@ impl Editor {
                 };
                 self.library = Some(l);
                 self.library_mode = true;
+                // On launch, return to the folder, photo and module of last time.
+                if let Some((source, photo, develop)) = self.restore.take()
+                    && let Some(library) = &mut self.library
+                {
+                    library.restore_source(&source, photo);
+                    if develop && let Some(id) = library.selected {
+                        self.develop_catalog_photo(id);
+                    }
+                }
                 let _ = self.save_session();
             }
             Err(e) => self.status = format!("Catalog operation failed: {e}"),

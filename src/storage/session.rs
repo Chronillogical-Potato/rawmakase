@@ -12,6 +12,14 @@ pub struct Session {
     /// The first-run setup was completed; until then it opens on launch.
     #[serde(default)]
     pub onboarding_done: bool,
+    /// Where the user was in the last catalog: the Library folder, the
+    /// selected photo, and whether Develop was open.
+    #[serde(default)]
+    pub library_source: String,
+    #[serde(default)]
+    pub selected_photo: Option<i64>,
+    #[serde(default)]
+    pub develop: bool,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))
