@@ -1,45 +1,63 @@
 # Remaining Lightroom parity gaps
 
-Status: 2026-09-26. RAWmakase renders substantially closer to Lightroom, but does not yet produce identical results. Measurements and test conditions are recorded in [macOS validation](macos-lightroom-validation.md).
+Status: 2026-09-26, engine 4. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`. For scale: Lightroom X100F references now average 0.0096, Sony A7 II Camera Raw references 0.0065. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
 
-## Tone curves and global tone
+## Measured and matched (for reference)
 
-- Saturated colors under the master point curve still differ. Generated-ramp MAE is 0.00240 for the tested S curve (peak 0.112) and 0.00333 for a clipped-endpoint curve, on a 0–1 scale.
-- Neutral master curves and independent RGB curves closely match measured ramps, but small ICC/quantization and interpolation differences remain. Tests do not establish equivalence for every possible curve.
-- Parametric Highlights, Lights, Darks and Shadows remain approximations. Their interaction with point curves and movable range boundaries needs isolated reference testing.
-- Non-default Curve Refine Saturation is unsupported and reported during import.
-- Basic contrast, highlights, shadows, whites and blacks use independent operators. Spatial tone response and operation order still differ, especially around bright windows and skin in shadow.
-- RAW baseline differences persist even with linear user curves. Identical curve points therefore do not guarantee identical complete photographs.
+These controls were fitted to Camera Raw renders and match within the default-render error, or close to it: default look without Adobe files (DNG ColorMatrix + ACR tone curve), exposure, black point, Contrast, Blacks, Whites (negative), Shadows, Highlights, Dehaze (±40), color mixer, Saturation, Vibrance, color grading at default Blending/Balance, Transform sliders, built-in Fujifilm/Sony and DNG lens corrections, imported Adobe lens profiles, DNG embedded profile/exposure/crop, and Fujifilm default crop.
 
-## Color and camera calibration
+## Tone
 
-- Primary Hue/Saturation and shadow tint are measured approximations, validated narrowly on two Fujifilm X100F photographs with Adobe Standard. Other cameras, profiles, white balances and extreme combinations need visual validation.
-- Vibrance, HSL luminance, split toning and modern three-way/global grading remain approximations. Some split-tone comparisons are unchanged or slightly worse; slider-number equivalence is not guaranteed.
-- Color grading range weights, balance, blending and luminance need broader reference coverage.
-- Point Color, its selection/range controls, and other unsupported color settings are not implemented.
+- **Whites above about +50** adapt to the photo's highlights in Camera Raw. RAWmakase uses a median curve: extra error +0.009 at +50 and +0.058 at +100 on dim-highlight photos.
+- **Contrast pivot** moves with the photo in Camera Raw (0.41–0.51 of the range). RAWmakase uses the averaged curve, within about 0.005.
+- **Dehaze at ±100** adapts per photo and has a spatial part. RAWmakase uses one averaged curve: extra error +0.036/+0.044, while ±40 is within +0.014.
+- **Shadows +100 / Highlights −100** reach +0.010/+0.006 extra error, because the strength also adapts per photo.
+- **Clarity** changes luminance only, but single- and multi-scale local models reproduce only about a third of it: +50 leaves about 0.019 unexplained. The earlier operator is still used. **Texture** is small (+0.001) and unchanged.
+- **Parametric tone curve** (Highlights/Lights/Darks/Shadows regions) is not measured. **Point curves** match on ramps, but saturated colors under an S master curve still differ (ramp MAE 0.0024, peak 0.11).
+- **Curve Refine Saturation** other than 100 is unsupported and reported on import.
+- **Black point** level (0.0015) is fitted, not taken from Adobe; very deep shadows on some photos remain +0.17 EV.
+
+## Color
+
+- **Color mixer bands with little test data:** blue and purple were barely present in the nine sweep photos, so those bands are the least reliable. Measured on photos from three cameras with Adobe Standard; other profiles are untested.
+- **Color grading at non-default Blending or Balance** still uses the earlier operator (+0.015 to +0.034 extra error on the sweeps). This includes legacy split-toning records, which imply Blending 100. Grading hues between the six measured ones and Saturation above 50 are interpolated: shadows at H30/S100 leave about 0.017.
+- **Point Color** and its range controls are not implemented.
+- **Camera Calibration** sliders (primaries, shadow tint) are earlier approximations, validated on two X100F photos only.
+- **Camera exposure offsets** are known for X100F DR100 (from Adobe's DNG) and measured for Sony A7 II and A7CR (0.3 EV). Other cameras use 0 unless the file is a DNG. X100F renders are still about 0.04 EV brighter in midtones.
 
 ## RAW processing and profiles
 
-- Demosaicing, highlight recovery, noise reduction and sharpening do not match Adobe algorithms. Fine detail, edges and clipped highlights can differ.
-- The camera exposure baseline is verified only for X100F DR100. Sony and other Fuji dynamic-range modes lack equivalent visual validation.
-- DCP support is a bounded subset. Enhanced Adobe XMP profiles and their dependent lookup tables, HDR/triple-illuminant profiles, and unsupported profile structures are not implemented.
-- White balance after demosaicing has limitations at extreme adjustments. Profile/WB/calibration processing order is not proven identical.
-- Source active-area and geometric differences limit pixel-aligned full-resolution comparisons.
+- **Demosaic, highlight reconstruction, noise reduction and sharpening** are not Adobe's algorithms. At 100% the detail error is about 0.007 on X100F. X-Trans uses 1-pass Markesteijn, which measures the same as 3-pass.
+- **DCP support** is a bounded subset. Triple-illuminant, HDR and other unsupported profile structures are rejected. Enhanced XMP looks (Adobe Color etc.) are supported; creative RGB-table profiles, adaptive/AI profiles and profile Amount other than 100 are not.
+- **White balance** at extreme values, and the exact order of profile, WB and calibration, are not verified.
+- **Other cameras** (Canon, Nikon, Panasonic, …) render through the same generic path but have not been compared with Lightroom, for lack of sample files.
 
-## Lens, local and finishing adjustments
+## Lens corrections
 
-- Built-in Fujifilm lens corrections (vignetting, distortion, lateral CA) are applied as Lightroom does; Sony's are read but off by default until verified. There is no LCP engine yet, so imported Adobe lens profiles are not applied. See [lens corrections](lens-corrections.md).
-- Lightroom masks, local adjustments, AI selections and healing/removal are not reproduced.
-- Texture, clarity, dehaze, grain, vignetting and detail controls need isolated numerical and visual parity checks.
-- HDR editing/output and Adobe AI denoise/enhance are not equivalent or implemented.
+- **Fujifilm built-in vignetting** is applied at 85% log strength to match Lightroom (fitted on three X100F photos).
+- **Sony built-in corrections** are read but off by default: Lightroom uses them only with profile corrections on. With an imported Adobe profile, Sony matches Camera Raw within ±0.02 EV in the corners.
+- **LCP** interpolation uses the farthest focus distance, since focus distance is not read from the files. Tangential distortion terms and off-centre optical centres are ignored.
+- **DNG GainMap opcodes** (phone lens shading) are not applied.
+- **Manual lens vignetting, Defringe and Remove Chromatic Aberration** are not measured against Camera Raw.
+
+## Geometry
+
+- **Upright** (Auto, Level, Vertical, Full, Guided) is not implemented; XMP files that use it are rejected.
+- The order in which Transform sliders compose was not measured separately. Aspect ±50 shows a slightly higher error than the other sliders.
+
+## Local and finishing adjustments
+
+- Masks, local adjustments, AI selections, healing/removal, AI denoise and Enhance are not implemented.
+- Post-crop vignetting, grain, Glow and Reshape are not measured. Glow and Reshape are rejected when non-zero.
+- HDR editing and output are not implemented.
 
 ## Catalog and interaction
 
-- Ratings, pick/reject flags and exact color-label text import into the RAWmakase catalog. Both modules now provide controls and Lightroom-style shortcuts. Custom label-set text is preserved, but automatic custom text-to-color mapping remains missing: unmapped labels display white. Multi-photo metadata edits and metadata undo are not implemented.
-- The RAWmakase catalog is separate. There is no write-back to the original `.lrcat` and no bidirectional synchronization with Lightroom.
-- Unsupported develop settings are retained/reported; retaining their source text does not mean RAWmakase renders them.
-- Lightroom's full catalog organization, workflow shortcuts, filtering and batch-editing behavior are not feature-complete.
+- The RAWmakase catalog is separate from Lightroom's, with no write-back or sync. Custom color-label text is kept, but custom labels display white. Multi-photo metadata edits and metadata undo are missing.
+- Unsupported develop settings are kept and reported, but not rendered.
 
 ## Validation still needed
 
-Expand controlled comparisons across cameras, illuminants, skin tones, highly saturated subjects and clipping. Test isolated controls and combinations, separating RAW/profile baseline error from each adjustment. Keep the original Lightroom catalog and photo files untouched; use copied catalogs/photos and generated fixtures. Report regressions as well as improvements, and do not describe visual closeness as exact parity.
+- More cameras, profiles (Adobe Color and other looks), illuminants and clipped highlights.
+- Combinations of sliders: every measurement above varies one slider at a time, and composition order is assumed.
+- A repeatable test set that isn't private photos; Piotr plans to design the testing pipeline.
