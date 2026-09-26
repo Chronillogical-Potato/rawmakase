@@ -221,3 +221,17 @@ fn lenient_apply_keeps_supported_settings_and_reports_the_rest() -> Result<()> {
     assert!(skipped.iter().any(|s| s.contains("Missing camera profile")));
     Ok(())
 }
+#[test]
+fn empty_flags_are_unset_and_curves_still_apply() -> Result<()> {
+    let p = parse(
+        Path::new("p.xmp"),
+        &xml(
+            r#"c:ConvertToGrayscale="" c:ToneCurveName2012="Custom""#,
+            r#"<c:ToneCurvePV2012><r:Seq><r:li>0, 50</r:li><r:li>255, 255</r:li></r:Seq></c:ToneCurvePV2012>"#,
+        ),
+    )?;
+    let r = p.apply(&Recipe::default(), &Metadata::default(), &[], None)?;
+    assert!(!r.effects.monochrome);
+    assert_eq!(r.curve.points[0], [0., 50. / 255.]);
+    Ok(())
+}

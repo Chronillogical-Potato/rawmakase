@@ -24,6 +24,9 @@ fn number(values: &BTreeMap<String, String>, key: &str) -> Result<Option<f32>> {
 fn boolean(values: &BTreeMap<String, String>, key: &str) -> Result<Option<bool>> {
     values
         .get(key)
+        // Lightroom writes some flags empty (e.g. ConvertToGrayscale=""),
+        // meaning not set.
+        .filter(|s| !s.trim().is_empty())
         .map(|s| match s.to_ascii_lowercase().as_str() {
             "true" | "1" => Ok(true),
             "false" | "0" => Ok(false),
