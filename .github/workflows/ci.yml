@@ -52,7 +52,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed rust git libraw lcms2 pkgconf namcap
+        run: >-
+          pacman -Syu --noconfirm --needed rust git libraw lcms2 pkgconf namcap
+          hicolor-icon-theme libxkbcommon vulkan-icd-loader wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: makepkg (current checkout)
         run: |

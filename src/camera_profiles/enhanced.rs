@@ -137,7 +137,9 @@ fn decode_table(text: &str) -> Result<Table> {
         dims,
         srgb: word(end) == 1,
         data: data[20..end]
-            .chunks_exact(12)
+            .as_chunks::<12>()
+            .0
+            .iter()
             .map(|p| {
                 std::array::from_fn(|c| f32::from_le_bytes(p[c * 4..c * 4 + 4].try_into().unwrap()))
             })

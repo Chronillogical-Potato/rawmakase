@@ -193,7 +193,9 @@ impl Tiff {
         }
         let b = self.bytes(offset + 2, n * 12)?;
         Some(
-            b.chunks_exact(12)
+            b.as_chunks::<12>()
+                .0
+                .iter()
                 .map(|e| {
                     (
                         self.u16(&e[0..2]),
