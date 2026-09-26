@@ -1,0 +1,253 @@
+//! GPU port of the per-pixel color and tone stage (`develop.wgsl`). Samples from the
+//! stage cache stay on the device while only the recipe changes; parameters and tables
+//! are uploaded per render. The result is read back for the CPU finishing steps.
+use super::Processor;
+use crate::develop::{
+    Rendered,
+    pipeline::{Samples, pixel_params::PixelParams},
+};
+use anyhow::{Context, Result, ensure};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use wgpu::util::DeviceExt;
+
+/// Invocations per workgroup, as declared in `develop.wgsl`.
+const GROUP: u32 = 256;
+/// Stand-in position for samples outside the photo; `develop.wgsl` tests against it
+/// rather than NaN, which shader compilers may assume never occurs.
+const OUTSIDE: f32 = -3e38;
+
+pub(super) struct Developer {
+    layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::ComputePipeline,
+    samples: Option<Uploaded>,
+}
+struct Uploaded {
+    source: Arc<Samples>,
+    pixels: wgpu::Buffer,
+    positions: wgpu::Buffer,
+    output: wgpu::Buffer,
+    staging: wgpu::Buffer,
+}
+impl Developer {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
+        let source =
+            crate::develop::pipeline::pixel_params::wgsl_prelude() + include_str!("develop.wgsl");
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Develop"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let entries: Vec<_> = (0..6)
+            .map(|binding| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: if binding == 5 {
+                        wgpu::BufferBindingType::Uniform
+                    } else {
+                        wgpu::BufferBindingType::Storage {
+                            read_only: binding != 2,
+                        }
+                    },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            })
+            .collect();
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Develop buffers"),
+            entries: &entries,
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Develop layout"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Develop"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("develop"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        Self {
+            layout,
+            pipeline,
+            samples: None,
+        }
+    }
+}
+impl Processor {
+    /// The per-pixel stage over `samples`. Does not change CPU state on failure.
+    pub(crate) fn develop(
+        &mut self,
+        samples: &Arc<Samples>,
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<Rendered> {
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
+        let n = samples.pixels.len() as u64;
+        ensure!(n > 0, "Empty develop region");
+        let limits = self.device.limits();
+        ensure!(
+            n * 12 <= limits.max_storage_buffer_binding_size
+                && n * 12 <= limits.max_buffer_size
+                && (params.tables.len() as u64 * 4) <= limits.max_storage_buffer_binding_size,
+            "Region exceeds GPU buffer limits"
+        );
+        ensure!(
+            n * 44 <= 1024 * 1024 * 1024,
+            "Region exceeds GPU memory budget"
+        );
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = self.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let allocation = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let result = self.develop_inner(samples, params, cancel);
+        let memory_error = pollster::block_on(allocation.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        if let Some(error) = memory_error.or(internal_error).or(validation_error) {
+            if let Some(d) = &mut self.developer {
+                d.samples = None;
+            }
+            anyhow::bail!("{error}");
+        }
+        result
+    }
+    fn develop_inner(
+        &mut self,
+        samples: &Arc<Samples>,
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<Rendered> {
+        let device = &self.device;
+        let developer = self.developer.get_or_insert_with(|| Developer::new(device));
+        let n = samples.pixels.len() as u64;
+        if developer
+            .samples
+            .as_ref()
+            .is_none_or(|u| !Arc::ptr_eq(&u.source, samples))
+        {
+            developer.samples = None; // Release the previous region's buffers first.
+            let positions: Vec<[f32; 2]> = samples
+                .positions
+                .iter()
+                .map(|p| if p[0].is_nan() { [OUTSIDE; 2] } else { *p })
+                .collect();
+            let init = |label, contents: &[u8]| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents,
+                    usage: wgpu::BufferUsages::STORAGE,
+                })
+            };
+            let buffer = |label, usage| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: n * 12,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            };
+            developer.samples = Some(Uploaded {
+                source: samples.clone(),
+                pixels: init("Develop samples", bytemuck::cast_slice(&samples.pixels)),
+                positions: init("Develop positions", bytemuck::cast_slice(&positions)),
+                output: buffer(
+                    "Developed pixels",
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                ),
+                staging: buffer(
+                    "Develop readback",
+                    wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                ),
+            });
+        }
+        let uploaded = developer.samples.as_ref().unwrap();
+        let storage = |label, data: &[f32]| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(data),
+                usage: wgpu::BufferUsages::STORAGE,
+            })
+        };
+        let params_buffer = storage("Develop parameters", &params.params);
+        let tables = storage("Develop tables", &params.tables);
+        let groups = (n as u32).div_ceil(GROUP);
+        let max = device.limits().max_compute_workgroups_per_dimension;
+        let (gx, gy) = (groups.min(max), groups.div_ceil(groups.min(max)));
+        let size = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Develop size"),
+            contents: bytemuck::cast_slice(&[n as u32, gx, 0, 0]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let entries: Vec<_> = [
+            &uploaded.pixels,
+            &uploaded.positions,
+            &uploaded.output,
+            &params_buffer,
+            &tables,
+            &size,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(binding, buffer)| wgpu::BindGroupEntry {
+            binding: binding as u32,
+            resource: buffer.as_entire_binding(),
+        })
+        .collect();
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Develop bindings"),
+            layout: &developer.layout,
+            entries: &entries,
+        });
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Develop pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&developer.pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(gx, gy, 1);
+        }
+        encoder.copy_buffer_to_buffer(&uploaded.output, 0, &uploaded.staging, 0, n * 12);
+        let submission = self.queue.submit([encoder.finish()]);
+        let (tx, rx) = mpsc::sync_channel(1);
+        uploaded
+            .staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+        let poll = device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(10)),
+        });
+        if let Err(error) = poll {
+            uploaded.staging.unmap();
+            return Err(error.into());
+        }
+        rx.recv_timeout(std::time::Duration::from_secs(1))
+            .context("GPU readback timed out")??;
+        if cancel.load(Ordering::Relaxed) {
+            uploaded.staging.unmap();
+            anyhow::bail!("Render superseded");
+        }
+        let mapped = uploaded.staging.slice(..).get_mapped_range()?;
+        let pixels = bytemuck::cast_slice::<u8, [f32; 3]>(&mapped).to_vec();
+        drop(mapped);
+        uploaded.staging.unmap();
+        Ok(Rendered {
+            width: samples.width,
+            height: samples.height,
+            pixels,
+        })
+    }
+}

@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 use wgpu::util::DeviceExt;
+mod develop;
 mod weights;
 
 pub struct Processor {
@@ -21,6 +22,8 @@ pub struct Processor {
     layout: wgpu::BindGroupLayout,
     pipelines: [wgpu::ComputePipeline; 4],
     buffers: Option<Buffers>,
+    /// Per-pixel develop stage, created on first use.
+    developer: Option<develop::Developer>,
     name: String,
 }
 struct Buffers {
@@ -120,6 +123,7 @@ impl Processor {
             layout,
             pipelines,
             buffers: None,
+            developer: None,
             name: adapter.get_info().name,
         })
     }

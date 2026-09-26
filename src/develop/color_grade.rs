@@ -12,8 +12,8 @@ use crate::color_math::{mul, srgb_decode, srgb_encode};
 
 pub(crate) struct ColorGrade {
     /// Per luminance bin: log2 gains and encoded offsets, summed over regions.
-    gain: [[f32; 3]; BINS],
-    offset: [[f32; 3]; BINS],
+    pub(crate) gain: [[f32; 3]; BINS],
+    pub(crate) offset: [[f32; 3]; BINS],
 }
 impl ColorGrade {
     /// `None` when grading is inactive or uses Blending/Balance settings the tables do

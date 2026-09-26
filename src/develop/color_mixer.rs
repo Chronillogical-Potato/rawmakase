@@ -28,7 +28,7 @@ fn value(table: usize, channel: usize, cell: usize) -> f32 {
 
 /// The combined change of all active sliders, one grid.
 pub(crate) struct ColorMixer {
-    delta: Vec<[f32; 3]>,
+    pub(crate) delta: Vec<[f32; 3]>,
 }
 impl ColorMixer {
     pub(crate) fn new(r: &Recipe) -> Option<Self> {

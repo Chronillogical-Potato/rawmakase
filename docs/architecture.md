@@ -185,6 +185,9 @@ device so its limits and error scopes do not affect the UI device. It uses ordin
 current hardware validation is Apple M1 Pro; Linux GPU vendors require validation
 on those machines before claiming equivalent performance or numerical precision.
 
+The per-pixel color and tone stage of the current engine runs on the GPU for previews
+(`gpu/develop.wgsl`, fed by `pipeline/pixel_params.rs`), on the stage cache's
+samples; other recipes and all exports use the CPU stage, which is the reference.
 Preview sharpening and Lanczos3 downsampling run on the GPU. Coefficients use the
 CPU reference's normalization and boundary convention. Grain/vignette retain their
 CPU implementation and ordering. Fit and zoomed-out previews render from a

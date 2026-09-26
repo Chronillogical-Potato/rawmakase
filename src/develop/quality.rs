@@ -1,5 +1,8 @@
 //! Full-resolution detail processing shared by Fit, 100% regions and exports.
-use crate::develop::stage_cache::{BlurKey, LocalKey, StageCache};
+use crate::develop::{
+    preview_renderer::Stages,
+    stage_cache::{BlurKey, LocalKey, StageCache},
+};
 use crate::{
     develop::{self, Geometry, Recipe, Rendered},
     raw::CameraImage,
@@ -442,7 +445,7 @@ pub(crate) fn render_level(
     size: (u32, u32),
     region: [u32; 4],
     cancel: &AtomicBool,
-    cache: &mut StageCache,
+    stages: &mut Stages,
 ) -> Result<Rendered> {
     check_cancel(cancel)?;
     r.validate()?;
@@ -452,7 +455,7 @@ pub(crate) fn render_level(
         p.ensure_camera(&level.metadata)?;
     }
     let level_scale = level.width.max(level.height) as f32 / full.width.max(full.height) as f32;
-    let (im, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(cache))?;
+    let (im, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(stages.cache))?;
     let mut g = Geometry::new(&im, r, 0);
     let footprint = g.width.max(g.height) as f32 / size.0.max(size.1) as f32;
     (g.width, g.height) = size;
@@ -483,7 +486,7 @@ pub(crate) fn render_level(
         [left, top, right - left, bottom - top],
         develop::pipeline::footprint_spread(footprint),
         cancel,
-        Some(cache),
+        Some(stages),
     )?;
     sharpen_with_radius(&mut out, r, sigma, cancel)?;
     crate::develop::effects::spatial_finish_scaled(
@@ -533,15 +536,7 @@ pub fn render_cancellable(
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
-    render_preview(
-        im,
-        r,
-        max_edge,
-        region,
-        cancel,
-        &mut develop::PreviewRenderer::default(),
-        None,
-    )
+    render_preview(im, r, max_edge, region, cancel, None)
 }
 pub(crate) fn render_preview(
     im: &CameraImage,
@@ -549,8 +544,7 @@ pub(crate) fn render_preview(
     max_edge: u32,
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
-    renderer: &mut develop::PreviewRenderer,
-    mut cache: Option<&mut StageCache>,
+    mut stages: Option<&mut Stages>,
 ) -> Result<Rendered> {
     ensure!(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
@@ -563,7 +557,13 @@ pub(crate) fn render_preview(
         p.ensure_camera(&im.metadata)?;
     }
     let source = recovered(im, cancel)?;
-    let (im, tonal_recipe) = local_stage(&source, r, 1., cancel, cache.as_deref_mut())?;
+    let (im, tonal_recipe) = local_stage(
+        &source,
+        r,
+        1.,
+        cancel,
+        stages.as_mut().map(|s| &mut *s.cache),
+    )?;
     let g = Geometry::new(&im, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);
     ensure!(
@@ -594,14 +594,16 @@ pub(crate) fn render_preview(
         [left, top, right - left, bottom - top],
         0.,
         cancel,
-        cache,
+        stages.as_deref_mut(),
     )?;
     let spatial =
         r.effects.grain != 0. || r.effects.vignette != 0. || r.effects.lens_vignette != 0.;
     let mut gpu_sharpened = false;
+    let edge = if region.is_some() { 0 } else { max_edge };
     if !spatial
-        && let Some(finished) =
-            renderer.finish(&out, r, if region.is_some() { 0 } else { max_edge }, cancel)
+        && let Some(finished) = stages
+            .as_mut()
+            .and_then(|s| s.backend.finish(&out, r, edge, cancel))
     {
         if region.is_none() {
             return Ok(finished);
@@ -629,7 +631,10 @@ pub(crate) fn render_preview(
         if spatial {
             let mut finished_recipe = r.clone();
             finished_recipe.sharpening = 0.;
-            if let Some(finished) = renderer.finish(&out, &finished_recipe, max_edge, cancel) {
+            let finished = stages
+                .as_mut()
+                .and_then(|s| s.backend.finish(&out, &finished_recipe, max_edge, cancel));
+            if let Some(finished) = finished {
                 return Ok(finished);
             }
             ensure!(

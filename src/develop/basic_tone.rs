@@ -8,7 +8,7 @@ const SIZE: usize = 1024;
 /// Composed Dehaze → Contrast → Whites → Blacks curve, sampled at `SIZE + 1` points over 0–1.
 #[derive(Clone)]
 pub(crate) struct BasicTone {
-    lut: Vec<f32>,
+    pub(crate) lut: Vec<f32>,
 }
 impl BasicTone {
     pub(crate) fn new(contrast: f32, whites: f32, blacks: f32, dehaze: f32) -> Option<Self> {

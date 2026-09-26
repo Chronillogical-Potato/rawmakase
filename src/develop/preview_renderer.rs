@@ -6,39 +6,54 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 #[derive(Default)]
 pub struct PreviewRenderer {
-    pub(crate) gpu: Option<gpu::Processor>,
-    fallback: Option<String>,
-    used_gpu: bool,
+    backend: Backend,
     /// Resolution pyramid of the current photo's recovered image, for Fit and
     /// zoomed-out renders. Holding the recovered image keeps its identity unique.
     pyramid: Option<Pyramid>,
     /// Stage results reused while only color and tone change.
     cache: StageCache,
 }
+/// The optional GPU and why it is not used.
+#[derive(Default)]
+pub(crate) struct Backend {
+    pub(crate) gpu: Option<gpu::Processor>,
+    fallback: Option<String>,
+    used_gpu: bool,
+}
+/// What preview stages keep between renders: the stage cache and the GPU backend.
+pub(crate) struct Stages<'a> {
+    pub(crate) cache: &'a mut StageCache,
+    pub(crate) backend: &'a mut Backend,
+}
 /// Pixel budget of a reduced 100% drag preview.
 const PREVIEW_PIXELS: u64 = 600_000;
 impl PreviewRenderer {
     /// A hardware device is optional; failure leaves a fully working CPU renderer.
     pub fn with_gpu() -> Self {
-        match gpu::Processor::new() {
-            Ok(gpu) => Self {
+        let backend = match gpu::Processor::new() {
+            Ok(gpu) => Backend {
                 gpu: Some(gpu),
-                ..Self::default()
+                ..Backend::default()
             },
-            Err(error) => Self {
+            Err(error) => Backend {
                 fallback: Some(error.to_string()),
-                ..Self::default()
+                ..Backend::default()
             },
+        };
+        Self {
+            backend,
+            ..Self::default()
         }
     }
     pub fn adapter_name(&self) -> Option<&str> {
-        self.gpu.as_ref().map(gpu::Processor::name)
+        self.backend.gpu.as_ref().map(gpu::Processor::name)
     }
     pub fn fallback_reason(&self) -> Option<&str> {
-        self.fallback.as_deref()
+        self.backend.fallback.as_deref()
     }
+    /// Whether the last render used the GPU for any stage.
     pub fn used_gpu(&self) -> bool {
-        self.used_gpu
+        self.backend.used_gpu
     }
     pub fn render(
         &mut self,
@@ -48,7 +63,7 @@ impl PreviewRenderer {
         region: Option<[u32; 4]>,
         cancel: &AtomicBool,
     ) -> Result<Rendered> {
-        self.used_gpu = false;
+        self.backend.used_gpu = false;
         anyhow::ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
             "Render superseded"
@@ -70,18 +85,20 @@ impl PreviewRenderer {
         {
             return Ok(out);
         }
-        let mut cache = std::mem::take(&mut self.cache);
-        let out = quality::render_preview(
+        quality::render_preview(
             image,
             recipe,
             max_edge,
             region,
             cancel,
-            self,
-            Some(&mut cache),
-        );
-        self.cache = cache;
-        out
+            Some(&mut self.stages()),
+        )
+    }
+    fn stages(&mut self) -> Stages<'_> {
+        Stages {
+            cache: &mut self.cache,
+            backend: &mut self.backend,
+        }
     }
     /// Fit and zoomed-out views from the smallest pyramid level with at least one
     /// pixel per output pixel. `None` when the output is the full resolution.
@@ -97,22 +114,12 @@ impl PreviewRenderer {
         if long <= max_edge {
             return Ok(None);
         }
-        let source = quality::recovered(image, cancel)?;
-        let pyramid = self.pyramid_for(source);
         let size = quality::output_size(full.width, full.height, max_edge);
         let needed = size.0.max(size.1) as f32 * image.width.max(image.height) as f32 / long as f32;
-        let level = pyramid.level_for(needed);
-        let source = pyramid.source().clone();
-        quality::render_level(
-            &level,
-            &source,
-            recipe,
-            size,
-            [0, 0, size.0, size.1],
-            cancel,
-            &mut self.cache,
-        )
-        .map(Some)
+        let (level, source) = self.level(image, needed, cancel)?;
+        let region = [0, 0, size.0, size.1];
+        let mut stages = self.stages();
+        quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
     }
     /// A 100% `region` at half resolution or less, from the pyramid: immediate
     /// feedback while dragging, before the full-resolution region. The viewport
@@ -125,6 +132,7 @@ impl PreviewRenderer {
         region: [u32; 4],
         cancel: &AtomicBool,
     ) -> Result<Option<Rendered>> {
+        self.backend.used_gpu = false;
         if recipe.engine < 3 {
             return Ok(None);
         }
@@ -143,27 +151,67 @@ impl PreviewRenderer {
         let size = (div(full.width), div(full.height));
         let (px, py) = (x >> k, y >> k);
         let (pw, ph) = (div(w).min(size.0 - px), div(h).min(size.1 - py));
-        let source = quality::recovered(image, cancel)?;
-        let pyramid = self.pyramid_for(source);
-        let level = pyramid.level_for(image.width.max(image.height).div_ceil(1 << k) as f32);
-        let source = pyramid.source().clone();
-        quality::render_level(
-            &level,
-            &source,
-            recipe,
-            size,
-            [px, py, pw, ph],
-            cancel,
-            &mut self.cache,
-        )
-        .map(Some)
+        let needed = image.width.max(image.height).div_ceil(1 << k) as f32;
+        let (level, source) = self.level(image, needed, cancel)?;
+        let region = [px, py, pw, ph];
+        let mut stages = self.stages();
+        quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
     }
-    fn pyramid_for(&mut self, source: Arc<CameraImage>) -> &mut Pyramid {
-        let current = self.pyramid.as_ref();
-        if !current.is_some_and(|p| Arc::ptr_eq(p.source(), &source)) {
+    /// The pyramid level for `needed` source pixels on the long edge, and the level-0
+    /// image, building the pyramid when the photo changed.
+    fn level(
+        &mut self,
+        image: &CameraImage,
+        needed: f32,
+        cancel: &AtomicBool,
+    ) -> Result<(Arc<CameraImage>, Arc<CameraImage>)> {
+        let source = quality::recovered(image, cancel)?;
+        if !self
+            .pyramid
+            .as_ref()
+            .is_some_and(|p| Arc::ptr_eq(p.source(), &source))
+        {
             self.pyramid = Some(Pyramid::new(source));
         }
-        self.pyramid.as_mut().unwrap()
+        let pyramid = self.pyramid.as_mut().unwrap();
+        Ok((pyramid.level_for(needed), pyramid.source().clone()))
+    }
+    #[cfg(test)]
+    pub(crate) fn finish(
+        &mut self,
+        image: &Rendered,
+        recipe: &Recipe,
+        max_edge: u32,
+        cancel: &AtomicBool,
+    ) -> Option<Rendered> {
+        self.backend.finish(image, recipe, max_edge, cancel)
+    }
+}
+impl Backend {
+    pub(crate) fn has_gpu(&self) -> bool {
+        self.gpu.is_some()
+    }
+    /// Runs `stage` on the GPU; a failure other than cancellation disables the GPU,
+    /// so a failing device is not retried on every slider movement.
+    fn run<T>(
+        &mut self,
+        cancel: &AtomicBool,
+        stage: impl FnOnce(&mut gpu::Processor) -> Result<T>,
+    ) -> Option<T> {
+        let gpu = self.gpu.as_mut()?;
+        match stage(gpu) {
+            Ok(out) => {
+                self.used_gpu = true;
+                Some(out)
+            }
+            Err(error) => {
+                if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    self.fallback = Some(error.to_string());
+                    self.gpu = None;
+                }
+                None
+            }
+        }
     }
     pub(crate) fn finish(
         &mut self,
@@ -172,20 +220,15 @@ impl PreviewRenderer {
         max_edge: u32,
         cancel: &AtomicBool,
     ) -> Option<Rendered> {
-        let gpu = self.gpu.as_mut()?;
-        match gpu.finish(image, recipe, max_edge, cancel) {
-            Ok(out) => {
-                self.used_gpu = true;
-                Some(out)
-            }
-            Err(error) => {
-                if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    self.fallback = Some(error.to_string());
-                    self.gpu = None; // Do not retry a failing device on every slider movement.
-                }
-                None
-            }
-        }
+        self.run(cancel, |gpu| gpu.finish(image, recipe, max_edge, cancel))
+    }
+    pub(crate) fn develop(
+        &mut self,
+        samples: &Arc<super::pipeline::Samples>,
+        params: &super::pipeline::pixel_params::PixelParams,
+        cancel: &AtomicBool,
+    ) -> Option<Rendered> {
+        self.run(cancel, |gpu| gpu.develop(samples, params, cancel))
     }
 }
 

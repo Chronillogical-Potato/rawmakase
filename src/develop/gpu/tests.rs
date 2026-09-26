@@ -156,3 +156,142 @@ fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> 
     assert!(!renderer.used_gpu());
     Ok(())
 }
+
+/// The GPU per-pixel stage against the CPU reference, over recipes that exercise every
+/// table and branch of `develop.wgsl`.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
+    use crate::{
+        camera_profiles::CameraProfile,
+        develop::pipeline::{Samples, develop_samples, pixel_params::pixel_params},
+        raw::{CameraImage, Metadata},
+    };
+    use std::sync::Arc;
+    let metadata = Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        width: 64,
+        height: 48,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let wave = |i: usize, k: f32| ((i as f32 * k).sin() * 0.5 + 0.5).powi(2);
+    let image = Arc::new(CameraImage {
+        width: 64,
+        height: 48,
+        pixels: (0..64 * 48)
+            .map(|i| [wave(i, 0.37) * 1.3, wave(i, 0.21), wave(i, 0.13) * 1.1])
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    let n = 4000;
+    let samples = Arc::new(Samples {
+        width: 80,
+        height: 50,
+        // Dark, mid, bright and out-of-range camera values in all hue directions.
+        pixels: (0..n)
+            .map(|i| {
+                [
+                    wave(i, 0.71) * 1.6,
+                    wave(i, 0.53) * 1.2,
+                    wave(i, 0.29) * 1.5,
+                ]
+            })
+            .collect(),
+        positions: (0..n)
+            .map(|i| {
+                if i % 97 == 0 {
+                    [f32::NAN; 2]
+                } else {
+                    [(i % 64) as f32, (i / 64 % 48) as f32]
+                }
+            })
+            .collect(),
+    });
+    let plain = CameraProfile::camera_matrix_default(&metadata).unwrap();
+    let tables = plain.clone().with_test_tables();
+    let base = |profile: &CameraProfile| Recipe {
+        profile: Some(Arc::new(profile.clone())),
+        reference_curves: true,
+        reference_color: true,
+        reference_calibration: true,
+        temperature: 5000.,
+        ..Default::default()
+    };
+    let mut recipes = vec![base(&plain), base(&tables)];
+    let mut r = base(&tables);
+    r.exposure = 0.7;
+    r.contrast = 0.4;
+    r.whites = -0.3;
+    r.blacks = 0.2;
+    r.effects.dehaze = 0.25;
+    r.curve.insert([0.3, 0.25]);
+    r.effects.channels[2].insert([0.6, 0.7]);
+    r.effects.parametric = [0.2, -0.1, 0.3, 0.];
+    r.black_point = 0.02;
+    r.white_point = 0.97;
+    r.midtone = 1.2;
+    recipes.push(r.clone());
+    r.shadows = 0.5;
+    r.highlights = -0.6;
+    recipes.push(r.clone());
+    r.hsl[1] = [0.3, -0.5, 0.4];
+    r.hsl[5] = [-0.2, 0.6, -0.3];
+    r.saturation = 0.2;
+    r.vibrance = -0.3;
+    r.grading[0] = [0.6, 0.4, -0.2];
+    r.effects.global_grade = [0.1, 0.2, 0.1];
+    r.effects.calibration = [[0.3, -0.2], [-0.4, 0.5], [0.2, 0.1]];
+    r.effects.shadow_tint = -0.4;
+    recipes.push(r.clone());
+    r.effects.defringe = [0.5, 0.3];
+    recipes.push(r.clone());
+    r.effects.monochrome = true;
+    r.effects.gray_mix = [0.2, -0.3, 0.1, 0.4, -0.2, 0.3, 0., -0.1];
+    recipes.push(r);
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    for (i, recipe) in recipes.iter().enumerate() {
+        let params = pixel_params(&image, recipe).expect("GPU port covers this recipe");
+        let expected = develop_samples(&image, recipe, &samples, &cancel)?;
+        let actual = gpu.develop(&samples, &params, &cancel)?;
+        let d: Vec<f32> = actual
+            .pixels
+            .iter()
+            .flatten()
+            .zip(expected.pixels.iter().flatten())
+            .map(|(a, b)| (a - b).abs())
+            .collect();
+        let mean = d.iter().sum::<f32>() / d.len() as f32;
+        let mut sorted = d.clone();
+        sorted.sort_by(f32::total_cmp);
+        let (p999, max) = (sorted[sorted.len() * 999 / 1000], sorted[sorted.len() - 1]);
+        eprintln!("recipe {i}: max {max:.6}, 99.9% {p999:.6}, mean {mean:.8}");
+        // Near-neutral pixels have an unstable Oklab hue angle, which can move them to
+        // another Monochrome band; everything else agrees to float precision.
+        assert!(
+            p999 < 1e-3 && max < 0.02 && mean < 2e-5,
+            "recipe {i}: max {max}, 99.9% {p999}, mean {mean}"
+        );
+    }
+    // Older operators stay on the CPU.
+    let mut legacy = base(&tables);
+    legacy.effects.balance = 0.3;
+    legacy.grading[0] = [0.6, 0.4, 0.];
+    assert!(pixel_params(&image, &legacy).is_none());
+    legacy = base(&tables);
+    legacy.engine = 3;
+    assert!(pixel_params(&image, &legacy).is_none());
+    Ok(())
+}

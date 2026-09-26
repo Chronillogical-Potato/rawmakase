@@ -29,8 +29,8 @@ fn inverse(a: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| cofactor[j][i] / determinant))
 }
 pub(crate) struct Calibration {
-    matrix: [[f32; 3]; 3],
-    shadow: f32,
+    pub(crate) matrix: [[f32; 3]; 3],
+    pub(crate) shadow: f32,
 }
 impl Calibration {
     pub(crate) fn new(primaries: [[f32; 2]; 3], shadow: f32) -> Self {

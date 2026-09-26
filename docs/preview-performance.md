@@ -2,9 +2,10 @@
 
 Fit and zoomed-out views render from a resolution pyramid of the photo (see
 [below](#resolution-pyramid)); 100% regions and export use the full-resolution
-image. The desktop uses GPU compute for sharpening and Lanczos3 resizing of full
-resolution renders. RAW decoding, color/tone processing, grain/vignette and export
-stay on the CPU. There is no separate draft: every slider change renders the real
+image. The desktop runs the per-pixel color and tone stage on the GPU (see
+[GPU develop stage](#gpu-develop-stage)) and uses GPU compute for sharpening and
+Lanczos3 resizing of full resolution renders. RAW decoding, geometry sampling, local
+tones, grain/vignette and export stay on the CPU. There is no separate draft: every slider change renders the real
 pipeline at Fit size, and at 100% a half-resolution preview of the region comes
 first (see [slider responsiveness](#slider-responsiveness)). The status line shows `GPU finish` when compute was used.
 
@@ -135,6 +136,57 @@ change the first update was the 50 ms legacy draft, and the real rendering came
 | | 100% preview, local | 41 ms |
 | | 100% preview, Clarity edits | 116 ms |
 | | 100% full region, local | 1469 ms |
+
+## GPU develop stage
+
+`src/develop/gpu/develop.wgsl` ports the per-pixel stage (`process_pixel`) of the
+current engine: white balance, camera matrix, DCP HueSatMap (with its two-illuminant
+blend), calibration, exposure and the DNG exposure ramp, LookTable, enhanced-look
+table and curve, the profile tone curve, the engine 4 Shadows/Highlights map,
+measured Basic curves, levels, parametric and point curves, color mixer, color
+grading, Oklab Defringe/Monochrome and gamut compression. It runs on the samples in
+the stage cache, which stay on the device while only the recipe changes; parameters
+and tables (`pixel_params.rs`) are uploaded per render and the result is read back
+for sharpening and spatial effects on the CPU.
+
+The port covers engine 4 with reference curves, color and calibration and a profile
+tone curve, which every new photo uses. Older engines, and color grading with
+Blending or Balance outside the measured tables, render on the CPU, as do machines
+without a usable adapter; a GPU failure disables the GPU for the session. Export
+always uses the CPU, which remains the reference.
+
+Profile tables are read with explicit trilinear interpolation from a storage buffer
+rather than a hardware-filtered 3D texture, whose reduced-precision filter weights
+would not match the CPU. A hardware test compares the two stages on 4000 samples over
+seven recipes that exercise every table and branch: the 99.9th-percentile channel
+difference is at most 0.0003 and the mean at most 0.00001 (0–1 scale). With
+Monochrome, a few near-neutral pixels whose Oklab hue is unstable can land in
+another band (largest difference 0.01).
+
+Rendering into a texture that egui draws directly would need the compute work on
+the UI's wgpu device, which the separate compute device deliberately avoids. The
+readback of a 1600-pixel Fit is a few milliseconds, so it stays.
+
+Best of two interleaved runs against the previous commit, load average 24–35:
+
+| Photo | Render, per exposure change | CPU color stage | GPU color stage |
+| --- | --- | ---: | ---: |
+| X100F | Fit | 166 ms | 14 ms |
+| | Fit, local | 437 ms | 39 ms |
+| | Fit, Clarity edits | 461 ms | 149 ms |
+| | 100% preview | 51 ms | 10 ms |
+| | 100% region | 188 ms | 24 ms |
+| | 100% region, local | 381 ms | 53 ms |
+| | First Fit after opening | 392 ms | 198 ms |
+| A7CR | Fit | 95 ms | 11 ms |
+| | Fit, local | 149 ms | 26 ms |
+| | 100% preview | 25 ms | 6 ms |
+| | 100% region | 106 ms | 20 ms |
+| | 100% region, local | 1327 ms | 1359 ms |
+
+Fit differs from the resized export exactly as much as the CPU Fit (0.0016 X100F,
+0.0059 A7CR). Clarity edits and the A7CR's 100% view with local adjustments are now
+dominated by the full-resolution local-tone blurs on the CPU.
 
 ## GPU finishing measurements — 2026-09-26
 

@@ -686,6 +686,7 @@ pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<R
 ///
 /// With a `cache`, the geometry, lens-warp and noise-reduction samples are kept, so a
 /// following render that only changes color and tone reruns the per-pixel stage alone.
+/// A `backend` with a GPU runs that stage there when the port covers the recipe.
 pub(crate) fn render_base(
     im: &std::sync::Arc<CameraImage>,
     r: &Recipe,
@@ -693,27 +694,34 @@ pub(crate) fn render_base(
     region: [u32; 4],
     spread: f32,
     cancel: &std::sync::atomic::AtomicBool,
-    cache: Option<&mut super::stage_cache::StageCache>,
+    stages: Option<&mut super::preview_renderer::Stages>,
 ) -> Result<Rendered> {
     let mut base = r.clone();
     base.sharpening = 0.;
-    let Some(cache) = cache else {
+    let Some(stages) = stages else {
         return render_region_inner(im, &base, g, region, spread, cancel);
     };
     base.validate()?;
     let key = super::stage_cache::SampleKey::new(im, &base, g, region, spread);
-    let samples = cache.samples.get_or_try(key, Samples::bytes, || {
+    let samples = stages.cache.samples.get_or_try(key, Samples::bytes, || {
         sample_region(im, &base, g, region, spread, cancel)
     })?;
+    let backend = &mut *stages.backend;
+    if backend.has_gpu()
+        && let Some(params) = pixel_params::pixel_params(im, &base)
+        && let Some(out) = backend.develop(&samples, &params, cancel)
+    {
+        return Ok(out);
+    }
     develop_samples(im, &base, &samples, cancel)
 }
 /// Camera samples of an output region after geometry, lens correction and noise
 /// reduction, with their source positions; `NAN` positions lie outside the photo.
 pub(crate) struct Samples {
-    width: u32,
-    height: u32,
-    pixels: Vec<[f32; 3]>,
-    positions: Vec<[f32; 2]>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<[f32; 3]>,
+    pub(crate) positions: Vec<[f32; 2]>,
 }
 impl Samples {
     fn bytes(&self) -> usize {
@@ -768,7 +776,7 @@ fn sample_region(
     })
 }
 /// The per-pixel color and tone stage over prepared samples.
-fn develop_samples(
+pub(crate) fn develop_samples(
     im: &CameraImage,
     r: &Recipe,
     samples: &Samples,
@@ -976,5 +984,6 @@ fn render_region_inner(
     })
 }
 
+pub(crate) mod pixel_params;
 #[cfg(test)]
 mod tests;

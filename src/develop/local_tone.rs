@@ -14,21 +14,21 @@ const RADIUS: f32 = 0.032;
 const EPSILON: f32 = 1.5;
 
 pub(crate) struct LocalToneMap {
-    width: usize,
-    height: usize,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
     /// Guided-filter coefficients: base = a · log2(Y) + b.
-    a: Vec<f32>,
-    b: Vec<f32>,
+    pub(crate) a: Vec<f32>,
+    pub(crate) b: Vec<f32>,
     /// Source image size, to convert sample coordinates.
-    scale: [f32; 2],
-    shadows: Option<Curve>,
-    highlights: Option<Curve>,
+    pub(crate) scale: [f32; 2],
+    pub(crate) shadows: Option<Curve>,
+    pub(crate) highlights: Option<Curve>,
 }
-struct Curve {
-    key: f32,
-    lo: f32,
-    hi: f32,
-    table: [f32; 48],
+pub(crate) struct Curve {
+    pub(crate) key: f32,
+    pub(crate) lo: f32,
+    pub(crate) hi: f32,
+    pub(crate) table: [f32; 48],
 }
 impl Curve {
     fn new(family: &Family, s: f32, key: f32) -> Option<Self> {

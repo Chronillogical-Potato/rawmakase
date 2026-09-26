@@ -234,6 +234,9 @@ impl CurveLut {
             Self(std::array::from_fn(|i| curve.evaluate(i as f32 / 4096.)))
         }
     }
+    pub(crate) fn values(&self) -> &[f32; 4097] {
+        &self.0
+    }
     pub fn evaluate(&self, x: f32) -> f32 {
         let p = x.clamp(0., 1.) * 4096.;
         let i = (p as usize).min(4095);

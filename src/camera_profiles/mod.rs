@@ -380,6 +380,69 @@ impl CameraProfile {
         mul(PRO_TO_RGB, p)
     }
 }
+/// A profile's tables as the GPU develop stage reads them (see `develop::gpu`).
+pub(crate) struct GpuTables<'a> {
+    /// HueSatMap for this temperature: the first table, the second and its weight.
+    pub hue: Option<(&'a Table, Option<&'a Table>, f32)>,
+    pub look: Option<&'a Table>,
+    pub enhanced: Option<(&'a Table, &'a [f32])>,
+    pub tone: &'a [[f32; 2]],
+    pub exposure_scale: f32,
+}
+impl Table {
+    pub(crate) fn dims(&self) -> [usize; 3] {
+        self.dims
+    }
+    pub(crate) fn data(&self) -> &[[f32; 3]] {
+        &self.data
+    }
+    pub(crate) fn srgb(&self) -> bool {
+        self.srgb
+    }
+}
+impl CameraProfile {
+    pub(crate) fn gpu_tables(&self, temperature: f32) -> GpuTables<'_> {
+        GpuTables {
+            hue: self
+                .hue1
+                .as_ref()
+                .map(|t| (t, self.hue2.as_ref(), self.weight(temperature))),
+            look: self.look.as_ref(),
+            enhanced: self
+                .enhanced
+                .as_ref()
+                .map(|e| (&e.table, e.curve.as_slice())),
+            tone: &self.tone,
+            exposure_scale: 2f32.powf(self.exposure),
+        }
+    }
+    /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
+    #[cfg(test)]
+    pub(crate) fn with_test_tables(mut self) -> Self {
+        let table = |dims: [usize; 3], srgb: bool, seed: f32| Table {
+            dims,
+            data: (0..dims.iter().product::<usize>())
+                .map(|i| {
+                    let f = i as f32 * 0.37 + seed;
+                    [
+                        f.sin() * 12.,
+                        1. + 0.2 * f.cos(),
+                        1. + 0.1 * (f * 1.7).sin(),
+                    ]
+                })
+                .collect(),
+            srgb,
+        };
+        self.hue1 = Some(table([90, 30, 1], false, 0.));
+        self.hue2 = Some(table([90, 30, 1], false, 1.));
+        self.kelvin1 = 2856.;
+        self.kelvin2 = 6504.;
+        self.look = Some(table([36, 8, 16], true, 2.));
+        self.exposure = 0.2;
+        self.enhanced = Some(enhanced::Enhanced::for_test(table([24, 6, 8], true, 3.)));
+        self
+    }
+}
 /// Bradford adaptation from D65 to the D50 profile connection space.
 const D65_TO_D50: Matrix = [
     [1.0478112, 0.0228866, -0.0501270],

@@ -25,10 +25,28 @@ pub struct Enhanced {
     pub clarity: f32,
     #[serde(default)]
     pub monochrome: bool,
-    table: Table,
-    curve: Vec<f32>,
+    pub(super) table: Table,
+    pub(super) curve: Vec<f32>,
 }
 impl Enhanced {
+    #[cfg(test)]
+    pub(super) fn for_test(table: Table) -> Self {
+        Self {
+            uuid: "0".repeat(32),
+            base_name: "Test".into(),
+            highlights: 0.,
+            shadows: 0.,
+            clarity: 0.,
+            monochrome: false,
+            table,
+            curve: (0..=4096)
+                .map(|i| {
+                    let x = i as f32 / 4096.;
+                    x * x * (3. - 2. * x)
+                })
+                .collect(),
+        }
+    }
     pub(super) fn validate(&self) -> Result<()> {
         ensure!(
             self.uuid.len() == 32 && self.uuid.bytes().all(|b| b.is_ascii_hexdigit()),
