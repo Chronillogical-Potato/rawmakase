@@ -23,6 +23,10 @@ pub struct Library {
     folders: Vec<Folder>,
     collections: Vec<Collection>,
     roots: Vec<(i64, String, Option<String>)>,
+    /// Whether each external volume's mount point exists, checked off the UI
+    /// thread so a hung network mount can't stall drawing.
+    volumes_online: std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, bool>>>,
+    volumes_checked: Option<std::time::Instant>,
     folder_scope: Option<HashSet<i64>>,
     selected_folder: String,
     expanded: HashSet<String>,
@@ -60,6 +64,8 @@ impl Library {
             folders: Vec::new(),
             collections: Vec::new(),
             roots: Vec::new(),
+            volumes_online: Default::default(),
+            volumes_checked: None,
             folder_scope: None,
             selected_folder: String::new(),
             expanded: HashSet::new(),
@@ -295,39 +301,70 @@ impl Library {
                     }
                 });
                 section(ui, "Folders", false, |ui| {
-                    for (root, original, mapped) in self.roots.clone() {
-                        let root_path = mapped.as_deref().unwrap_or(&original);
-                        let name = std::path::Path::new(&original)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let mut tree = FolderNode::root(root, name, root_path.into());
-                        for f in self.folders.iter().filter(|f| f.root == root) {
-                            tree.insert(f);
-                        }
-                        tree.finish();
-                        match folder_tree_row(
-                            ui,
-                            &tree,
-                            0,
-                            &mut self.expanded,
-                            &self.selected_folder,
-                        ) {
-                            Some(TreeAction::Select(key, ids)) => {
-                                self.selected_folder = key;
-                                self.folder_scope = Some(ids);
-                                self.collection = None;
-                                self.filter();
+                    // Lightroom-style volume headers with an attached light.
+                    let mut volumes: std::collections::BTreeMap<
+                        crate::platform::volume::Volume,
+                        Vec<(i64, String, Option<String>)>,
+                    > = Default::default();
+                    for root in self.roots.clone() {
+                        let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
+                        volumes
+                            .entry(crate::platform::volume::volume_of(&path))
+                            .or_default()
+                            .push(root);
+                    }
+                    self.check_volumes(ui.ctx(), volumes.keys());
+                    let online = self.volumes_online.lock().unwrap().clone();
+                    for (volume, roots) in volumes {
+                        let attached = match &volume.mount {
+                            None => Some(true),
+                            Some(mount) => online.get(mount).copied(),
+                        };
+                        let photos: usize = roots
+                            .iter()
+                            .map(|(id, _, _)| {
+                                self.folders
+                                    .iter()
+                                    .filter(|f| f.root == *id)
+                                    .map(|f| f.count)
+                                    .sum::<usize>()
+                            })
+                            .sum();
+                        volume_row(ui, &volume, attached, photos);
+                        for (root, original, mapped) in roots {
+                            let root_path = mapped.as_deref().unwrap_or(&original);
+                            let name = std::path::Path::new(&original)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            let mut tree = FolderNode::root(root, name, root_path.into());
+                            for f in self.folders.iter().filter(|f| f.root == root) {
+                                tree.insert(f);
                             }
-                            Some(TreeAction::Relink(root, id)) => {
-                                action = if root {
-                                    Action::RelinkRoot(id)
-                                } else {
-                                    Action::RelinkFolder(id)
+                            tree.finish();
+                            match folder_tree_row(
+                                ui,
+                                &tree,
+                                0,
+                                &mut self.expanded,
+                                &self.selected_folder,
+                            ) {
+                                Some(TreeAction::Select(key, ids)) => {
+                                    self.selected_folder = key;
+                                    self.folder_scope = Some(ids);
+                                    self.collection = None;
+                                    self.filter();
                                 }
+                                Some(TreeAction::Relink(root, id)) => {
+                                    action = if root {
+                                        Action::RelinkRoot(id)
+                                    } else {
+                                        Action::RelinkFolder(id)
+                                    }
+                                }
+                                None => {}
                             }
-                            None => {}
                         }
                     }
                     if self.roots.is_empty() {
@@ -435,6 +472,39 @@ impl Library {
                 });
             });
         action
+    }
+    /// Re-checks every few seconds, on a background thread, whether external
+    /// volumes are attached.
+    fn check_volumes<'a>(
+        &mut self,
+        ctx: &egui::Context,
+        volumes: impl Iterator<Item = &'a crate::platform::volume::Volume>,
+    ) {
+        let due = self
+            .volumes_checked
+            .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3));
+        if !due {
+            return;
+        }
+        self.volumes_checked = Some(std::time::Instant::now());
+        let mounts: Vec<PathBuf> = volumes.filter_map(|v| v.mount.clone()).collect();
+        if mounts.is_empty() {
+            return;
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs(3));
+        let online = self.volumes_online.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let state: HashMap<PathBuf, bool> = mounts
+                .into_iter()
+                .map(|m| (m.clone(), m.is_dir()))
+                .collect();
+            let mut shared = online.lock().unwrap();
+            if *shared != state {
+                *shared = state;
+                ctx.request_repaint();
+            }
+        });
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
@@ -978,6 +1048,50 @@ fn filter_caption(text: &str) -> egui::RichText {
     egui::RichText::new(text)
         .size(11.)
         .color(Color32::from_gray(150))
+}
+/// A volume header: a green light when attached, red when not (gray while
+/// unknown), the drive name and its photo count or Offline.
+fn volume_row(
+    ui: &mut egui::Ui,
+    volume: &crate::platform::volume::Volume,
+    attached: Option<bool>,
+    photos: usize,
+) {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::hover());
+    let y = rect.center().y;
+    let light = match attached {
+        Some(true) => Color32::from_rgb(92, 190, 108),
+        Some(false) => Color32::from_rgb(206, 78, 68),
+        None => Color32::from_gray(110),
+    };
+    ui.painter()
+        .circle_filled(egui::pos2(rect.left() + 16., y), 4., light);
+    ui.painter().text(
+        egui::pos2(rect.left() + 29., y),
+        egui::Align2::LEFT_CENTER,
+        &volume.name,
+        egui::FontId::proportional(12.),
+        Color32::from_gray(215),
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - 10., y),
+        egui::Align2::RIGHT_CENTER,
+        if attached == Some(false) {
+            "Offline".to_string()
+        } else {
+            photos.to_string()
+        },
+        egui::FontId::proportional(10.),
+        Color32::from_gray(125),
+    );
+    response.on_hover_text(match (&volume.mount, attached) {
+        (None, _) => "Startup disk".to_string(),
+        (Some(mount), Some(false)) => {
+            format!("{} is not attached", mount.display())
+        }
+        (Some(mount), _) => format!("Attached at {}", mount.display()),
+    });
 }
 /// A quiet full-width "+ label" row, Lightroom's add action in a panel.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
