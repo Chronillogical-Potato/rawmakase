@@ -316,6 +316,9 @@ impl Library {
                     }
                     self.check_volumes(ui.ctx(), volumes.keys());
                     let online = self.volumes_online.lock().unwrap().clone();
+                    // The startup disk first, then other drives by name.
+                    let mut volumes: Vec<_> = volumes.into_iter().collect();
+                    volumes.sort_by_key(|(v, _)| (v.mount.is_some(), v.name.to_lowercase()));
                     for (volume, roots) in volumes {
                         let state = online
                             .get(volume.mount.as_deref().unwrap_or(std::path::Path::new("/")))
