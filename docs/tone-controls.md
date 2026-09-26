@@ -6,6 +6,10 @@ References are Camera Raw 18.6 renders from Photoshop 2026, the same engine and 
 
 Each adjusted render was compared with the default render of the same photo. For Contrast, Blacks and Whites, a single curve applied to the brightest and darkest channel in ProPhoto primaries with the sRGB transfer function (DNG RGBTone) explains the change to within 0.0015 MAE. That is the 8-bit quantization level of the comparison, so these sliders are global tone curves in that domain. The same curve fits every photo for Blacks and negative Whites. Contrast pivots at a photo-dependent point (0.41–0.51), and positive Whites stretches further on photos whose highlights are dim. Highlights, Shadows, Clarity and Dehaze leave spatial residuals and are local operators.
 
+## Black point
+
+Adobe's rendering subtracts a small black level before the tone curve: the DNG SDK exposure ramp, whose default Shadows setting maps to a black point with a quadratic toe. Without it, RAWmakase's deep shadows (display luminance 0.02–0.08) were 0.4–0.55 EV brighter than Camera Raw on every camera. Engine 4 applies the ramp after exposure, with the black at 0.0015 × 2^exposure in scene-linear units. That value was fitted to the Camera Raw defaults of three photos; the SDK's nominal 0.005 crushes shadows by about 1.2 EV here. Scorecards: X100F Lightroom references 0.0120 → 0.0096 MAE, Sony Camera Raw references 0.0088 → 0.0065.
+
 ## Engine 4 implementation
 
 `src/develop/basic_tone.rs` applies Contrast → Whites → Blacks as one composed curve after the camera profile's tone curve and before the user's point curve. The curves are the measured averages in `basic_tone_data.rs`, interpolated between slider positions with 0 as the identity. They replace the earlier power-S contrast and luminance-weighted Whites/Blacks for engine 4. Older recipes keep their operators.

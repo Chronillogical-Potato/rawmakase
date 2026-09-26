@@ -133,6 +133,9 @@ fn tone_stage(
         color
     };
     let mut rgb = mul(TO_2020, color).map(|v| v * lut.exposure_gain);
+    if let Some(ramp) = &lut.black_ramp {
+        rgb = rgb.map(|v| ramp.eval(v));
+    }
     // Engine 4 renders Dehaze as a measured curve in `apply_reference_curves`.
     if r.effects.dehaze != 0. && !lut.basic_curves {
         let a = r.effects.dehaze;
@@ -296,6 +299,8 @@ struct CurveSet {
     basic: Option<crate::develop::basic_tone::BasicTone>,
     /// Engine 4 Shadows/Highlights base level, built per image by `with_local`.
     local: Option<crate::develop::local_tone::LocalToneMap>,
+    /// Engine 4: the DNG exposure ramp's black point (Adobe's default Shadows of 5).
+    black_ramp: Option<ExposureRamp>,
     color_adjustments: bool,
     calibration: crate::develop::calibration::Calibration,
     master: CurveLut,
@@ -330,6 +335,9 @@ impl CurveSet {
                 })
                 .flatten(),
             local: None,
+            black_ramp: basic_curves.then(|| {
+                ExposureRamp::new(DNG_SHADOWS_BLACK * 2f32.powf(r.exposure + r.camera_exposure))
+            }),
             color_adjustments: r.vibrance != 0.
                 || r.saturation != 0.
                 || r.hsl != [[0.; 3]; 8]
@@ -495,6 +503,44 @@ fn detail_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
             + (p[c] - center) * (1. - r.noise_chroma)
             + (avg[c] - avgl) * r.noise_chroma * (0.5 + r.effects.chroma_smoothness)
     })
+}
+/// Black level of the DNG SDK's exposure ramp at its default Shadows setting of 5
+/// (5 × 0.001, in scene-linear units before exposure).
+const DNG_SHADOWS_BLACK: f32 = 0.0015;
+/// dng_function_exposure_ramp with white at 1: values below `black` go to zero through
+/// a quadratic toe, the rest are stretched back to full range.
+struct ExposureRamp {
+    black: f32,
+    slope: f32,
+    radius: f32,
+    q: f32,
+}
+impl ExposureRamp {
+    fn new(black: f32) -> Self {
+        let black = black.clamp(0., 0.5);
+        let slope = 1. / (1. - black);
+        let radius = (0.5 * black).min(1. / 16. / slope);
+        Self {
+            black,
+            slope,
+            radius,
+            q: if radius > 0. {
+                slope / (4. * radius)
+            } else {
+                0.
+            },
+        }
+    }
+    fn eval(&self, x: f32) -> f32 {
+        if x <= self.black - self.radius {
+            0.
+        } else if x >= self.black + self.radius {
+            (x - self.black) * self.slope
+        } else {
+            let y = x - (self.black - self.radius);
+            self.q * y * y
+        }
+    }
 }
 /// Built-in vignetting over the camera image. Radius 1 is the half diagonal; `x`, `y`
 /// use sample coordinates, where pixel `i` is centred at `i`.
