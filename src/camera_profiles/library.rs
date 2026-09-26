@@ -25,8 +25,9 @@ pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
 }
 /// No camera profiles are bundled. Without an imported profile, rendering uses the
 /// camera matrix default (see `CameraProfile::camera_matrix_default`).
-pub fn builtin(_m: &Metadata) -> Option<Arc<CameraProfile>> {
-    None
+/// The profile a DNG embeds for its camera, which Lightroom lists as the file's own.
+pub fn builtin(m: &Metadata) -> Option<Arc<CameraProfile>> {
+    m.embedded_profile.clone()
 }
 /// User-installed profiles stay outside the source tree and are filtered by camera.
 pub fn library_dirs() -> Vec<std::path::PathBuf> {

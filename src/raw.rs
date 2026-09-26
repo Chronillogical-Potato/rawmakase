@@ -80,6 +80,12 @@ pub struct Metadata {
     /// Built-in lens correction stored by the camera, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lens: Option<crate::lens::LensCorrection>,
+    /// DNG BaselineExposure, when the file is a DNG that records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_exposure: Option<f32>,
+    /// Camera profile embedded in a DNG; rebuilt from the file on open.
+    #[serde(skip)]
+    pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
 }
 pub struct Raw {
     handle: *mut c_void,
@@ -145,13 +151,29 @@ impl Raw {
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: crate::lens::embedded::read(path_ref),
+            baseline_exposure: None,
+            embedded_profile: None,
         };
         let mut metadata = metadata;
-        if let Some([left, top, width, height]) = fuji_crop(path_ref)
+        let dng = crate::dng::read(path_ref);
+        let mut crop = fuji_crop(path_ref);
+        if let Some(dng) = dng {
+            metadata.baseline_exposure = dng.baseline_exposure;
+            metadata.embedded_profile = dng
+                .profile
+                .filter(|p| p.ensure_camera(&metadata).is_ok())
+                .map(std::sync::Arc::new);
+            if dng.lens.is_some() {
+                metadata.lens = dng.lens;
+            }
+            crop = dng.crop.or(crop);
+        }
+        if let Some([left, top, width, height]) = crop
             && left + width <= metadata.width
             && top + height <= metadata.height
         {
-            // Adobe's default crop for Fujifilm files, 2 px larger per side than LibRaw's.
+            // Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
+            // 2 px larger per side than LibRaw's).
             metadata.crop_left = left;
             metadata.crop_top = top;
             metadata.crop_width = width;

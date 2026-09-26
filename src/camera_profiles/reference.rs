@@ -7,6 +7,9 @@ fn x100f(m: &Metadata) -> bool {
     m.make.eq_ignore_ascii_case("Fujifilm") && m.model.eq_ignore_ascii_case("X100F")
 }
 pub fn baseline_exposure(m: &Metadata) -> f32 {
+    if let Some(dng) = m.baseline_exposure {
+        return dng;
+    }
     // Other DR modes have not been calibrated; never extrapolate an ISO rule.
     if x100f(m) && m.fuji_dynamic_range == 100 {
         return 0.15;

@@ -32,6 +32,10 @@ Full renders against Lightroom's Adobe Standard exports, encoded sRGB at 1200 px
 
 Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not enable profile corrections by default, and it has not been checked whether it applies Sony's embedded data, so Sony corrections start disabled until a Lightroom reference is available.
 
+## DNG files
+
+A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` reads FixVignetteRadial from OpcodeList2 and WarpRectilinear from OpcodeList3 (radial terms, per plane, when centred) into the same correction model, enabled by default. It also reads the embedded camera profile (offered as the file's own profile, as in Lightroom), BaselineExposure and DefaultCrop. The Lightroom-made DNG of DSCF7853 renders at 0.020 MAE against Lightroom's export with no imported files, against 0.030 before. GainMap opcodes (used by phone DNGs for lens shading) are not applied yet.
+
 ## Adobe LCP profiles
 
 Not implemented yet. Like camera profiles, LCP files will be explicitly imported by the user and never read from a Lightroom installation.

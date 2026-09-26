@@ -18,12 +18,14 @@ pub mod catalog;
 mod color_math;
 pub mod comparison;
 pub mod develop;
+pub mod dng;
 pub mod export;
 pub mod lens;
 pub mod platform;
 pub mod presets;
 pub mod raw;
 pub mod storage;
+mod tiff;
 pub mod xmp;
 
 // Source-compatible entry points for earlier users of the library. New code uses
