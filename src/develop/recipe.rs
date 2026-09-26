@@ -14,6 +14,16 @@ pub struct Recipe {
     /// recipes, which therefore keep rendering without it.
     #[serde(default)]
     pub lens_builtin: bool,
+    /// Lightroom's Enable Profile Corrections: use an imported Adobe lens profile that
+    /// matches the lens, in place of the built-in correction.
+    #[serde(default)]
+    pub lens_profile: bool,
+    /// Profile correction amounts, Lightroom's Distortion and Vignetting sliders
+    /// (0–2, 1 = 100).
+    #[serde(default = "one")]
+    pub lens_distortion: f32,
+    #[serde(default = "one")]
+    pub lens_vignetting: f32,
     /// Use the DCP tone curve without a second generic scene shoulder.
     #[serde(default)]
     pub profile_tone: bool,
@@ -69,6 +79,9 @@ impl Default for Recipe {
         Self {
             engine: 4,
             lens_builtin: true,
+            lens_profile: false,
+            lens_distortion: 1.,
+            lens_vignetting: 1.,
             profile_tone: true,
             effects: Default::default(),
             preset_name: String::new(),
@@ -253,6 +266,11 @@ impl Recipe {
             "Invalid rotation"
         );
         ensure!(self.transform.validate(), "Invalid transform");
+        ensure!(
+            (0. ..=2.).contains(&self.lens_distortion)
+                && (0. ..=2.).contains(&self.lens_vignetting),
+            "Invalid lens correction amount"
+        );
         Ok(())
     }
     /// The camera profile used for rendering. From engine 4, photos without an imported or
@@ -275,9 +293,13 @@ impl Recipe {
         &self,
         m: &'a Metadata,
     ) -> Option<&'a crate::lens::LensCorrection> {
-        m.lens
+        if self.engine < 4 {
+            return None;
+        }
+        m.profile_lens
             .as_ref()
-            .filter(|_| self.engine >= 4 && self.lens_builtin)
+            .filter(|_| self.lens_profile)
+            .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
     }
     /// Recipe as rendered: profile-internal adjustments plus the engine-4 default profile.
     pub(crate) fn resolved(&self, m: &Metadata) -> std::borrow::Cow<'_, Self> {
@@ -340,4 +362,7 @@ impl Recipe {
             *v /= g;
         }
     }
+}
+fn one() -> f32 {
+    1.
 }

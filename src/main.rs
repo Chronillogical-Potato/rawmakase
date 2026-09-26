@@ -21,6 +21,11 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
+    /// Import Adobe lens profiles (.lcp) for Enable Profile Corrections.
+    ImportLensProfiles {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+    },
     ImportCatalog {
         source: PathBuf,
         output: PathBuf,
@@ -83,6 +88,11 @@ fn main() -> Result<()> {
         .ok();
     let a = Args::parse();
     match a.command {
+        Some(Command::ImportLensProfiles { files }) => {
+            for p in rawmakase::lens::lcp::import_files(&files)? {
+                println!("Imported {}", p.display());
+            }
+        }
         Some(Command::ImportProfiles { files }) => {
             for p in rawmakase::camera_profiles::import_files(&files)? {
                 println!("Imported {}", p.display());

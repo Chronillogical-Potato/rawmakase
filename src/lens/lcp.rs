@@ -1,0 +1,414 @@
+//! Adobe lens profiles (LCP, Adobe Camera Model). Users import them explicitly; they
+//! are copied into `lens-profiles` under the data directory and never read from an
+//! Adobe installation. A matching profile becomes the photo's "Enable Profile
+//! Corrections" correction.
+//!
+//! Model: with x, y the offset from the image centre in units of FocalLengthX × the
+//! long edge (FocalLength × SensorFormatFactor / 36 when not given), r² = x² + y²,
+//! distortion maps ideal to observed radius by 1 + k1 r² + k2 r⁴ + k3 r⁶, vignetting
+//! darkens by 1 + a1 r² + a2 r⁴ + a3 r⁶, and the red/blue chromatic models scale the
+//! radius relative to green the same way, times their ScaleFactor.
+use super::{LensCorrection, Radial};
+use crate::raw::Metadata;
+use anyhow::{Context, Result, ensure};
+use std::path::{Path, PathBuf};
+
+const CAMERA: &str = "http://ns.adobe.com/photoshop/1.0/camera-profile";
+const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+/// A chromatic model: ScaleFactor and radial parameters.
+type Chromatic = (f32, [f32; 3]);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    pub make: String,
+    pub lens: Vec<String>,
+    pub name: String,
+    pub raw: bool,
+    /// Lightroom uses the camera's own distortion data instead of the profile's.
+    pub prefer_metadata_distortion: bool,
+    pub focal: f32,
+    /// APEX aperture value; f-number is 2^(av / 2).
+    pub aperture: Option<f32>,
+    pub distance: Option<f32>,
+    sensor_factor: f32,
+    focal_x: Option<f32>,
+    distortion: Option<[f32; 3]>,
+    vignette: Option<[f32; 3]>,
+    red: Option<Chromatic>,
+    blue: Option<Chromatic>,
+}
+
+fn attr(node: roxmltree::Node, name: &str) -> Option<String> {
+    node.attribute((CAMERA, name))
+        .map(str::to_string)
+        .or_else(|| {
+            node.children()
+                .find(|c| c.tag_name().namespace() == Some(CAMERA) && c.tag_name().name() == name)
+                .and_then(|c| c.text())
+                .map(|t| t.trim().to_string())
+        })
+}
+fn number(node: roxmltree::Node, name: &str) -> Option<f32> {
+    attr(node, name)?
+        .parse::<f32>()
+        .ok()
+        .filter(|v| v.is_finite())
+}
+/// The element itself when attributes carry the model, or its rdf:Description child.
+fn model<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<roxmltree::Node<'a, 'a>> {
+    let m = node
+        .children()
+        .find(|c| c.tag_name().namespace() == Some(CAMERA) && c.tag_name().name() == name)?;
+    Some(
+        m.children()
+            .find(|c| c.tag_name().namespace() == Some(RDF) && c.tag_name().name() == "Description")
+            .unwrap_or(m),
+    )
+}
+fn params(node: roxmltree::Node, prefix: &str) -> Option<[f32; 3]> {
+    Some([
+        number(node, &format!("{prefix}1"))?,
+        number(node, &format!("{prefix}2")).unwrap_or(0.),
+        number(node, &format!("{prefix}3")).unwrap_or(0.),
+    ])
+}
+
+pub fn parse(text: &str) -> Result<Vec<Entry>> {
+    ensure!(text.len() <= 16_000_000, "Lens profile too large");
+    let doc = roxmltree::Document::parse(text).context("Invalid lens profile XML")?;
+    let mut out = Vec::new();
+    for d in doc.descendants().filter(|n| {
+        n.tag_name().namespace() == Some(RDF)
+            && n.tag_name().name() == "Description"
+            && attr(*n, "FocalLength").is_some()
+    }) {
+        let mut lens: Vec<String> = attr(d, "Lens").into_iter().collect();
+        if let Some(alt) = d
+            .children()
+            .find(|c| c.tag_name().name() == "AlternateLensNames")
+        {
+            lens.extend(
+                alt.descendants()
+                    .filter(|n| n.tag_name().name() == "li")
+                    .filter_map(|n| n.text().map(|t| t.trim().to_string())),
+            );
+        }
+        let perspective = model(d, "PerspectiveModel");
+        let chromatic = |name| {
+            let m = perspective.and_then(|p| model(p, name))?;
+            Some((
+                number(m, "ScaleFactor").unwrap_or(1.),
+                params(m, "RadialDistortParam")?,
+            ))
+        };
+        out.push(Entry {
+            make: attr(d, "Make").unwrap_or_default(),
+            name: attr(d, "LensPrettyName")
+                .or_else(|| attr(d, "ProfileName"))
+                .unwrap_or_default(),
+            lens,
+            raw: attr(d, "CameraRawProfile").is_some_and(|v| v.eq_ignore_ascii_case("true")),
+            prefer_metadata_distortion: attr(d, "PreferMetadataDistort")
+                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
+            focal: number(d, "FocalLength").context("Lens profile without FocalLength")?,
+            aperture: number(d, "ApertureValue"),
+            distance: number(d, "FocusDistance"),
+            sensor_factor: number(d, "SensorFormatFactor").unwrap_or(1.),
+            focal_x: perspective.and_then(|p| number(p, "FocalLengthX")),
+            distortion: perspective.and_then(|p| params(p, "RadialDistortParam")),
+            vignette: perspective
+                .and_then(|p| model(p, "VignetteModel"))
+                .and_then(|v| params(v, "VignetteModelParam")),
+            red: chromatic("ChromaticRedGreenModel"),
+            blue: chromatic("ChromaticBlueGreenModel"),
+        });
+    }
+    ensure!(
+        !out.is_empty() && out.iter().all(|e| e.focal > 0. && e.sensor_factor > 0.),
+        "No usable lens profile entries"
+    );
+    Ok(out)
+}
+
+fn key(s: &str) -> String {
+    s.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+fn matches(e: &Entry, m: &Metadata) -> bool {
+    let lens = key(&m.lens_model);
+    !lens.is_empty()
+        && e.lens.iter().any(|l| key(l) == lens)
+        && (e.make.is_empty()
+            || key(&e.make) == key(&m.make)
+            || key(&m.make).contains(&key(&e.make)))
+}
+
+/// Parameters interpolated in focal length (and APEX aperture for vignetting).
+fn interpolate<T: Copy>(
+    entries: &[&Entry],
+    focal: f32,
+    aperture: Option<f32>,
+    get: impl Fn(&Entry) -> Option<T>,
+    mix: impl Fn(T, T, f32) -> T,
+) -> Option<(T, f32)> {
+    let with: Vec<&&Entry> = entries.iter().filter(|e| get(e).is_some()).collect();
+    let mut focals: Vec<f32> = with.iter().map(|e| e.focal).collect();
+    focals.sort_by(f32::total_cmp);
+    focals.dedup();
+    let lo = focals
+        .iter()
+        .rev()
+        .find(|f| **f <= focal)
+        .or(focals.first())?;
+    let hi = focals.iter().find(|f| **f >= focal).or(focals.last())?;
+    let at_focal = |f: f32| -> Option<(T, f32)> {
+        let mut here: Vec<&&&Entry> = with.iter().filter(|e| e.focal == f).collect();
+        // Prefer the farthest focus distance, as Lightroom does without distance data.
+        let far = here
+            .iter()
+            .map(|e| e.distance.unwrap_or(f32::INFINITY))
+            .fold(0f32, f32::max);
+        here.retain(|e| e.distance.unwrap_or(f32::INFINITY) == far);
+        match aperture {
+            Some(av) if here.iter().any(|e| e.aperture.is_some()) => {
+                here.sort_by(|a, b| {
+                    a.aperture
+                        .unwrap_or(0.)
+                        .total_cmp(&b.aperture.unwrap_or(0.))
+                });
+                let below = here
+                    .iter()
+                    .rev()
+                    .find(|e| e.aperture.unwrap_or(0.) <= av)
+                    .or(here.first())?;
+                let above = here
+                    .iter()
+                    .find(|e| e.aperture.unwrap_or(0.) >= av)
+                    .or(here.last())?;
+                let (a0, a1) = (below.aperture.unwrap_or(av), above.aperture.unwrap_or(av));
+                let t = if a1 > a0 { (av - a0) / (a1 - a0) } else { 0. };
+                Some((mix(get(below)?, get(above)?, t), below.focal))
+            }
+            _ => here.first().and_then(|e| get(e).map(|v| (v, e.focal))),
+        }
+    };
+    let (a, _) = at_focal(*lo)?;
+    let (b, _) = at_focal(*hi)?;
+    let t = if hi > lo {
+        (focal - lo) / (hi - lo)
+    } else {
+        0.
+    };
+    Some((mix(a, b, t), focal))
+}
+fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
+}
+
+/// The correction for a photo from matching profile entries.
+pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
+    let mut found: Vec<&Entry> = entries.iter().filter(|e| matches(e, m)).collect();
+    if found.iter().any(|e| e.raw) {
+        found.retain(|e| e.raw);
+    }
+    let first = *found.first()?;
+    let focal = if m.focal > 0. { m.focal } else { first.focal };
+    let av = (m.aperture > 0.).then(|| 2. * m.aperture.log2());
+    // Convert our radius (1 = half diagonal) to the model's.
+    let (w, h) = if m.crop_width > 0 && m.crop_height > 0 {
+        (m.crop_width as f32, m.crop_height as f32)
+    } else {
+        (m.width as f32, m.height as f32)
+    };
+    let long = w.max(h);
+    let half = (w * w + h * h).sqrt() * 0.5;
+    let fx = first
+        .focal_x
+        .unwrap_or(focal * first.sensor_factor / 36.)
+        .max(1e-3);
+    let to_model = half / (fx * long);
+    let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
+    let poly = |k: [f32; 3], r: f32| {
+        let r2 = (r * to_model).powi(2);
+        1. + k[0] * r2 + k[1] * r2 * r2 + k[2] * r2 * r2 * r2
+    };
+    let curve = |f: &dyn Fn(f32) -> f32| Radial {
+        knots: knots.clone(),
+        values: knots.iter().map(|r| f(*r)).collect(),
+    };
+    let distortion = match &m.lens {
+        Some(builtin) if first.prefer_metadata_distortion && builtin.distortion.is_some() => {
+            builtin.distortion.clone()
+        }
+        _ => interpolate(&found, focal, None, |e| e.distortion, mix3)
+            .map(|(k, _)| curve(&|r| poly(k, r))),
+    };
+    let vignetting = interpolate(&found, focal, av, |e| e.vignette, mix3)
+        .map(|(k, _)| curve(&|r| 1. / poly(k, r).max(0.2)));
+    let chroma = |get: fn(&Entry) -> Option<Chromatic>| {
+        interpolate(&found, focal, None, get, |a, b, t| {
+            (a.0 + (b.0 - a.0) * t, mix3(a.1, b.1, t))
+        })
+        .map(|((s, k), _)| curve(&|r| s * poly(k, r)))
+    };
+    let chromatic = chroma(|e| e.red)
+        .zip(chroma(|e| e.blue))
+        .map(|(r, b)| [r, b]);
+    let c = LensCorrection {
+        source: format!("Adobe profile: {}", first.name),
+        default_on: false,
+        vignetting,
+        distortion,
+        chromatic,
+    };
+    (!c.is_empty() && c.validate()).then_some(c)
+}
+
+pub fn library_dirs() -> Vec<PathBuf> {
+    crate::storage::asset_dirs()
+        .into_iter()
+        .map(|p| p.join("lens-profiles"))
+        .collect()
+}
+/// The imported profile correction for a photo, if any imported profile matches.
+pub fn installed(m: &Metadata) -> Option<LensCorrection> {
+    if m.lens_model.is_empty() {
+        return None;
+    }
+    for dir in library_dirs() {
+        let Ok(files) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let p = f.path();
+            if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lcp")) {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&p)
+                && let Ok(entries) = parse(&text)
+                && let Some(c) = correction(&entries, m)
+            {
+                return Some(c);
+            }
+        }
+    }
+    None
+}
+/// Validates and copies lens profiles into the data directory.
+pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    import_into(paths, &crate::storage::data_dir().join("lens-profiles"))
+}
+fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
+    use std::io::Write;
+    ensure!(
+        !paths.is_empty() && paths.len() <= 4096,
+        "Choose 1–4096 lens profiles"
+    );
+    let mut staged = Vec::new();
+    for path in paths {
+        ensure!(
+            path.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("lcp")),
+            "Choose LCP lens profiles: {}",
+            path.display()
+        );
+        let bytes = std::fs::read(path)?;
+        parse(std::str::from_utf8(&bytes)?).with_context(|| format!("{}", path.display()))?;
+        let target = destination.join(path.file_name().context("Missing profile filename")?);
+        if target.exists() {
+            ensure!(
+                std::fs::read(&target)? == bytes,
+                "A different lens profile named {} is already imported",
+                target.file_name().unwrap().to_string_lossy()
+            );
+        }
+        staged.push((target, bytes));
+    }
+    std::fs::create_dir_all(destination)?;
+    let mut imported = Vec::new();
+    for (target, bytes) in staged {
+        if !target.exists() {
+            let mut f = tempfile::NamedTempFile::new_in(destination)?;
+            f.write_all(&bytes)?;
+            f.as_file().sync_all()?;
+            f.persist_noclobber(&target).map_err(|e| e.error)?;
+        }
+        imported.push(target);
+    }
+    Ok(imported)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const SAMPLE: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">
+<photoshop:CameraProfiles><rdf:Seq>
+<rdf:li><rdf:Description stCamera:Make="SONY" stCamera:CameraRawProfile="True" stCamera:Lens="FE 55mm F1.8 ZA"
+ stCamera:LensPrettyName="Sony FE 55mm F1.8 ZA" stCamera:SensorFormatFactor="0.997786" stCamera:FocalLength="55"
+ stCamera:FocusDistance="3" stCamera:ApertureValue="1.695994">
+ <stCamera:AlternateLensNames><rdf:Seq><rdf:li>55mm F1.8 ZA</rdf:li></rdf:Seq></stCamera:AlternateLensNames>
+ <stCamera:PerspectiveModel><rdf:Description stCamera:Version="2" stCamera:ScaleFactor="0.994929"
+  stCamera:RadialDistortParam1="0.111952" stCamera:RadialDistortParam2="-0.511344" stCamera:RadialDistortParam3="-1.222533">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="-5.21124" stCamera:VignetteModelParam2="28.665015" stCamera:VignetteModelParam3="-89.161089"/>
+ </rdf:Description></stCamera:PerspectiveModel></rdf:Description></rdf:li>
+<rdf:li><rdf:Description stCamera:Make="SONY" stCamera:CameraRawProfile="True" stCamera:Lens="FE 55mm F1.8 ZA"
+ stCamera:SensorFormatFactor="0.997786" stCamera:FocalLength="55" stCamera:FocusDistance="3" stCamera:ApertureValue="2">
+ <stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="0.111952" stCamera:RadialDistortParam2="-0.511344" stCamera:RadialDistortParam3="-1.222533">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="-2.871602" stCamera:VignetteModelParam2="-4.473586" stCamera:VignetteModelParam3="33.881413"/>
+ </rdf:Description></stCamera:PerspectiveModel></rdf:Description></rdf:li>
+</rdf:Seq></photoshop:CameraProfiles></rdf:Description></rdf:RDF></x:xmpmeta>"#;
+    fn a7ii(aperture: f32) -> Metadata {
+        Metadata {
+            make: "Sony".into(),
+            model: "ILCE-7M2".into(),
+            lens_model: "FE 55mm F1.8 ZA".into(),
+            focal: 55.,
+            aperture,
+            width: 6000,
+            height: 4000,
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn parses_and_evaluates_sony_profile() {
+        let entries = parse(SAMPLE).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].lens, ["FE 55mm F1.8 ZA", "55mm F1.8 ZA"]);
+        let c = correction(&entries, &a7ii(1.8)).unwrap();
+        // Corner gain at f/1.8 computed independently from the LCP model: 1 / 0.5497.
+        assert!(
+            (c.vignetting_gain(1.) - 1.819).abs() < 0.01,
+            "{}",
+            c.vignetting_gain(1.)
+        );
+        assert!(c.vignetting_gain(0.) == 1.);
+        let d = c.distortion.as_ref().unwrap();
+        // The 55mm is almost distortion-free: under 0.1% at the corner.
+        assert!((d.eval(1.) - 1.).abs() < 0.001);
+        // Wider aperture numbers interpolate toward the f/2 entry.
+        let f2 = correction(&entries, &a7ii(2.)).unwrap();
+        assert!(f2.vignetting_gain(1.) < c.vignetting_gain(1.));
+        let mut other = a7ii(1.8);
+        other.lens_model = "FE 85mm F1.8".into();
+        assert!(correction(&entries, &other).is_none());
+        assert!(parse("<x/>").is_err());
+    }
+    #[test]
+    fn import_validates_and_copies() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("a.lcp");
+        std::fs::write(&src, SAMPLE).unwrap();
+        let dst = d.path().join("lib");
+        assert_eq!(
+            import_into(std::slice::from_ref(&src), &dst).unwrap().len(),
+            1
+        );
+        assert!(import_into(&[src], &dst).is_ok());
+        let bad = d.path().join("b.lcp");
+        std::fs::write(&bad, "not xml").unwrap();
+        assert!(import_into(&[bad], &dst).is_err());
+    }
+}

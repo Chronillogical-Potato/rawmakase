@@ -502,6 +502,8 @@ pub(crate) struct VignetteField<'a> {
     lens: &'a crate::lens::LensCorrection,
     center: [f32; 2],
     half: f32,
+    /// Lightroom's profile Vignetting amount (1 = 100%).
+    amount: f32,
 }
 impl<'a> VignetteField<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
@@ -513,6 +515,7 @@ impl<'a> VignetteField<'a> {
             lens,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
+            amount: r.lens_vignetting,
         })
     }
     pub(crate) fn gain(&self, x: f32, y: f32) -> f32 {
@@ -520,6 +523,7 @@ impl<'a> VignetteField<'a> {
         let dy = y + 0.5 - self.center[1];
         self.lens
             .vignetting_gain((dx * dx + dy * dy).sqrt() / self.half)
+            .powf(self.amount)
     }
 }
 /// Built-in lens correction applied while sampling the camera image, so no corrected
@@ -530,6 +534,8 @@ struct LensWarp<'a> {
     center: [f32; 2],
     half: f32,
     fill: f32,
+    /// Lightroom's profile Distortion amount (1 = 100%).
+    amount: f32,
     vignetting: Option<VignetteField<'a>>,
 }
 impl<'a> LensWarp<'a> {
@@ -540,7 +546,8 @@ impl<'a> LensWarp<'a> {
             lens,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
-            fill: lens.fill_scale(),
+            fill: lens.fill_scale_with(r.lens_distortion),
+            amount: r.lens_distortion,
             vignetting: VignetteField::new(im, r),
         })
     }
@@ -549,7 +556,7 @@ impl<'a> LensWarp<'a> {
         let dy = (y + 0.5 - self.center[1]) * self.fill;
         let scale = self
             .lens
-            .radial_scale((dx * dx + dy * dy).sqrt() / self.half);
+            .radial_scale_with((dx * dx + dy * dy).sqrt() / self.half, self.amount);
         let at = |c: usize| {
             [
                 self.center[0] + dx * scale[c] - 0.5,

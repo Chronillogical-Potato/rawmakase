@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod embedded;
+pub mod lcp;
 
 /// A radial function sampled at increasing radii. Radius 0 is the image centre and
 /// 1 is half of the image diagonal. Values are linearly interpolated and held constant
@@ -74,7 +75,14 @@ impl LensCorrection {
     }
     /// Source radius scale for red, green and blue at output radius `r`.
     pub fn radial_scale(&self, r: f32) -> [f32; 3] {
-        let g = self.distortion.as_ref().map_or(1., |d| d.eval(r));
+        self.radial_scale_with(r, 1.)
+    }
+    /// As `radial_scale`, with Lightroom's Distortion amount (1 = 100%).
+    pub fn radial_scale_with(&self, r: f32, amount: f32) -> [f32; 3] {
+        let g = self
+            .distortion
+            .as_ref()
+            .map_or(1., |d| 1. + (d.eval(r) - 1.) * amount);
         match &self.chromatic {
             Some([red, blue]) => [g * red.eval(r), g, g * blue.eval(r)],
             None => [g; 3],
@@ -86,8 +94,14 @@ impl LensCorrection {
         if self.distortion.is_none() && self.chromatic.is_none() {
             return 1.;
         }
+        self.fill_scale_with(1.)
+    }
+    pub fn fill_scale_with(&self, amount: f32) -> f32 {
+        if self.distortion.is_none() && self.chromatic.is_none() {
+            return 1.;
+        }
         let widest = (0..=64)
-            .flat_map(|i| self.radial_scale(i as f32 / 64.))
+            .flat_map(|i| self.radial_scale_with(i as f32 / 64., amount))
             .fold(1f32, f32::max);
         1. / widest
     }

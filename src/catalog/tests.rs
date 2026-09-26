@@ -194,13 +194,13 @@ fn folder_import_is_idempotent_and_does_not_touch_photos() -> Result<()> {
 }
 #[test]
 fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Result<()> {
-    let text = r#"s = { Exposure2012 = 1.25, Contrast2012 = 15, ConvertToGrayscale = true, ToneCurvePV2012 = { 0, 12, 255, 255 }, LensProfileEnable = 1, RetouchInfo = { { x = 0.5, y = 0.4 } }, CameraProfile = "Missing, {profile}" }"#;
+    let text = r#"s = { Exposure2012 = 1.25, Contrast2012 = 15, ConvertToGrayscale = true, ToneCurvePV2012 = { 0, 12, 255, 255 }, PerspectiveUpright = 1, RetouchInfo = { { x = 0.5, y = 0.4 } }, CameraProfile = "Missing, {profile}" }"#;
     let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 1.25);
     assert!(r.effects.monochrome);
     assert_eq!(r.curve.points[0], [0., 12. / 255.]);
     assert!(w.iter().any(|s| s.contains("Missing")));
-    assert!(w.iter().any(|s| s.contains("LensProfileEnable")));
+    assert!(w.iter().any(|s| s.contains("PerspectiveUpright")));
     assert!(w.contains(&"RetouchInfo".into()));
     assert!(
         convert_develop(

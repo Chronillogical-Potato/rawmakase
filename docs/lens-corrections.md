@@ -38,4 +38,8 @@ A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` r
 
 ## Adobe LCP profiles
 
-Not implemented yet. Like camera profiles, LCP files will be explicitly imported by the user and never read from a Lightroom installation.
+Lightroom's Enable Profile Corrections uses an Adobe lens profile. RAWmakase reads the same `.lcp` files when the user imports them (`rawmakase import-lens-profiles FILE…`, or the app's import command); they are copied to `lens-profiles` in the data directory and never read from a Lightroom installation. `src/lens/lcp.rs` matches the photo's lens model, preferring raw profiles, and interpolates the model in focal length and aperture, taking the farthest focus distance. It converts distortion, vignetting and chromatic models to the correction above. When the profile sets PreferMetadataDistort, the camera's own distortion is kept, as Lightroom does.
+
+`Recipe::lens_profile` enables it, from `crs:LensProfileEnable`. `lens_distortion` and `lens_vignetting` are the profile's Distortion and Vignetting amounts (`crs:LensProfileDistortionScale` / `VignettingScale`, 0–200%). With a matching imported profile, the profile replaces the built-in correction. Without one, the built-in correction applies when `lens_builtin` is set.
+
+Against Camera Raw 18.6 renders with profile corrections on (8 A7 II photos, FE 55mm F1.8 ZA at f/1.8), RAWmakase with the imported Adobe profile averages 0.0088 MAE, with centre and corner exposure within ±0.02 EV. Without correction the corners were 1 EV darker.

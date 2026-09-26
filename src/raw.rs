@@ -28,6 +28,7 @@ struct NativeMetadata {
     make: [c_char; 64],
     model: [c_char; 64],
     cam_xyz: [f32; 9],
+    lens: [c_char; 128],
 }
 unsafe extern "C" {
     fn ora_version() -> *const c_char;
@@ -80,9 +81,15 @@ pub struct Metadata {
     /// Built-in lens correction stored by the camera, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lens: Option<crate::lens::LensCorrection>,
+    /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lens_model: String,
     /// DNG BaselineExposure, when the file is a DNG that records one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
+    /// Correction from an imported Adobe lens profile matching this lens; rebuilt on open.
+    #[serde(skip)]
+    pub profile_lens: Option<crate::lens::LensCorrection>,
     /// Camera profile embedded in a DNG; rebuilt from the file on open.
     #[serde(skip)]
     pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -151,7 +158,9 @@ impl Raw {
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: crate::lens::embedded::read(path_ref),
+            lens_model: error(&m.lens).trim().to_string(),
             baseline_exposure: None,
+            profile_lens: None,
             embedded_profile: None,
         };
         let mut metadata = metadata;
@@ -179,6 +188,7 @@ impl Raw {
             metadata.crop_width = width;
             metadata.crop_height = height;
         }
+        metadata.profile_lens = crate::lens::lcp::installed(&metadata);
         Ok(Self { handle, metadata })
     }
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {

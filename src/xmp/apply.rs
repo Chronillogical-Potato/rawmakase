@@ -661,6 +661,33 @@ impl Preset {
             }
         }
         settings.assign("CropAngle", &mut r.straighten, 1., -45., 45.)?;
+        settings.seen.insert("LensProfileEnable".into());
+        // Which Adobe profile Lightroom chose; RAWmakase matches imported profiles itself.
+        for key in [
+            "LensProfileName",
+            "LensProfileFilename",
+            "LensProfileDigest",
+            "LensProfileIsEmbedded",
+        ] {
+            settings.seen.insert(key.into());
+        }
+        settings.assign(
+            "LensProfileDistortionScale",
+            &mut r.lens_distortion,
+            0.01,
+            0.,
+            2.,
+        )?;
+        settings.assign(
+            "LensProfileVignettingScale",
+            &mut r.lens_vignetting,
+            0.01,
+            0.,
+            2.,
+        )?;
+        if let Some(enable) = number(v, "LensProfileEnable")? {
+            r.lens_profile = enable != 0.;
+        }
         let t = &mut r.transform;
         settings.assign("PerspectiveVertical", &mut t.vertical, 0.01, -1., 1.)?;
         settings.assign("PerspectiveHorizontal", &mut t.horizontal, 0.01, -1., 1.)?;
@@ -682,7 +709,6 @@ impl Preset {
             ("HDREditMode", "0"),
             ("CurveRefineSaturation", "100"),
             ("AutoLateralCA", "0"),
-            ("LensProfileEnable", "0"),
             ("LensManualDistortionAmount", "0"),
             ("PerspectiveUpright", "0"),
             ("CropConstrainToWarp", "0"),

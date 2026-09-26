@@ -17,6 +17,7 @@ struct Metadata {
     float iso, shutter, aperture, focal, wb[3], daylight_wb[3], matrix[9];
     char make[64], model[64];
     float cam_xyz[9];
+    char lens[128];
 };
 typedef int (*Cancel)(void*);
 }
@@ -89,6 +90,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         for(float& v:m->daylight_wb) v=std::max(0.001f,v/green);
         std::snprintf(m->make,64,"%s",d.idata.make);
         std::snprintf(m->model,64,"%s",d.idata.model);
+        std::snprintf(m->lens,128,"%s",d.lens.Lens[0] ? d.lens.Lens : d.lens.makernotes.Lens);
         return h.release();
     } catch(const std::exception& e) { message(err,e.what()); return nullptr; }
     catch(...) { message(err,"Native RAW open failed"); return nullptr; }
