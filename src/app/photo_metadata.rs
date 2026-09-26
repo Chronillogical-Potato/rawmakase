@@ -34,7 +34,7 @@ impl Edit {
 }
 
 pub fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {
-    if ctx.egui_wants_keyboard_input() {
+    if ctx.text_edit_focused() {
         return None;
     }
     ctx.input(|i| {
@@ -302,7 +302,7 @@ mod tests {
             ui.text_edit_singleline(&mut text).request_focus();
         });
         output.textures_delta.clear();
-        assert!(ctx.egui_wants_keyboard_input());
+        assert!(ctx.text_edit_focused());
         run(key(Key::Num5, egui::Modifiers::NONE, false), None);
     }
     #[test]

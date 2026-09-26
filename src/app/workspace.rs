@@ -38,7 +38,7 @@ impl Editor {
                 }
                 Err(e) => self.status = format!("Metadata could not be saved: {e}"),
             }
-        } else if self.library_mode && !ctx.egui_wants_keyboard_input() {
+        } else if self.library_mode && !ctx.text_edit_focused() {
             let delta = ctx.input(|i| {
                 if i.modifiers.any() {
                     0
@@ -102,7 +102,7 @@ impl Editor {
         }
     }
     fn workspace_shortcuts(&mut self, ctx: &egui::Context) {
-        if !self.activity.is_busy() && !ctx.egui_wants_keyboard_input() {
+        if !self.activity.is_busy() && !ctx.text_edit_focused() {
             if ctx.input(|i| i.key_pressed(egui::Key::G)) && self.flush() {
                 self.library_mode = true;
             }
@@ -360,8 +360,8 @@ impl Editor {
         }
     }
 
-    fn develop_shortcuts(&mut self, ctx: &egui::Context) {
-        if !self.activity.is_busy() && !ctx.egui_wants_keyboard_input() {
+    pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
+        if !self.activity.is_busy() && !ctx.text_edit_focused() {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
                 self.dialog(FileDialog::OpenRaw, ctx);
             }
@@ -379,12 +379,20 @@ impl Editor {
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::V) {
                     paste = true;
                 }
+                // Cmd+Z / Cmd+Shift+Z on macOS, Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y elsewhere.
                 if i.modifiers.command && i.key_pressed(egui::Key::Z) {
                     if i.modifiers.shift {
                         self.redo();
                     } else {
                         self.undo();
                     }
+                }
+                if !cfg!(target_os = "macos")
+                    && i.modifiers.command
+                    && !i.modifiers.shift
+                    && i.key_pressed(egui::Key::Y)
+                {
+                    self.redo();
                 }
                 if i.modifiers.command
                     && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))

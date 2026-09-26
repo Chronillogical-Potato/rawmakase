@@ -328,6 +328,50 @@ fn history_snapshot_undo_and_redo() {
     assert!(e.document.history.can_undo());
 }
 #[test]
+fn undo_and_redo_keys_work_while_a_button_has_focus() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let original = e.document.recipe.clone();
+    e.document.recipe.exposure = 2.;
+    e.history(original.clone());
+    // A clicked button or the tone curve keeps focus; that must not block shortcuts.
+    let frame = |input, e: &mut Editor| {
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.button("focused").request_focus();
+            assert!(ctx.egui_wants_keyboard_input());
+            e.develop_shortcuts(&ctx);
+        });
+        output.textures_delta.clear();
+    };
+    let press = |shift: bool| {
+        let modifiers = egui::Modifiers {
+            command: true,
+            mac_cmd: cfg!(target_os = "macos"),
+            ctrl: !cfg!(target_os = "macos"),
+            shift,
+            ..Default::default()
+        };
+        egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: Some(egui::Key::Z),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        }
+    };
+    frame(egui::RawInput::default(), &mut e);
+    frame(press(false), &mut e);
+    assert_eq!(e.document.recipe, original);
+    frame(press(true), &mut e);
+    assert_eq!(e.document.recipe.exposure, 2.);
+}
+#[test]
 fn stale_preview_results_are_discarded() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
