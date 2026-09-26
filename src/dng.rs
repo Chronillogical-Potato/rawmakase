@@ -148,8 +148,10 @@ fn opcode(b: &[u8], id: u32) -> Option<Vec<u8>> {
     None
 }
 fn doubles(p: &[u8]) -> Vec<f64> {
-    p.chunks_exact(8)
-        .map(|c| f64::from_be_bytes(c.try_into().unwrap()))
+    p.as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| f64::from_be_bytes(*c))
         .collect()
 }
 /// Radius samples; the opcode radius, like ours, is 1 at the farthest corner from

@@ -145,6 +145,12 @@ impl Tiff {
             return None;
         }
         let b = self.raw(e)?;
-        Some(b.chunks_exact(4).map(|c| self.u32(c) as u64).collect())
+        Some(
+            b.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| self.u32(c) as u64)
+                .collect(),
+        )
     }
 }
