@@ -280,6 +280,14 @@ impl Catalog {
             Ok(None)
         }
     }
+    /// The saved RAWmakase recipe (JSON) and Lightroom develop text, if any.
+    pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
+        Ok(self.db.query_row(
+            "SELECT recipe, lightroom_develop FROM photos WHERE id=?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
     /// Lightroom's history for a photo, oldest step first.
     pub fn lightroom_history(&self, id: i64) -> Result<Vec<HistoryStep>> {
         let mut q = self.db.prepare(

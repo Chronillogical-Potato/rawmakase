@@ -126,6 +126,7 @@ impl Editor {
                     self.preview.mode = self.preview.pending_mode;
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
+                        self.refresh_library_thumbnail(ctx, &im);
                     }
                     self.preview.status = status;
                 }
@@ -261,5 +262,39 @@ impl Editor {
         self.document.path = Some(p);
         self.document.files = files;
         let _ = self.save_session();
+    }
+}
+impl Editor {
+    /// After a finished whole-photo render of the current edit, show it as
+    /// the photo's Library and filmstrip thumbnail.
+    fn refresh_library_thumbnail(&mut self, ctx: &egui::Context, im: &crate::develop::Rendered) {
+        let showing_edit = self.preview.mode == super::state::TextureMode::Whole
+            && !self.view.zoom100
+            && !self.view.compare
+            && !self.view.crop_mode
+            && self.presets.preview.is_none();
+        let (Some(library), Some(_), Some(path)) = (
+            &mut self.library,
+            self.document.catalog_photo,
+            self.document.path.clone(),
+        ) else {
+            return;
+        };
+        let Ok(json) = serde_json::to_string(&self.document.recipe) else {
+            return;
+        };
+        if !showing_edit {
+            return;
+        }
+        let Some(full) = image::RgbImage::from_raw(im.width, im.height, im.rgb8()) else {
+            return;
+        };
+        let k = (640. / im.width.max(im.height) as f32).min(1.);
+        let small = image::imageops::thumbnail(
+            &full,
+            ((im.width as f32 * k) as u32).max(1),
+            ((im.height as f32 * k) as u32).max(1),
+        );
+        library.update_edited(ctx, &path, small, json);
     }
 }

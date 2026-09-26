@@ -58,6 +58,103 @@ pub(super) fn spawn(
     (tx, result_rx)
 }
 
+/// What an edited preview is rendered from.
+#[derive(Clone)]
+pub(super) enum EditSource {
+    /// A saved RAWmakase recipe, as JSON.
+    Recipe(String),
+    /// Lightroom develop settings from an imported catalog.
+    Lightroom(String),
+}
+impl EditSource {
+    /// Identifies this edit in the preview cache.
+    pub fn tag(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        match self {
+            Self::Recipe(text) => ("recipe", text).hash(&mut h),
+            Self::Lightroom(text) => ("lightroom", text).hash(&mut h),
+        }
+        format!("edit-{:016x}", h.finish())
+    }
+}
+pub(super) enum EditJob {
+    /// Render (or load from cache) the photo with its edit.
+    Render { path: PathBuf, source: EditSource },
+    /// Keep an already rendered preview, e.g. from Develop.
+    Store {
+        path: PathBuf,
+        tag: String,
+        image: image::RgbImage,
+    },
+}
+/// Edited previews on their own worker, so slow renders never delay the
+/// embedded previews that fill the grid first.
+pub(super) fn spawn_edited(
+    cache_path: PathBuf,
+    ctx: egui::Context,
+) -> (mpsc::Sender<EditJob>, Receiver<PreviewResult>) {
+    let (tx, rx) = mpsc::channel::<EditJob>();
+    let (result_tx, result_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut cache = PreviewCache::open(&cache_path).ok();
+        while let Ok(job) = rx.recv() {
+            match job {
+                EditJob::Store { path, tag, image } => {
+                    if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path)) {
+                        let _ = cache.store_tagged(&path, &tag, &identity, &image);
+                    }
+                }
+                EditJob::Render { path, source } => {
+                    let tag = source.tag();
+                    let cached = cache
+                        .as_ref()
+                        .and_then(|c| c.load_tagged(&path, &tag).ok().flatten());
+                    let image = cached.or_else(|| {
+                        let identity = Identity::read(&path).ok()?;
+                        let image = render_edited(&path, &source).ok()?;
+                        if let Some(cache) = &mut cache {
+                            let _ = cache.store_tagged(&path, &tag, &identity, &image);
+                        }
+                        Some(image)
+                    });
+                    if image.is_some()
+                        && result_tx
+                            .send(PreviewResult {
+                                path,
+                                image,
+                                cache_error: None,
+                            })
+                            .is_err()
+                    {
+                        break;
+                    }
+                    ctx.request_repaint();
+                }
+            }
+        }
+    });
+    (tx, result_rx)
+}
+/// A 640 px preview of `path` developed with `source`, from the fast
+/// half-size decode.
+fn render_edited(path: &std::path::Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
+    let raw = crate::raw::Raw::open(path)?;
+    let m = raw.metadata.clone();
+    let (profiles, _) = crate::camera_profiles::installed(&m);
+    let recipe = match source {
+        EditSource::Recipe(json) => serde_json::from_str(json)?,
+        EditSource::Lightroom(text) => {
+            crate::catalog::convert_develop(text, &m, &profiles, None)?.0
+        }
+    };
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let image = raw.develop(true, &cancel)?;
+    let out = crate::develop::render(&image, &recipe, 640)?;
+    image::RgbImage::from_raw(out.width, out.height, out.rgb8())
+        .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))
+}
+
 #[derive(Default)]
 pub(super) struct Progress {
     total: usize,

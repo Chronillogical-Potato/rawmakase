@@ -49,6 +49,12 @@ pub struct Library {
     failed: HashSet<PathBuf>,
     thumb_tx: SyncSender<PathBuf>,
     thumb_rx: Receiver<previews::PreviewResult>,
+    /// Edited previews: rendered from each photo's edit on a second worker.
+    edit_tx: std::sync::mpsc::Sender<previews::EditJob>,
+    edit_rx: Receiver<previews::PreviewResult>,
+    edited_requested: HashSet<PathBuf>,
+    /// Photos whose shown thumbnail already reflects their edit.
+    edited_ready: HashSet<PathBuf>,
     preview_progress: previews::Progress,
     pub message: String,
 }
@@ -59,8 +65,12 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
-        let (tx, result_rx) =
-            previews::spawn(crate::catalog::preview_cache::PreviewCache::path(), ctx);
+        let (tx, result_rx) = previews::spawn(
+            crate::catalog::preview_cache::PreviewCache::path(),
+            ctx.clone(),
+        );
+        let (edit_tx, edit_rx) =
+            previews::spawn_edited(crate::catalog::preview_cache::PreviewCache::path(), ctx);
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -91,6 +101,10 @@ impl Library {
             failed: HashSet::new(),
             thumb_tx: tx,
             thumb_rx: result_rx,
+            edit_tx,
+            edit_rx,
+            edited_requested: HashSet::new(),
+            edited_ready: HashSet::new(),
             preview_progress: Default::default(),
             message: String::new(),
         };
@@ -542,30 +556,82 @@ impl Library {
                 path, image: im, ..
             } = result;
             self.pending.remove(&path);
-            if let Some(im) = im {
-                while self.thumbs.len() >= 192 {
-                    if let Some(old) = self.thumb_order.pop_front() {
-                        self.thumbs.remove(&old);
-                    } else {
-                        break;
-                    }
+            match im {
+                // An edited preview that arrived first wins over the embedded one.
+                Some(_) if self.edited_ready.contains(&path) => {}
+                Some(im) => self.insert_thumb(ctx, path, &im),
+                None => {
+                    self.failed.insert(path);
                 }
-                self.thumbs.insert(
-                    path.clone(),
-                    ctx.load_texture(
-                        path.display().to_string(),
-                        egui::ColorImage::from_rgb(
-                            [im.width() as usize, im.height() as usize],
-                            im.as_raw(),
-                        ),
-                        egui::TextureOptions::LINEAR,
-                    ),
-                );
-                self.thumb_order.push_back(path);
-            } else {
-                self.failed.insert(path);
             }
         }
+        while let Ok(result) = self.edit_rx.try_recv() {
+            if let Some(im) = result.image {
+                self.edited_ready.insert(result.path.clone());
+                self.insert_thumb(ctx, result.path, &im);
+            }
+        }
+    }
+    fn insert_thumb(&mut self, ctx: &egui::Context, path: PathBuf, im: &image::RgbImage) {
+        if !self.thumbs.contains_key(&path) {
+            while self.thumbs.len() >= 192 {
+                let Some(old) = self.thumb_order.pop_front() else {
+                    break;
+                };
+                self.thumbs.remove(&old);
+                self.edited_requested.remove(&old);
+                self.edited_ready.remove(&old);
+            }
+            self.thumb_order.push_back(path.clone());
+        }
+        self.thumbs.insert(
+            path.clone(),
+            ctx.load_texture(
+                path.display().to_string(),
+                egui::ColorImage::from_rgb(
+                    [im.width() as usize, im.height() as usize],
+                    im.as_raw(),
+                ),
+                egui::TextureOptions::LINEAR,
+            ),
+        );
+    }
+    /// Queues an edited preview for a photo with a saved or Lightroom edit.
+    fn request_edited(&mut self, photo: &Photo) {
+        if !self.edited_requested.insert(photo.path.clone()) {
+            return;
+        }
+        let Ok((recipe, lightroom)) = self.catalog.edit_texts(photo.id) else {
+            return;
+        };
+        let source = recipe
+            .map(previews::EditSource::Recipe)
+            .or(lightroom.map(previews::EditSource::Lightroom));
+        if let Some(source) = source {
+            let _ = self.edit_tx.send(previews::EditJob::Render {
+                path: photo.path.clone(),
+                source,
+            });
+        }
+    }
+    /// Shows Develop's latest render as the photo's thumbnail and caches it
+    /// under the edit it was rendered with.
+    pub(super) fn update_edited(
+        &mut self,
+        ctx: &egui::Context,
+        path: &std::path::Path,
+        image: image::RgbImage,
+        recipe_json: String,
+    ) {
+        let tag = previews::EditSource::Recipe(recipe_json).tag();
+        self.edited_requested.insert(path.to_path_buf());
+        self.edited_ready.insert(path.to_path_buf());
+        self.insert_thumb(ctx, path.to_path_buf(), &image);
+        let _ = self.edit_tx.send(previews::EditJob::Store {
+            path: path.to_path_buf(),
+            tag,
+            image,
+        });
     }
     /// The Library's cached preview for a photo, if one is loaded.
     pub(super) fn thumbnail(&self, path: &std::path::Path) -> Option<&egui::TextureHandle> {
@@ -854,6 +920,7 @@ impl Library {
                             continue;
                         }
                         self.request_thumbnail(&p.path, ui.ctx());
+                        self.request_edited(&p);
                         let cell = rect.shrink(2.);
                         let base = Color32::from_gray(if active {
                             120
@@ -968,6 +1035,7 @@ impl Library {
                                         let p = self.photos[index].clone();
                                         let exists = self.available.contains(&p.path);
                                         self.request_thumbnail(&p.path, ui.ctx());
+                                        self.request_edited(&p);
                                         let (response, edit) = photo_cell(
                                             ui,
                                             &p,
