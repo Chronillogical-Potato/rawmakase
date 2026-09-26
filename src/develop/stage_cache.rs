@@ -4,7 +4,12 @@
 //! and grading edits reuse all three and rerun only the per-pixel stage.
 //!
 //! When a stage starts reading another recipe field, add it to that stage's key here.
-use super::{Geometry, Recipe, effects::Effects, pipeline::Samples, quality::LocalBlurs};
+use super::{
+    Geometry, Recipe,
+    effects::Effects,
+    pipeline::{Samples, Toned},
+    quality::LocalBlurs,
+};
 use crate::raw::CameraImage;
 use anyhow::Result;
 use std::sync::Arc;
@@ -17,7 +22,7 @@ const BUDGET: usize = 512 << 20;
 #[derive(Default)]
 pub(crate) struct StageCache {
     pub(crate) blurs: Lru<BlurKey, LocalBlurs>,
-    pub(crate) local: Lru<LocalKey, CameraImage>,
+    pub(crate) local: Lru<LocalKey, Vec<f32>>,
     pub(crate) samples: Lru<SampleKey, Samples>,
 }
 
@@ -98,7 +103,7 @@ impl BlurKey {
         }
     }
 }
-/// The local-tone image: blurs plus the sliders applied to them. Exposure only
+/// The local-tone gain: blurs plus the sliders applied to them. Exposure only
 /// matters to Shadows and Highlights.
 #[derive(PartialEq)]
 pub(crate) struct LocalKey {
@@ -129,6 +134,7 @@ impl LocalKey {
 #[derive(PartialEq)]
 pub(crate) struct SampleKey {
     image: Same<CameraImage>,
+    gain: Option<Same<Vec<f32>>>,
     size: [u32; 2],
     region: [u32; 4],
     spread: u32,
@@ -136,7 +142,7 @@ pub(crate) struct SampleKey {
 }
 impl SampleKey {
     pub(crate) fn new(
-        image: &Arc<CameraImage>,
+        toned: &Toned,
         r: &Recipe,
         g: &Geometry,
         region: [u32; 4],
@@ -144,7 +150,8 @@ impl SampleKey {
     ) -> Self {
         let e = &r.effects;
         Self {
-            image: Same(image.clone()),
+            image: Same(toned.image.clone()),
+            gain: toned.gain.clone().map(Same),
             size: [g.width, g.height],
             region,
             spread: spread.to_bits(),

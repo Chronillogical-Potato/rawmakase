@@ -2,8 +2,8 @@
 //! Only the current engine's reference path is ported: engine 4 with reference curves,
 //! color and calibration and a profile tone curve, which every new photo uses. Other
 //! recipes return `None` and render on the CPU, which stays the reference.
-use super::{CurveSet, profile_matrix};
-use crate::{develop::Recipe, raw::CameraImage};
+use super::{CurveSet, Source, profile_matrix};
+use crate::develop::Recipe;
 
 /// Named slots of the parameter array and their lengths. `wgsl_prelude` turns them into
 /// `P_*` index constants for the shader.
@@ -106,7 +106,7 @@ pub(crate) fn supported(r: &Recipe) -> bool {
 }
 /// Parameters for `im`'s per-pixel stage with the resolved recipe `r`, or `None` when
 /// the GPU port does not cover it.
-pub(crate) fn pixel_params(im: &CameraImage, r: &Recipe) -> Option<PixelParams> {
+pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     if !supported(r) {
         return None;
     }

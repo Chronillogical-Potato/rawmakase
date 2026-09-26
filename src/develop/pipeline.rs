@@ -327,7 +327,7 @@ struct CurveSet {
 }
 impl CurveSet {
     /// Curves plus, for engine 4, the Shadows/Highlights map of this image.
-    fn for_image(im: &CameraImage, r: &Recipe, matrix: [[f32; 3]; 3]) -> Self {
+    fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> Self {
         let mut lut = Self::new(r);
         if lut.basic_curves {
             let local =
@@ -425,16 +425,55 @@ fn apply_curve(encoded: f32, c: usize, r: &Recipe, lut: &CurveSet) -> f32 {
     }
 }
 
-fn sample(im: &CameraImage, x: f32, y: f32) -> [f32; 3] {
+/// Camera pixels as the pipeline samples them: the image, times the per-pixel local-tone
+/// gain when Clarity, Texture or (before engine 4) Shadows and Highlights are active.
+#[derive(Clone, Copy)]
+pub(crate) struct Source<'a> {
+    image: &'a CameraImage,
+    gain: Option<&'a [f32]>,
+}
+impl<'a> Source<'a> {
+    pub(crate) fn new(image: &'a CameraImage, gain: Option<&'a [f32]>) -> Self {
+        Self { image, gain }
+    }
+    fn px(&self, i: usize) -> [f32; 3] {
+        let p = self.image.pixels[i];
+        match self.gain {
+            Some(gain) => p.map(|v| v * gain[i]),
+            None => p,
+        }
+    }
+}
+impl std::ops::Deref for Source<'_> {
+    type Target = CameraImage;
+    fn deref(&self) -> &CameraImage {
+        self.image
+    }
+}
+impl<'a> From<&'a CameraImage> for Source<'a> {
+    fn from(image: &'a CameraImage) -> Self {
+        Self { image, gain: None }
+    }
+}
+/// A camera image and its local-tone gain, as the pixel stages take them.
+pub(crate) struct Toned {
+    pub(crate) image: std::sync::Arc<CameraImage>,
+    pub(crate) gain: Option<std::sync::Arc<Vec<f32>>>,
+}
+impl Toned {
+    pub(crate) fn source(&self) -> Source<'_> {
+        Source::new(&self.image, self.gain.as_deref().map(Vec::as_slice))
+    }
+}
+fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
     let x = x.clamp(0., (im.width - 1) as f32);
     let y = y.clamp(0., (im.height - 1) as f32);
     let ix = x as u32;
     let iy = y as u32;
     let fx = x - ix as f32;
     let fy = y - iy as f32;
-    let at = |x: u32, y: u32| {
-        im.pixels[(y.min(im.height - 1) * im.width + x.min(im.width - 1)) as usize]
-    };
+    let at =
+        |x: u32, y: u32| im.px((y.min(im.height - 1) * im.width + x.min(im.width - 1)) as usize);
     let (a, b, c, d) = (
         at(ix, iy),
         at(ix + 1, iy),
@@ -451,7 +490,7 @@ pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     let mut sum = [0.; 3];
     for dy in -2..=2 {
         for dx in -2..=2 {
-            let p = sample(im, x + dx as f32, y + dy as f32);
+            let p = sample(im.into(), x + dx as f32, y + dy as f32);
             for c in 0..3 {
                 sum[c] += p[c];
             }
@@ -460,8 +499,15 @@ pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     std::array::from_fn(|c| (sum[1] / sum[c].max(1e-6)).clamp(0.01, 100.))
 }
 pub fn preview(im: &CameraImage, max: u32) -> CameraImage {
+    preview_source(im.into(), max)
+}
+pub(crate) fn preview_source(im: Source, max: u32) -> CameraImage {
     if im.width.max(im.height) <= max {
-        return im.clone();
+        let mut out = im.image.clone();
+        if im.gain.is_some() {
+            out.pixels = (0..out.pixels.len()).map(|i| im.px(i)).collect();
+        }
+        return out;
     }
     let scale = max as f32 / im.width.max(im.height) as f32;
     let w = (im.width as f32 * scale).round() as u32;
@@ -477,7 +523,7 @@ pub fn preview(im: &CameraImage, max: u32) -> CameraImage {
         let y1 = ((y + 1) * im.height / h).max(y0 + 1);
         for yy in y0..y1 {
             for xx in x0..x1 {
-                let p = im.pixels[(yy * im.width + xx) as usize];
+                let p = im.px((yy * im.width + xx) as usize);
                 for c in 0..3 {
                     out[c] += p[c];
                 }
@@ -501,7 +547,7 @@ pub fn preview(im: &CameraImage, max: u32) -> CameraImage {
 }
 /// A detail sample averaged over an output pixel's footprint: four taps at ±`spread`
 /// source pixels, which with bilinear sampling approximate a box filter.
-fn footprint_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
+fn footprint_sample(im: Source, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
     if spread == 0. {
         return detail_sample(im, x, y, r);
     }
@@ -520,7 +566,7 @@ fn footprint_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe, spread: f32) -
 pub(crate) fn footprint_spread(footprint: f32) -> f32 {
     (footprint * footprint / 12. - 1. / 6.).max(0.).sqrt()
 }
-fn detail_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
+fn detail_sample(im: Source, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
     let p = sample(im, x, y);
     if r.noise_luma == 0. && r.noise_chroma == 0. {
         return p;
@@ -643,7 +689,7 @@ impl<'a> LensWarp<'a> {
             vignetting: VignetteField::new(im, r),
         })
     }
-    fn sample(&self, im: &CameraImage, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
+    fn sample(&self, im: Source, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
         let dx = (x + 0.5 - self.center[0]) * self.fill;
         let dy = (y + 0.5 - self.center[1]) * self.fill;
         let scale = self
@@ -688,7 +734,7 @@ pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<R
 /// following render that only changes color and tone reruns the per-pixel stage alone.
 /// A `backend` with a GPU runs that stage there when the port covers the recipe.
 pub(crate) fn render_base(
-    im: &std::sync::Arc<CameraImage>,
+    toned: &Toned,
     r: &Recipe,
     g: &Geometry,
     region: [u32; 4],
@@ -698,11 +744,12 @@ pub(crate) fn render_base(
 ) -> Result<Rendered> {
     let mut base = r.clone();
     base.sharpening = 0.;
+    let im = toned.source();
     let Some(stages) = stages else {
         return render_region_inner(im, &base, g, region, spread, cancel);
     };
     base.validate()?;
-    let key = super::stage_cache::SampleKey::new(im, &base, g, region, spread);
+    let key = super::stage_cache::SampleKey::new(toned, &base, g, region, spread);
     let samples = stages.cache.samples.get_or_try(key, Samples::bytes, || {
         sample_region(im, &base, g, region, spread, cancel)
     })?;
@@ -729,7 +776,7 @@ impl Samples {
     }
 }
 fn sample_region(
-    im: &CameraImage,
+    im: Source,
     r: &Recipe,
     g: &Geometry,
     region: [u32; 4],
@@ -741,7 +788,7 @@ fn sample_region(
         w > 0 && h > 0 && x0 + w <= g.width && y0 + h <= g.height,
         "Invalid viewport region"
     );
-    let warp = LensWarp::new(im, r);
+    let warp = LensWarp::new(&im, r);
     let (pixels, positions) = (0..w as usize * h as usize)
         .into_par_iter()
         .map(|i| {
@@ -777,7 +824,7 @@ fn sample_region(
 }
 /// The per-pixel color and tone stage over prepared samples.
 pub(crate) fn develop_samples(
-    im: &CameraImage,
+    im: Source,
     r: &Recipe,
     samples: &Samples,
     cancel: &std::sync::atomic::AtomicBool,
@@ -813,7 +860,7 @@ pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rend
 }
 fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im, r, matrix);
+    let lut = CurveSet::for_image(im.into(), r, matrix);
     let full_geometry = Geometry::new(im, r, 0);
     if max_edge > 0 && full_geometry.width.max(full_geometry.height) > max_edge {
         let mut base = r.clone();
@@ -863,8 +910,8 @@ fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Re
             return;
         }
         let p = match &warp {
-            Some(w) => w.sample(im, sx, sy, r, 0.),
-            None => detail_sample(im, sx, sy, r),
+            Some(w) => w.sample(im.into(), sx, sy, r, 0.),
+            None => detail_sample(im.into(), sx, sy, r),
         };
         *out = process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy]);
     });
@@ -908,7 +955,7 @@ fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
 pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
     let r = r.with_profile_adjustments();
     render_region_inner(
-        im,
+        im.into(),
         &r,
         &Geometry::new(im, &r, 0),
         region,
@@ -917,7 +964,7 @@ pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> R
     )
 }
 fn render_region_inner(
-    im: &CameraImage,
+    im: Source,
     r: &Recipe,
     g: &Geometry,
     region: [u32; 4],
@@ -933,7 +980,7 @@ fn render_region_inner(
         "Invalid viewport region"
     );
     let mut pixels = vec![[0.; 3]; w as usize * h as usize];
-    let warp = LensWarp::new(im, r);
+    let warp = LensWarp::new(&im, r);
     let at = |x: u32, y: u32| {
         let [sx, sy] = g.source(
             (x as f32 + 0.5) / g.width as f32,

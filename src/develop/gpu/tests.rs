@@ -165,7 +165,7 @@ fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> 
 fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     use crate::{
         camera_profiles::CameraProfile,
-        develop::pipeline::{Samples, develop_samples, pixel_params::pixel_params},
+        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
         raw::{CameraImage, Metadata},
     };
     use std::sync::Arc;
@@ -262,9 +262,12 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     recipes.push(r);
     let mut gpu = Processor::new()?;
     let cancel = AtomicBool::new(false);
+    // A local-tone gain changes the Shadows/Highlights map's input.
+    let gain: Vec<f32> = (0..64 * 48).map(|i| 0.6 + wave(i, 0.05)).collect();
     for (i, recipe) in recipes.iter().enumerate() {
-        let params = pixel_params(&image, recipe).expect("GPU port covers this recipe");
-        let expected = develop_samples(&image, recipe, &samples, &cancel)?;
+        let source = Source::new(&image, (i % 2 == 1).then_some(gain.as_slice()));
+        let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
+        let expected = develop_samples(source, recipe, &samples, &cancel)?;
         let actual = gpu.develop(&samples, &params, &cancel)?;
         let d: Vec<f32> = actual
             .pixels
@@ -289,9 +292,9 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     let mut legacy = base(&tables);
     legacy.effects.balance = 0.3;
     legacy.grading[0] = [0.6, 0.4, 0.];
-    assert!(pixel_params(&image, &legacy).is_none());
+    assert!(pixel_params(image.as_ref().into(), &legacy).is_none());
     legacy = base(&tables);
     legacy.engine = 3;
-    assert!(pixel_params(&image, &legacy).is_none());
+    assert!(pixel_params(image.as_ref().into(), &legacy).is_none());
     Ok(())
 }

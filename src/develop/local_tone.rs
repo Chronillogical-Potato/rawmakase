@@ -5,7 +5,6 @@
 //! image key. The base level and keys come from a reduced copy of the photo, so the
 //! result does not depend on the rendered region or preview size.
 use super::local_tone_data::{Family, HIGHLIGHTS, SHADOWS, SLIDER_VALUES};
-use crate::raw::CameraImage;
 use rayon::prelude::*;
 
 /// Long edge of the reduced image the base level is computed on.
@@ -74,7 +73,7 @@ pub(crate) fn luminance(rgb: [f32; 3]) -> f32 {
 impl LocalToneMap {
     /// `tone` maps a camera sample to linear display RGB after the profile tone curve.
     pub(crate) fn build(
-        im: &CameraImage,
+        im: super::pipeline::Source,
         shadows: f32,
         highlights: f32,
         tone: impl Fn([f32; 3]) -> [f32; 3] + Sync,
@@ -82,7 +81,7 @@ impl LocalToneMap {
         if shadows == 0. && highlights == 0. {
             return None;
         }
-        let small = super::preview(im, MAP_EDGE);
+        let small = super::pipeline::preview_source(im, MAP_EDGE);
         let (w, h) = (small.width as usize, small.height as usize);
         let lum: Vec<f32> = small
             .pixels

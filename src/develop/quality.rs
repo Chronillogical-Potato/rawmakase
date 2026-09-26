@@ -1,5 +1,6 @@
 //! Full-resolution detail processing shared by Fit, 100% regions and exports.
 use crate::develop::{
+    pipeline::Toned,
     preview_renderer::Stages,
     stage_cache::{BlurKey, LocalKey, StageCache},
 };
@@ -261,15 +262,82 @@ fn box_blur(
 /// balance, profile and lens vignetting, so Clarity, Texture and exposure edits reuse
 /// them; exposure shifts every value by the same amount.
 pub(crate) struct LocalBlurs {
+    width: usize,
     logs: Vec<f32>,
-    fine: Vec<f32>,
-    broad: Vec<f32>,
+    fine: Coarse,
+    broad: Coarse,
     texture: Option<Vec<f32>>,
 }
 impl LocalBlurs {
     fn bytes(&self) -> usize {
-        self.logs.len() * 4 * if self.texture.is_some() { 4 } else { 3 }
+        (self.logs.len() + self.texture.as_ref().map_or(0, Vec::len)) * 4
+            + (self.fine.data.len() + self.broad.data.len()) * 4
     }
+}
+/// A box blur computed on a reduced copy of the image and read back bilinearly.
+struct Coarse {
+    width: usize,
+    height: usize,
+    factor: f32,
+    data: Vec<f32>,
+}
+/// Blur radius, in pixels of the reduced copy, below which no further halving is done.
+const COARSE_RADIUS: usize = 4;
+impl Coarse {
+    /// Box blur of `radius` pixels of `values`: halved (2×2 means) while the radius
+    /// stays at least `COARSE_RADIUS` there, blurred, and upsampled when read. Small
+    /// radii are blurred at full resolution.
+    fn new(
+        values: &[f32],
+        (w, h): (usize, usize),
+        radius: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Self> {
+        let mut level = std::borrow::Cow::Borrowed(values);
+        let (mut w, mut h, mut factor) = (w, h, 1usize);
+        while radius / (factor * 2) >= COARSE_RADIUS && w > 1 && h > 1 {
+            level = std::borrow::Cow::Owned(halve(&level, w, h));
+            (w, h, factor) = (w.div_ceil(2), h.div_ceil(2), factor * 2);
+        }
+        let radius = ((radius as f32 / factor as f32).round() as usize).max(1);
+        Ok(Self {
+            width: w,
+            height: h,
+            factor: factor as f32,
+            data: box_blur(&level, w, h, radius, cancel)?,
+        })
+    }
+    fn at(&self, x: usize, y: usize) -> f32 {
+        if self.factor == 1. {
+            return self.data[y * self.width + x];
+        }
+        let fx = ((x as f32 + 0.5) / self.factor - 0.5).clamp(0., (self.width - 1) as f32);
+        let fy = ((y as f32 + 0.5) / self.factor - 0.5).clamp(0., (self.height - 1) as f32);
+        let (ix, iy) = (fx as usize, fy as usize);
+        let (jx, jy) = ((ix + 1).min(self.width - 1), (iy + 1).min(self.height - 1));
+        let (tx, ty) = (fx - ix as f32, fy - iy as f32);
+        let v = |x: usize, y: usize| self.data[y * self.width + x];
+        let top = v(ix, iy) * (1. - tx) + v(jx, iy) * tx;
+        let bottom = v(ix, jy) * (1. - tx) + v(jx, jy) * tx;
+        top * (1. - ty) + bottom * ty
+    }
+}
+/// 2×2 means; an odd last row or column averages with itself.
+fn halve(values: &[f32], w: usize, h: usize) -> Vec<f32> {
+    let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
+    let mut out = vec![0.; hw * hh];
+    out.par_chunks_mut(hw).enumerate().for_each(|(y, row)| {
+        let (y0, y1) = (2 * y, (2 * y + 1).min(h - 1));
+        for (x, v) in row.iter_mut().enumerate() {
+            let (x0, x1) = (2 * x, (2 * x + 1).min(w - 1));
+            *v = (values[y0 * w + x0]
+                + values[y0 * w + x1]
+                + values[y1 * w + x0]
+                + values[y1 * w + x1])
+                * 0.25;
+        }
+    });
+    out
 }
 /// `scale` is the image's size relative to the full-resolution photo; radii given in
 /// full-resolution pixels shrink with it.
@@ -311,59 +379,53 @@ fn local_blurs(
     // rendered from reduced images keep the same local contrast as full renders.
     let long = im.width.max(im.height) as f32;
     let radius = |px: f32| ((px / 6000. * long).round() as usize).max(1);
-    let (w, h) = (im.width as usize, im.height as usize);
-    let fine = box_blur(&logs, w, h, radius(16.), cancel)?;
-    let broad = box_blur(&logs, w, h, radius(64.), cancel)?;
+    let size = (im.width as usize, im.height as usize);
+    let fine = Coarse::new(&logs, size, radius(16.), cancel)?;
+    let broad = Coarse::new(&logs, size, radius(64.), cancel)?;
     let texture = if texture {
         let radius = ((3. * scale).round() as usize).max(1);
-        Some(box_blur(&logs, w, h, radius, cancel)?)
+        Some(box_blur(&logs, size.0, size.1, radius, cancel)?)
     } else {
         None
     };
     check_cancel(cancel)?;
     Ok(LocalBlurs {
+        width: size.0,
         logs,
         fine,
         broad,
         texture,
     })
 }
-/// Shadows, Highlights (before engine 4), Clarity and Texture applied to `im` as a
-/// local gain.
-fn apply_local(
-    im: &CameraImage,
-    b: &LocalBlurs,
-    r: &Recipe,
-    cancel: &AtomicBool,
-) -> Result<CameraImage> {
+/// Shadows, Highlights (before engine 4), Clarity and Texture as a per-pixel gain of
+/// the camera image.
+fn apply_local(b: &LocalBlurs, r: &Recipe, cancel: &AtomicBool) -> Result<Vec<f32>> {
     let exposure = r.exposure + r.camera_exposure;
-    let mut out = im.clone();
-    out.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
+    let mut gains = vec![0.; b.logs.len()];
+    gains.par_iter_mut().enumerate().for_each(|(i, gain)| {
         if cancel.load(Ordering::Relaxed) {
             return;
         }
+        let (x, y) = (i % b.width, i / b.width);
         let logs = b.logs[i] + exposure;
         // Range guidance limits halos at strong boundaries; details stay in the residual.
         let guide = |base: f32| {
             let d = base + exposure - logs;
             logs + d / (1. + d * d)
         };
-        let base = (guide(b.fine[i]) + guide(b.broad[i])) * 0.5;
+        let fine = guide(b.fine.at(x, y));
+        let base = (fine + guide(b.broad.at(x, y))) * 0.5;
         let y = 2f32.powf(base);
         let shadow = (-y * 6.).exp();
         let high = y / (y + 0.5);
-        let clarity = (logs - guide(b.fine[i])).clamp(-1., 1.) * r.effects.clarity * 0.6;
+        let clarity = (logs - fine).clamp(-1., 1.) * r.effects.clarity * 0.6;
         let texture = b.texture.as_ref().map_or(0., |t| {
             (b.logs[i] - t[i]).clamp(-0.5, 0.5) * r.effects.texture * 0.7
         });
-        let gain =
-            2f32.powf(r.shadows * shadow * 2. + r.highlights * high * 2. + clarity + texture);
-        for v in p {
-            *v *= gain;
-        }
+        *gain = 2f32.powf(r.shadows * shadow * 2. + r.highlights * high * 2. + clarity + texture);
     });
     check_cancel(cancel)?;
-    Ok(out)
+    Ok(gains)
 }
 #[cfg(test)]
 fn local_tones(
@@ -373,7 +435,12 @@ fn local_tones(
     cancel: &AtomicBool,
 ) -> Result<CameraImage> {
     let blurs = local_blurs(im, r, scale, r.effects.texture != 0., cancel)?;
-    apply_local(im, &blurs, r, cancel)
+    let gains = apply_local(&blurs, r, cancel)?;
+    let mut out = im.clone();
+    for (p, g) in out.pixels.iter_mut().zip(gains) {
+        *p = p.map(|v| v * g);
+    }
+    Ok(out)
 }
 /// The highlight-recovered image, computed once per decoded image.
 pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImage>> {
@@ -383,15 +450,15 @@ pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<Cam
     let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
-/// Clarity, Texture and, before engine 4, Shadows and Highlights, as a modified camera
-/// image, plus the recipe for the per-pixel stage that follows.
+/// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the
+/// camera image, plus the recipe for the per-pixel stage that follows.
 fn local_stage(
     im: &Arc<CameraImage>,
     r: &Recipe,
     scale: f32,
     cancel: &AtomicBool,
     cache: Option<&mut StageCache>,
-) -> Result<(Arc<CameraImage>, Recipe)> {
+) -> Result<(Toned, Recipe)> {
     // Engine 4 renders Shadows and Highlights in the pixel pipeline (local_tone.rs);
     // this pre-pass then only carries Clarity and Texture.
     let measured = r.engine >= 4 && r.reference_curves;
@@ -405,18 +472,22 @@ fn local_stage(
         tonal.shadows = 0.;
         tonal.highlights = 0.;
     }
+    let mut toned = Toned {
+        image: im.clone(),
+        gain: None,
+    };
     if spatial.shadows == 0.
         && spatial.highlights == 0.
         && r.effects.clarity == 0.
         && r.effects.texture == 0.
     {
-        return Ok((im.clone(), tonal));
+        return Ok((toned, tonal));
     }
     let texture = r.effects.texture != 0.;
-    let local = match cache {
+    toned.gain = Some(match cache {
         None => {
             let blurs = local_blurs(im, &spatial, scale, texture, cancel)?;
-            Arc::new(apply_local(im, &blurs, &spatial, cancel)?)
+            Arc::new(apply_local(&blurs, &spatial, cancel)?)
         }
         Some(cache) => {
             let key = BlurKey::new(im, &spatial, scale, texture);
@@ -424,13 +495,13 @@ fn local_stage(
                 local_blurs(im, &spatial, scale, texture, cancel)
             })?;
             let key = LocalKey::new(&blurs, &spatial);
-            let bytes = |im: &CameraImage| im.pixels.len() * 12;
+            let bytes = |gains: &Vec<f32>| gains.len() * 4;
             cache
                 .local
-                .get_or_try(key, bytes, || apply_local(im, &blurs, &spatial, cancel))?
+                .get_or_try(key, bytes, || apply_local(&blurs, &spatial, cancel))?
         }
-    };
-    Ok((local, tonal))
+    });
+    Ok((toned, tonal))
 }
 /// Fit and zoomed-out previews from a pyramid level (see `pyramid.rs`). Each output
 /// pixel is developed once, from the level sampled over the pixel's footprint, and
@@ -455,8 +526,8 @@ pub(crate) fn render_level(
         p.ensure_camera(&level.metadata)?;
     }
     let level_scale = level.width.max(level.height) as f32 / full.width.max(full.height) as f32;
-    let (im, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(stages.cache))?;
-    let mut g = Geometry::new(&im, r, 0);
+    let (toned, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(stages.cache))?;
+    let mut g = Geometry::new(level, r, 0);
     let footprint = g.width.max(g.height) as f32 / size.0.max(size.1) as f32;
     (g.width, g.height) = size;
     // Output pixels per full-resolution pixel.
@@ -480,7 +551,7 @@ pub(crate) fn render_level(
     let bottom = (y + h + halo).min(size.1);
     check_cancel(cancel)?;
     let mut out = develop::render_base(
-        &im,
+        &toned,
         &tonal_recipe,
         &g,
         [left, top, right - left, bottom - top],
@@ -557,14 +628,14 @@ pub(crate) fn render_preview(
         p.ensure_camera(&im.metadata)?;
     }
     let source = recovered(im, cancel)?;
-    let (im, tonal_recipe) = local_stage(
+    let (toned, tonal_recipe) = local_stage(
         &source,
         r,
         1.,
         cancel,
         stages.as_mut().map(|s| &mut *s.cache),
     )?;
-    let g = Geometry::new(&im, r, 0);
+    let g = Geometry::new(&source, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);
     ensure!(
         w > 0
@@ -588,7 +659,7 @@ pub(crate) fn render_preview(
         "Render superseded"
     );
     let mut out = develop::render_base(
-        &im,
+        &toned,
         &tonal_recipe,
         &g,
         [left, top, right - left, bottom - top],
