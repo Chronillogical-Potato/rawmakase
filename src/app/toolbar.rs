@@ -145,6 +145,18 @@ impl Editor {
                                 self.paste_settings();
                                 ui.close();
                             }
+                            // Lightroom edits apply on open; this returns to them later.
+                            let lightroom = self
+                                .document
+                                .catalog_photo
+                                .and_then(|id| self.library.as_ref()?.photo(id))
+                                .is_some_and(|p| p.has_lightroom_edits);
+                            if lightroom
+                                && menu_item(ui, "Reset to Lightroom Edit", "", true, false)
+                            {
+                                self.apply_lightroom_edits();
+                                ui.close();
+                            }
                             if menu_item(ui, "Reset All Settings", "", true, false) {
                                 self.document.recipe = self
                                     .document

@@ -560,17 +560,9 @@ impl Editor {
             .max_size(400.)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let has_lightroom_edits = self.document.catalog_photo
-                        .and_then(|id| self.library.as_ref().and_then(|library| library.photo(id)))
-                        .is_some_and(|photo| photo.has_lightroom_edits);
-                    if has_lightroom_edits && ui
-                        .add_enabled(self.document.full().is_some() && !self.document.save.is_protected(), egui::Button::new("Apply compatible Lightroom edits"))
-                        .on_hover_text("Apply supported settings as one undo step. Unsupported settings stay preserved in the catalog and are listed below.")
-                        .clicked()
-                    {
-                        self.apply_lightroom_edits();
-                    }
-                    ui.add_enabled_ui(self.document.full().is_some() && !self.view.compare, |ui| self.controls(ui));
+                    ui.add_enabled_ui(self.document.full().is_some() && !self.view.compare, |ui| {
+                        self.controls(ui)
+                    });
                 });
             });
         egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
