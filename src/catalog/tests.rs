@@ -185,6 +185,8 @@ fn folder_import_is_idempotent_and_does_not_touch_photos() -> Result<()> {
     std::fs::create_dir(&photos)?;
     std::fs::write(photos.join("test.RAF"), b"test")?;
     std::fs::write(photos.join("note.txt"), b"ignore")?;
+    // macOS AppleDouble metadata written on exFAT/FAT drives.
+    std::fs::write(photos.join("._test.RAF"), b"metadata")?;
     let mut cat = Catalog::create(&d.path().join("new.rawmakase"))?;
     assert_eq!(cat.add_folder(&photos)?, 1);
     assert_eq!(cat.add_folder(&photos)?, 0);

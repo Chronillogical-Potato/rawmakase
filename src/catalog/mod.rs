@@ -256,7 +256,7 @@ impl Catalog {
             for entry in std::fs::read_dir(p)? {
                 let e = entry?;
                 let t = e.file_type()?;
-                if t.is_symlink() {
+                if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
                     continue;
                 }
                 if t.is_dir() {

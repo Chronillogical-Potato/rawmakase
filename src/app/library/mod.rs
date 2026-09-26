@@ -90,8 +90,14 @@ impl Library {
         Ok(s)
     }
     pub fn refresh(&mut self) -> Result<()> {
+        // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
+        self.photos
+            .retain(|p| !crate::storage::is_hidden(std::path::Path::new(&p.filename)));
         self.folders = self.catalog.folders()?;
+        for folder in &mut self.folders {
+            folder.count = self.photos.iter().filter(|p| p.folder == folder.id).count();
+        }
         self.collections = self.catalog.collections()?;
         self.roots = self.catalog.roots()?;
         self.available = available_paths(&self.photos);

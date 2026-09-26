@@ -69,10 +69,18 @@ pub const RAW_EXTENSIONS: [&str; 28] = [
     "mef", "mos", "mrw", "nef", "nrw", "orf", "pef", "raf", "raw", "rw2", "rwl", "sr2", "srf",
     "srw", "x3f",
 ];
+/// Dot files, including the "._NAME" AppleDouble files macOS writes next to
+/// every file on exFAT/FAT drives; they share the photo's extension but are
+/// only metadata.
+pub fn is_hidden(p: &Path) -> bool {
+    p.file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+}
 pub fn is_raw(p: &Path) -> bool {
-    p.extension()
-        .and_then(|v| v.to_str())
-        .is_some_and(|v| RAW_EXTENSIONS.iter().any(|ext| v.eq_ignore_ascii_case(ext)))
+    !is_hidden(p)
+        && p.extension()
+            .and_then(|v| v.to_str())
+            .is_some_and(|v| RAW_EXTENSIONS.iter().any(|ext| v.eq_ignore_ascii_case(ext)))
 }
 
 /// Search locations for user-installed assets, including the legacy Linux location.
