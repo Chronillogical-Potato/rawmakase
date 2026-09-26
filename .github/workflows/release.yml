@@ -238,7 +238,7 @@ jobs:
             test -n "${!key}" || { echo "Missing repository secret: $key" >&2; exit 1; }
           done
           gem install native-packages --version 0.7.0 --no-document
-          native-packages build --version "$VERSION" --target "$TARGET" --defer-recipes --output "$RUNNER_TEMP/macos-packages"
+          ruby packaging/release/signing-diagnostics.rb build --version "$VERSION" --target "$TARGET" --defer-recipes --output "$RUNNER_TEMP/macos-packages"
           mkdir -p dist/upload
           cp "$RUNNER_TEMP/macos-packages/packages/$TARGET/dmg/"*.dmg dist/upload/
       - name: Verify the finished download

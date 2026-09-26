@@ -27,6 +27,7 @@ jobs:
           "$RUNNER_TEMP/tools/actionlint"
           shellcheck packaging/release/*.sh
           ruby -c packaging/release/dmg.rb
+          ruby -c packaging/release/signing-diagnostics.rb
           python3 -m py_compile packaging/release/*.py
           gem install native-packages --version 0.7.0 --no-document
           native-packages validate
