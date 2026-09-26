@@ -77,6 +77,11 @@ pub(super) struct Onboarding {
     /// Your profiles named for those cameras ("Sony ILCE-7M2 Portra 400 SO.dcp"),
     /// or all of them when no camera is known yet.
     user_profiles: Vec<PathBuf>,
+    /// Adobe lens profiles for the catalog's camera makers and common
+    /// third-party lens brands, plus your own lens profiles.
+    lens_profiles: Vec<PathBuf>,
+    /// Makers of the catalog's cameras, e.g. "Sony".
+    makers: BTreeSet<String>,
     /// Progress of a running profile import: (finished, message).
     importing: Option<Arc<Mutex<(bool, String)>>>,
     user_presets: Vec<PathBuf>,
@@ -127,7 +132,49 @@ impl Onboarding {
                 ));
             }
         }
+        self.makers = self
+            .cameras
+            .iter()
+            .filter_map(|c| c.split_whitespace().next())
+            .map(str::to_string)
+            .collect();
+        self.lens_profiles.clear();
+        if let Some(shared) = shared_camera_raw()
+            && !self.makers.is_empty()
+            && let Ok(entries) = std::fs::read_dir(shared.join("LensProfiles/1.0"))
+        {
+            // Adobe groups lens profiles by maker; the camera maker's own
+            // lenses plus the usual third-party brands cover most kits
+            // without importing thousands of profiles.
+            const THIRD_PARTY: [&str; 12] = [
+                "Sigma",
+                "Tamron",
+                "Samyang",
+                "Rokinon",
+                "Zeiss",
+                "Tokina",
+                "Viltrox",
+                "Voigtlander",
+                "Laowa",
+                "TTArtisan",
+                "7Artisans",
+                "Sirui",
+            ];
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if self.makers.iter().any(|m| m.to_lowercase() == name)
+                    || THIRD_PARTY.iter().any(|b| b.to_lowercase() == name)
+                {
+                    self.lens_profiles
+                        .extend(find_files(&entry.path(), &["lcp"]));
+                }
+            }
+        }
         let user = user_camera_raw();
+        if let Some(user) = &user {
+            self.lens_profiles
+                .extend(find_files(&user.join("LensProfiles"), &["lcp"]));
+        }
         // Third-party packs ship a DCP per camera model, often thousands in all;
         // only those for the catalog's cameras are useful. Without a catalog,
         // take them all.
@@ -150,6 +197,45 @@ impl Onboarding {
     }
 }
 
+/// Lens profiles, leniently: unreadable or unparsable files and name clashes
+/// are skipped, the rest imported in batches the library accepts.
+fn import_lenses_leniently(paths: &[PathBuf], progress: &Mutex<(bool, String)>) -> (usize, usize) {
+    let destination = crate::storage::data_dir().join("lens-profiles");
+    let mut names = BTreeSet::new();
+    let (mut good, mut skipped) = (Vec::new(), 0);
+    for (i, path) in paths.iter().enumerate() {
+        if i % 50 == 0 {
+            progress.lock().unwrap().1 = format!("Checking lens profiles… {i} of {}", paths.len());
+        }
+        let Some(name) = path.file_name() else {
+            skipped += 1;
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(path) else {
+            skipped += 1;
+            continue;
+        };
+        let target = destination.join(name);
+        let clash = target.exists() && std::fs::read(&target).ok().as_ref() != Some(&bytes);
+        let valid = std::str::from_utf8(&bytes)
+            .ok()
+            .is_some_and(|text| crate::lens::lcp::parse(text).is_ok());
+        if clash || !valid || !names.insert(name.to_owned()) {
+            skipped += 1;
+        } else {
+            good.push(path.clone());
+        }
+    }
+    let mut imported = 0;
+    for batch in good.chunks(1000) {
+        progress.lock().unwrap().1 = format!("Importing lens profiles… {imported} done");
+        match crate::lens::lcp::import_files(batch) {
+            Ok(done) => imported += done.len(),
+            Err(_) => skipped += batch.len(),
+        }
+    }
+    (imported, skipped)
+}
 /// Imports what it can and skips the rest: unreadable or embed-prohibited DCPs,
 /// duplicate names, and names already imported with different contents. The
 /// library importer is all-or-nothing and takes at most 1024 files per batch.
@@ -235,7 +321,7 @@ impl Editor {
         ui.add_space(6.);
         text(
             ui,
-            "Pick a catalog, then bring over your Lightroom look. Steps 2 and 3 are optional.",
+            "Pick a catalog, then bring over your Lightroom look. Steps 2 to 4 are optional.",
             13.,
             150,
         );
@@ -354,7 +440,74 @@ impl Editor {
 
         let presets = self.presets.library.presets.len();
         let found = self.onboarding.user_presets.len();
-        step(ui, 3, "Presets", None, |ui| {
+        let lenses = self.onboarding.lens_profiles.len();
+        let makers = self
+            .onboarding
+            .makers
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        step(ui, 3, "Lens profiles", None, |ui| {
+            body(
+                ui,
+                "Lens profiles correct distortion and vignetting, like Lightroom's Enable \
+                 Profile Corrections. Adobe ships profiles for thousands of lenses; \
+                 RAWmakase takes those from your camera makers and common third-party \
+                 lens brands.",
+            );
+            ui.add_space(10.);
+            if let Some(shared) = shared_camera_raw() {
+                location(ui, "Adobe", &pretty(&shared.join("LensProfiles")));
+            }
+            if let Some(user) = user_camera_raw() {
+                location(ui, "Yours", &pretty(&user.join("LensProfiles")));
+            }
+            ui.add_space(8.);
+            hint(
+                ui,
+                &if self.onboarding.makers.is_empty() {
+                    "Choose a catalog to find lens profiles for your cameras.".to_string()
+                } else if lenses == 0 {
+                    format!("No lens profiles found for {makers}.")
+                } else {
+                    format!("Found {lenses} lens profiles for {makers} and third-party lenses")
+                },
+            );
+            ui.add_space(10.);
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!busy && self.onboarding.importing.is_none(), |ui| {
+                    if lenses > 0
+                        && primary(ui, &format!("Import {lenses} lens profiles")).clicked()
+                    {
+                        let paths = self.onboarding.lens_profiles.clone();
+                        let progress = Arc::new(Mutex::new((false, String::new())));
+                        self.onboarding.importing = Some(progress.clone());
+                        let ctx = ctx.clone();
+                        std::thread::spawn(move || {
+                            let (imported, skipped) = import_lenses_leniently(&paths, &progress);
+                            *progress.lock().unwrap() = (
+                                true,
+                                if skipped > 0 {
+                                    format!(
+                                        "Imported {imported} lens profiles; skipped {skipped} \
+                                         that are unreadable or clash by name."
+                                    )
+                                } else {
+                                    format!("Imported {imported} lens profiles")
+                                },
+                            );
+                            ctx.request_repaint();
+                        });
+                    }
+                    if secondary(ui, "Choose files…").clicked() {
+                        self.dialog(FileDialog::LensProfile, ctx);
+                    }
+                });
+            });
+        });
+
+        step(ui, 4, "Presets", None, |ui| {
             body(
                 ui,
                 "Your Lightroom develop presets are .xmp files. Presets that need \
@@ -396,9 +549,9 @@ impl Editor {
             });
         });
 
-        step(ui, 4, "Good to know", None, |ui| {
+        step(ui, 5, "Good to know", None, |ui| {
             for line in [
-                "Masks, healing and lens profiles aren't rendered yet; they stay in the catalog.",
+                "Masks and healing aren't rendered yet; they stay in the catalog.",
                 "Export presets, watermarks and plug-ins don't carry over.",
                 "Calibrated display? Set it in Develop under Settings › Monitor Profile.",
             ] {
