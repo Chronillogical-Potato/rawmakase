@@ -1,10 +1,31 @@
 //! Read-only preview timing harness: cargo run --release --example preview_benchmark -- PHOTO [ITERATIONS]
+//!
+//! Times what the desktop does: the first Fit after opening, Fit renders while a
+//! slider moves, a 100% region, and the full-resolution render used for export.
 use anyhow::{Context, Result};
 use rawmakase::{
     develop::{self, Recipe},
     raw,
 };
 use std::{sync::atomic::AtomicBool, time::Instant};
+
+/// Fit size of a 1600-pixel viewport, the size used by earlier measurements.
+const FIT: u32 = 1600;
+
+fn ms(t: Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1000.
+}
+fn mean_error(a: &develop::Rendered, b: &develop::Rendered) -> f32 {
+    assert_eq!((a.width, a.height), (b.width, b.height));
+    let d: f32 = a
+        .pixels
+        .iter()
+        .flatten()
+        .zip(b.pixels.iter().flatten())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    d / (a.pixels.len() * 3) as f32
+}
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -18,7 +39,7 @@ fn main() -> Result<()> {
         "Decode {}x{}: {:.1} ms",
         image.width,
         image.height,
-        start.elapsed().as_secs_f64() * 1000.
+        ms(start)
     );
     let (profiles, _) = rawmakase::camera_profiles::installed(&image.metadata);
     let recipe = Recipe::with_profiles(&image.metadata, &profiles);
@@ -28,13 +49,21 @@ fn main() -> Result<()> {
         image.metadata.model,
         recipe.profile.as_ref().map(|p| &p.name)
     );
-    let draft = develop::preview(&image, 1024);
     let mut gpu = develop::PreviewRenderer::with_gpu();
     println!(
         "GPU: {:?}; fallback: {:?}",
         gpu.adapter_name(),
         gpu.fallback_reason()
     );
+    let mut cpu = develop::PreviewRenderer::default();
+    let image = std::sync::Arc::new(image);
+    // First Fit after opening: highlight recovery and any per-photo preparation.
+    let t = Instant::now();
+    gpu.render(&image, &recipe, FIT, None, &cancel)?;
+    println!("First Fit after open: {:.1} ms", ms(t));
+    let g = develop::Geometry::new(&image, &recipe, 0);
+    let (rw, rh) = (1600.min(g.width), 1000.min(g.height));
+    let region = [(g.width - rw) / 2, (g.height - rh) / 2, rw, rh];
     for local in [false, true] {
         let mut recipe = recipe.clone();
         if local {
@@ -42,59 +71,38 @@ fn main() -> Result<()> {
             recipe.highlights = -0.3;
             recipe.effects.clarity = 0.2;
         }
-        let mut reference: Option<develop::Rendered> = None;
-        for mode in ["draft", "fit", "gpu-fit"] {
+        recipe.exposure = iterations as f32 * 0.1;
+        let t = Instant::now();
+        let full = develop::quality::render_cancellable(&image, &recipe, 0, None, &cancel)?;
+        println!("Export resolution, local={local}: {:.1} ms", ms(t));
+        let reference = develop::quality::resize(full, FIT);
+        for mode in ["cpu-fit", "gpu-fit", "gpu-region"] {
             let mut times = Vec::new();
+            let mut last = None;
             for i in 0..=iterations {
                 recipe.exposure = i as f32 * 0.1;
                 let t = Instant::now();
-                let out = if mode == "draft" {
-                    let mut r = recipe.clone();
-                    r.sharpening = 0.;
-                    r.noise_luma = 0.;
-                    r.noise_chroma = 0.;
-                    let recovered = draft.recovered.get_or_init(|| {
-                        std::sync::Arc::new(develop::quality::recover_highlights(&draft))
-                    });
-                    develop::render_legacy(recovered, &r, 1024)?
-                } else if mode == "gpu-fit" {
-                    gpu.render(&image, &recipe, 1600, None, &cancel)?
-                } else {
-                    develop::quality::render_cancellable(&image, &recipe, 1600, None, &cancel)?
+                let out = match mode {
+                    "cpu-fit" => cpu.render(&image, &recipe, FIT, None, &cancel)?,
+                    "gpu-fit" => gpu.render(&image, &recipe, FIT, None, &cancel)?,
+                    _ => gpu.render(&image, &recipe, 0, Some(region), &cancel)?,
                 };
-                let elapsed = t.elapsed().as_secs_f64() * 1000.;
                 if i > 0 {
-                    times.push(elapsed);
+                    times.push(ms(t));
                 }
-                if mode == "gpu-fit" {
-                    anyhow::ensure!(gpu.used_gpu(), "GPU fallback: {:?}", gpu.fallback_reason());
-                    if i == iterations {
-                        let reference = reference.as_ref().unwrap();
-                        // The desktop Fit renders from a reduced camera image, so it is
-                        // close to, not identical with, the full-resolution reference.
-                        let d: Vec<f32> = out
-                            .pixels
-                            .iter()
-                            .flatten()
-                            .zip(reference.pixels.iter().flatten())
-                            .map(|(a, b)| (a - b).abs())
-                            .collect();
-                        let mean = d.iter().sum::<f32>() / d.len() as f32;
-                        println!(
-                            "Desktop Fit vs full-resolution reference: mean channel error {mean:.5}"
-                        );
-                        anyhow::ensure!(mean < 0.01, "Desktop Fit differs from reference");
-                    }
-                }
-                if mode == "fit" && i == iterations {
-                    reference = Some(out);
-                } else {
-                    std::hint::black_box(out);
-                }
+                last = Some(out);
             }
             times.sort_by(f64::total_cmp);
+            let last = last.unwrap();
+            let error = if mode == "gpu-region" {
+                String::new()
+            } else {
+                let e = mean_error(&last, &reference);
+                anyhow::ensure!(e < 0.01, "{mode} differs from the export render: {e}");
+                format!(", mean error vs export {e:.5}")
+            };
             println!(
-                "{mode}, local={local}: median {:.1} ms, max {:.1} ms",
+                "{mode}, local={local}: median {:.1} ms, max {:.1} ms{error}",
                 times[times.len() / 2],
                 times[times.len() - 1]
             );

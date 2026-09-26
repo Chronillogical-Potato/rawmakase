@@ -113,9 +113,11 @@ fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> 
                 recipe.effects.grain = 0.4;
                 recipe.effects.vignette = -0.3;
             }
+            // Reduced Fit sizes render from the pyramid on the CPU; full size and
+            // regions use GPU finishing.
             let expected =
-                super::super::quality::render_cancellable(&image, &recipe, 70, region, &cancel)?;
-            let actual = renderer.render(&image, &recipe, 70, region, &cancel)?;
+                super::super::quality::render_cancellable(&image, &recipe, 0, region, &cancel)?;
+            let actual = renderer.render(&image, &recipe, 0, region, &cancel)?;
             assert_eq!(renderer.used_gpu(), !spatial || region.is_none());
             assert_eq!(
                 (actual.width, actual.height),
@@ -148,8 +150,8 @@ fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> 
     assert!(renderer.adapter_name().is_none());
     assert!(renderer.fallback_reason().is_some());
     let recipe = Recipe::default();
-    let expected = super::super::quality::render(&image, &recipe, 50, None)?;
-    let actual = renderer.render(&image, &recipe, 50, None, &cancel)?;
+    let expected = super::super::quality::render(&image, &recipe, 0, None)?;
+    let actual = renderer.render(&image, &recipe, 0, None, &cancel)?;
     assert_eq!(actual.pixels, expected.pixels);
     assert!(!renderer.used_gpu());
     Ok(())

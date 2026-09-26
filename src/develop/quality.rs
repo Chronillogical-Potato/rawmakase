@@ -60,16 +60,34 @@ pub(super) fn sharpen(im: &mut Rendered, r: &Recipe) {
     sharpen_cancellable(im, r, &AtomicBool::new(false)).unwrap();
 }
 fn sharpen_cancellable(im: &mut Rendered, r: &Recipe, cancel: &AtomicBool) -> Result<()> {
+    sharpen_with_radius(im, r, r.sharpening_radius, cancel)
+}
+/// Normalized Gaussian taps. Below half a pixel, which only scaled previews use, a
+/// sampled Gaussian degenerates to a single tap; three taps with the same variance
+/// keep the sharpening response of the full-resolution render.
+fn gaussian(sigma: f32) -> (i32, Vec<f32>) {
+    if sigma < 0.5 {
+        let side = sigma * sigma / 2.;
+        return (1, vec![side, 1. - 2. * side, side]);
+    }
+    let radius = (sigma * 3.).ceil() as i32;
+    let weights: Vec<f32> = (-radius..=radius)
+        .map(|x| (-0.5 * (x as f32 / sigma).powi(2)).exp())
+        .collect();
+    let sum: f32 = weights.iter().sum();
+    (radius, weights.into_iter().map(|x| x / sum).collect())
+}
+fn sharpen_with_radius(
+    im: &mut Rendered,
+    r: &Recipe,
+    sigma: f32,
+    cancel: &AtomicBool,
+) -> Result<()> {
     check_cancel(cancel)?;
     if r.sharpening == 0. {
         return Ok(());
     }
-    let radius = (r.sharpening_radius * 3.).ceil() as i32;
-    let weights: Vec<f32> = (-radius..=radius)
-        .map(|x| (-0.5 * (x as f32 / r.sharpening_radius).powi(2)).exp())
-        .collect();
-    let sum: f32 = weights.iter().sum();
-    let weights: Vec<f32> = weights.into_iter().map(|x| x / sum).collect();
+    let (radius, weights) = gaussian(sigma);
     let lum: Vec<f32> = im.pixels.par_iter().map(|p| luminance(*p)).collect();
     let w = im.width as usize;
     let h = im.height as usize;
@@ -232,7 +250,14 @@ fn box_blur(
         })?;
     Ok(tmp)
 }
-fn local_tones(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<CameraImage> {
+/// `scale` is the image's size relative to the full-resolution photo; radii given in
+/// full-resolution pixels shrink with it.
+fn local_tones(
+    im: &CameraImage,
+    r: &Recipe,
+    scale: f32,
+    cancel: &AtomicBool,
+) -> Result<CameraImage> {
     check_cancel(cancel)?;
     let matrix = develop::profile_matrix(&im.metadata, r);
     let vignetting = develop::pipeline::VignetteField::new(im, r);
@@ -283,7 +308,7 @@ fn local_tones(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Came
             &logs,
             im.width as usize,
             im.height as usize,
-            3,
+            ((3. * scale).round() as usize).max(1),
             cancel,
         )?)
     } else {
@@ -314,6 +339,90 @@ fn local_tones(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Came
             *v *= gain;
         }
     });
+    check_cancel(cancel)?;
+    Ok(out)
+}
+/// The highlight-recovered image, computed once per decoded image.
+pub(crate) fn recovered(
+    im: &CameraImage,
+    cancel: &AtomicBool,
+) -> Result<std::sync::Arc<CameraImage>> {
+    if let Some(recovered) = im.recovered.get() {
+        return Ok(recovered.clone());
+    }
+    let recovered = std::sync::Arc::new(recover_highlights_cancellable(im, cancel)?);
+    Ok(im.recovered.get_or_init(|| recovered).clone())
+}
+/// Clarity, Texture and, before engine 4, Shadows and Highlights, as a modified camera
+/// image, plus the recipe for the per-pixel stage that follows.
+fn local_stage(
+    im: &CameraImage,
+    r: &Recipe,
+    scale: f32,
+    cancel: &AtomicBool,
+) -> Result<(Option<CameraImage>, Recipe)> {
+    // Engine 4 renders Shadows and Highlights in the pixel pipeline (local_tone.rs);
+    // this pre-pass then only carries Clarity and Texture.
+    let measured = r.engine >= 4 && r.reference_curves;
+    let mut spatial_recipe = r.clone();
+    if measured {
+        spatial_recipe.shadows = 0.;
+        spatial_recipe.highlights = 0.;
+    }
+    let local = if spatial_recipe.shadows != 0.
+        || spatial_recipe.highlights != 0.
+        || r.effects.clarity != 0.
+        || r.effects.texture != 0.
+    {
+        Some(local_tones(im, &spatial_recipe, scale, cancel)?)
+    } else {
+        None
+    };
+    let mut tonal_recipe = r.clone();
+    if !measured {
+        tonal_recipe.shadows = 0.;
+        tonal_recipe.highlights = 0.;
+    }
+    Ok((local, tonal_recipe))
+}
+/// Fit and zoomed-out previews from a pyramid level (see `pyramid.rs`). Each output
+/// pixel is developed once, from the level sampled over the pixel's footprint, and
+/// radius-based effects are scaled to the output, so the result approximates the
+/// full-resolution render resized to `size` at a fraction of the cost. `full` is the
+/// full-resolution image the level was reduced from.
+pub(crate) fn render_level(
+    level: &CameraImage,
+    full: &CameraImage,
+    r: &Recipe,
+    size: (u32, u32),
+    cancel: &AtomicBool,
+) -> Result<Rendered> {
+    check_cancel(cancel)?;
+    r.validate()?;
+    let effective = r.resolved(&level.metadata);
+    let r = effective.as_ref();
+    if let Some(p) = &r.profile {
+        p.ensure_camera(&level.metadata)?;
+    }
+    let level_scale = level.width.max(level.height) as f32 / full.width.max(full.height) as f32;
+    let (local, tonal_recipe) = local_stage(level, r, level_scale, cancel)?;
+    let im = local.as_ref().unwrap_or(level);
+    let mut g = Geometry::new(im, r, 0);
+    let footprint = g.width.max(g.height) as f32 / size.0.max(size.1) as f32;
+    (g.width, g.height) = size;
+    check_cancel(cancel)?;
+    let mut out = develop::render_base(
+        im,
+        &tonal_recipe,
+        &g,
+        [0, 0, size.0, size.1],
+        develop::pipeline::footprint_spread(footprint),
+        cancel,
+    )?;
+    // Output pixels per full-resolution pixel.
+    let scale = level_scale / footprint;
+    sharpen_with_radius(&mut out, r, r.sharpening_radius * scale, cancel)?;
+    crate::develop::effects::spatial_finish_scaled(&mut out, r, [0, 0], [size.0, size.1], scale);
     check_cancel(cancel)?;
     Ok(out)
 }
@@ -365,34 +474,9 @@ pub(crate) fn render_preview(
     if let Some(p) = &r.profile {
         p.ensure_camera(&im.metadata)?;
     }
-    if im.recovered.get().is_none() {
-        let recovered = recover_highlights_cancellable(im, cancel)?;
-        let _ = im.recovered.set(std::sync::Arc::new(recovered));
-    }
-    let im = im.recovered.get().unwrap().as_ref();
-    // Engine 4 renders Shadows and Highlights in the pixel pipeline (local_tone.rs);
-    // this pre-pass then only carries Clarity and Texture.
-    let measured = r.engine >= 4 && r.reference_curves;
-    let mut spatial_recipe = r.clone();
-    if measured {
-        spatial_recipe.shadows = 0.;
-        spatial_recipe.highlights = 0.;
-    }
-    let local = if spatial_recipe.shadows != 0.
-        || spatial_recipe.highlights != 0.
-        || r.effects.clarity != 0.
-        || r.effects.texture != 0.
-    {
-        Some(local_tones(im, &spatial_recipe, cancel)?)
-    } else {
-        None
-    };
-    let im = local.as_ref().unwrap_or(im);
-    let mut tonal_recipe = r.clone();
-    if !measured {
-        tonal_recipe.shadows = 0.;
-        tonal_recipe.highlights = 0.;
-    }
+    let source = recovered(im, cancel)?;
+    let (local, tonal_recipe) = local_stage(&source, r, 1., cancel)?;
+    let im = local.as_ref().unwrap_or(&source);
     let g = Geometry::new(im, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);
     ensure!(
@@ -419,7 +503,9 @@ pub(crate) fn render_preview(
     let mut out = develop::render_base(
         im,
         &tonal_recipe,
+        &g,
         [left, top, right - left, bottom - top],
+        0.,
         cancel,
     )?;
     let spatial =
@@ -505,7 +591,7 @@ mod tests {
         let image = fixture();
         assert!(recover_highlights_cancellable(&image, &cancel).is_err());
         assert!(image.recovered.get().is_none());
-        assert!(local_tones(&image, &Recipe::default(), &cancel).is_err());
+        assert!(local_tones(&image, &Recipe::default(), 1., &cancel).is_err());
         Ok(())
     }
     fn fixture() -> CameraImage {

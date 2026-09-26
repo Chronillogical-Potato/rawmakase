@@ -44,7 +44,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
 | [pipeline.rs](../src/develop/pipeline.rs) | Color/tone processing, sampling, render entry points, neutral picking and legacy engine paths. |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
-| [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, GPU diagnostics and CPU fallback. |
+| [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
+| [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered camera image for Fit and zoomed-out previews. |
 | [gpu/mod.rs](../src/develop/gpu/mod.rs) | Optional compute device, bounded/reused buffers, command submission and readback for preview finishing. |
 | [gpu/finish.wgsl](../src/develop/gpu/finish.wgsl) | Portable sharpening and separable Lanczos resize compute kernels. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
@@ -213,7 +214,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
 | [develop/gpu/tests.rs](../src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
-| [examples/preview_benchmark.rs](../examples/preview_benchmark.rs) | Read-only release benchmark of draft, CPU fit and GPU fit on a supplied RAW; verifies GPU output against CPU. |
+| [examples/preview_benchmark.rs](../examples/preview_benchmark.rs) | Read-only release benchmark of first Fit, slider Fit, 100% region and export renders on a supplied RAW; checks Fit against the resized export. |
 | [tests/persistence.rs](../tests/persistence.rs) | Public API regressions for relative paths, malformed legacy recipes and invalid export defaults; isolates process-wide path settings in a child process. |
 | [tests/raw_fixtures.rs](../tests/raw_fixtures.rs) | Ignored private RAW development/export and repeated-navigation memory tests (`RAWMAKASE_FIXTURES`). |
 | [tests/private_profiles.rs](../tests/private_profiles.rs) | Ignored installed/private DCP coverage (`RAWMAKASE_PROFILES`). |

@@ -213,6 +213,18 @@ fn grain(x: f32, y: f32, size: f32, seed: u32) -> f32 {
     n * (1. - b) + m * b
 }
 pub fn spatial_finish(im: &mut Rendered, r: &Recipe, origin: [u32; 2], full: [u32; 2]) {
+    spatial_finish_scaled(im, r, origin, full, 1.);
+}
+/// Vignettes and grain for an output with `scale` pixels per full-resolution pixel.
+/// Grain keeps its full-resolution pattern and, like the full render resized, loses
+/// amplitude where a preview pixel averages several grains.
+pub(crate) fn spatial_finish_scaled(
+    im: &mut Rendered,
+    r: &Recipe,
+    origin: [u32; 2],
+    full: [u32; 2],
+    scale: f32,
+) {
     let e = &r.effects;
     if e.grain == 0. && e.vignette == 0. && e.lens_vignette == 0. {
         return;
@@ -245,8 +257,18 @@ pub fn spatial_finish(im: &mut Rendered, r: &Recipe, origin: [u32; 2], full: [u3
             / (2. - e.lens_vignette_midpoint))
             .clamp(0., 1.);
         let gain = 2f32.powf(-e.lens_vignette * lens * 2.);
-        let coarse = grain(x as f32, y as f32, 0.75 + e.grain_size * 5., e.grain_seed);
-        let fine = hash(x as i32, y as i32, e.grain_seed ^ 0x21f09);
+        let size = 0.75 + e.grain_size * 5.;
+        let (gx, gy) = if scale == 1. {
+            (x as f32, y as f32)
+        } else {
+            (
+                (x as f32 + 0.5) / scale - 0.5,
+                (y as f32 + 0.5) / scale - 0.5,
+            )
+        };
+        let coarse = grain(gx, gy, size, e.grain_seed) * (size * scale).min(1.) / size.min(1.);
+        let fine =
+            hash(gx.round() as i32, gy.round() as i32, e.grain_seed ^ 0x21f09) * scale.min(1.);
         let noise = (coarse * (1. - e.grain_roughness) + fine * e.grain_roughness)
             * e.grain
             * 0.13

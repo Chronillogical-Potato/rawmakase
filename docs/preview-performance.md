@@ -1,10 +1,11 @@
 # Preview performance and GPU support
 
-The desktop uses GPU compute for preview sharpening and Lanczos3 resizing.
-RAW decoding, color/tone processing, grain/vignette and export stay on the CPU.
-A 1024-pixel draft provides feedback while the full-resolution quality pass runs.
-Final fit resolution still follows the physical viewport, and 100% regions retain
-full-resolution detail. The status line shows `GPU finish` when compute was used.
+Fit and zoomed-out views render from a resolution pyramid of the photo (see
+[below](#resolution-pyramid)); 100% regions and export use the full-resolution
+image. The desktop uses GPU compute for sharpening and Lanczos3 resizing of full
+resolution renders. RAW decoding, color/tone processing, grain/vignette and export
+stay on the CPU. A 1024-pixel draft provides feedback while the quality pass runs.
+The status line shows `GPU finish` when compute was used.
 
 The shaders are portable WGSL through wgpu, with no CUDA or Metal-specific code.
 Metal is used on macOS; Linux NVIDIA/AMD devices can use Vulkan with a working
@@ -16,7 +17,47 @@ M1 Pro only. Linux/NVIDIA/AMD runtime validation remains outstanding.**
 See [architecture](architecture.md#preview-compute-backend) for resource limits,
 fallback behavior, cancellation and the division between CPU and GPU work.
 
-## Measurements — 2026-09-26
+## Resolution pyramid
+
+Opening a photo recovers highlights once at full resolution. Fit and zoomed-out
+renders then use a pyramid of that image: each level halves the previous one with a
+2×2 box average in linear camera space, and levels are built on first use and kept
+while the photo is open. A render takes the smallest level with at least one pixel
+per output pixel and develops each output pixel exactly once, averaging four
+bilinear taps over the pixel's footprint. Before, Fit developed a camera image
+reduced to twice the output size (four times the pixels) and resized it afterwards.
+
+Radius-based effects are scaled to the output: sharpening uses the full-resolution
+radius times the output scale (a three-tap kernel of the same variance below half a
+pixel), Clarity and Texture radii follow the level size, and grain keeps its
+full-resolution pattern with the amplitude a resized export would have. Fit is
+therefore an approximation of the export resized, not identical to it; a unit test
+bounds the mean difference on a textured image with sharpening, local and spatial
+effects, and the benchmark checks each photo. 100% regions and exports are
+unchanged.
+
+`examples/preview_benchmark`, release build, Apple M1 Pro, 1600-pixel Fit, median of
+three exposure changes after a warm-up. "Local" adds Shadows +40, Highlights −30
+and Clarity +20. Error is the mean absolute channel difference from the export
+render resized to the same size (0–1 scale).
+
+| Photo | Render | Before | After |
+| --- | --- | ---: | ---: |
+| X100F DSCF7853, 6032×4032, Adobe Color DCP | First Fit after opening | 1407 ms | 508 ms |
+| | Fit | 1098 ms | 283 ms |
+| | Fit, local | 1429 ms | 498 ms |
+| | Fit error vs export | 0.0023 | 0.0016 |
+| Sony A7CR, 9564×6376, no DCP | First Fit after opening | 640 ms | 379 ms |
+| | Fit | 565 ms | 249 ms |
+| | Fit, local | 731 ms | 278 ms |
+| | Fit error vs export | 0.0047 | 0.0059 |
+
+The remaining Fit time is the per-pixel color pipeline (DCP tables, profile tone
+curve, `powf`), about 1.7 megapixels per render. 100% regions with local
+adjustments (about 1.1 s on the X100F and 1.5 s on the A7CR for a 1600×1000
+region) still recompute Clarity over the full image on every change.
+
+## GPU finishing measurements — 2026-09-26
 
 Release build on Apple M1 Pro, private Fujifilm X100F RAW (6032×4032), installed
 Adobe Standard DCP, 1600-pixel final fit. Each number is the median of three
@@ -66,9 +107,8 @@ cargo test --locked develop::gpu::tests -- --ignored --nocapture
 cargo run --release --locked --example preview_benchmark -- /path/to/photo.RAF 3
 ```
 
-The benchmark prints the actual adapter and profile. It fails if GPU finishing is
-unavailable or if its output exceeds the CPU comparison tolerance, so CPU fallback
-cannot silently be reported as GPU performance. It reads the supplied RAW and
+The benchmark prints the actual adapter and profile, and fails if a Fit render
+differs from the resized export by a mean of 0.01 or more. It reads the supplied RAW and
 installed profiles and writes no photographic files. Use the same RAW, profile,
 release build and machine conditions for comparisons. Keep private photos outside
 the repository.

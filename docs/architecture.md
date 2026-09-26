@@ -187,8 +187,10 @@ on those machines before claiming equivalent performance or numerical precision.
 
 Preview sharpening and Lanczos3 downsampling run on the GPU. Coefficients use the
 CPU reference's normalization and boundary convention. Grain/vignette retain their
-CPU implementation and ordering; those fit previews still use GPU resizing.
-Full-resolution regions preserve the sharpening halo before cropping. Legacy
+CPU implementation and ordering. Fit and zoomed-out previews render from a
+resolution pyramid at output size on the CPU (see
+[preview performance](preview-performance.md#resolution-pyramid)), so they need no
+GPU finishing. Full-resolution regions preserve the sharpening halo before cropping. Legacy
 rendering engines and export remain on CPU. The status line identifies GPU
 finishing separately from CPU rendering.
 
@@ -201,6 +203,6 @@ obsolete readback results are discarded. Full-quality CPU stages check cancellat
 within pixel/row/column work. Pending jobs still coalesce in a single-slot mailbox.
 
 Interactive drafts now use a 1024-pixel camera-space image. They remain temporary,
-explicitly labeled drafts; the final fit still processes full-resolution detail
-and resizes to the physical viewport. The 150 ms refinement debounce remains so
+explicitly labeled drafts; the final fit is developed from the smallest pyramid
+level at or above the physical viewport size. The 150 ms refinement debounce remains so
 continuous editing does not repeatedly start expensive full-quality work.

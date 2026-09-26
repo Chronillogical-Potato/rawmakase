@@ -14,6 +14,7 @@ mod local_tone;
 mod local_tone_data;
 mod pipeline;
 mod preview_renderer;
+mod pyramid;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;

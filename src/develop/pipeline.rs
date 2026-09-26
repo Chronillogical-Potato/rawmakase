@@ -499,6 +499,27 @@ pub fn preview(im: &CameraImage, max: u32) -> CameraImage {
         scale_clipped: im.scale_clipped,
     }
 }
+/// A detail sample averaged over an output pixel's footprint: four taps at ±`spread`
+/// source pixels, which with bilinear sampling approximate a box filter.
+fn footprint_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
+    if spread == 0. {
+        return detail_sample(im, x, y, r);
+    }
+    let mut sum = [0.; 3];
+    for (dx, dy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
+        let p = detail_sample(im, x + dx * spread, y + dy * spread, r);
+        for c in 0..3 {
+            sum[c] += p[c] * 0.25;
+        }
+    }
+    sum
+}
+/// Tap offset for [`footprint_sample`] when one output pixel covers `footprint`
+/// source pixels: the four taps add the variance a box of that width has beyond a
+/// single bilinear sample's.
+pub(crate) fn footprint_spread(footprint: f32) -> f32 {
+    (footprint * footprint / 12. - 1. / 6.).max(0.).sqrt()
+}
 fn detail_sample(im: &CameraImage, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
     let p = sample(im, x, y);
     if r.noise_luma == 0. && r.noise_chroma == 0. {
@@ -622,7 +643,7 @@ impl<'a> LensWarp<'a> {
             vignetting: VignetteField::new(im, r),
         })
     }
-    fn sample(&self, im: &CameraImage, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
+    fn sample(&self, im: &CameraImage, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
         let dx = (x + 0.5 - self.center[0]) * self.fill;
         let dy = (y + 0.5 - self.center[1]) * self.fill;
         let scale = self
@@ -636,11 +657,11 @@ impl<'a> LensWarp<'a> {
         };
         let [gx, gy] = at(1);
         let p = if scale[0] == scale[1] && scale[2] == scale[1] {
-            detail_sample(im, gx, gy, r)
+            footprint_sample(im, gx, gy, r, spread)
         } else {
             std::array::from_fn(|c| {
                 let [sx, sy] = at(c);
-                detail_sample(im, sx, sy, r)[c]
+                footprint_sample(im, sx, sy, r, spread)[c]
             })
         };
         let gain = self.vignetting.as_ref().map_or(1., |v| v.gain(gx, gy));
@@ -660,15 +681,19 @@ pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<R
     }
     crate::develop::quality::render(im, r, 0, Some(region))
 }
+/// Unsharpened render of `region` of the output described by `g`. A `spread` above
+/// zero averages each sample over a footprint (see [`footprint_spread`]).
 pub(crate) fn render_base(
     im: &CameraImage,
     r: &Recipe,
+    g: &Geometry,
     region: [u32; 4],
+    spread: f32,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
     let mut base = r.clone();
     base.sharpening = 0.;
-    render_region_inner(im, &base, region, cancel)
+    render_region_inner(im, &base, g, region, spread, cancel)
 }
 
 pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
@@ -727,7 +752,7 @@ fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Re
             return;
         }
         let p = match &warp {
-            Some(w) => w.sample(im, sx, sy, r),
+            Some(w) => w.sample(im, sx, sy, r, 0.),
             None => detail_sample(im, sx, sy, r),
         };
         *out = process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy]);
@@ -770,21 +795,25 @@ fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
 
 /// Render a rectangle of the full output at one sample per output pixel.
 pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
+    let r = r.with_profile_adjustments();
     render_region_inner(
         im,
-        &r.with_profile_adjustments(),
+        &r,
+        &Geometry::new(im, &r, 0),
         region,
+        0.,
         &std::sync::atomic::AtomicBool::new(false),
     )
 }
 fn render_region_inner(
     im: &CameraImage,
     r: &Recipe,
+    g: &Geometry,
     region: [u32; 4],
+    spread: f32,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
     r.validate()?;
-    let g = Geometry::new(im, r, 0);
     let matrix = profile_matrix(&im.metadata, r);
     let lut = CurveSet::for_image(im, r, matrix);
     let [x0, y0, w, h] = region;
@@ -803,8 +832,8 @@ fn render_region_inner(
             return [1.; 3];
         }
         let p = match &warp {
-            Some(w) => w.sample(im, sx, sy, r),
-            None => detail_sample(im, sx, sy, r),
+            Some(w) => w.sample(im, sx, sy, r, spread),
+            None => footprint_sample(im, sx, sy, r, spread),
         };
         process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy])
     };
