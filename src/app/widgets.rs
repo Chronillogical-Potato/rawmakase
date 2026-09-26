@@ -635,6 +635,8 @@ pub(super) fn slider_with(
     let signed = start < 0. && default == 0.;
     // Like Lightroom, Temp moves evenly in mireds rather than kelvin.
     let reciprocal = label == "Temp" && start > 0.;
+    // Dragging Exposure moves in Lightroom's 0.05 EV steps; typed values stay exact.
+    let step = (label == "Exposure").then_some(0.05);
     let to_rail = move |v: f32, rail: Rect| {
         let t = if reciprocal {
             egui::remap_clamp(1. / v, 1. / start..=1. / end, 0. ..=1.)
@@ -754,7 +756,9 @@ pub(super) fn slider_with(
         } else if (response.dragged() || response.clicked())
             && let Some(p) = response.interact_pointer_pos()
         {
-            *value = from_rail(p.x, rail).clamp(start, end);
+            let v = from_rail(p.x, rail);
+            let v = step.map_or(v, |step| (v / step).round() * step);
+            *value = v.clamp(start, end);
         }
         let x = to_rail(*value, rail);
         if gradient.is_none() {
