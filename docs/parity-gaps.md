@@ -20,6 +20,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## Color
 
 - **Color mixer bands with little test data:** blue and purple were barely present in the nine sweep photos, so those bands are the least reliable. Measured on photos from three cameras with Adobe Standard; other profiles are untested.
+- **Color mixer slider positions** between the measured extremes are interpolated. Negative saturation scales linearly (16ff805; before that, Blue −25 removed twice Camera Raw's color, e.g. DSCF8200). Hue, luminance and positive saturation scale the ±100 changes linearly, which is not verified at intermediate values. Several bands combine by adding their changes, which is not verified either.
 - **Color grading at non-default Blending or Balance** still uses the earlier operator (+0.015 to +0.034 extra error on the sweeps). This includes legacy split-toning records, which imply Blending 100. Grading hues between the six measured ones and Saturation above 50 are interpolated: shadows at H30/S100 leave about 0.017.
 - **Point Color** and its range controls are not implemented.
 - **Camera Calibration** sliders (primaries, shadow tint) are earlier approximations, validated on two X100F photos only.
