@@ -25,7 +25,8 @@ pub struct Library {
     roots: Vec<(i64, String, Option<String>)>,
     /// Whether each external volume's mount point exists, checked off the UI
     /// thread so a hung network mount can't stall drawing.
-    volumes_online: std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, bool>>>,
+    /// Per volume mount (the startup disk as "/"): attached, and free/total bytes.
+    volumes_online: std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, VolumeState>>>,
     volumes_checked: Option<std::time::Instant>,
     folder_scope: Option<HashSet<i64>>,
     selected_folder: String,
@@ -316,10 +317,14 @@ impl Library {
                     self.check_volumes(ui.ctx(), volumes.keys());
                     let online = self.volumes_online.lock().unwrap().clone();
                     for (volume, roots) in volumes {
+                        let state = online
+                            .get(volume.mount.as_deref().unwrap_or(std::path::Path::new("/")))
+                            .copied();
                         let attached = match &volume.mount {
                             None => Some(true),
-                            Some(mount) => online.get(mount).copied(),
+                            Some(_) => state.map(|s| s.0),
                         };
+                        let space = state.and_then(|s| s.1);
                         let photos: usize = roots
                             .iter()
                             .map(|(id, _, _)| {
@@ -330,7 +335,19 @@ impl Library {
                                     .sum::<usize>()
                             })
                             .sum();
-                        volume_row(ui, &volume, attached, photos);
+                        let key = format!("volume-collapsed:{}", volume.name);
+                        let collapsed = self.expanded.contains(&key);
+                        if volume_row(ui, &volume, attached, space, photos, !collapsed).clicked() {
+                            if collapsed {
+                                self.expanded.remove(&key);
+                            } else {
+                                self.expanded.insert(key);
+                            }
+                        }
+                        if collapsed {
+                            continue;
+                        }
+                        ui.add_space(2.);
                         for (root, original, mapped) in roots {
                             let root_path = mapped.as_deref().unwrap_or(&original);
                             let name = std::path::Path::new(&original)
@@ -487,17 +504,22 @@ impl Library {
             return;
         }
         self.volumes_checked = Some(std::time::Instant::now());
-        let mounts: Vec<PathBuf> = volumes.filter_map(|v| v.mount.clone()).collect();
-        if mounts.is_empty() {
-            return;
-        }
+        let mounts: Vec<PathBuf> = volumes
+            .map(|v| v.mount.clone().unwrap_or_else(|| PathBuf::from("/")))
+            .collect();
         ctx.request_repaint_after(std::time::Duration::from_secs(3));
         let online = self.volumes_online.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let state: HashMap<PathBuf, bool> = mounts
+            let state: HashMap<PathBuf, VolumeState> = mounts
                 .into_iter()
-                .map(|m| (m.clone(), m.is_dir()))
+                .map(|m| {
+                    let attached = m.is_dir();
+                    let space = attached
+                        .then(|| crate::platform::volume::space(&m))
+                        .flatten();
+                    (m, (attached, space))
+                })
                 .collect();
             let mut shared = online.lock().unwrap();
             if *shared != state {
@@ -1049,49 +1071,87 @@ fn filter_caption(text: &str) -> egui::RichText {
         .size(11.)
         .color(Color32::from_gray(150))
 }
-/// A volume header: a green light when attached, red when not (gray while
-/// unknown), the drive name and its photo count or Offline.
+type VolumeState = (bool, Option<(u64, u64)>);
+/// A Lightroom volume header bar: an LED lit green when the drive is
+/// attached, the drive name, free / total space (or Offline), and a
+/// disclosure arrow that folds its folders away.
 fn volume_row(
     ui: &mut egui::Ui,
     volume: &crate::platform::volume::Volume,
     attached: Option<bool>,
+    space: Option<(u64, u64)>,
     photos: usize,
-) {
+    open: bool,
+) -> egui::Response {
+    ui.add_space(4.);
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::hover());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), egui::Sense::click());
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        3.,
+        Color32::from_gray(if response.hovered() { 64 } else { 56 }),
+    );
     let y = rect.center().y;
-    let light = match attached {
-        Some(true) => Color32::from_rgb(92, 190, 108),
-        Some(false) => Color32::from_rgb(206, 78, 68),
-        None => Color32::from_gray(110),
-    };
-    ui.painter()
-        .circle_filled(egui::pos2(rect.left() + 16., y), 4., light);
-    ui.painter().text(
-        egui::pos2(rect.left() + 29., y),
+    let led = egui::Rect::from_center_size(egui::pos2(rect.left() + 14., y), Vec2::new(5., 11.));
+    if attached == Some(true) {
+        painter.rect_filled(led, 1., Color32::from_rgb(110, 200, 90));
+    } else {
+        painter.rect_filled(led, 1., Color32::from_gray(26));
+        painter.rect_stroke(
+            led,
+            1.,
+            egui::Stroke::new(
+                1.,
+                Color32::from_gray(if attached == Some(false) { 150 } else { 90 }),
+            ),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.text(
+        egui::pos2(rect.left() + 26., y),
         egui::Align2::LEFT_CENTER,
         &volume.name,
-        egui::FontId::proportional(12.),
-        Color32::from_gray(215),
+        egui::FontId::proportional(12.5),
+        Color32::from_gray(225),
     );
-    ui.painter().text(
-        egui::pos2(rect.right() - 10., y),
+    let gb = |bytes: u64| bytes as f64 / 1e9;
+    let detail = match (attached, space) {
+        (Some(false), _) => "Offline".to_string(),
+        (_, Some((free, total))) => format!("{:.0} / {:.0} GB", gb(free), gb(total)),
+        _ => String::new(),
+    };
+    painter.text(
+        egui::pos2(rect.right() - 26., y),
         egui::Align2::RIGHT_CENTER,
-        if attached == Some(false) {
-            "Offline".to_string()
-        } else {
-            photos.to_string()
-        },
-        egui::FontId::proportional(10.),
-        Color32::from_gray(125),
+        detail,
+        egui::FontId::proportional(11.),
+        Color32::from_gray(160),
     );
+    let c = egui::pos2(rect.right() - 13., y);
+    let arrow = if open {
+        vec![
+            c + Vec2::new(-4., -2.),
+            c + Vec2::new(4., -2.),
+            c + Vec2::new(0., 3.),
+        ]
+    } else {
+        vec![
+            c + Vec2::new(3., -4.),
+            c + Vec2::new(3., 4.),
+            c + Vec2::new(-3., 0.),
+        ]
+    };
+    painter.add(egui::Shape::convex_polygon(
+        arrow,
+        Color32::from_gray(200),
+        egui::Stroke::NONE,
+    ));
     response.on_hover_text(match (&volume.mount, attached) {
-        (None, _) => "Startup disk".to_string(),
-        (Some(mount), Some(false)) => {
-            format!("{} is not attached", mount.display())
-        }
-        (Some(mount), _) => format!("Attached at {}", mount.display()),
-    });
+        (None, _) => format!("Startup disk · {photos} photos"),
+        (Some(mount), Some(false)) => format!("{} is not attached", mount.display()),
+        (Some(mount), _) => format!("{} · {photos} photos", mount.display()),
+    })
 }
 /// A quiet full-width "+ label" row, Lightroom's add action in a panel.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {

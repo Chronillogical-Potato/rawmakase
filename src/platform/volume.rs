@@ -58,13 +58,48 @@ pub fn volume_of(path: &Path) -> Volume {
         _ => None,
     };
     external.unwrap_or_else(|| Volume {
-        name: if cfg!(target_os = "macos") {
+        name: startup_name(),
+        mount: None,
+    })
+}
+/// The startup disk's name: on macOS the /Volumes entry that links to "/"
+/// (usually "Macintosh HD").
+fn startup_name() -> String {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        if cfg!(target_os = "macos")
+            && let Ok(entries) = std::fs::read_dir("/Volumes")
+        {
+            for entry in entries.flatten() {
+                if std::fs::read_link(entry.path()).is_ok_and(|t| t == Path::new("/")) {
+                    return entry.file_name().to_string_lossy().into_owned();
+                }
+            }
+        }
+        if cfg!(target_os = "macos") {
             "This Mac".into()
         } else {
             "This Computer".into()
-        },
-        mount: None,
+        }
     })
+    .clone()
+}
+/// Free and total bytes on the volume holding `path`, from `df` on macOS and
+/// Linux; `None` where that isn't available.
+pub fn space(path: &Path) -> Option<(u64, u64)> {
+    if cfg!(windows) {
+        return None;
+    }
+    let out = std::process::Command::new("df")
+        .arg("-Pk")
+        .arg(path)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let fields: Vec<&str> = text.lines().nth(1)?.split_whitespace().collect();
+    let total: u64 = fields.get(1)?.parse().ok()?;
+    let free: u64 = fields.get(3)?.parse().ok()?;
+    Some((free * 1024, total * 1024))
 }
 
 #[cfg(test)]
