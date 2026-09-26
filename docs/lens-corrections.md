@@ -17,6 +17,10 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
 The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on`. Recipes saved before engine 4 have no field and never apply it.
 
+### Fujifilm vignetting strength
+
+Applied at full strength, the Fujifilm table leaves corners about 0.08 EV brighter than Lightroom on three X100F photos, while the centre matches. Raising the gain to the power 0.85 brings corners within ±0.03 EV. The Sony and LCP paths match at full strength. The X100F Lightroom reference scorecard goes from 0.0148 to 0.0120 mean MAE.
+
 ### Validation — 2026-09-26
 
 The Fujifilm vignetting table for DSCF7853 (X100F) matches the `FixVignetteRadial` opcode Adobe wrote into Lightroom's DNG of the same file. The gain is 1.085 / 1.319 / 1.656 at radius 0.5 / 0.8 / 1.0, against Adobe's 1.087 / 1.326 / 1.670. Distortion is zero for this lens. Adobe's `WarpRectilinear` holds only a red-plane radial term under one pixel, the same order as the Fujifilm CA table.

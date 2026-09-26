@@ -31,6 +31,8 @@ pub fn read(path: &Path) -> Option<LensCorrection> {
     (!c.is_empty() && c.validate()).then_some(c)
 }
 
+const FUJI_VIGNETTE_STRENGTH: f32 = 0.85;
+
 fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
     let ifd0 = t.ifd(t.first)?;
     let fuji = t.ifd(t.offset(ifd0.get(&0xf000)?)?)?;
@@ -49,7 +51,9 @@ fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
         })?
     };
     let vignetting = vignetting
-        .and_then(|v| pairs(&v, &|p| 100. / p))
+        // Lightroom renders Fujifilm's table about 15% weaker in log gain: corners of
+        // three X100F photos match Camera Raw at exponent 0.85 (+0.08 EV at 1).
+        .and_then(|v| pairs(&v, &|p| (100. / p).powf(FUJI_VIGNETTE_STRENGTH)))
         .filter(|r| r.values.iter().any(|v| (v - 1.).abs() > 1e-4));
     let distortion = distortion
         .and_then(|v| pairs(&v, &|p| 1. + p / 100.))
@@ -231,8 +235,9 @@ mod tests {
         assert!(c.default_on);
         assert!(c.distortion.is_none(), "identity distortion is omitted");
         let v = c.vignetting.as_ref().unwrap();
-        assert!((v.eval(1.) - 100. / 60.4).abs() < 1e-4);
-        assert!((v.eval(0.85) - (100. / 75.8 + 100. / 68.3) / 2.).abs() < 1e-4);
+        let gain = |p: f32| (100. / p).powf(super::FUJI_VIGNETTE_STRENGTH);
+        assert!((v.eval(1.) - gain(60.4)).abs() < 1e-4);
+        assert!((v.eval(0.85) - (gain(75.8) + gain(68.3)) / 2.).abs() < 1e-4);
     }
     #[test]
     fn unsupported_or_truncated_files_have_no_correction() {
