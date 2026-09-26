@@ -19,6 +19,10 @@ pub(super) struct Document {
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
     pub(super) lightroom_notice: String,
+    /// Lightroom's history for the open catalog photo, oldest first.
+    pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
+    /// Apply the photo's Lightroom settings once its profiles arrive.
+    pub(super) pending_lightroom: bool,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
 }

@@ -63,6 +63,11 @@ impl Editor {
                     self.document.profiles = profiles;
                     self.document.profile_errors = errors;
                     self.refresh_preset_support();
+                    if std::mem::take(&mut self.document.pending_lightroom) {
+                        self.apply_lightroom_edits();
+                        // The Lightroom edit is the starting point, not an unsaved change.
+                        self.document.save.saved();
+                    }
                 }
                 Event::CameraProfile(p) => self.camera_profile_ready(p),
                 Event::LensProfiles(p) => self.lens_profiles_ready(p),
@@ -229,6 +234,8 @@ impl Editor {
         }
         self.status = status;
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
+            self.document.lightroom_history =
+                l.catalog.lightroom_history(photo).unwrap_or_default();
             match l.catalog.load_edit(photo, &p) {
                 Ok(Some(saved)) => {
                     self.document.recipe = saved.recipe;
@@ -239,13 +246,11 @@ impl Editor {
                 Ok(None) => {
                     self.document.export = ExportOptions::default();
                     self.document.save.saved();
-                    self.document.lightroom_notice =
-                        if l.photo(photo).is_some_and(|p| p.has_lightroom_edits) {
-                            "Lightroom settings preserved. Their rendering has not been applied."
-                                .into()
-                        } else {
-                            String::new()
-                        };
+                    self.document.lightroom_notice.clear();
+                    // No RAWmakase edit yet: start from the Lightroom edit, as
+                    // Lightroom shows it, once camera profiles are known.
+                    self.document.pending_lightroom =
+                        l.photo(photo).is_some_and(|p| p.has_lightroom_edits);
                 }
                 Err(e) => {
                     self.document.save.protect(e.to_string());

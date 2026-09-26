@@ -243,6 +243,7 @@ impl Editor {
                         }
                     }
                 });
+                self.history_section(ui);
             });
         if import {
             self.dialog(FileDialog::ImportXmp, &ui.ctx().clone());
@@ -384,4 +385,95 @@ fn list_row(
         );
     }
     response
+}
+
+impl Editor {
+    /// Lightroom's History panel: the photo's imported Lightroom steps,
+    /// newest first; clicking one returns the photo to that state.
+    fn history_section(&mut self, ui: &mut egui::Ui) {
+        if self.document.lightroom_history.is_empty() {
+            return;
+        }
+        let mut chosen = None;
+        section(ui, "History", false, |ui| {
+            ui.label(
+                egui::RichText::new("From Lightroom · click a step to go back to it")
+                    .size(10.)
+                    .color(Color32::from_gray(125)),
+            );
+            ui.add_space(4.);
+            ui.spacing_mut().item_spacing.y = 0.;
+            let enabled = self.document.metadata.is_some();
+            for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
+                let name = if step.name.is_empty() {
+                    "Edit"
+                } else {
+                    step.name.as_str()
+                };
+                let response = list_row(ui, name, None, 0, None, false, enabled);
+                let when = step.created.map(|s| {
+                    // Lightroom counts seconds from 2001-01-01 UTC.
+                    let unix = s as i64 + 978_307_200;
+                    format!("{} UTC", format_unix(unix))
+                });
+                let response = match when {
+                    Some(when) => response.on_hover_text(when),
+                    None => response,
+                };
+                if enabled && response.clicked() {
+                    chosen = Some(i);
+                }
+            }
+        });
+        if let Some(i) = chosen
+            && let Some(m) = &self.document.metadata
+        {
+            let step = &self.document.lightroom_history[i];
+            match crate::catalog::convert_develop(
+                &step.text,
+                m,
+                &self.document.profiles,
+                self.document.full().map(|image| image.as_ref()),
+            ) {
+                Ok((recipe, skipped)) => {
+                    self.document.recipe = recipe;
+                    self.status = if skipped.is_empty() {
+                        format!("History: {}", step.name)
+                    } else {
+                        format!(
+                            "History: {} · not rendered: {}",
+                            step.name,
+                            skipped.join(", ")
+                        )
+                    };
+                }
+                Err(e) => self.status = format!("History step not applied: {e:#}"),
+            }
+        }
+    }
+}
+/// "2016-07-28 06:14" from Unix seconds, without a date library.
+fn format_unix(seconds: i64) -> String {
+    let days = seconds.div_euclid(86_400);
+    let rest = seconds.rem_euclid(86_400);
+    // Civil-from-days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        rest / 3600,
+        rest % 3600 / 60
+    )
+}
+#[cfg(test)]
+#[test]
+fn formats_lightroom_history_dates() {
+    assert_eq!(format_unix(1_469_686_444), "2016-07-28 06:14");
 }

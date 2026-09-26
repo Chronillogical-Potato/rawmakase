@@ -55,7 +55,10 @@ pub struct Library {
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
         crate::platform::network::prepare_filesystem_bridge();
-        let catalog = Catalog::open(path)?;
+        let mut catalog = Catalog::open(path)?;
+        // Catalogs imported before history was kept: recover it from the
+        // stored Lightroom catalog. Best effort; a failure only hides history.
+        let _ = catalog.backfill_lightroom_history();
         let (tx, result_rx) =
             previews::spawn(crate::catalog::preview_cache::PreviewCache::path(), ctx);
         let mut s = Self {

@@ -167,11 +167,10 @@ impl Editor {
             Ok((r, warnings)) => {
                 self.document.recipe = r;
                 self.document.lightroom_notice = if warnings.is_empty() {
-                    "Compatible Lightroom settings applied; rendering uses RAWmakase's pipeline."
-                        .into()
+                    String::new()
                 } else {
                     format!(
-                        "Compatible settings applied. Preserved but not rendered: {}",
+                        "Lightroom edit applied; not rendered: {}",
                         warnings.join("; ")
                     )
                 };
