@@ -34,6 +34,10 @@ fn readonly_folder_uses_fallback_and_restores() -> Result<()> {
     let p = dir.path().join("photo.ARW");
     fs::write(&p, b"raw")?;
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555))?;
+    // Root (as in CI containers) ignores directory permissions; nothing to test then.
+    if fs::write(dir.path().join("probe"), b"").is_ok() {
+        return Ok(());
+    }
     let result = save_at(
         &p,
         &Recipe::default(),
