@@ -1820,30 +1820,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rawmakase"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cc",
- "clap",
- "eframe",
- "flate2",
- "image",
- "pkg-config",
- "pollster 1.0.1",
- "rayon",
- "rfd",
- "roxmltree",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tiff",
- "wgpu",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2111,6 +2087,30 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+]
+
+[[package]]
+name = "rawmakase"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cc",
+ "clap",
+ "eframe",
+ "flate2",
+ "image",
+ "pkg-config",
+ "pollster 1.0.1",
+ "rayon",
+ "rfd",
+ "roxmltree",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tiff",
+ "wgpu",
 ]
 
 [[package]]
