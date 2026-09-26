@@ -6,8 +6,10 @@
 //! hue shift (turns), log2 saturation and log2 value factors, on a grid of 36 hues ×
 //! 6 saturations (spaced by √s) × 6 values (spaced by v^0.45). The grid was measured
 //! on nine photos (Fujifilm X100F, Sony A7 II and A7CR); held-out photos reproduce each
-//! slider to 0.0002–0.0066 MAE. Slider positions scale the change linearly, and
-//! several sliders add their changes. See docs/color-mixer.md.
+//! slider to 0.0002–0.0066 MAE. Slider positions scale the hue shift, the value factor's
+//! log and positive saturation's log linearly; negative saturation scales the factor
+//! itself linearly, which matches Camera Raw at −25 and −50. Several sliders add their
+//! changes. See docs/color-mixer.md.
 use super::Recipe;
 use crate::color_math::mul;
 
@@ -56,7 +58,18 @@ impl ColorMixer {
                 std::array::from_fn(|c| {
                     active
                         .iter()
-                        .map(|(t, w)| value(*t, c, cell) * w)
+                        .map(|(t, w)| {
+                            let v = value(*t, c, cell);
+                            // Negative saturation sliders scale the saturation factor
+                            // linearly, as Camera Raw does: scaling the log factor of a
+                            // strong measured desaturation overshoots at −25 and −50.
+                            // Even tables are the negative extremes.
+                            if c == 1 && t % 2 == 0 {
+                                (1. + w * (v.exp2() - 1.)).max(1e-3).log2()
+                            } else {
+                                v * w
+                            }
+                        })
                         .sum::<f32>()
                 })
             })
@@ -162,5 +175,27 @@ mod tests {
             p.iter().fold(0f32, |a, b| a.max(*b)) - p.iter().fold(1f32, |a, b| a.min(*b))
         };
         assert!(spread(p) < spread(skin) * 0.3);
+    }
+    #[test]
+    fn negative_saturation_scales_the_factor_linearly() {
+        let at = |s: f32| {
+            let mut r = Recipe::default();
+            r.hsl[3][1] = s;
+            ColorMixer::new(&r).unwrap().delta
+        };
+        let (full, half) = (at(-1.), at(-0.5));
+        for (f, h) in full.iter().zip(&half) {
+            let expected = (1. + 0.5 * (f[1].exp2() - 1.)).max(1e-3).log2();
+            assert!((h[1] - expected).abs() < 1e-5);
+            // Hue and value keep scaling their measured change linearly.
+            assert!((h[0] - f[0] * 0.5).abs() < 1e-6 && (h[2] - f[2] * 0.5).abs() < 1e-6);
+        }
+        // Positive saturation keeps scaling the log factor.
+        let (full, half) = (at(1.), at(0.5));
+        assert!(
+            full.iter()
+                .zip(&half)
+                .all(|(f, h)| (h[1] - f[1] * 0.5).abs() < 1e-6)
+        );
     }
 }
