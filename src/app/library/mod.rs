@@ -633,6 +633,10 @@ impl Library {
             image,
         });
     }
+    /// Whether the photo's thumbnail already shows its edit (crop included).
+    pub(super) fn has_edited_thumbnail(&self, path: &std::path::Path) -> bool {
+        self.edited_ready.contains(path) && self.thumbs.contains_key(path)
+    }
     /// The Library's cached preview for a photo, if one is loaded.
     pub(super) fn thumbnail(&self, path: &std::path::Path) -> Option<&egui::TextureHandle> {
         self.thumbs.get(path)

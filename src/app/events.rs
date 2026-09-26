@@ -80,6 +80,18 @@ impl Editor {
                 }
                 Event::Header(header) if header.id == self.load.id() => self.header_ready(*header),
                 Event::Embedded { id, image: im } if id == self.load.id() => {
+                    // The camera JPEG is uncropped and unedited; when the Library
+                    // already has the edited thumbnail, keep showing that until
+                    // the first render instead of flashing the original.
+                    let edited = self
+                        .document
+                        .path
+                        .as_ref()
+                        .zip(self.library.as_ref())
+                        .is_some_and(|(p, l)| l.has_edited_thumbnail(p));
+                    if edited {
+                        continue;
+                    }
                     self.set_texture(ctx, im.width(), im.height(), im.as_raw());
                     self.preview.mode = super::state::TextureMode::Whole;
                     self.preview.status = "Camera preview • developing RAW…".into();
