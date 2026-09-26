@@ -2,6 +2,8 @@
 
 RAWmakase is a fast, non-destructive RAW photo developer for Linux and macOS, written in Rust. It opens RAW files from any camera LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
+![RAWmakase Develop view with presets, the photo, and tone controls](docs/images/screenshot.png)
+
 It is a personal project in active development. Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 ## Features
