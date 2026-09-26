@@ -20,6 +20,9 @@ pub struct Session {
     pub selected_photo: Option<i64>,
     #[serde(default)]
     pub develop: bool,
+    /// Which demosaic full-size decodes use.
+    #[serde(default)]
+    pub demosaic: crate::raw::Demosaic,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))

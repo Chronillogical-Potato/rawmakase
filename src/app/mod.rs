@@ -71,6 +71,7 @@ impl Editor {
         session_file: Option<PathBuf>,
         backend: worker::RenderBackend,
     ) -> Self {
+        crate::raw::set_demosaic(session.demosaic);
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = Color32::from_gray(35);
         visuals.window_fill = Color32::from_gray(35);
@@ -186,6 +187,7 @@ impl Editor {
                     library_source: self.saved_place.0.clone(),
                     selected_photo: self.saved_place.1,
                     develop: self.saved_place.2,
+                    demosaic: crate::raw::demosaic(),
                 },
             )?;
         }

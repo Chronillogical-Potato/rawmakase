@@ -207,6 +207,28 @@ impl Editor {
                                 ui.close();
                             }
                             menu_separator(ui);
+                            // Takes effect on the next full-size decode, so the
+                            // open photo is reopened.
+                            let current = crate::raw::demosaic();
+                            for (choice, label) in [
+                                (
+                                    crate::raw::Demosaic::Rawmakase,
+                                    "Demosaic: RAWmakase (faster)",
+                                ),
+                                (crate::raw::Demosaic::Libraw, "Demosaic: LibRaw"),
+                            ] {
+                                let picked = menu_item(ui, label, "", true, current == choice);
+                                if picked && current != choice {
+                                    crate::raw::set_demosaic(choice);
+                                    let _ = self.save_session();
+                                    if let Some(path) = self.document.path.clone() {
+                                        let photo = self.document.catalog_photo;
+                                        self.open_raw(path, photo);
+                                    }
+                                    ui.close();
+                                }
+                            }
+                            menu_separator(ui);
                             if menu_item(ui, "Keyboard Shortcuts", "", true, false) {
                                 self.view.shortcuts = true;
                                 ui.close();
