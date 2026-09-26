@@ -151,8 +151,8 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [worker/mod.rs](../src/app/worker/mod.rs) | Named event payloads, load/render jobs, task kinds, render stages and repaint notification. |
 | [worker/latest.rs](../src/app/worker/latest.rs) | Single-slot mailbox: submitting a new job replaces pending work rather than growing a queue. |
-| [worker/loader.rs](../src/app/worker/loader.rs) | RAW metadata/profile/sidecar loading, embedded preview, decoded full/draft images and neighboring thumbnails. |
-| [worker/renderer.rs](../src/app/worker/renderer.rs) | Progressive draft/fit/region previews, cancellation, monitor conversion and clipping overlays. |
+| [worker/loader.rs](../src/app/worker/loader.rs) | RAW metadata/profile/sidecar loading, embedded preview, the half-size then full decoded image and neighboring thumbnails. |
+| [worker/renderer.rs](../src/app/worker/renderer.rs) | Fit previews, reduced-then-full 100% regions, cancellation, monitor conversion and clipping overlays. |
 
 ## How an operation moves through the app
 

@@ -433,12 +433,14 @@ fn local_stage(
 /// pixel is developed once, from the level sampled over the pixel's footprint, and
 /// radius-based effects are scaled to the output, so the result approximates the
 /// full-resolution render resized to `size` at a fraction of the cost. `full` is the
-/// full-resolution image the level was reduced from.
+/// full-resolution image the level was reduced from; `region` is a rectangle of the
+/// `size` output.
 pub(crate) fn render_level(
     level: &Arc<CameraImage>,
     full: &CameraImage,
     r: &Recipe,
     size: (u32, u32),
+    region: [u32; 4],
     cancel: &AtomicBool,
     cache: &mut StageCache,
 ) -> Result<Rendered> {
@@ -454,22 +456,61 @@ pub(crate) fn render_level(
     let mut g = Geometry::new(&im, r, 0);
     let footprint = g.width.max(g.height) as f32 / size.0.max(size.1) as f32;
     (g.width, g.height) = size;
+    // Output pixels per full-resolution pixel.
+    let scale = level_scale / footprint;
+    let sigma = r.sharpening_radius * scale;
+    let [x, y, w, h] = region;
+    ensure!(
+        w > 0
+            && h > 0
+            && x.checked_add(w).is_some_and(|v| v <= size.0)
+            && y.checked_add(h).is_some_and(|v| v <= size.1),
+        "Invalid viewport region"
+    );
+    let halo = if r.sharpening > 0. {
+        gaussian(sigma).0 as u32
+    } else {
+        0
+    };
+    let (left, top) = (x.saturating_sub(halo), y.saturating_sub(halo));
+    let right = (x + w + halo).min(size.0);
+    let bottom = (y + h + halo).min(size.1);
     check_cancel(cancel)?;
     let mut out = develop::render_base(
         &im,
         &tonal_recipe,
         &g,
-        [0, 0, size.0, size.1],
+        [left, top, right - left, bottom - top],
         develop::pipeline::footprint_spread(footprint),
         cancel,
         Some(cache),
     )?;
-    // Output pixels per full-resolution pixel.
-    let scale = level_scale / footprint;
-    sharpen_with_radius(&mut out, r, r.sharpening_radius * scale, cancel)?;
-    crate::develop::effects::spatial_finish_scaled(&mut out, r, [0, 0], [size.0, size.1], scale);
+    sharpen_with_radius(&mut out, r, sigma, cancel)?;
+    crate::develop::effects::spatial_finish_scaled(
+        &mut out,
+        r,
+        [left, top],
+        [size.0, size.1],
+        scale,
+    );
     check_cancel(cancel)?;
-    Ok(out)
+    Ok(crop(out, [x - left, y - top, w, h]))
+}
+fn crop(im: Rendered, [x, y, w, h]: [u32; 4]) -> Rendered {
+    if (x, y, w, h) == (0, 0, im.width, im.height) {
+        return im;
+    }
+    let pixels = (0..h)
+        .flat_map(|row| {
+            let a = ((y + row) * im.width + x) as usize;
+            im.pixels[a..a + w as usize].iter().copied()
+        })
+        .collect();
+    Rendered {
+        width: w,
+        height: h,
+        pixels,
+    }
 }
 pub fn render(
     im: &CameraImage,
@@ -581,17 +622,7 @@ pub(crate) fn render_preview(
         "Render superseded"
     );
     if region.is_some() {
-        let pixels = (0..h)
-            .flat_map(|row| {
-                let a = ((y - top + row) * out.width + x - left) as usize;
-                out.pixels[a..a + w as usize].iter().copied()
-            })
-            .collect();
-        Ok(Rendered {
-            width: w,
-            height: h,
-            pixels,
-        })
+        Ok(crop(out, [x - left, y - top, w, h]))
     } else {
         // Spatial effects retain their CPU reference implementation. Resize can
         // still use compute after those effects, without sharpening twice.

@@ -15,6 +15,8 @@ pub struct PreviewRenderer {
     /// Stage results reused while only color and tone change.
     cache: StageCache,
 }
+/// Pixel budget of a reduced 100% drag preview.
+const PREVIEW_PIXELS: u64 = 600_000;
 impl PreviewRenderer {
     /// A hardware device is optional; failure leaves a fully working CPU renderer.
     pub fn with_gpu() -> Self {
@@ -54,6 +56,11 @@ impl PreviewRenderer {
         if recipe.engine < 3 {
             return match region {
                 Some(region) => super::render_region_legacy(image, recipe, region),
+                // Older engines develop without highlight recovery, so their Fit
+                // uses a reduced copy of the camera image instead of the pyramid.
+                None if max_edge > 0 && image.width.max(image.height) > max_edge * 5 / 2 => {
+                    super::render_legacy(&super::preview(image, max_edge * 2), recipe, max_edge)
+                }
                 None => super::render_legacy(image, recipe, max_edge),
             };
         }
@@ -96,7 +103,60 @@ impl PreviewRenderer {
         let needed = size.0.max(size.1) as f32 * image.width.max(image.height) as f32 / long as f32;
         let level = pyramid.level_for(needed);
         let source = pyramid.source().clone();
-        quality::render_level(&level, &source, recipe, size, cancel, &mut self.cache).map(Some)
+        quality::render_level(
+            &level,
+            &source,
+            recipe,
+            size,
+            [0, 0, size.0, size.1],
+            cancel,
+            &mut self.cache,
+        )
+        .map(Some)
+    }
+    /// A 100% `region` at half resolution or less, from the pyramid: immediate
+    /// feedback while dragging, before the full-resolution region. The viewport
+    /// stretches it over the region. `None` for engines before 3, which render
+    /// regions directly.
+    pub fn render_region_preview(
+        &mut self,
+        image: &CameraImage,
+        recipe: &Recipe,
+        region: [u32; 4],
+        cancel: &AtomicBool,
+    ) -> Result<Option<Rendered>> {
+        if recipe.engine < 3 {
+            return Ok(None);
+        }
+        let full = Geometry::new(image, recipe, 0);
+        let [x, y, w, h] = region;
+        anyhow::ensure!(
+            w > 0 && h > 0 && x + w <= full.width && y + h <= full.height,
+            "Invalid viewport region"
+        );
+        // Halve until the preview has at most PREVIEW_PIXELS.
+        let mut k = 1;
+        while (w as u64 * h as u64) >> (2 * k) > PREVIEW_PIXELS && k < 4 {
+            k += 1;
+        }
+        let div = |v: u32| v.div_ceil(1 << k).max(1);
+        let size = (div(full.width), div(full.height));
+        let (px, py) = (x >> k, y >> k);
+        let (pw, ph) = (div(w).min(size.0 - px), div(h).min(size.1 - py));
+        let source = quality::recovered(image, cancel)?;
+        let pyramid = self.pyramid_for(source);
+        let level = pyramid.level_for(image.width.max(image.height).div_ceil(1 << k) as f32);
+        let source = pyramid.source().clone();
+        quality::render_level(
+            &level,
+            &source,
+            recipe,
+            size,
+            [px, py, pw, ph],
+            cancel,
+            &mut self.cache,
+        )
+        .map(Some)
     }
     fn pyramid_for(&mut self, source: Arc<CameraImage>) -> &mut Pyramid {
         let current = self.pyramid.as_ref();
@@ -257,5 +317,45 @@ mod tests {
             }
         }
         assert_eq!(warm.cache.samples.len(), 2);
+    }
+    #[test]
+    fn region_preview_is_a_half_resolution_region() {
+        let (w, h) = (400, 300);
+        let mut im = image(w, h, 0.);
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            let v = 0.3 + 0.2 * (x * 0.04).sin() * (y * 0.03).cos();
+            *p = [v * 1.2, v, v * 0.6];
+        }
+        let cancel = AtomicBool::new(false);
+        let mut r = Recipe::default();
+        r.effects.clarity = 0.3;
+        let mut p = PreviewRenderer::default();
+        let region = [101, 80, 120, 90];
+        let preview = p
+            .render_region_preview(&im, &r, region, &cancel)
+            .unwrap()
+            .unwrap();
+        assert_eq!((preview.width, preview.height), (60, 45));
+        let full = p.render(&im, &r, 0, Some(region), &cancel).unwrap();
+        let mut error = 0.;
+        for y in 0..45 {
+            for x in 0..60 {
+                let a = preview.pixels[y * 60 + x];
+                let b = full.pixels[2 * y * 120 + 2 * x];
+                error += (0..3).map(|c| (a[c] - b[c]).abs()).sum::<f32>();
+            }
+        }
+        let error = error / (60. * 45. * 3.);
+        assert!(error < 0.02, "mean error {error}");
+        let legacy = Recipe {
+            engine: 2,
+            ..Default::default()
+        };
+        assert!(
+            p.render_region_preview(&im, &legacy, region, &cancel)
+                .unwrap()
+                .is_none()
+        );
     }
 }

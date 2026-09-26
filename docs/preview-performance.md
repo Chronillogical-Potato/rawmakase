@@ -4,8 +4,9 @@ Fit and zoomed-out views render from a resolution pyramid of the photo (see
 [below](#resolution-pyramid)); 100% regions and export use the full-resolution
 image. The desktop uses GPU compute for sharpening and Lanczos3 resizing of full
 resolution renders. RAW decoding, color/tone processing, grain/vignette and export
-stay on the CPU. A 1024-pixel draft provides feedback while the quality pass runs.
-The status line shows `GPU finish` when compute was used.
+stay on the CPU. There is no separate draft: every slider change renders the real
+pipeline at Fit size, and at 100% a half-resolution preview of the region comes
+first (see [slider responsiveness](#slider-responsiveness)). The status line shows `GPU finish` when compute was used.
 
 The shaders are portable WGSL through wgpu, with no CUDA or Metal-specific code.
 Metal is used on macOS; Linux NVIDIA/AMD devices can use Vulkan with a working
@@ -95,6 +96,45 @@ every render instead of exposure.
 The A7CR's full-resolution local-tone stages (61 megapixels) exceed the cache
 budget, so its 100% view with Clarity is not faster yet; local tones on pyramid
 levels are the next step.
+
+## Slider responsiveness
+
+The render worker used to answer each change with a 1024-pixel draft from the
+legacy (engine 2) pipeline, wait 150 ms, then render the full-quality Fit, which
+took one to two seconds. With the pyramid and stage cache, the worker renders the
+current engine at Fit size straight away, with no draft and no wait, so every
+frame shown while dragging is the real rendering. Photos with older engines (before
+3) render Fit from a reduced copy of the camera image instead.
+
+At 100%, each change first renders the visible region from the pyramid at half
+resolution or less (at most 0.6 megapixels), which the viewport stretches over the
+region, then the full-resolution region. The worker's mailbox keeps only the latest
+job and a newer job cancels the running one, so while a slider moves the view
+follows the reduced previews, and the sharp region appears when it stops. Pending
+region or quality work never delays a newer slider job beyond the next cancellation
+check (per row in blurs and per pixel in the color stage; a GPU command already
+submitted finishes first).
+
+Renderer times per change, same conditions as the stage cache table, but with the
+machine even busier (load average 40–58), so these are upper bounds. Before this
+change the first update was the 50 ms legacy draft, and the real rendering came
+150 ms plus 0.8–1.8 s later.
+
+| Photo | View | Real rendering per change |
+| --- | --- | ---: |
+| X100F | Fit | 170 ms |
+| | Fit, local | 228 ms |
+| | 100% preview (half resolution) | 62 ms |
+| | 100% preview, local | 67 ms |
+| | 100% preview, Clarity edits | 104 ms |
+| | 100% full region, local | 221 ms |
+| | 100% full region, Clarity edits | 325 ms |
+| A7CR | Fit | 184 ms |
+| | Fit, local | 223 ms |
+| | 100% preview (half resolution) | 34 ms |
+| | 100% preview, local | 41 ms |
+| | 100% preview, Clarity edits | 116 ms |
+| | 100% full region, local | 1469 ms |
 
 ## GPU finishing measurements — 2026-09-26
 

@@ -81,11 +81,13 @@ fn main() -> Result<()> {
                 "cpu-fit",
                 "gpu-fit",
                 "gpu-region",
+                "region-preview",
                 "clarity-fit",
                 "clarity-region",
+                "clarity-region-preview",
             ]
         } else {
-            &["cpu-fit", "gpu-fit", "gpu-region"]
+            &["cpu-fit", "gpu-fit", "gpu-region", "region-preview"]
         };
         for &mode in modes {
             let mut times = Vec::new();
@@ -101,6 +103,10 @@ fn main() -> Result<()> {
                 let out = match mode {
                     "cpu-fit" => cpu.render(&image, &recipe, FIT, None, &cancel)?,
                     "gpu-fit" | "clarity-fit" => gpu.render(&image, &recipe, FIT, None, &cancel)?,
+                    // The reduced 100% view shown while dragging, before the full region.
+                    "region-preview" | "clarity-region-preview" => gpu
+                        .render_region_preview(&image, &recipe, region, &cancel)?
+                        .context("No region preview")?,
                     _ => gpu.render(&image, &recipe, 0, Some(region), &cancel)?,
                 };
                 if i > 0 {
@@ -110,7 +116,7 @@ fn main() -> Result<()> {
             }
             times.sort_by(f64::total_cmp);
             let last = last.unwrap();
-            let error = if mode.ends_with("region") {
+            let error = if mode.contains("region") {
                 String::new()
             } else {
                 let e = mean_error(&last, &reference);

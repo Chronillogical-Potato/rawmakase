@@ -2,7 +2,7 @@ use super::{Event, Latest, RenderJob, RenderStage, TaskKind, send};
 use crate::{develop, raw};
 use eframe::egui;
 use std::{
-    sync::{Arc, atomic::Ordering, mpsc::Sender},
+    sync::{atomic::Ordering, mpsc::Sender},
     time::Instant,
 };
 #[derive(Clone, Copy)]
@@ -71,51 +71,25 @@ pub(in crate::app) fn renderer_with_backend(
                 return Ok(());
             }
             if let Some(region) = job.region {
-                return publish(
-                    if job.recipe.engine >= 3 {
-                        processor.render(&job.image, &job.recipe, 0, Some(region), &job.cancel)?
-                    } else {
-                        develop::render_region(&job.image, &job.recipe, region)?
-                    },
-                    RenderStage::Region,
-                    job.recipe.engine >= 3 && processor.used_gpu(),
-                );
-            }
-            let mut draft = job.recipe.clone();
-            draft.sharpening = 0.;
-            draft.noise_luma = 0.;
-            draft.noise_chroma = 0.;
-            // Small camera-space image is only an explicitly labeled interactive draft.
-            let draft_image = if draft.engine >= 3 {
-                job.draft
-                    .recovered
-                    .get_or_init(|| {
-                        Arc::new(crate::develop::quality::recover_highlights(&job.draft))
-                    })
-                    .as_ref()
-            } else {
-                job.draft.as_ref()
-            };
-            let mut draft_out = develop::render_legacy(draft_image, &draft, super::DRAFT_EDGE)?;
-            let draft_size = [draft_out.width, draft_out.height];
-            crate::develop::effects::spatial_finish(&mut draft_out, &draft, [0, 0], draft_size);
-            publish(draft_out, RenderStage::Draft, false)?;
-            for _ in 0..15 {
-                if job.cancel.load(Ordering::Relaxed) {
-                    return Ok(());
+                if job.recipe.engine < 3 {
+                    let out = develop::render_region(&job.image, &job.recipe, region)?;
+                    return publish(out, RenderStage::Region, false);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                // A reduced preview first keeps dragging at 100% responsive; a newer
+                // job cancels the full-resolution render that follows.
+                if let Some(out) =
+                    processor.render_region_preview(&job.image, &job.recipe, region, &job.cancel)?
+                {
+                    publish(out, RenderStage::Draft, false)?;
+                }
+                let out =
+                    processor.render(&job.image, &job.recipe, 0, Some(region), &job.cancel)?;
+                return publish(out, RenderStage::Region, processor.used_gpu());
             }
-            let out = if job.recipe.engine >= 3 {
-                processor.render(&job.image, &job.recipe, job.max_edge, None, &job.cancel)?
-            } else {
-                develop::render(&job.image, &job.recipe, job.max_edge)?
-            };
-            publish(
-                out,
-                RenderStage::Fit,
-                job.recipe.engine >= 3 && processor.used_gpu(),
-            )
+            // Fit renders from the photo's resolution pyramid, fast enough to follow
+            // a slider without a separate draft.
+            let out = processor.render(&job.image, &job.recipe, job.max_edge, None, &job.cancel)?;
+            publish(out, RenderStage::Fit, processor.used_gpu())
         })();
         if let Err(e) = result
             && !job.cancel.load(Ordering::Relaxed)

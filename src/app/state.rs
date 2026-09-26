@@ -14,7 +14,7 @@ pub(super) struct Document {
     pub(super) path: Option<PathBuf>,
     pub(super) files: Vec<PathBuf>,
     pub(super) metadata: Option<Metadata>,
-    images: Option<DecodedImages>,
+    image: Option<Arc<CameraImage>>,
     pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
@@ -170,18 +170,11 @@ impl PresetBrowser {
     }
 }
 
-struct DecodedImages {
-    full: Arc<CameraImage>,
-    draft: Arc<CameraImage>,
-}
 impl Document {
     pub fn full(&self) -> Option<&Arc<CameraImage>> {
-        self.images.as_ref().map(|images| &images.full)
+        self.image.as_ref()
     }
-    pub fn draft(&self) -> Option<&Arc<CameraImage>> {
-        self.images.as_ref().map(|images| &images.draft)
-    }
-    pub fn set_images(&mut self, full: Arc<CameraImage>, draft: Arc<CameraImage>) {
-        self.images = Some(DecodedImages { full, draft });
+    pub fn set_image(&mut self, full: Arc<CameraImage>) {
+        self.image = Some(full);
     }
 }

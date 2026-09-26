@@ -205,7 +205,7 @@ fn keyboard_fit_and_physical_pixel_region() {
         scale_factor: 1.,
         scale_clipped: 0,
     });
-    e.document.set_images(image.clone(), image);
+    e.document.set_image(image);
     e.view.zoom100 = true;
     e.view.viewport = Vec2::new(4., 2.);
     assert_eq!(e.region(), Some([4, 3, 4, 2]));
@@ -228,7 +228,7 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
         scale_factor: 1.,
         scale_clipped: 0,
     });
-    editor.document.set_images(image.clone(), image);
+    editor.document.set_image(image);
     editor.preview.texture = Some(ctx.load_texture(
         "photo",
         egui::ColorImage::filled([200, 200], Color32::GRAY),
@@ -529,7 +529,6 @@ fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     assert!(!editor.document.history.can_undo());
     assert!(!editor.document.history.in_gesture());
     assert!(editor.document.full().is_none());
-    assert!(editor.document.draft().is_none());
     assert!(editor.presets.preview.is_none());
     assert!(editor.view.crop_drag.is_none());
 }
@@ -552,7 +551,7 @@ fn refreshing_preset_support_cancels_the_hover_render() {
         scale_factor: 1.,
         scale_clipped: 0,
     });
-    editor.document.set_images(image.clone(), image);
+    editor.document.set_image(image);
     editor.presets.preview = Some(Recipe {
         exposure: 1.,
         ..Default::default()

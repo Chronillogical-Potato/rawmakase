@@ -202,7 +202,8 @@ creates a new backend. GPU execution already submitted cannot be interrupted;
 obsolete readback results are discarded. Full-quality CPU stages check cancellation
 within pixel/row/column work. Pending jobs still coalesce in a single-slot mailbox.
 
-Interactive drafts now use a 1024-pixel camera-space image. They remain temporary,
-explicitly labeled drafts; the final fit is developed from the smallest pyramid
-level at or above the physical viewport size. The 150 ms refinement debounce remains so
-continuous editing does not repeatedly start expensive full-quality work.
+There is no separate interactive draft. Fit renders the current pipeline from the
+smallest pyramid level at or above the physical viewport size on every change;
+at 100% a reduced region from the pyramid is published first (as a draft stage),
+then the full-resolution region. The single-slot mailbox and cancellation keep
+continuous editing on the latest change.

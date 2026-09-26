@@ -1,6 +1,6 @@
 use super::{Event, Latest, LoadJob, LoadedHeader, TaskKind, send};
 use crate::{
-    develop::{self, Recipe},
+    develop::Recipe,
     export::ExportOptions,
     raw::{self, thumbnail},
 };
@@ -28,14 +28,12 @@ fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
             if job.cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            let preview = Arc::new(develop::preview(&image, super::DRAFT_EDGE));
             send(
                 &tx,
                 &ctx,
                 Event::Ready {
                     id: job.id,
                     full: image,
-                    draft: preview,
                     status: format!("Developed in {:.2}s", job.started.elapsed().as_secs_f32()),
                 },
             );
@@ -174,7 +172,6 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 &ctx,
                 Event::Ready {
                     id: job.id,
-                    draft: Arc::new(develop::preview(&quick, super::DRAFT_EDGE)),
                     full: quick,
                     status: "Loading full resolution…".into(),
                 },

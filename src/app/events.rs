@@ -96,13 +96,8 @@ impl Editor {
                     self.preview.mode = super::state::TextureMode::Whole;
                     self.preview.status = "Camera preview • developing RAW…".into();
                 }
-                Event::Ready {
-                    id,
-                    full,
-                    draft: small,
-                    status,
-                } if id == self.load.id() => {
-                    self.document.set_images(full, small);
+                Event::Ready { id, full, status } if id == self.load.id() => {
+                    self.document.set_image(full);
                     self.load.finish(id);
                     if !self.document.save.is_protected() {
                         self.status = status;

@@ -155,11 +155,6 @@ impl Editor {
                 super::state::TextureMode::Region,
             );
             self.renderer.submit(RenderJob {
-                draft: self
-                    .document
-                    .draft()
-                    .cloned()
-                    .unwrap_or_else(|| image.clone()),
                 max_edge,
                 cancel,
                 id,

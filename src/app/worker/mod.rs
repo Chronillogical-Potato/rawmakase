@@ -66,7 +66,6 @@ pub enum Event {
     Ready {
         id: u64,
         full: Arc<CameraImage>,
-        draft: Arc<CameraImage>,
         status: String,
     },
     Thumbnail {
@@ -97,7 +96,6 @@ pub struct LoadJob {
 pub struct RenderJob {
     pub id: u64,
     pub image: Arc<CameraImage>,
-    pub draft: Arc<CameraImage>,
     pub max_edge: u32,
     pub cancel: Arc<AtomicBool>,
     pub recipe: Recipe,
@@ -117,6 +115,3 @@ pub use latest::Latest;
 pub use loader::loader;
 pub use renderer::renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};
-
-/// Interactive feedback is intentionally smaller than the final physical-pixel fit.
-const DRAFT_EDGE: u32 = 1024;
