@@ -262,82 +262,15 @@ fn box_blur(
 /// balance, profile and lens vignetting, so Clarity, Texture and exposure edits reuse
 /// them; exposure shifts every value by the same amount.
 pub(crate) struct LocalBlurs {
-    width: usize,
     logs: Vec<f32>,
-    fine: Coarse,
-    broad: Coarse,
+    fine: Vec<f32>,
+    broad: Vec<f32>,
     texture: Option<Vec<f32>>,
 }
 impl LocalBlurs {
     fn bytes(&self) -> usize {
-        (self.logs.len() + self.texture.as_ref().map_or(0, Vec::len)) * 4
-            + (self.fine.data.len() + self.broad.data.len()) * 4
+        (self.logs.len() * 3 + self.texture.as_ref().map_or(0, Vec::len)) * 4
     }
-}
-/// A box blur computed on a reduced copy of the image and read back bilinearly.
-struct Coarse {
-    width: usize,
-    height: usize,
-    factor: f32,
-    data: Vec<f32>,
-}
-/// Blur radius, in pixels of the reduced copy, below which no further halving is done.
-const COARSE_RADIUS: usize = 4;
-impl Coarse {
-    /// Box blur of `radius` pixels of `values`: halved (2×2 means) while the radius
-    /// stays at least `COARSE_RADIUS` there, blurred, and upsampled when read. Small
-    /// radii are blurred at full resolution.
-    fn new(
-        values: &[f32],
-        (w, h): (usize, usize),
-        radius: usize,
-        cancel: &AtomicBool,
-    ) -> Result<Self> {
-        let mut level = std::borrow::Cow::Borrowed(values);
-        let (mut w, mut h, mut factor) = (w, h, 1usize);
-        while radius / (factor * 2) >= COARSE_RADIUS && w > 1 && h > 1 {
-            level = std::borrow::Cow::Owned(halve(&level, w, h));
-            (w, h, factor) = (w.div_ceil(2), h.div_ceil(2), factor * 2);
-        }
-        let radius = ((radius as f32 / factor as f32).round() as usize).max(1);
-        Ok(Self {
-            width: w,
-            height: h,
-            factor: factor as f32,
-            data: box_blur(&level, w, h, radius, cancel)?,
-        })
-    }
-    fn at(&self, x: usize, y: usize) -> f32 {
-        if self.factor == 1. {
-            return self.data[y * self.width + x];
-        }
-        let fx = ((x as f32 + 0.5) / self.factor - 0.5).clamp(0., (self.width - 1) as f32);
-        let fy = ((y as f32 + 0.5) / self.factor - 0.5).clamp(0., (self.height - 1) as f32);
-        let (ix, iy) = (fx as usize, fy as usize);
-        let (jx, jy) = ((ix + 1).min(self.width - 1), (iy + 1).min(self.height - 1));
-        let (tx, ty) = (fx - ix as f32, fy - iy as f32);
-        let v = |x: usize, y: usize| self.data[y * self.width + x];
-        let top = v(ix, iy) * (1. - tx) + v(jx, iy) * tx;
-        let bottom = v(ix, jy) * (1. - tx) + v(jx, jy) * tx;
-        top * (1. - ty) + bottom * ty
-    }
-}
-/// 2×2 means; an odd last row or column averages with itself.
-fn halve(values: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
-    let mut out = vec![0.; hw * hh];
-    out.par_chunks_mut(hw).enumerate().for_each(|(y, row)| {
-        let (y0, y1) = (2 * y, (2 * y + 1).min(h - 1));
-        for (x, v) in row.iter_mut().enumerate() {
-            let (x0, x1) = (2 * x, (2 * x + 1).min(w - 1));
-            *v = (values[y0 * w + x0]
-                + values[y0 * w + x1]
-                + values[y1 * w + x0]
-                + values[y1 * w + x1])
-                * 0.25;
-        }
-    });
-    out
 }
 /// `scale` is the image's size relative to the full-resolution photo; radii given in
 /// full-resolution pixels shrink with it.
@@ -380,8 +313,8 @@ fn local_blurs(
     let long = im.width.max(im.height) as f32;
     let radius = |px: f32| ((px / 6000. * long).round() as usize).max(1);
     let size = (im.width as usize, im.height as usize);
-    let fine = Coarse::new(&logs, size, radius(16.), cancel)?;
-    let broad = Coarse::new(&logs, size, radius(64.), cancel)?;
+    let fine = box_blur(&logs, size.0, size.1, radius(16.), cancel)?;
+    let broad = box_blur(&logs, size.0, size.1, radius(64.), cancel)?;
     let texture = if texture {
         let radius = ((3. * scale).round() as usize).max(1);
         Some(box_blur(&logs, size.0, size.1, radius, cancel)?)
@@ -390,7 +323,6 @@ fn local_blurs(
     };
     check_cancel(cancel)?;
     Ok(LocalBlurs {
-        width: size.0,
         logs,
         fine,
         broad,
@@ -406,15 +338,14 @@ fn apply_local(b: &LocalBlurs, r: &Recipe, cancel: &AtomicBool) -> Result<Vec<f3
         if cancel.load(Ordering::Relaxed) {
             return;
         }
-        let (x, y) = (i % b.width, i / b.width);
         let logs = b.logs[i] + exposure;
         // Range guidance limits halos at strong boundaries; details stay in the residual.
         let guide = |base: f32| {
             let d = base + exposure - logs;
             logs + d / (1. + d * d)
         };
-        let fine = guide(b.fine.at(x, y));
-        let base = (fine + guide(b.broad.at(x, y))) * 0.5;
+        let fine = guide(b.fine[i]);
+        let base = (fine + guide(b.broad[i])) * 0.5;
         let y = 2f32.powf(base);
         let shadow = (-y * 6.).exp();
         let high = y / (y + 0.5);

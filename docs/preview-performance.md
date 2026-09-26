@@ -188,36 +188,34 @@ Fit differs from the resized export exactly as much as the CPU Fit (0.0016 X100F
 0.0059 A7CR). Clarity edits and the A7CR's 100% view with local adjustments were then dominated
 by the full-resolution local-tone blurs on the CPU (see the next section).
 
-## Local tones on reduced levels
+## Local-tone gain
 
 Clarity, Texture and older engines' Shadows/Highlights compare each pixel's log
-luminance with box blurs of it (16 and 64 pixels on a 6000-pixel long edge). Those
-blurs are now computed on a copy of the log luminance halved (2×2 means) while the
-radius stays at least 4 pixels there, and read back bilinearly, instead of at full
-resolution; Texture's 3-pixel blur stays at full resolution. The result is kept as a
-per-pixel gain that the sampling stage applies (4 bytes per pixel), instead of a
-modified copy of the camera image (12 bytes per pixel), so a 61-megapixel A7CR's
-local-tone stage fits the stage cache.
+luminance with full-resolution box blurs of it (16 and 64 pixels on a 6000-pixel long
+edge). The stage result is kept as a per-pixel gain that the sampling stage applies
+(4 bytes per pixel), instead of a modified copy of the camera image (12 bytes per
+pixel), so a 61-megapixel A7CR's local-tone stage fits the stage cache. Applying the
+gain while sampling gives the same values as the modified copy.
 
-This changes exports that use these controls slightly. On the X100F with Shadows
-+40, Highlights −30 and Clarity +30 (or −50, or Texture +40), the export differs from
-the previous full-resolution blurs by a mean of 0.0002, 0.002–0.004 at the 99.9th
-percentile and at most 0.016 (0–1 scale).
+Blurring on reduced levels was tried and removed: it changed exports with these
+controls (mean 0.0002, at most 0.016), and the develop math is to stay unchanged.
+Exports without Clarity, Texture or older Shadows/Highlights are bit-identical to
+the renderer before this work; with them, computing the blurs before exposure (so
+exposure edits reuse them) changes results only by float rounding: mean 0.000001, at
+most 0.00013 on the X100F.
 
-Best of two interleaved runs against the previous commit (load average 38–47):
+Measured with reduced-level blurs, before they were removed (best of two interleaved
+runs, load average 38–47); the gain storage accounts for the A7CR's 100% gain:
 
-| Photo | Render | Full-resolution blurs | Reduced-level blurs |
+| Photo | Render | Before | Gain storage |
 | --- | --- | ---: | ---: |
 | A7CR | 100% region, local, exposure edits | 1119 ms | 66 ms |
 | | 100% region, Clarity edits | 1010 ms | 476 ms |
-| | Export, local | 6341 ms | 5295 ms |
 | X100F | 100% region, local, exposure edits | 50 ms | 49 ms |
-| | 100% region, Clarity edits | 193 ms | 230 ms |
-| | Fit, Clarity edits | 138 ms | 166 ms |
 
-X100F differences are within the noise of the loaded machine. Clarity edits still
-recompute the gain for the whole image and resample the view; computing the gain only
-under the visible region would be the next step for 100% Clarity drags.
+Clarity edits recompute the gain for the whole image and resample the view;
+computing the gain only under the visible region would be the next step for 100%
+Clarity drags.
 
 ## Decode cache and prefetch
 
