@@ -19,6 +19,7 @@ pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
 mod rendered;
+mod stage_cache;
 mod white_balance;
 
 pub use crate::color_math::{mul, srgb_encode};

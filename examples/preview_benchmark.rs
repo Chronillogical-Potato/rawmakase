@@ -76,15 +76,31 @@ fn main() -> Result<()> {
         let full = develop::quality::render_cancellable(&image, &recipe, 0, None, &cancel)?;
         println!("Export resolution, local={local}: {:.1} ms", ms(t));
         let reference = develop::quality::resize(full, FIT);
-        for mode in ["cpu-fit", "gpu-fit", "gpu-region"] {
+        let modes: &[&str] = if local {
+            &[
+                "cpu-fit",
+                "gpu-fit",
+                "gpu-region",
+                "clarity-fit",
+                "clarity-region",
+            ]
+        } else {
+            &["cpu-fit", "gpu-fit", "gpu-region"]
+        };
+        for &mode in modes {
             let mut times = Vec::new();
             let mut last = None;
             for i in 0..=iterations {
-                recipe.exposure = i as f32 * 0.1;
+                // Exposure edits, or Clarity edits, which change the local-tone stage.
+                if mode.starts_with("clarity") {
+                    recipe.effects.clarity = 0.2 + (iterations - i) as f32 * 0.05;
+                } else {
+                    recipe.exposure = i as f32 * 0.1;
+                }
                 let t = Instant::now();
                 let out = match mode {
                     "cpu-fit" => cpu.render(&image, &recipe, FIT, None, &cancel)?,
-                    "gpu-fit" => gpu.render(&image, &recipe, FIT, None, &cancel)?,
+                    "gpu-fit" | "clarity-fit" => gpu.render(&image, &recipe, FIT, None, &cancel)?,
                     _ => gpu.render(&image, &recipe, 0, Some(region), &cancel)?,
                 };
                 if i > 0 {
@@ -94,7 +110,7 @@ fn main() -> Result<()> {
             }
             times.sort_by(f64::total_cmp);
             let last = last.unwrap();
-            let error = if mode == "gpu-region" {
+            let error = if mode.ends_with("region") {
                 String::new()
             } else {
                 let e = mean_error(&last, &reference);

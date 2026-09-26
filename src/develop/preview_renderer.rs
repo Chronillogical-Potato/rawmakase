@@ -1,5 +1,5 @@
 //! Stateful desktop preview backend. Export remains on the reference CPU path.
-use super::{Geometry, Recipe, Rendered, gpu, pyramid::Pyramid, quality};
+use super::{Geometry, Recipe, Rendered, gpu, pyramid::Pyramid, quality, stage_cache::StageCache};
 use crate::raw::CameraImage;
 use anyhow::Result;
 use std::sync::{Arc, atomic::AtomicBool};
@@ -12,6 +12,8 @@ pub struct PreviewRenderer {
     /// Resolution pyramid of the current photo's recovered image, for Fit and
     /// zoomed-out renders. Holding the recovered image keeps its identity unique.
     pyramid: Option<Pyramid>,
+    /// Stage results reused while only color and tone change.
+    cache: StageCache,
 }
 impl PreviewRenderer {
     /// A hardware device is optional; failure leaves a fully working CPU renderer.
@@ -61,7 +63,18 @@ impl PreviewRenderer {
         {
             return Ok(out);
         }
-        quality::render_preview(image, recipe, max_edge, region, cancel, self)
+        let mut cache = std::mem::take(&mut self.cache);
+        let out = quality::render_preview(
+            image,
+            recipe,
+            max_edge,
+            region,
+            cancel,
+            self,
+            Some(&mut cache),
+        );
+        self.cache = cache;
+        out
     }
     /// Fit and zoomed-out views from the smallest pyramid level with at least one
     /// pixel per output pixel. `None` when the output is the full resolution.
@@ -78,14 +91,19 @@ impl PreviewRenderer {
             return Ok(None);
         }
         let source = quality::recovered(image, cancel)?;
-        let pyramid = match &mut self.pyramid {
-            Some(p) if Arc::ptr_eq(p.source(), &source) => p,
-            slot => slot.insert(Pyramid::new(source)),
-        };
+        let pyramid = self.pyramid_for(source);
         let size = quality::output_size(full.width, full.height, max_edge);
         let needed = size.0.max(size.1) as f32 * image.width.max(image.height) as f32 / long as f32;
         let level = pyramid.level_for(needed);
-        quality::render_level(&level, pyramid.source(), recipe, size, cancel).map(Some)
+        let source = pyramid.source().clone();
+        quality::render_level(&level, &source, recipe, size, cancel, &mut self.cache).map(Some)
+    }
+    fn pyramid_for(&mut self, source: Arc<CameraImage>) -> &mut Pyramid {
+        let current = self.pyramid.as_ref();
+        if !current.is_some_and(|p| Arc::ptr_eq(p.source(), &source)) {
+            self.pyramid = Some(Pyramid::new(source));
+        }
+        self.pyramid.as_mut().unwrap()
     }
     pub(crate) fn finish(
         &mut self,
@@ -198,5 +216,46 @@ mod tests {
                 / (fit.pixels.len() * 3) as f32;
             assert!(error < 0.01, "edge {edge}: mean error {error}");
         }
+    }
+    /// Every edit, including ones that change only cached stages, must render exactly
+    /// as a renderer without cached state would.
+    #[test]
+    fn cached_stages_never_serve_a_stale_result() {
+        let (w, h) = (300, 200);
+        let mut im = image(w, h, 0.);
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            let v = 0.3 + 0.2 * (x * 0.07).sin() * (y * 0.05).cos();
+            *p = [v * 1.2, v, v * 0.6];
+        }
+        let cancel = AtomicBool::new(false);
+        let mut warm = PreviewRenderer::default();
+        let mut r = Recipe {
+            shadows: 0.3,
+            ..Default::default()
+        };
+        r.effects.clarity = 0.3;
+        let edits: [&dyn Fn(&mut Recipe); 9] = [
+            &|_| {},
+            &|r| r.exposure = 0.5,
+            &|r| r.effects.clarity = -0.2,
+            &|r| r.effects.texture = 0.4,
+            &|r| r.wb[0] = 1.3,
+            &|r| r.crop = [0.1, 0., 0.9, 1.],
+            &|r| r.noise_luma = 0.4,
+            &|r| r.contrast = 0.3,
+            &|r| r.engine = 3,
+        ];
+        for edit in edits {
+            edit(&mut r);
+            for (edge, region) in [(80, None), (0, Some([20, 30, 50, 40])), (150, None)] {
+                let cached = warm.render(&im, &r, edge, region, &cancel).unwrap();
+                let fresh = PreviewRenderer::default()
+                    .render(&im, &r, edge, region, &cancel)
+                    .unwrap();
+                assert_eq!(cached.pixels, fresh.pixels, "{r:?} {edge} {region:?}");
+            }
+        }
+        assert_eq!(warm.cache.samples.len(), 2);
     }
 }

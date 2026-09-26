@@ -57,6 +57,45 @@ curve, `powf`), about 1.7 megapixels per render. 100% regions with local
 adjustments (about 1.1 s on the X100F and 1.5 s on the A7CR for a 1600×1000
 region) still recompute Clarity over the full image on every change.
 
+## Stage caching
+
+The desktop renderer keeps the results of the stages before the per-pixel color
+pipeline (`src/develop/stage_cache.rs`), each keyed by the recipe fields it reads:
+
+- local-tone blurs: log luminance and its box blurs, which depend on white balance,
+  profile and lens vignetting but not on exposure (exposure shifts all of them
+  equally);
+- the local-tone image: the blurs with Clarity, Texture and, before engine 4,
+  Shadows and Highlights applied;
+- samples: each output pixel's camera value after geometry, lens correction and
+  noise reduction, and its source position.
+
+Exposure, curve, HSL, grading and Engine 4 Shadows/Highlights edits therefore rerun
+only the per-pixel stage; Clarity and Texture edits reuse the blurs. Two entries are
+kept per stage (Fit and a 100% view) within 512 MB per stage; larger results are
+computed and not kept. Export uses no cache. A unit test checks that cached renders
+equal uncached ones after each kind of edit.
+
+Measured as above, but as the best of three interleaved runs of the before and after
+builds, because other work was loading the machine (load average about 30 on 10
+cores; unchanged export timings varied by up to 2×). "Clarity" changes Clarity on
+every render instead of exposure.
+
+| Photo | Render | Pyramid only | With stage cache |
+| --- | --- | ---: | ---: |
+| X100F | Fit | 358 ms | 264 ms |
+| | Fit, local | 435 ms | 251 ms |
+| | Fit, Clarity edits | 688 ms | 405 ms |
+| | 100% region, local | 1429 ms | 366 ms |
+| | 100% region, Clarity edits | 1296 ms | 546 ms |
+| A7CR | Fit | 141 ms | 135 ms |
+| | Fit, local | 187 ms | 120 ms |
+| | 100% region, local | 1140 ms | 1386 ms |
+
+The A7CR's full-resolution local-tone stages (61 megapixels) exceed the cache
+budget, so its 100% view with Clarity is not faster yet; local tones on pyramid
+levels are the next step.
+
 ## GPU finishing measurements — 2026-09-26
 
 Release build on Apple M1 Pro, private Fujifilm X100F RAW (6032×4032), installed

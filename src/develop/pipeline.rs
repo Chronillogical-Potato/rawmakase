@@ -683,17 +683,120 @@ pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<R
 }
 /// Unsharpened render of `region` of the output described by `g`. A `spread` above
 /// zero averages each sample over a footprint (see [`footprint_spread`]).
+///
+/// With a `cache`, the geometry, lens-warp and noise-reduction samples are kept, so a
+/// following render that only changes color and tone reruns the per-pixel stage alone.
 pub(crate) fn render_base(
+    im: &std::sync::Arc<CameraImage>,
+    r: &Recipe,
+    g: &Geometry,
+    region: [u32; 4],
+    spread: f32,
+    cancel: &std::sync::atomic::AtomicBool,
+    cache: Option<&mut super::stage_cache::StageCache>,
+) -> Result<Rendered> {
+    let mut base = r.clone();
+    base.sharpening = 0.;
+    let Some(cache) = cache else {
+        return render_region_inner(im, &base, g, region, spread, cancel);
+    };
+    base.validate()?;
+    let key = super::stage_cache::SampleKey::new(im, &base, g, region, spread);
+    let samples = cache.samples.get_or_try(key, Samples::bytes, || {
+        sample_region(im, &base, g, region, spread, cancel)
+    })?;
+    develop_samples(im, &base, &samples, cancel)
+}
+/// Camera samples of an output region after geometry, lens correction and noise
+/// reduction, with their source positions; `NAN` positions lie outside the photo.
+pub(crate) struct Samples {
+    width: u32,
+    height: u32,
+    pixels: Vec<[f32; 3]>,
+    positions: Vec<[f32; 2]>,
+}
+impl Samples {
+    fn bytes(&self) -> usize {
+        self.pixels.len() * 20
+    }
+}
+fn sample_region(
     im: &CameraImage,
     r: &Recipe,
     g: &Geometry,
     region: [u32; 4],
     spread: f32,
     cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Samples> {
+    let [x0, y0, w, h] = region;
+    ensure!(
+        w > 0 && h > 0 && x0 + w <= g.width && y0 + h <= g.height,
+        "Invalid viewport region"
+    );
+    let warp = LensWarp::new(im, r);
+    let (pixels, positions) = (0..w as usize * h as usize)
+        .into_par_iter()
+        .map(|i| {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return ([0.; 3], [f32::NAN; 2]);
+            }
+            let x = x0 + i as u32 % w;
+            let y = y0 + i as u32 / w;
+            let [sx, sy] = g.source(
+                (x as f32 + 0.5) / g.width as f32,
+                (y as f32 + 0.5) / g.height as f32,
+            );
+            if g.outside(sx, sy) {
+                return ([1.; 3], [f32::NAN; 2]);
+            }
+            let p = match &warp {
+                Some(w) => w.sample(im, sx, sy, r, spread),
+                None => footprint_sample(im, sx, sy, r, spread),
+            };
+            (p, [sx, sy])
+        })
+        .unzip();
+    ensure!(
+        !cancel.load(std::sync::atomic::Ordering::Relaxed),
+        "Render superseded"
+    );
+    Ok(Samples {
+        width: w,
+        height: h,
+        pixels,
+        positions,
+    })
+}
+/// The per-pixel color and tone stage over prepared samples.
+fn develop_samples(
+    im: &CameraImage,
+    r: &Recipe,
+    samples: &Samples,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
-    let mut base = r.clone();
-    base.sharpening = 0.;
-    render_region_inner(im, &base, g, region, spread, cancel)
+    let matrix = profile_matrix(&im.metadata, r);
+    let lut = CurveSet::for_image(im, r, matrix);
+    let mut pixels = vec![[0.; 3]; samples.pixels.len()];
+    pixels.par_iter_mut().enumerate().for_each(|(i, out)| {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let pos = samples.positions[i];
+        *out = if pos[0].is_nan() {
+            [1.; 3]
+        } else {
+            process_pixel(samples.pixels[i], &im.metadata, r, &lut, matrix, pos)
+        };
+    });
+    ensure!(
+        !cancel.load(std::sync::atomic::Ordering::Relaxed),
+        "Render superseded"
+    );
+    Ok(Rendered {
+        width: samples.width,
+        height: samples.height,
+        pixels,
+    })
 }
 
 pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
