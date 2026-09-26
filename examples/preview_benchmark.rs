@@ -49,6 +49,30 @@ fn main() -> Result<()> {
         image.metadata.model,
         recipe.profile.as_ref().map(|p| &p.name)
     );
+    // Decode cache: store with recovered highlights, then open from it, in a temporary
+    // directory that is removed afterwards.
+    let t = Instant::now();
+    develop::quality::recover_highlights(&image);
+    println!("Highlight recovery: {:.1} ms", ms(t));
+    {
+        let dir = tempfile::tempdir()?;
+        let cache = rawmakase::decode_cache::DecodeCache::new(dir.path().to_owned(), u64::MAX);
+        let cached = image.clone();
+        let _ = cached
+            .recovered
+            .set(std::sync::Arc::new(develop::quality::recover_highlights(
+                &image,
+            )));
+        let t = Instant::now();
+        cache.store("benchmark", &cached)?;
+        println!("Decode cache store: {:.1} ms", ms(t));
+        let t = Instant::now();
+        let loaded = cache
+            .load("benchmark", &image.metadata)
+            .context("Decode cache miss")?;
+        println!("Open from decode cache: {:.1} ms", ms(t));
+        anyhow::ensure!(loaded.pixels == image.pixels, "Decode cache changed pixels");
+    }
     let mut gpu = develop::PreviewRenderer::with_gpu();
     println!(
         "GPU: {:?}; fallback: {:?}",

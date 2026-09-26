@@ -28,6 +28,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | --- | --- |
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
 | [src/lib.rs](../src/lib.rs) | Canonical domain exports and hidden compatibility aliases for older library paths. |
+| [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [src/raw.rs](../src/raw.rs) | Safe Rust ownership around native RAW handles, metadata, decoded camera-space images, oriented embedded thumbnails and ICC conversion. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
 | [src/color_math.rs](../src/color_math.rs) | Private shared matrix and sRGB transfer primitives. |
@@ -201,6 +202,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | Preset favorites | `preset-favorites.json` in the data directory. |
 | Installed assets | `xmp-presets/` and `camera-profiles/` under asset roots; shared discovery also checks the legacy XDG/Linux data location. Imported XMP files go to `xmp-presets/Imported/` under the current data directory. |
 | Library previews | `previews.sqlite3` in the data directory; disposable cache, not a source of edits. |
+| Decoded photos | `decoded/` in the cache directory (`~/Library/Caches/RAWmakase` on macOS, `$XDG_CACHE_HOME/rawmakase`, default `~/.cache/rawmakase`, on Linux; `RAWMAKASE_CACHE_DIR` overrides it): developed camera images of opened and prefetched photos, capped at 4 GB, least recently used removed first. Disposable. |
 | Build output | `target/`; generated binaries, documentation and local macOS bundle. |
 
 ## Tests and reference tools

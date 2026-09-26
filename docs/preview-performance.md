@@ -219,6 +219,39 @@ X100F differences are within the noise of the loaded machine. Clarity edits stil
 recompute the gain for the whole image and resample the view; computing the gain only
 under the visible region would be the next step for 100% Clarity drags.
 
+## Decode cache and prefetch
+
+Opening a photo stores the developed camera image, exactly as decoded, in a disk
+cache (`src/decode_cache.rs`), together with the pixels highlight recovery changed
+(0.7% of pixels on DSCF7853, 46 pixels on the A7CR file), so the recovered image is
+restored without recomputing it. The loader recovers highlights itself before
+announcing the full image, which the first render would otherwise do. A later open
+of the same photo reads the cache and skips both the half-size and the full decode.
+After a photo opens, the loader develops the next and previous photos of the folder
+into the cache on a two-thread pool, leaving the other cores to rendering; opening
+another photo cancels the prefetch.
+
+Entries are keyed by the RAW file's identity (size, modification time and a hash of
+its first 64 KB), the demosaic setting and the running executable's size and time,
+so a rebuilt or updated app never uses another build's pixels. The cache lives in
+`decoded/` under the per-user cache directory (`~/Library/Caches/RAWmakase` on macOS,
+`$XDG_CACHE_HOME/rawmakase` or `~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR`
+to override), is capped at 4 GB and drops the least recently used entries first.
+An entry is the image's size in 32-bit floats: 278 MB for the X100F, 697 MB for the
+A7CR. RAW files, sidecars and catalogs are not touched.
+
+Measured with `preview_benchmark` (store, then open from a warm cache) on the loaded
+machine:
+
+| Photo | Decode | Highlight recovery | Store | Open from cache |
+| --- | ---: | ---: | ---: | ---: |
+| X100F | 434–534 ms | 51–105 ms | 83–246 ms | 58–232 ms |
+| A7CR | 1037–2836 ms | 135–200 ms | 286–529 ms | 587–648 ms |
+
+Through the real loader, in a folder of three X100F photos: the first open showed
+the half-size image at 166 ms and the full image at 884 ms; reopening it showed the
+full image at 140 ms, and the two prefetched neighbours opened in 190 and 300 ms.
+
 ## GPU finishing measurements — 2026-09-26
 
 Release build on Apple M1 Pro, private Fujifilm X100F RAW (6032×4032), installed
@@ -270,7 +303,8 @@ cargo run --release --locked --example preview_benchmark -- /path/to/photo.RAF 3
 ```
 
 The benchmark prints the actual adapter and profile, and fails if a Fit render
-differs from the resized export by a mean of 0.01 or more. It reads the supplied RAW and
+differs from the resized export by a mean of 0.01 or more. It times the decode cache
+in a temporary directory that it removes. It reads the supplied RAW and
 installed profiles and writes no photographic files. Use the same RAW, profile,
 release build and machine conditions for comparisons. Keep private photos outside
 the repository.
