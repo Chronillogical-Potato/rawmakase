@@ -51,15 +51,17 @@ Never put the export, its base64 contents or passwords into the repository.
 2. Push that commit to `main`, then push its matching `vX.Y.Z` tag.
 3. The Release workflow publishes after every required job succeeds.
 
-For a rehearsal without a new publication, manually run **Release**, select an
+For a rehearsal without a new publication, manually run **Release**, select
 `main` as the workflow branch, enter an existing stable **tag** (such as
-`v0.1.1`), and leave **publish** unchecked. The workflow validates and builds
+`v0.1.1`), and uncheck **publish** (enabled by default). The workflow validates and builds
 the tag’s exact source commit using packaging tools from the selected workflow
 branch, so tags created before this workflow can also be tested.
 This still builds, signs, notarizes and verifies packages, then retains them as
 Actions artifacts. It does not replace any existing release assets. A normal
-tag push publishes automatically. Re-running publication for an existing
-release fails rather than silently overwriting its downloads.
+tag push publishes automatically. Publishing to an existing release attaches
+the generated packages and refreshes assets with matching names, including
+`SHA256SUMS`; release notes and unrelated assets are preserved. AUR publication
+remains disabled independently of GitHub publication.
 
 The workflow supports stable versions only. Do not push a prerelease tag with
 this workflow expecting a published release.

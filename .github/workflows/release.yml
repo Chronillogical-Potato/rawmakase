@@ -12,7 +12,7 @@ on:
       publish:
         description: Publish the selected stable tag after all package checks pass
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -274,11 +274,15 @@ jobs:
         uses: crmne/native-packages/.github/actions/attest@dc0cb1586894ca0239c53fd02d4da8064712671c # v0.7.0
         with:
           subject-path: dist/*
-      - name: Create release
+      - name: Attach packages to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "RAWmakase ${RELEASE_TAG#v}" --generate-notes \
