@@ -4,26 +4,28 @@ require "native_packages"
 
 # Keep native-packages' signing checks intact; expose public certificate
 # diagnostics when its exact identity check would otherwise fail silently.
+# Logs are public: never print raw command output or certificate identifiers.
 module SigningDiagnostics
   def execute(*arguments)
     output = super
     if arguments.first(5) == ["security", "find-identity", "-v", "-p", "codesigning"]
       expected = ENV.fetch("APPLE_SIGNING_IDENTITY")
       unless output.include?(%Q{"#{expected}"})
-        warn "Signing diagnostics: valid identities in the imported keychain:"
-        warn output
+        warn "Signing diagnostics: expected valid identity not found."
+        warn "Any valid signing identity present: #{output.match?(/^\s*\d+\) /)}"
         warn "Signing identity has surrounding whitespace: #{expected != expected.strip}"
         keychain = arguments.last
         begin
-          warn "Signing diagnostics: all identities, including trust failures:"
-          warn super("security", "find-identity", "-p", "codesigning", keychain)
+          identities = super("security", "find-identity", "-p", "codesigning", keychain)
+          warn "Expected identity present before validity filtering: #{identities.include?(%Q{"#{expected}"})}"
+          errors = identities.scan(/CSSMERR_[A-Z0-9_]+/).uniq
+          warn "Trust error codes: #{errors.empty? ? 'none reported' : errors.join(', ')}"
           pem = super("security", "find-certificate", "-a", "-p", keychain)
           pem.scan(/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/m).each do |block|
             cert = OpenSSL::X509::Certificate.new(block)
-            warn "Certificate subject: #{cert.subject}"
-            warn "Certificate issuer: #{cert.issuer}"
-            warn "Certificate SHA-1: #{OpenSSL::Digest::SHA1.hexdigest(cert.to_der).upcase}"
-            warn "Certificate validity: #{cert.not_before} to #{cert.not_after}"
+            common_name = cert.subject.to_a.find { |name, _value, _type| name == "CN" }&.at(1)
+            warn "Certificate matches expected identity: #{common_name == expected}"
+            warn "Certificate currently within validity dates: #{cert.not_before <= Time.now && Time.now <= cert.not_after}"
           end
         rescue NativePackages::Error, OpenSSL::X509::CertificateError
           warn "Additional certificate diagnostics could not be collected."
