@@ -4,6 +4,7 @@ use super::dialogs::{CatalogDialog, FileDialog};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Camera Raw's shared folder, installed with Lightroom for all users. It
 /// holds Adobe's camera profiles and the Adobe looks (Adobe Color…).
@@ -73,8 +74,11 @@ pub(super) struct Onboarding {
     cameras: BTreeSet<String>,
     /// Adobe base and Camera Matching profiles for those cameras, then looks.
     adobe_profiles: Vec<PathBuf>,
-    /// Your profiles named for those cameras ("Sony ILCE-7M2 Portra 400 SO.dcp").
+    /// Your profiles named for those cameras ("Sony ILCE-7M2 Portra 400 SO.dcp"),
+    /// or all of them when no camera is known yet.
     user_profiles: Vec<PathBuf>,
+    /// Progress of a running profile import: (finished, message).
+    importing: Option<Arc<Mutex<(bool, String)>>>,
     user_presets: Vec<PathBuf>,
     message: String,
 }
@@ -125,7 +129,8 @@ impl Onboarding {
         }
         let user = user_camera_raw();
         // Third-party packs ship a DCP per camera model, often thousands in all;
-        // only those for the catalog's cameras are useful.
+        // only those for the catalog's cameras are useful. Without a catalog,
+        // take them all.
         let cameras: Vec<String> = self.cameras.iter().map(|c| format!("{c} ")).collect();
         self.user_profiles = user
             .as_ref()
@@ -134,7 +139,7 @@ impl Onboarding {
             .into_iter()
             .filter(|p| {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                cameras.iter().any(|c| name.starts_with(c.as_str()))
+                cameras.is_empty() || cameras.iter().any(|c| name.starts_with(c.as_str()))
             })
             .collect();
         self.user_presets = user
@@ -145,6 +150,54 @@ impl Onboarding {
     }
 }
 
+/// Imports what it can and skips the rest: unreadable or embed-prohibited DCPs,
+/// duplicate names, and names already imported with different contents. The
+/// library importer is all-or-nothing and takes at most 1024 files per batch.
+fn import_leniently(paths: &[PathBuf], progress: &Mutex<(bool, String)>) -> (usize, usize) {
+    let destination = crate::storage::data_dir().join("camera-profiles");
+    let mut names = BTreeSet::new();
+    let (mut dcps, mut looks, mut skipped) = (Vec::new(), Vec::new(), 0);
+    for (i, path) in paths.iter().enumerate() {
+        if i % 50 == 0 {
+            progress.lock().unwrap().1 = format!("Checking profiles… {i} of {}", paths.len());
+        }
+        let Some(name) = path.file_name() else {
+            skipped += 1;
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(path) else {
+            skipped += 1;
+            continue;
+        };
+        let target = destination.join(name);
+        let clash = target.exists() && std::fs::read(&target).ok().as_ref() != Some(&bytes);
+        if clash || !names.insert(name.to_owned()) {
+            skipped += 1;
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
+        {
+            looks.push(path.clone());
+        } else if crate::camera_profiles::from_bytes(&bytes).is_ok() {
+            dcps.push(path.clone());
+        } else {
+            skipped += 1;
+        }
+    }
+    let mut imported = 0;
+    // Looks last: they need their base profile already in the library.
+    for batch in dcps.chunks(1000).chain(std::iter::once(&looks[..])) {
+        if batch.is_empty() {
+            continue;
+        }
+        progress.lock().unwrap().1 = format!("Importing profiles… {imported} done");
+        match crate::camera_profiles::import_files(batch) {
+            Ok(done) => imported += done.len(),
+            Err(_) => skipped += batch.len(),
+        }
+    }
+    (imported, skipped)
+}
 impl Editor {
     pub(super) fn onboarding_ui(&mut self, ui: &mut egui::Ui) {
         // Rescan when opened and whenever a different catalog is loaded.
@@ -251,10 +304,11 @@ impl Editor {
             ui.add_space(8.);
             hint(
                 ui,
-                &if !has_catalog {
-                    "Choose a catalog first so RAWmakase can find your cameras.".to_string()
-                } else if self.onboarding.cameras.is_empty() {
-                    "No RAW photos in the catalog yet.".to_string()
+                &if self.onboarding.cameras.is_empty() {
+                    format!(
+                        "Found {user_profiles} of your profiles. Choose a catalog to also \
+                         find Adobe's profiles and narrow yours to your cameras."
+                    )
                 } else if adobe + user_profiles == 0 {
                     format!("No profiles found for {cameras}.")
                 } else {
@@ -265,25 +319,31 @@ impl Editor {
             );
             ui.add_space(10.);
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
+                ui.add_enabled_ui(!busy && self.onboarding.importing.is_none(), |ui| {
                     if adobe + user_profiles > 0
                         && primary(ui, &format!("Import {} profiles", adobe + user_profiles))
                             .clicked()
                     {
-                        let mut messages = Vec::new();
-                        for (kind, failed, paths) in [
-                            ("Adobe", "Adobe", &self.onboarding.adobe_profiles),
-                            ("of your", "Your", &self.onboarding.user_profiles),
-                        ] {
-                            if paths.is_empty() {
-                                continue;
-                            }
-                            messages.push(match crate::camera_profiles::import_files(paths) {
-                                Ok(done) => format!("Imported {} {kind} profiles", done.len()),
-                                Err(e) => format!("{failed} profiles not imported: {e:#}"),
-                            });
-                        }
-                        self.onboarding.message = format!("{} for {cameras}", messages.join("; "));
+                        let mut paths = self.onboarding.user_profiles.clone();
+                        paths.extend(self.onboarding.adobe_profiles.iter().cloned());
+                        let progress = Arc::new(Mutex::new((false, String::new())));
+                        self.onboarding.importing = Some(progress.clone());
+                        let ctx = ctx.clone();
+                        std::thread::spawn(move || {
+                            let (imported, skipped) = import_leniently(&paths, &progress);
+                            *progress.lock().unwrap() = (
+                                true,
+                                if skipped > 0 {
+                                    format!(
+                                        "Imported {imported} profiles; skipped {skipped} that \
+                                         are unreadable, don't allow reuse or clash by name."
+                                    )
+                                } else {
+                                    format!("Imported {imported} profiles")
+                                },
+                            );
+                            ctx.request_repaint();
+                        });
                     }
                     if secondary(ui, "Choose files…").clicked() {
                         self.dialog(FileDialog::CameraProfile, ctx);
@@ -347,6 +407,15 @@ impl Editor {
             }
         });
 
+        if let Some(progress) = self.onboarding.importing.clone() {
+            let (done, message) = progress.lock().unwrap().clone();
+            self.onboarding.message = message;
+            if done {
+                self.onboarding.importing = None;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+        }
         if !self.onboarding.message.is_empty() {
             let message = self.onboarding.message.clone();
             text(ui, &message, 12., 200);
