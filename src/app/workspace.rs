@@ -103,7 +103,7 @@ impl Editor {
             }
             if ctx.input(|i| i.key_pressed(egui::Key::D)) {
                 if self.library_mode {
-                    if let Some(id) = self.library.as_ref().and_then(|l| l.selected) {
+                    if let Some(id) = self.library.as_mut().and_then(|l| l.selected_or_first()) {
                         self.develop_catalog_photo(id);
                     }
                 } else {
@@ -249,8 +249,10 @@ impl Editor {
                             {
                                 self.onboarding.visible = false;
                                 if self.library_mode
-                                    && let Some(id) =
-                                        self.library.as_ref().and_then(|library| library.selected)
+                                    && let Some(id) = self
+                                        .library
+                                        .as_mut()
+                                        .and_then(|library| library.selected_or_first())
                                 {
                                     self.develop_catalog_photo(id);
                                 } else {

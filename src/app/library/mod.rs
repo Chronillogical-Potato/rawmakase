@@ -633,6 +633,15 @@ impl Library {
             image,
         });
     }
+    /// The selected photo, or else the first one shown in the current
+    /// folder or filter (which then becomes selected), as Lightroom does
+    /// when switching to Develop.
+    pub(super) fn selected_or_first(&mut self) -> Option<i64> {
+        if self.selected.is_none() {
+            self.selected = self.visible.first().map(|i| self.photos[*i].id);
+        }
+        self.selected
+    }
     /// Whether the photo's thumbnail already shows its edit (crop included).
     pub(super) fn has_edited_thumbnail(&self, path: &std::path::Path) -> bool {
         self.edited_ready.contains(path) && self.thumbs.contains_key(path)
