@@ -1057,6 +1057,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
+name = "fastframe-fonts"
+version = "0.1.7"
+source = "git+https://github.com/crmne/fastframe?tag=v0.1.7#9cb28309097ef313ca38570e4d9d53faed92bdd1"
+dependencies = [
+ "directories",
+ "egui",
+ "log",
+ "memmap2",
+ "skrifa",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "fastframe-macos"
 version = "0.1.7"
 source = "git+https://github.com/crmne/fastframe?tag=v0.1.7#9cb28309097ef313ca38570e4d9d53faed92bdd1"
@@ -2739,6 +2752,7 @@ dependencies = [
  "cc",
  "clap",
  "eframe",
+ "fastframe-fonts",
  "fastframe-macos",
  "fastframe-text",
  "fastframe-theme",

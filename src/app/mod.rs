@@ -304,32 +304,11 @@ mod updates;
 
 mod events;
 
-/// egui's bundled fonts, rendered as the desktop renders text. They miss many
-/// symbols that preset and profile names use (superscripts, arrows, ◊…), so a
-/// broad-coverage system font is added as the last fallback so they render
-/// instead of showing boxes. Missing files are skipped.
+/// Inter, with tabular figures so values keep their width as they change,
+/// and an installed face for every script and symbol it lacks (fastframe-fonts),
+/// rendered as the desktop renders text.
 fn install_fonts(ctx: &egui::Context, text: &fastframe_text::TextRendering) {
-    const CANDIDATES: [&str; 6] = [
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "/System/Library/Fonts/Apple Symbols.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        "C:\\Windows\\Fonts\\seguisym.ttf",
-    ];
-    let mut fonts = egui::FontDefinitions::default();
-    for (i, path) in CANDIDATES.iter().enumerate() {
-        if let Ok(bytes) = std::fs::read(path) {
-            let name = format!("fallback-{i}");
-            fonts.font_data.insert(
-                name.clone(),
-                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
-            );
-            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().push(name.clone());
-            }
-        }
-    }
+    let mut fonts = fastframe_fonts::FontSetup::default().definitions();
     text.apply_to(&mut fonts);
     ctx.set_fonts(fonts);
 }

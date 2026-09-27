@@ -31,6 +31,7 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # yet: pin a tag and update it deliberately.
 fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 
