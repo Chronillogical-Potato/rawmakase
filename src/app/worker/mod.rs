@@ -45,7 +45,6 @@ pub enum Event {
     DialogClosed,
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
     Open(PathBuf),
-    ExportPath(PathBuf),
     Monitor(PathBuf),
     CameraProfile(Vec<PathBuf>),
     LensProfiles(Vec<PathBuf>),

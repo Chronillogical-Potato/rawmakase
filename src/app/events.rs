@@ -16,14 +16,6 @@ impl Editor {
                     self.activity.finish_dialog();
                     self.open(p);
                 }
-                Event::ExportPath(p) => {
-                    self.activity.finish_dialog();
-                    if p.exists() {
-                        self.activity.await_overwrite(p);
-                    } else {
-                        self.start_export(p, false, ctx);
-                    }
-                }
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
                     self.view.monitor = Some(p);
@@ -164,7 +156,6 @@ impl Editor {
                     self.activity.finish_dialog();
                 }
                 Event::Exported(s) => {
-                    self.activity.finish_export();
                     self.status = s;
                 }
                 _ => {}

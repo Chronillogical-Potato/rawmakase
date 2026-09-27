@@ -84,45 +84,25 @@ impl Editor {
                         self.view.clipping = !self.view.clipping;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let export = toolbar_action(
+                        if toolbar_action(
                             ui,
-                            if self.activity.is_exporting() {
-                                "Exporting…"
-                            } else {
-                                "Export"
-                            },
+                            "Export",
                             94.,
                             true,
-                            // Export waits for the full-resolution decode.
-                            self.document.full().is_some_and(|im| !im.fast)
-                                && !self.activity.is_busy(),
+                            self.document.full().is_some(),
                             4,
-                        );
-                        egui::Popup::from_toggle_button_response(&export)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .show(|ui| {
-                                ui.set_min_width(220.);
-                                ui.add(
-                                    egui::Slider::new(&mut self.document.export.quality, 1..=100)
-                                        .text("JPEG quality"),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label("Long edge");
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.document.export.max_edge)
-                                            .range(0..=30000)
-                                            .suffix(" px"),
-                                    );
-                                });
-                                ui.small("0 = original size. TIFF is 16-bit sRGB.");
-                                ui.separator();
-                                if ui.button("Export…").clicked() {
-                                    self.dialog(FileDialog::Export, &ctx);
-                                    ui.close();
-                                }
-                            });
+                        )
+                        .on_hover_text(if cfg!(target_os = "macos") {
+                            "Export… · ⇧⌘E"
+                        } else {
+                            "Export… · Ctrl+Shift+E"
+                        })
+                        .clicked()
+                        {
+                            self.open_export_dialog();
+                        }
                         ui.menu_button("Settings", |ui| {
-                            ui.set_width(250.);
+                            ui.set_width(270.);
                             ui.spacing_mut().item_spacing.y = 0.;
                             let (cmd, shift) = if cfg!(target_os = "macos") {
                                 ("⌘ ", "Shift ")
@@ -157,6 +137,21 @@ impl Editor {
                             }
                             if menu_item(ui, "Load Preset…", "", true, false) {
                                 self.dialog(FileDialog::LoadPreset, &ctx);
+                                ui.close();
+                            }
+                            menu_separator(ui);
+                            let (export, previous) = if cfg!(target_os = "macos") {
+                                ("⇧⌘E", "⌥⇧⌘E")
+                            } else {
+                                ("Ctrl+Shift+E", "Ctrl+Alt+Shift+E")
+                            };
+                            let photo = self.document.full().is_some();
+                            if menu_item(ui, "Export…", export, photo, false) {
+                                self.open_export_dialog();
+                                ui.close();
+                            }
+                            if menu_item(ui, "Export with Previous", previous, photo, false) {
+                                self.export_with_previous();
                                 ui.close();
                             }
                             menu_separator(ui);
@@ -227,6 +222,15 @@ impl Editor {
                     (format!("{cmd}{shift}C"), "Copy settings"),
                     (format!("{cmd}{shift}V"), "Paste settings"),
                     (format!("{cmd}{shift}R"), "Reset all settings"),
+                    (format!("{cmd}{shift}E"), "Export…"),
+                    (
+                        if cfg!(target_os = "macos") {
+                            "⌥⇧⌘E".to_string()
+                        } else {
+                            "Ctrl+Alt+Shift+E".to_string()
+                        },
+                        "Export with previous",
+                    ),
                     ("Double-click slider".into(), "Reset slider"),
                 ],
             ),

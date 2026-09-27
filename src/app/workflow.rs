@@ -1,6 +1,6 @@
 use super::Editor;
-use super::worker::{Event, LoadJob, RenderJob};
-use crate::develop::{self, Geometry, Recipe};
+use super::worker::{LoadJob, RenderJob};
+use crate::develop::{Geometry, Recipe};
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -206,38 +206,6 @@ impl Editor {
                     Some(ctx.load_texture("photo region", image, egui::TextureOptions::LINEAR))
             }
         }
-    }
-    pub(super) fn start_export(&mut self, path: PathBuf, overwrite: bool, ctx: &egui::Context) {
-        let (Some(im), Some(source)) = (self.document.full().cloned(), self.document.path.clone())
-        else {
-            return;
-        };
-        if im.fast {
-            self.status = "Wait for the full-resolution image before exporting".into();
-            return;
-        }
-        if self.activity.is_exporting() {
-            return;
-        }
-        let r = self.document.recipe.clone();
-        let options = self.document.export.clone();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-        if !self.activity.begin_export() {
-            return;
-        }
-        self.status = "Exporting…".into();
-        std::thread::spawn(move || {
-            let result = develop::render(&im, &r, options.max_edge).and_then(|out| {
-                crate::export::export(&path, &source, &out, &im.metadata, &options, overwrite)
-            });
-            let status = match result {
-                Ok(()) => format!("Exported {}", path.display()),
-                Err(e) => format!("Export failed: {e}"),
-            };
-            let _ = tx.send(Event::Exported(status));
-            ctx.request_repaint();
-        });
     }
     pub(super) fn navigate(&mut self, delta: isize) {
         if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo) {

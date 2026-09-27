@@ -227,13 +227,17 @@ fn main() -> Result<()> {
             let developed = t.elapsed();
             let out = develop::render(&im, &edit, max_edge)?;
             let rendered = t.elapsed() - developed;
-            rawmakase::export::export(
+            rawmakase::export::export_with(
                 &output,
                 &input,
                 &out,
                 &im.metadata,
                 &ExportOptions {
                     max_edge,
+                    ..Default::default()
+                },
+                &rawmakase::export::Embed {
+                    camera: rawmakase::export::exif::read(&input),
                     ..Default::default()
                 },
                 overwrite,

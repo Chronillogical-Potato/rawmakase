@@ -1,6 +1,7 @@
 //! Namespace-aware Adobe settings parsing and application to a develop recipe.
 mod apply;
 mod parse;
+pub mod write;
 use crate::develop::curve::ToneCurve;
 pub use parse::parse;
 use std::{collections::BTreeMap, path::PathBuf};

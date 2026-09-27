@@ -24,7 +24,8 @@ impl Tiff {
         f.seek(SeekFrom::Start(base)).ok()?;
         f.read_exact(&mut h).ok()?;
         let little = match &h[..4] {
-            b"II*\0" => true,
+            // Olympus ORF and Panasonic RW2 use their own magic numbers.
+            b"II*\0" | b"IIRO" | b"IIRS" | b"IIU\0" => true,
             b"MM\0*" => false,
             _ => return None,
         };

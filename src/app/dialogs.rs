@@ -6,7 +6,6 @@ use eframe::egui;
 pub(super) enum FileDialog {
     OpenRaw,
     OpenFolder,
-    Export,
     MonitorProfile,
     LoadPreset,
     SavePreset,
@@ -37,14 +36,6 @@ impl Editor {
         }
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        let name = self
-            .document
-            .path
-            .as_ref()
-            .and_then(|p| p.file_stem())
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
         std::thread::spawn(move || {
             if matches!(kind, FileDialog::CameraProfile) {
                 let event = rfd::FileDialog::new()
@@ -71,11 +62,6 @@ impl Editor {
                     .add_filter("Camera RAW", &crate::storage::RAW_EXTENSIONS)
                     .pick_file(),
                 FileDialog::OpenFolder => rfd::FileDialog::new().pick_folder(),
-                FileDialog::Export => rfd::FileDialog::new()
-                    .add_filter("JPEG", &["jpg"])
-                    .add_filter("16-bit TIFF", &["tiff"])
-                    .set_file_name(format!("{name}-edited.jpg"))
-                    .save_file(),
                 FileDialog::MonitorProfile => rfd::FileDialog::new()
                     .add_filter("ICC profile", &["icc", "icm"])
                     .pick_file(),
@@ -95,7 +81,6 @@ impl Editor {
             let event = selected
                 .map(|p| match kind {
                     FileDialog::OpenRaw | FileDialog::OpenFolder => Event::Open(p),
-                    FileDialog::Export => Event::ExportPath(p),
                     FileDialog::MonitorProfile => Event::Monitor(p),
                     FileDialog::CameraProfile | FileDialog::LensProfile => unreachable!(),
                     FileDialog::ImportXmp => Event::XmpImport(p),

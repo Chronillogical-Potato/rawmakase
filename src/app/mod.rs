@@ -38,6 +38,7 @@ pub struct Editor {
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
     preferences: preferences::Preferences,
+    exports: export::Exports,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
     /// That position as last written to the session.
@@ -157,6 +158,7 @@ impl Editor {
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
+            exports: Default::default(),
             restore: Some((
                 session.library_source.clone(),
                 session.selected_photo,
@@ -238,6 +240,7 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
 
 mod catalog;
 mod dialogs;
+mod export;
 mod inspector;
 pub mod library;
 mod onboarding;

@@ -64,7 +64,7 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open;
+        let modal = self.preferences.open || self.export_modal();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -91,6 +91,7 @@ impl Editor {
         }
         self.shortcuts_window(&ctx);
         self.preferences_window(&ctx);
+        self.export_windows(&ctx);
         self.pending_work(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(
@@ -259,6 +260,7 @@ impl Editor {
                     if self.activity.is_dialog() {
                         ui.spinner();
                     }
+                    self.export_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
@@ -393,6 +395,7 @@ impl Editor {
                 self.dialog(FileDialog::OpenRaw, ctx);
             }
             let (mut copy, mut paste, mut reset, mut zoom_step) = (false, false, false, 0);
+            let mut export = None;
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowRight) {
                     self.navigate(1);
@@ -408,6 +411,16 @@ impl Editor {
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
+                }
+                // Shift+Cmd+E exports, Option+Shift+Cmd+E exports with the previous
+                // choices. Option changes the typed letter on macOS, so match the
+                // physical key too.
+                let e = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
+                        if *key == egui::Key::E || *physical_key == Some(egui::Key::E))
+                });
+                if e && i.modifiers.command && i.modifiers.shift {
+                    export = Some(i.modifiers.alt);
                 }
                 // Cmd+Z / Cmd+Shift+Z on macOS, Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y elsewhere.
                 if i.modifiers.command && i.key_pressed(egui::Key::Z) {
@@ -472,6 +485,11 @@ impl Editor {
             }
             if reset {
                 self.reset_settings();
+            }
+            match export {
+                Some(true) => self.export_with_previous(),
+                Some(false) => self.open_export_dialog(),
+                None => {}
             }
             if paste {
                 self.paste_settings();
@@ -621,32 +639,13 @@ impl Editor {
         if self.document.save.needs_save() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
-        if let Some(path) = self.activity.pending_export().cloned() {
-            egui::Window::new("Replace exported file?")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(path.display().to_string());
-                    ui.horizontal(|ui| {
-                        if ui.button("Replace").clicked() {
-                            self.activity.cancel_overwrite();
-                            self.start_export(path.clone(), true, ctx);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.activity.cancel_overwrite();
-                        }
-                    });
-                });
-        }
-        if ctx.input(|i| i.viewport().close_requested())
-            && (self.activity.is_exporting() || !self.flush())
-        {
+        if ctx.input(|i| i.viewport().close_requested()) && (self.exporting() || !self.flush()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_confirm = true;
         }
         if self.close_confirm {
             egui::Window::new("Work still pending").show(ctx, |ui| {
-                ui.label(if self.activity.is_exporting() {
+                ui.label(if self.exporting() {
                     "Wait for the export to finish before closing."
                 } else {
                     "Edits could not be saved. Retry or save a preset before closing."
@@ -654,7 +653,7 @@ impl Editor {
                 if ui.button("Keep editing").clicked() {
                     self.close_confirm = false;
                 }
-                if !self.activity.is_exporting() && ui.button("Close without saving").clicked() {
+                if !self.exporting() && ui.button("Close without saving").clicked() {
                     self.document.save.saved();
                     self.close_confirm = false;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -37,3 +37,127 @@ fn icc_export_and_sixteen_bit_precision() -> Result<()> {
     assert_eq!(unique.len(), 1024);
     Ok(())
 }
+#[test]
+fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
+    use crate::develop::Recipe;
+    let m = Metadata {
+        make: "Sony".into(),
+        model: "ILCE-7M2".into(),
+        lens_model: "FE 55mm F1.8 ZA".into(),
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut r = Recipe {
+        exposure: 0.4,
+        contrast: 0.12,
+        shadows: -0.3,
+        vibrance: 0.25,
+        straighten: 1.5,
+        crop: [0.1, 0.05, 0.9, 0.95],
+        sharpening: 0.4,
+        ..Default::default()
+    };
+    r.hsl[3][0] = 0.26;
+    r.hsl[5][1] = -0.72;
+    r.grading[0] = [220. / 360., 0.2, -0.1];
+    r.effects.clarity = 0.15;
+    r.curve.points = vec![[0., 0.1], [0.5, 0.55], [1., 1.]];
+    let photo = crate::xmp::write::Photo {
+        raw_name: "DSC07924.ARW".into(),
+        captured: Some("2018:08:26 10:39:33".into()),
+        now: "2026-09-27T06:12:22Z".into(),
+        rating: 3,
+        keywords: vec!["coffee & books".into()],
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(packet.contains("crs:Exposure2012=\"+0.40\""));
+    assert!(packet.contains("xmp:CreateDate=\"2018-08-26T10:39:33\""));
+    assert!(packet.contains("coffee &amp; books"));
+    let preset = crate::xmp::parse(Path::new("export.xmp"), &packet)?;
+    let back = preset.apply(&Recipe::default(), &m, &[], None)?;
+    for (a, b) in [
+        (back.exposure, r.exposure),
+        (back.contrast, r.contrast),
+        (back.shadows, r.shadows),
+        (back.vibrance, r.vibrance),
+        (back.straighten, r.straighten),
+        (back.sharpening, r.sharpening),
+        (back.hsl[3][0], r.hsl[3][0]),
+        (back.hsl[5][1], r.hsl[5][1]),
+        (back.grading[0][0], r.grading[0][0]),
+        (back.grading[0][2], r.grading[0][2]),
+        (back.effects.clarity, r.effects.clarity),
+    ] {
+        assert!((a - b).abs() < 0.006, "{a} != {b}");
+    }
+    assert_eq!(back.crop, r.crop);
+    assert_eq!(back.curve.points.len(), 3);
+    Ok(())
+}
+#[test]
+fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.ARW");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 8,
+        height: 4,
+        pixels: vec![[0.5; 3]; 32],
+    };
+    let camera = exif::CameraExif {
+        main: vec![
+            exif::Field::ascii(0x010f, "SONY"),
+            exif::Field::ascii(0x0110, "ILCE-7M2"),
+        ],
+        exif: vec![
+            exif::Field::ascii(0x9003, "2018:08:26 10:39:33"),
+            exif::Field::ascii(0xa434, "FE 55mm F1.8 ZA"),
+            exif::Field::ascii(0x927c, "maker note"),
+        ],
+        gps: vec![exif::Field::rational(0x0002, 52, 1)],
+    };
+    let embed = Embed {
+        camera: Some(camera.clone()),
+        xmp: Some("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"/>".into()),
+        ..Default::default()
+    };
+    let jpg = dir.path().join("out.jpg");
+    let m = Metadata::default();
+    export_with(
+        &jpg,
+        &source,
+        &image,
+        &m,
+        &ExportOptions::default(),
+        &embed,
+        false,
+    )?;
+    let bytes = fs::read(&jpg)?;
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(has(b"2018:08:26 10:39:33"));
+    assert!(has(b"FE 55mm F1.8 ZA"));
+    assert!(has(b"http://ns.adobe.com/xap/1.0/\0<x:xmpmeta"));
+    assert!(image::open(&jpg).is_ok());
+    let tif = dir.path().join("out.tif");
+    let without_location = Embed {
+        location: false,
+        ..embed
+    };
+    export_with(
+        &tif,
+        &source,
+        &image,
+        &m,
+        &ExportOptions::default(),
+        &without_location,
+        false,
+    )?;
+    assert!(image::open(&tif).is_ok());
+    Ok(())
+}

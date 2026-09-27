@@ -456,24 +456,6 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
 }
 
 #[test]
-fn overwrite_confirmation_holds_the_document_and_blocks_other_dialogs() {
-    let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
-    editor.document.path = Some("original.ARW".into());
-    editor.activity.await_overwrite("output.jpg".into());
-    editor.open_raw("another.ARW".into(), None);
-    editor.open("source.lrcat".into());
-    assert!(!editor.library_mode);
-    assert_eq!(
-        editor.document.path.as_deref(),
-        Some(std::path::Path::new("original.ARW"))
-    );
-    assert!(!editor.load.is_running());
-    assert!(!editor.activity.begin_dialog());
-    assert!(editor.activity.pending_export().is_some());
-}
-
-#[test]
 fn catalog_header_keeps_the_recipe_resolved_by_the_loader() -> anyhow::Result<()> {
     use worker::LoadedHeader;
     let dir = tempfile::tempdir()?;
