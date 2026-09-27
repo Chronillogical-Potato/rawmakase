@@ -2,8 +2,10 @@
 //! Subtract and Intersect, brushes and gradients on the photo, range sampling and
 //! each mask's adjustment sliders.
 use super::Editor;
+use super::icons::{self, Icon};
 use super::overlay;
 use super::retouch_tool::{control_label, hint, indented};
+use super::theme;
 use super::widgets::{segmented, set_edit_context, slider_with};
 use crate::develop::{
     ViewMapping,
@@ -522,7 +524,7 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    Color32::from_gray(if active {
+                    theme::gray(if active {
                         72
                     } else if response.hovered() {
                         50
@@ -578,7 +580,7 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    Color32::from_gray(if active {
+                    theme::gray(if active {
                         64
                     } else if response.hovered() {
                         46
@@ -611,7 +613,7 @@ impl Editor {
                         egui::Align2::LEFT_CENTER,
                         mask_name(mask, i),
                         egui::FontId::proportional(11.5),
-                        Color32::from_gray(if mask.hidden { 120 } else { 225 }),
+                        theme::gray(if mask.hidden { 120 } else { 225 }),
                     );
                 }
                 if let Some(c) = mask.components.first() {
@@ -659,7 +661,7 @@ impl Editor {
                             ui.painter().rect_filled(
                                 rect,
                                 3.,
-                                Color32::from_gray(if active { 56 } else { 42 }),
+                                theme::gray(if active { 56 } else { 42 }),
                             );
                         }
                         let op = match (k, c.op) {
@@ -679,7 +681,7 @@ impl Editor {
                             egui::Align2::LEFT_CENTER,
                             format!("{op}{}{invert}", c.shape.kind()),
                             egui::FontId::proportional(11.),
-                            Color32::from_gray(200),
+                            theme::gray(200),
                         );
                         if response.clicked() {
                             select_component = Some(k);
@@ -1133,7 +1135,7 @@ fn draw_shape(
 }
 /// Small icons for each kind of mask.
 fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
-    let color = Color32::from_gray(if strong { 240 } else { 170 });
+    let color = theme::gray(if strong { 240 } else { 170 });
     let stroke = Stroke::new(1.3, color);
     match kind {
         Kind::Brush => {
@@ -1159,7 +1161,7 @@ fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
             }
         }
         Kind::Luminance => {
-            painter.circle_filled(c, 5.5, Color32::from_gray(60));
+            painter.circle_filled(c, 5.5, theme::gray(60));
             let half = (0..=18)
                 .map(|i| {
                     let t = std::f32::consts::FRAC_PI_2 + i as f32 / 18. * std::f32::consts::PI;
@@ -1171,21 +1173,12 @@ fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
     }
 }
 fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
-    let color = Color32::from_gray(if hovered { 235 } else { 160 });
-    let arc = |sign: f32| {
-        (0..=16).map(move |i| {
-            let t = i as f32 / 16. * std::f32::consts::PI;
-            c + Vec2::new(-sign * t.cos() * 6., -sign * t.sin() * 3.5)
-        })
-    };
-    let points: Vec<Pos2> = arc(1.).chain(arc(-1.)).collect();
-    painter.add(egui::Shape::closed_line(points, Stroke::new(1.1, color)));
-    if open {
-        painter.circle_filled(c, 1.8, color);
-    } else {
-        painter.line_segment(
-            [c + Vec2::new(-6., 5.), c + Vec2::new(6., -5.)],
-            Stroke::new(1.1, color),
-        );
-    }
+    let icon = if open { Icon::Eye } else { Icon::EyeOff };
+    icons::paint_at(
+        painter,
+        icon,
+        c,
+        14.,
+        theme::gray(if hovered { 235 } else { 160 }),
+    );
 }

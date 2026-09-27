@@ -25,6 +25,8 @@ fastframe_icons::icons! {
         More => lucide "ellipsis",
         ChevronDown => lucide "chevron-down",
         ChevronRight => lucide "chevron-right",
+        Eye => lucide "eye",
+        EyeOff => lucide "eye-off",
     }
 }
 

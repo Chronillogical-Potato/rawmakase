@@ -206,8 +206,18 @@ impl Editor {
                 });
         };
         match self.view.tool {
-            Tool::Remove => return drawer(ui, &mut |ui| self.retouch_panel(ui)),
-            Tool::Mask => return drawer(ui, &mut |ui| self.mask_panel(ui)),
+            Tool::Remove => {
+                return drawer(ui, &mut |ui| {
+                    experimental(ui);
+                    self.retouch_panel(ui)
+                });
+            }
+            Tool::Mask => {
+                return drawer(ui, &mut |ui| {
+                    experimental(ui);
+                    self.mask_panel(ui)
+                });
+            }
             Tool::Crop => {}
             _ => return,
         }
@@ -473,11 +483,8 @@ impl Editor {
                 let (rect, response) = ui.allocate_exact_size(Vec2::new(26., 20.), Sense::click());
                 let picking = view.is(Tool::WhiteBalance);
                 if picking || response.hovered() {
-                    ui.painter().rect_filled(
-                        rect,
-                        3.,
-                        theme::gray(if picking { 72 } else { 50 }),
-                    );
+                    ui.painter()
+                        .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
                 }
                 eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
                 if response
@@ -1248,9 +1255,24 @@ fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     let color = theme::gray(if strong { 235 } else { 170 });
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
 }
+/// The line that opens the Remove and Masking drawers: both tools are new.
+fn experimental(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.add_space(83.);
+        ui.label(
+            egui::RichText::new("Experimental · early version")
+                .size(10.)
+                .color(theme::warning()),
+        )
+        .on_hover_text(
+            "Not yet measured against Lightroom. Spots and masks are saved apart from the \
+             rest of the edit, so older RAWmakase releases open the photo without them.",
+        );
+    });
+}
 /// A circle with an arrow leaving it: the Remove tool.
 fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, Color32::from_gray(if strong { 240 } else { 170 }));
+    let stroke = Stroke::new(1.4, theme::gray(if strong { 240 } else { 170 }));
     painter.circle_stroke(c + Vec2::new(-2., 2.), 4.5, stroke);
     painter.line_segment([c + Vec2::new(1.5, -1.5), c + Vec2::new(6., -6.)], stroke);
     painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(2.5, -6.)], stroke);
@@ -1258,7 +1280,7 @@ fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
 }
 /// A dashed circle over a square: the Masking tool.
 fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = Color32::from_gray(if strong { 240 } else { 170 });
+    let color = theme::gray(if strong { 240 } else { 170 });
     let stroke = Stroke::new(1.4, color);
     painter.rect_stroke(
         Rect::from_center_size(c, Vec2::splat(12.)),

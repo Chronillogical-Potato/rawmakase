@@ -7,6 +7,7 @@
 //! source circle moves the source.
 use super::Editor;
 use super::overlay;
+use super::theme;
 use super::widgets::{segmented, slider_with};
 use crate::develop::{
     ViewMapping,
@@ -494,8 +495,8 @@ impl Editor {
             if ui
                 .add_sized(
                     [w, 22.],
-                    egui::Button::new(egui::RichText::new("Close").color(Color32::from_gray(245)))
-                        .fill(Color32::from_rgb(62, 88, 115)),
+                    egui::Button::new(egui::RichText::new("Close").color(theme::on_accent()))
+                        .fill(theme::accent()),
                 )
                 .on_hover_text("Close the tool · Q")
                 .clicked()
@@ -561,7 +562,7 @@ pub(super) fn control_label(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mu
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            Color32::from_gray(190),
+            theme::gray(190),
         );
         add(ui);
     });
@@ -576,12 +577,7 @@ pub(super) fn indented(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     indented(ui, |ui| {
         ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .size(10.)
-                    .color(Color32::from_gray(125)),
-            )
-            .wrap(),
+            egui::Label::new(egui::RichText::new(text).size(10.).color(theme::gray(125))).wrap(),
         );
     });
 }

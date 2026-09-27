@@ -1,5 +1,8 @@
 # Masking
 
+Status: experimental and early. It works, but the local sliders are not measured
+against Lightroom yet, and details may change.
+
 The Masking tool (Shift+W) works like Lightroom Classic's Masking panel for the
 masks that need no AI model: Brush, Linear Gradient, Radial Gradient, Color Range and
 Luminance Range. Subject, Sky, Background, Objects, People and Depth masks are not

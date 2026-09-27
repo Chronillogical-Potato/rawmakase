@@ -1,5 +1,8 @@
 # Spot removal
 
+Status: experimental and early. It works, but none of it is measured against
+Lightroom yet, and details may change.
+
 The Remove tool (Q) works like Lightroom Classic's Remove panel in Heal and Clone
 modes. The AI Remove mode is not implemented yet.
 

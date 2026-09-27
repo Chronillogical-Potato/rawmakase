@@ -48,7 +48,12 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Local and finishing adjustments
 
-- Masks, local adjustments, AI selections, healing/removal, AI denoise and Enhance are not implemented.
+- **Spot removal and masks are experimental and early** ([retouching](retouching.md), [masking](masking.md)). Heal and Clone, and brush, linear, radial, color range and luminance range masks with local sliders render, but none of it is measured against Camera Raw:
+  - Heal's algorithm, feather profile and automatic source choice are our own; results look alike but are not compared numerically.
+  - Local Contrast, Highlights, Shadows, Whites, Blacks and Dehaze reuse the measured global responses. Local Temp, Tint, Hue, Saturation, Color, Texture, Clarity, Sharpness and Noise are approximations; Noise only reduces noise, and local Moiré, Defringe, Grain and tone curves are not implemented.
+  - Gradient transition and brush feather profiles, Flow build-up, Auto Mask edges and range-mask Refine/Smoothness are approximations.
+  - AI selections (Subject, Sky, Background, Objects, People, Depth), the AI Remove mode, AI Denoise, Enhance and Lens Blur are not implemented.
+- **Lightroom import of spots and masks:** positions (default crop, unrotated sensor frame), long-edge sizes and spot sources were checked exactly against Camera Raw renders. Gradient Full/Zero points, the radial `Flipped` flag (read as inside the ellipse; not flipped applies outside, as the old Radial Filter default), the radial angle's sign, mask blend modes (0 add, 1 subtract, 2 intersect), brush feather from `CenterWeight`, local Hue's scale and legacy range-mask feathering are assumptions: Camera Raw ignored the test files for those. Color range masks and AI masks are reported and left out.
 - Post-crop vignetting, grain, Glow and Reshape are not measured. Glow and Reshape are rejected when non-zero.
 - HDR editing and output are not implemented.
 

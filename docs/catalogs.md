@@ -38,7 +38,7 @@ Smart collection definitions and any stored membership are preserved; RAWmakase 
 
 ## Lightroom rendering
 
-Imported Lightroom settings are initially preserved, not silently rendered as if equivalent. **Apply compatible Lightroom edits** makes one undoable change using RAWmakase's supported controls. It parses Lightroom's serialized settings as data, never as executable Lua. It reports missing profiles and unsupported controls, including masks, retouching, lens corrections and perspective operations. Compatible controls use RAWmakase's algorithms; this is not a Lightroom appearance guarantee. The untouched original settings remain in the database even after further editing. Lightroom orientation metadata is preserved; current previews/Develop use the source camera orientation.
+Imported Lightroom settings are initially preserved, not silently rendered as if equivalent. **Apply compatible Lightroom edits** makes one undoable change using RAWmakase's supported controls. It parses Lightroom's serialized settings as data, never as executable Lua. It reports missing profiles and unsupported controls, such as AI and color-range masks, lens corrections and perspective operations. Spot removal and brush, gradient, radial and luminance-range masks convert to RAWmakase's experimental spots and masks. Compatible controls use RAWmakase's algorithms; this is not a Lightroom appearance guarantee. The untouched original settings remain in the database even after further editing. Lightroom orientation metadata is preserved; current previews/Develop use the source camera orientation.
 
 ## Relinking offline photos
 

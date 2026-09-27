@@ -235,6 +235,9 @@ pub(super) fn on_accent() -> Color32 {
 pub(super) fn danger() -> Color32 {
     current().danger
 }
+pub(super) fn warning() -> Color32 {
+    current().warning
+}
 
 /// Makes `palette` current and styles egui's own widgets with it.
 pub(super) fn apply(ctx: &egui::Context, palette: Palette, text: &fastframe_text::TextRendering) {

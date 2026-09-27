@@ -9,6 +9,7 @@ It is a personal project in active development. Rendering aims for close, not ex
 ## Features
 
 - **Develop**: white balance and picker, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
+- **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders and collections, ratings, flags, color labels, keywords, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
 - **Presets and profiles**: Lightroom XMP presets, plus DCP and XMP camera profiles you import yourself.
 - **Non-destructive**: originals are never modified. Edits live in sidecar JSON files or in the catalog, and all writes are atomic.
@@ -112,7 +113,7 @@ rawmakase help
 
 ### Where data lives
 
-- Edits for photos opened outside a catalog: `photo.dng.rawmakase.json` next to the RAW, or in the data directory's `sidecars/` folder for read-only locations.
+- Edits for photos opened outside a catalog: `photo.dng.rawmakase.json` next to the RAW (spots and masks in `photo.dng.rawmakase-local.json`), or in the data directory's `sidecars/` folder for read-only locations.
 - Catalogs: the `.rawmakase` file you choose.
 - Profiles, presets, previews and session state: `~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` (default `~/.local/share/rawmakase`) on Linux. `RAWMAKASE_DATA_DIR` overrides it.
 
