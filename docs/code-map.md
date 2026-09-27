@@ -110,9 +110,9 @@ recipes and the installed preset collection; they do not own the renderer.
 | --- | --- |
 | [storage/mod.rs](../src/storage/mod.rs) | Shared persistence and path API. |
 | [files.rs](../src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
-| [format.rs](../src/storage/format.rs) | Saved schema/pipeline versions (7 only for recipes with spots or masks, 6 otherwise), envelope validation and legacy recipe migration. |
+| [format.rs](../src/storage/format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
-| [sidecar.rs](../src/storage/sidecar.rs) | RAW fingerprints, sidecar loading/saving, fallback storage and conflict protection. |
+| [sidecar.rs](../src/storage/sidecar.rs) | RAW fingerprints, sidecar loading/saving, fallback storage and conflict protection; spots and masks in the companion `*.rawmakase-local.json`. |
 | [session.rs](../src/storage/session.rs) | Last-opened path and monitor-profile preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, folders, photos, collections, metadata, edits, relinking and folder ingestion. |
 | [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
@@ -211,8 +211,8 @@ above rather than implementing SQL, file formats or pixel processing.
 | Data | Location and lifetime |
 | --- | --- |
 | Original RAW and Lightroom catalog | User-selected source files; treated as read-only. |
-| Standalone edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`; identity-keyed JSON under the data directory's `sidecars/` when adjacent storage is unavailable. Protected conflicts must not be overwritten. |
-| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. |
+| Standalone edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks (experimental); identity-keyed JSON under the data directory's `sidecars/` when adjacent storage is unavailable. Protected conflicts must not be overwritten. |
+| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots and masks are in the `local_edits` table, raster data in `bitmaps`. |
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF destination. |
 | Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |

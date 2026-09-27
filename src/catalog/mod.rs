@@ -25,6 +25,10 @@ const LIGHTROOM_HISTORY_TABLE: &str = "CREATE TABLE IF NOT EXISTS lightroom_hist
     created REAL,
     text TEXT NOT NULL,
     PRIMARY KEY(photo, position));";
+/// Spots and masks of a photo's edit (experimental), as `LocalEdits` JSON: kept out of
+/// the recipe column so releases before them still read every edit.
+const LOCAL_EDITS_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS local_edits(photo INTEGER PRIMARY KEY, data TEXT NOT NULL);";
 /// Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
 const BITMAPS_TABLE: &str =
     "CREATE TABLE IF NOT EXISTS bitmaps(hash TEXT PRIMARY KEY, data BLOB NOT NULL);";
@@ -88,6 +92,7 @@ impl Catalog {
         // Added after version 1 shipped; additive, so older catalogs gain it on open.
         db.execute_batch(LIGHTROOM_HISTORY_TABLE)?;
         db.execute_batch(BITMAPS_TABLE)?;
+        db.execute_batch(LOCAL_EDITS_TABLE)?;
         Ok(Self {
             path: path.into(),
             db,
@@ -276,8 +281,34 @@ impl Catalog {
         let identity = Identity::read(path)?;
         // Refuse replacing an edit after the underlying source changed.
         let _ = self.load_edit(id, path)?;
-        ensure!(self.db.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(recipe)?,serde_json::to_string(export)?,serde_json::to_string(&identity)?,id])?==1,"Unknown photo");
+        let (saved, local) = recipe.split_local();
+        let tx = self.db.unchecked_transaction()?;
+        ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(export)?,serde_json::to_string(&identity)?,id])?==1,"Unknown photo");
+        if local.is_empty() {
+            tx.execute("DELETE FROM local_edits WHERE photo=?", [id])?;
+        } else {
+            tx.execute(
+                "INSERT OR REPLACE INTO local_edits(photo, data) VALUES (?, ?)",
+                params![id, serde_json::to_string(&local)?],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+    /// The photo's spots and masks, saved apart from its recipe.
+    fn local_edits(&self, id: i64) -> Result<crate::develop::LocalEdits> {
+        let data: Option<String> = self
+            .db
+            .query_row("SELECT data FROM local_edits WHERE photo=?", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let local: crate::develop::LocalEdits = match data {
+            Some(d) => serde_json::from_str(&d)?,
+            None => Default::default(),
+        };
+        local.validate()?;
+        Ok(local)
     }
     pub fn load_edit(&self, id: i64, path: &Path) -> Result<Option<SavedEdit>> {
         let (recipe, export, identity): (Option<String>, Option<String>, Option<String>) =
@@ -294,6 +325,7 @@ impl Catalog {
                 "Photo changed since this catalog edit was saved; catalog edit protected"
             );
             let recipe: Recipe = serde_json::from_str(&recipe)?;
+            let recipe = recipe.with_local(self.local_edits(id)?);
             recipe.validate()?;
             let export: ExportOptions =
                 serde_json::from_str(&export.context("Missing export settings")?)?;
@@ -303,13 +335,23 @@ impl Catalog {
             Ok(None)
         }
     }
-    /// The saved RAWmakase recipe (JSON) and Lightroom develop text, if any.
+    /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
+    /// develop text, if any.
     pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
-        Ok(self.db.query_row(
+        let (recipe, lightroom): (Option<String>, Option<String>) = self.db.query_row(
             "SELECT recipe, lightroom_develop FROM photos WHERE id=?",
             [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
-        )?)
+        )?;
+        let local = self.local_edits(id)?;
+        let recipe = match recipe {
+            Some(text) if !local.is_empty() => {
+                let recipe: Recipe = serde_json::from_str(&text)?;
+                Some(serde_json::to_string(&recipe.with_local(local))?)
+            }
+            other => other,
+        };
+        Ok((recipe, lightroom))
     }
     /// Lightroom's history for a photo, oldest step first.
     pub fn lightroom_history(&self, id: i64) -> Result<Vec<HistoryStep>> {

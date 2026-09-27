@@ -32,5 +32,5 @@ pub use pipeline::{
     neutral_pick, preview, render, render_legacy, render_region, render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
-pub use recipe::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+pub use recipe::{LocalEdits, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 pub use rendered::Rendered;

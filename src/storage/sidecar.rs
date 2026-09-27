@@ -1,6 +1,9 @@
 //! Identity-checked edits with read-only-folder fallback and conflict protection.
-use super::{atomic_json, data_dir, migrate_recipe, versions};
-use crate::{develop::Recipe, export::ExportOptions};
+use super::{PIPELINE, SCHEMA, atomic_json, data_dir, migrate_recipe};
+use crate::{
+    develop::{LocalEdits, Recipe},
+    export::ExportOptions,
+};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,37 +37,79 @@ impl Identity {
         format!("{}-{}-{}", self.prefix_hash, self.size, self.modified_ns)
     }
 }
+/// A photo's saved edit. Unknown fields (from a newer release) are kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Sidecar {
     pub schema: u32,
     pub pipeline: u32,
     pub source: Identity,
+    /// The recipe with its spots and masks, which are saved in the companion file.
     pub recipe: Recipe,
     pub export: ExportOptions,
-    /// Compressed bitmaps the recipe refers to by hash, base64-encoded (see
-    /// `storage::bitmaps`). Omitted when empty, so older releases can read the file.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub bitmaps: std::collections::BTreeMap<String, String>,
+    #[serde(flatten)]
+    pub unknown: std::collections::BTreeMap<String, serde_json::Value>,
 }
-impl Sidecar {
-    pub fn bitmap(&self, hash: &str) -> Result<Option<super::bitmaps::Bitmap>> {
-        self.bitmaps
-            .get(hash)
-            .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
-            .transpose()
-    }
+/// Spot removal, masks and their bitmaps (experimental), saved next to the sidecar in
+/// `photo.ARW.rawmakase-local.json`, so releases before them keep reading the sidecar.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Companion {
+    schema: u32,
+    source: Identity,
+    #[serde(flatten)]
+    local: LocalEdits,
+    /// Compressed bitmaps the edits refer to by hash, base64-encoded (see
+    /// `storage::bitmaps`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    bitmaps: std::collections::BTreeMap<String, String>,
+}
+const COMPANION_SCHEMA: u32 = 1;
+/// A bitmap saved with the photo's spots and masks.
+pub fn bitmap(raw: &Path, hash: &str) -> Result<Option<super::bitmaps::Bitmap>> {
+    let id = Identity::read(raw)?;
+    let companion = [local_path(raw), fallback_at(&id, &data_dir(), "local.json")]
+        .into_iter()
+        .filter(|p| p.exists())
+        .map(|p| parse_companion(&p, &id))
+        .next()
+        .transpose()?;
+    companion
+        .and_then(|c| c.bitmaps.get(hash).cloned())
+        .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(&text)?))
+        .transpose()
 }
 pub fn sidecar_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();
     p.push(".rawmakase.json");
     p.into()
 }
-fn fallback_at(identity: &Identity, store: &Path) -> PathBuf {
+/// Where the photo's spots and masks are saved: next to the sidecar.
+pub fn local_path(raw: &Path) -> PathBuf {
+    let mut p = raw.as_os_str().to_os_string();
+    p.push(".rawmakase-local.json");
+    p.into()
+}
+fn fallback_at(identity: &Identity, store: &Path, extension: &str) -> PathBuf {
     store
         .to_path_buf()
         .join("sidecars")
-        .join(format!("{}.json", identity.key()))
+        .join(format!("{}.{extension}", identity.key()))
+}
+fn parse_companion(path: &Path, id: &Identity) -> Result<Companion> {
+    ensure!(
+        fs::metadata(path)?.len() < 16_000_000,
+        "Spots and masks file too large"
+    );
+    let c: Companion = serde_json::from_reader(File::open(path)?)?;
+    ensure!(
+        c.schema <= COMPANION_SCHEMA,
+        "Spots and masks saved by a newer release: preserved without changes"
+    );
+    ensure!(
+        &c.source == id,
+        "RAW identity differs from saved spots and masks: file preserved"
+    );
+    c.local.validate()?;
+    Ok(c)
 }
 fn parse_sidecar(path: &Path, id: &Identity) -> Result<Sidecar> {
     ensure!(fs::metadata(path)?.len() < 16_000_000, "Sidecar too large");
@@ -85,7 +130,7 @@ pub fn load(raw: &Path) -> Result<Option<Sidecar>> {
 fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
     let id = Identity::read(raw)?;
     let primary = sidecar_path(raw);
-    let backup = fallback_at(&id, store);
+    let backup = fallback_at(&id, store, "json");
     // Validate both stores before choosing newest; never hide a conflicting primary.
     let a = if primary.exists() {
         Some(parse_sidecar(&primary, &id)?)
@@ -97,14 +142,22 @@ fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
     } else {
         None
     };
-    if a.is_some()
-        && b.is_some()
-        && fs::metadata(&backup)?.modified()? > fs::metadata(&primary)?.modified()?
-    {
-        Ok(b)
+    let use_backup = b.is_some()
+        && (a.is_none()
+            || fs::metadata(&backup)?.modified()? > fs::metadata(&primary)?.modified()?);
+    let (chosen, local) = if use_backup {
+        (b, fallback_at(&id, store, "local.json"))
     } else {
-        Ok(a.or(b))
+        (a, local_path(raw))
+    };
+    let Some(mut sidecar) = chosen else {
+        return Ok(None);
+    };
+    if local.exists() {
+        let companion = parse_companion(&local, &id)?;
+        sidecar.recipe = sidecar.recipe.with_local(companion.local);
     }
+    Ok(Some(sidecar))
 }
 pub fn save(raw: &Path, recipe: &Recipe, export: &ExportOptions) -> Result<PathBuf> {
     save_at(raw, recipe, export, &data_dir())
@@ -114,37 +167,67 @@ fn save_at(raw: &Path, recipe: &Recipe, export: &ExportOptions, store: &Path) ->
     export.validate()?;
     let source = Identity::read(raw)?;
     let primary = sidecar_path(raw);
-    let mut bitmaps = std::collections::BTreeMap::new();
+    let mut unknown = Default::default();
     if primary.exists() {
-        bitmaps = parse_sidecar(&primary, &source)?.bitmaps;
+        unknown = parse_sidecar(&primary, &source)?.unknown;
     }
-    let backup = fallback_at(&source, store);
+    let backup = fallback_at(&source, store, "json");
     if backup.exists() {
-        bitmaps.extend(parse_sidecar(&backup, &source)?.bitmaps);
+        parse_sidecar(&backup, &source)?;
     }
-    let (schema, pipeline) = versions(recipe);
+    let (saved, local) = recipe.split_local();
     let s = Sidecar {
-        schema,
-        pipeline,
-        source,
-        recipe: recipe.clone(),
+        schema: SCHEMA,
+        pipeline: PIPELINE,
+        source: source.clone(),
+        recipe: saved,
         export: export.clone(),
-        bitmaps,
+        unknown,
     };
-    match atomic_json(&primary, &s) {
-        Ok(()) => Ok(primary),
+    let written = match atomic_json(&primary, &s) {
+        Ok(()) => primary,
         Err(e) => {
             let permission = e.downcast_ref::<std::io::Error>().is_some_and(|e| {
                 e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(30)
             });
-            if permission {
-                atomic_json(&backup, &s)?;
-                Ok(backup)
-            } else {
-                Err(e)
+            if !permission {
+                return Err(e);
             }
+            atomic_json(&backup, &s)?;
+            backup
         }
+    };
+    let companion = if written == sidecar_path(raw) {
+        local_path(raw)
+    } else {
+        fallback_at(&source, store, "local.json")
+    };
+    save_companion(&companion, source, local)?;
+    Ok(written)
+}
+/// Writes the spots and masks, keeping bitmaps already saved; removes the file when
+/// there are none.
+fn save_companion(path: &Path, source: Identity, local: LocalEdits) -> Result<()> {
+    let bitmaps = if path.exists() {
+        parse_companion(path, &source)?.bitmaps
+    } else {
+        Default::default()
+    };
+    if local.is_empty() && bitmaps.is_empty() {
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        return Ok(());
     }
+    atomic_json(
+        path,
+        &Companion {
+            schema: COMPANION_SCHEMA,
+            source,
+            local,
+            bitmaps,
+        },
+    )
 }
 
 #[cfg(test)]

@@ -22,8 +22,11 @@ Paste Settings and presets leave a photo's spots alone, as Lightroom's defaults 
 
 ## How it renders
 
-- Spots are stored as parameters in the recipe (`retouch`), with positions in image
-  space: the photo as the camera oriented it, within its default crop, before lens
+- Spots are stored as parameters (`retouch`) beside the recipe, not in it: in the
+  catalog's `local_edits` table, or for photos opened directly in
+  `photo.ARW.rawmakase-local.json` next to the sidecar. The recipe stays schema 6, so
+  earlier releases open the photo with every other edit, just without spots and
+  masks. Positions are in image space: the photo as the camera oriented it, within its default crop, before lens
   correction, Transform, crop and straightening. Spots stay on their dust when those
   change. Sizes are fractions of the long edge.
 - Operations apply in order to the linear, highlight-recovered camera image before

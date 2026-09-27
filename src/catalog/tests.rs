@@ -266,3 +266,41 @@ fn bitmaps_are_stored_once_by_hash() -> Result<()> {
     assert_eq!(catalog.bitmap("missing")?, None);
     Ok(())
 }
+#[test]
+fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
+    use crate::develop::masks;
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let mut c = Catalog::create(&d.path().join("local.rawmakase"))?;
+    c.add_folder(&photos)?;
+    let id = c.photos()?[0].id;
+    let mut r = Recipe::default();
+    r.masks.push(masks::MaskGroup {
+        components: vec![masks::MaskComponent::new(masks::MaskShape::Radial {
+            center: [0.5, 0.5],
+            radii: [0.2, 0.1],
+            angle: 0.,
+            feather: 0.5,
+        })],
+        adjust: masks::LocalAdjust {
+            shadows: 0.5,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    c.save_edit(id, &photo, &r, &ExportOptions::default())?;
+    let column: String =
+        c.db.query_row("SELECT recipe FROM photos WHERE id=?", [id], |row| {
+            row.get(0)
+        })?;
+    assert!(!column.contains("masks"));
+    assert_eq!(c.load_edit(id, &photo)?.unwrap().recipe, r);
+    let (text, _) = c.edit_texts(id)?;
+    assert_eq!(serde_json::from_str::<Recipe>(&text.unwrap())?, r);
+    c.save_edit(id, &photo, &Recipe::default(), &ExportOptions::default())?;
+    assert!(c.load_edit(id, &photo)?.unwrap().recipe.masks.is_empty());
+    Ok(())
+}

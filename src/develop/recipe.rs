@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 pub const TEMPERATURE_MIN: f32 = 2000.;
 pub const TEMPERATURE_MAX: f32 = 50000.;
 pub const TINT_LIMIT: f32 = 150.;
+/// A photo's develop settings. Fields this build does not know (from a newer release)
+/// are kept in `unknown` and saved again, so an older build never drops them.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Recipe {
     pub engine: u32,
     /// Apply the lens correction the camera stored in the RAW (engine 4). Missing in older
@@ -73,13 +75,35 @@ pub struct Recipe {
     pub rotation: u8,
     pub flip_x: bool,
     pub flip_y: bool,
-    /// Heal and Clone operations, in order. Omitted when empty so recipes without them
-    /// stay readable by releases before schema 7.
+    /// Heal and Clone operations, in order. Saved apart from the recipe (see
+    /// [`LocalEdits`]); omitted from recipe JSON when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retouch: Vec<crate::develop::retouch::RetouchOp>,
-    /// Masks with local adjustments; omitted when empty, as `retouch`.
+    /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
+    /// Settings from a newer release, preserved as they were.
+    #[serde(flatten)]
+    pub unknown: std::collections::BTreeMap<String, serde_json::Value>,
+}
+/// A recipe's spot removal and masks (experimental). They are saved beside the recipe,
+/// not in it, so releases that predate them still read every other setting.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LocalEdits {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<crate::develop::masks::MaskGroup>,
+}
+impl LocalEdits {
+    pub fn is_empty(&self) -> bool {
+        self.retouch.is_empty() && self.masks.is_empty()
+    }
+    pub fn validate(&self) -> Result<()> {
+        crate::develop::retouch::validate(&self.retouch)?;
+        crate::develop::masks::validate(&self.masks)
+    }
 }
 impl Default for Recipe {
     fn default() -> Self {
@@ -130,6 +154,7 @@ impl Default for Recipe {
             flip_y: false,
             retouch: Vec::new(),
             masks: Vec::new(),
+            unknown: Default::default(),
         }
     }
 }
@@ -272,9 +297,25 @@ impl Recipe {
         crate::develop::masks::validate(&self.masks)?;
         Ok(())
     }
-    /// Whether the recipe uses the retouching or masking tools, which need schema 7.
-    pub fn uses_local_tools(&self) -> bool {
-        !self.retouch.is_empty() || !self.masks.is_empty()
+    /// The recipe as saved, without spots and masks, and those apart.
+    pub fn split_local(&self) -> (Recipe, LocalEdits) {
+        let mut saved = self.clone();
+        let local = LocalEdits {
+            retouch: std::mem::take(&mut saved.retouch),
+            masks: std::mem::take(&mut saved.masks),
+        };
+        (saved, local)
+    }
+    /// Adds spots and masks saved apart. Ones already in the recipe (written by
+    /// development builds into the recipe itself) stay when `local` has none.
+    pub fn with_local(mut self, local: LocalEdits) -> Recipe {
+        if !local.retouch.is_empty() {
+            self.retouch = local.retouch;
+        }
+        if !local.masks.is_empty() {
+            self.masks = local.masks;
+        }
+        self
     }
     /// The camera profile used for rendering. From engine 4, photos without an imported or
     /// bundled profile render through the DNG ColorMatrix default instead of the legacy path.

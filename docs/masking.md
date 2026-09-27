@@ -31,8 +31,8 @@ implemented yet.
 
 ## How it renders
 
-- Masks are stored in the recipe (`masks`) as parameters in image space (see
-  [retouching](retouching.md)), so they follow crop, straighten, Transform and lens
+- Masks are stored as parameters beside the recipe, like spots (see
+  [retouching](retouching.md)), in image space, so they follow crop, straighten, Transform and lens
   corrections. Components combine in order: Add takes the larger weight, Subtract
   removes (not below zero), Intersect takes the smaller; each component and the
   whole mask can be inverted.
