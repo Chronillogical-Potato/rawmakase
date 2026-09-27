@@ -504,6 +504,10 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     let y = max(luma2020(wide), 1e-8);
     wide = wide * y / y;
     var rgb = profile_finish(FROM_2020 * wide);
+    // Toning the reduced photo for the Shadows/Highlights map (`tone_params`).
+    if p(P_TONE_ONLY) != 0.0 {
+        return rgb;
+    }
     if p(P_LOCAL) != 0.0 {
         rgb *= local_gain(pos, rgb);
     }

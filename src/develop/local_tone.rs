@@ -85,12 +85,29 @@ impl LocalToneMap {
             Some(small) => std::borrow::Cow::Borrowed(small),
             None => std::borrow::Cow::Owned(super::pipeline::preview_source(im, MAP_EDGE)),
         };
-        let (w, h) = (small.width as usize, small.height as usize);
         let lum: Vec<f32> = small
             .pixels
             .par_iter()
             .map(|p| luminance(tone(*p)))
             .collect();
+        Some(Self::from_luminance(
+            lum,
+            [small.width, small.height],
+            [im.width, im.height],
+            shadows,
+            highlights,
+        ))
+    }
+    /// The map from the luminance of the reduced photo toned, `size` pixels of a
+    /// `source`-sized photo, as `build` computes it (`luminance` of `tone`).
+    pub(crate) fn from_luminance(
+        lum: Vec<f32>,
+        size: [u32; 2],
+        source: [u32; 2],
+        shadows: f32,
+        highlights: f32,
+    ) -> Self {
+        let (w, h) = (size[0] as usize, size[1] as usize);
         let logs: Vec<f32> = lum.iter().map(|y| y.log2()).collect();
         let percentile = |q: f32| {
             let mut v = lum.clone();
@@ -101,9 +118,8 @@ impl LocalToneMap {
         let r = ((RADIUS * w.max(h) as f32).round() as usize).max(1);
         // He et al. guided filter with the image as its own guide.
         let mean = |x: &[f32]| blur(x, w, h, r);
-        let m = mean(&logs);
         let sq: Vec<f32> = logs.iter().map(|v| v * v).collect();
-        let m2 = mean(&sq);
+        let (m, m2) = rayon::join(|| mean(&logs), || mean(&sq));
         let a: Vec<f32> = m
             .iter()
             .zip(&m2)
@@ -113,15 +129,21 @@ impl LocalToneMap {
             })
             .collect();
         let b: Vec<f32> = m.iter().zip(&a).map(|(m, a)| m - a * m).collect();
-        Some(Self {
+        let (a, b) = rayon::join(|| mean(&a), || mean(&b));
+        Self {
             width: w,
             height: h,
-            a: mean(&a),
-            b: mean(&b),
-            scale: [w as f32 / im.width as f32, h as f32 / im.height as f32],
-            shadows: Curve::new(&SHADOWS, shadows, percentile(SHADOWS.percentile)),
-            highlights: Curve::new(&HIGHLIGHTS, highlights, percentile(HIGHLIGHTS.percentile)),
-        })
+            a,
+            b,
+            scale: [w as f32 / source[0] as f32, h as f32 / source[1] as f32],
+            // Only a slider in use needs its key.
+            shadows: (shadows != 0.)
+                .then(|| Curve::new(&SHADOWS, shadows, percentile(SHADOWS.percentile)))
+                .flatten(),
+            highlights: (highlights != 0.)
+                .then(|| Curve::new(&HIGHLIGHTS, highlights, percentile(HIGHLIGHTS.percentile)))
+                .flatten(),
+        }
     }
     /// Luminance gain for a toned pixel at camera-image sample position `x`, `y`.
     pub(crate) fn gain(&self, x: f32, y: f32, rgb: [f32; 3]) -> f32 {
@@ -143,20 +165,33 @@ impl LocalToneMap {
 }
 /// Mean over a (2r+1)² window, clamped at the borders, via running sums.
 fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
-    let pass = |src: &[f32], len: usize, count: usize, at: &dyn Fn(usize, usize) -> usize| {
-        let mut out = vec![0.; src.len()];
-        for line in 0..count {
-            let get = |i: isize| src[at(line, i.clamp(0, len as isize - 1) as usize)] as f64;
-            let mut sum: f64 = (-(r as isize)..=r as isize).map(get).sum();
-            for i in 0..len {
-                out[at(line, i)] = (sum / (2 * r + 1) as f64) as f32;
-                sum += get(i as isize + r as isize + 1) - get(i as isize - r as isize);
-            }
+    // One line: `out[i]` for `len` values read through `get`; lines are independent,
+    // so they run in parallel with the same arithmetic.
+    let line = |len: usize, get: &dyn Fn(usize) -> f32| -> Vec<f32> {
+        let get = |i: isize| get(i.clamp(0, len as isize - 1) as usize) as f64;
+        let mut out = vec![0.; len];
+        let mut sum: f64 = (-(r as isize)..=r as isize).map(get).sum();
+        for (i, v) in out.iter_mut().enumerate() {
+            *v = (sum / (2 * r + 1) as f64) as f32;
+            sum += get(i as isize + r as isize + 1) - get(i as isize - r as isize);
         }
         out
     };
-    let rows = pass(x, w, h, &|line, i| line * w + i);
-    pass(&rows, h, w, &|line, i| i * w + line)
+    let rows: Vec<f32> = (0..h)
+        .into_par_iter()
+        .flat_map_iter(|y| line(w, &|i| x[y * w + i]))
+        .collect();
+    let columns: Vec<Vec<f32>> = (0..w)
+        .into_par_iter()
+        .map(|c| line(h, &|i| rows[i * w + c]))
+        .collect();
+    let mut out = vec![0.; x.len()];
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (c, v) in row.iter_mut().enumerate() {
+            *v = columns[c][y];
+        }
+    });
+    out
 }
 
 #[cfg(test)]

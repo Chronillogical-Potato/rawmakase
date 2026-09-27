@@ -213,8 +213,9 @@ the GPU, and `CPU` otherwise.
 
 For the same recipes, the stages before the per-pixel stage also run on the device
 when the photo fits its buffer limits (`gpu/resident.rs`): the photo or pyramid level
-is kept there, with the local-tone blurs and gain, and regions are sampled there
-through geometry, lens correction and noise reduction. Only the reduced input of the
+is kept there with its local-tone blurs, the gain is computed only for the pixels a
+region samples, and regions are sampled there through geometry, lens correction and
+noise reduction. Only the reduced input of the
 Shadows/Highlights map is read back; the map is built on the CPU. A failure in these
 stages turns off only this path for the session.
 

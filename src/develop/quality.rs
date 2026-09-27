@@ -526,11 +526,10 @@ fn render_resident(
         gain_key: None,
         reduced: None,
     };
-    let mut gain = None;
+    let mut tones = None;
     if r.effects.clarity != 0. || r.effects.texture != 0. {
         let texture = r.effects.texture != 0.;
         let blur_key = BlurKey::new(source, &spatial, scale, texture);
-        let key = LocalKey::new(blur_key.clone(), &spatial);
         let Some(camera) = pixel_params(Source::from(source.as_ref()), &spatial) else {
             return Ok(None);
         };
@@ -550,21 +549,21 @@ fn render_resident(
             spatial.effects.clarity,
             spatial.effects.texture,
         ];
-        toned.gain_key = Some(key.clone());
-        gain = stages.backend.run_resident(cancel, |gpu| {
+        toned.gain_key = Some(LocalKey::new(blur_key.clone(), &spatial));
+        tones = stages.backend.run_resident(cancel, |gpu| {
             gpu.scoped(|gpu| {
-                gpu.local_gain(
+                gpu.local_tones(
                     source,
                     &camera,
                     vignetting.as_ref(),
                     radii,
                     sliders,
-                    (blur_key, key),
+                    blur_key,
                     cancel,
                 )
             })
         });
-        if gain.is_none() {
+        if tones.is_none() {
             return Ok(None);
         }
     }
@@ -585,7 +584,7 @@ fn render_resident(
         let reduced = cache.reduced.get_or_try(key, bytes, || {
             backend
                 .run_resident(cancel, |gpu| {
-                    gpu.scoped(|gpu| gpu.reduce_toned(source, gain.as_ref(), size, cancel))
+                    gpu.scoped(|gpu| gpu.reduce_toned(source, tones.as_ref(), size, cancel))
                 })
                 .context("GPU reduction failed")
         });
@@ -594,7 +593,9 @@ fn render_resident(
         };
         toned.reduced = Some(reduced);
     }
-    let Some(params) = pixel_params(toned.source(), &base) else {
+    let Some(params) =
+        develop::pipeline::gpu_pixel_params(toned.source(), &base, stages.backend, cancel)
+    else {
         return Ok(None);
     };
     let key = develop::stage_cache::SampleKey::new(&toned, &base, g, region, spread);
@@ -627,9 +628,23 @@ fn render_resident(
         develop::pipeline::lens_gpu_params(source, &base, develop::gpu::SAMPLE_HEADER, &mut tables);
     sampling[42..57].copy_from_slice(&lens);
     sampling.extend(tables);
+    let bounds = match tones {
+        Some(_) => develop::pipeline::source_bounds(source, &base, g, region, spread),
+        None => [0; 4],
+    };
     let backend = &mut *stages.backend;
     let Some(samples) = backend.run_resident(cancel, |gpu| {
-        gpu.scoped(|gpu| gpu.sample(source, gain.as_ref(), sampling, (w, h), key, cancel))
+        gpu.scoped(|gpu| {
+            gpu.sample(
+                source,
+                tones.as_ref(),
+                sampling,
+                bounds,
+                (w, h),
+                key,
+                cancel,
+            )
+        })
     }) else {
         return Ok(None);
     };

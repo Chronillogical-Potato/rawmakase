@@ -3,7 +3,7 @@
 //! color and calibration and a profile tone curve, which every new photo uses. Other
 //! recipes return `None` and render on the CPU, which stays the reference.
 use super::{CurveSet, Source, profile_matrix};
-use crate::develop::Recipe;
+use crate::develop::{Recipe, local_tone::LocalToneMap};
 
 /// Named slots of the parameter array and their lengths. `wgsl_prelude` turns them into
 /// `P_*` index constants for the shader.
@@ -43,6 +43,7 @@ const FIELDS: &[(&str, usize)] = &[
     ("DEFRINGE_RANGES", 4),
     ("MONO", 1),
     ("GRAY_MIX", 8),
+    ("TONE_ONLY", 1),
 ];
 pub(crate) fn wgsl_prelude() -> String {
     let mut at = 0;
@@ -110,9 +111,50 @@ pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     if !supported(r) {
         return None;
     }
-    let profile = r.profile.as_ref()?;
     let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im, r, matrix);
+    fill(r, CurveSet::for_image(im, r, matrix), matrix)
+}
+/// Whether `r`'s per-pixel stage needs the Shadows/Highlights map of the photo.
+pub(crate) fn needs_map(r: &Recipe) -> bool {
+    r.engine >= 4 && r.reference_curves && (r.shadows != 0. || r.highlights != 0.)
+}
+/// Parameters that stop after the tone stage (`tone_stage`, before the map), to tone
+/// the reduced photo the Shadows/Highlights map is built from on the GPU.
+pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
+    if !supported(r) {
+        return None;
+    }
+    let matrix = profile_matrix(&im.metadata, r);
+    let mut p = fill(r, CurveSet::new(r), matrix)?;
+    p.set("TONE_ONLY", &[1.]);
+    Some(p)
+}
+fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
+    p.set("LOCAL", &[1.]);
+    p.set("LOCAL_SIZE", &[local.width as f32, local.height as f32]);
+    p.set("LOCAL_SCALE", &local.scale);
+    let a = p.push(local.a.iter().copied());
+    let b = p.push(local.b.iter().copied());
+    p.set("LOCAL_A", &[a, b]);
+    for (name, curve) in [
+        ("SHADOWS", &local.shadows),
+        ("HIGHLIGHTS", &local.highlights),
+    ] {
+        let values = match curve {
+            Some(c) => [p.push(c.table), c.key, c.lo, c.hi],
+            None => [-1., 0., 0., 0.],
+        };
+        p.set(name, &values);
+    }
+}
+/// `tone` parameters for the whole stage, with the map built from their result.
+pub(crate) fn with_map(mut p: PixelParams, map: &LocalToneMap) -> PixelParams {
+    p.set("TONE_ONLY", &[0.]);
+    set_local(&mut p, map);
+    p
+}
+fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams> {
+    let profile = r.profile.as_ref()?;
     let len = FIELDS.iter().map(|f| f.1).sum();
     let mut p = PixelParams {
         params: vec![0.; len],
@@ -145,22 +187,7 @@ pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     p.set("TONE", &[tone]);
     p.set("TONE_COUNT", &[t.tone.len() as f32]);
     if let Some(local) = &lut.local {
-        p.set("LOCAL", &[1.]);
-        p.set("LOCAL_SIZE", &[local.width as f32, local.height as f32]);
-        p.set("LOCAL_SCALE", &local.scale);
-        let a = p.push(local.a.iter().copied());
-        let b = p.push(local.b.iter().copied());
-        p.set("LOCAL_A", &[a, b]);
-        for (name, curve) in [
-            ("SHADOWS", &local.shadows),
-            ("HIGHLIGHTS", &local.highlights),
-        ] {
-            let values = match curve {
-                Some(c) => [p.push(c.table), c.key, c.lo, c.hi],
-                None => [-1., 0., 0., 0.],
-            };
-            p.set(name, &values);
-        }
+        set_local(&mut p, local);
     }
     let basic = match &lut.basic {
         Some(b) => p.push(b.lut.iter().copied()),

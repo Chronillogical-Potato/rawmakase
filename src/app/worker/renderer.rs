@@ -20,6 +20,8 @@ pub(in crate::app) enum RenderBackend {
 /// Long edges of the Navigator's and the library thumbnail's copies.
 const NAVIGATOR: u32 = 360;
 const THUMBNAIL: u32 = 640;
+/// A full 100% region presented within this needs no reduced preview first.
+const QUICK_REGION: std::time::Duration = std::time::Duration::from_millis(40);
 
 /// A finished render and the view it shows.
 struct Shown {
@@ -138,6 +140,9 @@ pub(in crate::app) fn renderer_with_backend(
     // Whether the last finished image was a 100% region: then the region is being
     // edited or panned, and a reduced preview comes first.
     let mut showing_region = false;
+    // Whether the last full 100% region was presented on the GPU quickly enough that a
+    // reduced preview before it would only add work and a blurry frame.
+    let mut quick_region = false;
     Latest::new(move |job: RenderJob| {
         let processor = processor.get_or_insert_with(|| match &backend {
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
@@ -322,6 +327,7 @@ pub(in crate::app) fn renderer_with_backend(
                     // a newer job cancels the full-resolution render that follows.
                     // Zooming in goes straight to the full region, over the enlarged Fit.
                     if showing_region
+                        && !quick_region
                         && let Some(out) = processor.render_region_preview_to(
                             &job.image,
                             &job.recipe,
@@ -333,14 +339,18 @@ pub(in crate::app) fn renderer_with_backend(
                         let gpu = processor.used_gpu();
                         publish(out, RenderStage::Draft, false, gpu);
                     }
-                    processor.render_to(
+                    let started = Instant::now();
+                    let out = processor.render_to(
                         &job.image,
                         &job.recipe,
                         0,
                         Some(region),
                         &job.cancel,
                         zoomed_display.as_ref(),
-                    )?
+                    )?;
+                    quick_region =
+                        matches!(out, Output::Frame(_)) && started.elapsed() < QUICK_REGION;
+                    out
                 };
                 let gpu = processor.used_gpu();
                 zoomed =

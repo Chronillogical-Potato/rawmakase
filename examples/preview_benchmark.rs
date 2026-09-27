@@ -130,8 +130,52 @@ fn main() -> Result<()> {
                 "clarity-region-preview",
             ]
         } else {
-            &["cpu-fit", "gpu-fit", "gpu-region", "region-preview"]
+            // Clarity alone: no Shadows/Highlights map to feed.
+            &[
+                "cpu-fit",
+                "gpu-fit",
+                "gpu-region",
+                "region-preview",
+                "clarity-region",
+            ]
         };
+        if local {
+            // Switching between Fit and 100% with Clarity on, editing exposure in each:
+            // Fit renders a pyramid level, 100% the photo, both kept on the device.
+            let mut times = Vec::new();
+            let mut recipe = recipe.clone();
+            for i in 0..=2 * iterations {
+                recipe.exposure = i as f32 * 0.05;
+                let slot = if i % 2 == 0 {
+                    develop::gpu::Slot::Whole
+                } else {
+                    develop::gpu::Slot::Region
+                };
+                let display = develop::gpu::Display {
+                    slot,
+                    clipping: false,
+                    monitor: None,
+                    navigator: None,
+                    thumbnail: None,
+                };
+                let t = Instant::now();
+                let (edge, at) = if i % 2 == 0 {
+                    (FIT, None)
+                } else {
+                    (0, Some(region))
+                };
+                gpu.render_to(&image, &recipe, edge, at, &cancel, Some(&display))?;
+                if i > 1 {
+                    times.push(ms(t));
+                }
+            }
+            times.sort_by(f64::total_cmp);
+            println!(
+                "switch views, local=true: median {:.1} ms, max {:.1} ms",
+                times[times.len() / 2],
+                times[times.len() - 1]
+            );
+        }
         for &mode in modes {
             let mut times = Vec::new();
             let mut shown = Vec::new();

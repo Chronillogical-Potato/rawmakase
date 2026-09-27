@@ -250,12 +250,16 @@ the gain under this load); see the next section.
 
 The stages before the per-pixel stage now run on the device too (`gpu/logs.wgsl`,
 `gpu/local.wgsl`, `gpu/resident.rs`). The photo, or the pyramid level a Fit renders
-from, is uploaded once and kept; the log luminance, the box blurs (running sums per
-row and column, as the CPU computes them) and the Clarity/Texture gain are computed
-and kept there, keyed as the stage cache keys them; the reduced image the engine 4
-Shadows/Highlights map is built from is reduced there and read back (512 pixels on
-the long edge); and each region is sampled through geometry, Transform, lens
-correction and noise reduction straight into the develop stage's input. Only the
+from, is uploaded once and kept; the log luminance and the box blurs (running sums
+per row and column, as the CPU computes them) are computed and kept there, keyed as
+the stage cache keys them. The Clarity/Texture gain is computed only for the photo
+pixels a region samples (found by mapping the region's edges through geometry and
+lens correction), so a Clarity edit touches the whole photo only when the engine 4
+Shadows/Highlights map needs its reduced input: that reduction computes the gain as
+it goes, in two passes (row sums over each box's columns, then over its rows) and is
+read back (512 pixels on the long edge). Each region is sampled through geometry,
+Transform, lens correction and noise reduction straight into the develop stage's
+input. Only the
 Shadows/Highlights map itself (guided filter on 512 pixels) stays on the CPU. Photos
 up to 2 GB of pixels where the adapter allows (a 61-megapixel photo is 735 MB) take
 this path; a failure here, for example for lack of device memory, turns only this
@@ -275,8 +279,27 @@ release build, Apple M1 Pro, load average about 20:
 | A7CR | Fit, Clarity edits | 56.4 ms | 22.4 ms |
 | | 100% region, Clarity edits | 743.7 ms | 72.1 ms |
 
+With the gain computed only where it is read and the two-pass reduction (load average
+about 35): A7CR 100% region, Clarity edits with Shadows and Highlights, 59 ms; with
+Clarity alone, 7 ms (650 ms on the CPU path); Fit, Clarity edits, 19 ms.
+
 Exposure edits are unchanged (the gain is kept either way). A new photo's first
 Clarity render uploads the photo and computes the blurs once.
+
+Further per-render work removed afterwards:
+
+- The Shadows/Highlights map's tone pass (the tone stage over the 512-pixel reduced
+  photo, about 15 ms on the CPU per exposure change) runs on the GPU; the guided
+  filter then runs on the CPU from the luminance, with its blurs in parallel (same
+  arithmetic, so exports are unchanged).
+- The device keeps the state of two images, the pyramid level Fit renders and the
+  full photo 100% renders, so switching views with Clarity on does not upload the
+  photo or blur again: 15–18 ms per switch with an exposure edit.
+- At 100%, the reduced preview before the full region is skipped while full regions
+  are presented within 40 ms, so a slider drag shows only sharp frames.
+
+Presented per exposure change with Shadows +40, Highlights −30 and Clarity +20 (the
+"local" rows), X100F: Fit 28 → 16 ms, 100% region 29 → 16 ms, 100% preview 24 → 10 ms.
 
 ## Local-tone gain
 

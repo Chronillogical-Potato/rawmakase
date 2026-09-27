@@ -237,6 +237,69 @@ impl Processor {
         self.check_develop(Input::Cpu(samples), params, cancel)?;
         self.scoped(|gpu| gpu.develop_inner(samples, params, cancel))
     }
+    /// The per-pixel stage over `pixels` (at no particular position), in buffers of their
+    /// own rather than the upload cache: toning the reduced photo for the
+    /// Shadows/Highlights map (`pixel_params::tone_params`).
+    pub(crate) fn develop_pixels(
+        &mut self,
+        pixels: &[[f32; 3]],
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<[f32; 3]>> {
+        let n = pixels.len() as u64;
+        ensure!(n > 0, "Empty develop region");
+        let device = self.device.clone();
+        let init = |label, contents: &[u8]| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage: wgpu::BufferUsages::STORAGE,
+            })
+        };
+        let buffer = |label, usage| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: n * 12,
+                usage,
+                mapped_at_creation: false,
+            })
+        };
+        let input = DeviceSamples {
+            width: n as u32,
+            height: 1,
+            pixels: init("Map pixels", bytemuck::cast_slice(pixels)),
+            positions: init("Map positions", &vec![0; n as usize * 8]),
+            output: buffer(
+                "Toned map pixels",
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            ),
+        };
+        self.check_develop(Input::Device(&input), params, cancel)?;
+        let staging = buffer(
+            "Toned map readback",
+            wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        );
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let output = self.record_develop(Input::Device(&input), params, &mut encoder);
+        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, n * 12);
+        let submission = self.queue.submit([encoder.finish()]);
+        let (tx, rx) = mpsc::sync_channel(1);
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+        device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })?;
+        rx.recv_timeout(std::time::Duration::from_secs(1))
+            .context("GPU readback timed out")??;
+        let pixels =
+            bytemuck::cast_slice::<u8, [f32; 3]>(&staging.slice(..).get_mapped_range()?).to_vec();
+        staging.unmap();
+        Ok(pixels)
+    }
     /// Whether the device can develop `samples` at all.
     pub(super) fn check_develop(
         &self,
