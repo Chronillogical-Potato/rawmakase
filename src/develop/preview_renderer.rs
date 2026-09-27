@@ -362,7 +362,8 @@ mod tests {
                 assert_eq!(cached.pixels, fresh.pixels, "{r:?} {edge} {region:?}");
             }
         }
-        assert_eq!(warm.cache.samples.len(), 2);
+        // The stage cache filled up to its entry limit across the edits.
+        assert_eq!(warm.cache.samples.len(), 4);
     }
     #[test]
     fn region_preview_is_a_half_resolution_region() {

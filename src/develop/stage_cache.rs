@@ -14,8 +14,9 @@ use crate::raw::CameraImage;
 use anyhow::Result;
 use std::sync::Arc;
 
-/// Most recent entries kept per stage: enough for Fit and a 100% view in turn.
-const ENTRIES: usize = 2;
+/// Most recent entries kept per stage: Fit, the quick Fit shown when leaving 100%, and
+/// the 100% view's reduced preview and full region, so switching views reuses them.
+const ENTRIES: usize = 4;
 /// Byte budget per stage. Larger results are computed but not kept.
 const BUDGET: usize = 512 << 20;
 
@@ -196,22 +197,24 @@ mod tests {
             })
             .map(|_| made)
         };
-        assert_eq!(get(&mut lru, 1, 10)?, 1);
-        assert_eq!(get(&mut lru, 1, 10)?, 1);
-        assert_eq!(get(&mut lru, 2, 10)?, 2);
-        assert_eq!(get(&mut lru, 1, 10)?, 2);
-        // A third key evicts the least recently used one.
-        assert_eq!(get(&mut lru, 3, 10)?, 3);
-        assert_eq!(get(&mut lru, 1, 10)?, 3);
-        assert_eq!(get(&mut lru, 2, 10)?, 4);
+        let n = ENTRIES as u32;
+        for key in 1..=n {
+            assert_eq!(get(&mut lru, key, 10)?, key);
+        }
+        // Hits make nothing; key 1 becomes the most recently used.
+        assert_eq!(get(&mut lru, 1, 10)?, n);
+        // A new key evicts the least recently used one, key 2.
+        assert_eq!(get(&mut lru, n + 1, 10)?, n + 1);
+        assert_eq!(get(&mut lru, 1, 10)?, n + 1);
+        assert_eq!(get(&mut lru, 2, 10)?, n + 2);
         // Oversized results are returned but not kept.
-        assert_eq!(get(&mut lru, 4, BUDGET + 1)?, 5);
-        assert_eq!(lru.len(), 2);
+        assert_eq!(get(&mut lru, n + 2, BUDGET + 1)?, n + 3);
+        assert_eq!(lru.len(), ENTRIES);
         assert!(
-            lru.get_or_try(5, Vec::len, || anyhow::bail!("cancelled"))
+            lru.get_or_try(0, Vec::len, || anyhow::bail!("cancelled"))
                 .is_err()
         );
-        assert_eq!(lru.len(), 2);
+        assert_eq!(lru.len(), ENTRIES);
         Ok(())
     }
 }

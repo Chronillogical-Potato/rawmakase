@@ -23,8 +23,13 @@ const OUTSIDE: f32 = -3e38;
 pub(super) struct Developer {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
-    samples: Option<Uploaded>,
+    /// Uploaded sample sets, most recently used first, so switching between Fit and
+    /// 100% does not upload again.
+    samples: Vec<Uploaded>,
 }
+/// Uploaded sample sets kept, and their device memory budget.
+const UPLOADS: usize = 3;
+const UPLOAD_BUDGET: u64 = 512 << 20;
 struct Uploaded {
     source: Arc<Samples>,
     pixels: wgpu::Buffer,
@@ -78,7 +83,7 @@ impl Developer {
         Self {
             layout,
             pipeline,
-            samples: None,
+            samples: Vec::new(),
         }
     }
 }
@@ -113,7 +118,7 @@ impl Processor {
         let validation_error = pollster::block_on(validation.pop());
         if let Some(error) = memory_error.or(internal_error).or(validation_error) {
             if let Some(d) = &mut self.developer {
-                d.samples = None;
+                d.samples.clear();
             }
             anyhow::bail!("{error}");
         }
@@ -128,12 +133,20 @@ impl Processor {
         let device = &self.device;
         let developer = self.developer.get_or_insert_with(|| Developer::new(device));
         let n = samples.pixels.len() as u64;
-        if developer
+        if let Some(i) = developer
             .samples
-            .as_ref()
-            .is_none_or(|u| !Arc::ptr_eq(&u.source, samples))
+            .iter()
+            .position(|u| Arc::ptr_eq(&u.source, samples))
         {
-            developer.samples = None; // Release the previous region's buffers first.
+            let uploaded = developer.samples.remove(i);
+            developer.samples.insert(0, uploaded);
+        } else {
+            // Release the least recently used buffers before allocating more.
+            let bytes = |u: &Uploaded| u.source.pixels.len() as u64 * 44;
+            developer.samples.truncate(UPLOADS - 1);
+            while developer.samples.iter().map(bytes).sum::<u64>() + n * 44 > UPLOAD_BUDGET
+                && developer.samples.pop().is_some()
+            {}
             let positions: Vec<[f32; 2]> = samples
                 .positions
                 .iter()
@@ -154,7 +167,7 @@ impl Processor {
                     mapped_at_creation: false,
                 })
             };
-            developer.samples = Some(Uploaded {
+            let uploaded = Uploaded {
                 source: samples.clone(),
                 pixels: init("Develop samples", bytemuck::cast_slice(&samples.pixels)),
                 positions: init("Develop positions", bytemuck::cast_slice(&positions)),
@@ -166,9 +179,10 @@ impl Processor {
                     "Develop readback",
                     wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 ),
-            });
+            };
+            developer.samples.insert(0, uploaded);
         }
-        let uploaded = developer.samples.as_ref().unwrap();
+        let uploaded = &developer.samples[0];
         let storage = |label, data: &[f32]| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),

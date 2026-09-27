@@ -21,6 +21,9 @@ pub(in crate::app) fn renderer_with_backend(
     backend: RenderBackend,
 ) -> Latest<RenderJob> {
     let mut processor = None;
+    // Whether the last published image was a 100% region, which the viewport shows as
+    // a small rectangle once the view returns to Fit.
+    let mut showing_region = false;
     Latest::new(move |job: RenderJob| {
         let processor = processor.get_or_insert_with(|| match backend {
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
@@ -73,7 +76,9 @@ pub(in crate::app) fn renderer_with_backend(
             if let Some(region) = job.region {
                 if job.recipe.engine < 3 {
                     let out = develop::render_region(&job.image, &job.recipe, region)?;
-                    return publish(out, RenderStage::Region, false);
+                    publish(out, RenderStage::Region, false)?;
+                    showing_region = true;
+                    return Ok(());
                 }
                 // A reduced preview first keeps dragging at 100% responsive; a newer
                 // job cancels the full-resolution render that follows.
@@ -81,15 +86,27 @@ pub(in crate::app) fn renderer_with_backend(
                     processor.render_region_preview(&job.image, &job.recipe, region, &job.cancel)?
                 {
                     publish(out, RenderStage::Draft, false)?;
+                    showing_region = true;
                 }
                 let out =
                     processor.render(&job.image, &job.recipe, 0, Some(region), &job.cancel)?;
-                return publish(out, RenderStage::Region, processor.used_gpu());
+                publish(out, RenderStage::Region, processor.used_gpu())?;
+                showing_region = true;
+                return Ok(());
             }
             // Fit renders from the photo's resolution pyramid, fast enough to follow
-            // a slider without a separate draft.
+            // a slider without a separate draft. Returning from 100%, a quarter-size Fit
+            // first replaces the region at once.
+            if showing_region && job.max_edge >= 1024 {
+                let quick = job.max_edge / 4;
+                let out = processor.render(&job.image, &job.recipe, quick, None, &job.cancel)?;
+                publish(out, RenderStage::Draft, processor.used_gpu())?;
+                showing_region = false;
+            }
             let out = processor.render(&job.image, &job.recipe, job.max_edge, None, &job.cancel)?;
-            publish(out, RenderStage::Fit, processor.used_gpu())
+            publish(out, RenderStage::Fit, processor.used_gpu())?;
+            showing_region = false;
+            Ok(())
         })();
         if let Err(e) = result
             && !job.cancel.load(Ordering::Relaxed)
