@@ -90,8 +90,8 @@ credentials or automatic Homebrew/AUR publishers in this setup.
 
 ## AUR pause and updates
 
-GitHub includes the Arch binary package, a checksum-filled `PKGBUILD`, and an
-archive containing `PKGBUILD` and `.SRCINFO`. Install the binary with:
+GitHub includes the Arch binary package and a recipe archive containing a
+checksum-filled `PKGBUILD` and `.SRCINFO`. Install the binary with:
 
 ```sh
 sudo pacman -U ./rawmakase-VERSION-1-x86_64.pkg.tar.zst

@@ -165,7 +165,6 @@ jobs:
           rawmakase --version
           pacman -R --noconfirm rawmakase
           cp dist/arch/*.pkg.tar.zst dist/upload/
-          cp dist/arch/PKGBUILD dist/upload/PKGBUILD
           cp "dist/arch/rawmakase-$VERSION.tar.gz" "dist/upload/rawmakase-$VERSION-source.tar.gz"
           tar -C dist/arch -czf "dist/upload/rawmakase-$VERSION-arch-recipe.tar.gz" PKGBUILD .SRCINFO
           # AUR pushes are intentionally disabled. GitHub is the distribution channel.
