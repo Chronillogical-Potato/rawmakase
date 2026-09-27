@@ -37,6 +37,7 @@ pub struct Editor {
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
+    preferences: preferences::Preferences,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
     /// That position as last written to the session.
@@ -155,6 +156,7 @@ impl Editor {
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
+            preferences: Default::default(),
             restore: Some((
                 session.library_source.clone(),
                 session.selected_photo,
@@ -240,6 +242,7 @@ mod inspector;
 pub mod library;
 mod onboarding;
 mod photo_metadata;
+mod preferences;
 mod presets;
 #[cfg(test)]
 mod tests;

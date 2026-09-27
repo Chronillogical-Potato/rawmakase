@@ -63,8 +63,13 @@ impl Editor {
         if let Some(library) = &mut self.library {
             library.poll_previews(&ctx);
         }
-        self.metadata_shortcuts(&ctx);
-        self.workspace_shortcuts(&ctx);
+        // Preferences is modal: keys go to it, not to the photo behind.
+        let modal = self.preferences.open;
+        if !modal {
+            self.metadata_shortcuts(&ctx);
+            self.workspace_shortcuts(&ctx);
+            self.preferences_shortcut(&ctx);
+        }
         self.workspace_bar(ui);
         if self.activity.is_dialog() {
             ui.disable();
@@ -75,7 +80,9 @@ impl Editor {
             self.library_workspace(ui);
         } else {
             let frame = self.begin_edit_frame();
-            self.develop_shortcuts(&ctx);
+            if !modal {
+                self.develop_shortcuts(&ctx);
+            }
             self.toolbar(ui);
             self.status_bar(ui);
             self.filmstrip(ui);
@@ -83,6 +90,7 @@ impl Editor {
             self.finish_edit_frame(frame, &ctx);
         }
         self.shortcuts_window(&ctx);
+        self.preferences_window(&ctx);
         self.pending_work(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(
@@ -217,6 +225,13 @@ impl Editor {
                             self.open_onboarding();
                             ui.close();
                         }
+                        if ui
+                            .add(egui::Button::new("Catalog Settings…").frame(false))
+                            .clicked()
+                        {
+                            self.open_preferences(super::preferences::Tab::Catalog);
+                            ui.close();
+                        }
                         ui.separator();
                         for (kind, label) in [
                             (CatalogDialog::Open, "Open catalog…"),
@@ -280,6 +295,18 @@ impl Editor {
                             {
                                 self.onboarding.visible = false;
                                 self.library_mode = true;
+                            }
+                            ui.add_space(12.);
+                            let shortcut = if cfg!(target_os = "macos") {
+                                "⌘,"
+                            } else {
+                                "Ctrl+,"
+                            };
+                            if super::preferences::gear_button(ui)
+                                .on_hover_text(format!("Preferences · {shortcut}"))
+                                .clicked()
+                            {
+                                self.open_preferences(super::preferences::Tab::General);
                             }
                         });
                     });

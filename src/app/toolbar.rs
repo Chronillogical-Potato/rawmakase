@@ -175,62 +175,15 @@ impl Editor {
                                 self.dialog(FileDialog::LoadPreset, &ctx);
                                 ui.close();
                             }
-                            if menu_item(ui, "Import Profiles…", "", true, false) {
-                                self.dialog(FileDialog::CameraProfile, &ctx);
-                                ui.close();
-                            }
-                            if menu_item(ui, "Import Lens Profiles…", "", true, false) {
-                                self.dialog(FileDialog::LensProfile, &ctx);
-                                ui.close();
-                            }
                             menu_separator(ui);
-                            if menu_item(
-                                ui,
-                                "Monitor Profile…",
-                                "",
-                                true,
-                                self.view.monitor.is_some(),
-                            ) {
-                                self.dialog(FileDialog::MonitorProfile, &ctx);
-                                ui.close();
-                            }
-                            if menu_item(
-                                ui,
-                                "Display as sRGB",
-                                "",
-                                true,
-                                self.view.monitor.is_none(),
-                            ) {
-                                self.view.monitor = None;
-                                let _ = self.save_session();
-                                self.schedule();
-                                ui.close();
-                            }
-                            menu_separator(ui);
-                            // Takes effect on the next full-size decode, so the
-                            // open photo is reopened.
-                            let current = crate::raw::demosaic();
-                            for (choice, label) in [
-                                (
-                                    crate::raw::Demosaic::Rawmakase,
-                                    "Demosaic: RAWmakase (faster)",
-                                ),
-                                (crate::raw::Demosaic::Libraw, "Demosaic: LibRaw"),
-                            ] {
-                                let picked = menu_item(ui, label, "", true, current == choice);
-                                if picked && current != choice {
-                                    crate::raw::set_demosaic(choice);
-                                    let _ = self.save_session();
-                                    if let Some(path) = self.document.path.clone() {
-                                        let photo = self.document.catalog_photo;
-                                        self.open_raw(path, photo);
-                                    }
-                                    ui.close();
-                                }
-                            }
-                            menu_separator(ui);
-                            if menu_item(ui, "Keyboard Shortcuts", "", true, false) {
-                                self.view.shortcuts = true;
+                            let prefs = if cfg!(target_os = "macos") {
+                                "⌘ ,"
+                            } else {
+                                "Ctrl+,"
+                            };
+                            // Profiles, display and engine choices apply to every photo.
+                            if menu_item(ui, "Preferences…", prefs, true, false) {
+                                self.open_preferences(super::preferences::Tab::General);
                                 ui.close();
                             }
                         });
