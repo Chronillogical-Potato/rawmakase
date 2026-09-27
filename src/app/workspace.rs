@@ -129,19 +129,22 @@ impl Editor {
         }
     }
 
-    /// Lightroom's top panel: identity plate on the left, module picker on the right.
+    /// Lightroom's top panel: identity plate on the left, module picker on the
+    /// right. On macOS it is also the title bar, beside the traffic lights.
     fn workspace_bar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         egui::Panel::top("workspace-modes")
-            .exact_size(44.)
+            .exact_size(BAR_HEIGHT)
             .frame(
                 egui::Frame::new()
                     .fill(Color32::from_gray(26))
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
+                title_bar_drag(ui);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
+                    ui.add_space(fastframe_macos::traffic_light_inset(ui.ctx()));
                     let catalog = self
                         .library
                         .as_ref()
@@ -665,5 +668,40 @@ impl Editor {
         if let Some(file) = ctx.input(|i| i.raw.dropped_files.first().cloned()) {
             self.open(file.path().to_path_buf());
         }
+    }
+}
+
+/// The workspace bar's height; on macOS the traffic lights sit on its centre.
+pub(super) const BAR_HEIGHT: f32 = 44.;
+
+/// The bar's empty space moves the window, and a double click does what
+/// System Settings says, as a title bar does. Controls drawn later take their
+/// own clicks. Only macOS hides the system title bar.
+fn title_bar_drag(ui: &mut egui::Ui) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let bar = ui.max_rect().expand2(Vec2::new(18., 0.));
+    let response = ui.interact(
+        bar,
+        ui.id().with("title-bar"),
+        egui::Sense::click_and_drag(),
+    );
+    let ctx = ui.ctx();
+    if response.double_clicked() {
+        match fastframe_macos::double_click_action() {
+            fastframe_macos::DoubleClick::Minimize => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            fastframe_macos::DoubleClick::Zoom => {
+                let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+            }
+            // AppKit fills the screen itself, from the drag started below.
+            fastframe_macos::DoubleClick::Fill | fastframe_macos::DoubleClick::Nothing => {}
+        }
+    } else if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+        // AppKit only starts a drag during the original mouse-down.
+        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
 }

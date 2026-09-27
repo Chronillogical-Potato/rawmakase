@@ -53,7 +53,10 @@ impl Editor {
         path: Option<PathBuf>,
         launch: crate::updates::Launch,
     ) -> Self {
-        install_fallback_fonts(&cc.egui_ctx);
+        // The desktop's hinting and antialiasing, read once (a D-Bus call on
+        // Linux) and applied to the fonts here and to the visuals below.
+        let text = fastframe_text::detect();
+        install_fonts(&cc.egui_ctx, &text);
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
@@ -62,6 +65,8 @@ impl Editor {
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
         editor.updates.launched(launch, &mut editor.status);
+        cc.egui_ctx
+            .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
         editor
     }
     #[cfg(test)]
@@ -230,7 +235,9 @@ impl Editor {
     }
 }
 impl eframe::App for Editor {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // AppKit moves the traffic lights back during layout passes.
+        fastframe_macos::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
         self.draw(ui);
     }
 }
@@ -239,7 +246,15 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         viewport: egui::ViewportBuilder::default()
             .with_title("RAWmakase")
             .with_inner_size([1440., 960.])
-            .with_min_inner_size([900., 650.]),
+            .with_min_inner_size([900., 650.])
+            // On macOS the workspace bar is the title bar, under the traffic
+            // lights; elsewhere the window keeps its decorations.
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false),
+        // fastframe-macos turns on eframe's glow renderer too; previews
+        // share the UI's wgpu device.
+        renderer: eframe::Renderer::Wgpu,
         wgpu_options: wgpu_options(),
         ..Default::default()
     };
@@ -302,10 +317,11 @@ mod updates;
 
 mod events;
 
-/// egui's bundled fonts miss many symbols that preset and profile names use
-/// (superscripts, arrows, ◊…). Add a broad-coverage system font as the last
-/// fallback so they render instead of showing boxes. Missing files are skipped.
-fn install_fallback_fonts(ctx: &egui::Context) {
+/// egui's bundled fonts, rendered as the desktop renders text. They miss many
+/// symbols that preset and profile names use (superscripts, arrows, ◊…), so a
+/// broad-coverage system font is added as the last fallback so they render
+/// instead of showing boxes. Missing files are skipped.
+fn install_fonts(ctx: &egui::Context, text: &fastframe_text::TextRendering) {
     const CANDIDATES: [&str; 6] = [
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/System/Library/Fonts/Apple Symbols.ttf",
@@ -315,7 +331,6 @@ fn install_fallback_fonts(ctx: &egui::Context) {
         "C:\\Windows\\Fonts\\seguisym.ttf",
     ];
     let mut fonts = egui::FontDefinitions::default();
-    let mut added = false;
     for (i, path) in CANDIDATES.iter().enumerate() {
         if let Ok(bytes) = std::fs::read(path) {
             let name = format!("fallback-{i}");
@@ -326,10 +341,8 @@ fn install_fallback_fonts(ctx: &egui::Context) {
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
                 fonts.families.entry(family).or_default().push(name.clone());
             }
-            added = true;
         }
     }
-    if added {
-        ctx.set_fonts(fonts);
-    }
+    text.apply_to(&mut fonts);
+    ctx.set_fonts(fonts);
 }
