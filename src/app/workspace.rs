@@ -211,15 +211,13 @@ impl Editor {
                             name,
                             color,
                         );
-                    let c = rect.right_center() - Vec2::new(14., 0.);
-                    ui.painter().add(egui::Shape::line(
-                        vec![
-                            c + Vec2::new(-3.5, -1.5),
-                            c + Vec2::new(0., 2.),
-                            c + Vec2::new(3.5, -1.5),
-                        ],
-                        egui::Stroke::new(1.3, color),
-                    ));
+                    super::icons::paint_at(
+                        ui.painter(),
+                        super::icons::Icon::ChevronDown,
+                        rect.right_center() - Vec2::new(14., 0.),
+                        13.,
+                        color,
+                    );
                     let response = response
                         .on_hover_text("Catalog: open, create or import")
                         .on_hover_cursor(egui::CursorIcon::PointingHand);

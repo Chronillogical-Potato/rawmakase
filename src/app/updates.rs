@@ -5,7 +5,7 @@ use super::Editor;
 use super::widgets::{modal_frame, primary_button};
 use crate::app::theme;
 use crate::updates::{INTERVAL, Launch, Prepared, Release, Unsupported, Updater};
-use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, Sense, Vec2};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -435,18 +435,19 @@ fn note(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(160))).wrap())
 }
 
-/// An unframed ×, painted so it does not depend on the font.
+/// An unframed ×.
 fn close_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.), Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(rect, 4., theme::gray(48));
     }
     let color = theme::gray(if response.hovered() { 235 } else { 150 });
-    let (c, d) = (rect.center(), 4.);
-    let stroke = Stroke::new(1.4, color);
-    ui.painter()
-        .line_segment([c + Vec2::new(-d, -d), c + Vec2::new(d, d)], stroke);
-    ui.painter()
-        .line_segment([c + Vec2::new(-d, d), c + Vec2::new(d, -d)], stroke);
+    super::icons::paint_at(
+        ui.painter(),
+        super::icons::Icon::Close,
+        rect.center(),
+        14.,
+        color,
+    );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

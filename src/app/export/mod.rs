@@ -11,7 +11,7 @@ use crate::export::{
     job::{self, Photo},
     settings::unique,
 };
-use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, Sense, Vec2};
 use std::{
     path::PathBuf,
     sync::{
@@ -209,11 +209,13 @@ impl Editor {
             .interact(close, ui.id().with("cancel-export"), Sense::click())
             .on_hover_text("Cancel export");
         let color = theme::gray(if response.hovered() { 235 } else { 150 });
-        let c = close.center();
-        for d in [Vec2::new(4., 4.), Vec2::new(4., -4.)] {
-            ui.painter()
-                .line_segment([c - d, c + d], Stroke::new(1.4, color));
-        }
+        crate::app::icons::paint_at(
+            ui.painter(),
+            crate::app::icons::Icon::Close,
+            close.center(),
+            13.,
+            color,
+        );
         if response.clicked() {
             for job in jobs.iter() {
                 job.cancel.store(true, Ordering::Relaxed);

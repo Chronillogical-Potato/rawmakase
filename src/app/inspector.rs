@@ -3,6 +3,7 @@ use super::dialogs::FileDialog;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
 };
+use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -1221,30 +1222,12 @@ const WB_PRESETS: [(&str, f32, f32); 6] = [
     ("Flash", 5500., 0.),
 ];
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, theme::gray(if strong { 235 } else { 170 }));
-    // Bulb at the top right, glass tube down to a tip at the bottom left.
-    painter.line_segment([c + Vec2::new(-5., 5.), c + Vec2::new(2., -2.)], stroke);
-    painter.line_segment([c + Vec2::new(-1., -3.), c + Vec2::new(3., 1.)], stroke);
-    painter.circle_filled(c + Vec2::new(3.5, -3.5), 2.6, stroke.color);
+    let color = theme::gray(if strong { 235 } else { 170 });
+    icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
 }
 fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, theme::gray(if strong { 240 } else { 170 }));
-    painter.add(egui::Shape::line(
-        vec![
-            c + Vec2::new(-3., -7.),
-            c + Vec2::new(-3., 3.),
-            c + Vec2::new(7., 3.),
-        ],
-        stroke,
-    ));
-    painter.add(egui::Shape::line(
-        vec![
-            c + Vec2::new(-7., -3.),
-            c + Vec2::new(3., -3.),
-            c + Vec2::new(3., 7.),
-        ],
-        stroke,
-    ));
+    let color = theme::gray(if strong { 240 } else { 170 });
+    icons::paint_at(painter, Icon::Crop, c, 15., color);
 }
 
 /// Adobe's own profiles for this camera from a local Lightroom / Camera Raw

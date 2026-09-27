@@ -176,18 +176,21 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                 .collect();
             if !custom.is_empty() || !LABELS.contains(&photo.label.as_str()) {
                 ui.add_space(4.);
-                ui.menu_button(egui::RichText::new("⋯").size(12.), |ui| {
-                    for label in custom {
-                        if ui.selectable_label(photo.label == *label, label).clicked() {
-                            edit = Some(Edit::Label(label.clone()));
+                ui.menu_image_button(
+                    crate::app::icons::Icon::More.image(theme::gray(200), 14.),
+                    |ui| {
+                        for label in custom {
+                            if ui.selectable_label(photo.label == *label, label).clicked() {
+                                edit = Some(Edit::Label(label.clone()));
+                                ui.close();
+                            }
+                        }
+                        if ui.button("No label").clicked() {
+                            edit = Some(Edit::Label(String::new()));
                             ui.close();
                         }
-                    }
-                    if ui.button("No label").clicked() {
-                        edit = Some(Edit::Label(String::new()));
-                        ui.close();
-                    }
-                })
+                    },
+                )
                 .response
                 .on_hover_text(if photo.label.is_empty() {
                     "Other labels".to_string()
@@ -199,34 +202,17 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
     });
     edit
 }
-/// Lightroom's pick (white) and reject (black with a red cross) flags.
+/// Lightroom's pick and reject flags: a bright flag, or a struck-out one in red.
 pub fn flag_icon(painter: &egui::Painter, at: egui::Pos2, flag: i32, strong: bool) {
-    use egui::{Stroke, Vec2};
-    let color = if flag > 0 {
-        theme::gray(if strong { 245 } else { 200 })
+    use crate::app::icons::{self, Icon};
+    let (icon, color) = if flag < 0 {
+        (Icon::Rejected, Color32::from_rgb(214, 78, 66))
+    } else if flag > 0 {
+        (Icon::Flag, theme::gray(if strong { 245 } else { 200 }))
     } else {
-        theme::gray(if strong { 15 } else { 30 })
+        (Icon::Flag, theme::gray(if strong { 150 } else { 110 }))
     };
-    let outline = Stroke::new(1., theme::gray(if flag > 0 { 90 } else { 150 }));
-    painter.line_segment(
-        [at + Vec2::new(-3., -5.), at + Vec2::new(-3., 6.)],
-        Stroke::new(1.3, if flag > 0 { color } else { outline.color }),
-    );
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            at + Vec2::new(-3., -5.),
-            at + Vec2::new(5., -2.5),
-            at + Vec2::new(-3., 0.5),
-        ],
-        color,
-        outline,
-    ));
-    if flag < 0 {
-        let red = Stroke::new(1.3, Color32::from_rgb(214, 78, 66));
-        let c = at + Vec2::new(4., 4.);
-        painter.line_segment([c + Vec2::new(-2., -2.), c + Vec2::new(2., 2.)], red);
-        painter.line_segment([c + Vec2::new(-2., 2.), c + Vec2::new(2., -2.)], red);
-    }
+    icons::paint_at(painter, icon, at, 13., color);
 }
 
 #[cfg(test)]

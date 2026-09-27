@@ -32,6 +32,9 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
+# The SVG loader behind the icons, at eframe's egui version.
+egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
 fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 

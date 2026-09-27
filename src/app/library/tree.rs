@@ -1,3 +1,4 @@
+use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::catalog::Folder;
 use eframe::egui::{self, Vec2};
@@ -66,7 +67,7 @@ pub(super) fn folder_tree_row(
     expanded: &mut HashSet<String>,
     selected: &str,
 ) -> Option<TreeAction> {
-    use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke};
+    use egui::{Align2, FontId, Pos2, Rect, Sense};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
     let painter = ui.painter();
@@ -96,44 +97,19 @@ pub(super) fn folder_tree_row(
     let x = rect.left() + indent + 3.;
     let y = rect.center().y;
     if !node.children.is_empty() {
-        let points = if open {
-            vec![
-                Pos2::new(x - 3., y - 2.),
-                Pos2::new(x, y + 1.),
-                Pos2::new(x + 3., y - 2.),
-            ]
+        let chevron = if open {
+            Icon::ChevronDown
         } else {
-            vec![
-                Pos2::new(x - 2., y - 3.),
-                Pos2::new(x + 1., y),
-                Pos2::new(x - 2., y + 3.),
-            ]
+            Icon::ChevronRight
         };
-        painter.add(egui::Shape::line(
-            points,
-            Stroke::new(1.2, theme::gray(150)),
-        ));
+        icons::paint_at(painter, chevron, Pos2::new(x, y), 11., theme::gray(150));
     }
-    let icon = Rect::from_min_size(Pos2::new(x + 7., y - 4.), Vec2::new(12., 9.));
-    painter.rect_stroke(
-        icon,
-        1.,
-        Stroke::new(1., theme::gray(145)),
-        egui::StrokeKind::Inside,
-    );
-    painter.line_segment(
-        [
-            Pos2::new(icon.left(), icon.top()),
-            Pos2::new(icon.left(), icon.top() - 2.),
-        ],
-        Stroke::new(1., theme::gray(145)),
-    );
-    painter.line_segment(
-        [
-            Pos2::new(icon.left(), icon.top() - 2.),
-            Pos2::new(icon.left() + 5., icon.top() - 2.),
-        ],
-        Stroke::new(1., theme::gray(145)),
+    icons::paint_at(
+        painter,
+        Icon::Folder,
+        Pos2::new(x + 13., y),
+        13.,
+        theme::gray(145),
     );
     let can_relink = node.root.is_some() || node.folder.is_some();
     let label_rect = Rect::from_min_max(

@@ -31,6 +31,7 @@ def main():
     for source, target in [(root / "LICENSE", licenses / "LICENSE"),
                            (root / "licenses/Adobe-DNG-SDK.txt", licenses / "Adobe-DNG-SDK.txt"),
                            (root / "licenses/Inter-OFL.txt", licenses / "Inter-OFL.txt"),
+                           (root / "licenses/Lucide-ISC.txt", licenses / "Lucide-ISC.txt"),
                            (root / "packaging/rawmakase.desktop", stage / "usr/share/applications/rawmakase.desktop"),
                            (root / "packaging/rawmakase.svg", stage / "usr/share/icons/hicolor/scalable/apps/rawmakase.svg")]:
         target.parent.mkdir(parents=True, exist_ok=True)

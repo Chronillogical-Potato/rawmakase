@@ -1290,11 +1290,7 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let color = theme::gray(if hovered { 235 } else { 165 });
     // Same columns as folder rows: icon at 10 px, text at 29 px.
     let c = egui::pos2(rect.left() + 16., rect.center().y);
-    let stroke = egui::Stroke::new(1.4, color);
-    ui.painter()
-        .line_segment([c - Vec2::new(5., 0.), c + Vec2::new(5., 0.)], stroke);
-    ui.painter()
-        .line_segment([c - Vec2::new(0., 5.), c + Vec2::new(0., 5.)], stroke);
+    crate::app::icons::paint_at(ui.painter(), crate::app::icons::Icon::Add, c, 13., color);
     ui.painter().text(
         egui::pos2(rect.left() + 29., rect.center().y),
         egui::Align2::LEFT_CENTER,

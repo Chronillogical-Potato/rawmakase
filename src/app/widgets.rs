@@ -1,3 +1,4 @@
+use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -49,7 +50,6 @@ pub(super) fn toolbar_action(
     } else {
         175
     });
-    let stroke = Stroke::new(1.5, color);
     if !label.is_empty() {
         ui.painter().text(
             rect.center() + Vec2::new(if icon > 0 { 8. } else { 0. }, 0.),
@@ -64,43 +64,15 @@ pub(super) fn toolbar_action(
     } else {
         Pos2::new(rect.left() + 13., rect.center().y)
     };
-    if icon == 1 || icon == 2 {
-        let sign = if icon == 1 { 1. } else { -1. };
-        let p = |x: f32, y: f32| c + Vec2::new(x * sign, y);
-        ui.painter().add(egui::Shape::line(
-            vec![p(5., 5.), p(5., 0.), p(3., -3.), p(-6., -3.)],
-            stroke,
-        ));
-        ui.painter().add(egui::Shape::line(
-            vec![p(-2., -7.), p(-6., -3.), p(-2., 1.)],
-            stroke,
-        ));
-    } else if icon == 3 {
-        let r = Rect::from_center_size(c, Vec2::new(12., 12.));
-        ui.painter()
-            .rect_stroke(r, 1., stroke, egui::StrokeKind::Inside);
-        ui.painter()
-            .line_segment([r.center_top(), r.center_bottom()], stroke);
-    } else if icon == 4 {
-        ui.painter()
-            .line_segment([c + Vec2::new(0., -6.), c + Vec2::new(0., 3.)], stroke);
-        ui.painter().add(egui::Shape::line(
-            vec![
-                c + Vec2::new(-3., 0.),
-                c + Vec2::new(0., 3.),
-                c + Vec2::new(3., 0.),
-            ],
-            stroke,
-        ));
-        ui.painter().add(egui::Shape::line(
-            vec![
-                c + Vec2::new(-5., 4.),
-                c + Vec2::new(-5., 6.),
-                c + Vec2::new(5., 6.),
-                c + Vec2::new(5., 4.),
-            ],
-            stroke,
-        ));
+    let glyph = match icon {
+        1 => Some(Icon::Undo),
+        2 => Some(Icon::Redo),
+        3 => Some(Icon::BeforeAfter),
+        4 => Some(Icon::Export),
+        _ => None,
+    };
+    if let Some(glyph) = glyph {
+        icons::paint_at(ui.painter(), glyph, c, 15., color);
     }
     if enabled {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -220,21 +192,8 @@ pub(super) fn section(
         theme::gray(if toggle.hovered() { 250 } else { 235 }),
     );
     if resettable {
-        let c = reset_rect.center();
         let color = theme::gray(if reset.hovered() { 240 } else { 150 });
-        let pts: Vec<_> = (0..=24)
-            .map(|i| {
-                let a = 0.5 + i as f32 / 24. * 5.;
-                c + Vec2::angled(a) * 5.
-            })
-            .collect();
-        let tip = *pts.last().unwrap();
-        ui.painter()
-            .add(egui::Shape::line(pts, Stroke::new(1.2, color)));
-        ui.painter().add(egui::Shape::line(
-            vec![tip + Vec2::new(-3., 0.), tip, tip + Vec2::new(0., -3.)],
-            Stroke::new(1.2, color),
-        ));
+        icons::paint_at(ui.painter(), Icon::Reset, reset_rect.center(), 12., color);
     }
     if toggle.clicked() {
         open = !open;
@@ -930,14 +889,7 @@ pub(super) fn menu_item(
     };
     if checked {
         let c = rect.left_center() + Vec2::new(11., 0.);
-        ui.painter().add(egui::Shape::line(
-            vec![
-                c + Vec2::new(-4., 0.),
-                c + Vec2::new(-1., 3.),
-                c + Vec2::new(4., -3.),
-            ],
-            Stroke::new(1.5, color),
-        ));
+        icons::paint_at(ui.painter(), Icon::Check, c, 13., color);
     }
     ui.painter().text(
         rect.left_center() + Vec2::new(22., 0.),

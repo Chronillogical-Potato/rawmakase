@@ -66,14 +66,12 @@ impl Editor {
                         if response.hovered() {
                             ui.painter().rect_filled(rect, 3., theme::gray(50));
                         }
-                        let c = rect.center();
-                        ui.painter().line_segment(
-                            [c - Vec2::new(5., 0.), c + Vec2::new(5., 0.)],
-                            Stroke::new(1.5, color),
-                        );
-                        ui.painter().line_segment(
-                            [c - Vec2::new(0., 5.), c + Vec2::new(0., 5.)],
-                            Stroke::new(1.5, color),
+                        crate::app::icons::paint_at(
+                            ui.painter(),
+                            crate::app::icons::Icon::Add,
+                            rect.center(),
+                            14.,
+                            color,
                         );
                         if response
                             .on_hover_text("Import Lightroom presets (.xmp)")

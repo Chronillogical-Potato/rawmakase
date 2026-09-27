@@ -58,6 +58,7 @@ impl Editor {
         // Linux) and applied to the fonts here and to the visuals below.
         let text = fastframe_text::detect();
         install_fonts(&cc.egui_ctx, &text);
+        icons::install(&cc.egui_ctx);
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
@@ -290,6 +291,8 @@ mod state;
 use state::{Document, PresetBrowser, PreviewState, ViewState};
 
 mod history;
+
+mod icons;
 
 mod task;
 

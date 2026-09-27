@@ -631,14 +631,13 @@ fn step(
                 if done.is_some() {
                     ui.painter()
                         .circle_filled(c, 11., Color32::from_rgb(64, 132, 90));
-                    ui.painter().add(egui::Shape::line(
-                        vec![
-                            c + Vec2::new(-4.5, 0.),
-                            c + Vec2::new(-1.5, 3.),
-                            c + Vec2::new(4.5, -3.),
-                        ],
-                        Stroke::new(1.8, theme::on_accent()),
-                    ));
+                    super::icons::paint_at(
+                        ui.painter(),
+                        super::icons::Icon::Check,
+                        c,
+                        14.,
+                        theme::on_accent(),
+                    );
                 } else {
                     ui.painter().circle_filled(c, 11., theme::gray(52));
                     ui.painter().text(

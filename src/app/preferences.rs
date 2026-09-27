@@ -596,14 +596,12 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
         ui.painter().rect_filled(rect, 4., theme::gray(38));
     }
     let color = theme::gray(if response.hovered() { 235 } else { 175 });
-    let c = rect.center();
-    let painter = ui.painter();
-    for i in 0..8 {
-        let a = i as f32 * std::f32::consts::TAU / 8.;
-        let d = Vec2::angled(a);
-        painter.line_segment([c + d * 5.5, c + d * 8.], Stroke::new(2.4, color));
-    }
-    painter.circle_stroke(c, 5.2, Stroke::new(1.6, color));
-    painter.circle_stroke(c, 1.8, Stroke::new(1.3, color));
+    super::icons::paint_at(
+        ui.painter(),
+        super::icons::Icon::Settings,
+        rect.center(),
+        18.,
+        color,
+    );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
