@@ -1,8 +1,10 @@
-//! Optional compute backend for preview sharpening and Lanczos resizing.
+//! Optional compute backend for previews: the per-pixel develop stage, sharpening,
+//! Lanczos resizing and display finishing.
 //!
-//! Color processing remains in the shared CPU pipeline. A dedicated compute device
-//! keeps resource limits and failures independent of the UI device. Buffers are
-//! bounded and reused for equal dimensions; callers retain CPU pixels for fallback.
+//! On the desktop it shares the UI's wgpu device, so a preview is finished straight
+//! into a texture the viewport draws (`present.rs`). Headless callers (tests, the
+//! benchmark) create their own device. Buffers are bounded and reused for equal
+//! dimensions; callers retain CPU pixels for fallback.
 use super::{Recipe, Rendered};
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -14,7 +16,10 @@ use std::{
 };
 use wgpu::util::DeviceExt;
 mod develop;
+mod present;
 mod weights;
+pub(crate) use present::Finish;
+pub use present::{Display, Frame, MonitorLut, Slot};
 
 pub struct Processor {
     device: wgpu::Device,
@@ -24,6 +29,8 @@ pub struct Processor {
     buffers: Option<Buffers>,
     /// Per-pixel develop stage, created on first use.
     developer: Option<develop::Developer>,
+    /// Display finishing, created on first use.
+    presenter: Option<present::Presenter>,
     name: String,
 }
 struct Buffers {
@@ -33,8 +40,19 @@ struct Buffers {
     output: wgpu::Buffer,
     staging: wgpu::Buffer,
 }
+/// Device limits previews need: storage buffers for full-resolution regions, up to
+/// 512 MB where the adapter allows.
+pub fn required_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let limits = adapter.limits();
+    wgpu::Limits {
+        max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size.min(512 << 20),
+        max_buffer_size: limits.max_buffer_size.min(512 << 20),
+        max_texture_dimension_2d: limits.max_texture_dimension_2d,
+        ..wgpu::Limits::default()
+    }
+}
 impl Processor {
-    /// Fails cleanly if no hardware compute adapter is available.
+    /// A device of its own. Fails cleanly if no hardware compute adapter is available.
     pub fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -43,24 +61,35 @@ impl Processor {
             compatible_surface: None,
             ..Default::default()
         }))?;
+        let info = adapter.get_info();
         ensure!(
-            adapter.get_info().device_type != wgpu::DeviceType::Cpu,
+            info.device_type != wgpu::DeviceType::Cpu,
             "Software GPU adapter"
         );
-        let limits = adapter.limits();
-        let (device, queue) = pollster::block_on(
-            adapter.request_device(&wgpu::DeviceDescriptor {
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("RAWmakase preview compute"),
-                required_limits: wgpu::Limits {
-                    max_storage_buffer_binding_size: limits
-                        .max_storage_buffer_binding_size
-                        .min(512 * 1024 * 1024),
-                    max_buffer_size: limits.max_buffer_size.min(512 * 1024 * 1024),
-                    ..wgpu::Limits::default()
-                },
+                required_limits: required_limits(&adapter),
                 ..Default::default()
-            }),
-        )?;
+            }))?;
+        Self::with_device(device, queue, &info)
+    }
+    /// Uses the UI's device and queue, so previews can be presented into textures it
+    /// draws. The device should have [`required_limits`]; smaller limits only make
+    /// large regions fall back to the CPU.
+    pub fn with_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        adapter: &wgpu::AdapterInfo,
+    ) -> Result<Self> {
+        ensure!(
+            adapter.device_type != wgpu::DeviceType::Cpu,
+            "Software GPU adapter"
+        );
+        ensure!(
+            adapter.backend != wgpu::Backend::Gl,
+            "OpenGL adapters are not used for compute"
+        );
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
         let allocation = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
@@ -124,7 +153,8 @@ impl Processor {
             pipelines,
             buffers: None,
             developer: None,
-            name: adapter.get_info().name,
+            presenter: None,
+            name: adapter.name.clone(),
         })
     }
     pub fn name(&self) -> &str {

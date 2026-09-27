@@ -229,11 +229,14 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
         scale_clipped: 0,
     });
     editor.document.set_image(image);
-    editor.preview.texture = Some(ctx.load_texture(
-        "photo",
-        egui::ColorImage::filled([200, 200], Color32::GRAY),
-        egui::TextureOptions::LINEAR,
-    ));
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
     let recipe = editor.document.recipe.clone();
     let mut frame = |events| {
         let mut output = ctx.run_ui(
@@ -379,12 +382,17 @@ fn stale_preview_results_are_discarded() {
     e.preview.task.start();
     e.tx.send(Event::Rendered {
         id: old,
-        image: develop::Rendered {
-            width: 1,
-            height: 1,
-            pixels: vec![[1.; 3]],
+        preview: worker::Preview::Pixels {
+            image: develop::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[1.; 3]],
+            },
+            display_rgb: vec![255; 3],
+            navigator: None,
         },
-        display_rgb: vec![255; 3],
+        histogram: Box::new([[0; 256]; 3]),
+        thumbnail: None,
         stage: worker::RenderStage::Fit,
         status: "stale".into(),
     })
@@ -440,12 +448,17 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
             .tx
             .send(Event::Rendered {
                 id: current,
-                image: develop::Rendered {
-                    width: 1,
-                    height: 1,
-                    pixels: vec![[0.5; 3]],
+                preview: worker::Preview::Pixels {
+                    image: develop::Rendered {
+                        width: 1,
+                        height: 1,
+                        pixels: vec![[0.5; 3]],
+                    },
+                    display_rgb: vec![128; 3],
+                    navigator: None,
                 },
-                display_rgb: vec![128; 3],
+                histogram: Box::new([[0; 256]; 3]),
+                thumbnail: None,
                 stage,
                 status: status.into(),
             })

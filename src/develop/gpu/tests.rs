@@ -298,3 +298,169 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     assert!(pixel_params(image.as_ref().into(), &legacy).is_none());
     Ok(())
 }
+
+/// Reads a presented texture back as RGB bytes.
+fn read_texture(gpu: &Processor, texture: &wgpu::Texture) -> Result<Vec<u8>> {
+    let row = (texture.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: row as u64 * texture.height() as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: None,
+            },
+        },
+        texture.size(),
+    );
+    gpu.queue.submit([encoder.finish()]);
+    buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    gpu.device.poll(wgpu::PollType::wait_indefinitely())?;
+    let bytes = buffer.slice(..).get_mapped_range()?;
+    Ok(bytes
+        .chunks_exact(row as usize)
+        .flat_map(|r| r[..texture.width() as usize * 4].as_chunks::<4>().0.iter())
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect())
+}
+
+/// Previews presented on the GPU (develop, sharpening, spatial effects, clipping
+/// overlay, histogram) against the CPU renderer's pixels, for Fit, full size and a
+/// 100% region.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn presented_previews_match_the_cpu_render() -> Result<()> {
+    use crate::{
+        camera_profiles::CameraProfile,
+        develop::{PreviewRenderer, quality::Output},
+        raw::{CameraImage, Metadata},
+    };
+    use std::sync::Arc;
+    let (w, h) = (157, 103);
+    let metadata = Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        width: w,
+        height: h,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let v = 0.25 + 0.2 * (x * 0.21).sin() * (y * 0.13).cos() + 0.1 * (x * 0.9).sin();
+                [v * 1.3, v, v * 0.8 + x / w as f32 * 0.3]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let profile = CameraProfile::camera_matrix_default(&metadata)
+        .unwrap()
+        .with_test_tables();
+    let base = Recipe {
+        profile: Some(Arc::new(profile)),
+        reference_curves: true,
+        reference_color: true,
+        reference_calibration: true,
+        temperature: 5000.,
+        exposure: 0.4,
+        shadows: 0.3,
+        sharpening: 0.8,
+        sharpening_radius: 1.2,
+        sharpening_masking: 0.3,
+        ..Default::default()
+    };
+    let mut gpu = PreviewRenderer::with_gpu();
+    let mut cpu = PreviewRenderer::default();
+    let cancel = AtomicBool::new(false);
+    for (spatial, clipping) in [(false, false), (true, false), (true, true)] {
+        let mut recipe = base.clone();
+        if spatial {
+            recipe.effects.grain = 0.4;
+            recipe.effects.vignette = -0.3;
+            recipe.effects.lens_vignette = 0.2;
+            recipe.effects.clarity = 0.3;
+            recipe.whites = 0.6;
+        }
+        for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
+            let display = super::Display {
+                slot: if region.is_some() {
+                    super::Slot::Region
+                } else {
+                    super::Slot::Whole
+                },
+                clipping,
+                monitor: None,
+                navigator: Some(20),
+                thumbnail: Some(30),
+            };
+            let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
+            let Output::Frame(frame) =
+                gpu.render_to(&image, &recipe, max_edge, region, &cancel, Some(&display))?
+            else {
+                panic!("{:?}", gpu.fallback_reason());
+            };
+            assert_eq!(
+                (frame.width, frame.height),
+                (expected.width, expected.height)
+            );
+            let mut rgb = expected.rgb8();
+            if clipping {
+                for (p, orig) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&expected.pixels) {
+                    if orig.iter().any(|v| *v >= 0.999) {
+                        p.copy_from_slice(&[255, 40, 40]);
+                    } else if orig.iter().all(|v| *v <= 0.001) {
+                        p.copy_from_slice(&[40, 80, 255]);
+                    }
+                }
+            }
+            let actual = read_texture(gpu.gpu().unwrap(), &frame.texture)?;
+            let worst = actual
+                .iter()
+                .zip(&rgb)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            let label = format!("spatial={spatial} clipping={clipping} {max_edge} {region:?}");
+            let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
+            eprintln!(
+                "{label}: largest difference {worst}, {changed} of {} values",
+                rgb.len()
+            );
+            assert!(worst <= 1, "{label}: largest difference {worst}");
+            let histogram = expected.histogram();
+            for (gpu, cpu) in frame.histogram.iter().zip(&histogram) {
+                let total: u32 = gpu.iter().sum();
+                assert_eq!(total, frame.width * frame.height, "{label}");
+                let moved: u32 = gpu.iter().zip(cpu).map(|(a, b)| a.abs_diff(*b)).sum();
+                assert!(moved <= total / 50 + 2, "{label}: histogram moved {moved}");
+            }
+            let navigator = frame.navigator.as_ref().unwrap();
+            assert_eq!(navigator.width().max(navigator.height()), 20);
+            let (tw, th, bytes) = frame.thumbnail.as_ref().unwrap();
+            assert_eq!(((*tw).max(*th), bytes.len()), (30, (tw * th * 3) as usize));
+        }
+    }
+    Ok(())
+}

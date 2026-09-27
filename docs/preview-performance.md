@@ -4,10 +4,14 @@ Fit and zoomed-out views render from a resolution pyramid of the photo (see
 [below](#resolution-pyramid)); 100% regions and export use the full-resolution
 image. The desktop runs the per-pixel color and tone stage on the GPU (see
 [GPU develop stage](#gpu-develop-stage)) and uses GPU compute for sharpening and
-Lanczos3 resizing of full resolution renders. RAW decoding, geometry sampling, local
-tones, grain/vignette and export stay on the CPU. There is no separate draft: every slider change renders the real
-pipeline at Fit size, and at 100% a half-resolution preview of the region comes
-first (see [slider responsiveness](#slider-responsiveness)). The status line shows `GPU finish` when compute was used.
+Lanczos3 resizing of full resolution renders, and finishes previews (sharpening,
+grain, vignettes, clipping overlay, monitor profile) straight into the texture the
+viewport draws (see [presenting on the UI's GPU](#presenting-on-the-uis-gpu)). RAW
+decoding, geometry sampling, local tones and export stay on the CPU. There is no
+separate draft: every slider change renders the real pipeline at Fit size, and at
+100% a half-resolution preview of the region comes first (see
+[slider responsiveness](#slider-responsiveness)). The status line shows `GPU` for
+presented frames and `GPU finish` when only finishing used compute.
 
 The shaders are portable WGSL through wgpu, with no CUDA or Metal-specific code.
 Metal is used on macOS; Linux NVIDIA/AMD devices can use Vulkan with a working
@@ -147,7 +151,8 @@ measured Basic curves, levels, parametric and point curves, color mixer, color
 grading, Oklab Defringe/Monochrome and gamut compression. It runs on the samples in
 the stage cache, which stay on the device while only the recipe changes; parameters
 and tables (`pixel_params.rs`) are uploaded per render and the result is read back
-for sharpening and spatial effects on the CPU.
+for sharpening and spatial effects on the CPU (readback callers such as the benchmark
+and tests), or finished on the device (the desktop).
 
 The port covers engine 4 with reference curves, color and calibration and a profile
 tone curve, which every new photo uses. Older engines, and color grading with
@@ -163,9 +168,8 @@ difference is at most 0.0003 and the mean at most 0.00001 (0–1 scale). With
 Monochrome, a few near-neutral pixels whose Oklab hue is unstable can land in
 another band (largest difference 0.01).
 
-Rendering into a texture that egui draws directly would need the compute work on
-the UI's wgpu device, which the separate compute device deliberately avoids. The
-readback of a 1600-pixel Fit is a few milliseconds, so it stays.
+The result is no longer read back on the desktop; see
+[presenting on the UI's GPU](#presenting-on-the-uis-gpu).
 
 Best of two interleaved runs against the previous commit, load average 24–35:
 
@@ -187,6 +191,61 @@ Best of two interleaved runs against the previous commit, load average 24–35:
 Fit differs from the resized export exactly as much as the CPU Fit (0.0016 X100F,
 0.0059 A7CR). Clarity edits and the A7CR's 100% view with local adjustments were then dominated
 by the full-resolution local-tone blurs on the CPU (see the next section).
+
+## Presenting on the UI's GPU
+
+The render worker used to read every GPU result back with a blocking wait, sharpen
+and apply grain and vignettes on the CPU, convert to 8 bits, apply the monitor
+profile with a new lcms transform, draw the clipping overlay and compute the
+histogram; the UI thread then built an egui image, reduced it for the Navigator and
+uploaded it again. The GPU stage now runs on eframe's own wgpu device, and
+`gpu/present.wgsl` finishes the developed pixels on the device into a texture the
+viewport draws: sharpening, vignettes and grain, the clipping overlay, the monitor
+profile (a lattice sampled from lcms once per profile) and 8-bit encoding, with the
+histogram counted in the same pass and the Navigator copy reduced on the GPU. Only
+the histogram (3 KB) and, for catalog photos, the library thumbnail come back.
+When the GPU does not render a recipe, the worker prepares the display bytes,
+histogram and reduced copies, so the UI thread only uploads.
+
+A hardware test compares presented frames with the CPU renderer's 8-bit output for
+Fit, full size and a 100% region, with sharpening, grain, vignettes, Clarity and the
+clipping overlay: at most one level differs, in at most 9 of 48,513 values.
+
+Also in this change: the local-tone gain and the samples are keyed by what they are
+computed from rather than by the address of the blurs, so a 61-megapixel photo,
+whose blurs exceed the cache budget, no longer recomputes Clarity on every exposure
+change at 100%; and the reduced image the engine 4 Shadows/Highlights map is built
+from is kept in the stage cache instead of being reduced from the full image on
+every render.
+
+Time until a frame is ready to draw, per exposure (or Clarity) change: before, the
+render plus the worker's and UI thread's conversions (`ready to draw` in
+`preview_benchmark`); after, the presented frame including the histogram readback
+(`presented`). Best of two interleaved runs of the previous commit and this change,
+release build, Apple M1 Pro, machine loaded by other work (load average about 15–20):
+
+| Photo | Render | Before | After |
+| --- | --- | ---: | ---: |
+| X100F | Fit | 31.9 ms | 8.8 ms |
+| | Fit, local | 59.1 ms | 39.1 ms |
+| | Fit, Clarity edits | 158.5 ms | 118.9 ms |
+| | 100% preview | 10.0 ms | 3.9 ms |
+| | 100% region | 33.8 ms | 7.3 ms |
+| | 100% region, local | 66.7 ms | 26.3 ms |
+| | 100% region, Clarity edits | 173.1 ms | 134.6 ms |
+| A7CR | Fit | 24.3 ms | 4.1 ms |
+| | Fit, local | 40.7 ms | 14.4 ms |
+| | Fit, Clarity edits | 86.7 ms | 56.4 ms |
+| | 100% preview | 6.7 ms | 1.3 ms |
+| | 100% region | 24.6 ms | 4.1 ms |
+| | 100% region, local | 1026.8 ms | 12.8 ms |
+| | 100% region, Clarity edits | 725.9 ms | 743.7 ms |
+
+Fit differs from the resized export as before (0.0016 X100F, 0.0059 A7CR). Clarity
+edits at 100% on the A7CR still recompute the full-resolution blurs and gain on the
+CPU (about 110 ms for the log luminance, 150–190 ms per box blur and 150 ms for the
+gain under this load); moving those stages and the sampling onto the GPU is the next
+step.
 
 ## Local-tone gain
 

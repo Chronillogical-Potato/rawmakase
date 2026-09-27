@@ -34,14 +34,69 @@ pub(super) enum TextureMode {
     Whole,
     Region([u32; 4]),
 }
+/// A texture the viewport draws: uploaded through egui, or presented by the GPU
+/// renderer into a texture it registered.
+#[derive(Clone)]
+pub(super) struct Picture {
+    id: egui::TextureId,
+    size: [usize; 2],
+    /// Keeps an uploaded texture alive; presented ones belong to the renderer.
+    handle: Option<egui::TextureHandle>,
+}
+impl Picture {
+    pub(super) fn presented(id: egui::TextureId, size: [usize; 2]) -> Self {
+        Self {
+            id,
+            size,
+            handle: None,
+        }
+    }
+    pub(super) fn id(&self) -> egui::TextureId {
+        self.id
+    }
+    pub(super) fn size_vec2(&self) -> Vec2 {
+        Vec2::new(self.size[0] as f32, self.size[1] as f32)
+    }
+    /// Shows `image` in `slot`, reusing its uploaded texture when it has one.
+    pub(super) fn upload(
+        slot: &mut Option<Picture>,
+        ctx: &egui::Context,
+        name: &str,
+        image: egui::ColorImage,
+    ) {
+        let size = image.size;
+        match slot.as_mut().and_then(|p| p.handle.clone()) {
+            Some(mut handle) => {
+                handle.set(image, egui::TextureOptions::LINEAR);
+                *slot = Some(handle.into());
+            }
+            None => {
+                *slot = Some(
+                    ctx.load_texture(name, image, egui::TextureOptions::LINEAR)
+                        .into(),
+                )
+            }
+        }
+        debug_assert_eq!(slot.as_ref().map(|p| p.size), Some(size));
+    }
+}
+impl From<egui::TextureHandle> for Picture {
+    fn from(handle: egui::TextureHandle) -> Self {
+        Self {
+            id: handle.id(),
+            size: handle.size(),
+            handle: Some(handle),
+        }
+    }
+}
 pub(super) struct PreviewState {
     pub(super) task: super::task::Task,
     /// The last whole-photo render, always drawn so zooming never shows a gap.
-    pub(super) texture: Option<egui::TextureHandle>,
+    pub(super) texture: Option<Picture>,
     /// The last 100% region render, drawn over `texture` while `mode` is a region.
-    pub(super) region: Option<egui::TextureHandle>,
+    pub(super) region: Option<Picture>,
     /// Small copy of the last whole-photo render for the Navigator.
-    pub(super) navigator: Option<egui::TextureHandle>,
+    pub(super) navigator: Option<Picture>,
     pub(super) thumbs: HashMap<PathBuf, egui::TextureHandle>,
     pub(super) histogram: [[u32; 256]; 3],
     pub(super) status: String,

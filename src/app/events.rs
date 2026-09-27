@@ -1,7 +1,7 @@
 //! Accept worker results at a single generation-checked boundary.
 use super::{
     Editor,
-    worker::{Event, LoadedHeader, RenderStage, TaskKind},
+    worker::{self, Event, LoadedHeader, RenderStage, TaskKind},
 };
 use crate::export::ExportOptions;
 use eframe::egui;
@@ -84,7 +84,19 @@ impl Editor {
                     if edited {
                         continue;
                     }
-                    self.set_texture(ctx, im.width(), im.height(), im.as_raw());
+                    let k = (360. / im.width().max(im.height()) as f32).min(1.);
+                    let navigator = image::imageops::thumbnail(
+                        &im,
+                        ((im.width() as f32 * k) as u32).max(1),
+                        ((im.height() as f32 * k) as u32).max(1),
+                    );
+                    self.set_pixels(
+                        ctx,
+                        false,
+                        [im.width(), im.height()],
+                        im.as_raw(),
+                        Some(navigator),
+                    );
                     self.preview.mode = super::state::TextureMode::Whole;
                     self.preview.status = "Camera preview • developing RAW…".into();
                 }
@@ -115,24 +127,41 @@ impl Editor {
                 }
                 Event::Rendered {
                     id,
-                    image: im,
-                    display_rgb: rgb,
+                    preview,
+                    histogram,
+                    thumbnail,
                     stage,
                     status,
                 } if id == self.preview.task.id() => {
-                    self.preview.histogram = im.histogram();
-                    if matches!(
+                    self.preview.histogram = *histogram;
+                    let region = matches!(
                         self.preview.pending_mode,
                         super::state::TextureMode::Region(_)
-                    ) {
-                        self.set_region_texture(ctx, im.width, im.height, &rgb);
-                    } else {
-                        self.set_texture(ctx, im.width, im.height, &rgb);
+                    );
+                    match preview {
+                        worker::Preview::Pixels {
+                            image,
+                            display_rgb,
+                            navigator,
+                        } => self.set_pixels(
+                            ctx,
+                            region,
+                            [image.width, image.height],
+                            &display_rgb,
+                            navigator,
+                        ),
+                        worker::Preview::Texture {
+                            id,
+                            size,
+                            navigator,
+                        } => self.set_presented(region, (id, size), navigator),
                     }
                     self.preview.mode = self.preview.pending_mode;
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
-                        self.refresh_library_thumbnail(ctx, &im);
+                        if let Some(small) = thumbnail {
+                            self.refresh_library_thumbnail(ctx, small);
+                        }
                     }
                     self.preview.status = status;
                 }
@@ -281,34 +310,26 @@ impl Editor {
 impl Editor {
     /// After a finished whole-photo render of the current edit, show it as
     /// the photo's Library and filmstrip thumbnail.
-    fn refresh_library_thumbnail(&mut self, ctx: &egui::Context, im: &crate::develop::Rendered) {
-        let showing_edit = self.preview.mode == super::state::TextureMode::Whole
+    /// Whether the viewport shows the catalog photo's edit as the library would.
+    pub(super) fn shows_library_edit(&self) -> bool {
+        self.library.is_some()
+            && self.document.catalog_photo.is_some()
+            && self.document.path.is_some()
             && !self.view.zoom100
             && !self.view.compare
             && !self.view.crop_mode
-            && self.presets.preview.is_none();
-        let (Some(library), Some(_), Some(path)) = (
-            &mut self.library,
-            self.document.catalog_photo,
-            self.document.path.clone(),
-        ) else {
+            && self.presets.preview.is_none()
+    }
+    fn refresh_library_thumbnail(&mut self, ctx: &egui::Context, small: image::RgbImage) {
+        if self.preview.mode != super::state::TextureMode::Whole || !self.shows_library_edit() {
             return;
-        };
+        }
         let Ok(json) = serde_json::to_string(&self.document.recipe) else {
             return;
         };
-        if !showing_edit {
-            return;
-        }
-        let Some(full) = image::RgbImage::from_raw(im.width, im.height, im.rgb8()) else {
+        let (Some(library), Some(path)) = (&mut self.library, self.document.path.clone()) else {
             return;
         };
-        let k = (640. / im.width.max(im.height) as f32).min(1.);
-        let small = image::imageops::thumbnail(
-            &full,
-            ((im.width as f32 * k) as u32).max(1),
-            ((im.height as f32 * k) as u32).max(1),
-        );
         library.update_edited(ctx, &path, small, json);
     }
 }

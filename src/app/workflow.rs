@@ -1,4 +1,5 @@
 use super::Editor;
+use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
 use crate::develop::{Geometry, Recipe};
 use eframe::egui;
@@ -163,49 +164,54 @@ impl Editor {
                 region,
                 monitor: self.view.monitor.clone(),
                 clipping: self.view.clipping,
+                navigator: !self.view.zoom100,
+                thumbnail: region.is_none() && self.shows_library_edit(),
             });
         }
     }
-    pub(super) fn set_texture(&mut self, ctx: &egui::Context, w: u32, h: u32, data: &[u8]) {
+    /// A CPU render: the whole photo, or a 100% region drawn over it.
+    pub(super) fn set_pixels(
+        &mut self,
+        ctx: &egui::Context,
+        region: bool,
+        [w, h]: [u32; 2],
+        data: &[u8],
+        navigator: Option<image::RgbImage>,
+    ) {
+        let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
+        if region {
+            Picture::upload(&mut self.preview.region, ctx, "photo region", image);
+            return;
+        }
         if !self.view.zoom100
-            && let Some(full) = image::RgbImage::from_raw(w, h, data.to_vec())
+            && let Some(small) = navigator
         {
-            let scale = (360. / w.max(h) as f32).min(1.);
-            let small = image::imageops::thumbnail(
-                &full,
-                ((w as f32 * scale) as u32).max(1),
-                ((h as f32 * scale) as u32).max(1),
-            );
             let small = egui::ColorImage::from_rgb(
                 [small.width() as usize, small.height() as usize],
                 small.as_raw(),
             );
-            match &mut self.preview.navigator {
-                Some(t) => t.set(small, egui::TextureOptions::LINEAR),
-                None => {
-                    self.preview.navigator =
-                        Some(ctx.load_texture("navigator", small, egui::TextureOptions::LINEAR))
-                }
-            }
+            Picture::upload(&mut self.preview.navigator, ctx, "navigator", small);
         }
-        let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
-        if let Some(t) = &mut self.preview.texture {
-            t.set(image, egui::TextureOptions::LINEAR);
-        } else {
-            self.preview.texture =
-                Some(ctx.load_texture("photo", image, egui::TextureOptions::LINEAR));
-        }
+        Picture::upload(&mut self.preview.texture, ctx, "photo", image);
     }
-    /// A 100% region render, drawn over the whole-photo texture.
-    pub(super) fn set_region_texture(&mut self, ctx: &egui::Context, w: u32, h: u32, data: &[u8]) {
-        let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
-        match &mut self.preview.region {
-            Some(t) => t.set(image, egui::TextureOptions::LINEAR),
-            None => {
-                self.preview.region =
-                    Some(ctx.load_texture("photo region", image, egui::TextureOptions::LINEAR))
-            }
+    /// A GPU render, presented into textures the renderer registered.
+    pub(super) fn set_presented(
+        &mut self,
+        region: bool,
+        (id, size): (egui::TextureId, [usize; 2]),
+        navigator: Option<(egui::TextureId, [usize; 2])>,
+    ) {
+        let picture = Some(Picture::presented(id, size));
+        if region {
+            self.preview.region = picture;
+            return;
         }
+        if !self.view.zoom100
+            && let Some((id, size)) = navigator
+        {
+            self.preview.navigator = Some(Picture::presented(id, size));
+        }
+        self.preview.texture = picture;
     }
     pub(super) fn navigate(&mut self, delta: isize) {
         if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo) {

@@ -8,7 +8,7 @@ use super::local_tone_data::{Family, HIGHLIGHTS, SHADOWS, SLIDER_VALUES};
 use rayon::prelude::*;
 
 /// Long edge of the reduced image the base level is computed on.
-const MAP_EDGE: u32 = 512;
+pub(crate) const MAP_EDGE: u32 = 512;
 const RADIUS: f32 = 0.032;
 const EPSILON: f32 = 1.5;
 
@@ -81,7 +81,10 @@ impl LocalToneMap {
         if shadows == 0. && highlights == 0. {
             return None;
         }
-        let small = super::pipeline::preview_source(im, MAP_EDGE);
+        let small = match im.reduced {
+            Some(small) => std::borrow::Cow::Borrowed(small),
+            None => std::borrow::Cow::Owned(super::pipeline::preview_source(im, MAP_EDGE)),
+        };
         let (w, h) = (small.width as usize, small.height as usize);
         let lum: Vec<f32> = small
             .pixels

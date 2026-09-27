@@ -74,8 +74,10 @@ pub enum Event {
     },
     Rendered {
         id: u64,
-        image: Rendered,
-        display_rgb: Vec<u8>,
+        preview: Preview,
+        histogram: Box<[[u32; 256]; 3]>,
+        /// A reduced copy for the library, without overlays, when the job asked for one.
+        thumbnail: Option<image::RgbImage>,
         stage: RenderStage,
         status: String,
     },
@@ -85,6 +87,22 @@ pub enum Event {
         error: String,
     },
     Exported(String),
+}
+/// A rendered preview as the viewport draws it.
+pub enum Preview {
+    /// Rendered on the CPU: display bytes for a texture upload.
+    Pixels {
+        image: Rendered,
+        display_rgb: Vec<u8>,
+        /// The Navigator's copy, for whole-photo views.
+        navigator: Option<image::RgbImage>,
+    },
+    /// Presented on the GPU into textures registered with the UI's renderer.
+    Texture {
+        id: egui::TextureId,
+        size: [usize; 2],
+        navigator: Option<(egui::TextureId, [usize; 2])>,
+    },
 }
 pub struct LoadJob {
     pub catalog: bool,
@@ -101,6 +119,10 @@ pub struct RenderJob {
     pub region: Option<[u32; 4]>,
     pub monitor: Option<PathBuf>,
     pub clipping: bool,
+    /// Update the Navigator (Fit views).
+    pub navigator: bool,
+    /// Also produce a library thumbnail of the result.
+    pub thumbnail: bool,
 }
 fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
     let _ = tx.send(event);

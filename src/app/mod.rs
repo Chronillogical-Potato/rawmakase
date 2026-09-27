@@ -54,7 +54,7 @@ impl Editor {
             path,
             crate::storage::load_session(),
             Some(crate::storage::data_dir().join("session.json")),
-            worker::RenderBackend::Gpu,
+            worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         )
     }
     #[cfg(test)]
@@ -228,6 +228,7 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
             .with_title("RAWmakase")
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.]),
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
     eframe::run_native(
@@ -236,6 +237,23 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(Editor::new(cc, path)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
+}
+/// The UI's wgpu device also renders previews (see `develop::gpu`): prefer the
+/// discrete GPU and ask for the storage limits full-resolution regions need.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        setup.power_preference = wgpu::PowerPreference::HighPerformance;
+        let default = setup.device_descriptor.clone();
+        setup.device_descriptor = std::sync::Arc::new(move |adapter| {
+            let mut descriptor = default(adapter);
+            if adapter.get_info().backend != wgpu::Backend::Gl {
+                descriptor.required_limits = crate::develop::gpu::required_limits(adapter);
+            }
+            descriptor
+        });
+    }
+    options
 }
 
 mod catalog;

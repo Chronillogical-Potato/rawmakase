@@ -179,30 +179,50 @@ legacy `worker::renderer` entry point remain CPU-only. Domain color processing,
 RAW development and exports use the existing CPU implementation.
 
 `develop::gpu` uses portable WGSL compute through wgpu: Metal on macOS and Vulkan
-on supported Linux drivers, including NVIDIA and AMD. It owns a separate compute
-device so its limits and error scopes do not affect the UI device. It uses ordinary
-32-bit storage buffers and compute workgroups, without vendor extensions. The
-current hardware validation is Apple M1 Pro; Linux GPU vendors require validation
-on those machines before claiming equivalent performance or numerical precision.
+on supported Linux drivers, including NVIDIA and AMD. On the desktop it shares the
+UI's wgpu device (eframe's), which the app creates with the storage limits previews
+need (`gpu::required_limits`) and a high-performance adapter; OpenGL and software
+adapters are not used for compute. Every GPU call runs inside its own validation,
+internal and out-of-memory error scopes, so a failure disables the preview GPU
+without reaching the UI. Headless callers (tests, the benchmark) create a device of
+their own. It uses ordinary 32-bit storage buffers, Rgba8Unorm storage textures and
+compute workgroups, without vendor extensions. The current hardware validation is
+Apple M1 Pro; Linux GPU vendors require validation on those machines before claiming
+equivalent performance or numerical precision.
 
 The per-pixel color and tone stage of the current engine runs on the GPU for previews
 (`gpu/develop.wgsl`, fed by `pipeline/pixel_params.rs`), on the stage cache's
 samples; other recipes and all exports use the CPU stage, which is the reference.
-Preview sharpening and Lanczos3 downsampling run on the GPU. Coefficients use the
-CPU reference's normalization and boundary convention. Grain/vignette retain their
-CPU implementation and ordering. Fit and zoomed-out previews render from a
-resolution pyramid at output size on the CPU (see
-[preview performance](preview-performance.md#resolution-pyramid)), so they need no
-GPU finishing. Full-resolution regions preserve the sharpening halo before cropping. Legacy
-rendering engines and export remain on CPU. The status line identifies GPU
-finishing separately from CPU rendering.
+When the GPU renders a preview, the developed pixels stay on the device and
+`gpu/present.wgsl` finishes them into a texture that egui draws directly (registered
+as a native texture by the render worker): sharpening, vignettes and grain, the
+clipping overlay, the monitor profile (a 52³ lattice sampled from lcms once per
+profile, interpolated trilinearly) and 8-bit encoding, in the CPU reference's order.
+The histogram is counted in the same pass and the Navigator copy is reduced on the
+GPU; only the histogram (3 KB) and, for catalog photos, a 640-pixel library
+thumbnail are read back. Nothing is converted or uploaded on the UI thread. Recipes
+the port does not cover, older engines and machines without a usable adapter render
+on the CPU, and the worker then prepares the display bytes, histogram and reduced
+copies before the UI uploads the texture. Fit and zoomed-out previews render from a
+resolution pyramid at output size (see
+[preview performance](preview-performance.md#resolution-pyramid)). Full-resolution
+regions preserve the sharpening halo before cropping. Lanczos3 resizing of full
+renders remains on the GPU for readback callers. Export remains on the CPU. The
+status line says `GPU` for presented frames, `GPU finish` when only finishing used
+the GPU, and `CPU` otherwise.
+
+Presented textures are kept per view (the whole photo, or a 100% region) and size,
+two of each, so a slider moving at 100% alternates between the reduced preview's and
+the full region's textures without allocating. Each texture carries a generation that
+changes whenever it is written; the worker reuses a finished frame when switching
+views only while its texture still holds it.
 
 Buffers are reused by dimensions, limited by the adapter and a 1 GiB aggregate
 buffer budget. No compatible adapter, oversized buffers, allocation/validation
 errors and readback failures fall back to CPU. After a GPU failure the preview
 renderer releases the backend and avoids retrying it for every edit. Restarting
 creates a new backend. GPU execution already submitted cannot be interrupted;
-obsolete readback results are discarded. Full-quality CPU stages check cancellation
+obsolete results are discarded before they are published. Full-quality CPU stages check cancellation
 within pixel/row/column work. Pending jobs still coalesce in a single-slot mailbox.
 
 There is no separate interactive draft. Fit renders the current pipeline from the

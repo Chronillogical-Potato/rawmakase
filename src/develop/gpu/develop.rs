@@ -88,48 +88,14 @@ impl Developer {
     }
 }
 impl Processor {
-    /// The per-pixel stage over `samples`. Does not change CPU state on failure.
-    pub(crate) fn develop(
+    /// Uploads `samples` unless they are on the device already, and records the develop
+    /// pass; its result is in the most recent upload's `output`.
+    pub(super) fn record_develop(
         &mut self,
         samples: &Arc<Samples>,
         params: &PixelParams,
-        cancel: &AtomicBool,
-    ) -> Result<Rendered> {
-        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        let n = samples.pixels.len() as u64;
-        ensure!(n > 0, "Empty develop region");
-        let limits = self.device.limits();
-        ensure!(
-            n * 12 <= limits.max_storage_buffer_binding_size
-                && n * 12 <= limits.max_buffer_size
-                && (params.tables.len() as u64 * 4) <= limits.max_storage_buffer_binding_size,
-            "Region exceeds GPU buffer limits"
-        );
-        ensure!(
-            n * 44 <= 1024 * 1024 * 1024,
-            "Region exceeds GPU memory budget"
-        );
-        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let internal = self.device.push_error_scope(wgpu::ErrorFilter::Internal);
-        let allocation = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let result = self.develop_inner(samples, params, cancel);
-        let memory_error = pollster::block_on(allocation.pop());
-        let internal_error = pollster::block_on(internal.pop());
-        let validation_error = pollster::block_on(validation.pop());
-        if let Some(error) = memory_error.or(internal_error).or(validation_error) {
-            if let Some(d) = &mut self.developer {
-                d.samples.clear();
-            }
-            anyhow::bail!("{error}");
-        }
-        result
-    }
-    fn develop_inner(
-        &mut self,
-        samples: &Arc<Samples>,
-        params: &PixelParams,
-        cancel: &AtomicBool,
-    ) -> Result<Rendered> {
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> &wgpu::Buffer {
         let device = &self.device;
         let developer = self.developer.get_or_insert_with(|| Developer::new(device));
         let n = samples.pixels.len() as u64;
@@ -220,8 +186,6 @@ impl Processor {
             layout: &developer.layout,
             entries: &entries,
         });
-        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Develop pass"),
@@ -231,6 +195,71 @@ impl Processor {
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
+        &uploaded.output
+    }
+    /// The per-pixel stage over `samples`. Does not change CPU state on failure.
+    pub(crate) fn develop(
+        &mut self,
+        samples: &Arc<Samples>,
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<Rendered> {
+        self.check_develop(samples, params, cancel)?;
+        self.scoped(|gpu| gpu.develop_inner(samples, params, cancel))
+    }
+    /// Whether the device can develop `samples` at all.
+    pub(super) fn check_develop(
+        &self,
+        samples: &Samples,
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
+        let n = samples.pixels.len() as u64;
+        ensure!(n > 0, "Empty develop region");
+        let limits = self.device.limits();
+        ensure!(
+            n * 12 <= limits.max_storage_buffer_binding_size
+                && n * 12 <= limits.max_buffer_size
+                && (params.tables.len() as u64 * 4) <= limits.max_storage_buffer_binding_size,
+            "Region exceeds GPU buffer limits"
+        );
+        ensure!(
+            n * 44 <= 1024 * 1024 * 1024,
+            "Region exceeds GPU memory budget"
+        );
+        Ok(())
+    }
+    /// Runs `work` inside validation, internal and memory error scopes; a device error
+    /// releases the uploaded samples and fails.
+    pub(super) fn scoped<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = self.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let allocation = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let result = work(self);
+        let memory_error = pollster::block_on(allocation.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        if let Some(error) = memory_error.or(internal_error).or(validation_error) {
+            if let Some(d) = &mut self.developer {
+                d.samples.clear();
+            }
+            anyhow::bail!("{error}");
+        }
+        result
+    }
+    fn develop_inner(
+        &mut self,
+        samples: &Arc<Samples>,
+        params: &PixelParams,
+        cancel: &AtomicBool,
+    ) -> Result<Rendered> {
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.record_develop(samples, params, &mut encoder);
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
+        let device = &self.device;
+        let n = samples.pixels.len() as u64;
+        let uploaded = &self.developer.as_ref().unwrap().samples[0];
         encoder.copy_buffer_to_buffer(&uploaded.output, 0, &uploaded.staging, 0, n * 12);
         let submission = self.queue.submit([encoder.finish()]);
         let (tx, rx) = mpsc::sync_channel(1);

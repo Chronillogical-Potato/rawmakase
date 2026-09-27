@@ -26,6 +26,25 @@ fn mean_error(a: &develop::Rendered, b: &develop::Rendered) -> f32 {
         .sum();
     d / (a.pixels.len() * 3) as f32
 }
+/// What the desktop does with a CPU-side render before it can be drawn: 8-bit
+/// conversion and histogram on the render worker, then on the UI thread the texture
+/// image and, for whole-photo views, the Navigator thumbnail.
+fn cpu_display(out: &develop::Rendered, navigator: bool) -> usize {
+    let rgb = out.rgb8();
+    let histogram = out.histogram();
+    let image = eframe::egui::ColorImage::from_rgb([out.width as usize, out.height as usize], &rgb);
+    let mut n = image.pixels.len() + histogram[0][0] as usize;
+    if navigator && let Some(full) = image::RgbImage::from_raw(out.width, out.height, rgb) {
+        let scale = (360. / out.width.max(out.height) as f32).min(1.);
+        let small = image::imageops::thumbnail(
+            &full,
+            ((out.width as f32 * scale) as u32).max(1),
+            ((out.height as f32 * scale) as u32).max(1),
+        );
+        n += small.len();
+    }
+    n
+}
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -115,6 +134,7 @@ fn main() -> Result<()> {
         };
         for &mode in modes {
             let mut times = Vec::new();
+            let mut shown = Vec::new();
             let mut last = None;
             for i in 0..=iterations {
                 // Exposure edits, or Clarity edits, which change the local-tone stage.
@@ -133,12 +153,71 @@ fn main() -> Result<()> {
                         .context("No region preview")?,
                     _ => gpu.render(&image, &recipe, 0, Some(region), &cancel)?,
                 };
+                let rendered = ms(t);
+                std::hint::black_box(cpu_display(&out, !mode.contains("region")));
                 if i > 0 {
-                    times.push(ms(t));
+                    times.push(rendered);
+                    shown.push(ms(t));
                 }
                 last = Some(out);
             }
+            // The desktop path: presented into a texture on the GPU, ready to draw once
+            // the histogram is back.
+            let mut presented = Vec::new();
+            let before = recipe.clone();
+            if mode != "cpu-fit" {
+                let slot = if mode.contains("region") {
+                    develop::gpu::Slot::Region
+                } else {
+                    develop::gpu::Slot::Whole
+                };
+                let display = develop::gpu::Display {
+                    slot,
+                    clipping: false,
+                    monitor: None,
+                    navigator: (slot == develop::gpu::Slot::Whole).then_some(360),
+                    thumbnail: None,
+                };
+                for i in 0..=iterations {
+                    if mode.starts_with("clarity") {
+                        recipe.effects.clarity = 0.25 + (iterations - i) as f32 * 0.05;
+                    } else {
+                        recipe.exposure = i as f32 * 0.1 + 0.05;
+                    }
+                    let t = Instant::now();
+                    let out = match mode {
+                        "region-preview" | "clarity-region-preview" => gpu
+                            .render_region_preview_to(
+                                &image,
+                                &recipe,
+                                region,
+                                &cancel,
+                                Some(&display),
+                            )?
+                            .context("No region preview")?,
+                        "gpu-region" | "clarity-region" => gpu.render_to(
+                            &image,
+                            &recipe,
+                            0,
+                            Some(region),
+                            &cancel,
+                            Some(&display),
+                        )?,
+                        _ => gpu.render_to(&image, &recipe, FIT, None, &cancel, Some(&display))?,
+                    };
+                    if i > 0 {
+                        presented.push(ms(t));
+                    }
+                    if let develop::quality::Output::Pixels(out) = out {
+                        std::hint::black_box(cpu_display(&out, slot == develop::gpu::Slot::Whole));
+                        println!("  ({mode} fell back to CPU pixels)");
+                    }
+                }
+                presented.sort_by(f64::total_cmp);
+            }
+            recipe = before;
             times.sort_by(f64::total_cmp);
+            shown.sort_by(f64::total_cmp);
             let last = last.unwrap();
             let error = if mode.contains("region") {
                 String::new()
@@ -148,9 +227,13 @@ fn main() -> Result<()> {
                 format!(", mean error vs export {e:.5}")
             };
             println!(
-                "{mode}, local={local}: median {:.1} ms, max {:.1} ms{error}",
+                "{mode}, local={local}: median {:.1} ms, max {:.1} ms, ready to draw {:.1} ms, presented {}{error}",
                 times[times.len() / 2],
-                times[times.len() - 1]
+                times[times.len() - 1],
+                shown[shown.len() / 2],
+                presented
+                    .get(presented.len() / 2)
+                    .map_or("-".into(), |t| format!("{t:.1} ms"))
             );
         }
     }

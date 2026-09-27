@@ -431,10 +431,16 @@ fn apply_curve(encoded: f32, c: usize, r: &Recipe, lut: &CurveSet) -> f32 {
 pub(crate) struct Source<'a> {
     image: &'a CameraImage,
     gain: Option<&'a [f32]>,
+    /// These pixels reduced for the Shadows/Highlights map, when already made.
+    pub(crate) reduced: Option<&'a CameraImage>,
 }
 impl<'a> Source<'a> {
     pub(crate) fn new(image: &'a CameraImage, gain: Option<&'a [f32]>) -> Self {
-        Self { image, gain }
+        Self {
+            image,
+            gain,
+            reduced: None,
+        }
     }
     fn px(&self, i: usize) -> [f32; 3] {
         let p = self.image.pixels[i];
@@ -452,17 +458,25 @@ impl std::ops::Deref for Source<'_> {
 }
 impl<'a> From<&'a CameraImage> for Source<'a> {
     fn from(image: &'a CameraImage) -> Self {
-        Self { image, gain: None }
+        Self::new(image, None)
     }
 }
 /// A camera image and its local-tone gain, as the pixel stages take them.
 pub(crate) struct Toned {
     pub(crate) image: std::sync::Arc<CameraImage>,
     pub(crate) gain: Option<std::sync::Arc<Vec<f32>>>,
+    /// What the gain was computed from, when it came from the stage cache.
+    pub(crate) gain_key: Option<super::stage_cache::LocalKey>,
+    /// The toned image reduced for the Shadows/Highlights map, kept in the stage cache
+    /// so edits do not reduce the full-resolution image again.
+    pub(crate) reduced: Option<std::sync::Arc<CameraImage>>,
 }
 impl Toned {
     pub(crate) fn source(&self) -> Source<'_> {
-        Source::new(&self.image, self.gain.as_deref().map(Vec::as_slice))
+        Source {
+            reduced: self.reduced.as_deref(),
+            ..Source::new(&self.image, self.gain.as_deref().map(Vec::as_slice))
+        }
     }
 }
 fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
@@ -761,6 +775,42 @@ pub(crate) fn render_base(
         return Ok(out);
     }
     develop_samples(im, &base, &samples, cancel)
+}
+/// As [`render_base`] followed by sharpening, spatial effects and display, all on the
+/// GPU into a texture for the stages' display. `None` without a GPU or display, or when
+/// the port does not cover `r` (the tonal recipe); `finished` is the full recipe.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_display(
+    toned: &Toned,
+    r: &Recipe,
+    finished: &Recipe,
+    g: &Geometry,
+    region: [u32; 4],
+    spread: f32,
+    finish: &crate::develop::gpu::Finish,
+    cancel: &std::sync::atomic::AtomicBool,
+    stages: &mut super::preview_renderer::Stages,
+) -> Result<Option<crate::develop::gpu::Frame>> {
+    let Some(display) = stages.display else {
+        return Ok(None);
+    };
+    if !stages.backend.has_gpu() {
+        return Ok(None);
+    }
+    let mut base = r.clone();
+    base.sharpening = 0.;
+    base.validate()?;
+    let im = toned.source();
+    let Some(params) = pixel_params::pixel_params(im, &base) else {
+        return Ok(None);
+    };
+    let key = super::stage_cache::SampleKey::new(toned, &base, g, region, spread);
+    let samples = stages.cache.samples.get_or_try(key, Samples::bytes, || {
+        sample_region(im, &base, g, region, spread, cancel)
+    })?;
+    Ok(stages
+        .backend
+        .present(&samples, &params, finished, finish, display, cancel))
 }
 /// Camera samples of an output region after geometry, lens correction and noise
 /// reduction, with their source positions; `NAN` positions lie outside the photo.

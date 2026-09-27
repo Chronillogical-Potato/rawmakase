@@ -2,7 +2,7 @@
 use crate::develop::{
     pipeline::Toned,
     preview_renderer::Stages,
-    stage_cache::{BlurKey, LocalKey, StageCache},
+    stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache},
 };
 use crate::{
     develop::{self, Geometry, Recipe, Rendered},
@@ -39,6 +39,21 @@ pub(crate) fn output_size(width: u32, height: u32, max_edge: u32) -> (u32, u32) 
         (height as f64 * scale).round().max(1.) as u32,
     )
 }
+/// A preview render: pixels on the CPU, or a frame presented into a texture on the
+/// GPU when a display was given.
+pub enum Output {
+    Pixels(Rendered),
+    Frame(Box<develop::gpu::Frame>),
+}
+impl Output {
+    /// The pixels of a render made without a display, which is never a frame.
+    pub(crate) fn pixels(self) -> Rendered {
+        match self {
+            Output::Pixels(pixels) => pixels,
+            Output::Frame(_) => unreachable!("Frames are only presented to a display"),
+        }
+    }
+}
 pub fn resize(image: Rendered, max_edge: u32) -> Rendered {
     if max_edge == 0 || image.width.max(image.height) <= max_edge {
         return image;
@@ -73,7 +88,7 @@ fn sharpen_cancellable(im: &mut Rendered, r: &Recipe, cancel: &AtomicBool) -> Re
 /// Normalized Gaussian taps. Below half a pixel, which only scaled previews use, a
 /// sampled Gaussian degenerates to a single tap; three taps with the same variance
 /// keep the sharpening response of the full-resolution render.
-fn gaussian(sigma: f32) -> (i32, Vec<f32>) {
+pub(crate) fn gaussian(sigma: f32) -> (i32, Vec<f32>) {
     if sigma < 0.5 {
         let side = sigma * sigma / 2.;
         return (1, vec![side, 1. - 2. * side, side]);
@@ -406,33 +421,61 @@ fn local_stage(
     let mut toned = Toned {
         image: im.clone(),
         gain: None,
+        gain_key: None,
+        reduced: None,
     };
-    if spatial.shadows == 0.
-        && spatial.highlights == 0.
-        && r.effects.clarity == 0.
-        && r.effects.texture == 0.
+    let mut cache = cache;
+    if spatial.shadows != 0.
+        || spatial.highlights != 0.
+        || r.effects.clarity != 0.
+        || r.effects.texture != 0.
     {
-        return Ok((toned, tonal));
+        let (gain, key) = local_gain(im, &spatial, scale, cancel, cache.as_deref_mut())?;
+        (toned.gain, toned.gain_key) = (Some(gain), key);
     }
-    let texture = r.effects.texture != 0.;
-    toned.gain = Some(match cache {
-        None => {
-            let blurs = local_blurs(im, &spatial, scale, texture, cancel)?;
-            Arc::new(apply_local(&blurs, &spatial, cancel)?)
-        }
-        Some(cache) => {
-            let key = BlurKey::new(im, &spatial, scale, texture);
-            let blurs = cache.blurs.get_or_try(key, LocalBlurs::bytes, || {
-                local_blurs(im, &spatial, scale, texture, cancel)
-            })?;
-            let key = LocalKey::new(&blurs, &spatial);
-            let bytes = |gains: &Vec<f32>| gains.len() * 4;
-            cache
-                .local
-                .get_or_try(key, bytes, || apply_local(&blurs, &spatial, cancel))?
-        }
-    });
+    // The engine 4 Shadows/Highlights map starts from a reduced copy of the toned image.
+    if let Some(cache) = cache
+        && measured
+        && (r.shadows != 0. || r.highlights != 0.)
+    {
+        let key = ReducedKey::new(&toned);
+        let bytes = |im: &CameraImage| im.pixels.len() * 12;
+        let reduced = cache.reduced.get_or_try(key, bytes, || {
+            check_cancel(cancel)?;
+            Ok(develop::pipeline::preview_source(
+                toned.source(),
+                develop::local_tone::MAP_EDGE,
+            ))
+        })?;
+        toned.reduced = Some(reduced);
+    }
     Ok((toned, tonal))
+}
+/// The local-tone gain of `im`, through the stage cache when there is one, and what
+/// a cached gain was computed from.
+fn local_gain(
+    im: &Arc<CameraImage>,
+    spatial: &Recipe,
+    scale: f32,
+    cancel: &AtomicBool,
+    cache: Option<&mut StageCache>,
+) -> Result<(Arc<Vec<f32>>, Option<LocalKey>)> {
+    let texture = spatial.effects.texture != 0.;
+    let Some(cache) = cache else {
+        let blurs = local_blurs(im, spatial, scale, texture, cancel)?;
+        return Ok((Arc::new(apply_local(&blurs, spatial, cancel)?), None));
+    };
+    let blur_key = BlurKey::new(im, spatial, scale, texture);
+    let key = LocalKey::new(blur_key.clone(), spatial);
+    let StageCache { blurs, local, .. } = cache;
+    let bytes = |gains: &Vec<f32>| gains.len() * 4;
+    let gain = local.get_or_try(key.clone(), bytes, || {
+        let blurs = blurs.get_or_try(blur_key, LocalBlurs::bytes, || {
+            local_blurs(im, spatial, scale, texture, cancel)
+        })?;
+        apply_local(&blurs, spatial, cancel)
+    })?;
+    Ok((gain, Some(key)))
 }
 /// Fit and zoomed-out previews from a pyramid level (see `pyramid.rs`). Each output
 /// pixel is developed once, from the level sampled over the pixel's footprint, and
@@ -448,7 +491,7 @@ pub(crate) fn render_level(
     region: [u32; 4],
     cancel: &AtomicBool,
     stages: &mut Stages,
-) -> Result<Rendered> {
+) -> Result<Output> {
     check_cancel(cancel)?;
     r.validate()?;
     let effective = r.resolved(&level.metadata);
@@ -481,12 +524,35 @@ pub(crate) fn render_level(
     let right = (x + w + halo).min(size.0);
     let bottom = (y + h + halo).min(size.1);
     check_cancel(cancel)?;
+    let base = [left, top, right - left, bottom - top];
+    let spread = develop::pipeline::footprint_spread(footprint);
+    let finish = develop::gpu::Finish {
+        sigma,
+        origin: [left, top],
+        full: [size.0, size.1],
+        scale,
+        crop: [x - left, y - top, w, h],
+    };
+    let frame = develop::pipeline::render_display(
+        &toned,
+        &tonal_recipe,
+        r,
+        &g,
+        base,
+        spread,
+        &finish,
+        cancel,
+        stages,
+    )?;
+    if let Some(frame) = frame {
+        return Ok(Output::Frame(Box::new(frame)));
+    }
     let mut out = develop::render_base(
         &toned,
         &tonal_recipe,
         &g,
-        [left, top, right - left, bottom - top],
-        develop::pipeline::footprint_spread(footprint),
+        base,
+        spread,
         cancel,
         Some(stages),
     )?;
@@ -499,7 +565,7 @@ pub(crate) fn render_level(
         scale,
     );
     check_cancel(cancel)?;
-    Ok(crop(out, [x - left, y - top, w, h]))
+    Ok(Output::Pixels(crop(out, [x - left, y - top, w, h])))
 }
 fn crop(im: Rendered, [x, y, w, h]: [u32; 4]) -> Rendered {
     if (x, y, w, h) == (0, 0, im.width, im.height) {
@@ -538,7 +604,7 @@ pub fn render_cancellable(
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
-    render_preview(im, r, max_edge, region, cancel, None)
+    render_preview(im, r, max_edge, region, cancel, None).map(Output::pixels)
 }
 pub(crate) fn render_preview(
     im: &CameraImage,
@@ -547,7 +613,7 @@ pub(crate) fn render_preview(
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
     mut stages: Option<&mut Stages>,
-) -> Result<Rendered> {
+) -> Result<Output> {
     ensure!(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
         "Render superseded"
@@ -589,11 +655,39 @@ pub(crate) fn render_preview(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
         "Render superseded"
     );
+    let base = [left, top, right - left, bottom - top];
+    // A display shows the render unresized; a Fit smaller than the photo comes from
+    // the pyramid instead (`PreviewRenderer::render_fit`).
+    let unresized =
+        region.is_some() || output_size(g.width, g.height, max_edge) == (g.width, g.height);
+    if unresized && let Some(stages) = stages.as_mut() {
+        let finish = develop::gpu::Finish {
+            sigma: r.sharpening_radius,
+            origin: [left, top],
+            full: [g.width, g.height],
+            scale: 1.,
+            crop: [x - left, y - top, w, h],
+        };
+        let frame = develop::pipeline::render_display(
+            &toned,
+            &tonal_recipe,
+            r,
+            &g,
+            base,
+            0.,
+            &finish,
+            cancel,
+            stages,
+        )?;
+        if let Some(frame) = frame {
+            return Ok(Output::Frame(Box::new(frame)));
+        }
+    }
     let mut out = develop::render_base(
         &toned,
         &tonal_recipe,
         &g,
-        [left, top, right - left, bottom - top],
+        base,
         0.,
         cancel,
         stages.as_deref_mut(),
@@ -608,7 +702,7 @@ pub(crate) fn render_preview(
             .and_then(|s| s.backend.finish(&out, r, edge, cancel))
     {
         if region.is_none() {
-            return Ok(finished);
+            return Ok(Output::Pixels(finished));
         }
         out = finished;
         gpu_sharpened = true;
@@ -626,7 +720,7 @@ pub(crate) fn render_preview(
         "Render superseded"
     );
     if region.is_some() {
-        Ok(crop(out, [x - left, y - top, w, h]))
+        Ok(Output::Pixels(crop(out, [x - left, y - top, w, h])))
     } else {
         // Spatial effects retain their CPU reference implementation. Resize can
         // still use compute after those effects, without sharpening twice.
@@ -637,14 +731,14 @@ pub(crate) fn render_preview(
                 .as_mut()
                 .and_then(|s| s.backend.finish(&out, &finished_recipe, max_edge, cancel));
             if let Some(finished) = finished {
-                return Ok(finished);
+                return Ok(Output::Pixels(finished));
             }
             ensure!(
                 !cancel.load(std::sync::atomic::Ordering::Relaxed),
                 "Render superseded"
             );
         }
-        Ok(resize(out, max_edge))
+        Ok(Output::Pixels(resize(out, max_edge)))
     }
 }
 #[cfg(test)]

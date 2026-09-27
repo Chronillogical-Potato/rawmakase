@@ -1,5 +1,8 @@
 //! Stateful desktop preview backend. Export remains on the reference CPU path.
-use super::{Geometry, Recipe, Rendered, gpu, pyramid::Pyramid, quality, stage_cache::StageCache};
+use super::{
+    Geometry, Recipe, Rendered, gpu, pyramid::Pyramid, quality, quality::Output,
+    stage_cache::StageCache,
+};
 use crate::raw::CameraImage;
 use anyhow::Result;
 use std::sync::{Arc, atomic::AtomicBool};
@@ -20,17 +23,23 @@ pub(crate) struct Backend {
     fallback: Option<String>,
     used_gpu: bool,
 }
-/// What preview stages keep between renders: the stage cache and the GPU backend.
+/// What preview stages keep between renders: the stage cache and the GPU backend, and
+/// the display a render may be presented to.
 pub(crate) struct Stages<'a> {
     pub(crate) cache: &'a mut StageCache,
     pub(crate) backend: &'a mut Backend,
+    pub(crate) display: Option<&'a gpu::Display>,
 }
 /// Pixel budget of a reduced 100% drag preview.
 const PREVIEW_PIXELS: u64 = 600_000;
 impl PreviewRenderer {
     /// A hardware device is optional; failure leaves a fully working CPU renderer.
     pub fn with_gpu() -> Self {
-        let backend = match gpu::Processor::new() {
+        Self::with_processor(gpu::Processor::new())
+    }
+    /// With `gpu`, or on the CPU alone when it failed.
+    pub fn with_processor(gpu: Result<gpu::Processor>) -> Self {
+        let backend = match gpu {
             Ok(gpu) => Backend {
                 gpu: Some(gpu),
                 ..Backend::default()
@@ -48,6 +57,10 @@ impl PreviewRenderer {
     pub fn adapter_name(&self) -> Option<&str> {
         self.backend.gpu.as_ref().map(gpu::Processor::name)
     }
+    /// The GPU, while it works.
+    pub fn gpu(&self) -> Option<&gpu::Processor> {
+        self.backend.gpu.as_ref()
+    }
     pub fn fallback_reason(&self) -> Option<&str> {
         self.backend.fallback.as_deref()
     }
@@ -63,6 +76,20 @@ impl PreviewRenderer {
         region: Option<[u32; 4]>,
         cancel: &AtomicBool,
     ) -> Result<Rendered> {
+        self.render_to(image, recipe, max_edge, region, cancel, None)
+            .map(Output::pixels)
+    }
+    /// As [`Self::render`], presented into a texture for `display` when the GPU renders
+    /// the recipe, and otherwise as pixels.
+    pub fn render_to(
+        &mut self,
+        image: &CameraImage,
+        recipe: &Recipe,
+        max_edge: u32,
+        region: Option<[u32; 4]>,
+        cancel: &AtomicBool,
+        display: Option<&gpu::Display>,
+    ) -> Result<Output> {
         self.backend.used_gpu = false;
         anyhow::ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
@@ -77,11 +104,12 @@ impl PreviewRenderer {
                     super::render_legacy(&super::preview(image, max_edge * 2), recipe, max_edge)
                 }
                 None => super::render_legacy(image, recipe, max_edge),
-            };
+            }
+            .map(Output::Pixels);
         }
         if region.is_none()
             && max_edge > 0
-            && let Some(out) = self.render_fit(image, recipe, max_edge, cancel)?
+            && let Some(out) = self.render_fit(image, recipe, max_edge, cancel, display)?
         {
             return Ok(out);
         }
@@ -91,13 +119,14 @@ impl PreviewRenderer {
             max_edge,
             region,
             cancel,
-            Some(&mut self.stages()),
+            Some(&mut self.stages(display)),
         )
     }
-    fn stages(&mut self) -> Stages<'_> {
+    fn stages<'a>(&'a mut self, display: Option<&'a gpu::Display>) -> Stages<'a> {
         Stages {
             cache: &mut self.cache,
             backend: &mut self.backend,
+            display,
         }
     }
     /// Fit and zoomed-out views from the smallest pyramid level with at least one
@@ -108,7 +137,8 @@ impl PreviewRenderer {
         recipe: &Recipe,
         max_edge: u32,
         cancel: &AtomicBool,
-    ) -> Result<Option<Rendered>> {
+        display: Option<&gpu::Display>,
+    ) -> Result<Option<Output>> {
         let full = Geometry::new(image, recipe, 0);
         let long = full.width.max(full.height);
         if long <= max_edge {
@@ -118,7 +148,7 @@ impl PreviewRenderer {
         let needed = size.0.max(size.1) as f32 * image.width.max(image.height) as f32 / long as f32;
         let (level, source) = self.level(image, needed, cancel)?;
         let region = [0, 0, size.0, size.1];
-        let mut stages = self.stages();
+        let mut stages = self.stages(display);
         quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
     }
     /// A 100% `region` at half resolution or less, from the pyramid: immediate
@@ -132,6 +162,18 @@ impl PreviewRenderer {
         region: [u32; 4],
         cancel: &AtomicBool,
     ) -> Result<Option<Rendered>> {
+        self.render_region_preview_to(image, recipe, region, cancel, None)
+            .map(|out| out.map(Output::pixels))
+    }
+    /// As [`Self::render_region_preview`], presented for `display` when possible.
+    pub fn render_region_preview_to(
+        &mut self,
+        image: &CameraImage,
+        recipe: &Recipe,
+        region: [u32; 4],
+        cancel: &AtomicBool,
+        display: Option<&gpu::Display>,
+    ) -> Result<Option<Output>> {
         self.backend.used_gpu = false;
         if recipe.engine < 3 {
             return Ok(None);
@@ -157,7 +199,7 @@ impl PreviewRenderer {
         let needed = image.width.max(image.height).div_ceil(1 << k) as f32;
         let (level, source) = self.level(image, needed, cancel)?;
         let region = [px, py, pw, ph];
-        let mut stages = self.stages();
+        let mut stages = self.stages(display);
         quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
     }
     /// The pyramid level for `needed` source pixels on the long edge, and the level-0
@@ -232,6 +274,19 @@ impl Backend {
         cancel: &AtomicBool,
     ) -> Option<Rendered> {
         self.run(cancel, |gpu| gpu.develop(samples, params, cancel))
+    }
+    pub(crate) fn present(
+        &mut self,
+        samples: &Arc<super::pipeline::Samples>,
+        params: &super::pipeline::pixel_params::PixelParams,
+        recipe: &Recipe,
+        finish: &gpu::Finish,
+        display: &gpu::Display,
+        cancel: &AtomicBool,
+    ) -> Option<gpu::Frame> {
+        self.run(cancel, |gpu| {
+            gpu.present(samples, params, recipe, finish, display, cancel)
+        })
     }
 }
 
