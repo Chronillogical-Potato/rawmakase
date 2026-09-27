@@ -60,6 +60,7 @@ impl Editor {
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.events(&ctx);
+        self.poll_updates(&ctx);
         if let Some(library) = &mut self.library {
             library.poll_previews(&ctx);
         }
@@ -92,6 +93,7 @@ impl Editor {
         self.shortcuts_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
+        self.update_notice(&ctx, modal || self.view.shortcuts);
         self.pending_work(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(

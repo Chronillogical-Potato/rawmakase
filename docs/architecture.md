@@ -145,7 +145,7 @@ rendering parity beyond the existing implementation.
 
 ## Validation
 
-Use Rust 1.95 or newer with the native libraries documented in the main README:
+Use Rust 1.98 or newer with the native libraries documented in the main README:
 
 ```sh
 cargo fmt --check

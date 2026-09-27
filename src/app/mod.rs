@@ -38,6 +38,7 @@ pub struct Editor {
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
     preferences: preferences::Preferences,
+    updates: updates::Updates,
     exports: export::Exports,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
@@ -47,15 +48,21 @@ pub struct Editor {
     close_confirm: bool,
 }
 impl Editor {
-    pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        path: Option<PathBuf>,
+        launch: crate::updates::Launch,
+    ) -> Self {
         install_fallback_fonts(&cc.egui_ctx);
-        Self::with_backend(
+        let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
             crate::storage::load_session(),
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
-        )
+        );
+        editor.updates.launched(launch, &mut editor.status);
+        editor
     }
     #[cfg(test)]
     fn with_context(
@@ -128,6 +135,8 @@ impl Editor {
         });
         // Only a real session (not an isolated test) shows first-run setup.
         let show_onboarding = !session.onboarding_done && session_file.is_some();
+        // Only a real session checks GitHub, not an isolated test.
+        let updates = updates::Updates::new(&session, session_file.is_some().then_some(ctx));
         let path = path.or(session.last_path.filter(|p| p.exists()));
         let (tx, rx) = mpsc::channel();
         let loader = worker::loader(tx.clone(), ctx.clone());
@@ -158,6 +167,7 @@ impl Editor {
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
+            updates,
             exports: Default::default(),
             restore: Some((
                 session.library_source.clone(),
@@ -192,6 +202,8 @@ impl Editor {
                     selected_photo: self.saved_place.1,
                     develop: self.saved_place.2,
                     demosaic: crate::raw::demosaic(),
+                    no_update_checks: !self.updates.automatic,
+                    skipped_version: self.updates.skipped.clone(),
                 },
             )?;
         }
@@ -222,7 +234,7 @@ impl eframe::App for Editor {
         self.draw(ui);
     }
 }
-pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
+pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RAWmakase")
@@ -234,7 +246,7 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
     eframe::run_native(
         "RAWmakase",
         options,
-        Box::new(move |cc| Ok(Box::new(Editor::new(cc, path)))),
+        Box::new(move |cc| Ok(Box::new(Editor::new(cc, path, launch)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -286,6 +298,7 @@ mod save_state;
 
 mod editing;
 mod toolbar;
+mod updates;
 
 mod events;
 

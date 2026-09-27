@@ -8,8 +8,8 @@ notarization must pass before anything is published. No AUR pushes occur.
 
 | Platform | Artifact | Requirements |
 | --- | --- | --- |
-| macOS Apple Silicon | `rawmakase-VERSION-macos-arm64.dmg` | macOS 15+ |
-| macOS Intel | `rawmakase-VERSION-macos-x86_64.dmg` | macOS 15+ |
+| macOS Apple Silicon | `rawmakase-vVERSION-macos-arm64.dmg` | macOS 15+ |
+| macOS Intel | `rawmakase-vVERSION-macos-x86_64.dmg` | macOS 15+ |
 | Debian / Ubuntu x86_64 | `.deb` | Ubuntu 24.04+ or Debian 13+ |
 | Fedora x86_64 | `.rpm` | Fedora 43+ |
 | Arch x86_64 | `.pkg.tar.zst` | Current Arch system dependencies |
@@ -44,6 +44,25 @@ Checksums are generated after signing and stapling.
 
 No App Store listing or Developer ID Installer certificate is needed for DMGs.
 Never put the export, its base64 contents or passwords into the repository.
+
+## Update signatures
+
+The app updates itself from the Apple Silicon DMG through
+[fastframe-update](https://github.com/crmne/fastframe/tree/main/crates/fastframe-update).
+Before downloading a package it verifies `checksums.txt.sig`, a raw Ed25519
+signature over `checksums.txt`, against the public key embedded from
+`assets/update-public-key.hex`. There is no unsigned fallback.
+
+The publish job signs with `RAWMAKASE_UPDATE_SIGNING_KEY` (the PKCS#8 PEM
+private key), a secret of the `release-signing` environment, which is limited
+to `v*` tags and requires a maintainer's approval. Keep a backup of the private
+key outside GitHub, which never shows a secret again. Installed apps trust only
+the key they were built with: losing it means asking users to download the next
+release by hand, and a new key must first ship alongside the old one (see
+fastframe-update's notes on rotating the publisher key).
+
+The updater looks for `rawmakase-vVERSION-macos-arm64.dmg` by name. Intel Macs
+and Linux installs are shown the release page instead.
 
 ## Publishing and rehearsal
 

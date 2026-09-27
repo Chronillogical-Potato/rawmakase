@@ -82,11 +82,13 @@ enum Command {
     },
 }
 fn main() -> Result<()> {
+    // Before anything else: this process may be the update helper.
+    let launch = rawmakase::updates::intercept();
     rayon::ThreadPoolBuilder::new()
         .num_threads(std::thread::available_parallelism().map_or(4, |n| n.get().min(8)))
         .build_global()
         .ok();
-    let a = Args::parse();
+    let a = Args::parse_from(&launch.arguments);
     match a.command {
         Some(Command::ImportLensProfiles { files }) => {
             for p in rawmakase::lens::lcp::import_files(&files)? {
@@ -280,7 +282,7 @@ fn main() -> Result<()> {
             );
         }
         None => {
-            rawmakase::app::run(a.path)?;
+            rawmakase::app::run(a.path, launch)?;
         }
     }
     Ok(())

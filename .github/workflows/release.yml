@@ -98,9 +98,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libjpeg-dev zlib1g-dev patchelf libvulkan1 libxkbcommon-dev libwayland-dev
-          rustup toolchain install 1.95.0 --profile minimal
-          rustup default 1.95.0
-          toolchain_bin=$(dirname "$(rustup which --toolchain 1.95.0 rustc)")
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+          toolchain_bin=$(dirname "$(rustup which --toolchain 1.98.1 rustc)")
           echo "$toolchain_bin" >> "$GITHUB_PATH"
           bash packaging/release/native-deps.sh "$RUNNER_TEMP/native"
       - name: Build and stage portable payload
@@ -222,9 +222,9 @@ jobs:
       - name: Build dependencies and app
         run: |
           brew install pkg-config libomp jpeg-turbo librsvg
-          rustup toolchain install 1.95.0 --profile minimal
-          rustup default 1.95.0
-          toolchain_bin=$(dirname "$(rustup which --toolchain 1.95.0 rustc)")
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+          toolchain_bin=$(dirname "$(rustup which --toolchain 1.98.1 rustc)")
           export PATH="$toolchain_bin:$PATH"
           jpeg_prefix=$(brew --prefix jpeg-turbo)
           export PKG_CONFIG_PATH="$jpeg_prefix/lib/pkgconfig"
@@ -260,7 +260,7 @@ jobs:
       - name: Verify the finished download
         env:
           ARCH: ${{ matrix.arch }}
-        run: bash packaging/release/verify-macos.sh "dist/upload/rawmakase-$VERSION-macos-$ARCH.dmg" "$ARCH"
+        run: bash packaging/release/verify-macos.sh "dist/upload/rawmakase-v$VERSION-macos-$ARCH.dmg" "$ARCH"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.target }}
@@ -273,6 +273,8 @@ jobs:
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Holds RAWMAKASE_UPDATE_SIGNING_KEY; limited to v* tags, with approval.
+    environment: release-signing
     permissions:
       contents: write
       id-token: write
@@ -290,6 +292,25 @@ jobs:
       - name: Final checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: release-source
+          sparse-checkout: assets
+          persist-credentials: false
+      # checksums.txt and its Ed25519 signature, which the app's updater
+      # verifies against assets/update-public-key.hex before installing.
+      - name: Sign update manifest
+        uses: crmne/native-packages/.github/actions/sign-release@dc0cb1586894ca0239c53fd02d4da8064712671c # v0.7.0
+        with:
+          directory: dist
+          public-key: release-source/assets/update-public-key.hex
+          key-env: RAWMAKASE_UPDATE_SIGNING_KEY
+        env:
+          RAWMAKASE_UPDATE_SIGNING_KEY: ${{ secrets.RAWMAKASE_UPDATE_SIGNING_KEY }}
       - name: Attest packages
         uses: crmne/native-packages/.github/actions/attest@dc0cb1586894ca0239c53fd02d4da8064712671c # v0.7.0
         with:

@@ -274,11 +274,14 @@ impl Editor {
     fn general_page(&mut self, ui: &mut egui::Ui) {
         group(ui, "About");
         form_row(ui, "RAWmakase", |ui| {
-            value(ui, env!("CARGO_PKG_VERSION"));
+            value(ui, crate::updates::config().current_version);
+            ui.add_space(8.);
+            self.update_status(ui);
         });
         form_row(ui, "LibRaw", |ui| {
             value(ui, &crate::raw::version());
         });
+        form_row(ui, "Updates", |ui| self.automatic_updates_checkbox(ui));
         gap(ui);
         group(ui, "Locations");
         let data = crate::storage::data_dir();

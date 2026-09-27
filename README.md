@@ -21,7 +21,7 @@ Download the package for your system from [GitHub Releases](https://github.com/p
 
 ### macOS (15 or newer)
 
-Choose `rawmakase-<version>-macos-arm64.dmg` for Apple Silicon or `rawmakase-<version>-macos-x86_64.dmg` for Intel. Open the DMG, drag **RAWmakase** into **Applications**, and launch it there. Release DMGs are signed and notarized, and include their imaging libraries; Homebrew is not required.
+Choose `rawmakase-v<version>-macos-arm64.dmg` for Apple Silicon or `rawmakase-v<version>-macos-x86_64.dmg` for Intel. Open the DMG, drag **RAWmakase** into **Applications**, and launch it there. Release DMGs are signed and notarized, and include their imaging libraries; Homebrew is not required.
 
 ### Linux (x86_64)
 
@@ -53,7 +53,7 @@ Each new packaged release includes `SHA256SUMS`. After downloading it beside you
 
 ### From source (Linux and macOS)
 
-You need Rust 1.95 or newer, a C++17 compiler with OpenMP, pkg-config, LibRaw 0.22 or newer, and Little CMS 2.
+You need Rust 1.98 or newer, a C++17 compiler with OpenMP, pkg-config, LibRaw 0.22 or newer, and Little CMS 2.
 
 - Arch Linux: `sudo pacman -S rust base-devel pkgconf libraw lcms2`
 - macOS: `brew install pkg-config libraw little-cms2 libomp`. Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon); `LIBOMP_PREFIX` points the build at a non-Homebrew OpenMP.

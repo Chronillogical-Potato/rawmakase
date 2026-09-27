@@ -7,7 +7,7 @@ rustup_bin="${HOME}/.cargo/bin/rustup"
 if [ -x "$rustup_bin" ]; then
     architecture=$(uname -m)
     case "$architecture" in arm64) architecture=aarch64 ;; esac
-    toolchain="1.95.0-$architecture-apple-darwin"
+    toolchain="1.98.1-$architecture-apple-darwin"
     if compiler=$("$rustup_bin" which --toolchain "$toolchain" rustc 2>/dev/null); then
         PATH="$(dirname "$compiler"):$PATH"
         export PATH

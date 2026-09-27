@@ -29,6 +29,7 @@ pub mod raw;
 pub mod storage;
 mod tiff;
 pub mod time;
+pub mod updates;
 pub mod xmp;
 
 // Source-compatible entry points for earlier users of the library. New code uses

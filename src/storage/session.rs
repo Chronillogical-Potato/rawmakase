@@ -23,6 +23,12 @@ pub struct Session {
     /// Which demosaic full-size decodes use.
     #[serde(default)]
     pub demosaic: crate::raw::Demosaic,
+    /// The user turned off checking for updates, which is on by default.
+    #[serde(default)]
+    pub no_update_checks: bool,
+    /// A release the user chose to skip; newer ones are still offered.
+    #[serde(default)]
+    pub skipped_version: Option<String>,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))

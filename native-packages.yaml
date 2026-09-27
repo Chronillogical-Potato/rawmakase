@@ -22,7 +22,7 @@ targets:
       local: dist/RAWmakase.app
     native:
       command: [ruby, packaging/release/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'rawmakase-@VERSION@-macos-arm64.dmg'
+      output: 'rawmakase-v@VERSION@-macos-arm64.dmg'
   macos-amd64:
     platform: macos
     arch: amd64
@@ -32,4 +32,4 @@ targets:
       local: dist/RAWmakase.app
     native:
       command: [ruby, packaging/release/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'rawmakase-@VERSION@-macos-x86_64.dmg'
+      output: 'rawmakase-v@VERSION@-macos-x86_64.dmg'
