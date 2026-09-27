@@ -1,0 +1,471 @@
+{
+  "about": "RAWmakase's distance from Camera Raw when last accepted: [mean, p95] CIEDE2000 per case, sRGB patches outside the wide-gamut row. Tests fail when a case gets worse.",
+  "charts": {
+    "synthetic-a": {
+      "default": [
+        0.926,
+        2.307
+      ],
+      "temperature-3200": [
+        1.001,
+        2.906
+      ],
+      "temperature-5000": [
+        2.451,
+        10.265
+      ],
+      "temperature-8000": [
+        4.218,
+        14.474
+      ]
+    },
+    "synthetic-d50": {
+      "default": [
+        0.895,
+        2.331
+      ]
+    },
+    "synthetic-d65": {
+      "blacks+50": [
+        1.098,
+        2.323
+      ],
+      "blacks-50": [
+        1.116,
+        3.635
+      ],
+      "calibration-blue-hue-50": [
+        2.033,
+        5.314
+      ],
+      "calibration-blue-saturation+50": [
+        2.17,
+        7.33
+      ],
+      "calibration-green-saturation+50": [
+        1.628,
+        4.518
+      ],
+      "calibration-red-hue+50": [
+        1.745,
+        4.39
+      ],
+      "calibration-shadow-tint+30": [
+        0.975,
+        2.328
+      ],
+      "contrast+100": [
+        3.798,
+        10.772
+      ],
+      "contrast+50": [
+        2.159,
+        6.006
+      ],
+      "contrast-50": [
+        1.598,
+        2.61
+      ],
+      "curve-red": [
+        8.659,
+        17.627
+      ],
+      "curve-s": [
+        1.427,
+        5.998
+      ],
+      "default": [
+        0.914,
+        2.304
+      ],
+      "exposure+1.00": [
+        2.394,
+        6.791
+      ],
+      "exposure-1.00": [
+        0.605,
+        1.53
+      ],
+      "grading-balance-50": [
+        3.995,
+        6.566
+      ],
+      "grading-blending-100": [
+        3.369,
+        5.856
+      ],
+      "grading-highlights-h210": [
+        4.046,
+        8.218
+      ],
+      "grading-highlights-h30": [
+        4.153,
+        7.79
+      ],
+      "grading-midtones-h210": [
+        1.878,
+        3.804
+      ],
+      "grading-midtones-h30": [
+        2.146,
+        5.478
+      ],
+      "grading-shadows-h210": [
+        2.59,
+        4.473
+      ],
+      "grading-shadows-h30": [
+        3.058,
+        7.025
+      ],
+      "highlights+60": [
+        5.274,
+        9.258
+      ],
+      "highlights-60": [
+        7.273,
+        11.452
+      ],
+      "hue-aqua+100": [
+        1.204,
+        4.589
+      ],
+      "hue-aqua-100": [
+        1.048,
+        3.046
+      ],
+      "hue-blue+100": [
+        1.293,
+        4.407
+      ],
+      "hue-blue-100": [
+        1.657,
+        6.013
+      ],
+      "hue-green+100": [
+        1.122,
+        3.608
+      ],
+      "hue-green-100": [
+        1.067,
+        3.337
+      ],
+      "hue-magenta+100": [
+        0.964,
+        2.373
+      ],
+      "hue-magenta-100": [
+        0.931,
+        2.305
+      ],
+      "hue-orange+100": [
+        1.189,
+        3.791
+      ],
+      "hue-orange-100": [
+        1.304,
+        4.119
+      ],
+      "hue-purple+100": [
+        1.334,
+        4.994
+      ],
+      "hue-purple-100": [
+        1.502,
+        5.882
+      ],
+      "hue-red+100": [
+        1.166,
+        4.141
+      ],
+      "hue-red-100": [
+        1.125,
+        3.601
+      ],
+      "hue-yellow+100": [
+        1.175,
+        3.295
+      ],
+      "hue-yellow-100": [
+        1.249,
+        3.808
+      ],
+      "look-warm-contrast": [
+        3.975,
+        8.414
+      ],
+      "luminance-aqua+100": [
+        1.287,
+        4.648
+      ],
+      "luminance-aqua-100": [
+        1.484,
+        5.882
+      ],
+      "luminance-blue+100": [
+        1.381,
+        4.968
+      ],
+      "luminance-blue-100": [
+        2.257,
+        9.093
+      ],
+      "luminance-green+100": [
+        1.383,
+        5.453
+      ],
+      "luminance-green-100": [
+        1.997,
+        9.468
+      ],
+      "luminance-magenta+100": [
+        1.102,
+        4.326
+      ],
+      "luminance-magenta-100": [
+        1.406,
+        5.574
+      ],
+      "luminance-orange+100": [
+        1.422,
+        5.08
+      ],
+      "luminance-orange-100": [
+        1.793,
+        7.087
+      ],
+      "luminance-purple+100": [
+        1.536,
+        7.22
+      ],
+      "luminance-purple-100": [
+        2.367,
+        11.706
+      ],
+      "luminance-red+100": [
+        1.102,
+        3.154
+      ],
+      "luminance-red-100": [
+        1.387,
+        4.56
+      ],
+      "luminance-yellow+100": [
+        1.375,
+        4.336
+      ],
+      "luminance-yellow-100": [
+        1.548,
+        5.89
+      ],
+      "pair-calibration-red-hue+50-hue-red-50": [
+        1.872,
+        5.572
+      ],
+      "pair-contrast+50-saturation+50": [
+        2.765,
+        8.763
+      ],
+      "pair-exposure+1-hue-red+50": [
+        2.532,
+        8.592
+      ],
+      "pair-exposure-1-contrast+50": [
+        2.194,
+        4.405
+      ],
+      "pair-grading-shadows-contrast+50": [
+        2.716,
+        6.491
+      ],
+      "pair-highlights-60-whites+50": [
+        4.628,
+        7.891
+      ],
+      "pair-hue-orange+50-hue-yellow-50": [
+        1.214,
+        3.189
+      ],
+      "pair-parametric-lights+50-vibrance+50": [
+        4.672,
+        9.544
+      ],
+      "pair-saturation-red-50-luminance-red+50": [
+        1.069,
+        3.633
+      ],
+      "pair-shadows+60-blacks-50": [
+        5.411,
+        11.44
+      ],
+      "pair-temperature-4000-saturation-blue+50": [
+        1.823,
+        5.009
+      ],
+      "pair-vibrance+50-saturation-50": [
+        1.578,
+        4.195
+      ],
+      "parametric-darks+50": [
+        2.374,
+        4.536
+      ],
+      "parametric-darks-50": [
+        2.792,
+        6.87
+      ],
+      "parametric-highlights+50": [
+        1.57,
+        4.579
+      ],
+      "parametric-highlights-50": [
+        1.615,
+        3.554
+      ],
+      "parametric-lights+50": [
+        4.196,
+        8.185
+      ],
+      "parametric-lights-50": [
+        3.68,
+        6.071
+      ],
+      "parametric-shadows+50": [
+        1.184,
+        2.917
+      ],
+      "parametric-shadows-50": [
+        1.148,
+        4.181
+      ],
+      "saturation+50": [
+        1.841,
+        5.897
+      ],
+      "saturation-50": [
+        1.211,
+        3.685
+      ],
+      "saturation-aqua+100": [
+        1.069,
+        3.337
+      ],
+      "saturation-aqua-100": [
+        1.086,
+        3.017
+      ],
+      "saturation-blue+100": [
+        1.749,
+        6.283
+      ],
+      "saturation-blue-100": [
+        1.464,
+        5.631
+      ],
+      "saturation-green+100": [
+        1.051,
+        3.372
+      ],
+      "saturation-green-100": [
+        1.162,
+        4.113
+      ],
+      "saturation-magenta+100": [
+        0.99,
+        2.983
+      ],
+      "saturation-magenta-100": [
+        1.005,
+        3.438
+      ],
+      "saturation-orange+100": [
+        1.054,
+        3.017
+      ],
+      "saturation-orange-100": [
+        1.467,
+        6.069
+      ],
+      "saturation-purple+100": [
+        1.209,
+        4.326
+      ],
+      "saturation-purple-100": [
+        1.478,
+        5.631
+      ],
+      "saturation-red+100": [
+        1.083,
+        3.662
+      ],
+      "saturation-red-100": [
+        1.216,
+        4.69
+      ],
+      "saturation-yellow+100": [
+        1.059,
+        2.653
+      ],
+      "saturation-yellow-100": [
+        1.248,
+        4.253
+      ],
+      "shadows+60": [
+        5.092,
+        10.377
+      ],
+      "shadows-60": [
+        4.707,
+        8.573
+      ],
+      "temperature-3200": [
+        1.325,
+        3.504
+      ],
+      "temperature-5000": [
+        0.789,
+        1.967
+      ],
+      "temperature-8000": [
+        0.966,
+        2.773
+      ],
+      "tint+30": [
+        1.093,
+        2.557
+      ],
+      "tint-30": [
+        0.633,
+        1.557
+      ],
+      "vibrance+50": [
+        1.397,
+        4.401
+      ],
+      "vibrance-50": [
+        1.371,
+        3.854
+      ],
+      "whites+50": [
+        1.373,
+        6.874
+      ],
+      "whites-50": [
+        1.122,
+        2.171
+      ]
+    },
+    "synthetic-d65-matrix-only": {
+      "default": [
+        13.025,
+        17.924
+      ]
+    },
+    "synthetic-f2": {
+      "default": [
+        0.975,
+        2.326
+      ]
+    }
+  }
+}

@@ -1,0 +1,92 @@
+# Color test corpus
+
+Tests that RAWmakase's colors don't change unnoticed, and how far they are from Camera Raw. The code is in `tests/color/`; the scripts that talk to Photoshop are in `scripts/corpus/`.
+
+## What is here (public, committed)
+
+| Path | What it is |
+| --- | --- |
+| `charts/*.dng` | Synthetic chart DNGs (970×742 RGGB mosaic, lossless JPEG, about 0.27 MB each), written by the generator in `tests/color/chart.rs` and `dng.rs`. |
+| `charts/layout.json` | The patch areas every chart shares: 24-step gray ramp (−8 to +3.5 EV), 24 hues × 3 lightness × 3 chroma, a wide-gamut row, ColorChecker, skin tones, near-neutrals, two sweeps, and colors on black and white surrounds. |
+| `cases.json` | 107 settings cases (sliders one at a time, pairs, one combined look) as Camera Raw XMP attributes. |
+| `snapshots/*.json` | RAWmakase's own render of every chart and case. |
+| `camera-raw/*.json` | Camera Raw 18.6 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
+| `camera-raw/baseline.json` | RAWmakase's accepted distance from those renders, per case. |
+| `cameras.json` | LibRaw color matrices of the cameras that get their own chart. |
+| `pixls.json` | CC0 sample RAWs from raw.pixls.us (URL, SHA-256, size). The files themselves are not committed. |
+
+Patch files hold the mean encoded-sRGB value (16-bit) of each patch, one case per line.
+
+### Charts
+
+- `synthetic-d65`, `-d50`, `-a`, `-f2`: an invented camera (no manufacturer or Adobe data) under daylight, D50, tungsten and fluorescent light, with an embedded named profile (color and forward matrices), as Adobe's DNG Converter writes.
+- `synthetic-d65-matrix-only`: the same scene with color matrices only, as some third-party DNGs are.
+- `<camera>-d65`: one chart per camera in `cameras.json`, claiming that camera's make and model with its LibRaw matrix. With the camera's Adobe Standard DCP (private tier) this tests the per-camera profile path without a photo from that camera.
+
+Mosaic charts are used because RAWmakase rejects three-channel `LinearRaw` DNGs. Flat patch interiors demosaic exactly.
+
+## Tests
+
+`cargo test --test color` runs in CI and takes seconds:
+
+- `charts_match_their_generator`: the committed charts are exactly what the generator writes.
+- `charts_decode_to_their_camera_values`: LibRaw returns the patch values that were written.
+- `colors_match_snapshots`: every chart and case against the snapshots. Fails on any patch moving more than ΔE00 0.5, or a case's mean moving more than 0.1, and names the patches with their lightness, chroma and hue change.
+- `exports_match_the_render`: 16-bit TIFF and JPEG exports carry the render's colors.
+- `preview_size_matches_full_size`: a downscaled render keeps the colors of the full render.
+- `camera_raw_parity_does_not_regress`: fails when a case gets further from Camera Raw than its baseline (mean +0.1 or p95 +0.3 ΔE00). With `--nocapture` it prints, per case, ΔE00, the tone offset on the gray ramp, the contrast (slope) ratio, the hue error and the chroma difference.
+
+When a color change is intended, run the tests with `RAWMAKASE_BLESS=1` and commit the diff of `snapshots/` (and `camera-raw/baseline.json` if parity moved), saying why in the commit message. Charts are regenerated the same way after a generator change.
+
+## Private tier
+
+Kept outside the repository in `RAWMAKASE_CORPUS` (Piotr: `~/RAWmakase Corpus`, 5 GB cap):
+
+```
+raws/own/…              symlinks to your own RAWs (nothing is copied or written next to them)
+raws/pixls/…            downloaded CC0 samples (scripts/corpus/pixls.py download)
+camera-raw-adobe/       Camera Raw renders of the camera charts with Adobe Standard, plus baseline.json
+camera-raw-photos/      Camera Raw renders of the photos as 48-across block averages, plus baseline.json
+accepted/               RAWmakase's last accepted photo renders, as block averages
+```
+
+Run with `--release` (the dev profile is slow on 24 MP files):
+
+```
+RAWMAKASE_CORPUS=… RAWMAKASE_PROFILES=<folder of DCPs> cargo test --release --test color -- --ignored --nocapture
+```
+
+- `adobe_profile_parity_does_not_regress`: camera charts with each camera's Adobe Standard DCP against Camera Raw.
+- `photos_camera_raw_parity_does_not_regress`: every photo reference against Camera Raw. `RAWMAKASE_PHOTO_FILTER` selects a subset by path.
+- `photos_match_accepted_renders`: every photo and `photos` case against RAWmakase's last accepted render; files LibRaw can't open are listed as skipped until they have an accepted render.
+
+`RAWMAKASE_PROFILES` is read only when set, file by file; DCP file names must contain the camera model (Lightroom's `CameraProfiles` folder works). Adobe profiles and numbers derived from them never go into the repository.
+
+## Scripts
+
+All run from the repository root with a Python that has numpy (`/opt/homebrew/bin/python3.12` here). Photoshop scripts refuse to start while Photoshop has documents open, open only RAW or DNG copies (never TIFFs, which block Photoshop with a dialog), and delete every render once it is reduced.
+
+- `scripts/corpus/camera-raw-charts.py`: Camera Raw renders of the synthetic charts into `camera-raw/`; with `--adobe`, of the camera charts with Adobe Standard into the private corpus.
+- `scripts/corpus/camera-raw-photos.py`: Camera Raw renders of every corpus photo for the `photos` cases.
+- `scripts/corpus/pixls.py`: `manifest` (rebuild `pixls.json`), `download` (checks hashes and the budget), `cameras` (rebuild `cameras.json` from the corpus RAWs).
+- `scripts/corpus/migrate-references.py`: reduce existing reference TIFFs (sweeps, Lightroom exports) to block files.
+
+## TODO
+
+Known limitations, not yet addressed:
+
+- **Photo parity baseline not recorded.** `camera-raw-photos/baseline.json` does not exist yet; run `photos_camera_raw_parity_does_not_regress` once with `RAWMAKASE_BLESS=1` (about an hour) before relying on that test.
+- **Not yet run on CI.** The public tests pass on macOS (Apple Silicon). CI builds on Arch Linux x86_64, where floating-point results may differ slightly. Measure the difference and set the snapshot tolerances from it.
+- **Tolerances are not measured.** The snapshot limits (ΔE00 0.5 per patch, 0.1 mean) and parity margins (+0.1 mean, +0.3 p95) are reasonable guesses, not derived from Mac/Linux or CPU/GPU spread. The GPU preview path is not covered at all.
+- **Local operators are barely covered by charts.** Clarity, Texture and Dehaze are not in `cases.json`. Shadows, Highlights, Dehaze and Clarity adapt to image content, so flat patches (even with the black/white surrounds) say little about them; only the private real photos test them.
+- **sRGB only.** RAWmakase outputs sRGB, so the wide-gamut row and very saturated colors are clipped before comparison and saturation errors outside sRGB are invisible. Needs a wide-gamut (ProPhoto or linear) render output in RAWmakase.
+- **Private tier is slow.** Photo parity against Camera Raw (1,305 references) takes about an hour and accepted renders about 20 minutes with `--release`. Trim to a representative subset (a few photos per camera, the `photos` cases) for routine runs.
+- **Bad sample files are accepted.** Nikon Z5II and Z50II samples decode as "data corrupted" with LibRaw 0.22.0, yet their renders were recorded in `accepted/`. Exclude files LibRaw can't decode cleanly (also Z 8, Z6III, Sony A7 V, A1 II lossless, which don't open) until LibRaw supports them.
+- **Presets are not used.** The plan included about 40 of Piotr's Lightroom presets as realistic combinations; only 12 hand-picked pairs and one combined look exist.
+- **Parity numbers are not in docs/parity-gaps.md.** The report printed by `camera_raw_parity_does_not_regress` should feed that document instead of ad-hoc scorecard runs.
+- **Known RAWmakase gaps the tests expose** (tests record them as the baseline, or fail on purpose):
+  - Matrix-only DNGs (`synthetic-d65-matrix-only`) are about ΔE00 13 from Camera Raw: LibRaw leaves `cam_xyz` empty for DNGs, so the camera-matrix default profile and ACR tone curve are not used.
+  - A DNG's embedded profile is rejected when it has no ProfileName ("Invalid profile identity").
+  - Three-channel `LinearRaw` DNGs are rejected, which is why charts are mosaics.
+  - Nikon Z6III: LibRaw reports model "Z6_3" but Adobe's DCP is named for the "Nikon Z 6 3", so Adobe Standard is not matched (`adobe_profile_parity` fails for `nikon-z6-3-d65`).
+  - LibRaw trims 19 rows from Leica SL2 DNGs, so the SL2 has no chart.
