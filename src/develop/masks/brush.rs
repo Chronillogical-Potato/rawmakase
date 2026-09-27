@@ -86,12 +86,26 @@ pub(crate) struct Guide<'a> {
 }
 impl Guide<'_> {
     /// Log camera RGB at image-space position `p`.
-    fn at(&self, p: [f32; 2]) -> [f32; 3] {
+    /// Averaged over a box `reach` decoded pixels around `p`, so texture and noise do
+    /// not stop the brush.
+    fn at(&self, p: [f32; 2], reach: i64) -> [f32; 3] {
         let [x, y] = self.frame.to_source(p);
         let im = self.image;
-        let x = (x.round() as i64).clamp(0, im.width as i64 - 1) as usize;
-        let y = (y.round() as i64).clamp(0, im.height as i64 - 1) as usize;
-        im.pixels[y * im.width as usize + x].map(|v| (v.max(0.) + 1e-3).ln())
+        let (cx, cy) = (x.round() as i64, y.round() as i64);
+        let step = (reach / 2).max(1) as usize;
+        let (mut sum, mut n) = ([0.; 3], 0.);
+        for dy in (-reach..=reach).step_by(step) {
+            for dx in (-reach..=reach).step_by(step) {
+                let x = (cx + dx).clamp(0, im.width as i64 - 1) as usize;
+                let y = (cy + dy).clamp(0, im.height as i64 - 1) as usize;
+                let q = im.pixels[y * im.width as usize + x];
+                for c in 0..3 {
+                    sum[c] += q[c];
+                }
+                n += 1.;
+            }
+        }
+        sum.map(|v| ((v / n).max(0.) + 1e-3).ln())
     }
 }
 pub(crate) fn rasterize(
@@ -147,10 +161,14 @@ pub(crate) fn rasterize(
             .collect();
         let radius = s.radius / step;
         let inner = radius * (1. - s.feather);
-        // Auto Mask colours of the dab centres.
+        // Auto Mask colours of the dab centres, averaged over a few percent of the
+        // brush (in decoded pixels).
+        let blur = guide.map_or(1, |g| {
+            ((s.radius * g.frame.long_edge() * 0.08) as i64).max(1)
+        });
         let colors: Option<Vec<[f32; 3]>> = guide
             .filter(|_| s.auto_mask)
-            .map(|g| s.points.iter().map(|p| g.at(*p)).collect());
+            .map(|g| s.points.iter().map(|p| g.at(*p, blur)).collect());
         let segments: Vec<(usize, usize)> = if points.len() == 1 {
             vec![(0, 0)]
         } else {
@@ -200,14 +218,17 @@ pub(crate) fn rasterize(
                     continue;
                 }
                 if let (Some(colors), Some(g)) = (&colors, guide) {
-                    let here = g.at(space.from([
-                        origin[0] + (x as f32 + 0.5) * step,
-                        origin[1] + (y as f32 + 0.5) * step,
-                    ]));
+                    let here = g.at(
+                        space.from([
+                            origin[0] + (x as f32 + 0.5) * step,
+                            origin[1] + (y as f32 + 0.5) * step,
+                        ]),
+                        blur,
+                    );
                     let d: f32 = (0..3).map(|k| (here[k] - colors[dab][k]).powi(2)).sum();
-                    // Similar colours pass; a difference of about 0.25 in log camera
-                    // values (a clear edge) stops the brush.
-                    c *= (-d / 0.02).exp();
+                    // Similar colours pass; about half a stop of difference in every
+                    // channel (a clear edge) stops the brush.
+                    c *= (-d / 0.08).exp();
                 }
                 let v = &mut data[y * width + x];
                 if s.erase {
