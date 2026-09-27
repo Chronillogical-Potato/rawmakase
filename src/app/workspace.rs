@@ -465,7 +465,7 @@ impl Editor {
                 {
                     self.view.toggle(Tool::Crop);
                 }
-                if i.key_pressed(egui::Key::J) {
+                if i.key_pressed(egui::Key::J) && !i.modifiers.shift {
                     self.view.clipping = !self.view.clipping;
                 }
                 if i.key_pressed(egui::Key::Backslash) {
@@ -488,6 +488,25 @@ impl Editor {
                 }
                 if self.view.is(Tool::Remove) {
                     self.retouch_keys(i);
+                }
+                if self.view.is(Tool::Mask) {
+                    self.mask_keys(i);
+                }
+                // New masks: K brush, M linear, Shift+M radial, Shift+J colour range.
+                if !i.modifiers.command && !i.modifiers.alt {
+                    use super::mask_tool::Kind;
+                    let kind = if i.key_pressed(egui::Key::K) && !i.modifiers.shift {
+                        Some(Kind::Brush)
+                    } else if i.key_pressed(egui::Key::M) {
+                        Some(if i.modifiers.shift { Kind::Radial } else { Kind::Linear })
+                    } else if i.key_pressed(egui::Key::J) && i.modifiers.shift {
+                        Some(Kind::Color)
+                    } else {
+                        None
+                    };
+                    if let Some(kind) = kind {
+                        self.create_mask(kind, None);
+                    }
                 }
             });
             if zoom_step != 0 {

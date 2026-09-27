@@ -83,7 +83,6 @@ pub(super) fn path(painter: &Painter, points: Vec<Pos2>, color: Color32) {
     painter.add(egui::Shape::line(points, Stroke::new(1., color)));
 }
 /// A square handle, as on Lightroom's gradients.
-#[allow(dead_code)]
 pub(super) fn handle(painter: &Painter, at: Pos2, active: bool) {
     let r = Rect::from_center_size(at, Vec2::splat(if active { 9. } else { 7. }));
     painter.rect_filled(r.expand(1.), 1., Color32::from_black_alpha(140));

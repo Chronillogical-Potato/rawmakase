@@ -1,32 +1,1191 @@
-//! Lightroom's Masking panel: the selected mask and component, brush settings and the
-//! drag in progress.
-use eframe::egui;
+//! Lightroom's Masking panel (Shift+W): creating masks, the mask list with Add,
+//! Subtract and Intersect, brushes and gradients on the photo, range sampling and
+//! each mask's adjustment sliders.
+use super::Editor;
+use super::overlay;
+use super::retouch_tool::{control_label, hint, indented};
+use super::widgets::{segmented, set_edit_context, slider_with};
+use crate::develop::{
+    ViewMapping,
+    masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape, Space},
+};
+use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
-#[derive(Default)]
+/// What a new mask or component is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Kind {
+    Brush,
+    Linear,
+    Radial,
+    Color,
+    Luminance,
+}
+impl Kind {
+    const ALL: [(Kind, &'static str, &'static str); 5] = [
+        (Kind::Brush, "Brush", "K"),
+        (Kind::Linear, "Linear Gradient", "M"),
+        (Kind::Radial, "Radial Gradient", "Shift+M"),
+        (Kind::Color, "Color Range", "Shift+J"),
+        (Kind::Luminance, "Luminance Range", ""),
+    ];
+}
+/// Brush settings; Lightroom keeps two sets, A and B, and one for erasing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Brush {
+    pub(super) size: f32,
+    pub(super) feather: f32,
+    pub(super) flow: f32,
+    pub(super) density: f32,
+    pub(super) auto_mask: bool,
+}
+impl Default for Brush {
+    fn default() -> Self {
+        Self {
+            size: 0.03,
+            feather: 0.5,
+            flow: 1.,
+            density: 1.,
+            auto_mask: false,
+        }
+    }
+}
+/// Where the next shape goes, and what makes it: a drag for gradients, a click for
+/// colour ranges.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pending {
+    kind: Kind,
+    /// `None` for a new mask; otherwise the selected mask gets a component.
+    op: Option<MaskOp>,
+}
+#[derive(Clone, Debug, Default)]
+enum Drag {
+    #[default]
+    None,
+    /// Brush dabs in image space.
+    Stroke { points: Vec<[f32; 2]>, erase: bool },
+    /// A gradient being drawn from its first point.
+    Create([f32; 2]),
+    /// A gradient handle moved from where the drag started.
+    Handle(Handle, [f32; 2], MaskShape),
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Handle {
+    Start,
+    End,
+    Middle,
+    Center,
+    /// The ellipse's first and second radius.
+    Radius(usize),
+}
+
 pub(super) struct MaskTool {
     /// Index into the recipe's masks.
     pub(super) selected: Option<usize>,
+    /// Index into the selected mask's components.
+    pub(super) component: Option<usize>,
     /// Show the selected mask as a red overlay (O).
     pub(super) overlay: bool,
+    pub(super) brushes: [Brush; 3],
+    /// A, B, or 2 for the erase brush.
+    pub(super) brush: usize,
+    pending: Option<Pending>,
+    drag: Drag,
+    renaming: Option<(usize, String)>,
 }
-impl super::Editor {
-    /// The Masking panel's drawer.
-    pub(super) fn mask_panel(&mut self, ui: &mut egui::Ui) {
-        super::retouch_tool::hint(ui, "Masking arrives in the next step.");
-    }
-    /// Handles the pointer on the photo for the selected mask; returns whether the
-    /// tool owns it.
-    pub(super) fn mask_overlay(
-        &mut self,
-        _ui: &mut egui::Ui,
-        _response: &eframe::egui::Response,
-        _rect: eframe::egui::Rect,
-    ) -> bool {
-        false
+impl Default for MaskTool {
+    fn default() -> Self {
+        Self {
+            selected: None,
+            component: None,
+            overlay: false,
+            brushes: [Brush::default(); 3],
+            brush: 0,
+            pending: None,
+            drag: Drag::None,
+            renaming: None,
+        }
     }
 }
 impl MaskTool {
     pub(super) fn clear_document(&mut self) {
         self.selected = None;
+        self.component = None;
+        self.pending = None;
+        self.drag = Drag::None;
+        self.renaming = None;
+    }
+    fn select(&mut self, mask: Option<usize>, component: Option<usize>) {
+        self.selected = mask;
+        self.component = component;
+        self.renaming = None;
+    }
+}
+
+impl Editor {
+    fn selected_mask(&self) -> Option<usize> {
+        self.view
+            .masking
+            .selected
+            .filter(|i| *i < self.document.recipe.masks.len())
+    }
+    fn selected_component(&self) -> Option<(usize, usize)> {
+        let m = self.selected_mask()?;
+        let c = self
+            .view
+            .masking
+            .component
+            .filter(|c| *c < self.document.recipe.masks[m].components.len())?;
+        Some((m, c))
+    }
+    /// Starts a new mask of `kind` (the Create buttons and K, M, Shift+M, Shift+J), or
+    /// adds `kind` to the selected mask with `op`.
+    pub(super) fn create_mask(&mut self, kind: Kind, op: Option<MaskOp>) {
+        self.view.tool = super::state::Tool::Mask;
+        let op = op.filter(|_| self.selected_mask().is_some());
+        match kind {
+            Kind::Brush | Kind::Luminance => {
+                let shape = match kind {
+                    Kind::Brush => MaskShape::Brush {
+                        strokes: Vec::new(),
+                    },
+                    _ => MaskShape::LuminanceRange {
+                        low: 0.5,
+                        high: 1.,
+                        falloff: [0.15, 0.],
+                    },
+                };
+                self.add_component(MaskComponent::new(shape), op);
+                self.view.masking.pending = None;
+            }
+            Kind::Linear | Kind::Radial | Kind::Color => {
+                self.view.masking.pending = Some(Pending { kind, op });
+            }
+        }
+    }
+    /// Adds `component` to the selected mask with `op`, or as a new mask without one.
+    fn add_component(&mut self, mut component: MaskComponent, op: Option<MaskOp>) {
+        let masks = &mut self.document.recipe.masks;
+        match (op, self.view.masking.selected.filter(|i| *i < masks.len())) {
+            (Some(op), Some(m)) if masks[m].components.len() < masks::MAX_COMPONENTS => {
+                component.op = op;
+                masks[m].components.push(component);
+                let c = masks[m].components.len() - 1;
+                self.view.masking.select(Some(m), Some(c));
+            }
+            _ if masks.len() < masks::MAX_GROUPS => {
+                masks.push(MaskGroup {
+                    components: vec![component],
+                    ..Default::default()
+                });
+                let m = masks.len() - 1;
+                self.view.masking.select(Some(m), Some(0));
+            }
+            _ => self.status = format!("A photo holds up to {} masks", masks::MAX_GROUPS),
+        }
+    }
+    /// The Masking tool's keys: `[` `]` brush size (Shift: feather), O overlay, Delete
+    /// removes the selected mask, `/` switches between brushes A and B.
+    pub(super) fn mask_keys(&mut self, i: &egui::InputState) {
+        use egui::Key;
+        if i.modifiers.command || i.modifiers.alt || self.view.masking.renaming.is_some() {
+            return;
+        }
+        let pressed = |keys: &[Key]| keys.iter().any(|k| i.key_pressed(*k));
+        let t = &mut self.view.masking;
+        let brush = &mut t.brushes[t.brush];
+        if pressed(&[Key::OpenBracket, Key::OpenCurlyBracket]) {
+            if i.modifiers.shift {
+                brush.feather = (brush.feather - 0.1).max(0.);
+            } else {
+                brush.size = (brush.size / 1.15).max(0.002);
+            }
+        }
+        if pressed(&[Key::CloseBracket, Key::CloseCurlyBracket]) {
+            if i.modifiers.shift {
+                brush.feather = (brush.feather + 0.1).min(1.);
+            } else {
+                brush.size = (brush.size * 1.15).min(0.5);
+            }
+        }
+        if pressed(&[Key::O]) && !i.modifiers.shift {
+            t.overlay ^= true;
+        }
+        if pressed(&[Key::Slash, Key::Questionmark]) {
+            t.brush = if t.brush == 0 { 1 } else { 0 };
+        }
+        if pressed(&[Key::Delete, Key::Backspace])
+            && let Some(m) = self.selected_mask()
+        {
+            self.document.recipe.masks.remove(m);
+            self.view.masking.select(None, None);
+        }
+    }
+    /// Pointer handling and drawing on the photo; returns whether the tool owns the
+    /// pointer (it does unless nothing would respond to it).
+    pub(super) fn mask_overlay(
+        &mut self,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        rect: Rect,
+    ) -> bool {
+        let Some(im) = self.document.full().cloned() else {
+            return false;
+        };
+        let recipe = self.effective_recipe();
+        let map = ViewMapping::new(&im, &recipe);
+        let space = Space::new(map.frame().aspect());
+        let to_screen = |p: [f32; 2]| {
+            let [u, v] = map.to_view(p);
+            Pos2::new(
+                rect.left() + u * rect.width(),
+                rect.top() + v * rect.height(),
+            )
+        };
+        let to_image = |p: Pos2| {
+            map.to_image(
+                (p.x - rect.left()) / rect.width(),
+                (p.y - rect.top()) / rect.height(),
+            )
+        };
+        let radius_on_screen = |p: [f32; 2], r: f32| {
+            let [rx, ry] = map.view_radius(p, r);
+            (rx * rect.width()).max(ry * rect.height())
+        };
+        let selected = self.selected_component();
+        let shape =
+            selected.map(|(m, c)| self.document.recipe.masks[m].components[c].shape.clone());
+        let pending = self.view.masking.pending;
+        let brushing = pending.is_none() && matches!(shape, Some(MaskShape::Brush { .. }));
+        let handles: Vec<(Handle, Pos2)> = match &shape {
+            Some(s) if pending.is_none() => handles(s, space, &to_screen),
+            _ => Vec::new(),
+        };
+        let pins: Vec<(usize, Pos2)> = self
+            .document
+            .recipe
+            .masks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| anchor(m).map(|p| (i, to_screen(p))))
+            .collect();
+        let pointer = response.hover_pos();
+        let near = |pos: Pos2| {
+            handles
+                .iter()
+                .find(|(_, h)| h.distance(pos) < 9.)
+                .map(|h| h.0)
+        };
+        let near_pin = |pos: Pos2| pins.iter().find(|(_, p)| p.distance(pos) < 9.).map(|p| p.0);
+        let alt = ui.input(|i| i.modifiers.alt);
+
+        if response.drag_started()
+            && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        {
+            let at = to_image(origin);
+            let t = &mut self.view.masking;
+            let creating = pending.is_some_and(|p| matches!(p.kind, Kind::Linear | Kind::Radial));
+            t.drag = if creating {
+                Drag::Create(at)
+            } else if let (Some(h), Some(s)) = (near(origin), &shape) {
+                Drag::Handle(h, at, s.clone())
+            } else if brushing {
+                Drag::Stroke {
+                    points: vec![at],
+                    erase: alt || t.brush == 2,
+                }
+            } else {
+                Drag::None
+            };
+        }
+        if response.dragged()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let at = to_image(pos);
+            let size = self.view.masking.brushes[self.view.masking.brush].size;
+            match &mut self.view.masking.drag {
+                Drag::Stroke { points, .. } => {
+                    let last = space.to(points[points.len() - 1]);
+                    let q = space.to(at);
+                    if (q[0] - last[0]).hypot(q[1] - last[1]) >= size * 0.2
+                        && points.len() < masks::MAX_POINTS
+                    {
+                        points.push(at);
+                    }
+                }
+                Drag::Handle(h, start, original) => {
+                    let moved = move_handle(original, *h, space, *start, at);
+                    if let Some((m, c)) = selected {
+                        self.document.recipe.masks[m].components[c].shape = moved;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if response.drag_stopped()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let end = to_image(pos);
+            match std::mem::take(&mut self.view.masking.drag) {
+                Drag::Stroke { points, erase } => self.add_stroke(points, erase),
+                Drag::Create(start) => {
+                    if let Some(p) = pending {
+                        let shape = new_shape(p.kind, space, start, end);
+                        self.add_component(MaskComponent::new(shape), p.op);
+                        self.view.masking.pending = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.mask_click(pos, rect, to_image(pos), near_pin(pos), shape.as_ref(), ui);
+        }
+
+        // Drawing.
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        if let Some(s) = &shape {
+            draw_shape(&painter, s, space, &to_screen);
+        }
+        for (h, at) in &handles {
+            let hot = pointer.is_some_and(|p| p.distance(*at) < 9.);
+            overlay::handle(&painter, *at, hot && *h != Handle::Middle);
+        }
+        for (i, at) in &pins {
+            overlay::pin(&painter, *at, self.view.masking.selected == Some(*i));
+        }
+        if let (Drag::Create(start), Some(pos), Some(p)) =
+            (&self.view.masking.drag, pointer, pending)
+        {
+            let preview = new_shape(p.kind, space, *start, to_image(pos));
+            draw_shape(&painter, &preview, space, &to_screen);
+        }
+        if let Drag::Stroke { points, .. } = &self.view.masking.drag {
+            let screen: Vec<Pos2> = points.iter().map(|p| to_screen(*p)).collect();
+            overlay::path(&painter, screen, Color32::from_white_alpha(220));
+        }
+        let on_handle = pointer.and_then(near).is_some() || pointer.and_then(near_pin).is_some();
+        if let Some(pos) = pointer.filter(|p| rect.contains(*p)) {
+            if on_handle {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+            } else if brushing {
+                let t = &self.view.masking;
+                let b = t.brushes[if alt { 2 } else { t.brush }];
+                let r = radius_on_screen(to_image(pos), b.size);
+                overlay::brush_cursor(&painter, pos, r, b.feather);
+                if alt || t.brush == 2 {
+                    painter.line_segment(
+                        [pos - Vec2::new(4., 0.), pos + Vec2::new(4., 0.)],
+                        Stroke::new(1.5, Color32::WHITE),
+                    );
+                }
+                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+            } else if pending.is_some()
+                || matches!(
+                    shape,
+                    Some(MaskShape::ColorRange { .. } | MaskShape::LuminanceRange { .. })
+                )
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+            }
+        }
+        // Without a shape to edit or create, clicks and drags pan and zoom as usual.
+        pending.is_some() || shape.is_some() || on_handle
+    }
+    /// A click on the photo: select a mask by its pin, sample a colour or tone for a
+    /// range, or paint a single brush dab.
+    fn mask_click(
+        &mut self,
+        pos: Pos2,
+        rect: Rect,
+        at: [f32; 2],
+        pin: Option<usize>,
+        shape: Option<&MaskShape>,
+        ui: &egui::Ui,
+    ) {
+        let pending = self.view.masking.pending;
+        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+        if let Some(i) = pin.filter(|_| pending.is_none()) {
+            self.view.masking.select(Some(i), Some(0));
+            return;
+        }
+        if let Some(p) = pending.filter(|p| p.kind == Kind::Color) {
+            if let Some(lab) = self.developed_lab(pos, rect) {
+                let shape = MaskShape::ColorRange {
+                    samples: vec![lab],
+                    amount: 0.5,
+                };
+                self.add_component(MaskComponent::new(shape), p.op);
+            }
+            self.view.masking.pending = None;
+            return;
+        }
+        let Some((m, c)) = self.selected_component().filter(|_| pending.is_none()) else {
+            return;
+        };
+        let range = matches!(
+            shape,
+            Some(MaskShape::ColorRange { .. } | MaskShape::LuminanceRange { .. })
+        );
+        let lab = if range {
+            self.developed_lab(pos, rect)
+        } else {
+            None
+        };
+        let erase = alt || self.view.masking.brush == 2;
+        match (&mut self.document.recipe.masks[m].components[c].shape, lab) {
+            (MaskShape::ColorRange { samples, .. }, Some(lab)) => {
+                if shift && samples.len() < 5 {
+                    samples.push(lab);
+                } else {
+                    *samples = vec![lab];
+                }
+            }
+            (MaskShape::LuminanceRange { low, high, .. }, Some(lab)) => {
+                let l = lab[0].clamp(0., 1.);
+                (*low, *high) = ((l - 0.1).max(0.), (l + 0.1).min(1.));
+            }
+            (MaskShape::Brush { .. }, _) => self.add_stroke(vec![at], erase),
+            _ => {}
+        }
+    }
+    fn add_stroke(&mut self, points: Vec<[f32; 2]>, erase: bool) {
+        let Some((m, c)) = self.selected_component() else {
+            return;
+        };
+        let t = &self.view.masking;
+        let b = t.brushes[if erase { 2 } else { t.brush }];
+        if let MaskShape::Brush { strokes } = &mut self.document.recipe.masks[m].components[c].shape
+            && strokes.len() < masks::MAX_STROKES
+        {
+            strokes.push(BrushStroke {
+                points: points.into(),
+                radius: b.size,
+                feather: b.feather,
+                flow: b.flow,
+                density: b.density,
+                erase,
+                auto_mask: b.auto_mask && !erase,
+            });
+        }
+    }
+    /// Oklab of the photo's developed colour, without masks, at screen position `pos`
+    /// over the photo drawn in `rect`: a 3×3 average of a small full-resolution render.
+    fn developed_lab(&self, pos: Pos2, rect: Rect) -> Option<[f32; 3]> {
+        let im = self.document.full()?;
+        let mut r = self.effective_recipe();
+        r.masks.clear();
+        r.sharpening = 0.;
+        let g = crate::develop::Geometry::new(im, &r, 0);
+        let (w, h) = (3.min(g.width), 3.min(g.height));
+        let u = ((pos.x - rect.left()) / rect.width()).clamp(0., 1.);
+        let v = ((pos.y - rect.top()) / rect.height()).clamp(0., 1.);
+        let x = ((u * g.width as f32) as u32)
+            .saturating_sub(1)
+            .min(g.width - w);
+        let y = ((v * g.height as f32) as u32)
+            .saturating_sub(1)
+            .min(g.height - h);
+        let out = crate::develop::render_region(im, &r, [x, y, w, h]).ok()?;
+        let n = out.pixels.len() as f32;
+        let mean = out
+            .pixels
+            .iter()
+            .fold([0.; 3], |s, p| std::array::from_fn(|c| s[c] + p[c] / n));
+        Some(masks::oklab(mean))
+    }
+    /// The Masking panel's drawer.
+    pub(super) fn mask_panel(&mut self, ui: &mut egui::Ui) {
+        self.create_row(ui);
+        ui.add_space(4.);
+        self.mask_list(ui);
+        let Some(m) = self.selected_mask() else {
+            hint(
+                ui,
+                "Create a mask, or click a pin on the photo to select one. Shift+W closes.",
+            );
+            return;
+        };
+        ui.add_space(4.);
+        self.component_settings(ui, m);
+        ui.add_space(6.);
+        self.adjustment_sliders(ui, m);
+    }
+    fn create_row(&mut self, ui: &mut egui::Ui) {
+        let pending = self.view.masking.pending;
+        control_label(ui, "Create", |ui| {
+            let w = (ui.available_width() - 4. * 4.) / 5.;
+            for (kind, name, key) in Kind::ALL {
+                let active = pending.is_some_and(|p| p.kind == kind && p.op.is_none());
+                let (rect, response) = ui.allocate_exact_size(Vec2::new(w, 24.), Sense::click());
+                ui.painter().rect_filled(
+                    rect,
+                    3.,
+                    Color32::from_gray(if active {
+                        72
+                    } else if response.hovered() {
+                        50
+                    } else {
+                        36
+                    }),
+                );
+                kind_icon(
+                    ui.painter(),
+                    rect.center(),
+                    kind,
+                    active || response.hovered(),
+                );
+                let tip = if key.is_empty() {
+                    format!("New {name} mask")
+                } else {
+                    format!("New {name} mask · {key}")
+                };
+                if response
+                    .on_hover_text(tip)
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    self.create_mask(kind, None);
+                }
+            }
+        });
+        // One line, always there, so the panel does not jump when a tool waits for
+        // the photo.
+        let what = match pending.map(|p| p.kind) {
+            Some(Kind::Linear) => "Drag on the photo to draw the gradient",
+            Some(Kind::Radial) => "Drag on the photo from the centre outward",
+            Some(_) => "Click the photo to pick a colour",
+            None => "",
+        };
+        hint(ui, what);
+        indented(ui, |ui| {
+            ui.checkbox(&mut self.view.masking.overlay, "Show Overlay")
+                .on_hover_text("O: the selected mask in red");
+        });
+    }
+    fn mask_list(&mut self, ui: &mut egui::Ui) {
+        let selected = self.selected_mask();
+        let mut select = None;
+        let mut select_component = None;
+        let masks = self.document.recipe.masks.clone();
+        for (i, mask) in masks.iter().enumerate() {
+            indented(ui, |ui| {
+                let width = ui.available_width();
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(width, 24.), Sense::click());
+                let active = selected == Some(i);
+                ui.painter().rect_filled(
+                    rect,
+                    3.,
+                    Color32::from_gray(if active {
+                        64
+                    } else if response.hovered() {
+                        46
+                    } else {
+                        34
+                    }),
+                );
+                let renaming = self
+                    .view
+                    .masking
+                    .renaming
+                    .as_ref()
+                    .is_some_and(|r| r.0 == i);
+                if let Some((_, text)) = self.view.masking.renaming.as_mut().filter(|_| renaming) {
+                    let edit = ui.put(
+                        rect.shrink2(Vec2::new(26., 2.)),
+                        egui::TextEdit::singleline(text).font(egui::FontId::proportional(11.)),
+                    );
+                    edit.request_focus();
+                    if edit.lost_focus() {
+                        let name: String = text.trim().chars().take(64).collect();
+                        if let Some(m) = self.document.recipe.masks.get_mut(i) {
+                            m.name = name;
+                        }
+                        self.view.masking.renaming = None;
+                    }
+                } else {
+                    ui.painter().text(
+                        rect.left_center() + Vec2::new(26., 0.),
+                        egui::Align2::LEFT_CENTER,
+                        mask_name(mask, i),
+                        egui::FontId::proportional(11.5),
+                        Color32::from_gray(if mask.hidden { 120 } else { 225 }),
+                    );
+                }
+                if let Some(c) = mask.components.first() {
+                    kind_icon(
+                        ui.painter(),
+                        rect.left_center() + Vec2::new(13., 0.),
+                        kind_of(&c.shape),
+                        active,
+                    );
+                }
+                let eye = Rect::from_center_size(
+                    rect.right_center() - Vec2::new(14., 0.),
+                    Vec2::splat(20.),
+                );
+                let eye_response = ui.interact(eye, ui.id().with(("mask-eye", i)), Sense::click());
+                eye_icon(
+                    ui.painter(),
+                    eye.center(),
+                    !mask.hidden,
+                    eye_response.hovered(),
+                );
+                if eye_response
+                    .on_hover_text("Show or hide this mask's effect")
+                    .clicked()
+                {
+                    self.document.recipe.masks[i].hidden ^= true;
+                } else if response.double_clicked() {
+                    self.view.masking.renaming = Some((i, mask.name.clone()));
+                } else if response
+                    .on_hover_text("Click to select · double-click to rename")
+                    .clicked()
+                {
+                    select = Some(i);
+                }
+            });
+            if selected == Some(i) {
+                for (k, c) in mask.components.iter().enumerate() {
+                    indented(ui, |ui| {
+                        ui.add_space(14.);
+                        let width = ui.available_width();
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::new(width, 21.), Sense::click());
+                        let active = self.view.masking.component == Some(k);
+                        if active || response.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                3.,
+                                Color32::from_gray(if active { 56 } else { 42 }),
+                            );
+                        }
+                        let op = match (k, c.op) {
+                            (0, _) | (_, MaskOp::Add) => "",
+                            (_, MaskOp::Subtract) => "− ",
+                            (_, MaskOp::Intersect) => "∩ ",
+                        };
+                        let invert = if c.invert { " (inverted)" } else { "" };
+                        kind_icon(
+                            ui.painter(),
+                            rect.left_center() + Vec2::new(11., 0.),
+                            kind_of(&c.shape),
+                            active,
+                        );
+                        ui.painter().text(
+                            rect.left_center() + Vec2::new(24., 0.),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{op}{}{invert}", c.shape.kind()),
+                            egui::FontId::proportional(11.),
+                            Color32::from_gray(200),
+                        );
+                        if response.clicked() {
+                            select_component = Some(k);
+                        }
+                    });
+                }
+                self.mask_actions(ui, i);
+            }
+        }
+        if let Some(i) = select {
+            self.view
+                .masking
+                .select(Some(i), (!masks[i].components.is_empty()).then_some(0));
+        }
+        if let Some(k) = select_component {
+            self.view.masking.component = Some(k);
+        }
+    }
+    /// Add, Subtract and Intersect menus, invert, duplicate and delete for mask `i`.
+    fn mask_actions(&mut self, ui: &mut egui::Ui, i: usize) {
+        ui.add_space(2.);
+        indented(ui, |ui| {
+            ui.add_space(14.);
+            for (op, label) in [
+                (MaskOp::Add, "Add"),
+                (MaskOp::Subtract, "Subtract"),
+                (MaskOp::Intersect, "Intersect"),
+            ] {
+                ui.menu_button(label, |ui| {
+                    for (kind, name, _) in Kind::ALL {
+                        if ui.button(name).clicked() {
+                            self.create_mask(kind, Some(op));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(format!("{label} a brush, gradient or range"));
+            }
+        });
+        indented(ui, |ui| {
+            ui.add_space(14.);
+            ui.checkbox(&mut self.document.recipe.masks[i].invert, "Invert")
+                .on_hover_text("Apply the adjustment outside the mask");
+            let full = self.document.recipe.masks.len() >= masks::MAX_GROUPS;
+            if ui
+                .add_enabled(!full, egui::Button::new("Duplicate"))
+                .clicked()
+            {
+                let mut copy = self.document.recipe.masks[i].clone();
+                if !copy.name.is_empty() {
+                    copy.name.push_str(" copy");
+                }
+                self.document.recipe.masks.insert(i + 1, copy);
+                self.view.masking.select(Some(i + 1), Some(0));
+            }
+            if ui
+                .button("Delete")
+                .on_hover_text("Delete this mask · Delete")
+                .clicked()
+            {
+                self.document.recipe.masks.remove(i);
+                self.view.masking.select(None, None);
+            }
+        });
+    }
+    /// Settings of the selected component: brush, gradient feather or ranges.
+    fn component_settings(&mut self, ui: &mut egui::Ui, m: usize) {
+        let Some((_, c)) = self.selected_component() else {
+            return;
+        };
+        let context = format!("{}:", mask_name(&self.document.recipe.masks[m], m));
+        set_edit_context(ui, &context);
+        let is_brush = matches!(
+            self.document.recipe.masks[m].components[c].shape,
+            MaskShape::Brush { .. }
+        );
+        if is_brush {
+            let t = &mut self.view.masking;
+            control_label(ui, "Brush", |ui| {
+                let w = ui.available_width();
+                segmented(ui, &mut t.brush, &[(0, "A"), (1, "B"), (2, "Erase")], w);
+            });
+            let b = &mut t.brushes[t.brush];
+            let percent = Some((100., 0));
+            slider_with(
+                ui,
+                "Size",
+                &mut b.size,
+                0.002..=0.5,
+                0.03,
+                Some((1000., 0)),
+                None,
+            );
+            slider_with(ui, "Feather", &mut b.feather, 0. ..=1., 0.5, percent, None);
+            slider_with(ui, "Flow", &mut b.flow, 0. ..=1., 1., percent, None);
+            slider_with(ui, "Density", &mut b.density, 0. ..=1., 1., percent, None);
+            indented(ui, |ui| {
+                ui.checkbox(&mut b.auto_mask, "Auto Mask")
+                    .on_hover_text("Keep the brush within areas like the colour under its centre");
+            });
+            hint(
+                ui,
+                "Drag to paint · Option/Alt erases · [ ] size · / switches A and B",
+            );
+        }
+        let percent = Some((100., 0));
+        let component = &mut self.document.recipe.masks[m].components[c];
+        match &mut component.shape {
+            MaskShape::Radial { feather, .. } => {
+                slider_with(ui, "Feather", feather, 0. ..=1., 0.5, percent, None);
+                hint(
+                    ui,
+                    "Drag the centre to move it, the edge handles to size and turn it",
+                );
+            }
+            MaskShape::ColorRange { amount, samples } => {
+                slider_with(ui, "Refine", amount, 0. ..=1., 0.5, percent, None);
+                let text = format!(
+                    "{} sampled · click the photo to pick again, Shift-click adds",
+                    samples.len()
+                );
+                hint(ui, &text);
+            }
+            MaskShape::LuminanceRange { low, high, falloff } => {
+                slider_with(ui, "Range Low", low, 0. ..=1., 0.5, percent, None);
+                slider_with(ui, "Range High", high, 0. ..=1., 1., percent, None);
+                slider_with(
+                    ui,
+                    "Falloff Low",
+                    &mut falloff[0],
+                    0. ..=1.,
+                    0.15,
+                    percent,
+                    None,
+                );
+                slider_with(
+                    ui,
+                    "Falloff High",
+                    &mut falloff[1],
+                    0. ..=1.,
+                    0.,
+                    percent,
+                    None,
+                );
+                if *low > *high {
+                    std::mem::swap(low, high);
+                }
+                hint(ui, "Click the photo to select tones like the one there");
+            }
+            MaskShape::Linear { .. } => hint(
+                ui,
+                "Drag the ends to size and turn it, the middle to move it",
+            ),
+            MaskShape::Brush { .. } => {}
+        }
+        let mut remove = false;
+        indented(ui, |ui| {
+            ui.checkbox(&mut component.invert, "Invert component");
+            remove = ui
+                .button("Remove")
+                .on_hover_text("Remove this part of the mask")
+                .clicked();
+        });
+        if remove {
+            let mask = &mut self.document.recipe.masks[m];
+            mask.components.remove(c);
+            if mask.components.is_empty() {
+                self.document.recipe.masks.remove(m);
+                self.view.masking.select(None, None);
+            } else {
+                self.view.masking.component = Some(0);
+            }
+        }
+    }
+    /// Amount and the local adjustment sliders, in Lightroom's order.
+    fn adjustment_sliders(&mut self, ui: &mut egui::Ui, m: usize) {
+        let Some(mask) = self.document.recipe.masks.get_mut(m) else {
+            return;
+        };
+        set_edit_context(ui, &format!("{}:", mask_name(mask, m)));
+        slider_with(
+            ui,
+            "Amount",
+            &mut mask.amount,
+            0. ..=2.,
+            1.,
+            Some((100., 0)),
+            None,
+        );
+        let a = &mut mask.adjust;
+        let unit = |ui: &mut egui::Ui, label: &str, v: &mut f32| {
+            slider_with(ui, label, v, -1. ..=1., 0., None, None)
+        };
+        ui.add_space(4.);
+        unit(ui, "Temp", &mut a.temperature);
+        unit(ui, "Tint", &mut a.tint);
+        ui.add_space(4.);
+        slider_with(
+            ui,
+            "Exposure",
+            &mut a.exposure,
+            -4. ..=4.,
+            0.,
+            Some((1., 2)),
+            None,
+        );
+        unit(ui, "Contrast", &mut a.contrast);
+        unit(ui, "Highlights", &mut a.highlights);
+        unit(ui, "Shadows", &mut a.shadows);
+        unit(ui, "Whites", &mut a.whites);
+        unit(ui, "Blacks", &mut a.blacks);
+        ui.add_space(4.);
+        unit(ui, "Texture", &mut a.texture);
+        unit(ui, "Clarity", &mut a.clarity);
+        unit(ui, "Dehaze", &mut a.dehaze);
+        ui.add_space(4.);
+        slider_with(
+            ui,
+            "Hue",
+            &mut a.hue,
+            -180. ..=180.,
+            0.,
+            Some((1., 0)),
+            None,
+        );
+        unit(ui, "Saturation", &mut a.saturation);
+        ui.add_space(4.);
+        unit(ui, "Sharpness", &mut a.sharpness);
+        unit(ui, "Noise", &mut a.noise);
+        ui.add_space(4.);
+        slider_with(
+            ui,
+            "Color Hue",
+            &mut a.color[0],
+            0. ..=1.,
+            0.,
+            Some((360., 0)),
+            None,
+        );
+        slider_with(
+            ui,
+            "Color Sat",
+            &mut a.color[1],
+            0. ..=1.,
+            0.,
+            Some((100., 0)),
+            None,
+        );
+        ui.add_space(4.);
+        indented(ui, |ui| {
+            if ui
+                .button("Reset Sliders")
+                .on_hover_text("Set this mask's adjustments back to zero")
+                .clicked()
+            {
+                *a = LocalAdjust::default();
+            }
+        });
+    }
+}
+/// "Mask 2", or the name the user gave it.
+fn mask_name(m: &MaskGroup, i: usize) -> String {
+    if m.name.is_empty() {
+        format!("Mask {}", i + 1)
+    } else {
+        m.name.clone()
+    }
+}
+fn kind_of(shape: &MaskShape) -> Kind {
+    match shape {
+        MaskShape::Brush { .. } => Kind::Brush,
+        MaskShape::Linear { .. } => Kind::Linear,
+        MaskShape::Radial { .. } => Kind::Radial,
+        MaskShape::ColorRange { .. } => Kind::Color,
+        MaskShape::LuminanceRange { .. } => Kind::Luminance,
+    }
+}
+/// Where a mask's pin sits: its first component's position, for shapes that have one.
+fn anchor(m: &MaskGroup) -> Option<[f32; 2]> {
+    m.components.iter().find_map(|c| match &c.shape {
+        MaskShape::Brush { strokes } => strokes.first().map(|s| s.points[0]),
+        MaskShape::Linear { from, to } => Some([(from[0] + to[0]) / 2., (from[1] + to[1]) / 2.]),
+        MaskShape::Radial { center, .. } => Some(*center),
+        _ => None,
+    })
+}
+/// A gradient drawn by dragging from `start` to `end` (image space).
+fn new_shape(kind: Kind, space: Space, start: [f32; 2], end: [f32; 2]) -> MaskShape {
+    match kind {
+        Kind::Linear => MaskShape::Linear {
+            from: start,
+            to: if start == end {
+                [end[0], end[1] + 0.1]
+            } else {
+                end
+            },
+        },
+        _ => {
+            let (a, b) = (space.to(start), space.to(end));
+            MaskShape::Radial {
+                center: start,
+                radii: [(b[0] - a[0]).abs().max(0.01), (b[1] - a[1]).abs().max(0.01)],
+                angle: 0.,
+                feather: 0.5,
+            }
+        }
+    }
+}
+/// Handle positions of a gradient on screen.
+fn handles(
+    shape: &MaskShape,
+    space: Space,
+    to_screen: &impl Fn([f32; 2]) -> Pos2,
+) -> Vec<(Handle, Pos2)> {
+    match shape {
+        MaskShape::Linear { from, to } => vec![
+            (Handle::Start, to_screen(*from)),
+            (Handle::End, to_screen(*to)),
+            (
+                Handle::Middle,
+                to_screen([(from[0] + to[0]) / 2., (from[1] + to[1]) / 2.]),
+            ),
+        ],
+        MaskShape::Radial {
+            center,
+            radii,
+            angle,
+            ..
+        } => {
+            let c = space.to(*center);
+            let (s, co) = angle.to_radians().sin_cos();
+            let edge = |k: usize| {
+                let (x, y) = if k == 0 {
+                    (radii[0] * co, radii[0] * s)
+                } else {
+                    (-radii[1] * s, radii[1] * co)
+                };
+                to_screen(space.from([c[0] + x, c[1] + y]))
+            };
+            vec![
+                (Handle::Center, to_screen(*center)),
+                (Handle::Radius(0), edge(0)),
+                (Handle::Radius(1), edge(1)),
+            ]
+        }
+        _ => Vec::new(),
+    }
+}
+/// `original` with handle `h` dragged from `start` to `at` (image space).
+fn move_handle(
+    original: &MaskShape,
+    h: Handle,
+    space: Space,
+    start: [f32; 2],
+    at: [f32; 2],
+) -> MaskShape {
+    let delta = [at[0] - start[0], at[1] - start[1]];
+    let shift = |p: [f32; 2]| [p[0] + delta[0], p[1] + delta[1]];
+    let mut shape = original.clone();
+    match &mut shape {
+        MaskShape::Linear { from, to } => match h {
+            Handle::Start => *from = shift(*from),
+            Handle::End => *to = shift(*to),
+            _ => {
+                *from = shift(*from);
+                *to = shift(*to);
+            }
+        },
+        MaskShape::Radial {
+            center,
+            radii,
+            angle,
+            ..
+        } => match h {
+            Handle::Radius(k) => {
+                // The radius follows the pointer's distance; dragging around turns it.
+                let (c, p) = (space.to(*center), space.to(at));
+                let (dx, dy) = (p[0] - c[0], p[1] - c[1]);
+                radii[k] = dx.hypot(dy).max(0.005);
+                let turn = dy.atan2(dx).to_degrees() - if k == 0 { 0. } else { 90. };
+                *angle = (turn + 180.).rem_euclid(360.) - 180.;
+            }
+            _ => *center = shift(*center),
+        },
+        _ => {}
+    }
+    shape
+}
+/// A gradient's outline: Lightroom's three lines, or the ellipse and its feather.
+fn draw_shape(
+    painter: &egui::Painter,
+    shape: &MaskShape,
+    space: Space,
+    to_screen: &impl Fn([f32; 2]) -> Pos2,
+) {
+    let line = |points: Vec<Pos2>, width: f32, closed: bool| {
+        let (dark, light) = (
+            Stroke::new(width + 1.5, Color32::from_black_alpha(100)),
+            Stroke::new(width, Color32::from_white_alpha(220)),
+        );
+        if closed {
+            painter.add(egui::Shape::closed_line(points.clone(), dark));
+            painter.add(egui::Shape::closed_line(points, light));
+        } else {
+            painter.add(egui::Shape::line(points.clone(), dark));
+            painter.add(egui::Shape::line(points, light));
+        }
+    };
+    match shape {
+        MaskShape::Linear { from, to } => {
+            let (a, b) = (space.to(*from), space.to(*to));
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let len = d[0].hypot(d[1]).max(1e-6);
+            let n = [-d[1] / len * 3., d[0] / len * 3.];
+            for (t, width) in [(0., 1.2), (0.5, 0.8), (1., 1.2)] {
+                let m = [a[0] + d[0] * t, a[1] + d[1] * t];
+                let points = (-20..=20)
+                    .map(|k| {
+                        let s = k as f32 / 20.;
+                        to_screen(space.from([m[0] + n[0] * s, m[1] + n[1] * s]))
+                    })
+                    .collect();
+                line(points, width, false);
+            }
+        }
+        MaskShape::Radial {
+            center,
+            radii,
+            angle,
+            feather,
+        } => {
+            let c = space.to(*center);
+            let (s, co) = angle.to_radians().sin_cos();
+            for (scale, width) in [(1., 1.3), (1. - feather, 0.8)] {
+                if scale <= 0.01 {
+                    continue;
+                }
+                let points = (0..72)
+                    .map(|i| {
+                        let t = i as f32 / 72. * std::f32::consts::TAU;
+                        let (x, y) = (t.cos() * radii[0] * scale, t.sin() * radii[1] * scale);
+                        to_screen(space.from([c[0] + co * x - s * y, c[1] + s * x + co * y]))
+                    })
+                    .collect();
+                line(points, width, true);
+            }
+        }
+        _ => {}
+    }
+}
+/// Small icons for each kind of mask.
+fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
+    let color = Color32::from_gray(if strong { 240 } else { 170 });
+    let stroke = Stroke::new(1.3, color);
+    match kind {
+        Kind::Brush => {
+            painter.line_segment([c + Vec2::new(-5., 5.), c + Vec2::new(3., -3.)], stroke);
+            painter.circle_filled(c + Vec2::new(-5., 5.), 2., color);
+        }
+        Kind::Linear => {
+            for dy in [-4., 0., 4.] {
+                painter.line_segment([c + Vec2::new(-6., dy), c + Vec2::new(6., dy)], stroke);
+            }
+        }
+        Kind::Radial => {
+            painter.circle_stroke(c, 5.5, stroke);
+            painter.circle_stroke(c, 2.5, Stroke::new(1., color));
+        }
+        Kind::Color => {
+            for (offset, rgb) in [
+                (Vec2::new(-2.5, -1.5), [200, 90, 80]),
+                (Vec2::new(2.5, -1.5), [90, 170, 100]),
+                (Vec2::new(0., 2.5), [90, 130, 210]),
+            ] {
+                painter.circle_filled(c + offset, 3., Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+            }
+        }
+        Kind::Luminance => {
+            painter.circle_filled(c, 5.5, Color32::from_gray(60));
+            let half = (0..=18)
+                .map(|i| {
+                    let t = std::f32::consts::FRAC_PI_2 + i as f32 / 18. * std::f32::consts::PI;
+                    c + Vec2::new(t.cos(), t.sin()) * 5.5
+                })
+                .collect();
+            painter.add(egui::Shape::convex_polygon(half, color, Stroke::NONE));
+        }
+    }
+}
+fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
+    let color = Color32::from_gray(if hovered { 235 } else { 160 });
+    let arc = |sign: f32| {
+        (0..=16).map(move |i| {
+            let t = i as f32 / 16. * std::f32::consts::PI;
+            c + Vec2::new(-sign * t.cos() * 6., -sign * t.sin() * 3.5)
+        })
+    };
+    let points: Vec<Pos2> = arc(1.).chain(arc(-1.)).collect();
+    painter.add(egui::Shape::closed_line(points, Stroke::new(1.1, color)));
+    if open {
+        painter.circle_filled(c, 1.8, color);
+    } else {
+        painter.line_segment(
+            [c + Vec2::new(-6., 5.), c + Vec2::new(6., -5.)],
+            Stroke::new(1.1, color),
+        );
     }
 }

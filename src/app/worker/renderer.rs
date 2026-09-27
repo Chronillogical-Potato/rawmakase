@@ -231,8 +231,30 @@ pub(in crate::app) fn renderer_with_backend(
                 super::Overlay::Spots(threshold) => {
                     rgb = develop::retouch::visualize_spots(&out, threshold);
                 }
-                // Mask overlays arrive with the Masking panel.
-                super::Overlay::Mask { .. } => {}
+                super::Overlay::Mask {
+                    index,
+                    color,
+                    opacity,
+                } => {
+                    let weights = develop::masks::overlay_weights(
+                        &job.image,
+                        &job.recipe,
+                        index,
+                        &out,
+                        job.region,
+                    );
+                    for (p, w) in rgb
+                        .as_chunks_mut::<3>()
+                        .0
+                        .iter_mut()
+                        .zip(weights.iter().flatten())
+                    {
+                        let a = w * opacity;
+                        for c in 0..3 {
+                            p[c] = (p[c] as f32 * (1. - a) + color[c] as f32 * a) as u8;
+                        }
+                    }
+                }
             }
             if job.clipping {
                 for (p, orig) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&out.pixels) {

@@ -692,3 +692,166 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
     assert!((ops[0].pin()[0] - before.pin()[0] - 0.1).abs() < 0.01);
     assert!((source(&ops[0])[0] - source(&before)[0]).abs() < 1e-5);
 }
+#[test]
+fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
+    use crate::develop::masks::MaskShape;
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: vec![[0.2; 3]; 160000],
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    let mut frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ctx.input(|i| {
+                    if editor.view.is(state::Tool::Mask) {
+                        editor.mask_keys(i)
+                    }
+                });
+                editor.viewport_ui(ui)
+            },
+        );
+        output.textures_delta.clear();
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let drag = |editor: &mut Editor,
+                frame: &mut dyn FnMut(&mut Editor, Vec<egui::Event>),
+                a: Pos2,
+                b: Pos2| {
+        frame(editor, vec![egui::Event::PointerMoved(a), button(a, true)]);
+        for k in 1..=8 {
+            frame(
+                editor,
+                vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 8.)],
+            );
+        }
+        frame(editor, vec![button(b, false)]);
+    };
+    frame(&mut editor, vec![]);
+    // M, then a drag, draws a linear gradient as a new mask.
+    editor.create_mask(mask_tool::Kind::Linear, None);
+    drag(
+        &mut editor,
+        &mut frame,
+        Pos2::new(100., 40.),
+        Pos2::new(100., 160.),
+    );
+    let masks = editor.document.recipe.masks.clone();
+    assert_eq!(masks.len(), 1);
+    let MaskShape::Linear { from, to } = masks[0].components[0].shape else {
+        panic!("{:?}", masks[0].components[0].shape);
+    };
+    assert!(
+        (from[1] - 0.2).abs() < 0.02 && (to[1] - 0.8).abs() < 0.02,
+        "{from:?} {to:?}"
+    );
+    assert!(!editor.view.zoom100);
+    // Dragging its end handle moves only that end.
+    drag(
+        &mut editor,
+        &mut frame,
+        Pos2::new(100., 160.),
+        Pos2::new(140., 170.),
+    );
+    let MaskShape::Linear { from: f2, to: t2 } =
+        editor.document.recipe.masks[0].components[0].shape
+    else {
+        panic!()
+    };
+    assert_eq!(f2, from);
+    assert!(
+        (t2[0] - 0.7).abs() < 0.02 && (t2[1] - 0.85).abs() < 0.02,
+        "{t2:?}"
+    );
+    // Shift+M makes a radial gradient; K a brush that paints.
+    editor.create_mask(mask_tool::Kind::Radial, None);
+    drag(
+        &mut editor,
+        &mut frame,
+        Pos2::new(60., 60.),
+        Pos2::new(90., 80.),
+    );
+    assert!(matches!(
+        editor.document.recipe.masks[1].components[0].shape,
+        MaskShape::Radial { radii, .. } if (radii[0] - 0.15).abs() < 0.02 && (radii[1] - 0.1).abs() < 0.02
+    ));
+    editor.create_mask(mask_tool::Kind::Brush, None);
+    drag(
+        &mut editor,
+        &mut frame,
+        Pos2::new(20., 180.),
+        Pos2::new(180., 180.),
+    );
+    let MaskShape::Brush { strokes } = &editor.document.recipe.masks[2].components[0].shape else {
+        panic!()
+    };
+    assert_eq!(strokes.len(), 1);
+    assert!(strokes[0].points.len() > 3);
+    // Add a subtracted brush to the brush mask, then delete the mask with Delete.
+    editor.create_mask(
+        mask_tool::Kind::Brush,
+        Some(crate::develop::masks::MaskOp::Subtract),
+    );
+    assert_eq!(editor.document.recipe.masks[2].components.len(), 2);
+    frame(
+        &mut editor,
+        vec![egui::Event::Key {
+            key: egui::Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(editor.document.recipe.masks.len(), 2);
+    editor.document.recipe.validate().unwrap();
+    // The whole editor draws the Masking and Remove drawers without disturbing edits.
+    editor.view.masking.selected = Some(0);
+    editor.view.masking.component = Some(0);
+    let saved = editor.document.recipe.clone();
+    for tool in [state::Tool::Mask, state::Tool::Remove, state::Tool::Crop] {
+        editor.view.tool = tool;
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 900.))),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            output.textures_delta.clear();
+        }
+    }
+    assert_eq!(editor.document.recipe, saved);
+}
