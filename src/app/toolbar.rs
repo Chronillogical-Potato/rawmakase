@@ -184,6 +184,9 @@ impl Editor {
     }
     /// Back to the camera defaults, like Lightroom's Reset.
     pub(super) fn reset_settings(&mut self) {
+        self.document
+            .history
+            .label(super::history::Step::new("Reset Settings", ""));
         self.document.recipe = self
             .document
             .metadata
@@ -193,6 +196,9 @@ impl Editor {
     }
     pub(super) fn paste_settings(&mut self) {
         if let Some(recipe) = self.clipboard.clone() {
+            self.document
+                .history
+                .label(super::history::Step::new("Paste Settings", ""));
             self.document.recipe = recipe;
             self.status = "Settings pasted".into();
         }

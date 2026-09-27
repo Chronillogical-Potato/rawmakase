@@ -30,8 +30,15 @@ impl Editor {
         }
     }
     pub(super) fn finish_edit_frame(&mut self, frame: EditFrame, ctx: &egui::Context) {
+        let step =
+            ctx.data_mut(|d| d.remove_temp::<(String, String)>(super::widgets::history_step_id()));
         if frame.generation != self.load.id() {
             return;
+        }
+        if let Some((name, value)) = step {
+            self.document
+                .history
+                .label(super::history::Step::new(name, value));
         }
         if frame.aspect != self.view.aspect {
             self.fit_aspect();

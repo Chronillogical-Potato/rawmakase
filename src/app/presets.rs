@@ -388,44 +388,65 @@ fn list_row(
 }
 
 impl Editor {
-    /// Lightroom's History panel: the photo's imported Lightroom steps,
-    /// newest first; clicking one returns the photo to that state.
+    /// Lightroom's History panel: this session's steps, newest first, over
+    /// the photo's imported Lightroom steps. Clicking a step of this session
+    /// goes back (or forward) to it; later steps stay until the next edit.
     fn history_section(&mut self, ui: &mut egui::Ui) {
-        if self.document.lightroom_history.is_empty() {
+        if self.document.metadata.is_none() {
             return;
         }
-        let mut chosen = None;
+        let mut go_to = None;
+        let mut lightroom = None;
+        let (steps, applied) = self.document.history.steps();
         section(ui, "History", false, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.;
+            for (i, step) in steps.iter().enumerate().rev() {
+                let n = i + 1;
+                if history_row(ui, &step.name, &step.value, n == applied, n > applied).clicked() {
+                    go_to = Some(n);
+                }
+            }
+            let opened = if self.document.lightroom_history.is_empty() {
+                "Opened"
+            } else {
+                "Opened with Lightroom edit"
+            };
+            if history_row(ui, opened, "", applied == 0, false).clicked() {
+                go_to = Some(0);
+            }
+            if self.document.lightroom_history.is_empty() {
+                return;
+            }
+            ui.add_space(10.);
             ui.label(
-                egui::RichText::new("From Lightroom · click a step to go back to it")
-                    .size(10.)
+                egui::RichText::new("From Lightroom")
+                    .size(11.)
                     .color(Color32::from_gray(125)),
             );
             ui.add_space(4.);
-            ui.spacing_mut().item_spacing.y = 0.;
-            let enabled = self.document.metadata.is_some();
             for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
                 let name = if step.name.is_empty() {
                     "Edit"
                 } else {
                     step.name.as_str()
                 };
-                let response = list_row(ui, name, None, 0, None, false, enabled);
-                let when = step.created.map(|s| {
+                let response = history_row(ui, name, "", false, false);
+                let response = match step.created {
                     // Lightroom counts seconds from 2001-01-01 UTC.
-                    let unix = s as i64 + 978_307_200;
-                    format!("{} UTC", format_unix(unix))
-                });
-                let response = match when {
-                    Some(when) => response.on_hover_text(when),
+                    Some(s) => response
+                        .on_hover_text(format!("{} UTC", format_unix(s as i64 + 978_307_200))),
                     None => response,
                 };
-                if enabled && response.clicked() {
-                    chosen = Some(i);
+                if response.clicked() {
+                    lightroom = Some(i);
                 }
             }
         });
-        if let Some(i) = chosen
+        if let Some(n) = go_to {
+            let current = &mut self.document.recipe;
+            self.document.history.go_to(n, current);
+        }
+        if let Some(i) = lightroom
             && let Some(m) = &self.document.metadata
         {
             let step = &self.document.lightroom_history[i];
@@ -436,21 +457,75 @@ impl Editor {
                 self.document.full().map(|image| image.as_ref()),
             ) {
                 Ok((recipe, skipped)) => {
-                    self.document.recipe = recipe;
+                    let name = format!("Lightroom: {}", step.name);
                     self.status = if skipped.is_empty() {
-                        format!("History: {}", step.name)
+                        name.clone()
                     } else {
-                        format!(
-                            "History: {} · not rendered: {}",
-                            step.name,
-                            skipped.join(", ")
-                        )
+                        format!("{name} · not rendered: {}", skipped.join(", "))
                     };
+                    self.document
+                        .history
+                        .label(super::history::Step::new(name, ""));
+                    self.document.recipe = recipe;
                 }
                 Err(e) => self.status = format!("History step not applied: {e:#}"),
             }
         }
     }
+}
+/// A History row: the step on the left, its value on the right. The current
+/// step is highlighted; steps after it (undone) are dimmed, as in Lightroom.
+fn history_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    value: &str,
+    current: bool,
+    undone: bool,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
+    if current {
+        ui.painter()
+            .rect_filled(rect, 3., Color32::from_rgb(62, 88, 115));
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 3., Color32::from_gray(43));
+    }
+    let color = Color32::from_gray(if current {
+        250
+    } else if undone {
+        120
+    } else {
+        205
+    });
+    let value_width = if value.is_empty() {
+        0.
+    } else {
+        let galley =
+            ui.painter()
+                .layout_no_wrap(value.to_string(), egui::FontId::proportional(12.), color);
+        let width = galley.size().x;
+        ui.painter().galley(
+            egui::pos2(
+                rect.right() - 8. - width,
+                rect.center().y - galley.size().y / 2.,
+            ),
+            galley,
+            color,
+        );
+        width + 16.
+    };
+    let clip = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right() - 8. - value_width, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(clip).text(
+        rect.left_center() + Vec2::new(8., 0.),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(12.),
+        color,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 /// "2016-07-28 06:14" from Unix seconds, without a date library.
 fn format_unix(seconds: i64) -> String {

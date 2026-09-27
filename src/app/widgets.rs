@@ -119,6 +119,26 @@ pub(super) fn adjustment_section(
 pub(super) fn collapsed_sections_id() -> egui::Id {
     egui::Id::new("rawmakase-collapsed-sections")
 }
+/// Where a control names the edit it just made, for the History panel. The
+/// editor takes it at the end of the frame.
+pub(super) fn history_step_id() -> egui::Id {
+    egui::Id::new("rawmakase-history-step")
+}
+pub(super) fn name_history_step(ui: &egui::Ui, name: String, value: String) {
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(history_step_id(), (name, value)));
+}
+/// The panel or sub-panel being drawn ("Detail", then "Sharpening"), so a
+/// slider's step reads "Sharpening Amount" rather than "Amount".
+pub(super) fn set_edit_context(ui: &egui::Ui, title: &str) {
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(egui::Id::new("rawmakase-edit-context"), title.to_string()));
+}
+fn edit_context(ui: &egui::Ui) -> String {
+    ui.ctx()
+        .data(|d| d.get_temp(egui::Id::new("rawmakase-edit-context")))
+        .unwrap_or_default()
+}
 /// Collapsible Lightroom-style panel header; returns whether reset was clicked.
 pub(super) fn section(
     ui: &mut egui::Ui,
@@ -228,7 +248,11 @@ pub(super) fn section(
             }
         });
     }
+    if resettable && reset.clicked() {
+        name_history_step(ui, format!("Reset {title}"), String::new());
+    }
     if open {
+        set_edit_context(ui, title);
         // Scope ids per section so equal slider labels (e.g. two "Amount"s) never clash.
         ui.push_id(title, |ui| {
             egui::Frame::new()
@@ -653,6 +677,7 @@ pub(super) fn slider_with(
             egui::lerp(start..=end, t)
         }
     };
+    let before = *value;
     ui.push_id(label, |ui| {
         let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
         let label_rect = Rect::from_min_max(row.min, Pos2::new(row.left() + 83., row.bottom()));
@@ -674,14 +699,7 @@ pub(super) fn slider_with(
             egui::DragValue::new(&mut displayed)
                 .range(start * scale..=end * scale)
                 .speed(span * scale / 500.)
-                .custom_formatter(move |v, _| {
-                    let text = format!("{v:.decimals$}");
-                    if signed && v > 0. && !text.trim_start_matches(['0', '.']).is_empty() {
-                        format!("+{text}")
-                    } else {
-                        text
-                    }
-                })
+                .custom_formatter(move |v, _| slider_text(v, decimals, signed))
                 .custom_parser(|s| s.trim().trim_start_matches('+').parse().ok()),
         );
         if value_response.changed() {
@@ -786,6 +804,30 @@ pub(super) fn slider_with(
             "Drag to adjust · double-click to reset. Drag or type the number for precise edits.",
         );
     });
+    if *value != before {
+        let context = edit_context(ui);
+        let name = if label.is_empty() {
+            context
+        } else if matches!(
+            context.as_str(),
+            "" | "Basic" | "Tone" | "Presence" | "Tone Curve"
+        ) {
+            label.to_string()
+        } else {
+            format!("{context} {label}")
+        };
+        let shown = slider_text(f64::from(*value * scale), decimals, signed);
+        name_history_step(ui, name, shown);
+    }
+}
+/// A slider's number as shown: Lightroom's scale, with a sign when it has one.
+fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
+    let text = format!("{v:.decimals$}");
+    if signed && v > 0. && !text.trim_start_matches(['0', '.']).is_empty() {
+        format!("+{text}")
+    } else {
+        text
+    }
 }
 /// A Lightroom module-picker entry: plain text, brightest when active.
 pub(super) fn workspace_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {

@@ -1182,6 +1182,7 @@ fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.
 fn subheading(ui: &mut egui::Ui, text: &str) {
+    super::widgets::set_edit_context(ui, text);
     ui.add_space(8.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.), Sense::hover());
     ui.painter().text(

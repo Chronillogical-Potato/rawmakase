@@ -1,17 +1,63 @@
-//! Bounded edit history; a pointer gesture is a single transaction.
+//! Bounded edit history; a pointer gesture is a single transaction. Each step
+//! is named, like Lightroom's History panel ("Exposure +0.50").
 use crate::develop::Recipe;
 use std::collections::VecDeque;
 
 const LIMIT: usize = 100;
 
+/// A History panel entry: what changed, and its new value when there is one.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct Step {
+    pub(super) name: String,
+    pub(super) value: String,
+}
+impl Step {
+    pub(super) fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct History {
-    undo: VecDeque<Recipe>,
-    redo: Vec<Recipe>,
+    /// States before each step, oldest first, with the step that left them.
+    undo: VecDeque<(Recipe, Step)>,
+    /// States after each undone step, the next one last.
+    redo: Vec<(Recipe, Step)>,
     gesture: Option<Recipe>,
     replaying: bool,
+    /// The name for the next recorded step; otherwise it is derived.
+    label: Option<Step>,
 }
 impl History {
+    /// Names the step being made, e.g. by the slider being dragged.
+    pub fn label(&mut self, step: Step) {
+        self.label = Some(step);
+    }
+    /// Every step, oldest first, and how many of them are applied.
+    pub fn steps(&self) -> (Vec<&Step>, usize) {
+        let steps = self
+            .undo
+            .iter()
+            .map(|(_, s)| s)
+            .chain(self.redo.iter().rev().map(|(_, s)| s))
+            .collect();
+        (steps, self.undo.len())
+    }
+    /// Undoes or redoes until `applied` steps are applied, as clicking a
+    /// History step in Lightroom does. Later steps stay until a new edit.
+    pub fn go_to(&mut self, applied: usize, current: &mut Recipe) -> bool {
+        let mut moved = false;
+        while self.undo.len() > applied && self.undo(current) {
+            moved = true;
+        }
+        while self.undo.len() < applied && self.redo(current) {
+            moved = true;
+        }
+        moved
+    }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -26,32 +72,35 @@ impl History {
     }
 
     pub fn record(&mut self, before: Recipe, after: &Recipe) -> bool {
+        let label = self.label.take();
         if before == *after {
             return false;
         }
+        let step = label.unwrap_or_else(|| describe(&before, after));
         if self.undo.len() == LIMIT {
             self.undo.pop_front();
         }
-        self.undo.push_back(before);
+        self.undo.push_back((before, step));
         self.redo.clear();
         true
     }
     pub fn undo(&mut self, current: &mut Recipe) -> bool {
         self.replaying = true;
         self.gesture = None;
-        let Some(previous) = self.undo.pop_back() else {
+        let Some((previous, step)) = self.undo.pop_back() else {
             return false;
         };
-        self.redo.push(std::mem::replace(current, previous));
+        self.redo.push((std::mem::replace(current, previous), step));
         true
     }
     pub fn redo(&mut self, current: &mut Recipe) -> bool {
         self.replaying = true;
         self.gesture = None;
-        let Some(next) = self.redo.pop() else {
+        let Some((next, step)) = self.redo.pop() else {
             return false;
         };
-        self.undo.push_back(std::mem::replace(current, next));
+        self.undo
+            .push_back((std::mem::replace(current, next), step));
         true
     }
     /// Observe UI edits after drawing. Undo/redo must not create a new undo entry.
@@ -69,6 +118,49 @@ impl History {
         }
         changed
     }
+}
+
+/// A name for an edit no control named: the panel it belongs to.
+fn describe(before: &Recipe, after: &Recipe) -> Step {
+    let (b, a) = (before, after);
+    if a.preset_name != b.preset_name && !a.preset_name.is_empty() {
+        return Step::new("Preset", crate::presets::display_name(&a.preset_name));
+    }
+    let profile = |r: &Recipe| r.profile.as_ref().map(|p| p.name.clone());
+    if profile(a) != profile(b) {
+        return Step::new("Profile", profile(a).unwrap_or_default());
+    }
+    if a.effects.monochrome != b.effects.monochrome {
+        let treatment = if a.effects.monochrome {
+            "Black & White"
+        } else {
+            "Color"
+        };
+        return Step::new("Treatment", treatment);
+    }
+    let name = if (a.temperature, a.tint, a.wb) != (b.temperature, b.tint, b.wb) {
+        "White Balance"
+    } else if (a.crop, a.straighten, a.rotation, a.flip_x, a.flip_y)
+        != (b.crop, b.straighten, b.rotation, b.flip_x, b.flip_y)
+    {
+        "Crop"
+    } else if a.curve != b.curve
+        || a.effects.channels != b.effects.channels
+        || a.effects.parametric != b.effects.parametric
+    {
+        "Tone Curve"
+    } else if a.hsl != b.hsl || a.effects.gray_mix != b.effects.gray_mix {
+        "HSL / Color"
+    } else if a.grading != b.grading || a.effects.global_grade != b.effects.global_grade {
+        "Color Grading"
+    } else if (a.lens_builtin, a.lens_profile) != (b.lens_builtin, b.lens_profile) {
+        "Lens Corrections"
+    } else if a.transform != b.transform {
+        "Transform"
+    } else {
+        "Edit"
+    };
+    Step::new(name, "")
 }
 
 #[cfg(test)]
@@ -138,5 +230,29 @@ mod tests {
         assert!(!history.in_gesture());
         assert!(!history.can_undo());
         assert!(!history.can_redo());
+    }
+    #[test]
+    fn steps_are_named_and_go_to_moves_between_them() {
+        let mut history = History::default();
+        let mut recipe = Recipe::default();
+        let original = recipe.clone();
+        history.label(Step::new("Exposure", "+0.50"));
+        let before = recipe.clone();
+        recipe.exposure = 0.5;
+        history.record(before, &recipe);
+        let before = recipe.clone();
+        recipe.temperature += 100.;
+        history.record(before, &recipe);
+        let (steps, applied) = history.steps();
+        let names: Vec<_> = steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Exposure", "White Balance"]);
+        assert_eq!(applied, 2);
+        assert!(history.go_to(0, &mut recipe));
+        assert_eq!(recipe, original);
+        assert_eq!(history.steps().1, 0);
+        assert!(history.go_to(1, &mut recipe));
+        assert_eq!(recipe.exposure, 0.5);
+        assert_eq!(recipe.temperature, original.temperature);
+        assert_eq!(history.steps().0.len(), 2);
     }
 }
