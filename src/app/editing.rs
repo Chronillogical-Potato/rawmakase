@@ -7,6 +7,7 @@ pub(super) struct EditFrame {
     generation: u64,
     recipe: Recipe,
     modes: [bool; 4],
+    overlay: super::worker::Overlay,
     aspect: f32,
     export: (u8, u32),
 }
@@ -25,6 +26,7 @@ impl Editor {
             generation: self.load.id(),
             recipe: self.document.recipe.clone(),
             modes: self.render_modes(),
+            overlay: self.overlay(),
             aspect: self.view.aspect,
             export: (self.document.export.quality, self.document.export.max_edge),
         }
@@ -51,7 +53,7 @@ impl Editor {
         if edited {
             self.document.save.mark_changed();
         }
-        if edited || frame.modes != self.render_modes() {
+        if edited || frame.modes != self.render_modes() || frame.overlay != self.overlay() {
             self.schedule();
         }
         if frame.export != (self.document.export.quality, self.document.export.max_edge) {

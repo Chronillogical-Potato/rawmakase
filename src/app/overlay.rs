@@ -10,14 +10,23 @@ impl Editor {
     /// zoom with them. `rect` is where the whole photo is drawn, inside `area`.
     pub(super) fn tool_overlay(
         &mut self,
-        _ui: &mut egui::Ui,
-        _response: &egui::Response,
-        _rect: Rect,
-        _area: Rect,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        rect: Rect,
+        area: Rect,
     ) -> bool {
+        // Holding Space pans instead, as in Lightroom.
+        if ui.input(|i| i.key_down(egui::Key::Space)) || self.view.compare {
+            return false;
+        }
+        let _ = area;
         match self.view.tool {
             Tool::None | Tool::Crop | Tool::WhiteBalance => false,
-            Tool::Remove | Tool::Mask => true,
+            Tool::Remove => {
+                self.retouch_overlay(ui, response, rect);
+                true
+            }
+            Tool::Mask => self.mask_overlay(ui, response, rect),
         }
     }
 }
@@ -74,6 +83,7 @@ pub(super) fn path(painter: &Painter, points: Vec<Pos2>, color: Color32) {
     painter.add(egui::Shape::line(points, Stroke::new(1., color)));
 }
 /// A square handle, as on Lightroom's gradients.
+#[allow(dead_code)]
 pub(super) fn handle(painter: &Painter, at: Pos2, active: bool) {
     let r = Rect::from_center_size(at, Vec2::splat(if active { 9. } else { 7. }));
     painter.rect_filled(r.expand(1.), 1., Color32::from_black_alpha(140));

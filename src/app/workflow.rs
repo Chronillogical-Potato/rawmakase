@@ -114,6 +114,24 @@ impl Editor {
         }
         r
     }
+    /// What the active tool draws into the rendered preview.
+    pub(super) fn overlay(&self) -> super::worker::Overlay {
+        use super::{state::Tool, worker::Overlay};
+        match self.view.tool {
+            Tool::Remove if self.view.retouch.visualize => {
+                Overlay::Spots(self.view.retouch.threshold)
+            }
+            Tool::Mask if self.view.masking.overlay => match self.view.masking.selected {
+                Some(index) if index < self.document.recipe.masks.len() => Overlay::Mask {
+                    index,
+                    color: [230, 40, 40],
+                    opacity: 0.5,
+                },
+                _ => Overlay::None,
+            },
+            _ => Overlay::None,
+        }
+    }
     /// The 1:1 region to render when zoomed to 100% or more; below 100% the
     /// whole photo is rendered at the zoomed size instead.
     pub(super) fn region(&self) -> Option<[u32; 4]> {
@@ -166,6 +184,7 @@ impl Editor {
                 clipping: self.view.clipping,
                 navigator: !self.view.zoom100,
                 thumbnail: region.is_none() && self.shows_library_edit(),
+                overlay: self.overlay(),
             });
         }
     }

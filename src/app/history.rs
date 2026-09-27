@@ -176,7 +176,13 @@ fn retouch_step(before: &Recipe, after: &Recipe) -> &'static str {
     let changed = after
         .retouch
         .iter()
-        .zip(before.retouch.iter().map(Some).chain(std::iter::repeat(None)))
+        .zip(
+            before
+                .retouch
+                .iter()
+                .map(Some)
+                .chain(std::iter::repeat(None)),
+        )
         .find(|(a, b)| Some(*a) != *b)
         .map(|(a, _)| a.mode);
     match changed {

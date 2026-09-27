@@ -1,7 +1,7 @@
 use super::Editor;
-use super::state::Tool;
 use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
+use super::state::Tool;
 use super::widgets::workspace_tab;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
@@ -20,7 +20,11 @@ impl Editor {
         let Some(id) = id else {
             return;
         };
-        if let Some((edit, advance)) = crate::app::photo_metadata::shortcut(ctx) {
+        // With a brush tool open, [ and ] size the brush instead of rating the photo.
+        let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
+        if let Some((edit, advance)) = crate::app::photo_metadata::shortcut(ctx).filter(|(e, _)| {
+            !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
+        }) {
             let Some(library) = &mut self.library else {
                 return;
             };
@@ -473,8 +477,17 @@ impl Editor {
                 if i.key_pressed(egui::Key::W) && !i.modifiers.any() {
                     self.view.toggle(Tool::WhiteBalance);
                 }
+                if i.key_pressed(egui::Key::Q) && !i.modifiers.any() {
+                    self.view.toggle(Tool::Remove);
+                }
+                if i.key_pressed(egui::Key::W) && i.modifiers.shift && !i.modifiers.command {
+                    self.view.toggle(Tool::Mask);
+                }
                 if i.key_pressed(egui::Key::Escape) {
                     self.view.tool = Tool::None;
+                }
+                if self.view.is(Tool::Remove) {
+                    self.retouch_keys(i);
                 }
             });
             if zoom_step != 0 {

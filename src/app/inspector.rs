@@ -1,6 +1,6 @@
 use super::Editor;
-use super::state::Tool;
 use super::dialogs::FileDialog;
+use super::state::Tool;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
 };
@@ -137,51 +137,81 @@ impl Editor {
                 });
         });
     }
-    /// Lightroom's tool strip; only Crop exists so far, with its drawer below.
+    /// Lightroom's tool strip: Crop, Remove and Masking, with the open tool's drawer
+    /// below it.
     fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.);
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::click());
-        let active = self.view.is(Tool::Crop);
-        ui.painter().rect_filled(
-            rect,
-            3.,
-            theme::gray(if active {
-                72
-            } else if response.hovered() {
-                50
-            } else {
-                38
-            }),
-        );
-        crop_icon(
-            ui.painter(),
-            rect.left_center() + Vec2::new(16., 0.),
-            active,
-        );
-        ui.painter().text(
-            rect.left_center() + Vec2::new(32., 0.),
-            egui::Align2::LEFT_CENTER,
-            "Crop & Straighten",
-            egui::FontId::proportional(12.),
-            theme::gray(if active { 245 } else { 200 }),
-        );
-        ui.painter().text(
-            rect.right_center() - Vec2::new(10., 0.),
-            egui::Align2::RIGHT_CENTER,
-            "R",
-            egui::FontId::proportional(11.),
-            theme::gray(120),
-        );
-        if response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            self.view.toggle(Tool::Crop);
+        const TOOLS: [(Tool, &str, &str); 3] = [
+            (Tool::Crop, "Crop", "Crop & Straighten · R"),
+            (Tool::Remove, "Remove", "Spot Removal: Heal and Clone · Q"),
+            (Tool::Mask, "Masking", "Masking · Shift+W"),
+        ];
+        let (strip, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+        let width = (strip.width() - 8.) / 3.;
+        for (k, (tool, label, tip)) in TOOLS.into_iter().enumerate() {
+            let rect = Rect::from_min_size(
+                strip.min + Vec2::new(k as f32 * (width + 4.), 0.),
+                Vec2::new(width, strip.height()),
+            );
+            let response = ui
+                .interact(rect, ui.id().with(("tool", label)), Sense::click())
+                .on_hover_text(tip);
+            let active = self.view.is(tool);
+            ui.painter().rect_filled(
+                rect,
+                3.,
+                theme::gray(if active {
+                    72
+                } else if response.hovered() {
+                    50
+                } else {
+                    38
+                }),
+            );
+            let icon = rect.left_center() + Vec2::new(16., 0.);
+            match tool {
+                Tool::Crop => crop_icon(ui.painter(), icon, active),
+                Tool::Remove => heal_icon(ui.painter(), icon, active),
+                _ => mask_icon(ui.painter(), icon, active),
+            }
+            ui.painter().text(
+                rect.left_center() + Vec2::new(30., 0.),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(12.),
+                theme::gray(if active { 245 } else { 200 }),
+            );
+            if response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.view.toggle(tool);
+            }
         }
-        if !self.view.is(Tool::Crop) {
-            return;
+        let drawer = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+            ui.add_space(4.);
+            egui::Frame::new()
+                .fill(theme::gray(40))
+                .corner_radius(3.)
+                .inner_margin(egui::Margin {
+                    left: 0,
+                    right: 8,
+                    top: 8,
+                    bottom: 8,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
+                    add(ui)
+                });
+        };
+        match self.view.tool {
+            Tool::Remove => return drawer(ui, &mut |ui| self.retouch_panel(ui)),
+            Tool::Mask => return drawer(ui, &mut |ui| self.mask_panel(ui)),
+            Tool::Crop => {}
+            _ => return,
         }
+        ui.add_space(4.);
         let r = &mut self.document.recipe;
         egui::Frame::new()
             .fill(theme::gray(40))
@@ -1217,6 +1247,26 @@ const WB_PRESETS: [(&str, f32, f32); 6] = [
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     let color = theme::gray(if strong { 235 } else { 170 });
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
+}
+/// A circle with an arrow leaving it: the Remove tool.
+fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
+    let stroke = Stroke::new(1.4, Color32::from_gray(if strong { 240 } else { 170 }));
+    painter.circle_stroke(c + Vec2::new(-2., 2.), 4.5, stroke);
+    painter.line_segment([c + Vec2::new(1.5, -1.5), c + Vec2::new(6., -6.)], stroke);
+    painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(2.5, -6.)], stroke);
+    painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(6., -2.5)], stroke);
+}
+/// A dashed circle over a square: the Masking tool.
+fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
+    let color = Color32::from_gray(if strong { 240 } else { 170 });
+    let stroke = Stroke::new(1.4, color);
+    painter.rect_stroke(
+        Rect::from_center_size(c, Vec2::splat(12.)),
+        1.,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    painter.circle_filled(c + Vec2::new(1., 1.), 3.5, color);
 }
 fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     let color = theme::gray(if strong { 240 } else { 170 });

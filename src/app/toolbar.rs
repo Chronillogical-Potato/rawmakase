@@ -214,6 +214,13 @@ impl Editor {
                 "Develop",
                 vec![
                     ("R".into(), "Crop & Straighten"),
+                    ("Q".into(), "Spot removal (Heal / Clone)"),
+                    ("Shift W".into(), "Masking"),
+                    ("[ / ]".into(), "Brush size (Shift: feather)"),
+                    ("/".into(), "New source for the selected spot"),
+                    ("H".into(), "Hide spot pins"),
+                    ("A".into(), "Visualize spots"),
+                    ("Space".into(), "Pan while a tool is open"),
                     ("W".into(), "White balance selector"),
                     ("Enter".into(), "Finish crop"),
                     ("\\".into(), "Before / after"),

@@ -110,6 +110,21 @@ pub struct LoadJob {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
 }
+/// What is drawn over (or instead of) the rendered photo.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Overlay {
+    #[default]
+    None,
+    /// Visualize Spots with its threshold (0–1).
+    Spots(f32),
+    /// The mask at this index of the recipe's masks, tinted with this colour and
+    /// opacity.
+    Mask {
+        index: usize,
+        color: [u8; 3],
+        opacity: f32,
+    },
+}
 pub struct RenderJob {
     pub id: u64,
     pub image: Arc<CameraImage>,
@@ -123,6 +138,7 @@ pub struct RenderJob {
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.
     pub thumbnail: bool,
+    pub overlay: Overlay,
 }
 fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
     let _ = tx.send(event);

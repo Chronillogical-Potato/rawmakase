@@ -32,6 +32,7 @@ struct Shown {
     clipping: bool,
     monitor: Option<PathBuf>,
     navigator: bool,
+    overlay: super::Overlay,
     out: Shot,
 }
 enum Shot {
@@ -54,6 +55,7 @@ impl Shown {
             clipping: job.clipping,
             monitor: job.monitor.clone(),
             navigator: job.navigator,
+            overlay: job.overlay,
             out,
         }
     }
@@ -62,7 +64,8 @@ impl Shown {
         let same = Arc::ptr_eq(&self.image, &job.image)
             && self.max_edge == job.max_edge
             && self.region == job.region
-            && self.recipe == job.recipe;
+            && self.recipe == job.recipe
+            && self.overlay == job.overlay;
         match &self.out {
             Shot::Pixels(_) => same,
             Shot::Frame {
@@ -179,8 +182,10 @@ pub(in crate::app) fn renderer_with_backend(
             }
             _ => None,
         };
+        // Overlays are drawn into CPU pixels.
+        let overlay = job.overlay != super::Overlay::None;
         let display = |slot, navigator: bool, thumbnail: bool| {
-            textures.is_some().then(|| gpu::Display {
+            (textures.is_some() && !overlay).then(|| gpu::Display {
                 slot,
                 clipping: job.clipping,
                 monitor: monitor.clone(),
@@ -220,6 +225,14 @@ pub(in crate::app) fn renderer_with_backend(
                 && let Err(e) = raw::display_transform(p, &mut rgb)
             {
                 warning = format!(" • ICC failed: {e}");
+            }
+            match job.overlay {
+                super::Overlay::None => {}
+                super::Overlay::Spots(threshold) => {
+                    rgb = develop::retouch::visualize_spots(&out, threshold);
+                }
+                // Mask overlays arrive with the Masking panel.
+                super::Overlay::Mask { .. } => {}
             }
             if job.clipping {
                 for (p, orig) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&out.pixels) {
@@ -436,6 +449,7 @@ mod tests {
             clipping: false,
             navigator: region.is_none(),
             thumbnail: false,
+            overlay: Default::default(),
         });
         let mut stages = Vec::new();
         loop {
