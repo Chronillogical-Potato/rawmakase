@@ -21,7 +21,14 @@ pub struct ImageFrame {
 }
 impl ImageFrame {
     pub fn new(im: &CameraImage) -> Self {
-        let m = &im.metadata;
+        Self::with_size(&im.metadata, im.width, im.height)
+    }
+    /// The frame from metadata alone, as when a Lightroom edit is converted before the
+    /// photo is decoded.
+    pub fn for_metadata(m: &crate::raw::Metadata) -> Self {
+        Self::with_size(m, m.width.max(1), m.height.max(1))
+    }
+    fn with_size(m: &crate::raw::Metadata, width: u32, height: u32) -> Self {
         let cw = if m.crop_width > 0 && m.crop_width <= m.width {
             m.crop_width as f32 / m.width as f32
         } else {
@@ -39,8 +46,8 @@ impl ImageFrame {
             _ => 0,
         };
         Self {
-            width: im.width,
-            height: im.height,
+            width,
+            height,
             inset: [
                 if m.crop_left.saturating_add(m.crop_width) <= m.width {
                     m.crop_left as f32 / m.width as f32
@@ -79,6 +86,11 @@ impl ImageFrame {
         let x = ((sx + 0.5) / self.width as f32 - self.inset[0]) / self.inset[2];
         let y = ((sy + 0.5) / self.height as f32 - self.inset[1]) / self.inset[3];
         turn((4 - self.turns) % 4, x, y)
+    }
+    /// Image-space position of a point in the unrotated frame (normalised to the
+    /// default crop, before the camera orientation), where Lightroom keeps positions.
+    pub fn from_unrotated(&self, p: [f32; 2]) -> [f32; 2] {
+        turn((4 - self.turns) % 4, p[0], p[1])
     }
     /// Decoded sample coordinates of an image-space position.
     pub fn to_source(&self, p: [f32; 2]) -> [f32; 2] {

@@ -1,5 +1,6 @@
 //! Namespace-aware Adobe settings parsing and application to a develop recipe.
 mod apply;
+pub mod local;
 mod parse;
 pub mod write;
 use crate::develop::curve::ToneCurve;
@@ -18,6 +19,8 @@ pub struct Preset {
     pub blockers: Vec<String>,
     pub notes: Vec<String>,
     pub photo_settings: bool,
+    /// Spot removal and masks (see `local`), as nested data.
+    pub local: BTreeMap<String, local::Node>,
 }
 
 // Compatibility exports; preset collection management lives in `presets`.

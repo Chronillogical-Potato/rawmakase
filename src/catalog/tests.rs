@@ -203,7 +203,9 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     assert_eq!(r.curve.points[0], [0., 12. / 255.]);
     assert!(w.iter().any(|s| s.contains("Missing")));
     assert!(w.iter().any(|s| s.contains("PerspectiveUpright")));
-    assert!(w.contains(&"RetouchInfo".into()));
+    // An incomplete spot is reported, not rendered.
+    assert!(w.iter().any(|s| s.starts_with("Spot 1")), "{w:?}");
+    assert!(r.retouch.is_empty());
     assert!(
         convert_develop(
             "s = { Exposure2012 = os.execute(\"bad\") }",

@@ -57,6 +57,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     let mut curves = BTreeMap::new();
     let mut blockers = Vec::new();
     let mut look = String::new();
+    let mut local = BTreeMap::new();
     for node in description
         .children()
         .filter(|n| n.is_element() && n.tag_name().namespace() == Some(CRS))
@@ -109,6 +110,11 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
             };
             curve.validate()?;
             curves.insert(name.to_string(), curve);
+        } else if super::local::KEYS.contains(&name) {
+            let value = super::local::Node::from_xml(node);
+            if !value.is_empty() {
+                local.insert(name.to_string(), value);
+            }
         } else if name == "Look" {
             let d = node
                 .descendants()
@@ -210,6 +216,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         look,
         blockers,
         notes,
+        local,
     };
     ensure!(
         !preset.settings.is_empty() || !preset.curves.is_empty(),

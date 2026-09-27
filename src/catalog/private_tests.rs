@@ -50,3 +50,65 @@ fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {
     assert!(valid > 8000);
     Ok(())
 }
+/// Every Lightroom spot and mask in a real catalog parses; those without AI convert
+/// into valid recipes. Reads a temporary copy, so the catalog is never opened.
+#[test]
+#[ignore = "Requires private Lightroom catalog; set RAWMAKASE_LRCAT"]
+fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
+    use crate::xmp::local::{KEYS, Node, convert};
+    let source = PathBuf::from(std::env::var("RAWMAKASE_LRCAT")?);
+    let dir = tempfile::tempdir()?;
+    let copy = dir.path().join("copy.lrcat");
+    std::fs::copy(&source, &copy)?;
+    let db = Connection::open_with_flags(&copy, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut q = db.prepare(
+        "SELECT text FROM Adobe_imageDevelopSettings WHERE text LIKE '%RetouchAreas = { {%'
+         OR text LIKE '%RetouchInfo = { {%' OR text LIKE '%Corrections = { {%'",
+    )?;
+    let texts: Vec<String> = q
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let m = crate::raw::Metadata {
+        width: 6000,
+        height: 4000,
+        ..Default::default()
+    };
+    let frame = crate::develop::ImageFrame::for_metadata(&m);
+    let (mut photos, mut spots, mut masks) = (0, 0, 0);
+    let mut skipped = std::collections::BTreeMap::<String, usize>::new();
+    for text in &texts {
+        let fields = develop_fields(text)?;
+        let mut local = std::collections::BTreeMap::new();
+        for key in KEYS {
+            if let Some(value) = fields.get(key) {
+                let node = Node::from_lua(value)?;
+                if !node.is_empty() {
+                    local.insert(key.to_string(), node);
+                }
+            }
+        }
+        let edits = convert(&local, frame);
+        photos += 1;
+        let mut recipe = crate::develop::Recipe::default();
+        if let Some(r) = edits.retouch {
+            spots += r.len();
+            recipe.retouch = r;
+        }
+        if let Some(g) = edits.masks {
+            masks += g.len();
+            recipe.masks = g;
+        }
+        recipe.validate()?;
+        for s in edits.skipped {
+            // Group by reason, without the mask's name.
+            let reason = s.split_once(": ").map_or(s.clone(), |(_, r)| r.to_string());
+            *skipped.entry(reason).or_default() += 1;
+        }
+    }
+    println!("{photos} photos with spots or masks: {spots} spots and {masks} masks converted");
+    for (reason, n) in &skipped {
+        println!("  skipped {n}: {reason}");
+    }
+    assert!(photos > 0 && spots > 0);
+    Ok(())
+}

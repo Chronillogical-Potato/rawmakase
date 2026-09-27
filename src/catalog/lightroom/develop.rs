@@ -91,6 +91,7 @@ pub fn convert_develop(
         look: String::new(),
         blockers: Vec::new(),
         notes: Vec::new(),
+        local: Default::default(),
     };
     let mut warnings = Vec::new();
     // A record from before process version 2012 (6.7) with no 2012 tone keys.
@@ -116,6 +117,14 @@ pub fn convert_develop(
                         amount.parse::<f32>()? == 1.,
                         "Profile Amount other than 100% is not supported"
                     );
+                }
+            } else if crate::xmp::local::KEYS.contains(&key.as_str()) {
+                match crate::xmp::local::Node::from_lua(value) {
+                    Ok(node) if !node.is_empty() => {
+                        preset.local.insert(key.clone(), node);
+                    }
+                    Ok(_) => {}
+                    Err(e) => warnings.push(format!("{key}: {e:#}")),
                 }
             } else if key.starts_with("ToneCurve") && !key.contains("Name") {
                 let values = value
@@ -187,6 +196,8 @@ pub fn convert_develop(
             preset.settings.insert(key.clone(), value);
         }
     }
+    // Spots and masks convert on their own and report what they skip.
+    let local_settings = std::mem::take(&mut preset.local);
     // Build a compatible patch before application. Related fields are validated together.
     let mut accepted = preset.clone();
     accepted.settings.clear();
@@ -230,7 +241,17 @@ pub fn convert_develop(
             Err(e) => warnings.push(e.to_string()),
         }
     }
-    let recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    let mut recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    let local =
+        crate::xmp::local::convert(&local_settings, crate::develop::ImageFrame::for_metadata(m));
+    if let Some(retouch) = local.retouch {
+        recipe.retouch = retouch;
+    }
+    if let Some(masks) = local.masks {
+        recipe.masks = masks;
+    }
+    warnings.extend(local.skipped);
+    recipe.validate()?;
     warnings.sort();
     warnings.dedup();
     Ok((recipe, warnings))

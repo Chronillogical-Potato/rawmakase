@@ -235,3 +235,136 @@ fn empty_flags_are_unset_and_curves_still_apply() -> Result<()> {
     assert_eq!(r.curve.points[0], [0., 50. / 255.]);
     Ok(())
 }
+/// Lightroom's spots and masks convert with the conventions measured on Camera Raw:
+/// unrotated positions, long-edge sizes, absolute sources (a brush's from its first
+/// dab); AI masks are reported, not imported.
+#[test]
+fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
+    use crate::develop::masks::{MaskOp, MaskShape};
+    use crate::develop::retouch::{RetouchMode, RetouchShape};
+    let dabs =
+        "<r:li>d 0.200000 0.700000</r:li><r:li>r 0.030000</r:li><r:li>d 0.300000 0.700000</r:li>";
+    let body = format!(
+        r#"<c:RetouchAreas><r:Seq>
+            <r:li><r:Description c:SpotType="clone" c:SourceX="0.7" c:OffsetY="0.6" c:Opacity="0.8" c:Feather="0.5">
+              <c:Masks><r:Seq><r:li c:What="Mask/Ellipse" c:X="0.3" c:Y="0.3" c:SizeX="0.05" c:SizeY="0.05"/></r:Seq></c:Masks>
+            </r:Description></r:li>
+            <r:li><r:Description c:SpotType="heal" c:SourceX="0.6" c:OffsetY="0.3">
+              <c:Masks><r:Seq><r:li><r:Description c:What="Mask/Paint" c:Radius="0.03" c:Flow="1" c:CenterWeight="1">
+                <c:Dabs><r:Seq>{dabs}</r:Seq></c:Dabs></r:Description></r:li></r:Seq></c:Masks>
+            </r:Description></r:li>
+          </r:Seq></c:RetouchAreas>
+          <c:MaskGroupBasedCorrections><r:Seq>
+            <r:li><r:Description c:What="Correction" c:CorrectionName="Sky" c:CorrectionAmount="0.8" c:LocalExposure2012="-0.5" c:LocalDehaze="0.3" c:LocalToningHue="180" c:LocalToningSaturation="0.4">
+              <c:CorrectionMasks><r:Seq>
+                <r:li c:What="Mask/Gradient" c:MaskBlendMode="0" c:ZeroX="0.5" c:ZeroY="0.5" c:FullX="0.5" c:FullY="0.1"/>
+                <r:li><r:Description c:What="Mask/Paint" c:MaskBlendMode="1" c:MaskValue="0" c:Radius="0.02" c:Flow="0.5" c:CenterWeight="0.25">
+                  <c:Dabs><r:Seq>{dabs}</r:Seq></c:Dabs></r:Description></r:li>
+              </r:Seq></c:CorrectionMasks>
+            </r:Description></r:li>
+            <r:li><r:Description c:What="Correction" c:LocalShadows2012="0.4">
+              <c:CorrectionMasks><r:Seq>
+                <r:li c:What="Mask/CircularGradient" c:Top="0.2" c:Left="0.1" c:Bottom="0.5" c:Right="0.4" c:Angle="-10" c:Feather="40" c:Flipped="false" c:Midpoint="50" c:Roundness="0"/>
+              </r:Seq></c:CorrectionMasks>
+            </r:Description></r:li>
+            <r:li><r:Description c:What="Correction" c:CorrectionName="Subject" c:LocalExposure2012="1">
+              <c:CorrectionMasks><r:Seq><r:li c:What="Mask/Image" c:MaskSubType="1"/></r:Seq></c:CorrectionMasks>
+            </r:Description></r:li>
+          </r:Seq></c:MaskGroupBasedCorrections>"#
+    );
+    let preset = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:Exposure2012="0.2""#, &body),
+    )?;
+    assert!(preset.blockers.is_empty(), "{:?}", preset.blockers);
+    let landscape = Metadata {
+        width: 6000,
+        height: 4000,
+        ..Default::default()
+    };
+    // Strict application reports the AI mask; lenient application imports the rest.
+    assert!(
+        preset
+            .apply(&Recipe::default(), &landscape, &[], None)
+            .is_err()
+    );
+    let (r, skipped) = preset.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    assert!(skipped[0].contains("Select Subject"));
+    assert_eq!(r.exposure, 0.2);
+    let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
+    let spot = &r.retouch[0];
+    assert_eq!(
+        (spot.mode, spot.opacity, spot.feather),
+        (RetouchMode::Clone, 0.8, 0.5)
+    );
+    assert!(
+        matches!(spot.shape, RetouchShape::Spot { center, radius } if near(center, [0.3, 0.3]) && radius == 0.05)
+    );
+    assert!(near(spot.offset, [0.4, 0.3]));
+    let brush = &r.retouch[1];
+    assert!(
+        matches!(&brush.shape, RetouchShape::Brush { points, radius } if points.len() == 2 && *radius == 0.03)
+    );
+    // The source is where the first dab copies from.
+    assert!(near(brush.offset, [0.4, -0.4]));
+    assert_eq!(r.masks.len(), 2);
+    let sky = &r.masks[0];
+    assert_eq!((sky.name.as_str(), sky.amount), ("Sky", 0.8));
+    assert_eq!(sky.adjust.exposure, -0.5);
+    assert_eq!(sky.adjust.color, [0.5, 0.4]);
+    assert!(
+        matches!(sky.components[0].shape, MaskShape::Linear { from, to } if near(from, [0.5, 0.1]) && near(to, [0.5, 0.5]))
+    );
+    let erase = &sky.components[1];
+    assert_eq!(erase.op, MaskOp::Subtract);
+    assert!(
+        matches!(&erase.shape, MaskShape::Brush { strokes } if strokes[0].erase && strokes[0].flow == 0.5 && strokes[0].feather == 0.75)
+    );
+    let radial = &r.masks[1].components[0];
+    // Not flipped: the effect is outside the ellipse, Lightroom's default.
+    assert!(radial.invert);
+    assert!(
+        matches!(radial.shape, MaskShape::Radial { center, radii, angle, feather }
+        if near(center, [0.25, 0.35]) && (radii[0] - 0.15).abs() < 1e-5 && (radii[1] - 0.1).abs() < 1e-5
+            && angle == 10. && feather == 0.4)
+    );
+    // A portrait photo (camera turned 90° clockwise): positions turn, sizes do not.
+    let portrait = Metadata {
+        flip: 6,
+        ..landscape
+    };
+    let (r, _) = preset.apply_lenient(&Recipe::default(), &portrait, &[], None)?;
+    assert!(
+        matches!(r.retouch[0].shape, RetouchShape::Spot { center, radius } if near(center, [0.7, 0.3]) && radius == 0.05)
+    );
+    assert!(near(r.retouch[0].offset, [-0.3, 0.4]));
+    assert!(
+        matches!(r.masks[1].components[0].shape, MaskShape::Radial { angle, .. } if angle == 100.)
+    );
+    Ok(())
+}
+#[test]
+fn lightroom_catalog_tables_parse_as_data() -> Result<()> {
+    use super::local::Node;
+    let text = r#"{ { Feather = 0,
+        Masks = { { CenterWeight = 0.5, Dabs = { "d 0.1 0.2", "r 0.02", "M 0.15 0.2" },
+            Flow = 1, MaskValue = 1, Radius = 0.03, What = "Mask/Paint" } },
+        OffsetY = 0.3, Opacity = 1, SourceX = 0.4, SpotType = "heal" } }"#;
+    let node = Node::from_lua(text)?;
+    let mut local = std::collections::BTreeMap::new();
+    local.insert("RetouchAreas".to_string(), node);
+    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+        width: 300,
+        height: 200,
+        ..Default::default()
+    });
+    let edits = local::convert(&local, frame);
+    assert!(edits.skipped.is_empty(), "{:?}", edits.skipped);
+    let ops = edits.retouch.unwrap();
+    assert_eq!(ops.len(), 1);
+    assert!((ops[0].offset[0] - 0.3).abs() < 1e-6 && (ops[0].offset[1] - 0.1).abs() < 1e-6);
+    assert!(Node::from_lua("{ a = os.exit() }").is_err());
+    assert!(Node::from_lua("{ \"unterminated }").is_err());
+    Ok(())
+}

@@ -112,6 +112,8 @@ impl Preset {
         self.apply_grading(&mut settings, &mut recipe)?;
         self.apply_effects(&mut settings, &mut recipe)?;
         self.apply_auto_tone_and_crop(&mut settings, &mut recipe, m, image)?;
+        let skipped = self.apply_local(&mut recipe, m);
+        ensure!(skipped.is_empty(), "{}", skipped.join("; "));
         self.validate_remaining(&mut settings)?;
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
@@ -176,6 +178,9 @@ impl Preset {
         stage(&mut recipe, &|_| {
             self.validate_remaining(&mut settings.borrow_mut())
         });
+        // Spots and masks that convert apply; the rest are reported.
+        let skipped = self.apply_local(&mut recipe, m);
+        warnings.extend(skipped);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
         recipe.validate()?;
@@ -708,6 +713,21 @@ impl Preset {
         Ok(())
     }
 
+    /// Lightroom's spot removal and masks, replacing the recipe's when the settings
+    /// have them; returns what could not be converted.
+    fn apply_local(&self, r: &mut Recipe, m: &Metadata) -> Vec<String> {
+        if self.local.is_empty() {
+            return Vec::new();
+        }
+        let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
+        if let Some(retouch) = edits.retouch {
+            r.retouch = retouch;
+        }
+        if let Some(masks) = edits.masks {
+            r.masks = masks;
+        }
+        edits.skipped
+    }
     fn validate_remaining(&self, settings: &mut Settings<'_>) -> Result<()> {
         let v = settings.values;
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
