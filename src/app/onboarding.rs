@@ -1,6 +1,7 @@
 //! First-run setup: a catalog, then optional Lightroom profiles and presets.
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
+use super::widgets::pretty_path;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -28,16 +29,6 @@ fn user_camera_raw() -> Option<PathBuf> {
         return None;
     };
     path.is_dir().then_some(path)
-}
-/// `~/…` for display.
-fn pretty(path: &Path) -> String {
-    let text = path.display().to_string();
-    match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() && text.starts_with(&home) => {
-            format!("~{}", &text[home.len()..])
-        }
-        _ => text,
-    }
 }
 /// Files with one of `extensions` under `dir`, a few folders deep.
 fn find_files(dir: &Path, extensions: &[&str]) -> Vec<PathBuf> {
@@ -382,10 +373,10 @@ impl Editor {
             );
             ui.add_space(10.);
             if let Some(shared) = shared_camera_raw() {
-                location(ui, "Adobe", &pretty(&shared.join("CameraProfiles")));
+                location(ui, "Adobe", &pretty_path(&shared.join("CameraProfiles")));
             }
             if let Some(user) = user_camera_raw() {
-                location(ui, "Yours", &pretty(&user.join("CameraProfiles")));
+                location(ui, "Yours", &pretty_path(&user.join("CameraProfiles")));
             }
             ui.add_space(8.);
             hint(
@@ -458,10 +449,10 @@ impl Editor {
             );
             ui.add_space(10.);
             if let Some(shared) = shared_camera_raw() {
-                location(ui, "Adobe", &pretty(&shared.join("LensProfiles")));
+                location(ui, "Adobe", &pretty_path(&shared.join("LensProfiles")));
             }
             if let Some(user) = user_camera_raw() {
-                location(ui, "Yours", &pretty(&user.join("LensProfiles")));
+                location(ui, "Yours", &pretty_path(&user.join("LensProfiles")));
             }
             ui.add_space(8.);
             hint(
@@ -515,7 +506,7 @@ impl Editor {
             );
             ui.add_space(10.);
             if let Some(user) = user_camera_raw() {
-                location(ui, "Yours", &pretty(&user.join("Settings")));
+                location(ui, "Yours", &pretty_path(&user.join("Settings")));
             }
             if presets > 0 {
                 ui.add_space(8.);

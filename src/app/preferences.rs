@@ -3,6 +3,7 @@
 //! fixed-size page on the right so switching tabs never moves the window.
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
+use super::widgets::{form_row, modal_frame, pretty_path, primary_button};
 use crate::raw::Demosaic;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
@@ -61,7 +62,6 @@ pub(super) struct Preferences {
 const WIDTH: f32 = 780.;
 const HEIGHT: f32 = 520.;
 const SIDEBAR: f32 = 196.;
-const LABEL: f32 = 150.;
 
 fn camera_profiles_dir() -> PathBuf {
     crate::storage::data_dir().join("camera-profiles")
@@ -118,16 +118,6 @@ fn bytes(n: u64) -> String {
         "Empty".into()
     }
 }
-/// `~/…` for display.
-fn pretty(path: &Path) -> String {
-    let text = path.display().to_string();
-    match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() && text.starts_with(&home) => {
-            format!("~{}", &text[home.len()..])
-        }
-        _ => text,
-    }
-}
 fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -170,12 +160,7 @@ impl Editor {
         }
         let response = egui::Modal::new(egui::Id::new("preferences"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(
-                egui::Frame::new()
-                    .fill(Color32::from_gray(33))
-                    .stroke(Stroke::new(1., Color32::from_gray(52)))
-                    .corner_radius(10.),
-            )
+            .frame(modal_frame())
             .show(ctx, |ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::hover());
                 let sidebar = egui::Rect::from_min_size(rect.min, Vec2::new(SIDEBAR, HEIGHT));
@@ -235,13 +220,7 @@ impl Editor {
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
                 bar.spacing_mut().button_padding = Vec2::new(18., 6.);
-                let done = bar
-                    .add(
-                        egui::Button::new(egui::RichText::new("Done").color(Color32::WHITE))
-                            .fill(Color32::from_rgb(62, 88, 115))
-                            .min_size(Vec2::new(84., 30.)),
-                    )
-                    .clicked();
+                let done = primary_button(&mut bar, "Done").clicked();
                 // Only what happened while the window was open, e.g. an import.
                 if self.status != self.preferences.status_at_open {
                     bar.add_space(16.);
@@ -294,20 +273,20 @@ impl Editor {
 
     fn general_page(&mut self, ui: &mut egui::Ui) {
         group(ui, "About");
-        row(ui, "RAWmakase", |ui| {
+        form_row(ui, "RAWmakase", |ui| {
             value(ui, env!("CARGO_PKG_VERSION"));
         });
-        row(ui, "LibRaw", |ui| {
+        form_row(ui, "LibRaw", |ui| {
             value(ui, &crate::raw::version());
         });
         gap(ui);
         group(ui, "Locations");
         let data = crate::storage::data_dir();
-        row(ui, "App data", |ui| path_value(ui, &data));
-        row(ui, "", |ui| reveal_button(ui, &data));
+        form_row(ui, "App data", |ui| path_value(ui, &data));
+        form_row(ui, "", |ui| reveal_button(ui, &data));
         gap(ui);
         group(ui, "Help");
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             if ui.button("Keyboard Shortcuts").clicked() {
                 self.view.shortcuts = true;
                 self.preferences.open = false;
@@ -325,32 +304,32 @@ impl Editor {
         if let Some(library) = &self.library {
             let path = library.catalog.path.clone();
             group(ui, "Current catalog");
-            row(ui, "Name", |ui| {
+            form_row(ui, "Name", |ui| {
                 value(ui, &path.file_stem().unwrap_or_default().to_string_lossy());
             });
-            row(ui, "Location", |ui| path_value(ui, &path));
-            row(ui, "", |ui| reveal_button(ui, &path));
-            row(ui, "Photos", |ui| {
+            form_row(ui, "Location", |ui| path_value(ui, &path));
+            form_row(ui, "", |ui| reveal_button(ui, &path));
+            form_row(ui, "Photos", |ui| {
                 value(ui, &library.photos.len().to_string());
             });
-            row(ui, "Folders", |ui| {
+            form_row(ui, "Folders", |ui| {
                 value(ui, &usage.folders.map_or("–".into(), |n| n.to_string()));
             });
-            row(ui, "Catalog size", |ui| {
+            form_row(ui, "Catalog size", |ui| {
                 value(ui, &usage.catalog.map_or("–".into(), bytes));
             });
         } else {
             group(ui, "Current catalog");
-            row(ui, "", |ui| {
+            form_row(ui, "", |ui| {
                 value(ui, "No catalog is open.");
             });
         }
-        row(ui, "Previews", |ui| {
+        form_row(ui, "Previews", |ui| {
             value(ui, &bytes(usage.previews));
         });
         gap(ui);
         group(ui, "Catalogs");
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             for (kind, label) in [
                 (CatalogDialog::Open, "Open…"),
                 (CatalogDialog::Create, "New…"),
@@ -370,10 +349,10 @@ impl Editor {
         let presets = self.presets.library.presets.len();
         let mut chosen = None;
         group(ui, "Camera profiles");
-        row(ui, "Imported", |ui| {
+        form_row(ui, "Imported", |ui| {
             value(ui, &plural(cameras, "profile", "profiles"));
         });
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             if ui.button("Import Profiles…").clicked() {
                 chosen = Some(FileDialog::CameraProfile);
             }
@@ -381,10 +360,10 @@ impl Editor {
         });
         gap(ui);
         group(ui, "Lens profiles");
-        row(ui, "Imported", |ui| {
+        form_row(ui, "Imported", |ui| {
             value(ui, &plural(lenses, "profile", "profiles"));
         });
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             if ui.button("Import Lens Profiles…").clicked() {
                 chosen = Some(FileDialog::LensProfile);
             }
@@ -392,17 +371,17 @@ impl Editor {
         });
         gap(ui);
         group(ui, "Develop presets");
-        row(ui, "Installed", |ui| {
+        form_row(ui, "Installed", |ui| {
             value(ui, &plural(presets, "preset", "presets"));
         });
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             if ui.button("Import Preset…").clicked() {
                 chosen = Some(FileDialog::ImportXmp);
             }
             reveal_button(ui, &presets_dir());
         });
         gap(ui);
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             hint(
                 ui,
                 "The Setup Assistant finds Lightroom's own profiles and presets on this Mac.",
@@ -430,7 +409,7 @@ impl Editor {
                 "AHD for Bayer sensors, Markesteijn for X-Trans.",
             ),
         ] {
-            row(
+            form_row(
                 ui,
                 if choice == Demosaic::Rawmakase {
                     "Engine"
@@ -459,8 +438,8 @@ impl Editor {
         group(ui, "Decoded photo cache");
         let (entries, size) = self.preferences.usage.decode_cache;
         let dir = decode_cache_dir();
-        row(ui, "Location", |ui| path_value(ui, &dir));
-        row(ui, "Size", |ui| {
+        form_row(ui, "Location", |ui| path_value(ui, &dir));
+        form_row(ui, "Size", |ui| {
             value(
                 ui,
                 &format!(
@@ -471,13 +450,13 @@ impl Editor {
             );
         });
         let mut purge = false;
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             purge = ui
                 .add_enabled(entries > 0, egui::Button::new("Purge Cache"))
                 .clicked();
             reveal_button(ui, &dir);
         });
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             hint(
                 ui,
                 "Reopening a photo skips decoding while it is cached. Purging only removes decoded copies, never photos or edits.",
@@ -503,7 +482,7 @@ impl Editor {
         let ctx = ui.ctx().clone();
         group(ui, "Monitor profile");
         let monitor = self.view.monitor.clone();
-        row(ui, "Profile", |ui| match &monitor {
+        form_row(ui, "Profile", |ui| match &monitor {
             Some(path) => {
                 value(ui, &path.file_name().unwrap_or_default().to_string_lossy());
             }
@@ -513,13 +492,13 @@ impl Editor {
         });
         let mut choose = false;
         let mut srgb = false;
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             choose = ui.button("Choose Profile…").clicked();
             srgb = ui
                 .add_enabled(monitor.is_some(), egui::Button::new("Use sRGB"))
                 .clicked();
         });
-        row(ui, "", |ui| {
+        form_row(ui, "", |ui| {
             hint(
                 ui,
                 "Photos are shown in this profile. Choose your display's calibrated ICC profile, or keep sRGB.",
@@ -547,26 +526,12 @@ fn group(ui: &mut egui::Ui, title: &str) {
 fn gap(ui: &mut egui::Ui) {
     ui.add_space(14.);
 }
-/// A right-aligned label and its value, like Lightroom's preference rows.
-fn row(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(LABEL, 28.), Sense::hover());
-        ui.painter().text(
-            rect.right_center() - Vec2::new(12., 0.),
-            egui::Align2::RIGHT_CENTER,
-            label,
-            egui::FontId::proportional(13.),
-            Color32::from_gray(150),
-        );
-        contents(ui);
-    });
-}
 fn value(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).color(Color32::from_gray(225))).truncate());
 }
 fn path_value(ui: &mut egui::Ui, path: &Path) {
     ui.add(
-        egui::Label::new(egui::RichText::new(pretty(path)).color(Color32::from_gray(225)))
+        egui::Label::new(egui::RichText::new(pretty_path(path)).color(Color32::from_gray(225)))
             .truncate(),
     )
     .on_hover_text(path.display().to_string());

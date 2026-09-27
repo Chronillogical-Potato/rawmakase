@@ -1007,3 +1007,43 @@ pub(super) fn submenu_style(ui: &mut egui::Ui) {
     }
     visuals.widgets.inactive.fg_stroke = Stroke::new(1., Color32::from_gray(215));
 }
+/// The frame of a modal window such as Preferences or Export.
+pub(super) fn modal_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(Color32::from_gray(33))
+        .stroke(Stroke::new(1., Color32::from_gray(52)))
+        .corner_radius(10.)
+}
+/// The button that confirms a modal window ("Done", "Export").
+pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(Color32::WHITE))
+            .fill(Color32::from_rgb(62, 88, 115))
+            .min_size(Vec2::new(84., 30.)),
+    )
+}
+/// A form row as in Lightroom's dialogs: a right-aligned label in a fixed
+/// column, then the controls.
+pub(super) fn form_row(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(150., 28.), Sense::hover());
+        ui.painter().text(
+            rect.right_center() - Vec2::new(12., 0.),
+            egui::Align2::RIGHT_CENTER,
+            label,
+            egui::FontId::proportional(13.),
+            Color32::from_gray(150),
+        );
+        contents(ui);
+    });
+}
+/// A path for display, with the home folder as `~`.
+pub(super) fn pretty_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && text.starts_with(&home) => {
+            format!("~{}", &text[home.len()..])
+        }
+        _ => text,
+    }
+}
