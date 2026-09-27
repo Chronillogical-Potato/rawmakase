@@ -43,10 +43,15 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [develop/mod.rs](../src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
 | [recipe.rs](../src/develop/recipe.rs) | Serialized adjustment model, defaults, validation, rendering-engine compatibility and profile selection. |
 | [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
+| [image_space.rs](../src/develop/image_space.rs) | Image space, where spots and masks keep positions (oriented photo before lens correction, Transform and crop), and its mapping to and from the view, including the lens distortion inverse. |
+| [retouch/mod.rs](../src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
+| [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
+| [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image: built at once for exports, updated in dirty 256-pixel tiles for previews. |
+| [retouch/search.rs](../src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
 | [pipeline.rs](../src/develop/pipeline.rs) | Color/tone processing, sampling, render entry points, neutral picking and legacy engine paths. |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
-| [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered camera image for Fit and zoomed-out previews. |
+| [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
 | [stage_cache.rs](../src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images and geometry samples, keyed by the recipe fields each stage reads. |
 | [gpu/mod.rs](../src/develop/gpu/mod.rs) | Optional compute device, bounded/reused buffers, command submission and readback for preview finishing. |
 | [gpu/finish.wgsl](../src/develop/gpu/finish.wgsl) | Portable sharpening and separable Lanczos resize compute kernels. |
@@ -100,7 +105,8 @@ recipes and the installed preset collection; they do not own the renderer.
 | --- | --- |
 | [storage/mod.rs](../src/storage/mod.rs) | Shared persistence and path API. |
 | [files.rs](../src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
-| [format.rs](../src/storage/format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. |
+| [format.rs](../src/storage/format.rs) | Saved schema/pipeline versions (7 only for recipes with spots or masks, 6 otherwise), envelope validation and legacy recipe migration. |
+| [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [sidecar.rs](../src/storage/sidecar.rs) | RAW fingerprints, sidecar loading/saving, fallback storage and conflict protection. |
 | [session.rs](../src/storage/session.rs) | Last-opened path and monitor-profile preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, folders, photos, collections, metadata, edits, relinking and folder ingestion. |
@@ -142,7 +148,10 @@ above rather than implementing SQL, file formats or pixel processing.
 | [export.rs](../src/app/export.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
-| [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking. |
+| [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking; hands the pointer to the active tool. |
+| [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
+| [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
+| [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application and temporary hover previews. |
 | [photo_metadata.rs](../src/app/photo_metadata.rs) | Rating, color label and pick/reject controls and shortcuts. |
 | [widgets.rs](../src/app/widgets.rs) | Shared buttons, adjustment sections, sliders, curve editor and workspace tabs. |

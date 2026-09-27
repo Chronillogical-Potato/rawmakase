@@ -194,7 +194,10 @@ impl LocalAdjust {
                 && self.exposure.abs() <= 4.
                 && self.hue.is_finite()
                 && self.hue.abs() <= 180.
-                && self.color.iter().all(|v| v.is_finite() && (0. ..=1.).contains(v)),
+                && self
+                    .color
+                    .iter()
+                    .all(|v| v.is_finite() && (0. ..=1.).contains(v)),
             "Invalid mask adjustment"
         );
         Ok(())
@@ -239,7 +242,9 @@ impl MaskShape {
                 feather,
             } => ensure!(
                 position(center)
-                    && radii.iter().all(|r| r.is_finite() && (1e-4..=4.).contains(r))
+                    && radii
+                        .iter()
+                        .all(|r| r.is_finite() && (1e-4..=4.).contains(r))
                     && angle.is_finite()
                     && angle.abs() <= 360.
                     && unit(*feather),
@@ -248,7 +253,10 @@ impl MaskShape {
             MaskShape::ColorRange { samples, amount } => ensure!(
                 !samples.is_empty()
                     && samples.len() <= 5
-                    && samples.iter().flatten().all(|v| v.is_finite() && v.abs() <= 2.)
+                    && samples
+                        .iter()
+                        .flatten()
+                        .all(|v| v.is_finite() && v.abs() <= 2.)
                     && unit(*amount),
                 "Invalid color range"
             ),

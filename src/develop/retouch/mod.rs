@@ -6,9 +6,16 @@
 //! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening. Sizes are
 //! fractions of the photo's long edge.
+mod heal;
+mod layer;
+mod search;
+
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+pub(crate) use layer::{RetouchCache, apply};
+pub use search::find_source;
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RetouchMode {
@@ -102,7 +109,12 @@ impl RetouchOp {
     /// width is `aspect` times its height.
     pub fn bounds(&self, aspect: f32) -> [f32; 4] {
         let (rx, ry) = radii(self.radius(), aspect);
-        let mut b = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+        let mut b = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
         let mut add = |p: [f32; 2]| {
             b = [
                 b[0].min(p[0] - rx),
@@ -129,4 +141,40 @@ pub(crate) fn radii(r: f32, aspect: f32) -> (f32, f32) {
 pub fn validate(ops: &[RetouchOp]) -> Result<()> {
     ensure!(ops.len() <= MAX_OPS, "Too many spot removals");
     ops.iter().try_for_each(RetouchOp::validate)
+}
+
+#[cfg(test)]
+mod tests;
+
+/// Lightroom's Visualize Spots: a black-and-white view of fine luminance detail in a
+/// rendered preview, where dust and small blemishes stand out. `threshold` (0–1) is
+/// the panel's slider: higher shows fainter detail. Returns 8-bit RGB.
+pub fn visualize_spots(image: &crate::develop::Rendered, threshold: f32) -> Vec<u8> {
+    let (w, h) = (image.width as usize, image.height as usize);
+    let lum: Vec<f32> = image
+        .pixels
+        .iter()
+        .map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2])
+        .collect();
+    // Detail = luminance minus its 5×5 mean, from running sums.
+    let r = 2usize;
+    let mut rows = vec![0.; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (a, b) = (x.saturating_sub(r), (x + r + 1).min(w));
+            rows[y * w + x] = lum[y * w + a..y * w + b].iter().sum::<f32>() / (b - a) as f32;
+        }
+    }
+    let gain = 4. * 2f32.powf(threshold.clamp(0., 1.) * 5.);
+    let mut out = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        let (a, b) = (y.saturating_sub(r), (y + r + 1).min(h));
+        for x in 0..w {
+            let mean = (a..b).map(|yy| rows[yy * w + x]).sum::<f32>() / (b - a) as f32;
+            let v = ((lum[y * w + x] - mean).abs() * gain).min(1.);
+            let v = (255. * v.sqrt()) as u8;
+            out.extend([v, v, v]);
+        }
+    }
+    out
 }

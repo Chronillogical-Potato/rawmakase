@@ -162,10 +162,7 @@ impl<'a> LensMap<'a> {
             }
         }
         let k = rho / target / self.fill;
-        [
-            self.center[0] + qx * k - 0.5,
-            self.center[1] + qy * k - 0.5,
-        ]
+        [self.center[0] + qx * k - 0.5, self.center[1] + qy * k - 0.5]
     }
 }
 

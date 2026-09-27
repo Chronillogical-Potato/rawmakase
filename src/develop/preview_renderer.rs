@@ -15,6 +15,8 @@ pub struct PreviewRenderer {
     pyramid: Option<Pyramid>,
     /// Stage results reused while only color and tone change.
     cache: StageCache,
+    /// The recovered image with spot removal applied, updated tile by tile.
+    retouch: super::retouch::RetouchCache,
 }
 /// The optional GPU and why it is not used.
 #[derive(Default)]
@@ -30,6 +32,7 @@ pub(crate) struct Backend {
 /// the display a render may be presented to.
 pub(crate) struct Stages<'a> {
     pub(crate) cache: &'a mut StageCache,
+    pub(crate) retouch: &'a mut super::retouch::RetouchCache,
     pub(crate) backend: &'a mut Backend,
     pub(crate) display: Option<&'a gpu::Display>,
 }
@@ -128,6 +131,7 @@ impl PreviewRenderer {
     fn stages<'a>(&'a mut self, display: Option<&'a gpu::Display>) -> Stages<'a> {
         Stages {
             cache: &mut self.cache,
+            retouch: &mut self.retouch,
             backend: &mut self.backend,
             display,
         }
@@ -149,7 +153,7 @@ impl PreviewRenderer {
         }
         let size = quality::output_size(full.width, full.height, max_edge);
         let needed = size.0.max(size.1) as f32 * image.width.max(image.height) as f32 / long as f32;
-        let (level, source) = self.level(image, needed, cancel)?;
+        let (level, source) = self.level(image, recipe, needed, cancel)?;
         let region = [0, 0, size.0, size.1];
         let mut stages = self.stages(display);
         quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
@@ -200,26 +204,29 @@ impl PreviewRenderer {
         let (px, py) = (x >> k, y >> k);
         let (pw, ph) = (div(w).min(size.0 - px), div(h).min(size.1 - py));
         let needed = image.width.max(image.height).div_ceil(1 << k) as f32;
-        let (level, source) = self.level(image, needed, cancel)?;
+        let (level, source) = self.level(image, recipe, needed, cancel)?;
         let region = [px, py, pw, ph];
         let mut stages = self.stages(display);
         quality::render_level(&level, &source, recipe, size, region, cancel, &mut stages).map(Some)
     }
     /// The pyramid level for `needed` source pixels on the long edge, and the level-0
-    /// image, building the pyramid when the photo changed.
+    /// image (recovered and retouched), building the pyramid when the photo changed and
+    /// patching it where spot removal changed.
     fn level(
         &mut self,
         image: &CameraImage,
+        recipe: &Recipe,
         needed: f32,
         cancel: &AtomicBool,
     ) -> Result<(Arc<CameraImage>, Arc<CameraImage>)> {
-        let source = quality::recovered(image, cancel)?;
-        if !self
-            .pyramid
-            .as_ref()
-            .is_some_and(|p| Arc::ptr_eq(p.source(), &source))
-        {
-            self.pyramid = Some(Pyramid::new(source));
+        let source = quality::retouched(image, recipe, cancel, Some(&mut self.retouch))?;
+        match &mut self.pyramid {
+            Some(p) if Arc::ptr_eq(p.source(), &source) => {}
+            Some(p) if self.retouch.changed_from(p.source()).is_some() => {
+                let rects = self.retouch.changed_from(p.source()).unwrap().to_vec();
+                p.update(source, &rects);
+            }
+            _ => self.pyramid = Some(Pyramid::new(source)),
         }
         let pyramid = self.pyramid.as_mut().unwrap();
         Ok((pyramid.level_for(needed), pyramid.source().clone()))
@@ -450,6 +457,87 @@ mod tests {
         }
         // The stage cache filled up to its entry limit across the edits.
         assert_eq!(warm.cache.samples.len(), 4);
+    }
+    /// Spot removal renders the same in Fit, 100% regions and exports, and edits to
+    /// it patch the cached pyramid correctly.
+    #[test]
+    fn retouch_agrees_between_fit_regions_and_export() {
+        use crate::develop::retouch::{RetouchMode, RetouchOp, RetouchShape};
+        let (w, h) = (640, 424);
+        let mut im = image(w, h, 0.);
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            let v = 0.25 + 0.15 * (x * 0.05).sin() * (y * 0.031).cos() + x / w as f32 * 0.2;
+            let dust = (x - 300.).hypot(y - 200.) < 8.;
+            *p = if dust {
+                [0.02; 3]
+            } else {
+                [v * 1.1, v, v * 0.7]
+            };
+        }
+        let spot = |mode, center: [f32; 2], offset: [f32; 2]| RetouchOp {
+            mode,
+            shape: RetouchShape::Spot {
+                center,
+                radius: 15. / 640.,
+            },
+            feather: 0.4,
+            opacity: 1.,
+            offset,
+        };
+        let mut r = Recipe {
+            sharpening: 0.5,
+            straighten: 1.5,
+            ..Default::default()
+        };
+        r.retouch = vec![
+            spot(
+                RetouchMode::Heal,
+                [300.5 / 640., 200.5 / 424.],
+                [0.08, 0.02],
+            ),
+            spot(RetouchMode::Clone, [0.2, 0.7], [0.1, -0.1]),
+        ];
+        let cancel = AtomicBool::new(false);
+        let mut warm = PreviewRenderer::default();
+        for edit in 0..3 {
+            match edit {
+                1 => r.retouch[1].offset[0] += 0.05,
+                2 => {
+                    r.retouch.remove(0);
+                }
+                _ => {}
+            }
+            let expected = quality::render(&im, &r, 200, None).unwrap();
+            let fit = warm.render(&im, &r, 200, None, &cancel).unwrap();
+            let fresh = PreviewRenderer::default()
+                .render(&im, &r, 200, None, &cancel)
+                .unwrap();
+            assert_eq!(fit.pixels, fresh.pixels, "edit {edit}: stale pyramid");
+            let error = fit
+                .pixels
+                .iter()
+                .flatten()
+                .zip(expected.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .sum::<f32>()
+                / (fit.pixels.len() * 3) as f32;
+            assert!(error < 0.01, "edit {edit}: mean error {error}");
+            let region = [260, 160, 90, 80];
+            let tile = warm.render(&im, &r, 0, Some(region), &cancel).unwrap();
+            let full = quality::render(&im, &r, 0, Some(region)).unwrap();
+            assert_eq!(tile.pixels, full.pixels);
+        }
+        // The healed dust is gone from the export.
+        r.retouch = vec![spot(
+            RetouchMode::Heal,
+            [300.5 / 640., 200.5 / 424.],
+            [0.08, 0.02],
+        )];
+        r.straighten = 0.;
+        let healed = quality::render(&im, &r, 0, Some([300, 200, 1, 1])).unwrap();
+        let dusty = quality::render(&im, &Recipe::default(), 0, Some([300, 200, 1, 1])).unwrap();
+        assert!(healed.pixels[0][1] > dusty.pixels[0][1] + 0.2);
     }
     #[test]
     fn region_preview_is_a_half_resolution_region() {

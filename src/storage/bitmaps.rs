@@ -47,7 +47,11 @@ impl Bitmap {
                 .chain(&self.data)
                 .fold(seed, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100000001b3))
         };
-        format!("{:016x}{:016x}", fnv(0xcbf29ce484222325), fnv(0x84222325cbf29ce4))
+        format!(
+            "{:016x}{:016x}",
+            fnv(0xcbf29ce484222325),
+            fnv(0x84222325cbf29ce4)
+        )
     }
     /// Header plus zlib-compressed samples.
     pub fn compress(&self) -> Result<Vec<u8>> {
@@ -91,7 +95,11 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 pub fn to_base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {

@@ -14,6 +14,7 @@ mod chart;
 mod dng;
 mod measure;
 mod private;
+mod retouch;
 
 use chart::{Camera, Illuminant, Layout, Patch};
 use measure::{chroma, delta_e2000, hue_difference, lab};

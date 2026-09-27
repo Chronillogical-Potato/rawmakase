@@ -396,6 +396,21 @@ pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<Cam
     let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
+/// The recovered image with the recipe's spot removal applied: from the preview's
+/// cache, updated where the operations changed, or built at once (exports).
+pub(crate) fn retouched(
+    im: &CameraImage,
+    r: &Recipe,
+    cancel: &AtomicBool,
+    cache: Option<&mut develop::retouch::RetouchCache>,
+) -> Result<Arc<CameraImage>> {
+    let recovered = recovered(im, cancel)?;
+    match cache {
+        Some(cache) => cache.get(&recovered, &r.retouch, cancel),
+        None if r.retouch.is_empty() => Ok(recovered),
+        None => Ok(Arc::new(develop::retouch::apply(&recovered, &r.retouch))),
+    }
+}
 /// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the
 /// camera image, plus the recipe for the per-pixel stage that follows.
 fn local_stage(
@@ -820,7 +835,7 @@ pub(crate) fn render_preview(
     if let Some(p) = &r.profile {
         p.ensure_camera(&im.metadata)?;
     }
-    let source = recovered(im, cancel)?;
+    let source = retouched(im, r, cancel, stages.as_mut().map(|s| &mut *s.retouch))?;
     let g = Geometry::new(&source, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);
     ensure!(

@@ -105,7 +105,9 @@ impl Catalog {
     pub fn bitmap(&self, hash: &str) -> Result<Option<crate::storage::bitmaps::Bitmap>> {
         let data: Option<Vec<u8>> = self
             .db
-            .query_row("SELECT data FROM bitmaps WHERE hash=?", [hash], |r| r.get(0))
+            .query_row("SELECT data FROM bitmaps WHERE hash=?", [hash], |r| {
+                r.get(0)
+            })
             .optional()?;
         data.map(|d| crate::storage::bitmaps::Bitmap::decompress(&d))
             .transpose()
