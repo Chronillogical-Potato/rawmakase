@@ -27,7 +27,7 @@ pub(super) struct Document {
     pub(super) profile_errors: Vec<String>,
 }
 
-/// What the preview texture holds: the whole photo, or a 1:1 region of it.
+/// What the latest render showed: the whole photo, or a 1:1 region of it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) enum TextureMode {
     #[default]
@@ -36,7 +36,10 @@ pub(super) enum TextureMode {
 }
 pub(super) struct PreviewState {
     pub(super) task: super::task::Task,
+    /// The last whole-photo render, always drawn so zooming never shows a gap.
     pub(super) texture: Option<egui::TextureHandle>,
+    /// The last 100% region render, drawn over `texture` while `mode` is a region.
+    pub(super) region: Option<egui::TextureHandle>,
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<egui::TextureHandle>,
     pub(super) thumbs: HashMap<PathBuf, egui::TextureHandle>,
@@ -52,6 +55,7 @@ impl Default for PreviewState {
         Self {
             task: Default::default(),
             texture: None,
+            region: None,
             navigator: None,
             thumbs: HashMap::new(),
             histogram: [[0; 256]; 3],
@@ -141,6 +145,7 @@ impl PreviewState {
     pub fn clear_document(&mut self) {
         self.task.invalidate();
         self.texture = None;
+        self.region = None;
         self.navigator = None;
         self.thumbs.clear();
         self.histogram = [[0; 256]; 3];

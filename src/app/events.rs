@@ -129,7 +129,14 @@ impl Editor {
                     status,
                 } if id == self.preview.task.id() => {
                     self.preview.histogram = im.histogram();
-                    self.set_texture(ctx, im.width, im.height, &rgb);
+                    if matches!(
+                        self.preview.pending_mode,
+                        super::state::TextureMode::Region(_)
+                    ) {
+                        self.set_region_texture(ctx, im.width, im.height, &rgb);
+                    } else {
+                        self.set_texture(ctx, im.width, im.height, &rgb);
+                    }
                     self.preview.mode = self.preview.pending_mode;
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);

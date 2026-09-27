@@ -196,6 +196,17 @@ impl Editor {
                 Some(ctx.load_texture("photo", image, egui::TextureOptions::LINEAR));
         }
     }
+    /// A 100% region render, drawn over the whole-photo texture.
+    pub(super) fn set_region_texture(&mut self, ctx: &egui::Context, w: u32, h: u32, data: &[u8]) {
+        let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
+        match &mut self.preview.region {
+            Some(t) => t.set(image, egui::TextureOptions::LINEAR),
+            None => {
+                self.preview.region =
+                    Some(ctx.load_texture("photo region", image, egui::TextureOptions::LINEAR))
+            }
+        }
+    }
     pub(super) fn start_export(&mut self, path: PathBuf, overwrite: bool, ctx: &egui::Context) {
         let (Some(im), Some(source)) = (self.document.full().cloned(), self.document.path.clone())
         else {

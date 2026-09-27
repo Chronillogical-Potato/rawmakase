@@ -29,14 +29,12 @@ impl Shown {
             out,
         }
     }
-    /// The same photo at the same size and position, whatever the edit.
-    fn same_view(&self, job: &RenderJob) -> bool {
+    /// The same photo, view and edit.
+    fn matches(&self, job: &RenderJob) -> bool {
         std::sync::Arc::ptr_eq(&self.image, &job.image)
             && self.max_edge == job.max_edge
             && self.region == job.region
-    }
-    fn matches(&self, job: &RenderJob) -> bool {
-        self.same_view(job) && self.recipe == job.recipe
+            && self.recipe == job.recipe
     }
 }
 
@@ -50,8 +48,8 @@ pub(in crate::app) fn renderer_with_backend(
     backend: RenderBackend,
 ) -> Latest<RenderJob> {
     let mut processor = None;
-    // The last finished Fit and 100% region, so switching views shows the sharp image
-    // at once instead of a series of drafts.
+    // The last finished Fit and 100% region, so switching back to a view with the same
+    // edit shows its sharp image at once instead of rendering it again.
     let (mut fit, mut zoomed): (Option<Shown>, Option<Shown>) = (None, None);
     // Whether the last finished image was a 100% region: then the region is being
     // edited or panned, and a reduced preview comes first.
@@ -139,11 +137,6 @@ pub(in crate::app) fn renderer_with_backend(
                 zoomed = Some(Shown::new(&job, out));
                 showing_region = true;
                 return Ok(());
-            }
-            // Returning from 100% after an edit, the previous Fit of this photo replaces
-            // the region at once, before the Fit renders from the photo's pyramid.
-            if showing_region && let Some(shown) = fit.as_ref().filter(|s| s.same_view(&job)) {
-                publish(shown.out.clone(), RenderStage::Draft, false)?;
             }
             let out = processor.render(&job.image, &job.recipe, job.max_edge, None, &job.cancel)?;
             publish(out.clone(), RenderStage::Fit, processor.used_gpu())?;
@@ -254,10 +247,10 @@ mod tests {
         let edited = run(&worker, &rx, 5, &image, &recipe, region);
         assert_eq!(edited.len(), 2);
         assert_eq!(edited[0].0, RenderStage::Draft);
-        // Back to Fit after the edit: the previous Fit at once, then the new one.
+        // Back to Fit after the edit: the new Fit, without drafts; the viewport keeps
+        // showing its previous Fit under the region until then.
         let back = run(&worker, &rx, 6, &image, &recipe, None);
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[0], (RenderStage::Draft, fit[0].1.clone()));
-        assert_ne!(back[1].1, fit[0].1);
+        assert_eq!(back.len(), 1);
+        assert_ne!(back[0].1, fit[0].1);
     }
 }

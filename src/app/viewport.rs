@@ -253,7 +253,11 @@ impl Editor {
                 self.schedule();
             }
         }
-        let Some(texture) = self.preview.texture.clone() else {
+        let region_texture = match self.preview.mode {
+            TextureMode::Region(_) => self.preview.region.clone(),
+            TextureMode::Whole => None,
+        };
+        let Some(texture) = self.preview.texture.clone().or(region_texture.clone()) else {
             self.loading_placeholder(ui, area);
             return;
         };
@@ -261,9 +265,10 @@ impl Editor {
             .document
             .full()
             .map(|im| Geometry::new(im, &self.effective_recipe(), 0));
-        // `rect` is where the whole (cropped) photo sits on screen; the texture,
-        // whole or a 100% region, is drawn at its part of that rectangle, so a
-        // stale texture stays in place (just softer) until the new render lands.
+        // `rect` is where the whole (cropped) photo sits on screen. The last whole-photo
+        // render always fills it, and a 100% region is drawn over its part of it, so
+        // zooming and panning scale images that are already there instead of showing
+        // a stale region alone until the next render lands.
         let now = ui.input(|i| i.time);
         let target = match &geometry {
             Some(g) => self.photo_rect(area, g, ppp),
@@ -298,7 +303,7 @@ impl Editor {
             None => target,
         };
         self.view.shown_rect = Some(rect);
-        let texture_rect = match (self.preview.mode, &geometry) {
+        let region_rect = match (self.preview.mode, &geometry) {
             (TextureMode::Region([x, y, w, h]), Some(g)) => {
                 let at = |px: u32, py: u32| {
                     Pos2::new(
@@ -306,16 +311,18 @@ impl Editor {
                         rect.top() + py as f32 / g.height as f32 * rect.height(),
                     )
                 };
-                Rect::from_min_max(at(x, y), at(x + w, y + h))
+                Some(Rect::from_min_max(at(x, y), at(x + w, y + h)))
             }
-            _ => rect,
+            _ => None,
         };
-        ui.painter().with_clip_rect(area).image(
-            texture.id(),
-            texture_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)),
-            Color32::WHITE,
-        );
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+        let painter = ui.painter().with_clip_rect(area);
+        if self.preview.texture.is_some() {
+            painter.image(texture.id(), rect, uv, Color32::WHITE);
+        }
+        if let (Some(region), Some(at)) = (&region_texture, region_rect) {
+            painter.image(region.id(), at, uv, Color32::WHITE);
+        }
         if self.view.compare {
             let badge =
                 Rect::from_min_size(area.left_top() + Vec2::splat(12.), Vec2::new(62., 25.));
