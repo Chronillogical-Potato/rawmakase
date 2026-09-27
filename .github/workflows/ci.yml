@@ -66,13 +66,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
+      # makepkg rebuilds its source folder, so the build goes to target-arch outside it,
+      # and that and the cargo registry are cached between runs.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ". -> target-arch"
       - name: makepkg (current checkout)
         run: |
           useradd -m builder
-          chown -R builder "$GITHUB_WORKSPACE"
+          mkdir -p "$GITHUB_WORKSPACE/target-arch" "$HOME/.cargo"
+          chown -R builder "$GITHUB_WORKSPACE" "$HOME/.cargo"
+          chmod a+x "$HOME"
           # Build the -git recipe from this checkout rather than the published repository.
           sed -i "s|git+https://github.com/pch/rawmakase.git|git+file://$GITHUB_WORKSPACE|" packaging/rawmakase-git/PKGBUILD
-          su builder -c "git config --global --add safe.directory '*' && cd packaging/rawmakase-git && makepkg --noconfirm"
+          sed -i "s|export CARGO_TARGET_DIR=target|export CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target-arch|" packaging/rawmakase-git/PKGBUILD
+          # The tests already run in the lint job; --nocheck skips a second full build.
+          su builder -c "export CARGO_HOME='$HOME/.cargo' && git config --global --add safe.directory '*' && cd packaging/rawmakase-git && makepkg --noconfirm --nocheck"
           namcap packaging/rawmakase-git/PKGBUILD packaging/rawmakase-git/*.pkg.tar.zst
 
   audit:
