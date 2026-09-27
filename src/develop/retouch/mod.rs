@@ -14,6 +14,7 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub(crate) use heal::profile;
 pub(crate) use layer::{RetouchCache, apply};
 pub use search::find_source;
 

@@ -44,6 +44,16 @@ const FIELDS: &[(&str, usize)] = &[
     ("MONO", 1),
     ("GRAY_MIX", 8),
     ("TONE_ONLY", 1),
+    // Masks (see `masks::local`): how many, weight words per pixel, their deltas.
+    ("MASKS", 1),
+    ("MASK_WORDS", 1),
+    ("MASK_DELTAS", 1),
+    ("EXPOSURE_EV", 1),
+    ("LOCAL_WB", 6),
+    ("LOCAL_TONE", 1),
+    ("LOCAL_FAMILIES", 1),
+    ("LOCAL_KEYS", 2),
+    ("GLOBAL_SH", 2),
 ];
 pub(crate) fn wgsl_prelude() -> String {
     let mut at = 0;
@@ -59,6 +69,9 @@ pub(crate) fn wgsl_prelude() -> String {
 pub(crate) struct PixelParams {
     pub(crate) params: Vec<f32>,
     pub(crate) tables: Vec<f32>,
+    /// Mask weights, four bytes per word, `MASK_WORDS` words per pixel; empty
+    /// without masks.
+    pub(crate) weights: Vec<u32>,
 }
 impl PixelParams {
     fn set(&mut self, name: &str, values: &[f32]) {
@@ -112,11 +125,23 @@ pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
         return None;
     }
     let matrix = profile_matrix(&im.metadata, r);
-    fill(r, CurveSet::for_image(im, r, matrix), matrix)
+    fill(
+        r,
+        CurveSet::for_image(im, r, matrix, masks_need_map(r)),
+        matrix,
+    )
+}
+/// Whether active masks change Shadows or Highlights, which read the map.
+fn masks_need_map(r: &Recipe) -> bool {
+    r.masks
+        .iter()
+        .any(|m| m.is_active() && (m.adjust.shadows != 0. || m.adjust.highlights != 0.))
 }
 /// Whether `r`'s per-pixel stage needs the Shadows/Highlights map of the photo.
 pub(crate) fn needs_map(r: &Recipe) -> bool {
-    r.engine >= 4 && r.reference_curves && (r.shadows != 0. || r.highlights != 0.)
+    r.engine >= 4
+        && r.reference_curves
+        && (r.shadows != 0. || r.highlights != 0. || masks_need_map(r))
 }
 /// Parameters that stop after the tone stage (`tone_stage`, before the map), to tone
 /// the reduced photo the Shadows/Highlights map is built from on the GPU.
@@ -131,6 +156,7 @@ pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
 }
 fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
     p.set("LOCAL", &[1.]);
+    p.set("LOCAL_KEYS", &local.keys);
     p.set("LOCAL_SIZE", &[local.width as f32, local.height as f32]);
     p.set("LOCAL_SCALE", &local.scale);
     let a = p.push(local.a.iter().copied());
@@ -159,6 +185,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     let mut p = PixelParams {
         params: vec![0.; len],
         tables: Vec::new(),
+        weights: Vec::new(),
     };
     p.set("CAMERA", matrix.as_flattened());
     p.set("WB", &r.wb);
@@ -186,6 +213,8 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     let tone = p.push(t.tone.iter().flatten().copied());
     p.set("TONE", &[tone]);
     p.set("TONE_COUNT", &[t.tone.len() as f32]);
+    p.set("EXPOSURE_EV", &[r.exposure + r.camera_exposure]);
+    p.set("GLOBAL_SH", &[r.shadows, r.highlights]);
     if let Some(local) = &lut.local {
         set_local(&mut p, local);
     }
@@ -226,4 +255,46 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("MONO", &[e.monochrome as u8 as f32]);
     p.set("GRAY_MIX", &e.gray_mix);
     Some(p)
+}
+impl PixelParams {
+    /// Adds the masks' weights and adjustments. `false` when the port cannot render
+    /// them: Texture, Clarity, Sharpness and Noise are applied around this stage on
+    /// the CPU, and more masks than the parameters hold.
+    pub(crate) fn set_masks(
+        &mut self,
+        im: Source,
+        r: &Recipe,
+        weights: Option<&crate::develop::masks::MaskWeights>,
+    ) -> bool {
+        use crate::develop::masks::local;
+        let Some(w) = weights else {
+            return true;
+        };
+        let n = w.groups();
+        if n == 0 {
+            return true;
+        }
+        if n > crate::develop::masks::MAX_GROUPS {
+            return false;
+        }
+        let words = n.div_ceil(4);
+        self.set("MASKS", &[n as f32]);
+        self.set("MASK_WORDS", &[words as f32]);
+        let deltas = self.push(w.deltas.iter().flatten().copied());
+        self.set("MASK_DELTAS", &[deltas]);
+        let math = local::LocalMath::new(&im.metadata, r);
+        self.set("LOCAL_WB", math.white_balance.as_flattened());
+        let tone = self.push(crate::develop::basic_tone::gpu_tables());
+        self.set("LOCAL_TONE", &[tone]);
+        let families = self.push(crate::develop::local_tone::gpu_families());
+        self.set("LOCAL_FAMILIES", &[families]);
+        let pixels = w.data.len() / n;
+        self.weights = vec![0; pixels * words];
+        for (i, pixel) in w.data.chunks_exact(n).enumerate() {
+            for (k, v) in pixel.iter().enumerate() {
+                self.weights[i * words + k / 4] |= u32::from(*v) << (8 * (k % 4));
+            }
+        }
+        true
+    }
 }

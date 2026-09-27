@@ -267,7 +267,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     for (i, recipe) in recipes.iter().enumerate() {
         let source = Source::new(&image, (i % 2 == 1).then_some(gain.as_slice()));
         let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
-        let expected = develop_samples(source, recipe, &samples, &cancel)?;
+        let expected = develop_samples(source, recipe, &samples, &cancel, None)?;
         let actual = gpu.develop(&samples, &params, &cancel)?;
         let d: Vec<f32> = actual
             .pixels
@@ -489,5 +489,126 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             assert_eq!(((*tw).max(*th), bytes.len()), (30, (tw * th * 3) as usize));
         }
     }
+    Ok(())
+}
+
+/// Masks on the GPU match the CPU reference: every slider the port renders, with
+/// partial and overlapping weights.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
+    use crate::{
+        camera_profiles::CameraProfile,
+        develop::masks::{LocalAdjust, MaskWeights},
+        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        raw::{CameraImage, Metadata},
+    };
+    use std::sync::Arc;
+    let metadata = Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        width: 64,
+        height: 48,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let wave = |i: usize, k: f32| ((i as f32 * k).sin() * 0.5 + 0.5).powi(2);
+    let image = Arc::new(CameraImage {
+        width: 64,
+        height: 48,
+        pixels: (0..64 * 48)
+            .map(|i| [wave(i, 0.37) * 1.3, wave(i, 0.21), wave(i, 0.13) * 1.1])
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    let n = 4000;
+    let samples = Arc::new(Samples {
+        width: 80,
+        height: 50,
+        pixels: (0..n)
+            .map(|i| [wave(i, 0.71) * 1.4, wave(i, 0.53), wave(i, 0.29) * 1.2])
+            .collect(),
+        positions: (0..n)
+            .map(|i| [(i % 64) as f32, (i / 64 % 48) as f32])
+            .collect(),
+    });
+    let profile = CameraProfile::camera_matrix_default(&metadata).unwrap();
+    let mut r = Recipe {
+        profile: Some(Arc::new(profile)),
+        reference_curves: true,
+        reference_color: true,
+        reference_calibration: true,
+        temperature: 5000.,
+        exposure: 0.3,
+        contrast: 0.2,
+        shadows: 0.2,
+        ..Default::default()
+    };
+    r.masks = vec![Default::default(), Default::default()];
+    let adjust = [
+        LocalAdjust {
+            temperature: 0.4,
+            tint: -0.3,
+            exposure: 0.8,
+            contrast: 0.5,
+            whites: -0.4,
+            blacks: 0.3,
+            dehaze: 0.2,
+            highlights: -0.5,
+            shadows: 0.6,
+            ..Default::default()
+        },
+        LocalAdjust {
+            exposure: -0.6,
+            hue: 40.,
+            saturation: -0.4,
+            color: [0.6, 0.5],
+            ..Default::default()
+        },
+    ];
+    let weights = MaskWeights {
+        deltas: adjust.iter().map(|a| a.delta(0.9)).collect(),
+        data: Arc::new(
+            (0..n)
+                .flat_map(|i| {
+                    [
+                        (i * 7 % 256) as u8,
+                        if i % 3 == 0 { 0 } else { (i * 13 % 256) as u8 },
+                    ]
+                })
+                .collect(),
+        ),
+    };
+    for (m, a) in r.masks.iter_mut().zip(adjust) {
+        m.adjust = a;
+    }
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let source = Source::from(image.as_ref());
+    let mut params = pixel_params(source, &r).expect("GPU port covers this recipe");
+    assert!(params.set_masks(source, &r, Some(&weights)));
+    let expected = develop_samples(source, &r, &samples, &cancel, Some(&weights))?;
+    let actual = gpu.develop(&samples, &params, &cancel)?;
+    let d: Vec<f32> = actual
+        .pixels
+        .iter()
+        .flatten()
+        .zip(expected.pixels.iter().flatten())
+        .map(|(a, b)| (a - b).abs())
+        .collect();
+    let mean = d.iter().sum::<f32>() / d.len() as f32;
+    let max = d.iter().copied().fold(0., f32::max);
+    eprintln!("masks: max {max:.6}, mean {mean:.8}");
+    assert!(max < 2e-3 && mean < 2e-5, "max {max}, mean {mean}");
     Ok(())
 }

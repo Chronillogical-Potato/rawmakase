@@ -22,6 +22,9 @@ const OUTSIDE: f32 = -3e38;
 
 pub(super) struct Developer {
     pub(super) layout: wgpu::BindGroupLayout,
+    /// The layout without the mask weights, for passes that only share the camera
+    /// stage (`logs.wgsl`) and must stay within eight storage buffers.
+    pub(super) camera_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     /// Uploaded sample sets, most recently used first, so switching between Fit and
     /// 100% does not upload again.
@@ -45,7 +48,7 @@ impl Developer {
             label: Some("Develop"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let entries: Vec<_> = (0..6)
+        let entries: Vec<_> = (0..7)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -67,6 +70,10 @@ impl Developer {
             label: Some("Develop buffers"),
             entries: &entries,
         });
+        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Camera stage buffers"),
+            entries: &entries[..6],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Develop layout"),
             bind_group_layouts: &[Some(&layout)],
@@ -82,6 +89,7 @@ impl Developer {
         });
         Self {
             layout,
+            camera_layout,
             pipeline,
             samples: Vec::new(),
         }
@@ -195,6 +203,15 @@ impl Processor {
         };
         let params_buffer = storage("Develop parameters", &params.params);
         let tables = storage("Develop tables", &params.tables);
+        let weights = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Mask weights"),
+            contents: bytemuck::cast_slice(if params.weights.is_empty() {
+                &[0u32; 4]
+            } else {
+                &params.weights[..]
+            }),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let groups = (n as u32).div_ceil(GROUP);
         let max = device.limits().max_compute_workgroups_per_dimension;
         let (gx, gy) = (groups.min(max), groups.div_ceil(groups.min(max)));
@@ -203,14 +220,22 @@ impl Processor {
             contents: bytemuck::cast_slice(&[n as u32, gx, 0, 0]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let entries: Vec<_> = [&pixels, &positions, &output, &params_buffer, &tables, &size]
-            .into_iter()
-            .enumerate()
-            .map(|(binding, buffer)| wgpu::BindGroupEntry {
-                binding: binding as u32,
-                resource: buffer.as_entire_binding(),
-            })
-            .collect();
+        let entries: Vec<_> = [
+            &pixels,
+            &positions,
+            &output,
+            &params_buffer,
+            &tables,
+            &size,
+            &weights,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(binding, buffer)| wgpu::BindGroupEntry {
+            binding: binding as u32,
+            resource: buffer.as_entire_binding(),
+        })
+        .collect();
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Develop bindings"),
             layout: &developer.layout,

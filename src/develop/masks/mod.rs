@@ -4,9 +4,49 @@
 //! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening, so masks
 //! stay on the photo when those change. Sizes are fractions of the long edge.
+mod brush;
+mod eval;
+pub(crate) mod local;
+mod range;
+
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+pub(crate) use brush::Space;
+pub(crate) use eval::{MaskWeights, RasterCache, Selection, Weigher};
+pub(crate) use local::{LocalDelta, LocalMath};
+pub(crate) use range::oklab;
+
+/// Weights (0–1) of mask `index` over a rendered preview, for the mask overlay. `out`
+/// is the render: the whole photo at its own size, or `region` of the full-size
+/// output. Range components read `out`'s colours. `None` when the mask does not exist
+/// or has no components.
+pub fn overlay_weights(
+    image: &crate::raw::CameraImage,
+    recipe: &crate::develop::Recipe,
+    index: usize,
+    out: &crate::develop::Rendered,
+    region: Option<[u32; 4]>,
+) -> Option<Vec<f32>> {
+    recipe
+        .masks
+        .get(index)
+        .filter(|m| !m.components.is_empty())?;
+    let mut g = crate::develop::Geometry::new(image, recipe, 0);
+    let region = match region {
+        Some(r) if r[2] == out.width && r[3] == out.height => r,
+        Some(_) => return None,
+        None => {
+            // The Fit render's pixels cover the whole output at its own size.
+            (g.width, g.height) = (out.width, out.height);
+            [0, 0, out.width, out.height]
+        }
+    };
+    let weigher = Weigher::new(image, &recipe.masks, Selection::One(index), None);
+    let w = weigher.weights(image, recipe, &g, region, Some(out));
+    Some(w.data.iter().map(|v| *v as f32 / 255.).collect())
+}
 
 /// Most masks per photo; the GPU carries one weight byte per mask and pixel.
 pub const MAX_GROUPS: usize = 16;
@@ -294,3 +334,6 @@ pub fn validate(groups: &[MaskGroup]) -> Result<()> {
     ensure!(groups.len() <= MAX_GROUPS, "Too many masks");
     groups.iter().try_for_each(MaskGroup::validate)
 }
+
+#[cfg(test)]
+mod tests;

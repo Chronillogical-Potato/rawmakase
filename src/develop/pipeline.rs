@@ -1,3 +1,7 @@
+use super::masks::{
+    LocalDelta, LocalMath, MaskWeights,
+    local::{self, slot},
+};
 use super::{Geometry, Recipe, Rendered, mul, srgb_encode};
 use crate::color_math::srgb_decode;
 use crate::{
@@ -6,6 +10,7 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
+use std::sync::Arc;
 fn srgb_to_lab(p: [f32; 3]) -> [f32; 3] {
     let a = mul(
         [
@@ -85,6 +90,12 @@ pub(crate) fn profile_matrix(m: &Metadata, r: &Recipe) -> [[f32; 3]; 3] {
         .filter(|_| r.engine >= 3)
         .map_or(m.matrix, |p| p.camera_matrix(r.temperature))
 }
+/// A pixel's mask adjustments and the render's constants for them.
+#[derive(Clone, Copy)]
+pub(crate) struct Local<'a> {
+    pub(crate) delta: &'a LocalDelta,
+    pub(crate) math: &'a LocalMath,
+}
 fn process_pixel(
     p: [f32; 3],
     m: &Metadata,
@@ -92,16 +103,28 @@ fn process_pixel(
     lut: &CurveSet,
     matrix: [[f32; 3]; 3],
     pos: [f32; 2],
+    local: Option<Local>,
 ) -> [f32; 3] {
-    let (rgb, clipped_chroma) = tone_stage(p, m, r, lut, matrix);
+    let (rgb, clipped_chroma) = tone_stage(p, m, r, lut, matrix, local);
     let rgb = match &lut.local {
-        Some(local) => {
-            let gain = local.gain(pos[0], pos[1], rgb);
+        Some(map) => {
+            let sliders = local
+                .filter(|l| local::uses(l.delta, &[slot::SHADOWS, slot::HIGHLIGHTS]))
+                .map(|l| {
+                    [
+                        r.shadows + l.delta[slot::SHADOWS],
+                        r.highlights + l.delta[slot::HIGHLIGHTS],
+                    ]
+                });
+            let gain = match sliders {
+                Some(sliders) => map.gain_with(pos[0], pos[1], rgb, sliders),
+                None => map.gain(pos[0], pos[1], rgb),
+            };
             rgb.map(|v| v * gain)
         }
         None => rgb,
     };
-    color_stage(rgb, clipped_chroma, r, lut)
+    color_stage(rgb, clipped_chroma, r, lut, local.map(|l| l.delta))
 }
 /// Camera sample to linear display RGB after the camera profile's tone curve, plus the
 /// legacy clipped-highlight chroma factor.
@@ -111,6 +134,7 @@ fn tone_stage(
     r: &Recipe,
     lut: &CurveSet,
     matrix: [[f32; 3]; 3],
+    local: Option<Local>,
 ) -> ([f32; 3], f32) {
     let sensor_peak = (0..3)
         .map(|c| p[c] / m.wb[c].max(0.001))
@@ -120,7 +144,8 @@ fn tone_stage(
     } else {
         1.
     };
-    let p = std::array::from_fn(|c| p[c] * r.wb[c]);
+    let wb = local.map_or([1.; 3], |l| l.math.white_balance_gain(l.delta));
+    let p = std::array::from_fn(|c| p[c] * r.wb[c] * wb[c]);
     let color = r.profile.as_ref().filter(|_| r.engine >= 3).map_or_else(
         || mul(matrix, p),
         |profile| profile.camera_color(p, matrix, r.temperature),
@@ -132,9 +157,23 @@ fn tone_stage(
     } else {
         color
     };
-    let mut rgb = mul(TO_2020, color).map(|v| v * lut.exposure_gain);
+    let exposure = local.map_or(0., |l| l.delta[slot::EXPOSURE]);
+    let mut rgb = mul(TO_2020, color).map(|v| v * lut.exposure_gain * exposure.exp2());
+    if let Some(l) = local {
+        for (c, v) in rgb.iter_mut().enumerate() {
+            *v *= l.delta[slot::COLOR + c].exp2();
+        }
+    }
     if let Some(ramp) = &lut.black_ramp {
-        rgb = rgb.map(|v| ramp.eval(v));
+        if exposure != 0. {
+            // The ramp's black point follows exposure, as for the global slider.
+            let ramp = ExposureRamp::new(
+                DNG_SHADOWS_BLACK * (r.exposure + r.camera_exposure + exposure).exp2(),
+            );
+            rgb = rgb.map(|v| ramp.eval(v));
+        } else {
+            rgb = rgb.map(|v| ramp.eval(v));
+        }
     }
     // Engine 4 renders Dehaze as a measured curve in `apply_reference_curves`.
     if r.effects.dehaze != 0. && !lut.basic_curves {
@@ -183,9 +222,15 @@ fn tone_stage(
     (rgb, clipped_chroma)
 }
 /// Basic curves, point curves, color controls and output encoding.
-fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -> [f32; 3] {
+fn color_stage(
+    rgb: [f32; 3],
+    clipped_chroma: f32,
+    r: &Recipe,
+    lut: &CurveSet,
+    local: Option<&LocalDelta>,
+) -> [f32; 3] {
     let rgb = if r.reference_curves {
-        apply_reference_curves(rgb, r, lut)
+        apply_reference_curves(rgb, r, lut, local)
     } else if r.wide_gamut_curves {
         let p =
             mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| v.clamp(0., 1.).powf(1. / 2.2));
@@ -201,6 +246,9 @@ fn color_stage(rgb: [f32; 3], clipped_chroma: f32, r: &Recipe, lut: &CurveSet) -
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let mut lab = srgb_to_lab(rgb);
+    if let Some(d) = local {
+        lab = local::hue_saturation(d, lab);
+    }
     lab[1] *= clipped_chroma;
     lab[2] *= clipped_chroma;
     if lut.color_adjustments {
@@ -326,14 +374,18 @@ struct CurveSet {
     channels: [CurveLut; 3],
 }
 impl CurveSet {
-    /// Curves plus, for engine 4, the Shadows/Highlights map of this image.
-    fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> Self {
+    /// Curves plus, for engine 4, the Shadows/Highlights map of this image; built
+    /// also when `local_tone` (masks change Shadows or Highlights).
+    fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3], local_tone: bool) -> Self {
         let mut lut = Self::new(r);
         if lut.basic_curves {
-            let local =
-                crate::develop::local_tone::LocalToneMap::build(im, r.shadows, r.highlights, |p| {
-                    tone_stage(p, &im.metadata, r, &lut, matrix).0
-                });
+            let local = crate::develop::local_tone::LocalToneMap::build(
+                im,
+                r.shadows,
+                r.highlights,
+                local_tone,
+                |p| tone_stage(p, &im.metadata, r, &lut, matrix, None).0,
+            );
             lut.local = local;
         }
         lut
@@ -377,9 +429,18 @@ impl CurveSet {
         }
     }
 }
-fn apply_reference_curves(rgb: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f32; 3] {
+fn apply_reference_curves(
+    rgb: [f32; 3],
+    r: &Recipe,
+    lut: &CurveSet,
+    local: Option<&LocalDelta>,
+) -> [f32; 3] {
     let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| srgb_encode(v.clamp(0., 1.)));
     let p = lut.basic.as_ref().map_or(p, |b| b.apply(p));
+    let p = match local {
+        Some(d) if local::uses(d, &local::TONE_SLOTS) => local::tone(d, p),
+        _ => p,
+    };
     let contrast = if lut.basic_curves { 0. } else { r.contrast };
     let p = p.map(|v| {
         let x = ((v - r.black_point) / (r.white_point - r.black_point))
@@ -464,6 +525,8 @@ impl<'a> From<&'a CameraImage> for Source<'a> {
 /// A camera image and its local-tone gain, as the pixel stages take them.
 pub(crate) struct Toned {
     pub(crate) image: std::sync::Arc<CameraImage>,
+    /// The image's size relative to the full-resolution photo.
+    pub(crate) scale: f32,
     pub(crate) gain: Option<std::sync::Arc<Vec<f32>>>,
     /// What the gain was computed from, when it came from the stage cache.
     pub(crate) gain_key: Option<super::stage_cache::LocalKey>,
@@ -872,8 +935,9 @@ pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<R
     }
     crate::develop::quality::render(im, r, 0, Some(region))
 }
-/// Unsharpened render of `region` of the output described by `g`. A `spread` above
-/// zero averages each sample over a footprint (see [`footprint_spread`]).
+/// Unsharpened render of `region` of the output described by `g`, and the mask weights
+/// the finishing stages need. A `spread` above zero averages each sample over a
+/// footprint (see [`footprint_spread`]).
 ///
 /// With a `cache`, the geometry, lens-warp and noise-reduction samples are kept, so a
 /// following render that only changes color and tone reruns the per-pixel stage alone.
@@ -886,26 +950,67 @@ pub(crate) fn render_base(
     spread: f32,
     cancel: &std::sync::atomic::AtomicBool,
     stages: Option<&mut super::preview_renderer::Stages>,
-) -> Result<Rendered> {
+) -> Result<(Rendered, Option<Arc<MaskWeights>>)> {
     let mut base = r.clone();
     base.sharpening = 0.;
     let im = toned.source();
+    let masked = base.masks.iter().any(super::masks::MaskGroup::is_active);
     let Some(stages) = stages else {
-        return render_region_inner(im, &base, g, region, spread, cancel);
+        if !masked {
+            return Ok((
+                render_region_inner(im, &base, g, region, spread, cancel)?,
+                None,
+            ));
+        }
+        base.validate()?;
+        let samples = Arc::new(sample_region(im, &base, g, region, spread, cancel)?);
+        let weights = mask_weights(
+            toned,
+            &base,
+            g,
+            region,
+            spread,
+            Some(&samples),
+            None,
+            cancel,
+        )?;
+        let samples = detail(toned, &base, samples, weights.as_deref(), None, cancel)?;
+        let out = develop_samples(im, &base, &samples, cancel, weights.as_deref())?;
+        return Ok((out, weights));
     };
     base.validate()?;
     let key = super::stage_cache::SampleKey::new(toned, &base, g, region, spread);
     let samples = stages.cache.samples.get_or_try(key, Samples::bytes, || {
         sample_region(im, &base, g, region, spread, cancel)
     })?;
+    let weights = mask_weights(
+        toned,
+        &base,
+        g,
+        region,
+        spread,
+        Some(&samples),
+        Some(&mut *stages),
+        cancel,
+    )?;
+    let samples = detail(
+        toned,
+        &base,
+        samples,
+        weights.as_deref(),
+        Some(&mut *stages.cache),
+        cancel,
+    )?;
     let backend = &mut *stages.backend;
     if backend.has_gpu()
-        && let Some(params) = pixel_params::pixel_params(im, &base)
+        && let Some(mut params) = pixel_params::pixel_params(im, &base)
+        && params.set_masks(im, &base, weights.as_deref())
         && let Some(out) = backend.develop(&samples, &params, cancel)
     {
-        return Ok(out);
+        return Ok((out, weights));
     }
-    develop_samples(im, &base, &samples, cancel)
+    let out = develop_samples(im, &base, &samples, cancel, weights.as_deref())?;
+    Ok((out, weights))
 }
 /// As [`render_base`] followed by sharpening, spatial effects and display, all on the
 /// GPU into a texture for the stages' display. `None` without a GPU or display, or when
@@ -932,16 +1037,143 @@ pub(crate) fn render_display(
     base.sharpening = 0.;
     base.validate()?;
     let im = toned.source();
-    let Some(params) = gpu_pixel_params(im, &base, stages.backend, cancel) else {
+    let Some(mut params) = gpu_pixel_params(im, &base, stages.backend, cancel) else {
         return Ok(None);
     };
     let key = super::stage_cache::SampleKey::new(toned, &base, g, region, spread);
     let samples = stages.cache.samples.get_or_try(key, Samples::bytes, || {
         sample_region(im, &base, g, region, spread, cancel)
     })?;
+    let weights = mask_weights(
+        toned,
+        &base,
+        g,
+        region,
+        spread,
+        Some(&samples),
+        Some(&mut *stages),
+        cancel,
+    )?;
+    // Local Sharpness and Noise finish on the CPU.
+    if weights
+        .as_ref()
+        .is_some_and(|w| w.uses(&[slot::SHARPNESS, slot::NOISE]))
+        || !params.set_masks(im, &base, weights.as_deref())
+    {
+        return Ok(None);
+    }
+    let samples = detail(
+        toned,
+        &base,
+        samples,
+        weights.as_deref(),
+        Some(&mut *stages.cache),
+        cancel,
+    )?;
     Ok(stages
         .backend
         .present(&samples, &params, finished, finish, display, cancel))
+}
+/// Weights of the recipe's active masks over `region` of `g`, rendered from `toned`'s
+/// image, through the stage cache when there is one. Range components first develop
+/// `samples` without local adjustments; without samples they cannot be evaluated and
+/// the result is `None`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mask_weights(
+    toned: &Toned,
+    r: &Recipe,
+    g: &Geometry,
+    region: [u32; 4],
+    spread: f32,
+    samples: Option<&Arc<Samples>>,
+    stages: Option<&mut super::preview_renderer::Stages>,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Option<Arc<MaskWeights>>> {
+    use super::masks::{Selection, Weigher};
+    if !r.masks.iter().any(super::masks::MaskGroup::is_active) {
+        return Ok(None);
+    }
+    let ranges = r
+        .masks
+        .iter()
+        .any(|m| m.is_active() && m.components.iter().any(|c| c.shape.is_range()));
+    let key = super::stage_cache::MaskKey::new(toned, r, g, region, spread, ranges);
+    let mut stages = stages;
+    if let Some(s) = stages.as_deref_mut()
+        && let Some(hit) = s.cache.masks.get(&key)
+    {
+        return Ok(Some(Arc::new(hit.with_deltas(&r.masks))));
+    }
+    let weigher = Weigher::new(
+        &toned.image,
+        &r.masks,
+        Selection::Active,
+        stages.as_deref_mut().map(|s| &mut s.cache.rasters),
+    );
+    let global = if weigher.needs_range() {
+        let Some(samples) = samples else {
+            return Ok(None);
+        };
+        let mut plain = r.clone();
+        plain.masks.clear();
+        let im = toned.source();
+        let gpu = stages.as_deref_mut().and_then(|s| {
+            let params = pixel_params::pixel_params(im, &plain)?;
+            s.backend.develop(samples, &params, cancel)
+        });
+        Some(match gpu {
+            Some(out) => out,
+            None => develop_samples(im, &plain, samples, cancel, None)?,
+        })
+    } else {
+        None
+    };
+    ensure!(
+        !cancel.load(std::sync::atomic::Ordering::Relaxed),
+        "Render superseded"
+    );
+    let weights = Arc::new(weigher.weights(&toned.image, r, g, region, global.as_ref()));
+    if let Some(s) = stages {
+        s.cache.masks.insert(key, weights.clone(), weights.bytes());
+    }
+    Ok(Some(weights))
+}
+/// Local Texture and Clarity: the samples scaled by the local-contrast detail of the
+/// camera image at their positions, as the global sliders' gain does.
+fn detail(
+    toned: &Toned,
+    r: &Recipe,
+    samples: Arc<Samples>,
+    weights: Option<&MaskWeights>,
+    cache: Option<&mut super::stage_cache::StageCache>,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Arc<Samples>> {
+    let Some(weights) = weights.filter(|w| w.uses(&[slot::TEXTURE, slot::CLARITY])) else {
+        return Ok(samples);
+    };
+    let texture = weights.uses(&[slot::TEXTURE]);
+    let blurs = super::quality::blurs(&toned.image, r, toned.scale, texture, cache, cancel)?;
+    let exposure = r.exposure + r.camera_exposure;
+    let (w, h) = (toned.image.width as usize, toned.image.height as usize);
+    let mut out = Samples {
+        width: samples.width,
+        height: samples.height,
+        pixels: samples.pixels.clone(),
+        positions: samples.positions.clone(),
+    };
+    out.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
+        let Some(d) = weights.delta(i) else {
+            return;
+        };
+        let (clarity, tex) = (d[slot::CLARITY], d[slot::TEXTURE]);
+        let [x, y] = samples.positions[i];
+        if (clarity == 0. && tex == 0.) || x.is_nan() {
+            return;
+        }
+        let gain = blurs.detail_gain(x, y, w, h, exposure, clarity, tex);
+        *p = p.map(|v| v * gain);
+    });
+    Ok(Arc::new(out))
 }
 /// Camera samples of an output region after geometry, lens correction and noise
 /// reduction, with their source positions; `NAN` positions lie outside the photo.
@@ -1006,25 +1238,34 @@ fn sample_region(
         positions,
     })
 }
-/// The per-pixel color and tone stage over prepared samples.
+/// The per-pixel color and tone stage over prepared samples, with the masks'
+/// adjustments where `weights` has them.
 pub(crate) fn develop_samples(
     im: Source,
     r: &Recipe,
     samples: &Samples,
     cancel: &std::sync::atomic::AtomicBool,
+    weights: Option<&MaskWeights>,
 ) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im, r, matrix);
+    let local_tone = weights.is_some_and(|w| w.uses(&[slot::SHADOWS, slot::HIGHLIGHTS]));
+    let lut = CurveSet::for_image(im, r, matrix, local_tone);
+    let math = weights.map(|_| LocalMath::new(&im.metadata, r));
     let mut pixels = vec![[0.; 3]; samples.pixels.len()];
     pixels.par_iter_mut().enumerate().for_each(|(i, out)| {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
         let pos = samples.positions[i];
+        let delta = weights.and_then(|w| w.delta(i));
+        let local = delta
+            .as_ref()
+            .zip(math.as_ref())
+            .map(|(delta, math)| Local { delta, math });
         *out = if pos[0].is_nan() {
             [1.; 3]
         } else {
-            process_pixel(samples.pixels[i], &im.metadata, r, &lut, matrix, pos)
+            process_pixel(samples.pixels[i], &im.metadata, r, &lut, matrix, pos, local)
         };
     });
     ensure!(
@@ -1044,7 +1285,7 @@ pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rend
 }
 fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im.into(), r, matrix);
+    let lut = CurveSet::for_image(im.into(), r, matrix, false);
     let full_geometry = Geometry::new(im, r, 0);
     if max_edge > 0 && full_geometry.width.max(full_geometry.height) > max_edge {
         let mut base = r.clone();
@@ -1097,7 +1338,7 @@ fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Re
             Some(w) => w.sample(im.into(), sx, sy, r, 0.),
             None => detail_sample(im.into(), sx, sy, r),
         };
-        *out = process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy]);
+        *out = process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy], None);
     });
     sharpen(&mut pixels, g.width, g.height, r.sharpening);
     Ok(Rendered {
@@ -1157,7 +1398,7 @@ fn render_region_inner(
 ) -> Result<Rendered> {
     r.validate()?;
     let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im, r, matrix);
+    let lut = CurveSet::for_image(im, r, matrix, false);
     let [x0, y0, w, h] = region;
     ensure!(
         w > 0
@@ -1180,7 +1421,7 @@ fn render_region_inner(
             Some(w) => w.sample(im, sx, sy, r, spread),
             None => footprint_sample(im, sx, sy, r, spread),
         };
-        process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy])
+        process_pixel(p, &im.metadata, r, &lut, matrix, [sx, sy], None)
     };
     pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {

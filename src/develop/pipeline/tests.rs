@@ -1,7 +1,15 @@
 use super::*;
 use crate::develop::curve::ToneCurve;
 fn adjust(p: [f32; 3], m: &Metadata, r: &Recipe) -> [f32; 3] {
-    process_pixel(p, m, r, &CurveSet::new(r), profile_matrix(m, r), [0., 0.])
+    process_pixel(
+        p,
+        m,
+        r,
+        &CurveSet::new(r),
+        profile_matrix(m, r),
+        [0., 0.],
+        None,
+    )
 }
 fn fixture() -> CameraImage {
     let m = Metadata {
@@ -166,8 +174,8 @@ fn point_curves_match_lightroom_ramp_references() {
                 continue;
             }
             let input = sample[0].map(|v| srgb_decode(v as f32 / 65535.));
-            let actual =
-                apply_reference_curves(input, recipe, &lut).map(|v| srgb_encode(v).clamp(0., 1.));
+            let actual = apply_reference_curves(input, recipe, &lut, None)
+                .map(|v| srgb_encode(v).clamp(0., 1.));
             for (a, expected) in actual.into_iter().zip(sample[case + 1]) {
                 let error = (a - expected as f32 / 65535.).abs();
                 sum += error;
@@ -381,8 +389,24 @@ fn neutral_color_fast_path_matches_general_processing() {
                     ((i / 16) % 16) as f32 / 8.,
                     (i / 256) as f32 / 8.,
                 ];
-                let a = process_pixel(p, &metadata, &recipe, &fast, metadata.matrix, [0., 0.]);
-                let b = process_pixel(p, &metadata, &recipe, &general, metadata.matrix, [0., 0.]);
+                let a = process_pixel(
+                    p,
+                    &metadata,
+                    &recipe,
+                    &fast,
+                    metadata.matrix,
+                    [0., 0.],
+                    None,
+                );
+                let b = process_pixel(
+                    p,
+                    &metadata,
+                    &recipe,
+                    &general,
+                    metadata.matrix,
+                    [0., 0.],
+                    None,
+                );
                 for c in 0..3 {
                     assert!(
                         (a[c] - b[c]).abs() < 2e-5,

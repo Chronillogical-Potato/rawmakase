@@ -27,6 +27,10 @@ pub(crate) struct StageCache {
     pub(crate) local: Lru<LocalKey, Vec<f32>>,
     pub(crate) samples: Lru<SampleKey, Samples>,
     pub(crate) reduced: Lru<ReducedKey, CameraImage>,
+    /// Mask weights of a region.
+    pub(crate) masks: Lru<MaskKey, super::masks::MaskWeights>,
+    /// Brush masks rasterised in image space.
+    pub(crate) rasters: super::masks::RasterCache,
 }
 
 pub(crate) struct Lru<K, V> {
@@ -63,6 +67,24 @@ impl<K: PartialEq, V> Lru<K, V> {
             }
         }
         Ok(value)
+    }
+    /// The value for `key`, made most recently used.
+    pub(crate) fn get(&mut self, key: &K) -> Option<Arc<V>> {
+        let i = self.entries.iter().position(|(k, ..)| k == key)?;
+        let entry = self.entries.remove(i);
+        let value = entry.1.clone();
+        self.entries.insert(0, entry);
+        Some(value)
+    }
+    pub(crate) fn insert(&mut self, key: K, value: Arc<V>, size: usize) {
+        if size <= BUDGET {
+            self.entries.retain(|(k, ..)| *k != key);
+            self.entries.insert(0, (key, value, size));
+            self.entries.truncate(ENTRIES);
+            while self.entries.iter().map(|e| e.2).sum::<usize>() > BUDGET {
+                self.entries.pop();
+            }
+        }
     }
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
@@ -203,6 +225,40 @@ impl SampleKey {
                 },
                 ..Default::default()
             },
+        }
+    }
+}
+
+/// Mask weights of a region: where its samples come from, and the shapes of the
+/// masks that render (not their sliders, which apply later). Range components read
+/// the developed colours, so then the rest of the recipe counts too.
+#[derive(PartialEq)]
+pub(crate) struct MaskKey {
+    samples: SampleKey,
+    masks: Vec<(Vec<super::masks::MaskComponent>, bool)>,
+    recipe: Option<Recipe>,
+}
+impl MaskKey {
+    pub(crate) fn new(
+        toned: &Toned,
+        r: &Recipe,
+        g: &Geometry,
+        region: [u32; 4],
+        spread: f32,
+        ranges: bool,
+    ) -> Self {
+        Self {
+            samples: SampleKey::new(toned, r, g, region, spread),
+            masks: r
+                .masks
+                .iter()
+                .filter(|m| m.is_active())
+                .map(|m| (m.components.clone(), m.invert))
+                .collect(),
+            recipe: ranges.then(|| Recipe {
+                masks: Vec::new(),
+                ..r.clone()
+            }),
         }
     }
 }

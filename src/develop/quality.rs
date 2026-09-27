@@ -1,4 +1,5 @@
 //! Full-resolution detail processing shared by Fit, 100% regions and exports.
+use crate::develop::masks::{MaskWeights, local::slot};
 use crate::develop::{
     pipeline::Toned,
     preview_renderer::Stages,
@@ -80,10 +81,15 @@ pub fn resize(image: Rendered, max_edge: u32) -> Rendered {
 }
 #[cfg(test)]
 pub(super) fn sharpen(im: &mut Rendered, r: &Recipe) {
-    sharpen_cancellable(im, r, &AtomicBool::new(false)).unwrap();
+    sharpen_cancellable(im, r, None, &AtomicBool::new(false)).unwrap();
 }
-fn sharpen_cancellable(im: &mut Rendered, r: &Recipe, cancel: &AtomicBool) -> Result<()> {
-    sharpen_with_radius(im, r, r.sharpening_radius, cancel)
+fn sharpen_cancellable(
+    im: &mut Rendered,
+    r: &Recipe,
+    local: Option<&MaskWeights>,
+    cancel: &AtomicBool,
+) -> Result<()> {
+    sharpen_with_radius(im, r, r.sharpening_radius, local, cancel)
 }
 /// Normalized Gaussian taps. Below half a pixel, which only scaled previews use, a
 /// sampled Gaussian degenerates to a single tap; three taps with the same variance
@@ -100,14 +106,17 @@ pub(crate) fn gaussian(sigma: f32) -> (i32, Vec<f32>) {
     let sum: f32 = weights.iter().sum();
     (radius, weights.into_iter().map(|x| x / sum).collect())
 }
+/// Sharpening; masks' Sharpness adds to the amount per pixel, and below zero softens.
 fn sharpen_with_radius(
     im: &mut Rendered,
     r: &Recipe,
     sigma: f32,
+    local: Option<&MaskWeights>,
     cancel: &AtomicBool,
 ) -> Result<()> {
     check_cancel(cancel)?;
-    if r.sharpening == 0. {
+    let local = local.filter(|w| w.uses(&[slot::SHARPNESS]));
+    if r.sharpening == 0. && local.is_none() {
         return Ok(());
     }
     let (radius, weights) = gaussian(sigma);
@@ -138,6 +147,10 @@ fn sharpen_with_radius(
             blur += horizontal[yy * w + x] * weight;
         }
         let d = lum[i] - blur;
+        let amount = r.sharpening
+            + local
+                .and_then(|w| w.delta(i))
+                .map_or(0., |d| d[slot::SHARPNESS]);
         // Edge mask suppresses sharpening of smooth areas; Detail admits finer texture.
         let threshold = r.sharpening_masking * 0.03 * (1. - r.sharpening_detail * 0.8);
         let mask = if threshold == 0. {
@@ -145,13 +158,52 @@ fn sharpen_with_radius(
         } else {
             (d.abs() / threshold).clamp(0., 1.)
         };
-        let delta = (d * r.sharpening * 2. * mask).clamp(-0.08, 0.08);
+        let delta = if amount >= 0. {
+            (d * amount * 2. * mask).clamp(-0.08, 0.08)
+        } else {
+            // Negative local Sharpness blurs toward the Gaussian.
+            -d * (-amount).min(1.)
+        };
         // Add only luminance detail, preserving inter-channel differences.
         for v in p {
             *v = (*v + delta).clamp(0., 1.);
         }
     });
     check_cancel(cancel)
+}
+/// Masks' Noise: an edge-aware 5×5 average blended in by the pixel's amount (0–1).
+/// Negative values have no effect.
+fn local_noise(im: &mut Rendered, local: Option<&MaskWeights>) {
+    let Some(weights) = local.filter(|w| w.uses(&[slot::NOISE])) else {
+        return;
+    };
+    let src = im.pixels.clone();
+    let (w, h) = (im.width as i32, im.height as i32);
+    im.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
+        let Some(amount) = weights
+            .delta(i)
+            .map(|d| d[slot::NOISE].clamp(0., 1.))
+            .filter(|a| *a > 0.)
+        else {
+            return;
+        };
+        let (x, y) = (i as i32 % w, i as i32 / w);
+        let center = luminance(src[i]);
+        let (mut sum, mut total) = ([0.; 3], 0.);
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                let q = src[((y + dy).clamp(0, h - 1) * w + (x + dx).clamp(0, w - 1)) as usize];
+                let k = 1. / (1. + (luminance(q) - center).powi(2) / 0.0004);
+                for c in 0..3 {
+                    sum[c] += q[c] * k;
+                }
+                total += k;
+            }
+        }
+        for c in 0..3 {
+            p[c] += (sum[c] / total - p[c]) * amount;
+        }
+    });
 }
 /// Neighborhood-ratio reconstruction in camera space, before color conversion.
 /// Fully clipped neighborhoods have no recoverable color and use a neutral fallback.
@@ -285,6 +337,58 @@ pub(crate) struct LocalBlurs {
 impl LocalBlurs {
     fn bytes(&self) -> usize {
         (self.logs.len() * 3 + self.texture.as_ref().map_or(0, Vec::len)) * 4
+    }
+    /// The gain local Clarity and Texture give a sample at (`x`, `y`) of the `w` × `h`
+    /// image the blurs were made from: the global sliders' formula (`apply_local`) on
+    /// the blurs interpolated there.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn detail_gain(
+        &self,
+        x: f32,
+        y: f32,
+        w: usize,
+        h: usize,
+        exposure: f32,
+        clarity: f32,
+        texture: f32,
+    ) -> f32 {
+        let fx = x.clamp(0., (w - 1) as f32);
+        let fy = y.clamp(0., (h - 1) as f32);
+        let (ix, iy) = (fx as usize, fy as usize);
+        let (jx, jy) = ((ix + 1).min(w - 1), (iy + 1).min(h - 1));
+        let (tx, ty) = (fx - ix as f32, fy - iy as f32);
+        let at = |v: &[f32]| {
+            (v[iy * w + ix] * (1. - tx) + v[iy * w + jx] * tx) * (1. - ty)
+                + (v[jy * w + ix] * (1. - tx) + v[jy * w + jx] * tx) * ty
+        };
+        let raw = at(&self.logs);
+        let logs = raw + exposure;
+        let d = at(&self.fine) + exposure - logs;
+        let fine = logs + d / (1. + d * d);
+        let clarity = (logs - fine).clamp(-1., 1.) * clarity * 0.6;
+        let texture = self
+            .texture
+            .as_ref()
+            .map_or(0., |t| (raw - at(t)).clamp(-0.5, 0.5) * texture * 0.7);
+        (clarity + texture).exp2()
+    }
+}
+/// The local-tone blurs of `im`, through the stage cache when there is one.
+pub(crate) fn blurs(
+    im: &Arc<CameraImage>,
+    r: &Recipe,
+    scale: f32,
+    texture: bool,
+    cache: Option<&mut StageCache>,
+    cancel: &AtomicBool,
+) -> Result<Arc<LocalBlurs>> {
+    match cache {
+        Some(cache) => cache.blurs.get_or_try(
+            BlurKey::new(im, r, scale, texture),
+            LocalBlurs::bytes,
+            || local_blurs(im, r, scale, texture, cancel),
+        ),
+        None => Ok(Arc::new(local_blurs(im, r, scale, texture, cancel)?)),
     }
 }
 /// `scale` is the image's size relative to the full-resolution photo; radii given in
@@ -435,6 +539,7 @@ fn local_stage(
     }
     let mut toned = Toned {
         image: im.clone(),
+        scale,
         gain: None,
         gain_key: None,
         reduced: None,
@@ -532,11 +637,23 @@ fn render_resident(
     if !develop::pipeline::pixel_params::supported(&base) {
         return Ok(None);
     }
+    // Masks whose ranges need developed colours, whose detail changes the samples or
+    // whose finish runs on the CPU take the CPU sampling path.
+    if base.masks.iter().filter(|m| m.is_active()).any(|m| {
+        let a = &m.adjust;
+        m.components.iter().any(|c| c.shape.is_range())
+            || [a.texture, a.clarity, a.sharpness, a.noise]
+                .iter()
+                .any(|v| *v != 0.)
+    }) {
+        return Ok(None);
+    }
     let mut spatial = base.clone();
     spatial.shadows = 0.;
     spatial.highlights = 0.;
     let mut toned = Toned {
         image: source.clone(),
+        scale,
         gain: None,
         gain_key: None,
         reduced: None,
@@ -608,11 +725,24 @@ fn render_resident(
         };
         toned.reduced = Some(reduced);
     }
-    let Some(params) =
+    let Some(mut params) =
         develop::pipeline::gpu_pixel_params(toned.source(), &base, stages.backend, cancel)
     else {
         return Ok(None);
     };
+    let weights = develop::pipeline::mask_weights(
+        &toned,
+        &base,
+        g,
+        region,
+        spread,
+        None,
+        Some(&mut *stages),
+        cancel,
+    )?;
+    if !params.set_masks(toned.source(), &base, weights.as_deref()) {
+        return Ok(None);
+    }
     let key = develop::stage_cache::SampleKey::new(&toned, &base, g, region, spread);
     let mut sampling = vec![0f32; develop::gpu::SAMPLE_HEADER];
     let [x0, y0, w, h] = region;
@@ -758,7 +888,7 @@ pub(crate) fn render_level(
     if let Some(frame) = frame {
         return Ok(Output::Frame(Box::new(frame)));
     }
-    let mut out = develop::render_base(
+    let (mut out, weights) = develop::render_base(
         &toned,
         &tonal_recipe,
         &g,
@@ -767,7 +897,8 @@ pub(crate) fn render_level(
         cancel,
         Some(stages),
     )?;
-    sharpen_with_radius(&mut out, r, sigma, cancel)?;
+    sharpen_with_radius(&mut out, r, sigma, weights.as_deref(), cancel)?;
+    local_noise(&mut out, weights.as_deref());
     crate::develop::effects::spatial_finish_scaled(
         &mut out,
         r,
@@ -907,7 +1038,7 @@ pub(crate) fn render_preview(
             return Ok(Output::Frame(Box::new(frame)));
         }
     }
-    let mut out = develop::render_base(
+    let (mut out, weights) = develop::render_base(
         &toned,
         &tonal_recipe,
         &g,
@@ -916,8 +1047,13 @@ pub(crate) fn render_preview(
         cancel,
         stages.as_deref_mut(),
     )?;
-    let spatial =
-        r.effects.grain != 0. || r.effects.vignette != 0. || r.effects.lens_vignette != 0.;
+    let local_finish = weights
+        .as_ref()
+        .is_some_and(|w| w.uses(&[slot::SHARPNESS, slot::NOISE]));
+    let spatial = r.effects.grain != 0.
+        || r.effects.vignette != 0.
+        || r.effects.lens_vignette != 0.
+        || local_finish;
     let mut gpu_sharpened = false;
     let edge = if region.is_some() { 0 } else { max_edge };
     if !spatial
@@ -936,7 +1072,8 @@ pub(crate) fn render_preview(
         "Render superseded"
     );
     if !gpu_sharpened {
-        sharpen_cancellable(&mut out, r, cancel)?;
+        sharpen_cancellable(&mut out, r, weights.as_deref(), cancel)?;
+        local_noise(&mut out, weights.as_deref());
     }
     crate::develop::effects::spatial_finish(&mut out, r, [left, top], [g.width, g.height]);
     ensure!(

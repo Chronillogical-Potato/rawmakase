@@ -51,6 +51,26 @@ impl BasicTone {
     }
 }
 
+/// Dehaze → Contrast → Whites → Blacks at `x`, without `BasicTone`'s table and
+/// monotone clean-up: the local adjustments evaluate it per pixel.
+pub(crate) fn compose(contrast: f32, whites: f32, blacks: f32, dehaze: f32, x: f32) -> f32 {
+    let x = slider(&DEHAZE_VALUES, &DEHAZE, dehaze, x);
+    let x = slider(&SLIDER_VALUES, &CONTRAST, contrast, x);
+    let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
+    slider(&SLIDER_VALUES, &BLACKS, blacks, x)
+}
+/// The measured tables in the order `develop.wgsl`'s local curves read them: Dehaze,
+/// Contrast, Whites, Blacks, each 6 × 64 values, then the slider positions (Dehaze's,
+/// then the others').
+pub(crate) fn gpu_tables() -> Vec<f32> {
+    let mut out: Vec<f32> = [&DEHAZE, &CONTRAST, &WHITES, &BLACKS]
+        .into_iter()
+        .flat_map(|t| t.iter().flatten().copied())
+        .collect();
+    out.extend(DEHAZE_VALUES);
+    out.extend(SLIDER_VALUES);
+    out
+}
 /// One measured table: curve for slider `s` at input `x`.
 fn slider(values: &[f32; 6], table: &[[f32; 64]; 6], s: f32, x: f32) -> f32 {
     if s == 0. {

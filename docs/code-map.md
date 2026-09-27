@@ -48,11 +48,16 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
 | [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image: built at once for exports, updated in dirty 256-pixel tiles for previews. |
 | [retouch/search.rs](../src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
+| [masks/mod.rs](../src/develop/masks/mod.rs) | Mask groups, components (brush, gradients, ranges), local adjustments, validation and the overlay weights. |
+| [masks/eval.rs](../src/develop/masks/eval.rs) | Mask weights for a rendered region: tracing pixels to image space, combining components, caching brush rasters. |
+| [masks/brush.rs](../src/develop/masks/brush.rs) | Brush strokes rasterised in image space (flow, density, erase, Auto Mask). |
+| [masks/range.rs](../src/develop/masks/range.rs) | Color Range and Luminance Range weights from developed Oklab colours. |
+| [masks/local.rs](../src/develop/masks/local.rs) | A mask's sliders as per-pixel deltas, and where each acts in the pipeline. |
 | [pipeline.rs](../src/develop/pipeline.rs) | Color/tone processing, sampling, render entry points, neutral picking and legacy engine paths. |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
-| [stage_cache.rs](../src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images and geometry samples, keyed by the recipe fields each stage reads. |
+| [stage_cache.rs](../src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images, geometry samples, mask weights and brush rasters, keyed by the recipe fields each stage reads. |
 | [gpu/mod.rs](../src/develop/gpu/mod.rs) | Optional compute device, bounded/reused buffers, command submission and readback for preview finishing. |
 | [gpu/finish.wgsl](../src/develop/gpu/finish.wgsl) | Portable sharpening and separable Lanczos resize compute kernels. |
 | [gpu/develop.rs](../src/develop/gpu/develop.rs) | GPU per-pixel color and tone stage: sample buffers kept per stage-cache entry, dispatch and readback. |

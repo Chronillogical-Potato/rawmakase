@@ -132,7 +132,7 @@ impl Resident {
         );
         let logs = pipeline(
             &logs_module,
-            &[&developer.layout, &logs_layout],
+            &[&developer.camera_layout, &logs_layout],
             "log_luminance",
         );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -375,7 +375,7 @@ impl Processor {
         let dummy = &resident.dummy;
         let camera_group = bind(
             &device,
-            &developer.layout,
+            &developer.camera_layout,
             &[
                 (0, dummy),
                 (1, dummy),

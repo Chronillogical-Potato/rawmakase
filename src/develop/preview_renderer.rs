@@ -539,6 +539,67 @@ mod tests {
         let dusty = quality::render(&im, &Recipe::default(), 0, Some([300, 200, 1, 1])).unwrap();
         assert!(healed.pixels[0][1] > dusty.pixels[0][1] + 0.2);
     }
+    /// Mask edits (sliders, shapes, ranges, visibility) never reuse stale weights.
+    #[test]
+    fn cached_mask_weights_follow_every_edit() {
+        use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+        let (w, h) = (300, 200);
+        let mut im = image(w, h, 0.);
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            let v = 0.3 + 0.2 * (x * 0.07).sin() * (y * 0.05).cos();
+            *p = [v * 1.2, v, v * 0.6];
+        }
+        let cancel = AtomicBool::new(false);
+        let mut warm = PreviewRenderer::default();
+        let mut r = Recipe::default();
+        r.masks.push(MaskGroup {
+            components: vec![MaskComponent::new(MaskShape::Linear {
+                from: [0.2, 0.5],
+                to: [0.6, 0.5],
+            })],
+            adjust: LocalAdjust {
+                exposure: 0.7,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let edits: [&dyn Fn(&mut Recipe); 7] = [
+            &|_| {},
+            &|r| r.masks[0].adjust.exposure = -0.5,
+            &|r| r.masks[0].adjust.contrast = 0.4,
+            &|r| {
+                r.masks[0].components[0].shape = MaskShape::Radial {
+                    center: [0.5, 0.5],
+                    radii: [0.2, 0.1],
+                    angle: 20.,
+                    feather: 0.3,
+                }
+            },
+            &|r| {
+                r.masks[0].components.push(MaskComponent {
+                    op: crate::develop::masks::MaskOp::Intersect,
+                    ..MaskComponent::new(MaskShape::LuminanceRange {
+                        low: 0.3,
+                        high: 1.,
+                        falloff: [0.1, 0.],
+                    })
+                })
+            },
+            &|r| r.exposure = 0.4,
+            &|r| r.masks[0].hidden = true,
+        ];
+        for edit in edits {
+            edit(&mut r);
+            for (edge, region) in [(80, None), (0, Some([20, 30, 50, 40]))] {
+                let cached = warm.render(&im, &r, edge, region, &cancel).unwrap();
+                let fresh = PreviewRenderer::default()
+                    .render(&im, &r, edge, region, &cancel)
+                    .unwrap();
+                assert_eq!(cached.pixels, fresh.pixels, "{:?} {edge}", r.masks);
+            }
+        }
+    }
     #[test]
     fn region_preview_is_a_half_resolution_region() {
         let (w, h) = (400, 300);

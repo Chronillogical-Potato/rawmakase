@@ -22,6 +22,9 @@ pub(crate) struct LocalToneMap {
     pub(crate) scale: [f32; 2],
     pub(crate) shadows: Option<Curve>,
     pub(crate) highlights: Option<Curve>,
+    /// Image keys of Shadows and Highlights, for masks that evaluate them at their own
+    /// slider values.
+    pub(crate) keys: [f32; 2],
 }
 pub(crate) struct Curve {
     pub(crate) key: f32,
@@ -72,13 +75,15 @@ pub(crate) fn luminance(rgb: [f32; 3]) -> f32 {
 }
 impl LocalToneMap {
     /// `tone` maps a camera sample to linear display RGB after the profile tone curve.
+    /// Built when either slider is set, or when `local` (masks change them).
     pub(crate) fn build(
         im: super::pipeline::Source,
         shadows: f32,
         highlights: f32,
+        local: bool,
         tone: impl Fn([f32; 3]) -> [f32; 3] + Sync,
     ) -> Option<Self> {
-        if shadows == 0. && highlights == 0. {
+        if shadows == 0. && highlights == 0. && !local {
             return None;
         }
         let small = match im.reduced {
@@ -130,23 +135,37 @@ impl LocalToneMap {
             .collect();
         let b: Vec<f32> = m.iter().zip(&a).map(|(m, a)| m - a * m).collect();
         let (a, b) = rayon::join(|| mean(&a), || mean(&b));
+        // Masks may evaluate either slider, so both keys are kept.
+        let keys = [
+            percentile(SHADOWS.percentile),
+            percentile(HIGHLIGHTS.percentile),
+        ];
         Self {
             width: w,
             height: h,
             a,
             b,
             scale: [w as f32 / source[0] as f32, h as f32 / source[1] as f32],
-            // Only a slider in use needs its key.
-            shadows: (shadows != 0.)
-                .then(|| Curve::new(&SHADOWS, shadows, percentile(SHADOWS.percentile)))
-                .flatten(),
-            highlights: (highlights != 0.)
-                .then(|| Curve::new(&HIGHLIGHTS, highlights, percentile(HIGHLIGHTS.percentile)))
-                .flatten(),
+            shadows: Curve::new(&SHADOWS, shadows, keys[0]),
+            highlights: Curve::new(&HIGHLIGHTS, highlights, keys[1]),
+            keys,
         }
     }
     /// Luminance gain for a toned pixel at camera-image sample position `x`, `y`.
     pub(crate) fn gain(&self, x: f32, y: f32, rgb: [f32; 3]) -> f32 {
+        let base = self.base(x, y, rgb);
+        let ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
+            + self.highlights.as_ref().map_or(0., |c| c.eval(base));
+        ev.exp2()
+    }
+    /// As [`Self::gain`], with Shadows and Highlights at the given slider values.
+    pub(crate) fn gain_with(&self, x: f32, y: f32, rgb: [f32; 3], sliders: [f32; 2]) -> f32 {
+        let base = self.base(x, y, rgb);
+        (family(&SHADOWS, sliders[0], self.keys[0], base)
+            + family(&HIGHLIGHTS, sliders[1], self.keys[1], base))
+        .exp2()
+    }
+    fn base(&self, x: f32, y: f32, rgb: [f32; 3]) -> f32 {
         let fx = ((x + 0.5) * self.scale[0] - 0.5).clamp(0., (self.width - 1) as f32);
         let fy = ((y + 0.5) * self.scale[1] - 0.5).clamp(0., (self.height - 1) as f32);
         let (ix, iy) = (fx as usize, fy as usize);
@@ -157,11 +176,46 @@ impl LocalToneMap {
             let bottom = v[jy * self.width + ix] * (1. - tx) + v[jy * self.width + jx] * tx;
             top * (1. - ty) + bottom * ty
         };
-        let base = bilinear(&self.a) * luminance(rgb).log2() + bilinear(&self.b);
-        let ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
-            + self.highlights.as_ref().map_or(0., |c| c.eval(base));
-        ev.exp2()
+        bilinear(&self.a) * luminance(rgb).log2() + bilinear(&self.b)
     }
+}
+/// A family's log2 gain at slider `s` and base level `base`, as `Curve::new(..).eval`
+/// without building the table.
+fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
+    if s == 0. {
+        return 0.;
+    }
+    let s = s.clamp(-1., 1.);
+    let bin = |t: &[f32; 48]| {
+        let x = ((base - key - f.lo) / (f.hi - f.lo) * 48. - 0.5).clamp(0., 47.);
+        let i = (x as usize).min(46);
+        t[i] + (t[i + 1] - t[i]) * (x - i as f32)
+    };
+    let mut points: Vec<(f32, Option<&[f32; 48]>)> = SLIDER_VALUES
+        .iter()
+        .zip(&f.tables)
+        .map(|(v, t)| (*v, Some(t)))
+        .collect();
+    points.insert(3, (0., None));
+    let j = points
+        .windows(2)
+        .position(|w| s <= w[1].0)
+        .unwrap_or(points.len() - 2);
+    let ((s0, t0), (s1, t1)) = (points[j], points[j + 1]);
+    let w = (s - s0) / (s1 - s0);
+    let (y0, y1) = (t0.map_or(0., bin), t1.map_or(0., bin));
+    y0 + (y1 - y0) * w
+}
+/// The measured families for `develop.wgsl`'s local Shadows/Highlights: per family
+/// its 6 × 48 table values, then `lo` and `hi`; then the slider positions.
+pub(crate) fn gpu_families() -> Vec<f32> {
+    let mut out = Vec::new();
+    for f in [&SHADOWS, &HIGHLIGHTS] {
+        out.extend(f.tables.iter().flatten());
+        out.extend([f.lo, f.hi]);
+    }
+    out.extend(SLIDER_VALUES);
+    out
 }
 /// Mean over a (2r+1)² window, clamped at the borders, via running sums.
 fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
@@ -218,5 +272,20 @@ mod tests {
         assert!((half.eval(-6.) - full.eval(-6.) / 2.).abs() < 1e-5);
         let h = Curve::new(&HIGHLIGHTS, -0.6, -3.).unwrap();
         assert!(h.eval(0.) < -0.2);
+        // Per-pixel evaluation matches the interpolated table.
+        for base in [-8., -3., -1., 0.2] {
+            assert!(
+                (family(&SHADOWS, 0.45, -1., base)
+                    - Curve::new(&SHADOWS, 0.45, -1.).unwrap().eval(base))
+                .abs()
+                    < 1e-5
+            );
+            assert!(
+                (family(&HIGHLIGHTS, -0.8, -3., base)
+                    - Curve::new(&HIGHLIGHTS, -0.8, -3.).unwrap().eval(base))
+                .abs()
+                    < 1e-5
+            );
+        }
     }
 }
