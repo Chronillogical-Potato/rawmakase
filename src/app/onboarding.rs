@@ -2,6 +2,7 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::pretty_path;
+use crate::app::theme;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -286,7 +287,7 @@ impl Editor {
         }
         let ctx = ui.ctx().clone();
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::from_gray(24)))
+            .frame(egui::Frame::new().fill(theme::gray(24)))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
@@ -570,9 +571,13 @@ impl Editor {
             if ui
                 .add_enabled(
                     has_catalog,
-                    egui::Button::new(egui::RichText::new("Start").size(14.).color(Color32::WHITE))
-                        .fill(Color32::from_rgb(62, 88, 115))
-                        .min_size(Vec2::new(120., 34.)),
+                    egui::Button::new(
+                        egui::RichText::new("Start")
+                            .size(14.)
+                            .color(theme::on_accent()),
+                    )
+                    .fill(theme::accent())
+                    .min_size(Vec2::new(120., 34.)),
                 )
                 .on_disabled_hover_text("Choose a catalog first")
                 .clicked()
@@ -614,8 +619,8 @@ fn step(
     contents: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::new()
-        .fill(Color32::from_gray(32))
-        .stroke(Stroke::new(1., Color32::from_gray(44)))
+        .fill(theme::gray(32))
+        .stroke(Stroke::new(1., theme::gray(44)))
         .corner_radius(8.)
         .inner_margin(egui::Margin::symmetric(20, 18))
         .show(ui, |ui| {
@@ -632,16 +637,16 @@ fn step(
                             c + Vec2::new(-1.5, 3.),
                             c + Vec2::new(4.5, -3.),
                         ],
-                        Stroke::new(1.8, Color32::WHITE),
+                        Stroke::new(1.8, theme::on_accent()),
                     ));
                 } else {
-                    ui.painter().circle_filled(c, 11., Color32::from_gray(52));
+                    ui.painter().circle_filled(c, 11., theme::gray(52));
                     ui.painter().text(
                         c,
                         egui::Align2::CENTER_CENTER,
                         number.to_string(),
                         egui::FontId::proportional(12.),
-                        Color32::from_gray(210),
+                        theme::gray(210),
                     );
                 }
                 ui.add_space(10.);
@@ -664,7 +669,7 @@ fn text(ui: &mut egui::Ui, value: &str, size: f32, gray: u8) {
     ui.label(
         egui::RichText::new(value)
             .size(size)
-            .color(Color32::from_gray(gray)),
+            .color(theme::gray(gray)),
     );
 }
 fn body(ui: &mut egui::Ui, value: &str) {
@@ -673,7 +678,7 @@ fn body(ui: &mut egui::Ui, value: &str) {
             egui::RichText::new(value)
                 .size(13.)
                 .line_height(Some(19.))
-                .color(Color32::from_gray(170)),
+                .color(theme::gray(170)),
         )
         .wrap(),
     );
@@ -690,10 +695,10 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            Color32::from_gray(125),
+            theme::gray(125),
         );
         egui::Frame::new()
-            .fill(Color32::from_gray(24))
+            .fill(theme::gray(24))
             .corner_radius(4.)
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
@@ -702,7 +707,7 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
                         egui::RichText::new(path)
                             .monospace()
                             .size(11.)
-                            .color(Color32::from_gray(180)),
+                            .color(theme::gray(180)),
                     )
                     .truncate(),
                 );
@@ -712,9 +717,13 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
 }
 fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(egui::RichText::new(label).size(13.).color(Color32::WHITE))
-            .fill(Color32::from_rgb(62, 88, 115))
-            .min_size(Vec2::new(0., 28.)),
+        egui::Button::new(
+            egui::RichText::new(label)
+                .size(13.)
+                .color(theme::on_accent()),
+        )
+        .fill(theme::accent())
+        .min_size(Vec2::new(0., 28.)),
     )
 }
 fn secondary(ui: &mut egui::Ui, label: &str) -> egui::Response {

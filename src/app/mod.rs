@@ -11,7 +11,7 @@ use crate::{
     app::worker::{Event, Latest, LoadJob, RenderJob},
     develop::Recipe,
 };
-use eframe::egui::{self, Color32, Stroke, Vec2};
+use eframe::egui::{self, Vec2};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
@@ -39,6 +39,7 @@ pub struct Editor {
     onboarding_done: bool,
     preferences: preferences::Preferences,
     updates: updates::Updates,
+    themes: theme::Themes,
     exports: export::Exports,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
@@ -67,6 +68,8 @@ impl Editor {
         editor.updates.launched(launch, &mut editor.status);
         cc.egui_ctx
             .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
+        editor.themes.text = text;
+        editor.themes.start();
         editor
     }
     #[cfg(test)]
@@ -86,45 +89,17 @@ impl Editor {
         backend: worker::RenderBackend,
     ) -> Self {
         crate::raw::set_demosaic(session.demosaic);
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_gray(35);
-        visuals.window_fill = Color32::from_gray(35);
-        visuals.extreme_bg_color = Color32::from_gray(22);
-        visuals.faint_bg_color = Color32::from_gray(40);
-        visuals.selection.bg_fill = Color32::from_rgb(62, 88, 115);
-        visuals.widgets.inactive.bg_fill = Color32::from_gray(43);
-        visuals.widgets.inactive.weak_bg_fill = Color32::from_gray(43);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., Color32::from_gray(194));
-        visuals.widgets.hovered.bg_fill = Color32::from_gray(59);
-        visuals.widgets.hovered.weak_bg_fill = Color32::from_gray(59);
-        visuals.widgets.active.bg_fill = Color32::from_gray(67);
-        visuals.widgets.active.weak_bg_fill = Color32::from_gray(67);
-        // egui insets button text by the stroke width, but an unframed item
-        // (a menu or list row) has no stroke until hovered, so its text moved
-        // by a pixel. No widget strokes: fills alone show state.
-        for widget in [
-            &mut visuals.widgets.inactive,
-            &mut visuals.widgets.hovered,
-            &mut visuals.widgets.active,
-            &mut visuals.widgets.open,
-        ] {
-            widget.bg_stroke = Stroke::NONE;
-        }
-        // egui grows hovered widgets by a pixel; keep every control a fixed size.
-        for widget in [
-            &mut visuals.widgets.hovered,
-            &mut visuals.widgets.active,
-            &mut visuals.widgets.open,
-        ] {
-            widget.expansion = 0.;
-        }
-        ctx.set_visuals(visuals);
+        theme::apply(
+            ctx,
+            theme::Palette::DEFAULT,
+            &fastframe_text::TextRendering::platform_default(),
+        );
         // Cmd/Ctrl + and − zoom the photo, not the whole interface.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         ctx.data_mut(|d| {
             d.insert_temp(widgets::collapsed_sections_id(), session.collapsed.clone())
         });
-        ctx.style_mut_of(egui::Theme::Dark, |style| {
+        ctx.all_styles_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8., 5.);
             style.spacing.button_padding = Vec2::new(9., 5.);
             style.spacing.indent = 18.;
@@ -173,6 +148,11 @@ impl Editor {
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
             updates,
+            themes: theme::Themes::new(
+                ctx,
+                session.theme.clone(),
+                fastframe_text::TextRendering::platform_default(),
+            ),
             exports: Default::default(),
             restore: Some((
                 session.library_source.clone(),
@@ -209,6 +189,7 @@ impl Editor {
                     demosaic: crate::raw::demosaic(),
                     no_update_checks: !self.updates.automatic,
                     skipped_version: self.updates.skipped.clone(),
+                    theme: self.themes.selected.clone(),
                 },
             )?;
         }
@@ -235,6 +216,11 @@ impl Editor {
     }
 }
 impl eframe::App for Editor {
+    /// What shows where no panel paints, e.g. behind the Library grid: the
+    /// theme's darkest grey rather than eframe's near-black.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        theme::gray(12).to_normalized_gamma_f32()
+    }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // AppKit moves the traffic lights back during layout passes.
         fastframe_macos::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
@@ -312,6 +298,7 @@ mod activity;
 mod save_state;
 
 mod editing;
+mod theme;
 mod toolbar;
 mod updates;
 

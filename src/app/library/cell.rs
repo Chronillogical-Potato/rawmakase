@@ -1,3 +1,4 @@
+use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Vec2};
 pub(super) fn photo_cell(
@@ -23,11 +24,11 @@ pub(super) fn photo_cell(
     // for the selection, and the color label tinting the cell.
     let cell = rect.shrink(1.);
     let base = if selected {
-        Color32::from_gray(150)
+        theme::gray(150)
     } else if response.hovered() {
-        Color32::from_gray(66)
+        theme::gray(66)
     } else {
-        Color32::from_gray(56)
+        theme::gray(56)
     };
     let fill = label_color(&photo.label).map_or(base, |label| {
         base.lerp_to_gamma(label, if selected { 0.35 } else { 0.22 })
@@ -37,17 +38,17 @@ pub(super) fn photo_cell(
     painter.rect_stroke(
         cell,
         1.,
-        Stroke::new(1., Color32::from_gray(if selected { 205 } else { 40 })),
+        Stroke::new(1., theme::gray(if selected { 205 } else { 40 })),
         StrokeKind::Inside,
     );
-    let ink = Color32::from_gray(if selected { 60 } else { 125 });
+    let ink = theme::gray(if selected { 60 } else { 125 });
     let header = (width * 0.13).clamp(16., 26.);
     painter.text(
         cell.left_top() + Vec2::new(6., 3.),
         Align2::LEFT_TOP,
         number.to_string(),
         FontId::proportional(header * 0.95),
-        Color32::from_gray(if selected { 120 } else { 78 }),
+        theme::gray(if selected { 120 } else { 78 }),
     );
     if width >= 140. {
         let name = painter.layout_no_wrap(photo.filename.clone(), FontId::proportional(10.), ink);
@@ -111,7 +112,7 @@ pub(super) fn photo_cell(
             Align2::LEFT_CENTER,
             "★".repeat(photo.rating as usize),
             FontId::proportional(10.),
-            Color32::from_gray(if selected { 35 } else { 185 }),
+            theme::gray(if selected { 35 } else { 185 }),
         );
     }
     if !photo.copy_name.is_empty() {
@@ -138,7 +139,7 @@ pub(super) fn photo_cell(
         painter.rect_stroke(
             badge,
             1.,
-            Stroke::new(1., Color32::from_gray(30)),
+            Stroke::new(1., theme::gray(30)),
             StrokeKind::Inside,
         );
     }

@@ -1,3 +1,4 @@
+use crate::app::theme;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -7,7 +8,7 @@ pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
             rect.center_top() + Vec2::new(0., 6.),
             rect.center_bottom() - Vec2::new(0., 6.),
         ],
-        Stroke::new(1., Color32::from_gray(53)),
+        Stroke::new(1., theme::gray(53)),
     );
 }
 pub(super) fn toolbar_action(
@@ -28,9 +29,9 @@ pub(super) fn toolbar_action(
     );
     let hover = enabled && response.hovered();
     let fill = if icon == 4 {
-        Color32::from_gray(if hover { 225 } else { 200 })
+        theme::gray(if hover { 225 } else { 200 })
     } else {
-        Color32::from_gray(if selected {
+        theme::gray(if selected {
             62
         } else if hover {
             48
@@ -39,7 +40,7 @@ pub(super) fn toolbar_action(
         })
     };
     ui.painter().rect_filled(rect, 5., fill);
-    let color = Color32::from_gray(if !enabled {
+    let color = theme::gray(if !enabled {
         85
     } else if icon == 4 {
         25
@@ -184,12 +185,12 @@ pub(super) fn section(
     ui.painter().rect_filled(
         rect,
         3.,
-        Color32::from_gray(if toggle.hovered() { 60 } else { 51 }),
+        theme::gray(if toggle.hovered() { 60 } else { 51 }),
     );
     ui.painter().rect_stroke(
         rect,
         3.,
-        Stroke::new(1., Color32::from_gray(if open { 70 } else { 62 })),
+        Stroke::new(1., theme::gray(if open { 70 } else { 62 })),
         egui::StrokeKind::Inside,
     );
     let c = Pos2::new(rect.left() + 13., rect.center().y);
@@ -208,7 +209,7 @@ pub(super) fn section(
     };
     ui.painter().add(egui::Shape::convex_polygon(
         triangle,
-        Color32::from_gray(if toggle.hovered() { 235 } else { 190 }),
+        theme::gray(if toggle.hovered() { 235 } else { 190 }),
         Stroke::NONE,
     ));
     ui.painter().text(
@@ -216,11 +217,11 @@ pub(super) fn section(
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(13.),
-        Color32::from_gray(if toggle.hovered() { 250 } else { 235 }),
+        theme::gray(if toggle.hovered() { 250 } else { 235 }),
     );
     if resettable {
         let c = reset_rect.center();
-        let color = Color32::from_gray(if reset.hovered() { 240 } else { 150 });
+        let color = theme::gray(if reset.hovered() { 240 } else { 150 });
         let pts: Vec<_> = (0..=24)
             .map(|i| {
                 let a = 0.5 + i as f32 / 24. * 5.;
@@ -276,7 +277,7 @@ struct CurveInteraction {
 /// curve, a quarter grid and a dark frame. `channel` 0 is RGB, 1–3 are R, G, B.
 fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channel: usize) {
     let painter = ui.painter();
-    painter.rect_filled(rect, 0., Color32::from_gray(82));
+    painter.rect_filled(rect, 0., theme::gray(82));
     let bins: Vec<f32> = (0..256)
         .map(|i| match channel {
             1..=3 => histogram[channel - 1][i] as f32,
@@ -289,7 +290,7 @@ fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channe
         1 => Color32::from_rgb(112, 62, 60),
         2 => Color32::from_rgb(62, 102, 66),
         3 => Color32::from_rgb(62, 78, 118),
-        _ => Color32::from_gray(58),
+        _ => theme::gray(58),
     };
     if bins.iter().any(|v| *v > 0.) {
         let mut mesh = egui::Mesh::default();
@@ -327,7 +328,7 @@ fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channe
     painter.rect_stroke(
         rect,
         0.,
-        Stroke::new(1., Color32::from_gray(15)),
+        Stroke::new(1., theme::gray(15)),
         egui::StrokeKind::Outside,
     );
 }
@@ -336,7 +337,7 @@ fn curve_color(channel: usize) -> Color32 {
         1 => Color32::from_rgb(240, 110, 100),
         2 => Color32::from_rgb(120, 215, 125),
         3 => Color32::from_rgb(120, 160, 245),
-        _ => Color32::WHITE,
+        _ => theme::gray(255),
     }
 }
 /// Read-out under a curve: the input and output values at the pointer.
@@ -348,7 +349,7 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
             egui::Align2::CENTER_CENTER,
             format!("{:.0} / {:.0}", x * 255., y * 255.),
             egui::FontId::proportional(11.),
-            Color32::from_gray(170),
+            theme::gray(170),
         );
     }
 }
@@ -406,7 +407,7 @@ pub(super) fn parametric_curve_ui(
         })
         .collect();
     ui.painter()
-        .add(egui::Shape::line(pts, Stroke::new(2., Color32::WHITE)));
+        .add(egui::Shape::line(pts, Stroke::new(2., theme::gray(255))));
     let name = hovered_region.map(|i| ["Shadows", "Darks", "Lights", "Highlights"][i]);
     response
         .on_hover_cursor(egui::CursorIcon::ResizeVertical)
@@ -419,7 +420,7 @@ pub(super) fn parametric_curve_ui(
     ui.painter().rect_filled(
         Rect::from_x_y_ranges(track.x_range(), track.top() + 2.0..=track.top() + 4.),
         1.,
-        Color32::from_gray(60),
+        theme::gray(60),
     );
     for i in 0..3 {
         let x = track.left() + effects.splits[i] * track.width();
@@ -445,7 +446,7 @@ pub(super) fn parametric_curve_ui(
         if r.double_clicked() {
             effects.splits[i] = [0.25, 0.5, 0.75][i];
         }
-        let color = Color32::from_gray(if r.hovered() || r.dragged() { 240 } else { 175 });
+        let color = theme::gray(if r.hovered() || r.dragged() { 240 } else { 175 });
         let top = Pos2::new(x, track.top() + 3.);
         ui.painter().add(egui::Shape::convex_polygon(
             vec![top, top + Vec2::new(5., 9.), top + Vec2::new(-5., 9.)],
@@ -555,9 +556,9 @@ pub(super) fn tone_curve_ui(
             p,
             if active { 5.5 } else { 4.5 },
             if state.selected == Some(i) {
-                Color32::from_gray(25)
+                theme::gray(25)
             } else {
-                Color32::WHITE
+                theme::gray(255)
             },
         );
         ui.painter().circle_stroke(
@@ -566,9 +567,9 @@ pub(super) fn tone_curve_ui(
             Stroke::new(
                 1.5,
                 if state.selected == Some(i) {
-                    Color32::WHITE
+                    theme::gray(255)
                 } else {
-                    Color32::from_gray(20)
+                    theme::gray(20)
                 },
             ),
         );
@@ -621,7 +622,7 @@ pub(super) fn tone_curve_ui(
     ui.label(
         egui::RichText::new("Click to add · drag to shape · right-click to remove")
             .size(10.)
-            .color(Color32::from_gray(125)),
+            .color(theme::gray(125)),
     );
     ui.ctx().data_mut(|d| d.insert_temp(id, state));
 }
@@ -687,7 +688,7 @@ pub(super) fn slider_with(
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            Color32::from_gray(190),
+            theme::gray(190),
         );
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
@@ -759,7 +760,7 @@ pub(super) fn slider_with(
             mesh.add_triangle(0, 2, 3);
             ui.painter().add(mesh);
         } else {
-            ui.painter().rect_filled(rail, 1., Color32::from_gray(83));
+            ui.painter().rect_filled(rail, 1., theme::gray(83));
         }
         let neutral = to_rail(default, rail);
         ui.painter().line_segment(
@@ -767,7 +768,7 @@ pub(super) fn slider_with(
                 Pos2::new(neutral, area.center().y - 4.),
                 Pos2::new(neutral, area.center().y + 4.),
             ],
-            Stroke::new(1., Color32::from_gray(115)),
+            Stroke::new(1., theme::gray(115)),
         );
         if response.double_clicked() {
             *value = default.clamp(start, end);
@@ -785,7 +786,7 @@ pub(super) fn slider_with(
                     Pos2::new(neutral, area.center().y),
                     Pos2::new(x, area.center().y),
                 ],
-                Stroke::new(2., Color32::from_gray(153)),
+                Stroke::new(2., theme::gray(153)),
             );
         }
         let center = Pos2::new(x, area.center().y);
@@ -796,10 +797,10 @@ pub(super) fn slider_with(
             } else {
                 3.5
             },
-            Color32::from_gray(205),
+            theme::gray(205),
         );
         ui.painter()
-            .circle_stroke(center, 3.5, Stroke::new(1., Color32::from_gray(26)));
+            .circle_stroke(center, 3.5, Stroke::new(1., theme::gray(26)));
         response.on_hover_text(
             "Drag to adjust · double-click to reset. Drag or type the number for precise edits.",
         );
@@ -834,11 +835,11 @@ pub(super) fn workspace_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> e
     let galley = ui.painter().layout_no_wrap(
         label.into(),
         egui::FontId::proportional(16.),
-        Color32::WHITE,
+        theme::gray(255),
     );
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(galley.size().x + 24., 28.), Sense::click());
-    let color = Color32::from_gray(if selected {
+    let color = theme::gray(if selected {
         248
     } else if !ui.is_enabled() {
         70
@@ -868,7 +869,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(
     width: f32,
 ) -> bool {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.), Sense::hover());
-    ui.painter().rect_filled(rect, 3., Color32::from_gray(30));
+    ui.painter().rect_filled(rect, 3., theme::gray(30));
     let segment = rect.width() / options.len() as f32;
     let mut changed = false;
     for (i, (option, label)) in options.iter().enumerate() {
@@ -882,7 +883,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(
             ui.painter().rect_filled(
                 cell.shrink(1.),
                 3.,
-                Color32::from_gray(if active { 72 } else { 44 }),
+                theme::gray(if active { 72 } else { 44 }),
             );
         }
         let text = egui::WidgetText::from(*label).into_galley(
@@ -894,7 +895,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(
         ui.painter().galley(
             cell.center() - text.size() / 2.,
             text,
-            Color32::from_gray(if active { 240 } else { 165 }),
+            theme::gray(if active { 240 } else { 165 }),
         );
         if response.clicked() && !active {
             *value = *option;
@@ -920,16 +921,13 @@ pub(super) fn menu_item(
         },
     );
     if enabled && response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 3., Color32::from_rgb(62, 88, 115));
+        ui.painter().rect_filled(rect, 3., theme::accent());
     }
-    let color = Color32::from_gray(if !enabled {
-        100
-    } else if response.hovered() {
-        250
+    let color = if enabled && response.hovered() {
+        theme::on_accent_text(250)
     } else {
-        215
-    });
+        theme::gray(if enabled { 215 } else { 100 })
+    };
     if checked {
         let c = rect.left_center() + Vec2::new(11., 0.);
         ui.painter().add(egui::Shape::line(
@@ -954,7 +952,7 @@ pub(super) fn menu_item(
             egui::Align2::RIGHT_CENTER,
             shortcut,
             egui::FontId::proportional(11.),
-            Color32::from_gray(if enabled { 140 } else { 90 }),
+            theme::gray(if enabled { 140 } else { 90 }),
         );
     }
     enabled && response.clicked()
@@ -963,7 +961,7 @@ pub(super) fn menu_separator(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.), Sense::hover());
     ui.painter().line_segment(
         [rect.left_center(), rect.right_center()],
-        Stroke::new(1., Color32::from_gray(55)),
+        Stroke::new(1., theme::gray(55)),
     );
 }
 /// True for a context-menu click: a right click, or Control-click on macOS.
@@ -1000,25 +998,25 @@ pub(super) fn submenu_style(ui: &mut egui::Ui) {
         &mut visuals.widgets.open,
         &mut visuals.widgets.active,
     ] {
-        widget.weak_bg_fill = Color32::from_rgb(62, 88, 115);
-        widget.bg_fill = Color32::from_rgb(62, 88, 115);
+        widget.weak_bg_fill = theme::accent();
+        widget.bg_fill = theme::accent();
         widget.bg_stroke = Stroke::NONE;
-        widget.fg_stroke = Stroke::new(1., Color32::from_gray(250));
+        widget.fg_stroke = Stroke::new(1., theme::on_accent_text(250));
     }
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1., Color32::from_gray(215));
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1., theme::gray(215));
 }
 /// The frame of a modal window such as Preferences or Export.
 pub(super) fn modal_frame() -> egui::Frame {
     egui::Frame::new()
-        .fill(Color32::from_gray(33))
-        .stroke(Stroke::new(1., Color32::from_gray(52)))
+        .fill(theme::gray(33))
+        .stroke(Stroke::new(1., theme::gray(52)))
         .corner_radius(10.)
 }
 /// The button that confirms a modal window ("Done", "Export").
 pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(egui::RichText::new(text).color(Color32::WHITE))
-            .fill(Color32::from_rgb(62, 88, 115))
+        egui::Button::new(egui::RichText::new(text).color(theme::on_accent()))
+            .fill(theme::accent())
             .min_size(Vec2::new(84., 30.)),
     )
 }
@@ -1032,7 +1030,7 @@ pub(super) fn form_row(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mu
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(13.),
-            Color32::from_gray(150),
+            theme::gray(150),
         );
         contents(ui);
     });

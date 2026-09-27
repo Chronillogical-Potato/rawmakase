@@ -232,7 +232,7 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
     editor.preview.texture = Some(
         ctx.load_texture(
             "photo",
-            egui::ColorImage::filled([200, 200], Color32::GRAY),
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
             egui::TextureOptions::LINEAR,
         )
         .into(),

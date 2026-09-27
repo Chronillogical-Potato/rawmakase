@@ -3,6 +3,7 @@
 //! work on a thread of its own (`crate::updates`); this is what the user sees.
 use super::Editor;
 use super::widgets::{modal_frame, primary_button};
+use crate::app::theme;
 use crate::updates::{INTERVAL, Launch, Prepared, Release, Unsupported, Updater};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::sync::Arc;
@@ -359,7 +360,7 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
         ui.label(
             egui::RichText::new("Update available")
                 .size(14.)
-                .color(Color32::from_gray(236)),
+                .color(theme::gray(236)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if close_button(ui).on_hover_text("Remind me later").clicked() {
@@ -387,7 +388,7 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
             ui.add(
                 egui::ProgressBar::new(progress)
                     .desired_height(6.)
-                    .fill(Color32::from_rgb(62, 88, 115)),
+                    .fill(theme::accent()),
             );
             note(ui, "Downloading…");
         }
@@ -406,11 +407,7 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
         Download::Idle | Download::Failed(_) => {
             let failed = matches!(updates.download, Download::Failed(_));
             if let Download::Failed(error) = &updates.download {
-                ui.label(
-                    egui::RichText::new(error)
-                        .size(12.)
-                        .color(Color32::from_rgb(214, 120, 110)),
-                );
+                ui.label(egui::RichText::new(error).size(12.).color(theme::danger()));
             }
             if let Some(reason) = &updates.unsupported {
                 note(ui, &reason.to_string());
@@ -435,23 +432,16 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
 }
 
 fn note(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .size(12.)
-                .color(Color32::from_gray(160)),
-        )
-        .wrap(),
-    )
+    ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(160))).wrap())
 }
 
 /// An unframed ×, painted so it does not depend on the font.
 fn close_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., Color32::from_gray(48));
+        ui.painter().rect_filled(rect, 4., theme::gray(48));
     }
-    let color = Color32::from_gray(if response.hovered() { 235 } else { 150 });
+    let color = theme::gray(if response.hovered() { 235 } else { 150 });
     let (c, d) = (rect.center(), 4.);
     let stroke = Stroke::new(1.4, color);
     ui.painter()

@@ -3,6 +3,7 @@ use super::dialogs::FileDialog;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
 };
+use crate::app::theme;
 use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -13,12 +14,12 @@ impl Editor {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 96.), Sense::hover());
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, 2., Color32::from_gray(20));
+        painter.rect_filled(rect, 2., theme::gray(20));
         for i in 1..5 {
             let x = rect.left() + i as f32 / 5. * rect.width();
             painter.line_segment(
                 [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1., Color32::from_gray(32)),
+                Stroke::new(1., theme::gray(32)),
             );
         }
         let h = self.preview.histogram;
@@ -62,7 +63,7 @@ impl Editor {
                     );
                 }
             };
-            segment(0., v[0].0, Color32::from_gray(150));
+            segment(0., v[0].0, theme::gray(150));
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
@@ -85,9 +86,9 @@ impl Editor {
                     "Highlight clipping · J shows clipped areas"
                 });
             let color = if clipped {
-                Color32::from_gray(235)
+                theme::gray(235)
             } else {
-                Color32::from_gray(if self.view.clipping || response.hovered() {
+                theme::gray(if self.view.clipping || response.hovered() {
                     150
                 } else {
                     80
@@ -126,16 +127,12 @@ impl Editor {
                 )
             });
         ui.vertical_centered(|ui| {
-            ui.label(
-                egui::RichText::new(exif)
-                    .size(11.)
-                    .color(Color32::from_gray(170)),
-            )
-            .on_hover_text(if self.view.zoom100 {
-                "Output histogram of the visible 100% region"
-            } else {
-                "Output histogram of the displayed image"
-            });
+            ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
+                .on_hover_text(if self.view.zoom100 {
+                    "Output histogram of the visible 100% region"
+                } else {
+                    "Output histogram of the displayed image"
+                });
         });
     }
     /// Lightroom's tool strip; only Crop exists so far, with its drawer below.
@@ -147,7 +144,7 @@ impl Editor {
         ui.painter().rect_filled(
             rect,
             3.,
-            Color32::from_gray(if active {
+            theme::gray(if active {
                 72
             } else if response.hovered() {
                 50
@@ -165,14 +162,14 @@ impl Editor {
             egui::Align2::LEFT_CENTER,
             "Crop & Straighten",
             egui::FontId::proportional(12.),
-            Color32::from_gray(if active { 245 } else { 200 }),
+            theme::gray(if active { 245 } else { 200 }),
         );
         ui.painter().text(
             rect.right_center() - Vec2::new(10., 0.),
             egui::Align2::RIGHT_CENTER,
             "R",
             egui::FontId::proportional(11.),
-            Color32::from_gray(120),
+            theme::gray(120),
         );
         if response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -187,7 +184,7 @@ impl Editor {
         }
         let r = &mut self.document.recipe;
         egui::Frame::new()
-            .fill(Color32::from_gray(40))
+            .fill(theme::gray(40))
             .corner_radius(3.)
             .inner_margin(egui::Margin {
                 left: 0,
@@ -256,7 +253,7 @@ impl Editor {
                     ui.label(
                         egui::RichText::new("Drag the frame on the photo; changes apply live.")
                             .size(10.)
-                            .color(Color32::from_gray(125)),
+                            .color(theme::gray(125)),
                     );
                 });
                 ui.horizontal(|ui| {
@@ -277,9 +274,9 @@ impl Editor {
                         .add_sized(
                             [w, 22.],
                             egui::Button::new(
-                                egui::RichText::new("Done").color(Color32::from_gray(245)),
+                                egui::RichText::new("Done").color(theme::on_accent_text(245)),
                             )
-                            .fill(Color32::from_rgb(62, 88, 115)),
+                            .fill(theme::accent()),
                         )
                         .on_hover_text("Finish cropping · Enter or R")
                         .clicked()
@@ -448,7 +445,7 @@ impl Editor {
                     ui.painter().rect_filled(
                         rect,
                         3.,
-                        Color32::from_gray(if view.picker { 72 } else { 50 }),
+                        theme::gray(if view.picker { 72 } else { 50 }),
                     );
                 }
                 eyedropper_icon(
@@ -610,7 +607,7 @@ impl Editor {
                             -1. ..=1.,
                             0.,
                             None,
-                            Some((Color32::from_gray(40), band_color(i))),
+                            Some((theme::gray(40), band_color(i))),
                         )
                     });
                 }
@@ -635,7 +632,7 @@ impl Editor {
                             ui.painter().circle_stroke(
                                 rect.center(),
                                 10.,
-                                Stroke::new(1.5, Color32::from_gray(215)),
+                                Stroke::new(1.5, theme::gray(215)),
                             );
                         }
                         if response.on_hover_text(*band).clicked() {
@@ -735,7 +732,7 @@ impl Editor {
                     0.,
                     None,
                     Some((
-                        Color32::from_gray(90),
+                        theme::gray(90),
                         Color32::from_rgb(tint[0], tint[1], tint[2]),
                     )),
                 );
@@ -746,7 +743,7 @@ impl Editor {
                     -1. ..=1.,
                     0.,
                     None,
-                    Some((Color32::from_gray(25), Color32::from_gray(210))),
+                    Some((theme::gray(25), theme::gray(210))),
                 );
             });
             ui.add_space(4.);
@@ -841,7 +838,7 @@ impl Editor {
                 ui.label(
                     egui::RichText::new(lens.as_deref().unwrap_or("Unknown"))
                         .size(11.)
-                        .color(Color32::from_gray(200)),
+                        .color(theme::gray(200)),
                 );
             });
             control_row(ui, "Profile", |ui| {
@@ -852,7 +849,7 @@ impl Editor {
                             .map_or("No matching profile", |l| l.source.as_str()),
                     )
                     .size(11.)
-                    .color(Color32::from_gray(200)),
+                    .color(theme::gray(200)),
                 );
             });
             if r.lens_profile {
@@ -1173,11 +1170,8 @@ fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
     let color = band_color(band);
     match channel {
         0 => (band_color((band + 7) % 8), band_color((band + 1) % 8)),
-        1 => (Color32::from_gray(110), color),
-        _ => (
-            Color32::from_gray(25),
-            color.lerp_to_gamma(Color32::WHITE, 0.45),
-        ),
+        1 => (theme::gray(110), color),
+        _ => (theme::gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
     }
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.
@@ -1190,7 +1184,7 @@ fn subheading(ui: &mut egui::Ui, text: &str) {
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(11.),
-        Color32::from_gray(165),
+        theme::gray(165),
     );
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
@@ -1203,7 +1197,7 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
         egui::Align2::RIGHT_CENTER,
         label,
         egui::FontId::proportional(11.),
-        Color32::from_gray(190),
+        theme::gray(190),
     );
     let rect = Rect::from_min_max(Pos2::new(row.left() + 88., row.top()), row.max);
     ui.scope_builder(
@@ -1227,14 +1221,14 @@ const WB_PRESETS: [(&str, f32, f32); 6] = [
     ("Flash", 5500., 0.),
 ];
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, Color32::from_gray(if strong { 235 } else { 170 }));
+    let stroke = Stroke::new(1.4, theme::gray(if strong { 235 } else { 170 }));
     // Bulb at the top right, glass tube down to a tip at the bottom left.
     painter.line_segment([c + Vec2::new(-5., 5.), c + Vec2::new(2., -2.)], stroke);
     painter.line_segment([c + Vec2::new(-1., -3.), c + Vec2::new(3., 1.)], stroke);
     painter.circle_filled(c + Vec2::new(3.5, -3.5), 2.6, stroke.color);
 }
 fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, Color32::from_gray(if strong { 240 } else { 170 }));
+    let stroke = Stroke::new(1.4, theme::gray(if strong { 240 } else { 170 }));
     painter.add(egui::Shape::line(
         vec![
             c + Vec2::new(-3., -7.),
@@ -1286,10 +1280,6 @@ fn adobe_camera_profiles(m: &crate::raw::Metadata) -> Vec<std::path::PathBuf> {
 fn hint_row(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
         ui.add_space(88.);
-        ui.label(
-            egui::RichText::new(text)
-                .size(11.)
-                .color(Color32::from_gray(140)),
-        );
+        ui.label(egui::RichText::new(text).size(11.).color(theme::gray(140)));
     });
 }

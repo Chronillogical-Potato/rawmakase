@@ -4,6 +4,7 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::{form_row, modal_frame, pretty_path, primary_button};
+use crate::app::theme;
 use crate::raw::Demosaic;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
@@ -172,12 +173,12 @@ impl Editor {
                         ne: 0,
                         se: 0,
                     },
-                    Color32::from_gray(27),
+                    theme::gray(27),
                 );
                 ui.painter().vline(
                     sidebar.right(),
                     sidebar.y_range(),
-                    Stroke::new(1., Color32::from_gray(45)),
+                    Stroke::new(1., theme::gray(45)),
                 );
                 let mut side = ui.new_child(
                     egui::UiBuilder::new().max_rect(sidebar.shrink2(Vec2::new(12., 20.))),
@@ -195,7 +196,7 @@ impl Editor {
                 content.label(
                     egui::RichText::new(self.preferences.tab.title())
                         .size(18.)
-                        .color(Color32::from_gray(236)),
+                        .color(theme::gray(236)),
                 );
                 content.add_space(10.);
                 match self.preferences.tab {
@@ -212,7 +213,7 @@ impl Editor {
                 ui.painter().hline(
                     (sidebar.right() + 1.)..=rect.right(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., Color32::from_gray(45)),
+                    Stroke::new(1., theme::gray(45)),
                 );
                 let mut bar = ui.new_child(
                     egui::UiBuilder::new()
@@ -228,7 +229,7 @@ impl Editor {
                         egui::Label::new(
                             egui::RichText::new(&self.status)
                                 .size(12.)
-                                .color(Color32::from_gray(160)),
+                                .color(theme::gray(160)),
                         )
                         .truncate(),
                     );
@@ -244,7 +245,7 @@ impl Editor {
         ui.label(
             egui::RichText::new("Preferences")
                 .size(11.)
-                .color(Color32::from_gray(130)),
+                .color(theme::gray(130)),
         );
         ui.add_space(8.);
         for tab in Tab::ALL {
@@ -252,17 +253,20 @@ impl Editor {
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::click());
             let selected = self.preferences.tab == tab;
             if selected {
-                ui.painter()
-                    .rect_filled(rect, 5., Color32::from_rgb(62, 88, 115));
+                ui.painter().rect_filled(rect, 5., theme::accent());
             } else if response.hovered() {
-                ui.painter().rect_filled(rect, 5., Color32::from_gray(40));
+                ui.painter().rect_filled(rect, 5., theme::gray(40));
             }
             ui.painter().text(
                 rect.left_center() + Vec2::new(12., 0.),
                 egui::Align2::LEFT_CENTER,
                 tab.title(),
                 egui::FontId::proportional(13.),
-                Color32::from_gray(if selected { 250 } else { 205 }),
+                if selected {
+                    theme::on_accent_text(250)
+                } else {
+                    theme::gray(205)
+                },
             );
             if response.clicked() && !selected {
                 self.preferences.tab = tab;
@@ -483,6 +487,41 @@ impl Editor {
 
     fn display_page(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        group(ui, "Interface");
+        let choices = self.themes.choices();
+        let name = |file: &Option<String>| match file {
+            None => "RAWmakase".to_string(),
+            Some(file) => choices.iter().find(|(f, _)| f == file).map_or_else(
+                || fastframe_theme::display_name(file).to_string(),
+                |(_, n)| n.clone(),
+            ),
+        };
+        let mut chosen = self.themes.selected.clone();
+        form_row(ui, "Theme", |ui| {
+            egui::ComboBox::from_id_salt("interface-theme")
+                .width(220.)
+                .selected_text(name(&chosen))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut chosen, None, "RAWmakase");
+                    for (file, label) in &choices {
+                        ui.selectable_value(&mut chosen, Some(file.clone()), label);
+                    }
+                });
+            reveal_button(ui, &super::theme::Themes::folder());
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                &self.themes.status().unwrap_or_else(|| {
+                    "Palette files in the themes folder are listed here. On Omarchy the desktop's theme is followed. The photo's backdrop stays neutral grey.".into()
+                }),
+            );
+        });
+        if chosen != self.themes.selected {
+            self.themes.selected = chosen;
+            let _ = self.save_session();
+        }
+        gap(ui);
         group(ui, "Monitor profile");
         let monitor = self.view.monitor.clone();
         form_row(ui, "Profile", |ui| match &monitor {
@@ -523,31 +562,23 @@ fn group(ui: &mut egui::Ui, title: &str) {
         egui::RichText::new(title)
             .size(12.)
             .strong()
-            .color(Color32::from_gray(175)),
+            .color(theme::gray(175)),
     );
 }
 fn gap(ui: &mut egui::Ui) {
     ui.add_space(14.);
 }
 fn value(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).color(Color32::from_gray(225))).truncate());
+    ui.add(egui::Label::new(egui::RichText::new(text).color(theme::gray(225))).truncate());
 }
 fn path_value(ui: &mut egui::Ui, path: &Path) {
     ui.add(
-        egui::Label::new(egui::RichText::new(pretty_path(path)).color(Color32::from_gray(225)))
-            .truncate(),
+        egui::Label::new(egui::RichText::new(pretty_path(path)).color(theme::gray(225))).truncate(),
     )
     .on_hover_text(path.display().to_string());
 }
 fn hint(ui: &mut egui::Ui, text: &str) {
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .size(12.)
-                .color(Color32::from_gray(135)),
-        )
-        .wrap(),
-    );
+    ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(135))).wrap());
 }
 fn reveal_button(ui: &mut egui::Ui, path: &Path) {
     let exists = path.exists();
@@ -562,9 +593,9 @@ fn reveal_button(ui: &mut egui::Ui, path: &Path) {
 pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., Color32::from_gray(38));
+        ui.painter().rect_filled(rect, 4., theme::gray(38));
     }
-    let color = Color32::from_gray(if response.hovered() { 235 } else { 175 });
+    let color = theme::gray(if response.hovered() { 235 } else { 175 });
     let c = rect.center();
     let painter = ui.painter();
     for i in 0..8 {

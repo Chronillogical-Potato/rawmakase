@@ -1,5 +1,6 @@
+use crate::app::theme;
 use crate::catalog::Folder;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Vec2};
 use std::{collections::HashSet, path::PathBuf};
 #[derive(Default)]
 pub(super) struct FolderNode {
@@ -76,9 +77,9 @@ pub(super) fn folder_tree_row(
             rect,
             3.,
             if active {
-                Color32::from_rgb(47, 58, 66)
+                theme::selected_row()
             } else {
-                Color32::from_gray(43)
+                theme::gray(43)
             },
         );
     }
@@ -86,7 +87,7 @@ pub(super) fn folder_tree_row(
         painter.rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(2., rect.height())),
             0.,
-            Color32::from_rgb(135, 160, 176),
+            theme::selected_marker(),
         );
     }
     let indent = depth.min(12) as f32 * 14.;
@@ -110,14 +111,14 @@ pub(super) fn folder_tree_row(
         };
         painter.add(egui::Shape::line(
             points,
-            Stroke::new(1.2, Color32::from_gray(150)),
+            Stroke::new(1.2, theme::gray(150)),
         ));
     }
     let icon = Rect::from_min_size(Pos2::new(x + 7., y - 4.), Vec2::new(12., 9.));
     painter.rect_stroke(
         icon,
         1.,
-        Stroke::new(1., Color32::from_gray(145)),
+        Stroke::new(1., theme::gray(145)),
         egui::StrokeKind::Inside,
     );
     painter.line_segment(
@@ -125,14 +126,14 @@ pub(super) fn folder_tree_row(
             Pos2::new(icon.left(), icon.top()),
             Pos2::new(icon.left(), icon.top() - 2.),
         ],
-        Stroke::new(1., Color32::from_gray(145)),
+        Stroke::new(1., theme::gray(145)),
     );
     painter.line_segment(
         [
             Pos2::new(icon.left(), icon.top() - 2.),
             Pos2::new(icon.left() + 5., icon.top() - 2.),
         ],
-        Stroke::new(1., Color32::from_gray(145)),
+        Stroke::new(1., theme::gray(145)),
     );
     let can_relink = node.root.is_some() || node.folder.is_some();
     let label_rect = Rect::from_min_max(
@@ -148,22 +149,18 @@ pub(super) fn folder_tree_row(
     painter.galley(
         Pos2::new(label_rect.left(), y - text.size().y / 2.),
         text,
-        Color32::from_gray(if active { 235 } else { 190 }),
+        theme::gray(if active { 235 } else { 190 }),
     );
     painter.text(
         Pos2::new(rect.right() - 27., y),
         Align2::RIGHT_CENTER,
         node.count.to_string(),
         FontId::proportional(10.),
-        Color32::from_gray(125),
+        theme::gray(125),
     );
     if can_relink && (response.hovered() || node.root.is_some()) {
         for dx in [-3., 0., 3.] {
-            painter.circle_filled(
-                Pos2::new(rect.right() - 12. + dx, y),
-                1.,
-                Color32::from_gray(160),
-            );
+            painter.circle_filled(Pos2::new(rect.right() - 12. + dx, y), 1., theme::gray(160));
         }
     }
     let relink = || {

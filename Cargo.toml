@@ -32,6 +32,7 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
+fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7" }
 
 [build-dependencies]
 cc = "1"

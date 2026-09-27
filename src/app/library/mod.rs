@@ -1,5 +1,6 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
 use super::widgets::{section, segmented};
+use crate::app::theme;
 use crate::catalog::{Catalog, Collection, Folder, Photo};
 use anyhow::Result;
 use eframe::egui::{self, Color32, Vec2};
@@ -277,14 +278,14 @@ impl Library {
                         Vec2::new(ui.available_width(), ui.available_width() * 0.66),
                         egui::Sense::hover(),
                     );
-                    ui.painter().rect_filled(rect, 0., Color32::from_gray(22));
+                    ui.painter().rect_filled(rect, 0., theme::gray(22));
                     if texture.is_none() {
                         ui.painter().text(
                             rect.center(),
                             egui::Align2::CENTER_CENTER,
                             "No photo selected",
                             egui::FontId::proportional(11.),
-                            Color32::from_gray(95),
+                            theme::gray(95),
                         );
                     }
                     if let Some(texture) = texture {
@@ -409,7 +410,7 @@ impl Library {
                         ui.label(
                             egui::RichText::new("No folders yet")
                                 .size(11.)
-                                .color(Color32::from_gray(120)),
+                                .color(theme::gray(120)),
                         );
                     }
                     ui.add_space(12.);
@@ -703,7 +704,7 @@ impl Library {
         use crate::app::photo_metadata::{LABELS, label_color};
         let mut changed = false;
         egui::Frame::new()
-            .fill(Color32::from_gray(38))
+            .fill(theme::gray(38))
             .inner_margin(egui::Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -748,7 +749,7 @@ impl Library {
                             egui::Align2::CENTER_CENTER,
                             "★",
                             egui::FontId::proportional(12.),
-                            Color32::from_gray(if lit {
+                            theme::gray(if lit {
                                 225
                             } else if response.hovered() {
                                 140
@@ -779,7 +780,7 @@ impl Library {
                             ui.painter().rect_stroke(
                                 chip.expand(2.),
                                 2.,
-                                egui::Stroke::new(1.2, Color32::from_gray(225)),
+                                egui::Stroke::new(1.2, theme::gray(225)),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -844,7 +845,7 @@ impl Library {
     }
     fn grid_toolbar(&mut self, ui: &mut egui::Ui) {
         egui::Frame::new()
-            .fill(Color32::from_gray(38))
+            .fill(theme::gray(38))
             .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -939,7 +940,7 @@ impl Library {
                     ui.label(
                         egui::RichText::new(self.source_name())
                             .size(11.)
-                            .color(Color32::from_gray(200)),
+                            .color(theme::gray(200)),
                     );
                     ui.label(filter_caption(&match position {
                         Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
@@ -978,7 +979,7 @@ impl Library {
                         self.request_thumbnail(&p.path, ui.ctx());
                         self.request_edited(&p);
                         let cell = rect.shrink(2.);
-                        let base = Color32::from_gray(if active {
+                        let base = theme::gray(if active {
                             120
                         } else if response.hovered() {
                             58
@@ -1024,7 +1025,7 @@ impl Library {
                                 egui::Align2::LEFT_CENTER,
                                 "★".repeat(p.rating as usize),
                                 egui::FontId::proportional(9.),
-                                Color32::from_gray(if active { 30 } else { 200 }),
+                                theme::gray(if active { 30 } else { 200 }),
                             );
                         }
                         if let Some(color) = crate::app::photo_metadata::label_color(&p.label) {
@@ -1070,53 +1071,50 @@ impl Library {
         let mut metadata_edit = None;
         let spacing = ui.spacing().item_spacing;
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        egui::Frame::new()
-            .fill(Color32::from_gray(44))
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("library-grid")
-                    .auto_shrink(false)
-                    .show_rows(
-                        ui,
-                        width,
-                        self.visible.len().div_ceil(columns),
-                        |ui, rows| {
-                            for row in rows {
-                                ui.horizontal(|ui| {
-                                    for col in 0..columns {
-                                        let Some(&index) = self.visible.get(row * columns + col)
-                                        else {
-                                            break;
-                                        };
-                                        let p = self.photos[index].clone();
-                                        let exists = self.available.contains(&p.path);
-                                        self.request_thumbnail(&p.path, ui.ctx());
-                                        self.request_edited(&p);
-                                        let (response, edit) = photo_cell(
-                                            ui,
-                                            &p,
-                                            self.thumbs.get(&p.path),
-                                            self.selected == Some(p.id),
-                                            row * columns + col + 1,
-                                            exists,
-                                            width,
-                                        );
-                                        if response.clicked() || response.secondary_clicked() {
-                                            self.selected = Some(p.id);
-                                        }
-                                        if response.double_clicked() {
-                                            self.selected = Some(p.id);
-                                            action = Action::Develop(p.id);
-                                        }
-                                        if let Some(edit) = edit {
-                                            metadata_edit = Some((p.clone(), edit));
-                                        }
+        egui::Frame::new().fill(theme::gray(44)).show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("library-grid")
+                .auto_shrink(false)
+                .show_rows(
+                    ui,
+                    width,
+                    self.visible.len().div_ceil(columns),
+                    |ui, rows| {
+                        for row in rows {
+                            ui.horizontal(|ui| {
+                                for col in 0..columns {
+                                    let Some(&index) = self.visible.get(row * columns + col) else {
+                                        break;
+                                    };
+                                    let p = self.photos[index].clone();
+                                    let exists = self.available.contains(&p.path);
+                                    self.request_thumbnail(&p.path, ui.ctx());
+                                    self.request_edited(&p);
+                                    let (response, edit) = photo_cell(
+                                        ui,
+                                        &p,
+                                        self.thumbs.get(&p.path),
+                                        self.selected == Some(p.id),
+                                        row * columns + col + 1,
+                                        exists,
+                                        width,
+                                    );
+                                    if response.clicked() || response.secondary_clicked() {
+                                        self.selected = Some(p.id);
                                     }
-                                });
-                            }
-                        },
-                    );
-            });
+                                    if response.double_clicked() {
+                                        self.selected = Some(p.id);
+                                        action = Action::Develop(p.id);
+                                    }
+                                    if let Some(edit) = edit {
+                                        metadata_edit = Some((p.clone(), edit));
+                                    }
+                                }
+                            });
+                        }
+                    },
+                );
+        });
         ui.spacing_mut().item_spacing = spacing;
         if let Some((photo, menu)) = metadata_edit
             && let Some(id) = self.photo_action(ui.ctx(), &photo, menu)
@@ -1164,7 +1162,7 @@ fn metadata_row(ui: &mut egui::Ui, key: &str, value: &str) -> egui::Response {
         egui::Align2::RIGHT_CENTER,
         key,
         egui::FontId::proportional(11.),
-        Color32::from_gray(135),
+        theme::gray(135),
     );
     let left = rect.left() + 92.;
     let galley = egui::WidgetText::from(if value.is_empty() { "—" } else { value }).into_galley(
@@ -1176,7 +1174,7 @@ fn metadata_row(ui: &mut egui::Ui, key: &str, value: &str) -> egui::Response {
     ui.painter().galley(
         egui::pos2(left, y - galley.size().y / 2.),
         galley,
-        Color32::from_gray(if value.is_empty() { 90 } else { 205 }),
+        theme::gray(if value.is_empty() { 90 } else { 205 }),
     );
     response
 }
@@ -1193,13 +1191,11 @@ fn info_text(ui: &mut egui::Ui, text: &str) {
     ui.painter().galley(
         egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.),
         galley,
-        Color32::from_gray(150),
+        theme::gray(150),
     );
 }
 fn filter_caption(text: &str) -> egui::RichText {
-    egui::RichText::new(text)
-        .size(11.)
-        .color(Color32::from_gray(150))
+    egui::RichText::new(text).size(11.).color(theme::gray(150))
 }
 type VolumeState = (bool, Option<(u64, u64)>);
 /// A Lightroom volume header bar: an LED lit green when the drive is
@@ -1220,20 +1216,20 @@ fn volume_row(
     painter.rect_filled(
         rect,
         3.,
-        Color32::from_gray(if response.hovered() { 64 } else { 56 }),
+        theme::gray(if response.hovered() { 64 } else { 56 }),
     );
     let y = rect.center().y;
     let led = egui::Rect::from_center_size(egui::pos2(rect.left() + 14., y), Vec2::new(5., 11.));
     if attached == Some(true) {
         painter.rect_filled(led, 1., Color32::from_rgb(110, 200, 90));
     } else {
-        painter.rect_filled(led, 1., Color32::from_gray(26));
+        painter.rect_filled(led, 1., theme::gray(26));
         painter.rect_stroke(
             led,
             1.,
             egui::Stroke::new(
                 1.,
-                Color32::from_gray(if attached == Some(false) { 150 } else { 90 }),
+                theme::gray(if attached == Some(false) { 150 } else { 90 }),
             ),
             egui::StrokeKind::Inside,
         );
@@ -1243,7 +1239,7 @@ fn volume_row(
         egui::Align2::LEFT_CENTER,
         &volume.name,
         egui::FontId::proportional(12.5),
-        Color32::from_gray(225),
+        theme::gray(225),
     );
     let gb = |bytes: u64| bytes as f64 / 1e9;
     let detail = match (attached, space) {
@@ -1256,7 +1252,7 @@ fn volume_row(
         egui::Align2::RIGHT_CENTER,
         detail,
         egui::FontId::proportional(11.),
-        Color32::from_gray(160),
+        theme::gray(160),
     );
     let c = egui::pos2(rect.right() - 13., y);
     let arrow = if open {
@@ -1274,7 +1270,7 @@ fn volume_row(
     };
     painter.add(egui::Shape::convex_polygon(
         arrow,
-        Color32::from_gray(200),
+        theme::gray(200),
         egui::Stroke::NONE,
     ));
     response.on_hover_text(match (&volume.mount, attached) {
@@ -1289,9 +1285,9 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
     let hovered = response.hovered();
     if hovered {
-        ui.painter().rect_filled(rect, 3., Color32::from_gray(43));
+        ui.painter().rect_filled(rect, 3., theme::gray(43));
     }
-    let color = Color32::from_gray(if hovered { 235 } else { 165 });
+    let color = theme::gray(if hovered { 235 } else { 165 });
     // Same columns as folder rows: icon at 10 px, text at 29 px.
     let c = egui::pos2(rect.left() + 16., rect.center().y);
     let stroke = egui::Stroke::new(1.4, color);
@@ -1317,9 +1313,9 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
             rect,
             2.,
             if active {
-                Color32::from_rgb(47, 58, 66)
+                theme::selected_row()
             } else {
-                Color32::from_gray(43)
+                theme::gray(43)
             },
         );
     }
@@ -1329,14 +1325,14 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(12.),
-        Color32::from_gray(if active { 235 } else { 190 }),
+        theme::gray(if active { 235 } else { 190 }),
     );
     ui.painter().text(
         egui::pos2(rect.right() - 10., y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         egui::FontId::proportional(11.),
-        Color32::from_gray(125),
+        theme::gray(125),
     );
     response
 }

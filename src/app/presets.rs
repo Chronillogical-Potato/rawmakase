@@ -2,8 +2,9 @@ use super::Editor;
 use super::dialogs::FileDialog;
 use super::widgets::{section, segmented};
 use super::worker::Event;
+use crate::app::theme;
 use crate::develop::Recipe;
-use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
+use eframe::egui::{self, Sense, Stroke, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -61,9 +62,9 @@ impl Editor {
                         );
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::splat(22.), Sense::click());
-                        let color = Color32::from_gray(if response.hovered() { 235 } else { 160 });
+                        let color = theme::gray(if response.hovered() { 235 } else { 160 });
                         if response.hovered() {
-                            ui.painter().rect_filled(rect, 3., Color32::from_gray(50));
+                            ui.painter().rect_filled(rect, 3., theme::gray(50));
                         }
                         let c = rect.center();
                         ui.painter().line_segment(
@@ -108,7 +109,7 @@ impl Editor {
                             format!("{} presets · open a RAW to apply", library.presets.len())
                         })
                         .size(10.)
-                        .color(Color32::from_gray(125)),
+                        .color(theme::gray(125)),
                     );
                     if !library.errors.is_empty() {
                         ui.label(
@@ -193,7 +194,7 @@ impl Editor {
                                     egui::Align2::CENTER_CENTER,
                                     "★",
                                     egui::FontId::proportional(12.),
-                                    Color32::from_gray(if star_response.hovered() {
+                                    theme::gray(if star_response.hovered() {
                                         240
                                     } else if favorite {
                                         200
@@ -327,9 +328,9 @@ fn list_row(
             rect,
             2.,
             if selected {
-                Color32::from_rgb(47, 58, 66)
+                theme::selected_row()
             } else {
-                Color32::from_gray(43)
+                theme::gray(43)
             },
         );
     }
@@ -352,7 +353,7 @@ fn list_row(
         };
         ui.painter().add(egui::Shape::convex_polygon(
             triangle,
-            Color32::from_gray(140),
+            theme::gray(140),
             Stroke::NONE,
         ));
     }
@@ -367,7 +368,7 @@ fn list_row(
     ui.painter().galley(
         Pos2::new(text_left, y - galley.size().y / 2.),
         galley,
-        Color32::from_gray(if !enabled {
+        theme::gray(if !enabled {
             95
         } else if selected {
             240
@@ -381,7 +382,7 @@ fn list_row(
             Align2::RIGHT_CENTER,
             count.to_string(),
             FontId::proportional(10.),
-            Color32::from_gray(120),
+            theme::gray(120),
         );
     }
     response
@@ -421,7 +422,7 @@ impl Editor {
             ui.label(
                 egui::RichText::new("From Lightroom")
                     .size(11.)
-                    .color(Color32::from_gray(125)),
+                    .color(theme::gray(125)),
             );
             ui.add_space(4.);
             for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
@@ -485,18 +486,15 @@ fn history_row(
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     if current {
-        ui.painter()
-            .rect_filled(rect, 3., Color32::from_rgb(62, 88, 115));
+        ui.painter().rect_filled(rect, 3., theme::accent());
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 3., Color32::from_gray(43));
+        ui.painter().rect_filled(rect, 3., theme::gray(43));
     }
-    let color = Color32::from_gray(if current {
-        250
-    } else if undone {
-        120
+    let color = if current {
+        theme::on_accent_text(250)
     } else {
-        205
-    });
+        theme::gray(if undone { 120 } else { 205 })
+    };
     let value_width = if value.is_empty() {
         0.
     } else {

@@ -1,4 +1,5 @@
 //! Lightroom-compatible catalog metadata and keyboard commands.
+use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Key};
 
@@ -90,7 +91,7 @@ pub fn label_color(label: &str) -> Option<Color32> {
         "Blue" => Color32::from_rgb(87, 143, 207),
         "Purple" => Color32::from_rgb(164, 111, 194),
         // Lightroom stores label text; custom label-set colors cannot be inferred.
-        _ => Color32::from_gray(220),
+        _ => theme::gray(220),
     })
 }
 
@@ -123,7 +124,7 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                     Align2::CENTER_CENTER,
                     "★",
                     FontId::proportional(14.),
-                    Color32::from_gray(match (lit, hovered.is_some()) {
+                    theme::gray(match (lit, hovered.is_some()) {
                         (true, false) => 230,
                         (true, true) => 175,
                         _ => 72,
@@ -138,7 +139,7 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                     ui.painter().rect_filled(
                         rect.shrink2(Vec2::new(2., 2.)),
                         3.,
-                        Color32::from_gray(if active { 70 } else { 50 }),
+                        theme::gray(if active { 70 } else { 50 }),
                     );
                 }
                 flag_icon(ui.painter(), rect.center(), flag, active);
@@ -157,7 +158,7 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                     ui.painter().rect_stroke(
                         chip.expand(2.),
                         3.,
-                        Stroke::new(1.2, Color32::from_gray(if active { 235 } else { 140 })),
+                        Stroke::new(1.2, theme::gray(if active { 235 } else { 140 })),
                         StrokeKind::Outside,
                     );
                 }
@@ -202,11 +203,11 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
 pub fn flag_icon(painter: &egui::Painter, at: egui::Pos2, flag: i32, strong: bool) {
     use egui::{Stroke, Vec2};
     let color = if flag > 0 {
-        Color32::from_gray(if strong { 245 } else { 200 })
+        theme::gray(if strong { 245 } else { 200 })
     } else {
-        Color32::from_gray(if strong { 15 } else { 30 })
+        theme::gray(if strong { 15 } else { 30 })
     };
-    let outline = Stroke::new(1., Color32::from_gray(if flag > 0 { 90 } else { 150 }));
+    let outline = Stroke::new(1., theme::gray(if flag > 0 { 90 } else { 150 }));
     painter.line_segment(
         [at + Vec2::new(-3., -5.), at + Vec2::new(-3., 6.)],
         Stroke::new(1.3, if flag > 0 { color } else { outline.color }),
@@ -307,10 +308,7 @@ mod tests {
     }
     #[test]
     fn unknown_label_is_visible_without_guessing_a_color() {
-        assert_eq!(
-            label_color("Client approved"),
-            Some(Color32::from_gray(220))
-        );
+        assert_eq!(label_color("Client approved"), Some(theme::gray(220)));
         assert_eq!(label_color(""), None);
         assert_ne!(label_color("Red"), label_color("Green"));
     }

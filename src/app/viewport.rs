@@ -1,6 +1,7 @@
 use super::Editor;
 use super::state::TextureMode;
 use super::widgets::{section, segmented};
+use crate::app::theme;
 use crate::develop::{self, Geometry};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -70,14 +71,14 @@ impl Editor {
                 Vec2::new(ui.available_width(), ui.available_width() * 0.66),
                 Sense::click_and_drag(),
             );
-            ui.painter().rect_filled(rect, 0., Color32::from_gray(22));
+            ui.painter().rect_filled(rect, 0., theme::photo_backdrop());
             let Some(texture) = &self.preview.navigator else {
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
                     "No photo open",
                     egui::FontId::proportional(11.),
-                    Color32::from_gray(95),
+                    theme::gray(95),
                 );
                 return;
             };
@@ -134,7 +135,7 @@ impl Editor {
                 egui::Align2::CENTER_CENTER,
                 "Open a RAW photo, or pick one in the Library",
                 egui::FontId::proportional(15.),
-                Color32::from_gray(120),
+                theme::gray(120),
             );
             return;
         }
@@ -170,7 +171,7 @@ impl Editor {
             egui::Align2::LEFT_CENTER,
             "Loading photo…",
             egui::FontId::proportional(12.),
-            Color32::from_gray(225),
+            theme::gray(225),
         );
     }
     /// Sets a zoom level; 0 means Fit.
@@ -237,7 +238,7 @@ impl Editor {
     pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
         let (area, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
-        ui.painter().rect_filled(area, 0., Color32::from_gray(22));
+        ui.painter().rect_filled(area, 0., theme::photo_backdrop());
         let ppp = ui.ctx().pixels_per_point();
         self.view.viewport = available * ppp;
         if !self.view.zoom100

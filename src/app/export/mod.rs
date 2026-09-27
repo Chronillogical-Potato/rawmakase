@@ -5,6 +5,7 @@
 mod dialog;
 
 use super::{Editor, worker::Event};
+use crate::app::theme;
 use crate::export::{
     Existing, ExportSettings,
     job::{self, Photo},
@@ -188,13 +189,13 @@ impl Editor {
                 format!("Exporting {n} photos")
             },
             egui::FontId::proportional(11.),
-            Color32::from_gray(190),
+            theme::gray(190),
         );
         let bar = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.top() + 17.),
             Vec2::new(rect.width() - 26., 4.),
         );
-        painter.rect_filled(bar, 2., Color32::from_gray(50));
+        painter.rect_filled(bar, 2., theme::gray(50));
         painter.rect_filled(
             egui::Rect::from_min_size(bar.min, Vec2::new(bar.width() * fraction, 4.)),
             2.,
@@ -207,7 +208,7 @@ impl Editor {
         let response = ui
             .interact(close, ui.id().with("cancel-export"), Sense::click())
             .on_hover_text("Cancel export");
-        let color = Color32::from_gray(if response.hovered() { 235 } else { 150 });
+        let color = theme::gray(if response.hovered() { 235 } else { 150 });
         let c = close.center();
         for d in [Vec2::new(4., 4.), Vec2::new(4., -4.)] {
             ui.painter()

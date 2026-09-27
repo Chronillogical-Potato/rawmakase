@@ -1,8 +1,9 @@
 use super::Editor;
 use super::dialogs::FileDialog;
 use super::widgets::{menu_item, menu_separator, toolbar_action, toolbar_divider};
+use crate::app::theme;
 use crate::develop::Recipe;
-use eframe::egui::{self, Color32, Stroke, Vec2};
+use eframe::egui::{self, Stroke, Vec2};
 
 impl Editor {
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -10,7 +11,7 @@ impl Editor {
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_gray(29))
+                    .fill(theme::gray(29))
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
             .show(ui, |ui| {
@@ -18,12 +19,11 @@ impl Editor {
                 ui.spacing_mut().interact_size.y = 32.;
                 ui.spacing_mut().item_spacing.x = 8.;
                 ui.visuals_mut().button_frame = true;
-                ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_gray(38);
-                ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::from_gray(38);
-                ui.visuals_mut().widgets.inactive.bg_stroke =
-                    Stroke::new(1., Color32::from_gray(53));
-                ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_gray(52);
-                ui.visuals_mut().widgets.hovered.weak_bg_fill = Color32::from_gray(52);
+                ui.visuals_mut().widgets.inactive.bg_fill = theme::gray(38);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = theme::gray(38);
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1., theme::gray(53));
+                ui.visuals_mut().widgets.hovered.bg_fill = theme::gray(52);
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::gray(52);
                 ui.horizontal(|ui| {
                     ui.menu_button("Open", |ui| {
                         if ui.button("Open RAW file…").clicked() {
@@ -50,7 +50,7 @@ impl Editor {
                     }
                     toolbar_divider(ui);
                     egui::Frame::new()
-                        .fill(Color32::from_gray(20))
+                        .fill(theme::gray(20))
                         .corner_radius(6.)
                         .inner_margin(3)
                         .show(ui, |ui| {
@@ -259,11 +259,7 @@ impl Editor {
             .show(ctx, |ui| {
                 for (title, rows) in groups {
                     ui.add_space(6.);
-                    ui.label(
-                        egui::RichText::new(title)
-                            .size(12.)
-                            .color(Color32::from_gray(160)),
-                    );
+                    ui.label(egui::RichText::new(title).size(12.).color(theme::gray(160)));
                     ui.add_space(2.);
                     egui::Grid::new(title)
                         .num_columns(2)
@@ -271,9 +267,7 @@ impl Editor {
                         .show(ui, |ui| {
                             for (key, action) in rows {
                                 ui.label(
-                                    egui::RichText::new(key)
-                                        .monospace()
-                                        .color(Color32::from_gray(230)),
+                                    egui::RichText::new(key).monospace().color(theme::gray(230)),
                                 );
                                 ui.label(action);
                                 ui.end_row();

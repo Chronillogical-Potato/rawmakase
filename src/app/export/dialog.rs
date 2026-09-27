@@ -1,6 +1,7 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
 use super::super::widgets::{form_row, modal_frame, pretty_path, primary_button};
 use super::{Conflict, Editor};
+use crate::app::theme;
 use crate::export::{Destination, Existing, Format, settings::unique};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
@@ -53,7 +54,7 @@ impl Editor {
                         source.file_name().unwrap_or_default().to_string_lossy()
                     ),
                     egui::FontId::proportional(16.),
-                    Color32::from_gray(236),
+                    theme::gray(236),
                 );
                 let body = egui::Rect::from_min_max(
                     rect.left_top() + Vec2::new(16., 52.),
@@ -70,7 +71,7 @@ impl Editor {
                 ui.painter().hline(
                     rect.x_range(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., Color32::from_gray(45)),
+                    Stroke::new(1., theme::gray(45)),
                 );
                 let footer = egui::Rect::from_min_max(
                     egui::pos2(rect.left() + 24., rect.bottom() - 56.),
@@ -98,7 +99,7 @@ impl Editor {
                             egui::Label::new(
                                 egui::RichText::new(format!("Saves to {}", pretty_path(&target)))
                                     .size(12.)
-                                    .color(Color32::from_gray(140)),
+                                    .color(theme::gray(140)),
                             )
                             .truncate(),
                         )
@@ -142,10 +143,7 @@ impl Editor {
             let text = folder
                 .as_deref()
                 .map_or("No folder chosen".into(), pretty_path);
-            ui.add(
-                egui::Label::new(egui::RichText::new(text).color(Color32::from_gray(150)))
-                    .truncate(),
-            );
+            ui.add(egui::Label::new(egui::RichText::new(text).color(theme::gray(150))).truncate());
         });
         form_row(ui, "", |ui| {
             ui.checkbox(&mut s.subfolder, "Put in Subfolder:");
@@ -174,7 +172,7 @@ impl Editor {
             );
         });
         form_row(ui, "Example", |ui| {
-            ui.label(egui::RichText::new(s.file_name(source)).color(Color32::from_gray(225)));
+            ui.label(egui::RichText::new(s.file_name(source)).color(theme::gray(225)));
         });
         form_row(ui, "Extensions", |ui| {
             egui::ComboBox::from_id_salt("export-case")
@@ -211,13 +209,12 @@ impl Editor {
             }),
             Format::Tiff => form_row(ui, "Bit Depth", |ui| {
                 ui.label(
-                    egui::RichText::new("16 bits/component, uncompressed")
-                        .color(Color32::from_gray(225)),
+                    egui::RichText::new("16 bits/component, uncompressed").color(theme::gray(225)),
                 );
             }),
         }
         form_row(ui, "Color Space", |ui| {
-            ui.label(egui::RichText::new("sRGB").color(Color32::from_gray(225)));
+            ui.label(egui::RichText::new("sRGB").color(theme::gray(225)));
         });
 
         section(ui, "Image Sizing");
@@ -290,14 +287,14 @@ impl Editor {
                 ui.label(
                     egui::RichText::new("A file with this name already exists")
                         .size(15.)
-                        .color(Color32::from_gray(236)),
+                        .color(theme::gray(236)),
                 );
                 ui.add_space(6.);
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(conflict.target.display().to_string())
                             .size(12.)
-                            .color(Color32::from_gray(150)),
+                            .color(theme::gray(150)),
                     )
                     .truncate(),
                 );
@@ -336,12 +333,12 @@ impl Editor {
 fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(6.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    ui.painter().rect_filled(rect, 3., Color32::from_gray(44));
+    ui.painter().rect_filled(rect, 3., theme::gray(44));
     ui.painter().text(
         rect.left_center() + Vec2::new(12., 0.),
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(13.),
-        Color32::from_gray(235),
+        theme::gray(235),
     );
 }

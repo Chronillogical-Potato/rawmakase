@@ -2,6 +2,7 @@ use super::Editor;
 use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::widgets::workspace_tab;
+use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
 
@@ -61,6 +62,7 @@ impl Editor {
         let ctx = ui.ctx().clone();
         self.events(&ctx);
         self.poll_updates(&ctx);
+        self.themes.poll(&ctx);
         if let Some(library) = &mut self.library {
             library.poll_previews(&ctx);
         }
@@ -137,7 +139,7 @@ impl Editor {
             .exact_size(BAR_HEIGHT)
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_gray(26))
+                    .fill(theme::gray(26))
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
@@ -162,7 +164,7 @@ impl Editor {
                     let wordmark = ui.painter().layout_no_wrap(
                         "rawmakase".into(),
                         egui::FontId::proportional(17.),
-                        Color32::from_gray(232),
+                        theme::gray(232),
                     );
                     let (rect, _) = ui.allocate_exact_size(
                         Vec2::new(wordmark.size().x, 28.),
@@ -171,7 +173,7 @@ impl Editor {
                     ui.painter().galley(
                         rect.left_center() - Vec2::new(0., wordmark.size().y / 2.),
                         wordmark,
-                        Color32::from_gray(232),
+                        theme::gray(232),
                     );
                     let (rect, _) =
                         ui.allocate_exact_size(Vec2::new(29., 28.), egui::Sense::hover());
@@ -180,12 +182,12 @@ impl Editor {
                             rect.center() - Vec2::new(0., 9.),
                             rect.center() + Vec2::new(0., 9.),
                         ],
-                        egui::Stroke::new(1., Color32::from_gray(70)),
+                        egui::Stroke::new(1., theme::gray(70)),
                     );
                     let name = ui.painter().layout_no_wrap(
                         catalog,
                         egui::FontId::proportional(13.),
-                        Color32::WHITE,
+                        theme::gray(255),
                     );
                     let busy = self.activity.is_busy();
                     let (rect, response) = ui.allocate_exact_size(
@@ -199,10 +201,9 @@ impl Editor {
                     let open =
                         egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response));
                     if response.hovered() || open {
-                        ui.painter().rect_filled(rect, 4., Color32::from_gray(38));
+                        ui.painter().rect_filled(rect, 4., theme::gray(38));
                     }
-                    let color =
-                        Color32::from_gray(if response.hovered() || open { 235 } else { 175 });
+                    let color = theme::gray(if response.hovered() || open { 235 } else { 175 });
                     ui.painter()
                         .with_clip_rect(rect.shrink2(Vec2::new(10., 0.)))
                         .galley(
@@ -293,7 +294,7 @@ impl Editor {
                                     rect.center() - Vec2::new(0., 8.),
                                     rect.center() + Vec2::new(0., 8.),
                                 ],
-                                egui::Stroke::new(1., Color32::from_gray(70)),
+                                egui::Stroke::new(1., theme::gray(70)),
                             );
                             if workspace_tab(ui, "Library", !setup && self.library_mode)
                                 .on_hover_text("Library · G")
@@ -321,7 +322,7 @@ impl Editor {
             });
         egui::Panel::top("workspace-modes-rule")
             .exact_size(1.)
-            .frame(egui::Frame::new().fill(Color32::from_gray(16)))
+            .frame(egui::Frame::new().fill(theme::gray(16)))
             .show(ui, |_| {});
     }
 
@@ -559,7 +560,7 @@ impl Editor {
             let mut target = None;
             egui::Panel::bottom("catalog-filmstrip")
                 .exact_size(128.)
-                .frame(egui::Frame::new().fill(Color32::from_gray(26)))
+                .frame(egui::Frame::new().fill(theme::gray(26)))
                 .show(ui, |ui| {
                     let (next, changed) = library.filmstrip(ui, current);
                     target = next;

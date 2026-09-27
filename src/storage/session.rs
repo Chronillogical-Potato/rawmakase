@@ -29,6 +29,9 @@ pub struct Session {
     /// A release the user chose to skip; newer ones are still offered.
     #[serde(default)]
     pub skipped_version: Option<String>,
+    /// The interface's palette file; None is RAWmakase's own greys.
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))
