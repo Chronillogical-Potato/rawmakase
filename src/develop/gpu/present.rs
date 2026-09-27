@@ -1,12 +1,8 @@
 //! Preview display on the device: the developed pixels are finished (`present.wgsl`)
 //! straight into a texture the viewport draws, so a preview is never read back or
 //! uploaded again. Only the histogram and, when asked, a small thumbnail come back.
-use super::Processor;
-use crate::develop::{
-    Recipe,
-    pipeline::{Samples, pixel_params::PixelParams},
-    quality,
-};
+use super::{Processor, develop::Input};
+use crate::develop::{Recipe, pipeline::pixel_params::PixelParams, quality};
 use anyhow::{Context, Result, ensure};
 use std::{
     path::Path,
@@ -302,20 +298,21 @@ impl Processor {
     /// only the histogram and the thumbnail. Fails without side effects on the CPU.
     pub(crate) fn present(
         &mut self,
-        samples: &Arc<Samples>,
+        input: Input,
         params: &PixelParams,
         recipe: &Recipe,
         finish: &Finish,
         display: &Display,
         cancel: &AtomicBool,
     ) -> Result<Frame> {
-        self.check_develop(samples, params, cancel)?;
+        self.check_develop(input, params, cancel)?;
+        let (width, height) = input.size();
         let [x, y, w, h] = finish.crop;
         ensure!(
             w > 0
                 && h > 0
-                && x + w <= samples.width
-                && y + h <= samples.height
+                && x + w <= width
+                && y + h <= height
                 && finish.full[0] > 0
                 && finish.full[1] > 0,
             "Invalid preview crop"
@@ -325,11 +322,11 @@ impl Processor {
             w.max(h) <= limits.max_texture_dimension_2d
                 && w.div_ceil(16).max(h.div_ceil(16))
                     <= limits.max_compute_workgroups_per_dimension
-                && samples.width.div_ceil(16).max(samples.height.div_ceil(16))
+                && width.div_ceil(16).max(height.div_ceil(16))
                     <= limits.max_compute_workgroups_per_dimension,
             "Preview exceeds GPU texture limits"
         );
-        self.scoped(|gpu| gpu.present_inner(samples, params, recipe, finish, display, cancel))
+        self.scoped(|gpu| gpu.present_inner(input, params, recipe, finish, display, cancel))
     }
     /// The generation of `texture` if it is still a preview target, to tell whether a
     /// frame's pixels are still in it.
@@ -343,7 +340,7 @@ impl Processor {
     }
     fn present_inner(
         &mut self,
-        samples: &Arc<Samples>,
+        input: Input,
         params: &PixelParams,
         recipe: &Recipe,
         finish: &Finish,
@@ -352,11 +349,11 @@ impl Processor {
     ) -> Result<Frame> {
         let device = self.device.clone();
         let mut encoder = device.create_command_encoder(&Default::default());
-        let pixels = self.record_develop(samples, params, &mut encoder).clone();
+        let pixels = self.record_develop(input, params, &mut encoder);
         let presenter = self
             .presenter
             .get_or_insert_with(|| Presenter::new(&device));
-        let (width, height) = (samples.width, samples.height);
+        let (width, height) = input.size();
         let n = width as u64 * height as u64;
         if presenter.scratch.as_ref().is_none_or(|b| b.size() < n * 4) {
             presenter.scratch = None;

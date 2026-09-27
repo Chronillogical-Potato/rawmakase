@@ -21,7 +21,7 @@ const GROUP: u32 = 256;
 const OUTSIDE: f32 = -3e38;
 
 pub(super) struct Developer {
-    layout: wgpu::BindGroupLayout,
+    pub(super) layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     /// Uploaded sample sets, most recently used first, so switching between Fit and
     /// 100% does not upload again.
@@ -87,17 +87,32 @@ impl Developer {
         }
     }
 }
-impl Processor {
-    /// Uploads `samples` unless they are on the device already, and records the develop
-    /// pass; its result is in the most recent upload's `output`.
-    pub(super) fn record_develop(
-        &mut self,
-        samples: &Arc<Samples>,
-        params: &PixelParams,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> &wgpu::Buffer {
-        let device = &self.device;
-        let developer = self.developer.get_or_insert_with(|| Developer::new(device));
+/// Samples made on the device (`resident.rs`), and the develop stage's output.
+pub(crate) struct DeviceSamples {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) pixels: wgpu::Buffer,
+    pub(super) positions: wgpu::Buffer,
+    pub(super) output: wgpu::Buffer,
+}
+/// What the develop stage reads: samples prepared on the CPU, or on the device.
+#[derive(Clone, Copy)]
+pub(crate) enum Input<'a> {
+    Cpu(&'a Arc<Samples>),
+    Device(&'a DeviceSamples),
+}
+impl Input<'_> {
+    pub(super) fn size(&self) -> (u32, u32) {
+        match self {
+            Input::Cpu(s) => (s.width, s.height),
+            Input::Device(s) => (s.width, s.height),
+        }
+    }
+}
+impl Developer {
+    /// Makes `samples` the most recent upload, uploading them unless they are there.
+    fn upload(&mut self, device: &wgpu::Device, samples: &Arc<Samples>) {
+        let developer = self;
         let n = samples.pixels.len() as u64;
         if let Some(i) = developer
             .samples
@@ -148,7 +163,29 @@ impl Processor {
             };
             developer.samples.insert(0, uploaded);
         }
-        let uploaded = &developer.samples[0];
+    }
+}
+impl Processor {
+    /// Uploads CPU samples unless they are on the device already, and records the
+    /// develop pass; returns the buffer that holds its result.
+    pub(super) fn record_develop(
+        &mut self,
+        input: Input,
+        params: &PixelParams,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> wgpu::Buffer {
+        let device = &self.device;
+        let developer = self.developer.get_or_insert_with(|| Developer::new(device));
+        let (w, h) = input.size();
+        let n = w as u64 * h as u64;
+        let (pixels, positions, output) = match input {
+            Input::Device(s) => (s.pixels.clone(), s.positions.clone(), s.output.clone()),
+            Input::Cpu(samples) => {
+                developer.upload(device, samples);
+                let u = &developer.samples[0];
+                (u.pixels.clone(), u.positions.clone(), u.output.clone())
+            }
+        };
         let storage = |label, data: &[f32]| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -166,21 +203,14 @@ impl Processor {
             contents: bytemuck::cast_slice(&[n as u32, gx, 0, 0]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let entries: Vec<_> = [
-            &uploaded.pixels,
-            &uploaded.positions,
-            &uploaded.output,
-            &params_buffer,
-            &tables,
-            &size,
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(binding, buffer)| wgpu::BindGroupEntry {
-            binding: binding as u32,
-            resource: buffer.as_entire_binding(),
-        })
-        .collect();
+        let entries: Vec<_> = [&pixels, &positions, &output, &params_buffer, &tables, &size]
+            .into_iter()
+            .enumerate()
+            .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                binding: binding as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect();
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Develop bindings"),
             layout: &developer.layout,
@@ -195,7 +225,7 @@ impl Processor {
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
-        &uploaded.output
+        output
     }
     /// The per-pixel stage over `samples`. Does not change CPU state on failure.
     pub(crate) fn develop(
@@ -204,18 +234,19 @@ impl Processor {
         params: &PixelParams,
         cancel: &AtomicBool,
     ) -> Result<Rendered> {
-        self.check_develop(samples, params, cancel)?;
+        self.check_develop(Input::Cpu(samples), params, cancel)?;
         self.scoped(|gpu| gpu.develop_inner(samples, params, cancel))
     }
     /// Whether the device can develop `samples` at all.
     pub(super) fn check_develop(
         &self,
-        samples: &Samples,
+        input: Input,
         params: &PixelParams,
         cancel: &AtomicBool,
     ) -> Result<()> {
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        let n = samples.pixels.len() as u64;
+        let (w, h) = input.size();
+        let n = w as u64 * h as u64;
         ensure!(n > 0, "Empty develop region");
         let limits = self.device.limits();
         ensure!(
@@ -231,8 +262,8 @@ impl Processor {
         Ok(())
     }
     /// Runs `work` inside validation, internal and memory error scopes; a device error
-    /// releases the uploaded samples and fails.
-    pub(super) fn scoped<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+    /// releases the uploaded samples and resident buffers and fails.
+    pub(crate) fn scoped<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let internal = self.device.push_error_scope(wgpu::ErrorFilter::Internal);
         let allocation = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
@@ -244,6 +275,7 @@ impl Processor {
             if let Some(d) = &mut self.developer {
                 d.samples.clear();
             }
+            self.release_resident();
             anyhow::bail!("{error}");
         }
         result
@@ -255,7 +287,7 @@ impl Processor {
         cancel: &AtomicBool,
     ) -> Result<Rendered> {
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.record_develop(samples, params, &mut encoder);
+        self.record_develop(Input::Cpu(samples), params, &mut encoder);
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let device = &self.device;
         let n = samples.pixels.len() as u64;

@@ -346,11 +346,26 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     };
     use std::sync::Arc;
     let (w, h) = (157, 103);
+    let radial = |values: Vec<f32>| crate::lens::Radial {
+        knots: (0..values.len())
+            .map(|i| i as f32 / (values.len() - 1) as f32)
+            .collect(),
+        values,
+    };
     let metadata = Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         width: w,
         height: h,
+        lens: Some(crate::lens::LensCorrection {
+            vignetting: Some(radial(vec![1., 1.1, 1.3, 1.6])),
+            distortion: Some(radial(vec![1., 0.99, 1.02, 1.05])),
+            chromatic: Some([
+                radial(vec![1., 1.001, 1.002]),
+                radial(vec![1., 0.999, 0.998]),
+            ]),
+            ..Default::default()
+        }),
         wb: [2.02, 1., 1.89],
         cam_xyz: [
             [1.1434, -0.4948, -0.121],
@@ -401,7 +416,16 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.effects.vignette = -0.3;
             recipe.effects.lens_vignette = 0.2;
             recipe.effects.clarity = 0.3;
+            recipe.effects.texture = -0.4;
             recipe.whites = 0.6;
+            // Geometry, lens correction and noise reduction in the sampling stage.
+            recipe.straighten = 3.;
+            recipe.crop = [0.05, 0.1, 0.95, 0.92];
+            recipe.transform.vertical = 0.2;
+            recipe.lens_builtin = true;
+            recipe.lens_distortion = 0.8;
+            recipe.noise_luma = 0.4;
+            recipe.noise_chroma = 0.5;
         }
         for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
             let display = super::Display {
@@ -435,7 +459,10 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                     }
                 }
             }
-            let actual = read_texture(gpu.gpu().unwrap(), &frame.texture)?;
+            let processor = gpu.gpu().unwrap();
+            // The photo stayed on the device: sampled there, not on the CPU.
+            assert!(!processor.resident.as_ref().unwrap().samples.is_empty());
+            let actual = read_texture(processor, &frame.texture)?;
             let worst = actual
                 .iter()
                 .zip(&rgb)

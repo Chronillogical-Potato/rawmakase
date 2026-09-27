@@ -728,6 +728,58 @@ impl<'a> LensWarp<'a> {
         p.map(|v| v * gain)
     }
 }
+/// Lens correction for `gpu/local.wgsl`, from `S_LENS` to `S_VIGNETTING_AMOUNT`, with
+/// radial tables appended to `tables` (each: knots, then values) at offsets counted
+/// from `base`. Offsets are -1 for absent tables.
+pub(crate) fn lens_gpu_params(
+    im: &CameraImage,
+    r: &Recipe,
+    base: usize,
+    tables: &mut Vec<f32>,
+) -> [f32; 15] {
+    let mut push = |radial: Option<&crate::lens::Radial>| match radial {
+        Some(radial) => {
+            let at = base + tables.len();
+            tables.extend(&radial.knots);
+            tables.extend(&radial.values);
+            [at as f32, radial.knots.len() as f32]
+        }
+        None => [-1., 0.],
+    };
+    let mut out = [0.; 15];
+    let Some(warp) = LensWarp::new(im, r) else {
+        out[5..13].copy_from_slice(&[-1., 0., -1., 0., -1., 0., -1., 0.]);
+        return out;
+    };
+    let lens = warp.lens;
+    let distortion = push(lens.distortion.as_ref());
+    let [red, blue] = match &lens.chromatic {
+        Some([red, blue]) => [push(Some(red)), push(Some(blue))],
+        None => [[-1., 0.]; 2],
+    };
+    let vignetting = push(
+        warp.vignetting
+            .as_ref()
+            .map(|v| v.lens.vignetting.as_ref().unwrap()),
+    );
+    out[..5].copy_from_slice(&[1., warp.center[0], warp.center[1], warp.half, warp.fill]);
+    out[5] = warp.amount;
+    out[6..8].copy_from_slice(&distortion);
+    out[8..10].copy_from_slice(&red);
+    out[10..12].copy_from_slice(&blue);
+    out[12..14].copy_from_slice(&vignetting);
+    out[14] = warp.vignetting.as_ref().map_or(0., |v| v.amount);
+    out
+}
+/// Built-in vignetting for `gpu/logs.wgsl`: centre, half diagonal, amount and the
+/// radial table (knots, then values), or `None`.
+pub(crate) fn vignetting_gpu_params(im: &CameraImage, r: &Recipe) -> Option<([f32; 4], Vec<f32>)> {
+    let v = VignetteField::new(im, r)?;
+    let radial = v.lens.vignetting.as_ref()?;
+    let mut table = radial.knots.clone();
+    table.extend(&radial.values);
+    Some(([v.center[0], v.center[1], v.half, v.amount], table))
+}
 /// Shared full/preview renderer. Geometry is sampled in rows; no full-sized intermediate color image.
 pub fn render(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     if r.engine < 3 {

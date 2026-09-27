@@ -211,6 +211,13 @@ renders remains on the GPU for readback callers. Export remains on the CPU. The
 status line says `GPU` for presented frames, `GPU finish` when only finishing used
 the GPU, and `CPU` otherwise.
 
+For the same recipes, the stages before the per-pixel stage also run on the device
+when the photo fits its buffer limits (`gpu/resident.rs`): the photo or pyramid level
+is kept there, with the local-tone blurs and gain, and regions are sampled there
+through geometry, lens correction and noise reduction. Only the reduced input of the
+Shadows/Highlights map is read back; the map is built on the CPU. A failure in these
+stages turns off only this path for the session.
+
 Presented textures are kept per view (the whole photo, or a 100% region) and size,
 two of each, so a slider moving at 100% alternates between the reduced preview's and
 the full region's textures without allocating. Each texture carries a generation that

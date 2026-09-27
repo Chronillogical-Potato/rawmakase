@@ -8,7 +8,7 @@ use crate::{
     develop::{self, Geometry, Recipe, Rendered},
     raw::CameraImage,
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
 use std::sync::{
     Arc,
@@ -477,6 +477,173 @@ fn local_gain(
     })?;
     Ok((gain, Some(key)))
 }
+/// The GPU path for everything before the per-pixel stage, with the photo (or pyramid
+/// level) `source` kept on the device: the local-tone gain, the Shadows/Highlights
+/// map's reduced input and the region's samples are made there, then developed and
+/// presented. `scale` is `source`'s size relative to the full-resolution photo. `None`
+/// without a display or GPU, or when the port does not cover the recipe; the CPU
+/// stages then run as before.
+#[allow(clippy::too_many_arguments)]
+fn render_resident(
+    source: &Arc<CameraImage>,
+    r: &Recipe,
+    scale: f32,
+    g: &Geometry,
+    region: [u32; 4],
+    spread: f32,
+    finish: &develop::gpu::Finish,
+    cancel: &AtomicBool,
+    stages: &mut Stages,
+) -> Result<Option<develop::gpu::Frame>> {
+    use develop::pipeline::{Source, pixel_params::pixel_params};
+    let Some(display) = stages.display else {
+        return Ok(None);
+    };
+    // Engine 4 renders Shadows and Highlights per pixel; the gain carries only Clarity
+    // and Texture (see `local_stage`).
+    if !(r.engine >= 4 && r.reference_curves)
+        || !stages
+            .backend
+            .gpu
+            .as_ref()
+            .is_some_and(|gpu| gpu.fits_resident(source))
+        || stages.backend.resident_fallback.is_some()
+    {
+        return Ok(None);
+    }
+    let mut base = r.clone();
+    base.sharpening = 0.;
+    base.validate()?;
+    if !develop::pipeline::pixel_params::supported(&base) {
+        return Ok(None);
+    }
+    let mut spatial = base.clone();
+    spatial.shadows = 0.;
+    spatial.highlights = 0.;
+    let mut toned = Toned {
+        image: source.clone(),
+        gain: None,
+        gain_key: None,
+        reduced: None,
+    };
+    let mut gain = None;
+    if r.effects.clarity != 0. || r.effects.texture != 0. {
+        let texture = r.effects.texture != 0.;
+        let blur_key = BlurKey::new(source, &spatial, scale, texture);
+        let key = LocalKey::new(blur_key.clone(), &spatial);
+        let Some(camera) = pixel_params(Source::from(source.as_ref()), &spatial) else {
+            return Ok(None);
+        };
+        let vignetting = develop::pipeline::vignetting_gpu_params(source, &spatial);
+        // As `local_blurs`: 16 and 64 px on a 6000 px long edge, and 3 px for Texture.
+        let long = source.width.max(source.height) as f32;
+        let radius = |px: f32| ((px / 6000. * long).round() as u32).max(1);
+        let radii = [
+            Some(radius(16.)),
+            Some(radius(64.)),
+            texture.then(|| ((3. * scale).round() as u32).max(1)),
+        ];
+        let sliders = [
+            spatial.exposure + spatial.camera_exposure,
+            spatial.shadows,
+            spatial.highlights,
+            spatial.effects.clarity,
+            spatial.effects.texture,
+        ];
+        toned.gain_key = Some(key.clone());
+        gain = stages.backend.run_resident(cancel, |gpu| {
+            gpu.scoped(|gpu| {
+                gpu.local_gain(
+                    source,
+                    &camera,
+                    vignetting.as_ref(),
+                    radii,
+                    sliders,
+                    (blur_key, key),
+                    cancel,
+                )
+            })
+        });
+        if gain.is_none() {
+            return Ok(None);
+        }
+    }
+    if base.shadows != 0. || base.highlights != 0. {
+        let edge = develop::local_tone::MAP_EDGE;
+        let size = if source.width.max(source.height) <= edge {
+            (source.width, source.height)
+        } else {
+            let k = edge as f32 / source.width.max(source.height) as f32;
+            (
+                (source.width as f32 * k).round() as u32,
+                (source.height as f32 * k).round() as u32,
+            )
+        };
+        let key = ReducedKey::new(&toned);
+        let bytes = |im: &CameraImage| im.pixels.len() * 12;
+        let Stages { cache, backend, .. } = stages;
+        let reduced = cache.reduced.get_or_try(key, bytes, || {
+            backend
+                .run_resident(cancel, |gpu| {
+                    gpu.scoped(|gpu| gpu.reduce_toned(source, gain.as_ref(), size, cancel))
+                })
+                .context("GPU reduction failed")
+        });
+        let Ok(reduced) = reduced else {
+            return Ok(None);
+        };
+        toned.reduced = Some(reduced);
+    }
+    let Some(params) = pixel_params(toned.source(), &base) else {
+        return Ok(None);
+    };
+    let key = develop::stage_cache::SampleKey::new(&toned, &base, g, region, spread);
+    let mut sampling = vec![0f32; develop::gpu::SAMPLE_HEADER];
+    let [x0, y0, w, h] = region;
+    sampling[..10].copy_from_slice(&[
+        source.width as f32,
+        source.height as f32,
+        0.,
+        g.width as f32,
+        g.height as f32,
+        x0 as f32,
+        y0 as f32,
+        w as f32,
+        h as f32,
+        spread,
+    ]);
+    sampling[10..36].copy_from_slice(&g.gpu_params());
+    let e = &base.effects;
+    sampling[36..42].copy_from_slice(&[
+        base.noise_luma,
+        base.noise_chroma,
+        e.luma_detail,
+        e.chroma_detail,
+        e.luma_contrast,
+        e.chroma_smoothness,
+    ]);
+    let mut tables = Vec::new();
+    let lens =
+        develop::pipeline::lens_gpu_params(source, &base, develop::gpu::SAMPLE_HEADER, &mut tables);
+    sampling[42..57].copy_from_slice(&lens);
+    sampling.extend(tables);
+    let backend = &mut *stages.backend;
+    let Some(samples) = backend.run_resident(cancel, |gpu| {
+        gpu.scoped(|gpu| gpu.sample(source, gain.as_ref(), sampling, (w, h), key, cancel))
+    }) else {
+        return Ok(None);
+    };
+    Ok(backend.run(cancel, |gpu| {
+        gpu.present(
+            develop::gpu::Input::Device(&samples),
+            &params,
+            r,
+            finish,
+            display,
+            cancel,
+        )
+    }))
+}
 /// Fit and zoomed-out previews from a pyramid level (see `pyramid.rs`). Each output
 /// pixel is developed once, from the level sampled over the pixel's footprint, and
 /// radius-based effects are scaled to the output, so the result approximates the
@@ -500,7 +667,6 @@ pub(crate) fn render_level(
         p.ensure_camera(&level.metadata)?;
     }
     let level_scale = level.width.max(level.height) as f32 / full.width.max(full.height) as f32;
-    let (toned, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(stages.cache))?;
     let mut g = Geometry::new(level, r, 0);
     let footprint = g.width.max(g.height) as f32 / size.0.max(size.1) as f32;
     (g.width, g.height) = size;
@@ -533,6 +699,21 @@ pub(crate) fn render_level(
         scale,
         crop: [x - left, y - top, w, h],
     };
+    let frame = render_resident(
+        level,
+        r,
+        level_scale,
+        &g,
+        base,
+        spread,
+        &finish,
+        cancel,
+        stages,
+    )?;
+    if let Some(frame) = frame {
+        return Ok(Output::Frame(Box::new(frame)));
+    }
+    let (toned, tonal_recipe) = local_stage(level, r, level_scale, cancel, Some(stages.cache))?;
     let frame = develop::pipeline::render_display(
         &toned,
         &tonal_recipe,
@@ -625,13 +806,6 @@ pub(crate) fn render_preview(
         p.ensure_camera(&im.metadata)?;
     }
     let source = recovered(im, cancel)?;
-    let (toned, tonal_recipe) = local_stage(
-        &source,
-        r,
-        1.,
-        cancel,
-        stages.as_mut().map(|s| &mut *s.cache),
-    )?;
     let g = Geometry::new(&source, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);
     ensure!(
@@ -660,6 +834,26 @@ pub(crate) fn render_preview(
     // the pyramid instead (`PreviewRenderer::render_fit`).
     let unresized =
         region.is_some() || output_size(g.width, g.height, max_edge) == (g.width, g.height);
+    if unresized && let Some(stages) = stages.as_mut() {
+        let finish = develop::gpu::Finish {
+            sigma: r.sharpening_radius,
+            origin: [left, top],
+            full: [g.width, g.height],
+            scale: 1.,
+            crop: [x - left, y - top, w, h],
+        };
+        let frame = render_resident(&source, r, 1., &g, base, 0., &finish, cancel, stages)?;
+        if let Some(frame) = frame {
+            return Ok(Output::Frame(Box::new(frame)));
+        }
+    }
+    let (toned, tonal_recipe) = local_stage(
+        &source,
+        r,
+        1.,
+        cancel,
+        stages.as_mut().map(|s| &mut *s.cache),
+    )?;
     if unresized && let Some(stages) = stages.as_mut() {
         let finish = develop::gpu::Finish {
             sigma: r.sharpening_radius,

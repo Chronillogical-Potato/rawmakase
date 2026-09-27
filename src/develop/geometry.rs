@@ -179,6 +179,29 @@ impl Geometry {
                 || x > self.source_width as f32 - 0.5
                 || y > self.source_height as f32 - 0.5)
     }
+    /// The fields `source` reads, laid out for `gpu/local.wgsl` (`S_CROP` to the end of
+    /// `S_HOMOGRAPHY`): crop, oriented size, zoom, sine and cosine, turns, flips, inset,
+    /// then whether there is a transform and its homography.
+    pub(crate) fn gpu_params(&self) -> [f32; 26] {
+        let (s, c) = self.angle.sin_cos();
+        let h = self.transform.unwrap_or([[0.; 3]; 3]);
+        let mut out = [0.; 26];
+        out[..4].copy_from_slice(&self.crop);
+        out[4..12].copy_from_slice(&[
+            self.oriented_width,
+            self.oriented_height,
+            self.zoom,
+            s,
+            c,
+            self.turns as f32,
+            self.flip_x as u8 as f32,
+            self.flip_y as u8 as f32,
+        ]);
+        out[12..16].copy_from_slice(&self.inset);
+        out[16] = self.transform.is_some() as u8 as f32;
+        out[17..].copy_from_slice(h.as_flattened());
+        out
+    }
     pub fn source(&self, u: f32, v: f32) -> [f32; 2] {
         let mut x = self.crop[0] + u * (self.crop[2] - self.crop[0]);
         let mut y = self.crop[1] + v * (self.crop[3] - self.crop[1]);

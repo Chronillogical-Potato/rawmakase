@@ -17,9 +17,12 @@ use std::{
 use wgpu::util::DeviceExt;
 mod develop;
 mod present;
+mod resident;
 mod weights;
+pub(crate) use develop::Input;
 pub(crate) use present::Finish;
 pub use present::{Display, Frame, MonitorLut, Slot};
+pub(crate) use resident::SAMPLE_HEADER;
 
 pub struct Processor {
     device: wgpu::Device,
@@ -31,6 +34,8 @@ pub struct Processor {
     developer: Option<develop::Developer>,
     /// Display finishing, created on first use.
     presenter: Option<present::Presenter>,
+    /// The photo and its local-tone and sampling stages on the device.
+    resident: Option<resident::Resident>,
     name: String,
 }
 struct Buffers {
@@ -40,13 +45,13 @@ struct Buffers {
     output: wgpu::Buffer,
     staging: wgpu::Buffer,
 }
-/// Device limits previews need: storage buffers for full-resolution regions, up to
-/// 512 MB where the adapter allows.
+/// Device limits previews need: storage buffers for a whole photo kept on the device
+/// (735 MB for 61 megapixels), up to 2 GB where the adapter allows.
 pub fn required_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     let limits = adapter.limits();
     wgpu::Limits {
-        max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size.min(512 << 20),
-        max_buffer_size: limits.max_buffer_size.min(512 << 20),
+        max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size.min(2 << 30),
+        max_buffer_size: limits.max_buffer_size.min(2 << 30),
         max_texture_dimension_2d: limits.max_texture_dimension_2d,
         ..wgpu::Limits::default()
     }
@@ -154,6 +159,7 @@ impl Processor {
             buffers: None,
             developer: None,
             presenter: None,
+            resident: None,
             name: adapter.name.clone(),
         })
     }

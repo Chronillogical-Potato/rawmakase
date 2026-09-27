@@ -242,10 +242,41 @@ release build, Apple M1 Pro, machine loaded by other work (load average about 15
 | | 100% region, Clarity edits | 725.9 ms | 743.7 ms |
 
 Fit differs from the resized export as before (0.0016 X100F, 0.0059 A7CR). Clarity
-edits at 100% on the A7CR still recompute the full-resolution blurs and gain on the
-CPU (about 110 ms for the log luminance, 150–190 ms per box blur and 150 ms for the
-gain under this load); moving those stages and the sampling onto the GPU is the next
-step.
+edits at 100% on the A7CR then still recomputed the full-resolution blurs and gain
+on the CPU (about 110 ms for the log luminance, 150–190 ms per box blur and 150 ms for
+the gain under this load); see the next section.
+
+## Photo kept on the GPU
+
+The stages before the per-pixel stage now run on the device too (`gpu/logs.wgsl`,
+`gpu/local.wgsl`, `gpu/resident.rs`). The photo, or the pyramid level a Fit renders
+from, is uploaded once and kept; the log luminance, the box blurs (running sums per
+row and column, as the CPU computes them) and the Clarity/Texture gain are computed
+and kept there, keyed as the stage cache keys them; the reduced image the engine 4
+Shadows/Highlights map is built from is reduced there and read back (512 pixels on
+the long edge); and each region is sampled through geometry, Transform, lens
+correction and noise reduction straight into the develop stage's input. Only the
+Shadows/Highlights map itself (guided filter on 512 pixels) stays on the CPU. Photos
+up to 2 GB of pixels where the adapter allows (a 61-megapixel photo is 735 MB) take
+this path; a failure here, for example for lack of device memory, turns only this
+path off and the CPU stages run as before.
+
+The hardware test above now also covers lens correction (distortion, lateral
+chromatic aberration, vignetting), straighten and crop, Transform, noise reduction,
+Clarity and Texture: at most one 8-bit level differs from the CPU render.
+
+Per Clarity edit, until the frame is ready to draw, median of three after a warm-up,
+release build, Apple M1 Pro, load average about 20:
+
+| Photo | Render | Step 1 | Photo on the GPU |
+| --- | --- | ---: | ---: |
+| X100F | Fit, Clarity edits | 118.9 ms | 42.4 ms |
+| | 100% region, Clarity edits | 134.6 ms | 49.4 ms |
+| A7CR | Fit, Clarity edits | 56.4 ms | 22.4 ms |
+| | 100% region, Clarity edits | 743.7 ms | 72.1 ms |
+
+Exposure edits are unchanged (the gain is kept either way). A new photo's first
+Clarity render uploads the photo and computes the blurs once.
 
 ## Local-tone gain
 

@@ -22,6 +22,9 @@ pub(crate) struct Backend {
     pub(crate) gpu: Option<gpu::Processor>,
     fallback: Option<String>,
     used_gpu: bool,
+    /// Why the photo is not kept on the device, after that path failed (for example
+    /// for lack of memory); the rest of the GPU path keeps working.
+    pub(crate) resident_fallback: Option<String>,
 }
 /// What preview stages keep between renders: the stage cache and the GPU backend, and
 /// the display a render may be presented to.
@@ -238,7 +241,28 @@ impl Backend {
     }
     /// Runs `stage` on the GPU; a failure other than cancellation disables the GPU,
     /// so a failing device is not retried on every slider movement.
-    fn run<T>(
+    /// Runs a stage of the resident path (see `quality::render_resident`); a failure
+    /// other than cancellation turns that path off, not the GPU.
+    pub(crate) fn run_resident<T>(
+        &mut self,
+        cancel: &AtomicBool,
+        stage: impl FnOnce(&mut gpu::Processor) -> Result<T>,
+    ) -> Option<T> {
+        if self.resident_fallback.is_some() {
+            return None;
+        }
+        let gpu = self.gpu.as_mut()?;
+        match stage(gpu) {
+            Ok(out) => Some(out),
+            Err(error) => {
+                if !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    self.resident_fallback = Some(error.to_string());
+                }
+                None
+            }
+        }
+    }
+    pub(crate) fn run<T>(
         &mut self,
         cancel: &AtomicBool,
         stage: impl FnOnce(&mut gpu::Processor) -> Result<T>,
@@ -285,7 +309,14 @@ impl Backend {
         cancel: &AtomicBool,
     ) -> Option<gpu::Frame> {
         self.run(cancel, |gpu| {
-            gpu.present(samples, params, recipe, finish, display, cancel)
+            gpu.present(
+                gpu::Input::Cpu(samples),
+                params,
+                recipe,
+                finish,
+                display,
+                cancel,
+            )
         })
     }
 }
