@@ -145,25 +145,9 @@ impl Editor {
                                 self.paste_settings();
                                 ui.close();
                             }
-                            // Lightroom edits apply on open; this returns to them later.
-                            let lightroom = self
-                                .document
-                                .catalog_photo
-                                .and_then(|id| self.library.as_ref()?.photo(id))
-                                .is_some_and(|p| p.has_lightroom_edits);
-                            if lightroom
-                                && menu_item(ui, "Reset to Lightroom Edit", "", true, false)
-                            {
-                                self.apply_lightroom_edits();
-                                ui.close();
-                            }
-                            if menu_item(ui, "Reset All Settings", "", true, false) {
-                                self.document.recipe = self
-                                    .document
-                                    .metadata
-                                    .as_ref()
-                                    .map(|m| Recipe::with_profiles(m, &self.document.profiles))
-                                    .unwrap_or_default();
+                            let reset = format!("{cmd}{shift}R");
+                            if menu_item(ui, "Reset All Settings", &reset, true, false) {
+                                self.reset_settings();
                                 ui.close();
                             }
                             menu_separator(ui);
@@ -198,6 +182,15 @@ impl Editor {
         self.clipboard = Some(self.document.recipe.clone());
         self.status = "Settings copied".into();
     }
+    /// Back to the camera defaults, like Lightroom's Reset.
+    pub(super) fn reset_settings(&mut self) {
+        self.document.recipe = self
+            .document
+            .metadata
+            .as_ref()
+            .map(|m| Recipe::with_profiles(m, &self.document.profiles))
+            .unwrap_or_default();
+    }
     pub(super) fn paste_settings(&mut self) {
         if let Some(recipe) = self.clipboard.clone() {
             self.document.recipe = recipe;
@@ -227,6 +220,7 @@ impl Editor {
                     (format!("{cmd}{shift}Z"), "Redo"),
                     (format!("{cmd}{shift}C"), "Copy settings"),
                     (format!("{cmd}{shift}V"), "Paste settings"),
+                    (format!("{cmd}{shift}R"), "Reset all settings"),
                     ("Double-click slider".into(), "Reset slider"),
                 ],
             ),

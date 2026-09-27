@@ -392,7 +392,7 @@ impl Editor {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
                 self.dialog(FileDialog::OpenRaw, ctx);
             }
-            let (mut copy, mut paste, mut zoom_step) = (false, false, 0);
+            let (mut copy, mut paste, mut reset, mut zoom_step) = (false, false, false, 0);
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowRight) {
                     self.navigate(1);
@@ -405,6 +405,9 @@ impl Editor {
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::V) {
                     paste = true;
+                }
+                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
+                    reset = true;
                 }
                 // Cmd+Z / Cmd+Shift+Z on macOS, Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y elsewhere.
                 if i.modifiers.command && i.key_pressed(egui::Key::Z) {
@@ -466,6 +469,9 @@ impl Editor {
             }
             if copy {
                 self.copy_settings();
+            }
+            if reset {
+                self.reset_settings();
             }
             if paste {
                 self.paste_settings();
