@@ -112,8 +112,16 @@ fn write_field<W: Write + Seek, K: TiffKind>(
     f: &Field,
 ) -> Result<()> {
     let tag = Tag::Unknown(f.tag);
-    let halves = || f.bytes.chunks_exact(2).map(|c| [c[0], c[1]]);
-    let words = || f.bytes.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]);
+    let halves = || f.bytes.as_chunks::<2>().0.iter().copied();
+    let words = || f.bytes.as_chunks::<4>().0.iter().copied();
+    // Numerator and denominator of each rational.
+    let pairs = || {
+        f.bytes
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| c.as_chunks::<4>().0)
+    };
     match f.kind {
         2 => dir.write_tag(tag, f.text().unwrap_or_default().as_str())?,
         3 => dir.write_tag(
@@ -152,9 +160,7 @@ fn write_field<W: Write + Seek, K: TiffKind>(
                 .as_slice(),
         )?,
         5 => {
-            let v: Vec<Rational> = words()
-                .collect::<Vec<_>>()
-                .chunks_exact(2)
+            let v: Vec<Rational> = pairs()
                 .map(|p| Rational {
                     n: u32::from_le_bytes(p[0]),
                     d: u32::from_le_bytes(p[1]),
@@ -163,9 +169,7 @@ fn write_field<W: Write + Seek, K: TiffKind>(
             write_array(dir, tag, v)?
         }
         10 => {
-            let v: Vec<SRational> = words()
-                .collect::<Vec<_>>()
-                .chunks_exact(2)
+            let v: Vec<SRational> = pairs()
                 .map(|p| SRational {
                     n: i32::from_le_bytes(p[0]),
                     d: i32::from_le_bytes(p[1]),
