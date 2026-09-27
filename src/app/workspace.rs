@@ -1,4 +1,5 @@
 use super::Editor;
+use super::state::Tool;
 use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::widgets::workspace_tab;
@@ -458,8 +459,7 @@ impl Editor {
                 if (i.key_pressed(egui::Key::C) || i.key_pressed(egui::Key::R))
                     && !i.modifiers.command
                 {
-                    self.view.crop_mode = !self.view.crop_mode;
-                    self.view.zoom100 = false;
+                    self.view.toggle(Tool::Crop);
                 }
                 if i.key_pressed(egui::Key::J) {
                     self.view.clipping = !self.view.clipping;
@@ -467,18 +467,14 @@ impl Editor {
                 if i.key_pressed(egui::Key::Backslash) {
                     self.view.compare = !self.view.compare;
                 }
-                if i.key_pressed(egui::Key::Enter) && self.view.crop_mode {
-                    self.view.crop_mode = false;
+                if i.key_pressed(egui::Key::Enter) && self.view.is(Tool::Crop) {
+                    self.view.tool = Tool::None;
                 }
                 if i.key_pressed(egui::Key::W) && !i.modifiers.any() {
-                    self.view.picker = !self.view.picker;
-                    if self.view.picker {
-                        self.view.crop_mode = false;
-                    }
+                    self.view.toggle(Tool::WhiteBalance);
                 }
                 if i.key_pressed(egui::Key::Escape) {
-                    self.view.picker = false;
-                    self.view.crop_mode = false;
+                    self.view.tool = Tool::None;
                 }
             });
             if zoom_step != 0 {

@@ -25,6 +25,9 @@ const LIGHTROOM_HISTORY_TABLE: &str = "CREATE TABLE IF NOT EXISTS lightroom_hist
     created REAL,
     text TEXT NOT NULL,
     PRIMARY KEY(photo, position));";
+/// Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
+const BITMAPS_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS bitmaps(hash TEXT PRIMARY KEY, data BLOB NOT NULL);";
 /// Copies history steps from an attached Lightroom catalog named `lr`.
 pub(crate) const COPY_LIGHTROOM_HISTORY: &str =
     "INSERT OR IGNORE INTO lightroom_history(photo,position,name,created,text)
@@ -84,10 +87,28 @@ impl Catalog {
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
         // Added after version 1 shipped; additive, so older catalogs gain it on open.
         db.execute_batch(LIGHTROOM_HISTORY_TABLE)?;
+        db.execute_batch(BITMAPS_TABLE)?;
         Ok(Self {
             path: path.into(),
             db,
         })
+    }
+    /// Stores `bitmap` once and returns the hash that refers to it.
+    pub fn put_bitmap(&self, bitmap: &crate::storage::bitmaps::Bitmap) -> Result<String> {
+        let hash = bitmap.hash();
+        self.db.execute(
+            "INSERT OR IGNORE INTO bitmaps(hash, data) VALUES (?, ?)",
+            params![hash, bitmap.compress()?],
+        )?;
+        Ok(hash)
+    }
+    pub fn bitmap(&self, hash: &str) -> Result<Option<crate::storage::bitmaps::Bitmap>> {
+        let data: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT data FROM bitmaps WHERE hash=?", [hash], |r| r.get(0))
+            .optional()?;
+        data.map(|d| crate::storage::bitmaps::Bitmap::decompress(&d))
+            .transpose()
     }
     pub fn photos(&self) -> Result<Vec<Photo>> {
         let mappings = self.folders()?;

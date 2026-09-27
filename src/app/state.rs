@@ -123,16 +123,31 @@ impl Default for PreviewState {
     }
 }
 
+/// The tool that owns clicks and drags on the photo, as in Lightroom's tool strip.
+/// Only one is active; activating one closes the others.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Tool {
+    #[default]
+    None,
+    Crop,
+    WhiteBalance,
+    /// Spot removal: Heal and Clone.
+    Remove,
+    Mask,
+}
 pub(super) struct ViewState {
     pub(super) zoom100: bool,
     pub(super) pan: [f32; 2],
     pub(super) viewport: Vec2,
     pub(super) compare: bool,
     pub(super) clipping: bool,
-    pub(super) crop_mode: bool,
+    pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
-    pub(super) picker: bool,
+    /// Spot removal settings, selection and drag in progress.
+    pub(super) retouch: super::retouch_tool::RetouchTool,
+    /// Masking panel state.
+    pub(super) masking: super::mask_tool::MaskTool,
     pub(super) monitor: Option<PathBuf>,
     pub(super) selected_band: usize,
     pub(super) selected_grade: usize,
@@ -155,10 +170,11 @@ impl Default for ViewState {
             viewport: Vec2::ZERO,
             compare: false,
             clipping: false,
-            crop_mode: false,
+            tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
-            picker: false,
+            retouch: Default::default(),
+            masking: Default::default(),
             monitor: None,
             selected_band: 0,
             selected_grade: 1,
@@ -211,13 +227,24 @@ impl PreviewState {
     }
 }
 impl ViewState {
+    pub fn is(&self, tool: Tool) -> bool {
+        self.tool == tool
+    }
+    /// Opens `tool`, or closes it when it is already open.
+    pub fn toggle(&mut self, tool: Tool) {
+        self.tool = if self.tool == tool { Tool::None } else { tool };
+        if matches!(self.tool, Tool::Crop) {
+            self.zoom100 = false;
+        }
+    }
     pub fn clear_document(&mut self) {
         self.zoom100 = false;
         self.zoom_anim = None;
         self.shown_rect = None;
-        self.crop_mode = false;
+        self.tool = Tool::None;
         self.crop_drag = None;
-        self.picker = false;
+        self.retouch.clear_document();
+        self.masking.clear_document();
         self.compare = false;
     }
 }

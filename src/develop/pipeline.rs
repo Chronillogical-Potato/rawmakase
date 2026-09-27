@@ -682,46 +682,29 @@ impl<'a> VignetteField<'a> {
 /// intermediate is stored: vignetting gain in linear camera space, then distortion and
 /// lateral chromatic aberration as per-channel radial remapping.
 struct LensWarp<'a> {
-    lens: &'a crate::lens::LensCorrection,
-    center: [f32; 2],
-    half: f32,
-    fill: f32,
-    /// Lightroom's profile Distortion amount (1 = 100%).
-    amount: f32,
+    map: super::image_space::LensMap<'a>,
     vignetting: Option<VignetteField<'a>>,
 }
 impl<'a> LensWarp<'a> {
     fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
-        let lens = r.lens_correction(&im.metadata)?;
-        let (w, h) = (im.width as f32, im.height as f32);
         Some(Self {
-            lens,
-            center: [w * 0.5, h * 0.5],
-            half: (w * w + h * h).sqrt() * 0.5,
-            fill: lens.fill_scale_with(r.lens_distortion),
-            amount: r.lens_distortion,
+            map: super::image_space::LensMap::new(im, r)?,
             vignetting: VignetteField::new(im, r),
         })
     }
     /// Where `sample` reads red, green and blue for sample coordinates `x`, `y`.
     fn positions(&self, x: f32, y: f32) -> [[f32; 2]; 3] {
-        let dx = (x + 0.5 - self.center[0]) * self.fill;
-        let dy = (y + 0.5 - self.center[1]) * self.fill;
-        let scale = self
-            .lens
-            .radial_scale_with((dx * dx + dy * dy).sqrt() / self.half, self.amount);
-        scale.map(|k| [self.center[0] + dx * k - 0.5, self.center[1] + dy * k - 0.5])
+        let m = &self.map;
+        let ([dx, dy], scale) = m.scales(x, y);
+        scale.map(|k| [m.center[0] + dx * k - 0.5, m.center[1] + dy * k - 0.5])
     }
     fn sample(&self, im: Source, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
-        let dx = (x + 0.5 - self.center[0]) * self.fill;
-        let dy = (y + 0.5 - self.center[1]) * self.fill;
-        let scale = self
-            .lens
-            .radial_scale_with((dx * dx + dy * dy).sqrt() / self.half, self.amount);
+        let m = &self.map;
+        let ([dx, dy], scale) = m.scales(x, y);
         let at = |c: usize| {
             [
-                self.center[0] + dx * scale[c] - 0.5,
-                self.center[1] + dy * scale[c] - 0.5,
+                m.center[0] + dx * scale[c] - 0.5,
+                m.center[1] + dy * scale[c] - 0.5,
             ]
         };
         let [gx, gy] = at(1);
@@ -795,7 +778,7 @@ pub(crate) fn lens_gpu_params(
         out[5..13].copy_from_slice(&[-1., 0., -1., 0., -1., 0., -1., 0.]);
         return out;
     };
-    let lens = warp.lens;
+    let lens = warp.map.lens;
     let distortion = push(lens.distortion.as_ref());
     let [red, blue] = match &lens.chromatic {
         Some([red, blue]) => [push(Some(red)), push(Some(blue))],
@@ -806,8 +789,9 @@ pub(crate) fn lens_gpu_params(
             .as_ref()
             .map(|v| v.lens.vignetting.as_ref().unwrap()),
     );
-    out[..5].copy_from_slice(&[1., warp.center[0], warp.center[1], warp.half, warp.fill]);
-    out[5] = warp.amount;
+    let m = &warp.map;
+    out[..5].copy_from_slice(&[1., m.center[0], m.center[1], m.half, m.fill]);
+    out[5] = m.amount;
     out[6..8].copy_from_slice(&distortion);
     out[8..10].copy_from_slice(&red);
     out[10..12].copy_from_slice(&blue);

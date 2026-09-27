@@ -25,7 +25,13 @@ impl Editor {
                 Event::PresetLoad(p) => {
                     self.activity.finish_dialog();
                     match crate::presets::load_preset(&p) {
-                        Ok(r) => {
+                        Ok(mut r) => {
+                            // Presets never carry spot removal; their masks replace the
+                            // photo's only when they have any, as in Lightroom.
+                            r.retouch = self.document.recipe.retouch.clone();
+                            if r.masks.is_empty() {
+                                r.masks = self.document.recipe.masks.clone();
+                            }
                             let old = std::mem::replace(&mut self.document.recipe, r);
                             self.history(old);
                             self.schedule();
@@ -317,7 +323,7 @@ impl Editor {
             && self.document.path.is_some()
             && !self.view.zoom100
             && !self.view.compare
-            && !self.view.crop_mode
+            && !self.view.is(super::state::Tool::Crop)
             && self.presets.preview.is_none()
     }
     fn refresh_library_thumbnail(&mut self, ctx: &egui::Context, small: image::RgbImage) {

@@ -109,7 +109,7 @@ impl Editor {
                 .unwrap_or(&self.document.recipe)
                 .clone()
         };
-        if self.view.crop_mode {
+        if self.view.is(super::state::Tool::Crop) {
             r.crop = [0., 0., 1., 1.];
         }
         r

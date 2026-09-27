@@ -247,3 +247,20 @@ fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> 
     assert_eq!(r.exposure, 0.25);
     Ok(())
 }
+#[test]
+fn bitmaps_are_stored_once_by_hash() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let catalog = Catalog::create(&d.path().join("bitmaps.rawmakase"))?;
+    let bitmap = crate::storage::bitmaps::Bitmap {
+        width: 4,
+        height: 2,
+        channels: 1,
+        depth: 1,
+        data: vec![0, 64, 128, 255, 1, 2, 3, 4],
+    };
+    let hash = catalog.put_bitmap(&bitmap)?;
+    assert_eq!(catalog.put_bitmap(&bitmap)?, hash);
+    assert_eq!(catalog.bitmap(&hash)?, Some(bitmap));
+    assert_eq!(catalog.bitmap("missing")?, None);
+    Ok(())
+}

@@ -1,5 +1,5 @@
 use super::Editor;
-use super::state::TextureMode;
+use super::state::{TextureMode, Tool};
 use super::widgets::{section, segmented};
 use crate::app::theme;
 use crate::develop::{self, Geometry};
@@ -114,7 +114,9 @@ impl Editor {
                     ((p.y - image.top()) / image.height()).clamp(0., 1.),
                 ];
                 self.view.zoom100 = true;
-                self.view.crop_mode = false;
+                if self.view.is(Tool::Crop) {
+                    self.view.tool = Tool::None;
+                }
             }
             response
                 .on_hover_cursor(egui::CursorIcon::Crosshair)
@@ -181,7 +183,9 @@ impl Editor {
         } else {
             self.view.zoom100 = true;
             self.view.zoom_level = level;
-            self.view.crop_mode = false;
+            if self.view.is(Tool::Crop) {
+                self.view.tool = Tool::None;
+            }
         }
         self.schedule();
     }
@@ -337,12 +341,16 @@ impl Editor {
                 Color32::WHITE,
             );
         }
-        if self.view.zoom100 && !self.view.picker && response.dragged() {
+        // A tool that owns the pointer (spots, brushes, gradients) takes drags and
+        // clicks; the hand tool pans only when no tool claims them.
+        let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
+        let hand = !tool_owns_pointer && !self.view.is(Tool::WhiteBalance);
+        if self.view.zoom100 && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
             self.view.pan[0] = (self.view.pan[0] - delta.x / rect.width()).clamp(0., 1.);
             self.view.pan[1] = (self.view.pan[1] - delta.y / rect.height()).clamp(0., 1.);
         }
-        if response.hovered() && !self.view.crop_mode && !self.view.picker {
+        if response.hovered() && hand && !self.view.is(Tool::Crop) {
             ui.ctx().set_cursor_icon(if self.view.zoom100 {
                 egui::CursorIcon::Grab
             } else {
@@ -355,8 +363,8 @@ impl Editor {
         // Lightroom: a click zooms in keeping the clicked point under the
         // pointer; the next click returns to Fit.
         if response.clicked()
-            && !self.view.crop_mode
-            && !self.view.picker
+            && hand
+            && !self.view.is(Tool::Crop)
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
@@ -373,7 +381,7 @@ impl Editor {
             self.view.zoom100 = !self.view.zoom100;
             self.schedule();
         }
-        if self.view.picker
+        if self.view.is(Tool::WhiteBalance)
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
@@ -385,9 +393,9 @@ impl Editor {
             self.document
                 .recipe
                 .sync_white_balance_controls(&im.metadata);
-            self.view.picker = false;
+            self.view.tool = Tool::None;
         }
-        if self.view.crop_mode && !self.view.zoom100 && self.document.full().is_some() {
+        if self.view.is(Tool::Crop) && !self.view.zoom100 && self.document.full().is_some() {
             let c = self.document.recipe.crop;
             let cr = Rect::from_min_max(
                 Pos2::new(

@@ -1,7 +1,7 @@
 //! RAWmakase JSON recipes, including migration of earlier pipeline versions.
 use crate::{
     develop::Recipe,
-    storage::{PIPELINE, SCHEMA, atomic_json, migrate_recipe},
+    storage::{atomic_json, migrate_recipe, versions},
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -15,12 +15,18 @@ struct Preset {
 }
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;
+    // Spot removal is specific to its photo; Lightroom presets never include it.
+    let recipe = Recipe {
+        retouch: Vec::new(),
+        ..r.clone()
+    };
+    let (schema, pipeline) = versions(&recipe);
     atomic_json(
         path,
         &Preset {
-            schema: SCHEMA,
-            pipeline: PIPELINE,
-            recipe: r.clone(),
+            schema,
+            pipeline,
+            recipe,
         },
     )
 }

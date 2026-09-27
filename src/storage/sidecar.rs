@@ -1,5 +1,5 @@
 //! Identity-checked edits with read-only-folder fallback and conflict protection.
-use super::{PIPELINE, SCHEMA, atomic_json, data_dir, migrate_recipe};
+use super::{atomic_json, data_dir, migrate_recipe, versions};
 use crate::{develop::Recipe, export::ExportOptions};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -42,6 +42,18 @@ pub struct Sidecar {
     pub source: Identity,
     pub recipe: Recipe,
     pub export: ExportOptions,
+    /// Compressed bitmaps the recipe refers to by hash, base64-encoded (see
+    /// `storage::bitmaps`). Omitted when empty, so older releases can read the file.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub bitmaps: std::collections::BTreeMap<String, String>,
+}
+impl Sidecar {
+    pub fn bitmap(&self, hash: &str) -> Result<Option<super::bitmaps::Bitmap>> {
+        self.bitmaps
+            .get(hash)
+            .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
+            .transpose()
+    }
 }
 pub fn sidecar_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();
@@ -102,19 +114,22 @@ fn save_at(raw: &Path, recipe: &Recipe, export: &ExportOptions, store: &Path) ->
     export.validate()?;
     let source = Identity::read(raw)?;
     let primary = sidecar_path(raw);
+    let mut bitmaps = std::collections::BTreeMap::new();
     if primary.exists() {
-        parse_sidecar(&primary, &source)?;
+        bitmaps = parse_sidecar(&primary, &source)?.bitmaps;
     }
     let backup = fallback_at(&source, store);
     if backup.exists() {
-        parse_sidecar(&backup, &source)?;
+        bitmaps.extend(parse_sidecar(&backup, &source)?.bitmaps);
     }
+    let (schema, pipeline) = versions(recipe);
     let s = Sidecar {
-        schema: SCHEMA,
-        pipeline: PIPELINE,
+        schema,
+        pipeline,
         source,
         recipe: recipe.clone(),
         export: export.clone(),
+        bitmaps,
     };
     match atomic_json(&primary, &s) {
         Ok(()) => Ok(primary),

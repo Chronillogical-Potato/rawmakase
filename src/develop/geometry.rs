@@ -103,32 +103,15 @@ pub struct Geometry {
     inset: [f32; 4],
     /// Output-to-source Transform homography, when not the identity.
     transform: Option<[[f32; 3]; 3]>,
+    /// Its inverse, source to output.
+    forward: Option<[[f32; 3]; 3]>,
 }
 impl Geometry {
     pub fn new(im: &CameraImage, r: &Recipe, max_edge: u32) -> Self {
-        let m = &im.metadata;
-        let cw = if m.crop_width > 0 && m.crop_width <= m.width {
-            m.crop_width as f32 / m.width as f32
-        } else {
-            1.
-        };
-        let ch = if m.crop_height > 0 && m.crop_height <= m.height {
-            m.crop_height as f32 / m.height as f32
-        } else {
-            1.
-        };
-        let base_turn = match m.flip {
-            3 => 2,
-            5 => 3,
-            6 => 1,
-            _ => 0,
-        };
-        let turns = (base_turn + r.rotation) % 4;
-        let (ow, oh) = if turns % 2 == 1 {
-            (im.height as f32 * ch, im.width as f32 * cw)
-        } else {
-            (im.width as f32 * cw, im.height as f32 * ch)
-        };
+        let frame = super::ImageFrame::new(im);
+        let turns = (frame.turns + r.rotation) % 4;
+        let [w, h] = frame.size();
+        let (ow, oh) = if r.rotation % 2 == 1 { (h, w) } else { (w, h) };
         let angle = r.straighten.to_radians();
         let (s, c) = angle.sin_cos();
         let zoom = (c.abs() + s.abs() * oh / ow).max(c.abs() + s.abs() * ow / oh);
@@ -139,6 +122,8 @@ impl Geometry {
         } else {
             1.
         };
+        let transform = (r.engine >= 4 && !r.transform.is_identity())
+            .then(|| r.transform.inverse(ow / ow.max(oh), oh / ow.max(oh)));
         Self {
             width: (w * factor).round().max(1.) as u32,
             height: (h * factor).round().max(1.) as u32,
@@ -152,22 +137,9 @@ impl Geometry {
             flip_y: r.flip_y,
             source_width: im.width,
             source_height: im.height,
-            inset: [
-                if m.crop_left.saturating_add(m.crop_width) <= m.width {
-                    m.crop_left as f32 / m.width as f32
-                } else {
-                    (1. - cw) / 2.
-                },
-                if m.crop_top.saturating_add(m.crop_height) <= m.height {
-                    m.crop_top as f32 / m.height as f32
-                } else {
-                    (1. - ch) / 2.
-                },
-                cw,
-                ch,
-            ],
-            transform: (r.engine >= 4 && !r.transform.is_identity())
-                .then(|| r.transform.inverse(ow / ow.max(oh), oh / ow.max(oh))),
+            inset: frame.inset,
+            transform,
+            forward: transform.map(crate::color_math::inverse),
         }
     }
     /// Whether a transformed output position has no source pixel; Lightroom shows
@@ -236,6 +208,39 @@ impl Geometry {
         [
             (self.inset[0] + x * self.inset[2]) * self.source_width as f32 - 0.5,
             (self.inset[1] + y * self.inset[3]) * self.source_height as f32 - 0.5,
+        ]
+    }
+    /// Output position (0–1 over the view) of decoded sample coordinates (`x`, `y`):
+    /// the inverse of [`Self::source`].
+    pub fn view(&self, x: f32, y: f32) -> [f32; 2] {
+        let x = ((x + 0.5) / self.source_width as f32 - self.inset[0]) / self.inset[2];
+        let y = ((y + 0.5) / self.source_height as f32 - self.inset[1]) / self.inset[3];
+        let [mut x, mut y] = super::image_space::turn((4 - self.turns) % 4, x, y);
+        if self.flip_x {
+            x = 1. - x;
+        }
+        if self.flip_y {
+            y = 1. - y;
+        }
+        if let Some(f) = &self.forward {
+            let long = self.oriented_width.max(self.oriented_height);
+            let px = (x - 0.5) * self.oriented_width / long;
+            let py = (y - 0.5) * self.oriented_height / long;
+            let w = f[2][0] * px + f[2][1] * py + f[2][2];
+            let w = if w.abs() > 1e-6 { w } else { 1e-6 };
+            x = (f[0][0] * px + f[0][1] * py + f[0][2]) / w * long / self.oriented_width + 0.5;
+            y = (f[1][0] * px + f[1][1] * py + f[1][2]) / w * long / self.oriented_height + 0.5;
+        }
+        let big_x = (x - 0.5) * self.oriented_width;
+        let big_y = (y - 0.5) * self.oriented_height;
+        let (s, c) = self.angle.sin_cos();
+        let x0 = c * big_x - s * big_y;
+        let y0 = s * big_x + c * big_y;
+        let xc = x0 * self.zoom / self.oriented_width + 0.5;
+        let yc = y0 * self.zoom / self.oriented_height + 0.5;
+        [
+            (xc - self.crop[0]) / (self.crop[2] - self.crop[0]),
+            (yc - self.crop[1]) / (self.crop[3] - self.crop[1]),
         ]
     }
 }

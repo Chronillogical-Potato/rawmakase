@@ -1,7 +1,19 @@
 //! Versioning shared by native sidecars and recipe presets.
 use anyhow::{Context, Result, ensure};
-pub const SCHEMA: u32 = 6;
-pub const PIPELINE: u32 = 6;
+pub const SCHEMA: u32 = 7;
+pub const PIPELINE: u32 = 7;
+/// The version written for recipes that do not use schema 7's retouching and masks,
+/// so releases that predate them (which reject unknown fields) can still read them.
+const COMPATIBLE: u32 = 6;
+
+/// The schema and pipeline versions to write `recipe` with.
+pub(crate) fn versions(recipe: &crate::develop::Recipe) -> (u32, u32) {
+    if recipe.uses_local_tools() {
+        (SCHEMA, PIPELINE)
+    } else {
+        (COMPATIBLE, COMPATIBLE)
+    }
+}
 
 pub(crate) fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
     let schema = value["schema"].as_u64();
@@ -15,6 +27,7 @@ pub(crate) fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
                 | (Some(4), Some(4))
                 | (Some(5), Some(5))
                 | (Some(6), Some(6))
+                | (Some(7), Some(7))
         ),
         "Unsupported saved recipe version: preserved without changes"
     );
@@ -47,5 +60,29 @@ mod tests {
         let mut v = serde_json::json!({"schema": 6, "pipeline": 6, "recipe": {}});
         super::migrate_recipe(&mut v).unwrap();
         assert!(v["recipe"].get("engine").is_none());
+        let mut v = serde_json::json!({"schema": 7, "pipeline": 7, "recipe": {"retouch": []}});
+        super::migrate_recipe(&mut v).unwrap();
+        assert!(v["recipe"].get("engine").is_none());
+    }
+    #[test]
+    fn only_recipes_with_local_tools_need_schema_seven() {
+        use crate::develop::{Recipe, retouch};
+        let mut r = Recipe::default();
+        assert_eq!(super::versions(&r), (6, 6));
+        let json = serde_json::to_value(&r).unwrap();
+        assert!(json.get("retouch").is_none() && json.get("masks").is_none());
+        r.retouch.push(retouch::RetouchOp {
+            mode: retouch::RetouchMode::Heal,
+            shape: retouch::RetouchShape::Spot {
+                center: [0.5, 0.5],
+                radius: 0.01,
+            },
+            feather: 0.5,
+            opacity: 1.,
+            offset: [0.05, 0.],
+        });
+        assert_eq!(super::versions(&r), (7, 7));
+        let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
     }
 }

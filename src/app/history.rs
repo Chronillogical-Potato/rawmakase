@@ -157,9 +157,73 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         "Lens Corrections"
     } else if a.transform != b.transform {
         "Transform"
+    } else if a.retouch != b.retouch {
+        return Step::new(retouch_step(b, a), "");
+    } else if a.masks != b.masks {
+        return mask_step(b, a);
     } else {
         "Edit"
     };
+    Step::new(name, "")
+}
+
+/// Lightroom names spot edits by mode: "Spot Removal", "Clone", "Delete Spot".
+fn retouch_step(before: &Recipe, after: &Recipe) -> &'static str {
+    use crate::develop::retouch::RetouchMode;
+    if after.retouch.len() < before.retouch.len() {
+        return "Delete Spot";
+    }
+    let changed = after
+        .retouch
+        .iter()
+        .zip(before.retouch.iter().map(Some).chain(std::iter::repeat(None)))
+        .find(|(a, b)| Some(*a) != *b)
+        .map(|(a, _)| a.mode);
+    match changed {
+        Some(RetouchMode::Clone) => "Clone",
+        _ => "Spot Removal",
+    }
+}
+/// "Brush Mask" for a new mask, "Mask 2: Exposure" for a changed slider, otherwise
+/// what happened to which mask.
+fn mask_step(before: &Recipe, after: &Recipe) -> Step {
+    let (b, a) = (&before.masks, &after.masks);
+    if a.len() > b.len() {
+        let kind = a
+            .last()
+            .and_then(|m| m.components.first())
+            .map_or("New", |c| c.shape.kind());
+        return Step::new(format!("{kind} Mask"), "");
+    }
+    if a.len() < b.len() {
+        return Step::new("Delete Mask", "");
+    }
+    let Some(i) = (0..a.len()).find(|i| a[*i] != b[*i]) else {
+        return Step::new("Masking", "");
+    };
+    let (m, old) = (&a[i], &b[i]);
+    let name = if m.name.is_empty() {
+        format!("Mask {}", i + 1)
+    } else {
+        m.name.clone()
+    };
+    if m.components.len() != old.components.len() {
+        let what = if m.components.len() > old.components.len() {
+            m.components.last().map_or("Add", |c| c.shape.kind())
+        } else {
+            "Remove Component"
+        };
+        return Step::new(format!("{name}: {what}"), "");
+    }
+    if m.components != old.components {
+        let kind = m
+            .components
+            .iter()
+            .zip(&old.components)
+            .find(|(x, y)| x != y)
+            .map_or("Mask", |(c, _)| c.shape.kind());
+        return Step::new(format!("{name}: {kind}"), "");
+    }
     Step::new(name, "")
 }
 
@@ -230,6 +294,36 @@ mod tests {
         assert!(!history.in_gesture());
         assert!(!history.can_undo());
         assert!(!history.can_redo());
+    }
+    #[test]
+    fn retouch_and_mask_edits_have_lightroom_names() {
+        use crate::develop::{masks, retouch};
+        let before = Recipe::default();
+        let mut after = before.clone();
+        after.retouch.push(retouch::RetouchOp {
+            mode: retouch::RetouchMode::Heal,
+            shape: retouch::RetouchShape::Spot {
+                center: [0.5, 0.5],
+                radius: 0.01,
+            },
+            feather: 0.5,
+            opacity: 1.,
+            offset: [0.02, 0.],
+        });
+        assert_eq!(describe(&before, &after).name, "Spot Removal");
+        assert_eq!(describe(&after, &before).name, "Delete Spot");
+        let mut masked = before.clone();
+        masked.masks.push(masks::MaskGroup {
+            components: vec![masks::MaskComponent::new(masks::MaskShape::Brush {
+                strokes: Vec::new(),
+            })],
+            ..Default::default()
+        });
+        masked.masks.push(masked.masks[0].clone());
+        let mut exposed = masked.clone();
+        exposed.masks[1].adjust.exposure = 1.;
+        assert_eq!(describe(&before, &masked).name, "Brush Mask");
+        assert_eq!(describe(&masked, &exposed).name, "Mask 2");
     }
     #[test]
     fn steps_are_named_and_go_to_moves_between_them() {

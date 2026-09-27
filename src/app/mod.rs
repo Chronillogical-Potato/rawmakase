@@ -274,11 +274,14 @@ mod catalog;
 mod dialogs;
 mod export;
 mod inspector;
+mod mask_tool;
+mod overlay;
 pub mod library;
 mod onboarding;
 mod photo_metadata;
 mod preferences;
 mod presets;
+mod retouch_tool;
 #[cfg(test)]
 mod tests;
 mod viewport;

@@ -189,11 +189,15 @@ impl Editor {
             .map(|m| Recipe::with_profiles(m, &self.document.profiles))
             .unwrap_or_default();
     }
+    /// Pastes the copied settings. Spot removal and masks belong to their photo and
+    /// stay as they were, as with Lightroom's default Paste Settings.
     pub(super) fn paste_settings(&mut self) {
-        if let Some(recipe) = self.clipboard.clone() {
+        if let Some(mut recipe) = self.clipboard.clone() {
             self.document
                 .history
                 .label(super::history::Step::new("Paste Settings", ""));
+            recipe.retouch = std::mem::take(&mut self.document.recipe.retouch);
+            recipe.masks = std::mem::take(&mut self.document.recipe.masks);
             self.document.recipe = recipe;
             self.status = "Settings pasted".into();
         }

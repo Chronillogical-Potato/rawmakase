@@ -73,6 +73,13 @@ pub struct Recipe {
     pub rotation: u8,
     pub flip_x: bool,
     pub flip_y: bool,
+    /// Heal and Clone operations, in order. Omitted when empty so recipes without them
+    /// stay readable by releases before schema 7.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    /// Masks with local adjustments; omitted when empty, as `retouch`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<crate::develop::masks::MaskGroup>,
 }
 impl Default for Recipe {
     fn default() -> Self {
@@ -121,6 +128,8 @@ impl Default for Recipe {
             rotation: 0,
             flip_x: false,
             flip_y: false,
+            retouch: Vec::new(),
+            masks: Vec::new(),
         }
     }
 }
@@ -192,19 +201,6 @@ impl Recipe {
         if let Some(p) = &self.profile {
             p.validate()?;
         }
-        let mut scalar_recipe = self.clone();
-        scalar_recipe.profile = None;
-        let mut finite = serde_json::to_value(&scalar_recipe)?;
-        finite.as_object_mut().unwrap().remove("profile");
-        fn all(v: &serde_json::Value) -> bool {
-            match v {
-                serde_json::Value::Null => false,
-                serde_json::Value::Array(a) => a.iter().all(all),
-                serde_json::Value::Object(a) => a.values().all(all),
-                _ => true,
-            }
-        }
-        ensure!(all(&finite), "Non-finite edit parameter");
         ensure!(
             (-8. ..=8.).contains(&self.exposure)
                 && self.camera_exposure.is_finite()
@@ -271,7 +267,14 @@ impl Recipe {
                 && (0. ..=2.).contains(&self.lens_vignetting),
             "Invalid lens correction amount"
         );
+        // Every other number is range-checked above, which also rejects NaN.
+        crate::develop::retouch::validate(&self.retouch)?;
+        crate::develop::masks::validate(&self.masks)?;
         Ok(())
+    }
+    /// Whether the recipe uses the retouching or masking tools, which need schema 7.
+    pub fn uses_local_tools(&self) -> bool {
+        !self.retouch.is_empty() || !self.masks.is_empty()
     }
     /// The camera profile used for rendering. From engine 4, photos without an imported or
     /// bundled profile render through the DNG ColorMatrix default instead of the legacy path.

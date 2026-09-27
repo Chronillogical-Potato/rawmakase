@@ -13,7 +13,7 @@ pub(super) struct EditFrame {
 impl Editor {
     fn render_modes(&self) -> [bool; 4] {
         [
-            self.view.crop_mode,
+            self.view.is(super::state::Tool::Crop),
             self.view.clipping,
             self.view.compare,
             self.view.zoom100,

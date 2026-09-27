@@ -9,21 +9,25 @@ mod color_mixer;
 pub mod curve;
 pub mod effects;
 mod geometry;
+mod image_space;
 pub mod gpu;
 mod local_tone;
 mod local_tone_data;
+pub mod masks;
 mod pipeline;
 mod preview_renderer;
 mod pyramid;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
+pub mod retouch;
 mod rendered;
 mod stage_cache;
 mod white_balance;
 
 pub use crate::color_math::{mul, srgb_encode};
 pub use geometry::{Geometry, Transform};
+pub use image_space::{ImageFrame, ViewMapping};
 pub use pipeline::{
     neutral_pick, preview, render, render_legacy, render_region, render_region_legacy,
 };

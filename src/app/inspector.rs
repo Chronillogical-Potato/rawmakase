@@ -1,4 +1,5 @@
 use super::Editor;
+use super::state::Tool;
 use super::dialogs::FileDialog;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
@@ -141,7 +142,7 @@ impl Editor {
         ui.add_space(6.);
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::click());
-        let active = self.view.crop_mode;
+        let active = self.view.is(Tool::Crop);
         ui.painter().rect_filled(
             rect,
             3.,
@@ -176,11 +177,9 @@ impl Editor {
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
-            self.view.crop_mode = !active;
-            self.view.zoom100 = false;
-            self.view.picker = false;
+            self.view.toggle(Tool::Crop);
         }
-        if !self.view.crop_mode {
+        if !self.view.is(Tool::Crop) {
             return;
         }
         let r = &mut self.document.recipe;
@@ -282,7 +281,7 @@ impl Editor {
                         .on_hover_text("Finish cropping · Enter or R")
                         .clicked()
                     {
-                        self.view.crop_mode = false;
+                        self.view.tool = Tool::None;
                     }
                 });
             });
@@ -442,26 +441,20 @@ impl Editor {
                         );
                     });
                 let (rect, response) = ui.allocate_exact_size(Vec2::new(26., 20.), Sense::click());
-                if view.picker || response.hovered() {
+                let picking = view.is(Tool::WhiteBalance);
+                if picking || response.hovered() {
                     ui.painter().rect_filled(
                         rect,
                         3.,
-                        theme::gray(if view.picker { 72 } else { 50 }),
+                        theme::gray(if picking { 72 } else { 50 }),
                     );
                 }
-                eyedropper_icon(
-                    ui.painter(),
-                    rect.center(),
-                    view.picker || response.hovered(),
-                );
+                eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
                 if response
                     .on_hover_text("White balance selector (W): click a neutral area of the photo")
                     .clicked()
                 {
-                    view.picker = !view.picker;
-                    if view.picker {
-                        view.crop_mode = false;
-                    }
+                    view.toggle(Tool::WhiteBalance);
                 }
             });
             let old = (r.temperature, r.tint);
