@@ -53,6 +53,23 @@ jobs:
             echo "sha=$sha"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require reviewed release notes
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          notes="packaging/release-notes/$RELEASE_TAG.md"
+          if ! test -s "$notes" || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::Write $notes before releasing; generated placeholder notes are not allowed."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/release-notes"
+          cp "$notes" "$RUNNER_TEMP/release-notes/notes.md"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reviewed-notes
+          path: ${{ runner.temp }}/release-notes/notes.md
+          if-no-files-found: error
+
   ci:
     needs: prepare
     uses: ./.github/workflows/ci.yml
@@ -266,6 +283,10 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: reviewed-notes
+          path: release-notes
       - name: Final checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
@@ -280,9 +301,9 @@ jobs:
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes/notes.md
             exit 0
           fi
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "RAWmakase ${RELEASE_TAG#v}" --generate-notes \
-            --notes "macOS 15+: choose the signed, notarized DMG for Apple Silicon (arm64) or Intel (x86_64). Linux x86_64: DEB for Ubuntu 24.04+/Debian 13+, RPM for Fedora 43+, or the Arch package installed with pacman -U. Imaging libraries are bundled in the Mac/DEB/RPM downloads; Arch uses system dependencies. The Linux tarball uses the same Ubuntu 24.04 baseline. AUR publication is paused; the source recipe is attached for local builds. Verify downloads with SHA256SUMS."
+            --title "RAWmakase ${RELEASE_TAG#v}" --notes-file release-notes/notes.md

@@ -47,7 +47,8 @@ Never put the export, its base64 contents or passwords into the repository.
 
 ## Publishing and rehearsal
 
-1. Finish and review the release commit, including the Cargo version/lockfile.
+1. Finish and review the release commit, including the version files and
+   `packaging/release-notes/vX.Y.Z.md` (see below).
 2. Push that commit to `main`, then push its matching `vX.Y.Z` tag.
 3. The Release workflow publishes after every required job succeeds.
 
@@ -60,11 +61,59 @@ This still builds, signs, notarizes and verifies packages, then retains them as
 Actions artifacts. It does not replace any existing release assets. A normal
 tag push publishes automatically. Publishing to an existing release attaches
 the generated packages and refreshes assets with matching names, including
-`SHA256SUMS`; release notes and unrelated assets are preserved. AUR publication
+`SHA256SUMS`; the reviewed notes replace the release description and unrelated
+assets are preserved. AUR publication
 remains disabled independently of GitHub publication.
 
 The workflow supports stable versions only. Do not push a prerelease tag with
 this workflow expecting a published release.
+
+## Writing release notes
+
+Release notes are authored and reviewed Markdown, not generated commit lists.
+Write `packaging/release-notes/vX.Y.Z.md` before tagging. The workflow fails early
+if the file is missing, empty or whitespace-only, including during rehearsals.
+It publishes the file verbatim for both new and existing releases. Automated
+checks enforce presence; the maintainer still reviews accuracy and writing.
+
+For a normal tag push, notes come from the tagged commit. A manual rebuild uses
+notes from the selected workflow branch while building the exact tag's source.
+This allows notes to be backfilled for older releases without moving their tags.
+Review those notes against that tag, not against the latest application code.
+
+1. Inspect the changes from the previous stable tag to the release commit. Read
+   relevant diffs and issue/PR context so reverted or partial work is not announced
+   as a shipped feature. For the first release, describe the capabilities shipped.
+2. Open with a short summary of the main changes and their practical effect.
+   Focus on what users can now do, what feels better, and which problems are fixed.
+3. Group items under **New**, **Improved**, **Fixed**, **Changed**, or **Removed**,
+   choosing only sections that have meaningful content. Use a bold result followed
+   by a concise explanation; mention UI paths or upgrade actions where useful.
+   Omit routine refactors and build plumbing. Packaging changes belong when they
+   change installation or supported systems. Do not turn notes into a setup guide.
+4. Add clearly labelled direct download links for the shipped platforms and a
+   link to the full comparison with the previous tag. State important requirements,
+   breaking changes, migration steps or known limitations when relevant. Credit
+   implementers and reporters accurately, with PR/issue links where available;
+   include a Thanks section only when there is someone specific to acknowledge.
+5. For visible features, add useful screenshots or short recordings using
+   synthetic or explicitly approved content. Upload them as release assets and
+   use their final asset URLs in the notes. Never commit private photographs,
+   catalogs, filesystem paths or credentials. Omit media when it adds no value.
+6. Review every claim against shipped code and verification results. Qualify
+   measured speedups with the tested conditions; do not promise universal gains.
+   Verify notes, media and downloads on the published release page.
+
+Use `packaging/release-notes/v0.1.2.md` as an example of structure, not a source
+of claims to copy into later releases. No external project's release history
+is required. Keep the length proportional to the changes.
+
+To correct only a published description, edit and commit its notes file, then
+publish that exact file without rebuilding or replacing packages:
+
+```sh
+gh release edit vX.Y.Z --notes-file packaging/release-notes/vX.Y.Z.md
+```
 
 ## Dependency maintenance
 
