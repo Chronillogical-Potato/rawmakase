@@ -2,6 +2,7 @@
 """Stage a relocatable app; only the supplied output directory is modified."""
 import argparse
 import json
+import os
 from pathlib import Path
 import plistlib
 import re
@@ -134,6 +135,9 @@ def main():
             metadata["CFBundleIconName"] = "RAWmakase"
             with (app / "Contents/Info.plist").open("wb") as handle:
                 plistlib.dump(metadata, handle)
+        elif os.environ.get("GITHUB_ACTIONS") == "true":
+            raise SystemExit("actool cannot compile packaging/RAWmakase.icon:\n"
+                             + result.stderr.decode(errors="replace"))
         else:
             print("actool cannot compile packaging/RAWmakase.icon; keeping the flat icon")
     finally:
