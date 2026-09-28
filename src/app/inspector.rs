@@ -1,4 +1,5 @@
 use super::Editor;
+use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
@@ -335,6 +336,7 @@ impl Editor {
         ui.add_space(6.);
         let mut import_profiles = false;
         let mut import_lens = false;
+        let mut import_folder = None;
         let mut import_adobe = false;
         // Cached per camera: this scans Adobe's profile folders.
         let adobe_key = self
@@ -411,6 +413,14 @@ impl Editor {
                             .clicked()
                         {
                             import_profiles = true;
+                            ui.close();
+                        }
+                        if ui
+                            .button("Import profiles from folder…")
+                            .on_hover_text("Import every DCP profile and XMP look in a folder and its subfolders")
+                            .clicked()
+                        {
+                            import_folder = Some(ImportKind::CameraProfiles);
                             ui.close();
                         }
                     });
@@ -914,6 +924,13 @@ impl Editor {
                 {
                     import_lens = true;
                 }
+                if ui
+                    .small_button("Import Folder…")
+                    .on_hover_text("Import every .lcp lens profile in a folder and its subfolders")
+                    .clicked()
+                {
+                    import_folder = Some(ImportKind::LensProfiles);
+                }
             });
             subheading(ui, "Defringe");
             for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
@@ -1155,6 +1172,9 @@ impl Editor {
         }
         if import_lens {
             self.dialog(FileDialog::LensProfile, &ui.ctx().clone());
+        }
+        if let Some(kind) = import_folder {
+            self.dialog(FileDialog::ImportFolder(kind), &ui.ctx().clone());
         }
         if import_adobe && let Some(m) = self.document.metadata.clone() {
             if let Some(key) = adobe_key {

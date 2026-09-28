@@ -1,5 +1,5 @@
 //! File chooser intent, independent of menu order and numeric UI identifiers.
-use super::{Editor, worker::Event};
+use super::{Editor, bulk_import::ImportKind, worker::Event};
 use eframe::egui;
 
 #[derive(Clone, Copy)]
@@ -12,6 +12,8 @@ pub(super) enum FileDialog {
     CameraProfile,
     LensProfile,
     ImportXmp,
+    /// A folder to scan for profiles or presets, subfolders included.
+    ImportFolder(ImportKind),
 }
 
 #[derive(Clone, Copy)]
@@ -37,21 +39,27 @@ impl Editor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            if matches!(kind, FileDialog::CameraProfile) {
+            let import = match kind {
+                FileDialog::CameraProfile => Some(ImportKind::CameraProfiles),
+                FileDialog::LensProfile => Some(ImportKind::LensProfiles),
+                FileDialog::ImportXmp => Some(ImportKind::Presets),
+                _ => None,
+            };
+            if let Some(import) = import {
+                let (name, extensions) = import.filter();
                 let event = rfd::FileDialog::new()
-                    .add_filter("Lightroom / camera profiles", &["dcp", "xmp"])
+                    .add_filter(name, extensions)
                     .pick_files()
-                    .map(Event::CameraProfile)
+                    .map(|paths| Event::Import(import, paths))
                     .unwrap_or(Event::DialogClosed);
                 let _ = tx.send(event);
                 ctx.request_repaint();
                 return;
             }
-            if matches!(kind, FileDialog::LensProfile) {
+            if let FileDialog::ImportFolder(import) = kind {
                 let event = rfd::FileDialog::new()
-                    .add_filter("Adobe lens profiles", &["lcp"])
-                    .pick_files()
-                    .map(Event::LensProfiles)
+                    .pick_folder()
+                    .map(|folder| Event::Import(import, vec![folder]))
                     .unwrap_or(Event::DialogClosed);
                 let _ = tx.send(event);
                 ctx.request_repaint();
@@ -65,12 +73,10 @@ impl Editor {
                 FileDialog::MonitorProfile => rfd::FileDialog::new()
                     .add_filter("ICC profile", &["icc", "icm"])
                     .pick_file(),
-                FileDialog::ImportXmp => rfd::FileDialog::new()
-                    .add_filter("XMP preset", &["xmp"])
-                    .pick_file(),
-                FileDialog::CameraProfile | FileDialog::LensProfile => {
-                    unreachable!("Handled by the multi-file chooser")
-                }
+                FileDialog::CameraProfile
+                | FileDialog::LensProfile
+                | FileDialog::ImportXmp
+                | FileDialog::ImportFolder(_) => unreachable!("Handled by the import choosers"),
                 FileDialog::LoadPreset => rfd::FileDialog::new()
                     .add_filter("RAWmakase preset", &["json"])
                     .pick_file(),
@@ -82,8 +88,10 @@ impl Editor {
                 .map(|p| match kind {
                     FileDialog::OpenRaw | FileDialog::OpenFolder => Event::Open(p),
                     FileDialog::MonitorProfile => Event::Monitor(p),
-                    FileDialog::CameraProfile | FileDialog::LensProfile => unreachable!(),
-                    FileDialog::ImportXmp => Event::XmpImport(p),
+                    FileDialog::CameraProfile
+                    | FileDialog::LensProfile
+                    | FileDialog::ImportXmp
+                    | FileDialog::ImportFolder(_) => unreachable!(),
                     FileDialog::LoadPreset => Event::PresetLoad(p),
                     FileDialog::SavePreset => Event::PresetSave(p),
                 })

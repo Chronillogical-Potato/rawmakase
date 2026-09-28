@@ -1,4 +1,5 @@
 use super::Editor;
+use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::widgets::{section, segmented};
 use super::worker::Event;
@@ -45,7 +46,7 @@ impl Editor {
         let library = self.presets.library.clone();
         let mut clicked = None;
         let mut hovered = None;
-        let mut import = false;
+        let mut import = None;
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
             .id_salt("preset-list")
@@ -73,12 +74,28 @@ impl Editor {
                             14.,
                             color,
                         );
-                        if response
-                            .on_hover_text("Import Lightroom presets (.xmp)")
-                            .clicked()
-                        {
-                            import = true;
-                        }
+                        let response = response.on_hover_text("Import Lightroom presets (.xmp)");
+                        egui::Popup::menu(&response).show(|ui| {
+                            ui.set_min_width(190.);
+                            if ui
+                                .add(egui::Button::new("Import Presets…").frame(false))
+                                .on_hover_text("Choose one or more .xmp presets")
+                                .clicked()
+                            {
+                                import = Some(FileDialog::ImportXmp);
+                                ui.close();
+                            }
+                            if ui
+                                .add(egui::Button::new("Import Folder…").frame(false))
+                                .on_hover_text(
+                                    "Import every preset in a folder and its subfolders",
+                                )
+                                .clicked()
+                            {
+                                import = Some(FileDialog::ImportFolder(ImportKind::Presets));
+                                ui.close();
+                            }
+                        });
                     });
                     let mut show = match (self.presets.favorites_only, self.presets.compatible_only)
                     {
@@ -244,8 +261,8 @@ impl Editor {
                 });
                 self.history_section(ui);
             });
-        if import {
-            self.dialog(FileDialog::ImportXmp, &ui.ctx().clone());
+        if let Some(dialog) = import {
+            self.dialog(dialog, &ui.ctx().clone());
         }
         if let Some(i) = clicked {
             self.presets.preview = None;

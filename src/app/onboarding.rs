@@ -1,12 +1,12 @@
 //! First-run setup: a catalog, then optional Lightroom profiles and presets.
 use super::Editor;
+use super::bulk_import::{ImportKind, Summary, find_files};
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::pretty_path;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 
 /// Camera Raw's shared folder, installed with Lightroom for all users. It
 /// holds Adobe's camera profiles and the Adobe looks (Adobe Color…).
@@ -31,31 +31,6 @@ fn user_camera_raw() -> Option<PathBuf> {
     };
     path.is_dir().then_some(path)
 }
-/// Files with one of `extensions` under `dir`, a few folders deep.
-fn find_files(dir: &Path, extensions: &[&str]) -> Vec<PathBuf> {
-    fn walk(dir: &Path, extensions: &[&str], depth: usize, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && depth < 6 {
-                walk(&path, extensions, depth + 1, out);
-            } else if path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
-            {
-                out.push(path);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(dir, extensions, 0, &mut out);
-    out.sort();
-    out
-}
-
 /// What the setup view found on disk, refreshed when it opens or imports.
 #[derive(Default)]
 pub(super) struct Onboarding {
@@ -74,10 +49,9 @@ pub(super) struct Onboarding {
     lens_profiles: Vec<PathBuf>,
     /// Makers of the catalog's cameras, e.g. "Sony".
     makers: BTreeSet<String>,
-    /// Progress of a running profile import: (finished, message).
-    importing: Option<Arc<Mutex<(bool, String)>>>,
     user_presets: Vec<PathBuf>,
-    message: String,
+    /// The last profile or preset import, shown under the steps.
+    pub(super) last_import: Option<Box<Summary>>,
 }
 impl Onboarding {
     pub(super) fn new(visible: bool) -> Self {
@@ -113,14 +87,18 @@ impl Onboarding {
                 if base.is_file() {
                     self.adobe_profiles.push(base);
                 }
-                self.adobe_profiles
-                    .extend(find_files(&profiles.join("Camera").join(camera), &["dcp"]));
+                self.adobe_profiles.extend(find_files(
+                    &profiles.join("Camera").join(camera),
+                    &["dcp"],
+                    &[],
+                ));
             }
             if !self.adobe_profiles.is_empty() {
                 // Looks last: they need their base profile in the same import.
                 self.adobe_profiles.extend(find_files(
                     &shared.join("Settings/Adobe/Profiles/Adobe Raw"),
                     &["xmp"],
+                    &[],
                 ));
             }
         }
@@ -158,14 +136,14 @@ impl Onboarding {
                     || THIRD_PARTY.iter().any(|b| b.to_lowercase() == name)
                 {
                     self.lens_profiles
-                        .extend(find_files(&entry.path(), &["lcp"]));
+                        .extend(find_files(&entry.path(), &["lcp"], &[]));
                 }
             }
         }
         let user = user_camera_raw();
         if let Some(user) = &user {
             self.lens_profiles
-                .extend(find_files(&user.join("LensProfiles"), &["lcp"]));
+                .extend(find_files(&user.join("LensProfiles"), &["lcp"], &[]));
         }
         // Third-party packs ship a DCP per camera model, often thousands in all;
         // only those for the catalog's cameras are useful. Without a catalog,
@@ -173,7 +151,7 @@ impl Onboarding {
         let cameras: Vec<String> = self.cameras.iter().map(|c| format!("{c} ")).collect();
         self.user_profiles = user
             .as_ref()
-            .map(|d| find_files(&d.join("CameraProfiles"), &["dcp"]))
+            .map(|d| find_files(&d.join("CameraProfiles"), &["dcp"], &[]))
             .unwrap_or_default()
             .into_iter()
             .filter(|p| {
@@ -183,99 +161,12 @@ impl Onboarding {
             .collect();
         self.user_presets = user
             .as_ref()
-            .map(|d| find_files(&d.join("Settings"), &["xmp"]))
+            .map(|d| find_files(&d.join("Settings"), &["xmp"], &["Defaults", "GPU"]))
             .unwrap_or_default();
         self.scanned = true;
     }
 }
 
-/// Lens profiles, leniently: unreadable or unparsable files and name clashes
-/// are skipped, the rest imported in batches the library accepts.
-fn import_lenses_leniently(paths: &[PathBuf], progress: &Mutex<(bool, String)>) -> (usize, usize) {
-    let destination = crate::storage::data_dir().join("lens-profiles");
-    let mut names = BTreeSet::new();
-    let (mut good, mut skipped) = (Vec::new(), 0);
-    for (i, path) in paths.iter().enumerate() {
-        if i % 50 == 0 {
-            progress.lock().unwrap().1 = format!("Checking lens profiles… {i} of {}", paths.len());
-        }
-        let Some(name) = path.file_name() else {
-            skipped += 1;
-            continue;
-        };
-        let Ok(bytes) = std::fs::read(path) else {
-            skipped += 1;
-            continue;
-        };
-        let target = destination.join(name);
-        let clash = target.exists() && std::fs::read(&target).ok().as_ref() != Some(&bytes);
-        let valid = std::str::from_utf8(&bytes)
-            .ok()
-            .is_some_and(|text| crate::lens::lcp::parse(text).is_ok());
-        if clash || !valid || !names.insert(name.to_owned()) {
-            skipped += 1;
-        } else {
-            good.push(path.clone());
-        }
-    }
-    let mut imported = 0;
-    for batch in good.chunks(1000) {
-        progress.lock().unwrap().1 = format!("Importing lens profiles… {imported} done");
-        match crate::lens::lcp::import_files(batch) {
-            Ok(done) => imported += done.len(),
-            Err(_) => skipped += batch.len(),
-        }
-    }
-    (imported, skipped)
-}
-/// Imports what it can and skips the rest: unreadable or embed-prohibited DCPs,
-/// duplicate names, and names already imported with different contents. The
-/// library importer is all-or-nothing and takes at most 1024 files per batch.
-fn import_leniently(paths: &[PathBuf], progress: &Mutex<(bool, String)>) -> (usize, usize) {
-    let destination = crate::storage::data_dir().join("camera-profiles");
-    let mut names = BTreeSet::new();
-    let (mut dcps, mut looks, mut skipped) = (Vec::new(), Vec::new(), 0);
-    for (i, path) in paths.iter().enumerate() {
-        if i % 50 == 0 {
-            progress.lock().unwrap().1 = format!("Checking profiles… {i} of {}", paths.len());
-        }
-        let Some(name) = path.file_name() else {
-            skipped += 1;
-            continue;
-        };
-        let Ok(bytes) = std::fs::read(path) else {
-            skipped += 1;
-            continue;
-        };
-        let target = destination.join(name);
-        let clash = target.exists() && std::fs::read(&target).ok().as_ref() != Some(&bytes);
-        if clash || !names.insert(name.to_owned()) {
-            skipped += 1;
-        } else if path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
-        {
-            looks.push(path.clone());
-        } else if crate::camera_profiles::from_bytes(&bytes).is_ok() {
-            dcps.push(path.clone());
-        } else {
-            skipped += 1;
-        }
-    }
-    let mut imported = 0;
-    // Looks last: they need their base profile already in the library.
-    for batch in dcps.chunks(1000).chain(std::iter::once(&looks[..])) {
-        if batch.is_empty() {
-            continue;
-        }
-        progress.lock().unwrap().1 = format!("Importing profiles… {imported} done");
-        match crate::camera_profiles::import_files(batch) {
-            Ok(done) => imported += done.len(),
-            Err(_) => skipped += batch.len(),
-        }
-    }
-    (imported, skipped)
-}
 impl Editor {
     pub(super) fn onboarding_ui(&mut self, ui: &mut egui::Ui) {
         // Rescan when opened and whenever a different catalog is loaded.
@@ -356,6 +247,9 @@ impl Editor {
         });
 
         // Profiles before presets: many presets name a profile.
+        let importing = self.importing.is_some();
+        let enabled = !busy && !importing;
+        let mut chosen = None;
         let adobe = self.onboarding.adobe_profiles.len();
         let user_profiles = self.onboarding.user_profiles.len();
         let cameras = self
@@ -368,21 +262,28 @@ impl Editor {
         step(ui, 2, "Camera profiles", None, |ui| {
             body(
                 ui,
-                "Profiles set the starting look, such as Adobe Color. Lightroom keeps \
-                 Adobe's profiles in a shared folder for all users, and profiles you \
-                 added in your own folder.",
+                "Profiles set the starting look, such as Adobe Color. Choose a folder \
+                 and RAWmakase imports the .dcp profiles and .xmp looks in it and its \
+                 subfolders.",
             );
             ui.add_space(10.);
-            if let Some(shared) = shared_camera_raw() {
+            let shared = shared_camera_raw();
+            let user = user_camera_raw();
+            if let Some(shared) = &shared {
                 location(ui, "Adobe", &pretty_path(&shared.join("CameraProfiles")));
             }
-            if let Some(user) = user_camera_raw() {
+            if let Some(user) = &user {
                 location(ui, "Yours", &pretty_path(&user.join("CameraProfiles")));
             }
             ui.add_space(8.);
             hint(
                 ui,
-                &if self.onboarding.cameras.is_empty() {
+                &if shared.is_none() && user.is_none() {
+                    "Lightroom keeps them in CameraRaw/CameraProfiles, under \
+                     /Library/Application Support/Adobe on a Mac and C:\\ProgramData\\Adobe \
+                     on Windows. Copy that folder here, or any folder of profiles."
+                        .to_string()
+                } else if self.onboarding.cameras.is_empty() {
                     format!(
                         "Found {user_profiles} of your profiles. Choose a catalog to also \
                          find Adobe's profiles and narrow yours to your cameras."
@@ -396,38 +297,11 @@ impl Editor {
                 },
             );
             ui.add_space(10.);
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy && self.onboarding.importing.is_none(), |ui| {
-                    if adobe + user_profiles > 0
-                        && primary(ui, &format!("Import {} profiles", adobe + user_profiles))
-                            .clicked()
-                    {
-                        let mut paths = self.onboarding.user_profiles.clone();
-                        paths.extend(self.onboarding.adobe_profiles.iter().cloned());
-                        let progress = Arc::new(Mutex::new((false, String::new())));
-                        self.onboarding.importing = Some(progress.clone());
-                        let ctx = ctx.clone();
-                        std::thread::spawn(move || {
-                            let (imported, skipped) = import_leniently(&paths, &progress);
-                            *progress.lock().unwrap() = (
-                                true,
-                                if skipped > 0 {
-                                    format!(
-                                        "Imported {imported} profiles; skipped {skipped} that \
-                                         are unreadable, don't allow reuse or clash by name."
-                                    )
-                                } else {
-                                    format!("Imported {imported} profiles")
-                                },
-                            );
-                            ctx.request_repaint();
-                        });
-                    }
-                    if secondary(ui, "Choose files…").clicked() {
-                        self.dialog(FileDialog::CameraProfile, ctx);
-                    }
-                });
-            });
+            let found = (adobe + user_profiles > 0)
+                .then(|| format!("Import {} profiles", adobe + user_profiles));
+            if let Some(choice) = import_buttons(ui, found, enabled) {
+                chosen = Some((ImportKind::CameraProfiles, choice));
+            }
         });
 
         let presets = self.presets.library.presets.len();
@@ -444,21 +318,26 @@ impl Editor {
             body(
                 ui,
                 "Lens profiles correct distortion and vignetting, like Lightroom's Enable \
-                 Profile Corrections. Adobe ships profiles for thousands of lenses; \
-                 RAWmakase takes those from your camera makers and common third-party \
-                 lens brands.",
+                 Profile Corrections. Choose a folder and RAWmakase imports the .lcp \
+                 profiles in it and its subfolders.",
             );
             ui.add_space(10.);
-            if let Some(shared) = shared_camera_raw() {
+            let shared = shared_camera_raw();
+            let user = user_camera_raw();
+            if let Some(shared) = &shared {
                 location(ui, "Adobe", &pretty_path(&shared.join("LensProfiles")));
             }
-            if let Some(user) = user_camera_raw() {
+            if let Some(user) = &user {
                 location(ui, "Yours", &pretty_path(&user.join("LensProfiles")));
             }
             ui.add_space(8.);
             hint(
                 ui,
-                &if self.onboarding.makers.is_empty() {
+                &if shared.is_none() && user.is_none() {
+                    "Lightroom keeps them in CameraRaw/LensProfiles. Adobe's cover thousands \
+                     of lenses; the folders of your camera maker and lens brands are enough."
+                        .to_string()
+                } else if self.onboarding.makers.is_empty() {
                     "Choose a catalog to find lens profiles for your cameras.".to_string()
                 } else if lenses == 0 {
                     format!("No lens profiles found for {makers}.")
@@ -467,43 +346,19 @@ impl Editor {
                 },
             );
             ui.add_space(10.);
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy && self.onboarding.importing.is_none(), |ui| {
-                    if lenses > 0
-                        && primary(ui, &format!("Import {lenses} lens profiles")).clicked()
-                    {
-                        let paths = self.onboarding.lens_profiles.clone();
-                        let progress = Arc::new(Mutex::new((false, String::new())));
-                        self.onboarding.importing = Some(progress.clone());
-                        let ctx = ctx.clone();
-                        std::thread::spawn(move || {
-                            let (imported, skipped) = import_lenses_leniently(&paths, &progress);
-                            *progress.lock().unwrap() = (
-                                true,
-                                if skipped > 0 {
-                                    format!(
-                                        "Imported {imported} lens profiles; skipped {skipped} \
-                                         that are unreadable or clash by name."
-                                    )
-                                } else {
-                                    format!("Imported {imported} lens profiles")
-                                },
-                            );
-                            ctx.request_repaint();
-                        });
-                    }
-                    if secondary(ui, "Choose files…").clicked() {
-                        self.dialog(FileDialog::LensProfile, ctx);
-                    }
-                });
-            });
+            let found = (lenses > 0).then(|| format!("Import {lenses} lens profiles"));
+            if let Some(choice) = import_buttons(ui, found, enabled) {
+                chosen = Some((ImportKind::LensProfiles, choice));
+            }
         });
 
         step(ui, 4, "Presets", None, |ui| {
             body(
                 ui,
-                "Your Lightroom develop presets are .xmp files. Presets that need \
-                 something RAWmakase lacks still appear and apply what they can.",
+                "Your Lightroom develop presets are .xmp files. Choose a folder and \
+                 RAWmakase imports the presets in it and its subfolders, keeping their \
+                 groups. Presets that need something RAWmakase lacks still appear and \
+                 apply what they can.",
             );
             ui.add_space(10.);
             if let Some(user) = user_camera_raw() {
@@ -514,32 +369,41 @@ impl Editor {
                 hint(ui, &format!("{presets} presets already in RAWmakase."));
             }
             ui.add_space(10.);
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if found > 0 && primary(ui, "Import your presets").clicked() {
-                        let (mut ok, mut skipped) = (0, 0);
-                        for path in &self.onboarding.user_presets {
-                            match crate::presets::import_file(path) {
-                                Ok(_) => ok += 1,
-                                Err(_) => skipped += 1,
-                            }
-                        }
-                        self.onboarding.message = if skipped > 0 {
-                            format!(
-                                "Imported {ok} presets; skipped {skipped} files that aren't \
-                                 presets or clash with an installed one."
-                            )
-                        } else {
-                            format!("Imported {ok} presets")
-                        };
-                        self.reload_presets(ctx);
-                    }
-                    if secondary(ui, "Choose a file…").clicked() {
-                        self.dialog(FileDialog::ImportXmp, ctx);
-                    }
-                });
-            });
+            let found = (found > 0).then(|| format!("Import {found} presets"));
+            if let Some(choice) = import_buttons(ui, found, enabled) {
+                chosen = Some((ImportKind::Presets, choice));
+            }
         });
+        if let Some((kind, choice)) = chosen {
+            self.onboarding.last_import = None;
+            match choice {
+                Choice::Found => {
+                    let paths = match kind {
+                        ImportKind::CameraProfiles => {
+                            let mut paths = self.onboarding.user_profiles.clone();
+                            paths.extend(self.onboarding.adobe_profiles.iter().cloned());
+                            paths
+                        }
+                        ImportKind::LensProfiles => self.onboarding.lens_profiles.clone(),
+                        // The folder rather than its files, to skip Defaults and
+                        // keep preset folders.
+                        ImportKind::Presets => user_camera_raw()
+                            .map(|user| vec![user.join("Settings")])
+                            .unwrap_or_default(),
+                    };
+                    self.import(kind, paths, ctx);
+                }
+                Choice::Folder => self.dialog(FileDialog::ImportFolder(kind), ctx),
+                Choice::Files => self.dialog(
+                    match kind {
+                        ImportKind::CameraProfiles => FileDialog::CameraProfile,
+                        ImportKind::LensProfiles => FileDialog::LensProfile,
+                        ImportKind::Presets => FileDialog::ImportXmp,
+                    },
+                    ctx,
+                ),
+            }
+        }
 
         step(ui, 5, "Good to know", None, |ui| {
             for line in [
@@ -552,18 +416,16 @@ impl Editor {
             }
         });
 
-        if let Some(progress) = self.onboarding.importing.clone() {
-            let (done, message) = progress.lock().unwrap().clone();
-            self.onboarding.message = message;
-            if done {
-                self.onboarding.importing = None;
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        if importing {
+            let status = self.status.clone();
+            text(ui, &status, 12., 200);
+            ui.add_space(14.);
+        } else if let Some(summary) = &self.onboarding.last_import {
+            text(ui, &summary.message(), 12., 200);
+            if !summary.failed.is_empty() {
+                ui.add_space(4.);
+                hint(ui, &summary.details(5));
             }
-        }
-        if !self.onboarding.message.is_empty() {
-            let message = self.onboarding.message.clone();
-            text(ui, &message, 12., 200);
             ui.add_space(14.);
         }
         ui.add_space(6.);
@@ -605,7 +467,7 @@ impl Editor {
     pub(super) fn open_onboarding(&mut self) {
         self.onboarding.visible = true;
         self.onboarding.scanned = false;
-        self.onboarding.message.clear();
+        self.onboarding.last_import = None;
     }
 }
 
@@ -713,6 +575,42 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
             });
     });
     ui.add_space(4.);
+}
+/// A step's import button, as chosen.
+enum Choice {
+    /// The files the step found.
+    Found,
+    Folder,
+    Files,
+}
+/// A step's import buttons: the files found, if any, then a folder or files
+/// of your choosing. The first one is the primary action.
+fn import_buttons(ui: &mut egui::Ui, found: Option<String>, enabled: bool) -> Option<Choice> {
+    let mut choice = None;
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            if let Some(label) = &found
+                && primary(ui, label).clicked()
+            {
+                choice = Some(Choice::Found);
+            }
+            let folder = if found.is_some() {
+                secondary(ui, "Choose folder…")
+            } else {
+                primary(ui, "Choose folder…")
+            };
+            if folder
+                .on_hover_text("Imports every file in the folder and its subfolders")
+                .clicked()
+            {
+                choice = Some(Choice::Folder);
+            }
+            if secondary(ui, "Choose files…").clicked() {
+                choice = Some(Choice::Files);
+            }
+        });
+    });
+    choice
 }
 fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(

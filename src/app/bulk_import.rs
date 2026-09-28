@@ -1,0 +1,585 @@
+//! Imports camera profiles, lens profiles and presets from chosen files or
+//! whole folders, leniently: folders are scanned recursively, files already
+//! imported are skipped quietly, and what can't be imported is reported
+//! instead of failing the rest.
+use super::{Editor, worker::Event};
+use eframe::egui;
+use std::collections::{BTreeMap, HashSet};
+use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportKind {
+    CameraProfiles,
+    LensProfiles,
+    Presets,
+}
+impl ImportKind {
+    fn extensions(self) -> &'static [&'static str] {
+        match self {
+            Self::CameraProfiles => &["dcp", "xmp"],
+            Self::LensProfiles => &["lcp"],
+            Self::Presets => &["xmp"],
+        }
+    }
+    pub(super) fn noun(self, count: usize) -> &'static str {
+        match (self, count == 1) {
+            (Self::CameraProfiles, true) => "profile",
+            (Self::CameraProfiles, false) => "profiles",
+            (Self::LensProfiles, true) => "lens profile",
+            (Self::LensProfiles, false) => "lens profiles",
+            (Self::Presets, true) => "preset",
+            (Self::Presets, false) => "presets",
+        }
+    }
+    /// Label for the multi-file chooser's filter.
+    pub(super) fn filter(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Self::CameraProfiles => ("Camera profiles", &["dcp", "xmp"]),
+            Self::LensProfiles => ("Adobe lens profiles", &["lcp"]),
+            Self::Presets => ("Lightroom presets", &["xmp"]),
+        }
+    }
+}
+
+/// Files with one of `extensions` under `dir`, in sorted order. Skips hidden
+/// folders, macOS archive leftovers and, when `skip` names them, other
+/// folders such as Camera Raw's Defaults.
+pub(super) fn find_files(dir: &Path, extensions: &[&str], skip: &[&str]) -> Vec<PathBuf> {
+    fn walk(dir: &Path, extensions: &[&str], skip: &[&str], depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            // Follows links, so the depth limit also stops link cycles.
+            if path.is_dir() {
+                if depth < 12 && name != "__MACOSX" && !skip.contains(&name.as_ref()) {
+                    walk(&path, extensions, skip, depth + 1, out);
+                }
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, extensions, skip, 0, &mut out);
+    out.sort();
+    out
+}
+
+/// A file to import.
+struct Found {
+    path: PathBuf,
+    /// Its folder under the chosen one, starting with the chosen folder's
+    /// name. Presets keep it: a preset without a group is grouped by folder.
+    folder: PathBuf,
+    /// Chosen by name rather than found in a folder. A chosen file of the
+    /// wrong kind is reported; a found one is passed over quietly.
+    chosen: bool,
+}
+
+fn gather(kind: ImportKind, picks: &[PathBuf]) -> Vec<Found> {
+    let skip: &[&str] = match kind {
+        ImportKind::Presets => &["Defaults", "GPU"],
+        _ => &[],
+    };
+    let mut found = Vec::new();
+    for pick in picks {
+        if pick.is_dir() {
+            let root = pick.file_name().map(PathBuf::from).unwrap_or_default();
+            for path in find_files(pick, kind.extensions(), skip) {
+                let under = path
+                    .parent()
+                    .and_then(|p| p.strip_prefix(pick).ok())
+                    .unwrap_or(Path::new(""));
+                found.push(Found {
+                    folder: root.join(under),
+                    path,
+                    chosen: false,
+                });
+            }
+        } else {
+            found.push(Found {
+                folder: pick
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(PathBuf::from)
+                    .unwrap_or_default(),
+                path: pick.clone(),
+                chosen: true,
+            });
+        }
+    }
+    found
+}
+
+/// What an import did.
+#[derive(Debug)]
+pub struct Summary {
+    pub(super) kind: ImportKind,
+    pub(super) imported: usize,
+    /// Identical to one already imported, or repeated within this import.
+    pub(super) already: usize,
+    /// Profile looks found in a folder for cameras without a base profile.
+    pub(super) without_base: usize,
+    /// Files that couldn't be imported, with the reason.
+    pub(super) failed: Vec<(PathBuf, String)>,
+}
+impl Summary {
+    fn new(kind: ImportKind) -> Self {
+        Self {
+            kind,
+            imported: 0,
+            already: 0,
+            without_base: 0,
+            failed: Vec::new(),
+        }
+    }
+    fn fail(&mut self, path: &Path, reason: impl Into<String>) {
+        self.failed.push((path.to_path_buf(), reason.into()));
+    }
+    /// One line: "Imported 40 presets · 3 already imported · 2 skipped".
+    pub(super) fn message(&self) -> String {
+        let (imported, already, failed) = (self.imported, self.already, self.failed.len());
+        if imported + already + failed + self.without_base == 0 {
+            return format!("No {} found there", self.kind.noun(2));
+        }
+        let mut parts = vec![format!("Imported {imported} {}", self.kind.noun(imported))];
+        if already > 0 {
+            parts.push(format!("{already} already imported"));
+        }
+        if self.without_base > 0 {
+            parts.push(format!(
+                "{} looks skipped for cameras without a profile",
+                self.without_base
+            ));
+        }
+        if failed > 0 {
+            parts.push(format!("{failed} skipped"));
+        }
+        parts.join(" · ")
+    }
+    /// The skipped files, one per line, at most `limit` of them.
+    pub(super) fn details(&self, limit: usize) -> String {
+        let mut lines: Vec<String> = self
+            .failed
+            .iter()
+            .take(limit)
+            .map(|(path, reason)| {
+                format!(
+                    "{}: {reason}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                )
+            })
+            .collect();
+        if self.failed.len() > limit {
+            lines.push(format!("…and {} more", self.failed.len() - limit));
+        }
+        lines.join("\n")
+    }
+}
+
+fn content_hash(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+/// Camera Raw profile looks are XMP files like presets, marked as looks.
+fn is_look(text: &str) -> bool {
+    text.contains("PresetType=\"Look\"") || text.contains(">Look</crs:PresetType>")
+}
+fn report(progress: &Mutex<String>, i: usize, total: usize, noun: &str) {
+    if i.is_multiple_of(50) {
+        *progress.lock().unwrap() = format!("Checking {noun}… {i} of {total}");
+    }
+}
+
+/// Checks a profile against the library folder and this import's earlier
+/// files: true to import it; counts it as already imported or fails it.
+fn check_name(
+    found: &Found,
+    bytes: &[u8],
+    destination: &Path,
+    names: &mut BTreeMap<OsString, u64>,
+    summary: &mut Summary,
+) -> bool {
+    let Some(name) = found.path.file_name() else {
+        summary.fail(&found.path, "no file name");
+        return false;
+    };
+    let hash = content_hash(bytes);
+    if let Some(&seen) = names.get(name) {
+        if seen == hash {
+            summary.already += 1;
+        } else {
+            summary.fail(&found.path, "another file in this import has the same name");
+        }
+        return false;
+    }
+    names.insert(name.to_owned(), hash);
+    let target = destination.join(name);
+    if target.exists() {
+        if std::fs::read(&target).is_ok_and(|existing| existing == bytes) {
+            summary.already += 1;
+        } else {
+            summary.fail(
+                &found.path,
+                "a different one with this name is already imported",
+            );
+        }
+        return false;
+    }
+    true
+}
+
+fn import_camera_profiles(found: &[Found], progress: &Mutex<String>) -> Summary {
+    let mut summary = Summary::new(ImportKind::CameraProfiles);
+    let destination = crate::storage::data_dir().join("camera-profiles");
+    let mut names = BTreeMap::new();
+    let (mut dcps, mut looks) = (Vec::new(), Vec::new());
+    for (i, file) in found.iter().enumerate() {
+        report(progress, i, found.len(), "profiles");
+        let Ok(bytes) = std::fs::read(&file.path) else {
+            summary.fail(&file.path, "unreadable");
+            continue;
+        };
+        let xmp = file
+            .path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("xmp"));
+        if xmp {
+            // Folders of profiles often hold presets too; only looks belong here.
+            if !std::str::from_utf8(&bytes).is_ok_and(is_look) {
+                if file.chosen {
+                    summary.fail(&file.path, "a preset, not a profile");
+                }
+                continue;
+            }
+        } else if bytes.len() > 16_000_000 {
+            summary.fail(&file.path, "too large");
+            continue;
+        } else if let Err(e) = crate::camera_profiles::from_bytes(&bytes) {
+            summary.fail(&file.path, format!("{e:#}"));
+            continue;
+        }
+        if check_name(file, &bytes, &destination, &mut names, &mut summary) {
+            if xmp { &mut looks } else { &mut dcps }.push(file.path.clone());
+        }
+    }
+    // Every DCP was checked above, so batches only fail on a write error.
+    for batch in dcps.chunks(1000) {
+        *progress.lock().unwrap() = format!("Importing profiles… {} done", summary.imported);
+        match crate::camera_profiles::import_files(batch) {
+            Ok(done) => summary.imported += done.len(),
+            Err(e) => batch.iter().for_each(|p| summary.fail(p, format!("{e:#}"))),
+        }
+    }
+    let chosen: HashSet<&Path> = found
+        .iter()
+        .filter(|f| f.chosen)
+        .map(|f| f.path.as_path())
+        .collect();
+    // Looks last, as they need their base profile in the library. One without
+    // its base fails the batch, so then import them one by one.
+    for batch in looks.chunks(1000) {
+        match crate::camera_profiles::import_files(batch) {
+            Ok(done) => summary.imported += done.len(),
+            Err(_) => {
+                for path in batch {
+                    match crate::camera_profiles::import_files(std::slice::from_ref(path)) {
+                        Ok(_) => summary.imported += 1,
+                        // Camera Raw's folder of looks covers every camera; only
+                        // looks chosen by name are worth a line each.
+                        Err(e)
+                            if e.to_string().contains("Missing base camera profile")
+                                && !chosen.contains(path.as_path()) =>
+                        {
+                            summary.without_base += 1
+                        }
+                        Err(e) => {
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            let reason = format!("{e:#}");
+                            let reason =
+                                reason.strip_prefix(&format!("{name}: ")).unwrap_or(&reason);
+                            summary.fail(path, reason);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    summary
+}
+
+fn import_lens_profiles(found: &[Found], progress: &Mutex<String>) -> Summary {
+    let mut summary = Summary::new(ImportKind::LensProfiles);
+    let destination = crate::storage::data_dir().join("lens-profiles");
+    let mut names = BTreeMap::new();
+    let mut good = Vec::new();
+    for (i, file) in found.iter().enumerate() {
+        report(progress, i, found.len(), "lens profiles");
+        let Ok(bytes) = std::fs::read(&file.path) else {
+            summary.fail(&file.path, "unreadable");
+            continue;
+        };
+        let parsed = std::str::from_utf8(&bytes)
+            .map_err(anyhow::Error::from)
+            .and_then(crate::lens::lcp::parse);
+        if let Err(e) = parsed {
+            summary.fail(&file.path, format!("not a lens profile: {e:#}"));
+        } else if check_name(file, &bytes, &destination, &mut names, &mut summary) {
+            good.push(file.path.clone());
+        }
+    }
+    for batch in good.chunks(4000) {
+        *progress.lock().unwrap() = format!("Importing lens profiles… {} done", summary.imported);
+        match crate::lens::lcp::import_files(batch) {
+            Ok(done) => summary.imported += done.len(),
+            Err(e) => batch.iter().for_each(|p| summary.fail(p, format!("{e:#}"))),
+        }
+    }
+    summary
+}
+
+/// Copies presets into `root`/Imported, keeping their folders. A preset
+/// identical to one anywhere in `installed` counts as already imported; one
+/// whose name is taken by a different preset gets a numbered name.
+fn import_presets(
+    found: &[Found],
+    progress: &Mutex<String>,
+    root: &Path,
+    installed: &[PathBuf],
+) -> Summary {
+    use std::io::Write;
+    let mut summary = Summary::new(ImportKind::Presets);
+    *progress.lock().unwrap() = "Checking installed presets…".into();
+    let mut known: HashSet<u64> = installed
+        .iter()
+        .flat_map(|dir| find_files(dir, &["xmp"], &[]))
+        .filter_map(|p| std::fs::read(p).ok())
+        .map(|bytes| content_hash(&bytes))
+        .collect();
+    for (i, file) in found.iter().enumerate() {
+        report(progress, i, found.len(), "presets");
+        let text = match std::fs::metadata(&file.path) {
+            Ok(m) if m.len() >= 8_000_000 => {
+                summary.fail(&file.path, "too large");
+                continue;
+            }
+            _ => match std::fs::read_to_string(&file.path) {
+                Ok(text) => text,
+                Err(_) => {
+                    summary.fail(&file.path, "unreadable");
+                    continue;
+                }
+            },
+        };
+        let hash = content_hash(text.as_bytes());
+        if known.contains(&hash) {
+            summary.already += 1;
+            continue;
+        }
+        if is_look(&text) {
+            if file.chosen {
+                summary.fail(
+                    &file.path,
+                    "a camera profile; import it under Camera profiles",
+                );
+            }
+            continue;
+        }
+        match crate::xmp::parse(&file.path, &text) {
+            // Photo sidecars sit next to RAW files; they aren't presets.
+            Ok(preset) if preset.photo_settings && !file.chosen => continue,
+            Ok(_) => {}
+            Err(e) => {
+                summary.fail(&file.path, format!("not a preset: {e:#}"));
+                continue;
+            }
+        }
+        let dir = root.join("Imported").join(&file.folder);
+        let written = (|| -> anyhow::Result<()> {
+            std::fs::create_dir_all(&dir)?;
+            let stem = file.path.file_stem().unwrap_or_default().to_string_lossy();
+            let mut target = dir.join(file.path.file_name().unwrap_or_default());
+            let mut n = 2;
+            while target.exists() {
+                target = dir.join(format!("{stem} {n}.xmp"));
+                n += 1;
+            }
+            let mut staged = tempfile::NamedTempFile::new_in(&dir)?;
+            staged.write_all(text.as_bytes())?;
+            staged.as_file().sync_all()?;
+            staged.persist_noclobber(&target).map_err(|e| e.error)?;
+            Ok(())
+        })();
+        match written {
+            Ok(()) => {
+                known.insert(hash);
+                summary.imported += 1;
+            }
+            Err(e) => summary.fail(&file.path, format!("{e:#}")),
+        }
+    }
+    summary
+}
+
+/// Imports what `picks` (files and folders) hold for `kind`.
+fn run(kind: ImportKind, picks: &[PathBuf], progress: &Mutex<String>) -> Summary {
+    *progress.lock().unwrap() = format!("Looking for {}…", kind.noun(2));
+    let found = gather(kind, picks);
+    match kind {
+        ImportKind::CameraProfiles => import_camera_profiles(&found, progress),
+        ImportKind::LensProfiles => import_lens_profiles(&found, progress),
+        ImportKind::Presets => import_presets(
+            &found,
+            progress,
+            &crate::storage::data_dir().join("xmp-presets"),
+            &crate::presets::library_dirs(),
+        ),
+    }
+}
+
+impl Editor {
+    /// Starts importing `picks` in the background; the status line follows it.
+    pub(super) fn import(&mut self, kind: ImportKind, picks: Vec<PathBuf>, ctx: &egui::Context) {
+        if self.importing.is_some() || picks.is_empty() {
+            return;
+        }
+        let progress = Arc::new(Mutex::new(String::new()));
+        self.importing = Some(progress.clone());
+        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let summary = run(kind, &picks, &progress);
+            let _ = tx.send(Event::Imported(Box::new(summary)));
+            ctx.request_repaint();
+        });
+    }
+    pub(super) fn import_progress(&mut self, ctx: &egui::Context) {
+        if let Some(progress) = &self.importing {
+            self.status = progress.lock().unwrap().clone();
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
+    pub(super) fn imported(&mut self, summary: Box<Summary>, ctx: &egui::Context) {
+        self.importing = None;
+        if summary.imported > 0 {
+            match summary.kind {
+                ImportKind::CameraProfiles => {
+                    if let Some(m) = &self.document.metadata {
+                        let (profiles, errors) = crate::camera_profiles::installed(m);
+                        self.document.profiles = profiles;
+                        self.document.profile_errors = errors;
+                        // Importing never changes the active edit: the user picks
+                        // a profile, and new photos use the imported default.
+                        self.refresh_preset_support();
+                    }
+                }
+                ImportKind::LensProfiles => {
+                    // Lens profiles are matched when a photo opens: reopen it.
+                    if let Some(path) = self.document.path.clone() {
+                        let photo = self.document.catalog_photo;
+                        self.open_raw(path, photo);
+                    }
+                }
+                ImportKind::Presets => self.reload_presets(ctx),
+            }
+        }
+        self.status = summary.message();
+        if !summary.failed.is_empty() {
+            self.status.push_str(": ");
+            self.status.push_str(&summary.details(1));
+        }
+        self.onboarding.last_import = Some(summary);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PRESET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   crs:Exposure2012="+0.50"/>
+ </rdf:RDF>
+</x:xmpmeta>"#;
+
+    #[test]
+    fn folder_import_scans_recursively_keeps_folders_and_skips_duplicates() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack = temp.path().join("Pack");
+        std::fs::create_dir_all(pack.join("Warm/.hidden")).unwrap();
+        std::fs::create_dir_all(pack.join("Defaults")).unwrap();
+        std::fs::write(pack.join("One.xmp"), PRESET).unwrap();
+        std::fs::write(pack.join("Warm/One.xmp"), PRESET.replace("0.50", "0.70")).unwrap();
+        // Identical to Warm/One.xmp under another name: only the first,
+        // Copy.xmp, is imported.
+        std::fs::write(pack.join("Warm/Copy.xmp"), PRESET.replace("0.50", "0.70")).unwrap();
+        std::fs::write(pack.join("Warm/.hidden/Two.xmp"), PRESET).unwrap();
+        std::fs::write(pack.join("Defaults/Three.xmp"), PRESET).unwrap();
+        std::fs::write(pack.join("Broken.xmp"), "<not xmp").unwrap();
+        std::fs::write(
+            pack.join("Look.xmp"),
+            PRESET.replace("crs:Exposure", "crs:PresetType=\"Look\" crs:Exposure"),
+        )
+        .unwrap();
+        let root = temp.path().join("library");
+        let progress = Mutex::new(String::new());
+
+        let found = gather(ImportKind::Presets, std::slice::from_ref(&pack));
+        let summary = import_presets(&found, &progress, &root, std::slice::from_ref(&root));
+        assert_eq!(summary.imported, 2, "{summary:?}");
+        assert_eq!(summary.already, 1);
+        assert_eq!(summary.failed.len(), 1, "only Broken.xmp is reported");
+        assert!(root.join("Imported/Pack/One.xmp").is_file());
+        assert!(root.join("Imported/Pack/Warm/Copy.xmp").is_file());
+        assert_eq!(
+            summary.message(),
+            "Imported 2 presets · 1 already imported · 1 skipped"
+        );
+
+        // Importing again finds everything installed.
+        let again = import_presets(&found, &progress, &root, std::slice::from_ref(&root));
+        assert_eq!((again.imported, again.already), (0, 3));
+
+        // A different preset under a taken name gets a numbered one.
+        let other = temp.path().join("Other");
+        std::fs::create_dir_all(&other).unwrap();
+        let chosen = other.join("One.xmp");
+        std::fs::write(&chosen, PRESET.replace("0.50", "1.00")).unwrap();
+        std::fs::create_dir_all(root.join("Imported/Other")).unwrap();
+        std::fs::write(root.join("Imported/Other/One.xmp"), "taken").unwrap();
+        let found = gather(ImportKind::Presets, &[chosen]);
+        let summary = import_presets(&found, &progress, &root, std::slice::from_ref(&root));
+        assert_eq!(summary.imported, 1);
+        assert!(root.join("Imported/Other/One 2.xmp").is_file());
+    }
+
+    #[test]
+    fn chosen_files_of_the_wrong_kind_are_reported() {
+        let temp = tempfile::tempdir().unwrap();
+        let look = temp.path().join("Look.xmp");
+        std::fs::write(
+            &look,
+            PRESET.replace("crs:Exposure", "crs:PresetType=\"Look\" crs:Exposure"),
+        )
+        .unwrap();
+        let found = gather(ImportKind::Presets, &[look]);
+        let summary = import_presets(&found, &Mutex::default(), &temp.path().join("lib"), &[]);
+        assert_eq!(summary.failed.len(), 1);
+        assert!(summary.details(5).starts_with("Look.xmp: a camera profile"));
+    }
+}

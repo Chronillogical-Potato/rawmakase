@@ -46,6 +46,8 @@ pub struct Editor {
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     status: String,
+    /// Progress of a running profile or preset import.
+    importing: Option<std::sync::Arc<std::sync::Mutex<String>>>,
     close_confirm: bool,
 }
 impl Editor {
@@ -166,6 +168,7 @@ impl Editor {
                 session.develop,
             ),
             status: "Open a RAW photo to begin".into(),
+            importing: None,
             close_confirm: false,
         };
         app.reload_presets(ctx);
@@ -270,6 +273,7 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     options
 }
 
+mod bulk_import;
 mod catalog;
 mod dialogs;
 mod export;

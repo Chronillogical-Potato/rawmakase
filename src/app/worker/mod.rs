@@ -46,15 +46,15 @@ pub enum Event {
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
     Open(PathBuf),
     Monitor(PathBuf),
-    CameraProfile(Vec<PathBuf>),
-    LensProfiles(Vec<PathBuf>),
+    /// Files and folders chosen to import profiles or presets from.
+    Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),
+    Imported(Box<crate::app::bulk_import::Summary>),
     Profiles {
         id: u64,
         profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
         errors: Vec<String>,
     },
     PresetLoad(PathBuf),
-    XmpImport(PathBuf),
     XmpLibrary(Arc<crate::presets::Library>),
     PresetSave(PathBuf),
     Header(Box<LoadedHeader>),

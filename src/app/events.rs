@@ -8,6 +8,7 @@ use eframe::egui;
 
 impl Editor {
     pub(super) fn events(&mut self, ctx: &egui::Context) {
+        self.import_progress(ctx);
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::CatalogReady(result) => self.catalog_ready(result),
@@ -43,16 +44,6 @@ impl Editor {
                     self.presets.library = library;
                     self.refresh_preset_support();
                 }
-                Event::XmpImport(path) => {
-                    self.activity.finish_dialog();
-                    match crate::presets::import_file(&path) {
-                        Ok(_) => {
-                            self.status = "Preset imported".into();
-                            self.reload_presets(ctx);
-                        }
-                        Err(e) => self.status = format!("Preset not imported: {e:#}"),
-                    }
-                }
                 Event::Profiles {
                     id,
                     profiles,
@@ -67,8 +58,11 @@ impl Editor {
                         self.document.save.saved();
                     }
                 }
-                Event::CameraProfile(p) => self.camera_profile_ready(p),
-                Event::LensProfiles(p) => self.lens_profiles_ready(p),
+                Event::Import(kind, paths) => {
+                    self.activity.finish_dialog();
+                    self.import(kind, paths, ctx);
+                }
+                Event::Imported(summary) => self.imported(summary, ctx),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
                     match crate::presets::save_preset(&p, &self.document.recipe) {
@@ -225,41 +219,6 @@ impl Editor {
                 let _ = self.save_session();
             }
             Err(e) => self.status = format!("Catalog operation failed: {e}"),
-        }
-    }
-
-    fn lens_profiles_ready(&mut self, paths: Vec<std::path::PathBuf>) {
-        self.activity.finish_dialog();
-        match crate::lens::lcp::import_files(&paths) {
-            Ok(imported) => {
-                self.status = format!("Imported {} lens profiles", imported.len());
-                // Lens profiles are matched when a photo opens: reopen it.
-                if let Some(path) = self.document.path.clone() {
-                    let photo = self.document.catalog_photo;
-                    self.open_raw(path, photo);
-                }
-            }
-            Err(e) => self.status = format!("Lens profiles not imported: {e:#}"),
-        }
-    }
-    fn camera_profile_ready(&mut self, paths: Vec<std::path::PathBuf>) {
-        self.activity.finish_dialog();
-        match crate::camera_profiles::import_files(&paths) {
-            Ok(imported) => {
-                if let Some(m) = &self.document.metadata {
-                    let (profiles, errors) = crate::camera_profiles::installed(m);
-                    self.document.profiles = profiles;
-                    self.document.profile_errors = errors;
-                    // Importing a library never changes the active edit. The user selects
-                    // a profile explicitly; new photos use the imported default.
-                    self.refresh_preset_support();
-                }
-                self.status = format!(
-                    "Imported {} profile files. Choose a profile from the Profile menu.",
-                    imported.len()
-                );
-            }
-            Err(e) => self.status = format!("Profiles not imported: {e:#}"),
         }
     }
 
