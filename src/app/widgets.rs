@@ -789,70 +789,125 @@ fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
         text
     }
 }
-/// The Library/Develop switcher: equal-width segments in a dark track, with
-/// a raised pill that slides to the active one, like Claude's view switcher.
-pub(super) fn workspace_switcher(
+/// Size of a segmented control: the track's height and the label size.
+pub(super) struct SegmentStyle {
+    height: f32,
+    font: f32,
+}
+/// The Library/Develop switcher in the top bar.
+pub(super) const TOP_BAR_SEGMENTS: SegmentStyle = SegmentStyle {
+    height: 26.,
+    font: 13.,
+};
+/// Toolbar toggles such as Fit and 100%, as tall as the toolbar buttons.
+pub(super) const TOOLBAR_SEGMENTS: SegmentStyle = SegmentStyle {
+    height: 32.,
+    font: 12.,
+};
+/// Height of compact segmented controls; fields beside them use it too so
+/// their edges line up.
+pub(super) const COMPACT_SEGMENT_HEIGHT: f32 = 22.;
+/// Panel and filter controls.
+const COMPACT_SEGMENTS: SegmentStyle = SegmentStyle {
+    height: COMPACT_SEGMENT_HEIGHT,
+    font: 11.,
+};
+/// Segmented control sized to its labels: equal-width segments, so switching
+/// never moves a label. `selected` None shows no active segment.
+pub(super) fn segment_bar<const N: usize>(
     ui: &mut egui::Ui,
-    labels: [&str; 2],
+    labels: [&str; N],
     selected: Option<usize>,
-) -> [egui::Response; 2] {
-    let galleys = labels.map(|label| {
-        ui.painter().layout_no_wrap(
-            label.into(),
-            egui::FontId::proportional(13.),
-            theme::gray(255),
-        )
-    });
-    let inset = 2.;
-    // Equal widths, so switching never moves a label.
-    let width = galleys
+    style: &SegmentStyle,
+) -> [egui::Response; N] {
+    let width = segments_width(ui, &labels, style);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, style.height.max(28.)), Sense::hover());
+    segment_track(ui, rect, response.id, &labels, selected, style)
+        .try_into()
+        .expect("one response per label")
+}
+/// The narrowest track that fits every label untruncated: equal segments as
+/// wide as the widest label plus padding, and the pill's inset.
+fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
+    let font = egui::FontId::proportional(style.font);
+    let widest = labels
         .iter()
-        .map(|galley| galley.size().x)
-        .fold(0., f32::max)
-        + 20.;
-    let (slot, _) = ui.allocate_exact_size(Vec2::new(2. * width + 2. * inset, 28.), Sense::hover());
-    let track = Rect::from_center_size(slot.center(), Vec2::new(slot.width(), 26.));
-    ui.painter().rect_filled(track, 7., theme::gray(21));
-    let segment = |index: f32| {
+        .map(|label| {
+            ui.painter()
+                .layout_no_wrap((*label).into(), font.clone(), theme::gray(255))
+                .size()
+                .x
+        })
+        .fold(0., f32::max);
+    labels.len() as f32 * (widest + 24.) + 4.
+}
+/// The shared look of every segmented control: a dark track holding
+/// equal-width segments, with a raised pill that slides to the selected one
+/// while the labels cross-fade, like Claude's view switcher.
+fn segment_track(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    labels: &[&str],
+    selected: Option<usize>,
+    style: &SegmentStyle,
+) -> Vec<egui::Response> {
+    let inset = 2.;
+    let radius = (style.height * 0.27).round();
+    let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
+    ui.painter().rect_filled(track, radius, theme::gray(21));
+    let width = (track.width() - 2. * inset) / labels.len().max(1) as f32;
+    let segment = |position: f32| {
         Rect::from_min_size(
-            track.min + Vec2::new(inset + index * width, inset),
+            track.min + Vec2::new(inset + position * width, inset),
             Vec2::new(width, track.height() - 2. * inset),
         )
     };
-    // 0 is the first segment, 1 the second; eased out in the direction of travel.
+    // Glide from where the pill was when the selection changed, easing out.
     let target = selected.unwrap_or(0) as f32;
-    let linear = ui
+    let linear = ui.ctx().animate_value_with_time(id, target, 0.18);
+    let start_id = id.with("start");
+    let (last, start) = ui
         .ctx()
-        .animate_value_with_time(ui.id().with("workspace-switcher"), target, 0.18);
-    let position = if target >= 0.5 {
-        egui::emath::easing::cubic_out(linear)
+        .data(|data| data.get_temp::<(f32, f32)>(start_id))
+        .unwrap_or((target, target));
+    let start = if last == target { start } else { linear };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(start_id, (target, start)));
+    let position = if target == start {
+        target
     } else {
-        1. - egui::emath::easing::cubic_out(1. - linear)
+        let progress = ((linear - start) / (target - start)).clamp(0., 1.);
+        start + egui::emath::easing::cubic_out(progress) * (target - start)
     };
     let enabled = ui.is_enabled();
-    let responses = [0, 1].map(|index| {
-        ui.interact(
-            segment(index as f32),
-            ui.id().with(("workspace-switcher", index)),
-            Sense::click(),
-        )
-    });
+    let responses: Vec<_> = (0..labels.len())
+        .map(|index| {
+            ui.interact(
+                segment(index as f32),
+                id.with(("segment", index)),
+                Sense::click(),
+            )
+        })
+        .collect();
     for (index, response) in responses.iter().enumerate() {
         if selected != Some(index) && enabled && response.hovered() {
             ui.painter()
-                .rect_filled(segment(index as f32), 5., theme::gray(30));
+                .rect_filled(segment(index as f32), radius - inset, theme::gray(30));
         }
     }
     if selected.is_some() {
         ui.painter().rect(
             segment(position),
-            5.,
+            radius - inset,
             theme::gray(44),
             Stroke::new(1., theme::gray(58)),
             egui::StrokeKind::Inside,
         );
     }
-    for (index, galley) in galleys.into_iter().enumerate() {
+    for (index, label) in labels.iter().enumerate() {
+        let rect = segment(index as f32);
         // How much of the pill sits under this label.
         let weight = match selected {
             Some(_) => 1. - (position - index as f32).abs().min(1.),
@@ -863,57 +918,45 @@ pub(super) fn workspace_switcher(
         } else {
             theme::gray(70)
         };
-        let rect = segment(index as f32);
-        ui.painter().galley_with_override_text_color(
-            rect.center() - galley.size() / 2.,
-            galley,
-            color,
+        let text = ui.painter().layout_no_wrap(
+            (*label).into(),
+            egui::FontId::proportional(style.font),
+            theme::gray(255),
         );
+        ui.painter()
+            .galley_with_override_text_color(rect.center() - text.size() / 2., text, color);
     }
-    responses.map(|response| response.on_hover_cursor(egui::CursorIcon::PointingHand))
+    responses
+        .into_iter()
+        .map(|response| {
+            if enabled {
+                response.on_hover_cursor(egui::CursorIcon::PointingHand)
+            } else {
+                response
+            }
+        })
+        .collect()
 }
-/// Compact Lightroom-style segmented control spanning `width`.
+/// Compact segmented control at least `width` wide, for panels and filters.
 pub(super) fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     options: &[(T, &str)],
     width: f32,
 ) -> bool {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.), Sense::hover());
-    ui.painter().rect_filled(rect, 3., theme::gray(30));
-    let segment = rect.width() / options.len() as f32;
-    let mut changed = false;
-    for (i, (option, label)) in options.iter().enumerate() {
-        let cell = Rect::from_min_size(
-            Pos2::new(rect.left() + i as f32 * segment, rect.top()),
-            Vec2::new(segment, rect.height()),
-        );
-        let response = ui.interact(cell, ui.id().with(("segment", label, i)), Sense::click());
-        let active = *value == *option;
-        if active || response.hovered() {
-            ui.painter().rect_filled(
-                cell.shrink(1.),
-                3.,
-                theme::gray(if active { 72 } else { 44 }),
-            );
-        }
-        let text = egui::WidgetText::from(*label).into_galley(
-            ui,
-            Some(egui::TextWrapMode::Truncate),
-            cell.width() - 4.,
-            egui::FontId::proportional(11.),
-        );
-        ui.painter().galley(
-            cell.center() - text.size() / 2.,
-            text,
-            theme::gray(if active { 240 } else { 165 }),
-        );
-        if response.clicked() && !active {
+    let labels: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
+    let width = width.max(segments_width(ui, &labels, &COMPACT_SEGMENTS));
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, COMPACT_SEGMENTS.height), Sense::hover());
+    let selected = options.iter().position(|(option, _)| *option == *value);
+    let responses = segment_track(ui, rect, response.id, &labels, selected, &COMPACT_SEGMENTS);
+    for (response, (option, _)) in responses.iter().zip(options) {
+        if response.clicked() && *value != *option {
             *value = *option;
-            changed = true;
+            return true;
         }
     }
-    changed
+    false
 }
 /// A full-width menu row: optional check mark, label, right-aligned shortcut.
 pub(super) fn menu_item(

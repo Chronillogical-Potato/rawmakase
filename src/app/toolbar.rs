@@ -1,6 +1,8 @@
 use super::Editor;
 use super::dialogs::FileDialog;
-use super::widgets::{menu_item, menu_separator, toolbar_action, toolbar_divider};
+use super::widgets::{
+    TOOLBAR_SEGMENTS, menu_item, menu_separator, segment_bar, toolbar_action, toolbar_divider,
+};
 use crate::app::theme;
 use crate::develop::Recipe;
 use eframe::egui::{self, Stroke, Vec2};
@@ -49,27 +51,18 @@ impl Editor {
                         self.redo();
                     }
                     toolbar_divider(ui);
-                    egui::Frame::new()
-                        .fill(theme::gray(20))
-                        .corner_radius(6.)
-                        .inner_margin(3)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 2.;
-                                if toolbar_action(ui, "Fit", 44., !self.view.zoom100, true, 0)
-                                    .on_hover_text("Fit image · F")
-                                    .clicked()
-                                {
-                                    self.view.zoom100 = false;
-                                }
-                                if toolbar_action(ui, "100%", 52., self.view.zoom100, true, 0)
-                                    .on_hover_text("Actual pixels · 1")
-                                    .clicked()
-                                {
-                                    self.set_zoom(1.);
-                                }
-                            });
-                        });
+                    let [fit, actual] = segment_bar(
+                        ui,
+                        ["Fit", "100%"],
+                        Some(usize::from(self.view.zoom100)),
+                        &TOOLBAR_SEGMENTS,
+                    );
+                    if fit.on_hover_text("Fit image · F").clicked() {
+                        self.view.zoom100 = false;
+                    }
+                    if actual.on_hover_text("Actual pixels · 1").clicked() {
+                        self.set_zoom(1.);
+                    }
                     ui.add_space(4.);
                     if toolbar_action(ui, "Before", 70., self.view.compare, true, 3)
                         .on_hover_text("Show original · Backslash")

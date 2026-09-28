@@ -2,7 +2,7 @@ use super::Editor;
 use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::state::Tool;
-use super::widgets::workspace_switcher;
+use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
 use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
@@ -255,8 +255,12 @@ impl Editor {
                             // The setup assistant shows neither module as active.
                             let selected =
                                 (!setup).then_some(if self.library_mode { 0 } else { 1 });
-                            let [library, develop] =
-                                workspace_switcher(ui, ["Library", "Develop"], selected);
+                            let [library, develop] = segment_bar(
+                                ui,
+                                ["Library", "Develop"],
+                                selected,
+                                &TOP_BAR_SEGMENTS,
+                            );
                             if develop.on_hover_text("Develop · D").clicked() {
                                 self.onboarding.visible = false;
                                 if self.library_mode
