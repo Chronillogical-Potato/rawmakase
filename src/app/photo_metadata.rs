@@ -174,30 +174,29 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                 .iter()
                 .filter(|l| !LABELS.contains(&l.as_str()))
                 .collect();
-            if !custom.is_empty() || !LABELS.contains(&photo.label.as_str()) {
-                ui.add_space(4.);
-                ui.menu_image_button(
-                    crate::app::icons::Icon::More.image(theme::gray(200), 14.),
-                    |ui| {
-                        for label in custom {
-                            if ui.selectable_label(photo.label == *label, label).clicked() {
-                                edit = Some(Edit::Label(label.clone()));
-                                ui.close();
-                            }
-                        }
-                        if ui.button("No label").clicked() {
-                            edit = Some(Edit::Label(String::new()));
+            // Always shown, so a photo's label never changes the row's width.
+            ui.add_space(4.);
+            ui.menu_image_button(
+                crate::app::icons::Icon::More.image(theme::gray(200), 14.),
+                |ui| {
+                    for label in custom {
+                        if ui.selectable_label(photo.label == *label, label).clicked() {
+                            edit = Some(Edit::Label(label.clone()));
                             ui.close();
                         }
-                    },
-                )
-                .response
-                .on_hover_text(if photo.label.is_empty() {
-                    "Other labels".to_string()
-                } else {
-                    format!("Label: {}", photo.label)
-                });
-            }
+                    }
+                    if ui.button("No label").clicked() {
+                        edit = Some(Edit::Label(String::new()));
+                        ui.close();
+                    }
+                },
+            )
+            .response
+            .on_hover_text(if photo.label.is_empty() {
+                "Other labels".to_string()
+            } else {
+                format!("Label: {}", photo.label)
+            });
         });
     });
     edit
