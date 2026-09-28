@@ -17,7 +17,7 @@ It is a personal project in active development. Rendering aims for close, not ex
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders and collections, ratings, flags, color labels, keywords, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
 - **Presets and profiles**: Lightroom XMP presets, plus DCP and XMP camera profiles you import yourself.
-- **Non-destructive**: originals are never modified. Edits live in sidecar JSON files or in the catalog, and all writes are atomic.
+- **Non-destructive**: originals are never modified. Edits live in the catalog, and all writes are atomic.
 - **Fast previews**: a quick draft first, then full quality, with GPU finishing (Metal on macOS, Vulkan on Linux) and CPU fallback.
 - **Command line**: inspect, render, export thumbnails, import catalogs and benchmark without the GUI.
 
