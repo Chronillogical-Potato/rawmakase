@@ -241,6 +241,9 @@ jobs:
           xcode=$(printf '%s\n' /Applications/Xcode_26*.app | sort -V | tail -n 1)
           test -d "$xcode" || { echo "No Xcode 26 on this runner; the app icon needs it" >&2; exit 1; }
           sudo xcode-select -s "$xcode/Contents/Developer"
+          # Installs the system components actool's asset catalog agent needs;
+          # without them it crashes on a non-default Xcode.
+          sudo xcodebuild -runFirstLaunch
           xcodebuild -version
       - name: Build dependencies and app
         run: |
