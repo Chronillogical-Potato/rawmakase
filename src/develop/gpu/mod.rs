@@ -24,6 +24,27 @@ pub(crate) use present::Finish;
 pub use present::{Display, Frame, MonitorLut, Slot};
 pub(crate) use resident::SAMPLE_HEADER;
 
+/// Waits up to ten seconds for `submission` to finish on the GPU.
+///
+/// wgpu holds the device's resource lock through a whole `PollType::Wait`,
+/// and the UI thread needs that lock exclusively to acquire and present each
+/// window frame. A render waiting in one long poll froze the interface (a
+/// slider stopped following the pointer) until the GPU finished; waiting in
+/// short slices lets the UI's frames through in between.
+fn wait(device: &wgpu::Device, submission: wgpu::SubmissionIndex) -> Result<(), wgpu::PollError> {
+    const SLICE: Duration = Duration::from_millis(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission.clone()),
+            timeout: Some(SLICE),
+        }) {
+            Err(wgpu::PollError::Timeout) if std::time::Instant::now() < deadline => {}
+            result => return result.map(drop),
+        }
+    }
+}
+
 pub struct Processor {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -366,10 +387,7 @@ impl Processor {
             .map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-        let poll = self.device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(Duration::from_secs(10)),
-        });
+        let poll = wait(&self.device, submission);
         if let Err(error) = poll {
             b.staging.unmap();
             return Err(error.into());

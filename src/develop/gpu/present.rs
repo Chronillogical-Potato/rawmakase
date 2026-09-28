@@ -589,10 +589,7 @@ impl Processor {
             map(buffer);
         }
         drop(tx);
-        let poll = device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(Duration::from_secs(10)),
-        });
+        let poll = super::wait(&device, submission);
         let mapped: Result<()> = poll.map_err(anyhow::Error::from).and_then(|_| {
             for _ in 0..1 + thumbnail.is_some() as usize {
                 rx.recv_timeout(Duration::from_secs(1))

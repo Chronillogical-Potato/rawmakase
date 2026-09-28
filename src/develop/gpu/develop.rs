@@ -314,10 +314,7 @@ impl Processor {
             .map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-        device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(std::time::Duration::from_secs(10)),
-        })?;
+        super::wait(&device, submission)?;
         rx.recv_timeout(std::time::Duration::from_secs(1))
             .context("GPU readback timed out")??;
         let pixels =
@@ -389,10 +386,7 @@ impl Processor {
             .map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-        let poll = device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(std::time::Duration::from_secs(10)),
-        });
+        let poll = super::wait(device, submission);
         if let Err(error) = poll {
             uploaded.staging.unmap();
             return Err(error.into());

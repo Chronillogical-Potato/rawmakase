@@ -530,10 +530,7 @@ impl Processor {
         staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(Duration::from_secs(10)),
-        })?;
+        super::wait(&device, submission)?;
         rx.recv_timeout(Duration::from_secs(1))
             .context("GPU readback timed out")??;
         let pixels =
