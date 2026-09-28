@@ -1,6 +1,6 @@
 # Maintainer: pch <https://github.com/pch>
 pkgname=rawmakase
-pkgver=0.1.7
+pkgver=0.1.8
 pkgrel=1
 pkgdesc='A fast, non-destructive RAW photo developer'
 arch=('x86_64')
