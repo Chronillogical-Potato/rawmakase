@@ -4,6 +4,11 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux and macOS, wr
 
 ![RAWmakase Develop view with presets, the photo, and tone controls](docs/images/screenshot.png)
 
+<p align="center">
+  <a href="https://github.com/pch/rawmakase/releases/latest"><strong>⬇ Download the latest version</strong></a><br>
+  <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · <a href="#install">install notes</a></sub>
+</p>
+
 It is a personal project in active development. Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 ## Features
