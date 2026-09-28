@@ -24,6 +24,8 @@ pub(super) struct Document {
     pub(super) pending_lightroom: bool,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
+    /// An Auto estimate is running for this photo.
+    pub(super) auto_running: bool,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.

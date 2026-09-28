@@ -43,6 +43,9 @@ impl Editor {
                         Err(e) => self.status = e.to_string(),
                     }
                 }
+                Event::Auto { id, kind, result } if id == self.load.id() => {
+                    self.auto_ready(kind, result)
+                }
                 Event::XmpLibrary(library) => {
                     self.presets.library = library;
                     self.refresh_preset_support();

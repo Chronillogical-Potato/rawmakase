@@ -70,6 +70,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
 | [white_balance.rs](../src/develop/white_balance.rs) | Fallback illuminant and as-shot temperature estimation. |
+| [auto.rs](../src/develop/auto.rs) | Auto: white balance from near-neutral pixels, and the Basic tone sliders fitted by measuring renders of a small copy of the photo. |
 
 ## Camera profiles
 
@@ -143,6 +144,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [workflow.rs](../src/app/workflow.rs) | Opening/navigating photos, flushing edits, scheduling previews, publishing textures and launching exports. |
 | [events.rs](../src/app/events.rs) | Receives worker messages, rejects stale generations and applies accepted results to editor state. |
 | [dialogs.rs](../src/app/dialogs.rs) | Typed dialog intents and native file/folder choosers. |
+| [auto.rs](../src/app/auto.rs) | Runs Auto (the Tone group's button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs, Lightroom import, folder addition, relinking and applying imported edits. |
 
 ### Panels and interaction

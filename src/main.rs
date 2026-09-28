@@ -74,6 +74,9 @@ enum Command {
         overwrite: bool,
         #[arg(long)]
         recipe: Option<PathBuf>,
+        /// Apply Auto white balance and tone, as the Basic panel's Auto button does.
+        #[arg(long)]
+        auto: bool,
     },
     Benchmark {
         input: PathBuf,
@@ -185,6 +188,7 @@ fn main() -> Result<()> {
             fast,
             overwrite,
             recipe,
+            auto,
         }) => {
             let t = Instant::now();
             let r = raw::Raw::open(&input)?;
@@ -221,6 +225,22 @@ fn main() -> Result<()> {
                 if let Some(e) = exposure {
                     edit.exposure = e;
                 }
+            }
+            if auto {
+                let t = Instant::now();
+                edit = develop::auto_adjust(&im, &edit)?;
+                eprintln!(
+                    "Auto ({:?}): temperature {:.0} tint {:+.0} exposure {:+.2} contrast {:+.0} highlights {:+.0} shadows {:+.0} whites {:+.0} blacks {:+.0}",
+                    t.elapsed(),
+                    edit.temperature,
+                    edit.tint,
+                    edit.exposure,
+                    edit.contrast * 100.,
+                    edit.highlights * 100.,
+                    edit.shadows * 100.,
+                    edit.whites * 100.,
+                    edit.blacks * 100.
+                );
             }
             if let Some(path) = save_recipe {
                 anyhow::ensure!(!path.exists(), "Recipe output already exists");

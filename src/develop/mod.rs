@@ -1,4 +1,5 @@
 //! Headless RAW development: recipes, geometry, color and detail rendering.
+mod auto;
 mod basic_tone;
 mod basic_tone_data;
 pub(crate) mod calibration;
@@ -26,6 +27,7 @@ mod stage_cache;
 mod white_balance;
 
 pub use crate::color_math::{mul, srgb_encode};
+pub use auto::{auto_adjust, auto_tone, auto_white_balance};
 pub use geometry::{Geometry, Transform};
 pub use image_space::{ImageFrame, ViewMapping};
 pub use pipeline::{

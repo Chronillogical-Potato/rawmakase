@@ -40,6 +40,14 @@ pub enum TaskKind {
     Render,
 }
 
+/// What an Auto request sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoKind {
+    /// White balance and the six Tone sliders, as Lightroom's Auto button.
+    Settings,
+    /// White balance alone, the WB menu's Auto.
+    WhiteBalance,
+}
 pub enum Event {
     DialogClosed,
     /// A catalog import or open is under way, as a status line.
@@ -55,6 +63,12 @@ pub enum Event {
         errors: Vec<String>,
     },
     PresetLoad(PathBuf),
+    /// An Auto estimate for the photo loaded as `id`.
+    Auto {
+        id: u64,
+        kind: AutoKind,
+        result: Result<Box<crate::develop::Recipe>, String>,
+    },
     XmpLibrary(Arc<crate::presets::Library>),
     PresetSave(PathBuf),
     Header(Box<LoadedHeader>),

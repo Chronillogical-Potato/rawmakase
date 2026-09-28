@@ -985,3 +985,126 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     assert_eq!(editor.prefetch_neighbour(last), None);
     Ok(())
 }
+#[test]
+fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let (width, height) = (64u32, 48u32);
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        // A dim, warm gradient: Auto brightens it and cools it.
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.002 + 0.06 * (i % width) as f32 / width as f32;
+                [v * 1.2, v, v * 0.8]
+            })
+            .collect(),
+        metadata: Metadata {
+            width,
+            height,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    let before = editor.document.recipe.clone();
+    editor.start_auto(worker::AutoKind::Settings);
+    assert!(editor.document.auto_running);
+    // A second request while the first runs is ignored.
+    editor.start_auto(worker::AutoKind::Settings);
+    editor.document.recipe.saturation = 0.25;
+    let start = std::time::Instant::now();
+    while editor.document.auto_running {
+        assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        editor.events(&ctx);
+    }
+    let auto = editor.document.recipe.clone();
+    assert!(auto.exposure > 1., "exposure {}", auto.exposure);
+    assert!(auto.wb[0] < 1. && auto.wb[2] > 1., "wb {:?}", auto.wb);
+    assert_eq!(auto.saturation, 0.25);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(applied, 1);
+    assert_eq!(steps[0].name, "Auto Settings");
+    editor.undo();
+    let mut expected = before;
+    expected.saturation = 0.25;
+    assert_eq!(editor.document.recipe, expected);
+    editor.redo();
+    assert_eq!(editor.document.recipe, auto);
+}
+#[test]
+fn stale_auto_results_are_ignored_after_moving_on() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let before = editor.document.recipe.clone();
+    let mut auto = before.clone();
+    auto.exposure = 2.;
+    editor
+        .tx
+        .send(worker::Event::Auto {
+            id: editor.load.id() + 1,
+            kind: worker::AutoKind::Settings,
+            result: Ok(Box::new(auto)),
+        })
+        .unwrap();
+    editor.events(&ctx);
+    assert_eq!(editor.document.recipe, before);
+    assert!(!editor.document.history.can_undo());
+}
+#[test]
+fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let modifiers = egui::Modifiers {
+        command: true,
+        mac_cmd: cfg!(target_os = "macos"),
+        ctrl: !cfg!(target_os = "macos"),
+        shift: true,
+        ..Default::default()
+    };
+    let press = |e: &mut Editor| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key: egui::Key::U,
+                    physical_key: Some(egui::Key::U),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+        output.textures_delta.clear();
+    };
+    press(&mut e);
+    assert!(!e.document.auto_running, "no photo yet");
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 8,
+        height: 8,
+        pixels: vec![[0.1; 3]; 64],
+        metadata: Metadata {
+            width: 8,
+            height: 8,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    press(&mut e);
+    assert!(e.document.auto_running);
+}

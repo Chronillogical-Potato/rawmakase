@@ -379,6 +379,7 @@ impl Editor {
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             let (mut copy, mut paste, mut reset, mut zoom_step) = (false, false, false, 0);
+            let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowRight) {
@@ -395,6 +396,10 @@ impl Editor {
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
+                }
+                // Lightroom's Auto Settings.
+                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
+                    auto = true;
                 }
                 // Shift+Cmd+E exports, Option+Shift+Cmd+E exports with the previous
                 // choices. Option changes the typed letter on macOS, so match the
@@ -492,6 +497,9 @@ impl Editor {
             }
             if reset {
                 self.reset_settings();
+            }
+            if auto {
+                self.start_auto(super::worker::AutoKind::Settings);
             }
             match export {
                 Some(true) => self.export_with_previous(),

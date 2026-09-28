@@ -205,6 +205,7 @@ impl Editor {
                     (format!("{cmd}{shift}C"), "Copy settings"),
                     (format!("{cmd}{shift}V"), "Paste settings"),
                     (format!("{cmd}{shift}R"), "Reset all settings"),
+                    (format!("{cmd}{shift}U"), "Auto white balance and tone"),
                     (format!("{cmd}{shift}E"), "Export…"),
                     (
                         if cfg!(target_os = "macos") {

@@ -35,6 +35,15 @@ Offline fits on the sweeps show both are local operators whose effect is best ex
 
 Dehaze is mostly a per-photo tone curve with a spatial residual. A single curve per photo explains ±40 to 0.011–0.019 MAE (from 0.04–0.11 unchanged). Engine 4 applies the curve averaged across photos, before Contrast in the same composed curve. Extra MAE over the default render: +0.0078 / +0.0135 at +40 / −40 (previously +0.037 / +0.062), +0.0021 / +0.0045 at ±20, and +0.036 / +0.044 at ±100, where the per-photo adaptation dominates.
 
+## Auto
+
+The Basic panel's **Auto** (the button beside Tone, or Cmd/Ctrl+Shift+U) sets white balance and the six Tone sliders; **Auto** in the WB menu sets white balance alone. `rawmakase render --auto` applies the same estimate from the command line. The implementation is `src/develop/auto.rs`; it keeps every other setting, and the app runs it off the UI thread and records one History step.
+
+- **White balance** starts from As Shot. Each of three passes averages the camera pixels that look nearly neutral under the previous estimate, with a tighter tolerance each time (normalised chromaticity distance 0.5, 0.25, 0.12), so a large coloured surface pulls less than in plain gray world. Plain gray world is the fallback when under 2% of the photo qualifies. Pixels near clipping or in the noise floor are ignored, and each channel's correction is limited to two stops.
+- **Tone** is fitted by rendering a 256 px copy of the photo through the normal pipeline and measuring the display-encoded result, so the estimate follows the sliders as they actually render. Exposure puts the median luminance at 0.46 (18% gray), found by the secant method, then gives up at most 1 EV of that while more than 1% of pixels would clip. Highlights (up to −60) and Shadows (up to +50) scale with the 97th and 5th luminance percentiles, and Contrast (−20 to +25) with the interquartile spread. Whites places the brightest channel of the brightest 0.2% at 0.97 and Blacks the darkest 0.2% at 0.015, each solved against renders; they are limited to −50…+35 and −50…+20 because strong positive Whites is not yet image-adaptive (below) and lifted Blacks looks flat. When highlights are clipped in the camera, Whites stays at 0 and Highlights does the recovery.
+
+A photo takes 10–20 small renders; on 45-megapixel Nikon Z files that was 0.2–0.6 s with 8 CPU threads, including reducing the photo. The targets were tuned by eye on Nikon Z photos and have not been measured against Lightroom's Auto values.
+
 ## Remaining
 
 - Positive Whites needs the image-adaptive white point. The table is a median, which is poor on photos with dim highlights at +100.

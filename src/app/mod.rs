@@ -326,6 +326,7 @@ fn survive_surface_errors(device: &wgpu::Device) {
     }));
 }
 
+mod auto;
 mod bulk_import;
 mod catalog;
 mod dialogs;

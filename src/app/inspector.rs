@@ -5,6 +5,7 @@ use super::state::Tool;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
 };
+use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
@@ -351,6 +352,9 @@ impl Editor {
         let profiles = self.document.profiles.clone();
         let profile_errors = self.document.profile_errors.clone();
         let histogram = self.preview.histogram;
+        // Auto needs the decoded photo, and runs one estimate at a time.
+        let auto_ready = self.document.full().is_some() && !self.document.auto_running;
+        let mut auto_request = None;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -472,6 +476,13 @@ impl Editor {
                             r.wb = [1.; 3];
                             r.reset_white_balance(m);
                         }
+                        if ui
+                            .add_enabled(auto_ready, egui::Button::selectable(false, "Auto"))
+                            .on_hover_text("Make the photo's near-neutral areas neutral")
+                            .clicked()
+                        {
+                            auto_request = Some(AutoKind::WhiteBalance);
+                        }
                         for (name, temperature, tint) in WB_PRESETS {
                             if ui.selectable_label(selected == name, name).clicked()
                                 && let Some(m) = &metadata
@@ -514,7 +525,20 @@ impl Editor {
             {
                 r.update_wb(m);
             }
-            subheading(ui, "Tone");
+            let shortcut = if cfg!(target_os = "macos") {
+                "⌘⇧U"
+            } else {
+                "Ctrl+Shift+U"
+            };
+            if subheading_button(
+                ui,
+                "Tone",
+                "Auto",
+                &format!("Set white balance and tone automatically · {shortcut}"),
+                auto_ready,
+            ) {
+                auto_request = Some(AutoKind::Settings);
+            }
             slider_with(
                 ui,
                 "Exposure",
@@ -1163,6 +1187,9 @@ impl Editor {
             r.effects.calibration = [[0.; 2]; 3];
             r.effects.shadow_tint = 0.;
         }
+        if let Some(kind) = auto_request {
+            self.start_auto(kind);
+        }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());
         }
@@ -1233,6 +1260,37 @@ fn subheading(ui: &mut egui::Ui, text: &str) {
         egui::FontId::proportional(11.),
         theme::gray(165),
     );
+}
+/// [`subheading`] with a small button at the row's right end, as Lightroom's Tone
+/// group has Auto; returns whether it was clicked.
+fn subheading_button(
+    ui: &mut egui::Ui,
+    text: &str,
+    button: &str,
+    tip: &str,
+    enabled: bool,
+) -> bool {
+    super::widgets::set_edit_context(ui, text);
+    ui.add_space(8.);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), Sense::hover());
+    ui.painter().text(
+        rect.left_center() + Vec2::new(88., 0.),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(11.),
+        theme::gray(165),
+    );
+    let button_rect = Rect::from_min_max(Pos2::new(rect.right() - 56., rect.top()), rect.max);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(button_rect), |ui| {
+        ui.add_enabled(
+            enabled,
+            egui::Button::new(egui::RichText::new(button).size(11.)).min_size(button_rect.size()),
+        )
+        .on_hover_text(tip)
+        .on_disabled_hover_text(tip)
+        .clicked()
+    })
+    .inner
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
 /// 83 px label column, controls from the rail start (88 px) to the right edge,
