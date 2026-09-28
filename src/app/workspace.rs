@@ -168,8 +168,8 @@ impl Editor {
                         .unwrap_or_else(|| "No catalog".into());
                     // Every element is painted in a 28 px slot so all centers line up.
                     let wordmark = ui.painter().layout_no_wrap(
-                        "rawmakase".into(),
-                        egui::FontId::proportional(17.),
+                        "RAWmakase".into(),
+                        egui::FontId::proportional(14.),
                         theme::gray(232),
                     );
                     let (rect, _) = ui.allocate_exact_size(
