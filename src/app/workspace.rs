@@ -137,7 +137,7 @@ impl Editor {
         }
     }
 
-    /// Lightroom's top panel: identity plate on the left, module picker on the
+    /// Lightroom's top panel: catalog menu on the left, module picker on the
     /// right. On macOS it is also the title bar, beside the traffic lights.
     fn workspace_bar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -167,29 +167,6 @@ impl Editor {
                         })
                         .unwrap_or_else(|| "No catalog".into());
                     // Every element is painted in a 28 px slot so all centers line up.
-                    let wordmark = ui.painter().layout_no_wrap(
-                        "RAWmakase".into(),
-                        egui::FontId::proportional(13.),
-                        theme::gray(232),
-                    );
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(wordmark.size().x, 28.),
-                        egui::Sense::hover(),
-                    );
-                    ui.painter().galley(
-                        rect.left_center() - Vec2::new(0., wordmark.size().y / 2.),
-                        wordmark,
-                        theme::gray(232),
-                    );
-                    let (rect, _) =
-                        ui.allocate_exact_size(Vec2::new(29., 28.), egui::Sense::hover());
-                    ui.painter().line_segment(
-                        [
-                            rect.center() - Vec2::new(0., 7.),
-                            rect.center() + Vec2::new(0., 7.),
-                        ],
-                        egui::Stroke::new(1., theme::gray(70)),
-                    );
                     let name = ui.painter().layout_no_wrap(
                         catalog,
                         egui::FontId::proportional(13.),
