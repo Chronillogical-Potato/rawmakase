@@ -789,36 +789,88 @@ fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
         text
     }
 }
-/// A Lightroom module-picker entry: plain text, brightest when active.
-pub(super) fn workspace_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(
-        label.into(),
-        egui::FontId::proportional(13.),
-        theme::gray(255),
-    );
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(galley.size().x + 20., 28.), Sense::click());
-    let color = theme::gray(if selected {
-        248
-    } else if !ui.is_enabled() {
-        70
-    } else if response.hovered() {
-        175
-    } else {
-        105
+/// The Library/Develop switcher: equal-width segments in a dark track, with
+/// a raised pill that slides to the active one, like Claude's view switcher.
+pub(super) fn workspace_switcher(
+    ui: &mut egui::Ui,
+    labels: [&str; 2],
+    selected: Option<usize>,
+) -> [egui::Response; 2] {
+    let galleys = labels.map(|label| {
+        ui.painter().layout_no_wrap(
+            label.into(),
+            egui::FontId::proportional(13.),
+            theme::gray(255),
+        )
     });
-    ui.painter()
-        .galley(rect.center() - galley.size() / 2., galley, color);
-    if selected {
-        // Accent bar under the active module.
-        let bar = Rect::from_center_size(
-            Pos2::new(rect.center().x, rect.bottom() + 5.),
-            Vec2::new(rect.width() - 16., 2.),
-        );
-        ui.painter()
-            .rect_filled(bar, 1., Color32::from_rgb(120, 165, 210));
+    let inset = 2.;
+    // Equal widths, so switching never moves a label.
+    let width = galleys
+        .iter()
+        .map(|galley| galley.size().x)
+        .fold(0., f32::max)
+        + 20.;
+    let (slot, _) = ui.allocate_exact_size(Vec2::new(2. * width + 2. * inset, 28.), Sense::hover());
+    let track = Rect::from_center_size(slot.center(), Vec2::new(slot.width(), 26.));
+    ui.painter().rect_filled(track, 7., theme::gray(21));
+    let segment = |index: f32| {
+        Rect::from_min_size(
+            track.min + Vec2::new(inset + index * width, inset),
+            Vec2::new(width, track.height() - 2. * inset),
+        )
+    };
+    // 0 is the first segment, 1 the second; eased out in the direction of travel.
+    let target = selected.unwrap_or(0) as f32;
+    let linear = ui
+        .ctx()
+        .animate_value_with_time(ui.id().with("workspace-switcher"), target, 0.18);
+    let position = if target >= 0.5 {
+        egui::emath::easing::cubic_out(linear)
+    } else {
+        1. - egui::emath::easing::cubic_out(1. - linear)
+    };
+    let enabled = ui.is_enabled();
+    let responses = [0, 1].map(|index| {
+        ui.interact(
+            segment(index as f32),
+            ui.id().with(("workspace-switcher", index)),
+            Sense::click(),
+        )
+    });
+    for (index, response) in responses.iter().enumerate() {
+        if selected != Some(index) && enabled && response.hovered() {
+            ui.painter()
+                .rect_filled(segment(index as f32), 5., theme::gray(30));
+        }
     }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if selected.is_some() {
+        ui.painter().rect(
+            segment(position),
+            5.,
+            theme::gray(44),
+            Stroke::new(1., theme::gray(58)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    for (index, galley) in galleys.into_iter().enumerate() {
+        // How much of the pill sits under this label.
+        let weight = match selected {
+            Some(_) => 1. - (position - index as f32).abs().min(1.),
+            None => 0.,
+        };
+        let color = if enabled {
+            theme::gray(140).lerp_to_gamma(theme::gray(245), weight)
+        } else {
+            theme::gray(70)
+        };
+        let rect = segment(index as f32);
+        ui.painter().galley_with_override_text_color(
+            rect.center() - galley.size() / 2.,
+            galley,
+            color,
+        );
+    }
+    responses.map(|response| response.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
 /// Compact Lightroom-style segmented control spanning `width`.
 pub(super) fn segmented<T: PartialEq + Copy>(

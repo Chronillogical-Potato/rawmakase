@@ -2,7 +2,7 @@ use super::Editor;
 use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::state::Tool;
-use super::widgets::workspace_tab;
+use super::widgets::workspace_switcher;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
@@ -252,10 +252,12 @@ impl Editor {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
                             let setup = self.onboarding.visible;
-                            if workspace_tab(ui, "Develop", !setup && !self.library_mode)
-                                .on_hover_text("Develop · D")
-                                .clicked()
-                            {
+                            // The setup assistant shows neither module as active.
+                            let selected =
+                                (!setup).then_some(if self.library_mode { 0 } else { 1 });
+                            let [library, develop] =
+                                workspace_switcher(ui, ["Library", "Develop"], selected);
+                            if develop.on_hover_text("Develop · D").clicked() {
                                 self.onboarding.visible = false;
                                 if self.library_mode
                                     && let Some(id) = self
@@ -268,20 +270,7 @@ impl Editor {
                                     self.library_mode = false;
                                 }
                             }
-                            let (rect, _) =
-                                ui.allocate_exact_size(Vec2::new(1., 28.), egui::Sense::hover());
-                            ui.painter().line_segment(
-                                [
-                                    rect.center() - Vec2::new(0., 7.),
-                                    rect.center() + Vec2::new(0., 7.),
-                                ],
-                                egui::Stroke::new(1., theme::gray(70)),
-                            );
-                            if workspace_tab(ui, "Library", !setup && self.library_mode)
-                                .on_hover_text("Library · G")
-                                .clicked()
-                                && self.flush()
-                            {
+                            if library.on_hover_text("Library · G").clicked() && self.flush() {
                                 self.onboarding.visible = false;
                                 self.library_mode = true;
                             }
