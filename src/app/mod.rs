@@ -61,6 +61,9 @@ impl Editor {
         // The desktop's hinting and antialiasing, read once (a D-Bus call on
         // Linux) and applied to the fonts here and to the visuals below.
         let text = fastframe_text::detect();
+        if let Some(render_state) = &cc.wgpu_render_state {
+            survive_surface_errors(&render_state.device);
+        }
         install_fonts(&cc.egui_ctx, &text);
         icons::install(&cc.egui_ctx);
         let mut editor = Self::with_backend(
@@ -273,7 +276,30 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
             descriptor
         });
     }
+    // A surface whose configuration failed reports `Validation` until it is
+    // configured again; the default would skip frames until the next resize.
+    let default = options.on_surface_status.clone();
+    options.on_surface_status = std::sync::Arc::new(move |status| match status {
+        wgpu::CurrentSurfaceTexture::Validation => {
+            eframe::egui_wgpu::SurfaceErrorAction::Reconfigure
+        }
+        _ => default(status),
+    });
     options
+}
+
+/// wgpu panics on uncaptured errors by default. Reconfiguring the window's
+/// surface can fail transiently, for example when a tiling compositor resizes
+/// the window while the GPU is busy ("Failed to wait for GPU to come idle"),
+/// and the next frame configures it again. Other errors are still bugs.
+fn survive_surface_errors(device: &wgpu::Device) {
+    device.on_uncaptured_error(std::sync::Arc::new(|error| {
+        if error.to_string().contains("In Surface::") {
+            eprintln!("Ignoring window surface error: {error}");
+        } else {
+            panic!("wgpu error: {error}");
+        }
+    }));
 }
 
 mod bulk_import;
