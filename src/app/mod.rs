@@ -245,6 +245,9 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RAWmakase")
+            // An empty icon keeps the bundle's and desktop entry's icon;
+            // otherwise eframe replaces it with egui's logo while running.
+            .with_icon(egui::IconData::default())
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.])
             // On macOS the workspace bar is the title bar, under the traffic
