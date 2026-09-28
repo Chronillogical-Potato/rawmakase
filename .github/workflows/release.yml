@@ -238,8 +238,8 @@ jobs:
       - name: Use Xcode 26 for the Liquid Glass icon
         run: |
           # The runner's default Xcode cannot compile packaging/macos/RAWmakase.icon.
-          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
-          test -n "$xcode" || { echo "No Xcode 26 on this runner; the app icon needs it" >&2; exit 1; }
+          xcode=$(printf '%s\n' /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          test -d "$xcode" || { echo "No Xcode 26 on this runner; the app icon needs it" >&2; exit 1; }
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
       - name: Build dependencies and app
