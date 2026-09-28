@@ -195,10 +195,13 @@ impl Preset {
                 name => name,
             })
     }
-    /// The imported profile named `name` for this camera. A built-in preset falls back
-    /// from Adobe Standard to the DNG's own profile, then RAWmakase Standard, and from
-    /// Adobe Color to RAWmakase Color, so it works without Adobe's files. Another
-    /// camera's profile is never used, and one Adobe look never stands in for another.
+    /// The imported profile named `name` for this camera. Built-in presets and a
+    /// photo's own Lightroom edit fall back from Adobe Standard to the DNG's own
+    /// profile, then RAWmakase Standard, and from Adobe Color to RAWmakase Color, so
+    /// they render close to what was intended without Adobe's files (an edit made on
+    /// Adobe Standard would otherwise keep RAWmakase Color, the new-photo default).
+    /// Imported presets still need the exact profile. Another camera's profile is
+    /// never used, and one Adobe look never stands in for another.
     fn resolve_profile(
         &self,
         name: &str,
@@ -212,7 +215,7 @@ impl Preset {
                 .cloned()
         };
         find(name).or_else(|| {
-            if !self.builtin {
+            if !self.builtin && !self.photo_settings {
                 return None;
             }
             match name {
@@ -225,8 +228,8 @@ impl Preset {
             }
         })
     }
-    /// When this preset will render with a different profile than it names (a
-    /// built-in preset's fallback), the names of both.
+    /// When this preset will render with a different profile than it names (see
+    /// `resolve_profile`), the names of both.
     pub fn profile_substitute(
         &self,
         m: &Metadata,

@@ -243,6 +243,9 @@ pub fn convert_develop(
         }
     }
     let mut recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    if let Some((asked, used)) = accepted.profile_substitute(m, profiles) {
+        warnings.push(format!("{asked} isn't imported; rendered with {used}"));
+    }
     let local =
         crate::xmp::local::convert(&local_settings, crate::develop::ImageFrame::for_metadata(m));
     if let Some(retouch) = local.retouch {

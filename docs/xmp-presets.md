@@ -10,7 +10,7 @@ Presets are sparse patches: omitted settings retain the current edit; explicit z
 
 RAWmakase ships 26 presets of its own, listed before imported ones in Lightroom's group order: Color, Creative, B&W, Curve, Grain and Vignetting. They are ordinary Lightroom XMP presets in `assets/presets`, MIT-licensed like the rest of the code, embedded in the binary, and read-only in the app. Favorites of a built-in preset follow its UUID, so renaming or regrouping one keeps them.
 
-Only the Creative looks name a camera profile: Adobe Standard, which is what they were made with. Imported presets need the exact profile they name. Built-in presets fall back instead, so they work with nothing imported:
+Only the Creative looks name a camera profile: Adobe Standard, which is what they were made with. Imported presets need the exact profile they name. Built-in presets, and a photo's own Lightroom edit (from a catalog or photo sidecar), fall back instead, so they work with nothing imported:
 
 - Adobe Standard: the imported Adobe Standard for this camera, else the DNG's embedded profile, else RAWmakase Standard.
 - Adobe Color: the imported Adobe Color, else RAWmakase Color.

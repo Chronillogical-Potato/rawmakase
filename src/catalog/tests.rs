@@ -219,6 +219,43 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
+fn lightroom_edits_fall_back_to_rawmakase_profiles() -> Result<()> {
+    use crate::camera_profiles::open;
+    let m = crate::raw::Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        wb: [2.0198677, 1., 1.8874172],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let profiles: Vec<_> = [open::standard(&m), open::color(&m)]
+        .into_iter()
+        .flatten()
+        .map(std::sync::Arc::new)
+        .collect();
+    for (asked, used) in [
+        ("Adobe Standard", open::STANDARD),
+        ("Adobe Color", open::COLOR),
+    ] {
+        let text = format!(r#"s = {{ Exposure2012 = 0.5, CameraProfile = "{asked}" }}"#);
+        let (r, w) = convert_develop(&text, &m, &profiles, None)?;
+        assert_eq!(r.exposure, 0.5);
+        assert_eq!(r.profile.as_ref().unwrap().name, used);
+        assert!(w.iter().any(|s| s.contains(used)), "{w:?}");
+    }
+    // Other Adobe looks aren't substituted.
+    let text = r#"s = { CameraProfile = "Adobe Vivid" }"#;
+    let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, open::COLOR);
+    assert!(w.iter().any(|s| s.contains("Adobe Vivid")), "{w:?}");
+    Ok(())
+}
+#[test]
 fn lightroom_history_text_decodes_plain_and_compressed() {
     use std::io::Write;
     let text = "s = { Exposure2012 = 0.5 }";
