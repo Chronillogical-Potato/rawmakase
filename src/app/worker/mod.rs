@@ -108,6 +108,15 @@ pub struct LoadJob {
     pub id: u64,
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
+    /// The photo to decode ahead of time once this one is fully developed.
+    pub prefetch: Option<Prefetch>,
+}
+/// A photo to develop into the decode cache ahead of time, so opening it next
+/// skips decoding. It has its own cancel flag: the photo on screen finishing
+/// must not stop it, moving to another photo must.
+pub struct Prefetch {
+    pub path: PathBuf,
+    pub cancel: Arc<AtomicBool>,
 }
 /// What is drawn over (or instead of) the rendered photo.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -1,4 +1,4 @@
-use super::{Event, Latest, LoadJob, LoadedHeader, TaskKind, send};
+use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     decode_cache::DecodeCache,
     develop::Recipe,
@@ -19,9 +19,46 @@ struct FullJob {
     started: Instant,
     /// Decode cache key of `path`, when its identity could be read.
     key: Option<String>,
+    prefetch: Option<Prefetch>,
 }
-fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
-    Latest::new(move |job: FullJob| {
+/// Develops a neighbour into the decode cache on two threads, leaving the other
+/// cores to rendering the photo on screen.
+fn prefetcher() -> Latest<Prefetch> {
+    Latest::new(|job: Prefetch| {
+        static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
+        let Some(pool) = POOL.get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .thread_name(|i| format!("prefetch-{i}"))
+                .build()
+                .ok()
+        }) else {
+            return;
+        };
+        let cache = DecodeCache::default();
+        let Ok(key) = DecodeCache::key(&job.path) else {
+            return;
+        };
+        if job.cancel.load(Ordering::Relaxed) || cache.contains(&key) {
+            return;
+        }
+        let _ = pool.install(|| -> anyhow::Result<()> {
+            let image = raw::Raw::open(&job.path)?.develop(false, &job.cancel)?;
+            crate::develop::quality::recovered(&image, &job.cancel)?;
+            if !job.cancel.load(Ordering::Relaxed) {
+                cache.store(&key, &image)?;
+            }
+            Ok(())
+        });
+    })
+}
+fn full_loader(
+    tx: Sender<Event>,
+    ctx: egui::Context,
+    prefetcher: Arc<Latest<Prefetch>>,
+) -> Latest<FullJob> {
+    Latest::new(move |mut job: FullJob| {
+        let prefetch = job.prefetch.take();
         let result = (|| -> anyhow::Result<()> {
             if job.cancel.load(Ordering::Relaxed) {
                 return Ok(());
@@ -46,6 +83,10 @@ fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
                     let _ = DecodeCache::default().store(key, &image);
                 }
             }
+            // Only now, so decoding the neighbour never slows the photo on screen.
+            if let Some(prefetch) = prefetch {
+                prefetcher.submit(prefetch);
+            }
             Ok(())
         })();
         if let Err(e) = result
@@ -64,8 +105,10 @@ fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
     })
 }
 pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
-    let full = full_loader(tx.clone(), ctx.clone());
-    Latest::new(move |job: LoadJob| {
+    let prefetcher = Arc::new(prefetcher());
+    let full = full_loader(tx.clone(), ctx.clone(), prefetcher.clone());
+    Latest::new(move |mut job: LoadJob| {
+        let prefetch = job.prefetch.take();
         let result = (|| -> anyhow::Result<()> {
             let path = job.path.clone();
             let mut raw = raw::Raw::open(&path)?;
@@ -137,6 +180,9 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                         status: format!("Opened from cache in {:.2}s", t.elapsed().as_secs_f32()),
                     },
                 );
+                if let Some(prefetch) = prefetch {
+                    prefetcher.submit(prefetch);
+                }
                 return Ok(());
             }
             // Lightroom-style two stages: a half-size decode (about 0.2 s) makes
@@ -158,6 +204,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 cancel: job.cancel.clone(),
                 started: t,
                 key,
+                prefetch,
             });
             Ok(())
         })();

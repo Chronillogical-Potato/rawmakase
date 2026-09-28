@@ -34,6 +34,16 @@ impl Editor {
         if !self.flush() {
             return;
         }
+        // Moving on cancels the previous photo's prefetch.
+        self.prefetch_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.prefetch_cancel = Default::default();
+        let prefetch = photo
+            .and_then(|id| self.prefetch_neighbour(id))
+            .map(|path| super::worker::Prefetch {
+                path,
+                cancel: self.prefetch_cancel.clone(),
+            });
         self.document.reset(photo);
         self.library_mode = false;
         let (id, cancel) = self.load.start();
@@ -41,7 +51,24 @@ impl Editor {
         self.presets.clear_document();
         self.view.clear_document();
         self.status = "Reading RAW…".into();
-        self.loader.submit(LoadJob { id, path, cancel });
+        self.loader.submit(LoadJob {
+            id,
+            path,
+            cancel,
+            prefetch,
+        });
+    }
+    /// The photo to decode ahead of time while `id` is shown: the next one in
+    /// the filmstrip, or the previous one after stepping back.
+    pub(super) fn prefetch_neighbour(&self, id: i64) -> Option<PathBuf> {
+        let library = self.library.as_ref()?;
+        let step = match self.document.catalog_photo {
+            Some(previous) if previous != id && library.navigate(previous, -1) == Some(id) => -1,
+            _ => 1,
+        };
+        let neighbour = library.navigate(id, step).filter(|n| *n != id)?;
+        let photo = library.photo(neighbour)?;
+        (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
     }
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.

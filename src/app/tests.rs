@@ -944,3 +944,44 @@ fn a_photo_from_outside_the_library_is_added_and_opened() -> anyhow::Result<()> 
     assert!(!editor.library_mode);
     Ok(())
 }
+
+#[test]
+fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    for name in ["a.ARW", "b.ARW", "c.ARW"] {
+        std::fs::write(dir.path().join(name), name)?;
+    }
+    let path = dir.path().join("photos.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let library = library::Library::load(&path, ctx.clone())?;
+    // The filmstrip order, first to last.
+    let mut order = vec![library.photos[0].id];
+    while let Some(previous) = library.navigate(order[0], -1).filter(|p| *p != order[0]) {
+        order.insert(0, previous);
+    }
+    while let Some(next) = library
+        .navigate(order[order.len() - 1], 1)
+        .filter(|n| !order.contains(n))
+    {
+        order.push(next);
+    }
+    let paths: Vec<_> = order
+        .iter()
+        .map(|id| library.photo(*id).unwrap().path.clone())
+        .collect();
+    let [first, middle, last] = [order[0], order[1], order[2]];
+    editor.library = Some(Box::new(library));
+    // Opening a photo, or stepping forward: the next one.
+    assert_eq!(editor.prefetch_neighbour(middle), Some(paths[2].clone()));
+    editor.document.catalog_photo = Some(first);
+    assert_eq!(editor.prefetch_neighbour(middle), Some(paths[2].clone()));
+    // Stepping back: the previous one.
+    editor.document.catalog_photo = Some(last);
+    assert_eq!(editor.prefetch_neighbour(middle), Some(paths[0].clone()));
+    // Nothing past the end of the filmstrip.
+    editor.document.catalog_photo = Some(middle);
+    assert_eq!(editor.prefetch_neighbour(last), None);
+    Ok(())
+}

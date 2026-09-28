@@ -47,6 +47,8 @@ pub struct Editor {
     /// A photo from outside the Library to open once the catalog is ready,
     /// and whether its folder has already been added.
     pending_photo: Option<(PathBuf, bool)>,
+    /// Cancels the prefetch started for the photo on screen.
+    prefetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     status: String,
@@ -179,6 +181,7 @@ impl Editor {
                 session.develop,
             ),
             pending_photo: None,
+            prefetch_cancel: Default::default(),
             status: "Pick a photo in the Library to begin".into(),
             catalog_work: None,
             importing: None,
