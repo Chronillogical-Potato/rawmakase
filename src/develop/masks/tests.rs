@@ -2,6 +2,7 @@ use super::local::slot;
 use super::*;
 use crate::develop::{Geometry, Recipe};
 use crate::raw::CameraImage;
+use std::sync::Arc;
 
 fn image(width: u32, height: u32) -> CameraImage {
     CameraImage {
@@ -42,7 +43,7 @@ fn weights(im: &CameraImage, m: MaskGroup, range: Option<&crate::develop::Render
     let r = Recipe::default();
     let g = Geometry::new(im, &r, 0);
     let masks = [m];
-    let weigher = Weigher::new(im, &masks, Selection::One(0), None);
+    let weigher = Weigher::new(im, &masks, Selection::One(0));
     let w = weigher.weights(im, &r, &g, [0, 0, g.width, g.height], range);
     w.data.iter().map(|v| *v as f32 / 255.).collect()
 }
@@ -213,6 +214,79 @@ fn auto_mask_stops_at_edges() {
     );
     assert!(w[50 * 200 + 90] > 0.99);
     assert!(w[50 * 200 + 110] < 0.01);
+}
+/// Weights of `m` over the whole image, with brush rasters from `cache`.
+fn cached_weights(im: &Arc<CameraImage>, m: &MaskGroup, cache: &mut RasterCache) -> Vec<f32> {
+    let r = Recipe::default();
+    let g = Geometry::new(im, &r, 0);
+    let masks = [m.clone()];
+    let weigher = Weigher::cached(im, &masks, Selection::One(0), Some(cache));
+    let w = weigher.weights(im, &r, &g, [0, 0, g.width, g.height], None);
+    w.data.iter().map(|v| *v as f32 / 255.).collect()
+}
+fn brush(auto_mask: bool) -> MaskGroup {
+    group(vec![MaskComponent::new(MaskShape::Brush {
+        strokes: vec![BrushStroke {
+            points: vec![[0.3, 0.5], [0.7, 0.5]].into(),
+            radius: 0.1,
+            feather: 0.5,
+            flow: 1.,
+            density: 1.,
+            erase: false,
+            auto_mask,
+        }],
+    })])
+}
+#[test]
+fn cached_brushes_follow_the_photos_proportions() {
+    let mut cache = RasterCache::default();
+    let m = brush(false);
+    let wide = Arc::new(image(200, 100));
+    let tall = Arc::new(image(100, 200));
+    let _ = cached_weights(&wide, &m, &mut cache);
+    // The same strokes pasted onto a portrait photo.
+    assert_eq!(
+        cached_weights(&tall, &m, &mut cache),
+        weights(&tall, m.clone(), None)
+    );
+}
+/// Dark left of `edge` (a fraction of the width), bright right of it.
+fn split(width: u32, height: u32, edge: f32) -> CameraImage {
+    let mut im = image(width, height);
+    for (i, p) in im.pixels.iter_mut().enumerate() {
+        let x = (i as u32 % width) as f32 / width as f32;
+        *p = if x < edge { [0.05; 3] } else { [0.6; 3] };
+    }
+    im
+}
+#[test]
+fn cached_auto_masks_follow_retouched_images() {
+    let mut cache = RasterCache::default();
+    let m = brush(true);
+    let before = Arc::new(split(200, 100, 0.5));
+    let first = cached_weights(&before, &m, &mut cache);
+    assert_eq!(first, weights(&before, m.clone(), None));
+    // A retouch replaces the image, which may reuse the old one's memory.
+    drop(before);
+    let after = Arc::new(split(200, 100, 0.6));
+    let second = cached_weights(&after, &m, &mut cache);
+    assert_eq!(second, weights(&after, m.clone(), None));
+    assert_ne!(first, second);
+}
+#[test]
+fn cached_auto_masks_follow_the_pyramid_level() {
+    let mut cache = RasterCache::default();
+    let m = brush(true);
+    let fit = Arc::new(split(100, 50, 0.55));
+    let full = Arc::new(split(200, 100, 0.5));
+    for level in [&fit, &full, &fit] {
+        assert_eq!(
+            cached_weights(level, &m, &mut cache),
+            weights(level, m.clone(), None)
+        );
+    }
+    // Back at Fit, its raster came from the cache.
+    assert_eq!(cache.len(), 2);
 }
 #[test]
 fn ranges_use_the_developed_colors() {
