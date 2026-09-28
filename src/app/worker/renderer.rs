@@ -133,28 +133,89 @@ pub(in crate::app) fn renderer_with_backend(
     ctx: egui::Context,
     backend: RenderBackend,
 ) -> Latest<RenderJob> {
-    let mut processor = None;
-    let mut textures = None;
-    // The monitor profile as the GPU applies it, per profile path.
-    let mut lut: Option<(PathBuf, Result<Arc<gpu::MonitorLut>, String>)> = None;
-    // The last finished Fit and 100% region, so switching back to a view with the same
-    // edit shows its sharp image at once instead of rendering it again.
-    let (mut fit, mut zoomed): (Option<Shown>, Option<Shown>) = (None, None);
-    // Whether the last finished image was a 100% region: then the region is being
-    // edited or panned, and a reduced preview comes first.
-    let mut showing_region = false;
-    // Whether the last full 100% region was presented on the GPU quickly enough that a
-    // reduced preview before it would only add work and a blurry frame.
-    let mut quick_region = false;
-    // The whole photo's histogram for the last edit shown at 100%, so panning
-    // there does not render the whole photo again.
-    let mut whole_shown: Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)> = None;
+    let mut state = RendererState::default();
     Latest::new(move |job: RenderJob| {
-        let processor = processor.get_or_insert_with(|| match &backend {
+        let id = job.id;
+        let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            render(&mut state, &backend, &tx, &ctx, job)
+        }));
+        if let Err(panic) = rendered {
+            // Whatever the panic interrupted is suspect: start over from nothing.
+            // The UI stops drawing presented textures before they are freed.
+            if state.textures.as_ref().is_some_and(|t| !t.ids.is_empty()) {
+                send(&tx, &ctx, Event::RendererReset);
+            }
+            state.reset();
+            send(
+                &tx,
+                &ctx,
+                Event::Failed {
+                    id,
+                    task: TaskKind::Render,
+                    error: format!("Rendering failed: {}", super::panic_message(&*panic)),
+                },
+            );
+        }
+    })
+}
+
+/// Everything the renderer keeps between jobs, replaced as a whole after a panic.
+#[derive(Default)]
+struct RendererState {
+    processor: Option<develop::PreviewRenderer>,
+    textures: Option<Textures>,
+    /// The monitor profile as the GPU applies it, per profile path.
+    lut: Option<(PathBuf, Result<Arc<gpu::MonitorLut>, String>)>,
+    /// The last finished Fit and 100% region, so switching back to a view with the same
+    /// edit shows its sharp image at once instead of rendering it again.
+    fit: Option<Shown>,
+    zoomed: Option<Shown>,
+    /// Whether the last finished image was a 100% region: then the region is being
+    /// edited or panned, and a reduced preview comes first.
+    showing_region: bool,
+    /// Whether the last full 100% region was presented on the GPU quickly enough that a
+    /// reduced preview before it would only add work and a blurry frame.
+    quick_region: bool,
+    /// The whole photo's histogram for the last edit shown at 100%, so panning
+    /// there does not render the whole photo again.
+    whole_shown: Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)>,
+}
+impl RendererState {
+    /// Drops everything, unregistering the textures frames were presented into.
+    fn reset(&mut self) {
+        if let Some(textures) = &mut self.textures {
+            let mut renderer = textures.state.renderer.write();
+            for (_, id) in textures.ids.drain() {
+                renderer.free_texture(&id);
+            }
+        }
+        *self = Self::default();
+    }
+}
+
+fn render(
+    state: &mut RendererState,
+    backend: &RenderBackend,
+    tx: &Sender<Event>,
+    ctx: &egui::Context,
+    job: RenderJob,
+) {
+    let RendererState {
+        processor,
+        textures,
+        lut,
+        fit,
+        zoomed,
+        showing_region,
+        quick_region,
+        whole_shown,
+    } = state;
+    {
+        let processor = processor.get_or_insert_with(|| match backend {
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
             RenderBackend::Gpu(None) => develop::PreviewRenderer::with_gpu(),
             RenderBackend::Gpu(Some(state)) => {
-                textures = Some(Textures {
+                *textures = Some(Textures {
                     state: state.clone(),
                     ids: HashMap::new(),
                 });
@@ -173,7 +234,7 @@ pub(in crate::app) fn renderer_with_backend(
                     let built = gpu::MonitorLut::new(path)
                         .map(Arc::new)
                         .map_err(|e| e.to_string());
-                    lut = Some((path.clone(), built));
+                    *lut = Some((path.clone(), built));
                 }
                 match &lut.as_ref().unwrap().1 {
                     Ok(lut) => Some(lut.clone()),
@@ -272,8 +333,8 @@ pub(in crate::app) fn renderer_with_backend(
                 .then(|| reduce(&rgb, NAVIGATOR))
                 .flatten();
             send(
-                &tx,
-                &ctx,
+                tx,
+                ctx,
                 Event::Rendered {
                     id: job.id,
                     histogram: Box::new(out.histogram()),
@@ -313,8 +374,8 @@ pub(in crate::app) fn renderer_with_backend(
                     };
                     if !job.cancel.load(Ordering::Relaxed) {
                         send(
-                            &tx,
-                            &ctx,
+                            tx,
+                            ctx,
                             Event::Rendered {
                                 id: job.id,
                                 preview: presented.preview(),
@@ -335,15 +396,19 @@ pub(in crate::app) fn renderer_with_backend(
                     })
                 }
             };
-            let cached = if job.region.is_some() { &zoomed } else { &fit };
+            let cached = if job.region.is_some() {
+                &*zoomed
+            } else {
+                &*fit
+            };
             if let Some(shown) = cached.as_ref().filter(|s| s.matches(&job, processor.gpu())) {
                 match &shown.out {
                     Shot::Pixels(out) => publish_pixels(out.clone(), stage, false),
                     Shot::Frame {
                         preview, histogram, ..
                     } => send(
-                        &tx,
-                        &ctx,
+                        tx,
+                        ctx,
                         Event::Rendered {
                             id: job.id,
                             preview: preview.preview(),
@@ -354,9 +419,9 @@ pub(in crate::app) fn renderer_with_backend(
                         },
                     ),
                 }
-                showing_region = job.region.is_some();
+                *showing_region = job.region.is_some();
                 if job.region.is_some() {
-                    whole_histogram(&job, processor, &fit, &mut whole_shown, &tx, &ctx)?;
+                    whole_histogram(&job, processor, fit, whole_shown, tx, ctx)?;
                 }
                 return Ok(());
             }
@@ -367,8 +432,8 @@ pub(in crate::app) fn renderer_with_backend(
                     // While editing at 100%, a reduced preview keeps sliders responsive;
                     // a newer job cancels the full-resolution render that follows.
                     // Zooming in goes straight to the full region, over the enlarged Fit.
-                    if showing_region
-                        && !quick_region
+                    if *showing_region
+                        && !*quick_region
                         && let Some(out) = processor.render_region_preview_to(
                             &job.image,
                             &job.recipe,
@@ -389,15 +454,15 @@ pub(in crate::app) fn renderer_with_backend(
                         &job.cancel,
                         zoomed_display.as_ref(),
                     )?;
-                    quick_region =
+                    *quick_region =
                         matches!(out, Output::Frame(_)) && started.elapsed() < QUICK_REGION;
                     out
                 };
                 let gpu = processor.used_gpu();
-                zoomed =
+                *zoomed =
                     publish(out, RenderStage::Region, true, gpu).map(|out| Shown::new(&job, out));
-                showing_region = true;
-                whole_histogram(&job, processor, &fit, &mut whole_shown, &tx, &ctx)?;
+                *showing_region = true;
+                whole_histogram(&job, processor, fit, whole_shown, tx, ctx)?;
                 return Ok(());
             }
             let out = processor.render_to(
@@ -409,16 +474,16 @@ pub(in crate::app) fn renderer_with_backend(
                 whole.as_ref(),
             )?;
             let gpu = processor.used_gpu();
-            fit = publish(out, RenderStage::Fit, true, gpu).map(|out| Shown::new(&job, out));
-            showing_region = false;
+            *fit = publish(out, RenderStage::Fit, true, gpu).map(|out| Shown::new(&job, out));
+            *showing_region = false;
             Ok(())
         })();
         if let Err(e) = result
             && !job.cancel.load(Ordering::Relaxed)
         {
             send(
-                &tx,
-                &ctx,
+                tx,
+                ctx,
                 Event::Failed {
                     id: job.id,
                     task: TaskKind::Render,
@@ -426,7 +491,7 @@ pub(in crate::app) fn renderer_with_backend(
                 },
             );
         }
-    })
+    }
 }
 
 type Histogram = Box<[[u32; 256]; 3]>;
@@ -573,6 +638,39 @@ mod tests {
         let back = run(&worker, &rx, 6, &image, &recipe, None);
         assert_eq!(back.len(), 1);
         assert_ne!(back[0].1, fit[0].1);
+    }
+    #[test]
+    fn a_panicking_render_fails_and_the_next_one_succeeds() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = renderer(tx, egui::Context::default());
+        let recipe = develop::Recipe::default();
+        // Fewer pixels than its size says: indexing it panics.
+        let mut broken = (*image()).clone();
+        broken.pixels.truncate(10);
+        worker.submit(RenderJob {
+            id: 1,
+            image: Arc::new(broken),
+            max_edge: 60,
+            cancel: Arc::new(AtomicBool::new(false)),
+            recipe: recipe.clone(),
+            region: None,
+            monitor: None,
+            clipping: false,
+            navigator: true,
+            thumbnail: false,
+            overlay: Default::default(),
+        });
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap() {
+                Event::Failed { id: 1, task, .. } => {
+                    assert_eq!(task, TaskKind::Render);
+                    break;
+                }
+                Event::Rendered { id: 1, .. } => panic!("the broken image rendered"),
+                _ => {}
+            }
+        }
+        assert_eq!(run(&worker, &rx, 2, &image(), &recipe, None).len(), 1);
     }
     #[test]
     fn the_histogram_describes_the_whole_photo_at_100_percent() {

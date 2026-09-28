@@ -86,6 +86,9 @@ pub enum Event {
         task: TaskKind,
         error: String,
     },
+    /// The renderer recovered from a failure and unregistered the textures its
+    /// previews were presented into: stop drawing them.
+    RendererReset,
     Exported(String),
 }
 /// A rendered preview as the viewport draws it.
@@ -157,6 +160,7 @@ mod latest;
 mod loader;
 mod renderer;
 pub use latest::Latest;
+pub(crate) use latest::panic_message;
 pub use loader::loader;
 pub use renderer::renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

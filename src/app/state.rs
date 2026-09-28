@@ -53,6 +53,10 @@ impl Picture {
     pub(super) fn id(&self) -> egui::TextureId {
         self.id
     }
+    /// Presented into a texture the renderer registered, rather than uploaded.
+    fn is_presented(&self) -> bool {
+        self.handle.is_none()
+    }
     pub(super) fn size_vec2(&self) -> Vec2 {
         Vec2::new(self.size[0] as f32, self.size[1] as f32)
     }
@@ -220,6 +224,15 @@ impl PreviewState {
         self.last_fit_edge = 0;
         self.last_region = None;
         self.mode = TextureMode::Whole;
+    }
+    /// Stops drawing textures the renderer presented into, once it has freed them.
+    /// Not rendering again at once: a render that keeps failing would repeat.
+    pub fn forget_presented(&mut self) {
+        for slot in [&mut self.texture, &mut self.region, &mut self.navigator] {
+            if slot.as_ref().is_some_and(Picture::is_presented) {
+                *slot = None;
+            }
+        }
     }
 }
 impl ViewState {

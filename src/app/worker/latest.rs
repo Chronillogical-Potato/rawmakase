@@ -30,7 +30,9 @@ impl<T: Send + 'static> Latest<T> {
                 }
                 let job = lock.take().unwrap();
                 drop(lock);
-                run(job);
+                // A panic must not end the thread, or later jobs would wait forever.
+                // Workers with state catch their own panics to report and rebuild it.
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(job)));
             }
         });
         Self { slot }
@@ -39,6 +41,14 @@ impl<T: Send + 'static> Latest<T> {
         *self.slot.job.lock().unwrap() = Some(job);
         self.slot.wake.notify_one();
     }
+}
+/// The message a caught panic carries.
+pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".into())
 }
 impl<T> Drop for Latest<T> {
     fn drop(&mut self) {
@@ -71,5 +81,18 @@ mod tests {
                 .unwrap(),
             3
         );
+    }
+    #[test]
+    fn a_panicking_job_does_not_stop_the_worker() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = Latest::new(move |i: u32| {
+            tx.send(i).unwrap();
+            assert_ne!(i, 1, "job 1 panics");
+        });
+        let next = || rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        worker.submit(1);
+        assert_eq!(next(), 1);
+        worker.submit(2);
+        assert_eq!(next(), 2);
     }
 }

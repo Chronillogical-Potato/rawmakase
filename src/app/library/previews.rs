@@ -3,7 +3,7 @@ use crate::{catalog::preview_cache::PreviewCache, storage::Identity};
 use eframe::egui;
 use std::{
     collections::HashSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, SyncSender},
@@ -20,31 +20,48 @@ pub(super) fn spawn(
     cache_path: PathBuf,
     ctx: egui::Context,
 ) -> (SyncSender<PathBuf>, Receiver<PreviewResult>) {
+    spawn_with(cache_path, ctx, super::thumbnail)
+}
+fn spawn_with(
+    cache_path: PathBuf,
+    ctx: egui::Context,
+    thumbnail: fn(&Path) -> anyhow::Result<image::RgbImage>,
+) -> (SyncSender<PathBuf>, Receiver<PreviewResult>) {
     let (tx, rx) = mpsc::sync_channel::<PathBuf>(24);
     let (result_tx, result_rx) = mpsc::sync_channel(24);
     std::thread::spawn(move || {
-        let (mut cache, open_error) = match PreviewCache::open(&cache_path) {
+        let open = || match PreviewCache::open(&cache_path) {
             Ok(cache) => (Some(cache), None),
             Err(error) => (None, Some(error.to_string())),
         };
+        let (mut cache, mut open_error) = open();
         while let Ok(path) = rx.recv() {
-            let mut cache_error = open_error.clone();
-            let cached = cache.as_ref().and_then(|cache| match cache.load(&path) {
-                Ok(image) => image,
-                Err(error) => {
-                    cache_error = Some(error.to_string());
-                    None
-                }
-            });
-            let image = cached.or_else(|| {
-                let identity = Identity::read(&path).ok()?;
-                let image = super::thumbnail(&path).ok()?;
-                if let Some(cache) = &mut cache
-                    && let Err(error) = cache.store(&path, &identity, &image)
-                {
-                    cache_error = Some(error.to_string());
-                }
-                Some(image)
+            let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut cache_error = open_error.clone();
+                let cached = cache.as_ref().and_then(|cache| match cache.load(&path) {
+                    Ok(image) => image,
+                    Err(error) => {
+                        cache_error = Some(error.to_string());
+                        None
+                    }
+                });
+                let image = cached.or_else(|| {
+                    let identity = Identity::read(&path).ok()?;
+                    let image = thumbnail(&path).ok()?;
+                    if let Some(cache) = &mut cache
+                        && let Err(error) = cache.store(&path, &identity, &image)
+                    {
+                        cache_error = Some(error.to_string());
+                    }
+                    Some(image)
+                });
+                (image, cache_error)
+            }));
+            // After a panic the preview is unavailable, and the cache, which it may
+            // have left mid-write, is opened again for the next one.
+            let (image, cache_error) = prepared.unwrap_or_else(|_| {
+                (cache, open_error) = open();
+                (None, None)
             });
             if result_tx
                 .send(PreviewResult {
@@ -110,6 +127,14 @@ pub(super) fn spawn_edited(
     wanted: Wanted,
     ctx: egui::Context,
 ) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
+    spawn_edited_with(cache_path, wanted, ctx, render_edited)
+}
+fn spawn_edited_with(
+    cache_path: PathBuf,
+    wanted: Wanted,
+    ctx: egui::Context,
+    render_edited: fn(&Path, &EditSource) -> anyhow::Result<image::RgbImage>,
+) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
     let (tx, rx) = mpsc::channel::<EditJob>();
     let (result_tx, result_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -136,15 +161,16 @@ pub(super) fn spawn_edited(
                 Some(i) => queue.remove(i),
                 None => queue.pop().unwrap(),
             };
-            let result = match job {
+            let store = matches!(job, EditJob::Store { .. });
+            let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
                 EditJob::Store { path, tag, image } => {
                     if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path)) {
                         let _ = cache.store_tagged(&path, &tag, &identity, &image);
                     }
-                    continue;
+                    None
                 }
                 EditJob::Render { path, .. } if !wanted.lock().unwrap().contains(&path) => {
-                    EditResult::Skipped(path)
+                    Some(EditResult::Skipped(path))
                 }
                 EditJob::Render { path, source } => {
                     let tag = source.tag();
@@ -164,11 +190,19 @@ pub(super) fn spawn_edited(
                         }
                         Some(image)
                     });
-                    match image {
+                    Some(match image {
                         Some(image) => EditResult::Ready(path, image),
                         None => EditResult::Failed,
-                    }
+                    })
                 }
+            }));
+            // After a panic the cache, which it may have left mid-write, is opened again.
+            let result = done.unwrap_or_else(|_| {
+                cache = PreviewCache::open(&cache_path).ok();
+                (!store).then_some(EditResult::Failed)
+            });
+            let Some(result) = result else {
+                continue;
             };
             if result_tx.send(result).is_err() {
                 break;
@@ -180,7 +214,7 @@ pub(super) fn spawn_edited(
 }
 /// A 640 px preview of `path` developed with `source`, from the fast
 /// half-size decode.
-fn render_edited(path: &std::path::Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
+fn render_edited(path: &Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
     let raw = crate::raw::Raw::open(path)?;
     let m = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&m);
@@ -290,6 +324,73 @@ mod tests {
         assert_eq!(result.path, source);
         assert!(result.image.is_some());
         assert!(result.cache_error.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn a_panicking_preview_is_unavailable_and_the_next_one_is_made() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let [panics, works] = ["panics.png", "works.png"].map(|name| directory.path().join(name));
+        for path in [&panics, &works] {
+            image::RgbImage::new(16, 16).save(path)?;
+        }
+        fn thumbnail(path: &Path) -> anyhow::Result<image::RgbImage> {
+            assert!(!path.ends_with("panics.png"), "thumbnail panics");
+            Ok(image::open(path)?.to_rgb8())
+        }
+        let (tx, rx) = spawn_with(
+            directory.path().join("previews.sqlite3"),
+            egui::Context::default(),
+            thumbnail,
+        );
+        tx.try_send(panics.clone())?;
+        tx.try_send(works.clone())?;
+        let first = rx.recv_timeout(Duration::from_secs(10))?;
+        assert_eq!(first.path, panics);
+        assert!(first.image.is_none());
+        let second = rx.recv_timeout(Duration::from_secs(10))?;
+        assert_eq!(second.path, works);
+        assert!(second.image.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn a_panicking_edited_preview_fails_and_the_next_one_is_rendered() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let [panics, works] = ["panics.png", "works.png"].map(|name| directory.path().join(name));
+        for path in [&panics, &works] {
+            image::RgbImage::new(16, 16).save(path)?;
+        }
+        fn render(path: &Path, _: &EditSource) -> anyhow::Result<image::RgbImage> {
+            assert!(!path.ends_with("panics.png"), "render panics");
+            Ok(image::open(path)?.to_rgb8())
+        }
+        let wanted = Wanted::default();
+        wanted
+            .lock()
+            .unwrap()
+            .extend([panics.clone(), works.clone()]);
+        let (tx, rx) = spawn_edited_with(
+            directory.path().join("previews.sqlite3"),
+            wanted,
+            egui::Context::default(),
+            render,
+        );
+        let source = EditSource::Recipe("{}".into());
+        let job = |path: &PathBuf| EditJob::Render {
+            path: path.clone(),
+            source: source.clone(),
+        };
+        tx.send(job(&panics))?;
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10))?,
+            EditResult::Failed
+        ));
+        tx.send(job(&works))?;
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10))?,
+            EditResult::Ready(path, _) if path == works
+        ));
         Ok(())
     }
 

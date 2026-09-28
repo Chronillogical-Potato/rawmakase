@@ -174,6 +174,7 @@ impl Editor {
                     self.status = error;
                     self.preview.task.finish(id);
                 }
+                Event::RendererReset => self.preview.forget_presented(),
                 Event::DialogClosed => {
                     self.activity.finish_dialog();
                 }
