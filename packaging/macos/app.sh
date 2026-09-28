@@ -24,6 +24,8 @@ case "$profile" in
 esac
 bundle="target/$profile/RAWmakase.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources/licenses"
+# Replace, never overwrite: macOS kills a signed binary rewritten in place.
+rm -f "$bundle/Contents/MacOS/rawmakase"
 cp "target/$profile/rawmakase" "$bundle/Contents/MacOS/rawmakase"
 cp packaging/macos/Info.plist "$bundle/Contents/Info.plist"
 cp LICENSE "$bundle/Contents/Resources/licenses/RAWmakase.txt"
