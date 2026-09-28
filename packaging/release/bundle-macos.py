@@ -119,6 +119,25 @@ def main():
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "rawmakase.icns")], check=True)
     finally:
         shutil.rmtree(iconset)
+    # With Xcode 26's actool, macOS 26 draws the layered Liquid Glass icon;
+    # older systems and toolchains keep the flat icns above.
+    compiled = app.parent / "rawmakase-icon"
+    compiled.mkdir(exist_ok=False)
+    try:
+        result = subprocess.run(["xcrun", "actool", str(root / "packaging/RAWmakase.icon"), "--compile", str(compiled),
+                                 "--app-icon", "RAWmakase", "--platform", "macosx",
+                                 "--minimum-deployment-target", args.minimum_macos,
+                                 "--output-partial-info-plist", str(compiled / "partial.plist")],
+                                capture_output=True)
+        if result.returncode == 0 and (compiled / "Assets.car").is_file():
+            shutil.copy2(compiled / "Assets.car", resources / "Assets.car")
+            metadata["CFBundleIconName"] = "RAWmakase"
+            with (app / "Contents/Info.plist").open("wb") as handle:
+                plistlib.dump(metadata, handle)
+        else:
+            print("actool cannot compile packaging/RAWmakase.icon; keeping the flat icon")
+    finally:
+        shutil.rmtree(compiled)
     # Ad-hoc signatures allow local verification; release signing replaces them.
     # Signing the main executable can validate its enclosing bundle, so sign
     # every nested library first (Intel libraries may arrive unsigned).

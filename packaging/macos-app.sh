@@ -47,4 +47,18 @@ if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&
 else
     echo 'brew install librsvg for the app icon' >&2
 fi
+# With Xcode 26, the layered Liquid Glass icon for macOS 26.
+compiled="target/$profile/rawmakase-icon"
+rm -rf "$compiled"
+mkdir "$compiled"
+if xcrun actool packaging/RAWmakase.icon --compile "$compiled" --app-icon RAWmakase \
+    --platform macosx --minimum-deployment-target 11.0 \
+    --output-partial-info-plist "$compiled/partial.plist" >/dev/null 2>&1 &&
+    [ -f "$compiled/Assets.car" ]; then
+    cp "$compiled/Assets.car" "$bundle/Contents/Resources/Assets.car"
+    plist="$bundle/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIconName RAWmakase' "$plist" 2>/dev/null ||
+        /usr/libexec/PlistBuddy -c 'Add :CFBundleIconName string RAWmakase' "$plist"
+fi
+rm -rf "$compiled"
 echo "$bundle"

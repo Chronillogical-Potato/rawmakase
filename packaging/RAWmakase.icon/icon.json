@@ -1,0 +1,50 @@
+{
+  "fill": {
+    "solid": "srgb:0.13725,0.15294,0.17255,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "salmon.svg",
+          "name": "salmon"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "rice.svg",
+          "name": "rice"
+        },
+        {
+          "image-name": "nori.svg",
+          "name": "nori"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
