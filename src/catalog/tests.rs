@@ -304,3 +304,33 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
     assert!(c.load_edit(id, &photo)?.unwrap().recipe.masks.is_empty());
     Ok(())
 }
+#[test]
+fn adding_a_folder_imports_sidecar_edits() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let edited = folder.join("edited.dng");
+    let plain = folder.join("plain.dng");
+    std::fs::write(&edited, b"synthetic raw identity")?;
+    std::fs::write(&plain, b"another synthetic raw")?;
+    let edit = Recipe {
+        exposure: 0.75,
+        ..Default::default()
+    };
+    crate::storage::save(&edited, &edit, &ExportOptions::default())?;
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    assert_eq!(cat.add_folder(&folder)?, 2);
+    let photos = cat.photos()?;
+    let find = |name: &str| photos.iter().find(|p| p.path.ends_with(name)).unwrap();
+    let (edited_photo, plain_photo) = (find("edited.dng"), find("plain.dng"));
+    assert_eq!(
+        cat.load_edit(edited_photo.id, &edited_photo.path)?
+            .unwrap()
+            .recipe,
+        edit
+    );
+    assert!(cat.load_edit(plain_photo.id, &plain_photo.path)?.is_none());
+    // The sidecar is left as it was.
+    assert!(crate::storage::sidecar_path(&edited).exists());
+    Ok(())
+}

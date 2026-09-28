@@ -477,7 +477,7 @@ impl Catalog {
         } else {
             root
         };
-        let mut count = 0;
+        let mut added = Vec::new();
         for file in files {
             if existing_paths.contains(&file) {
                 continue;
@@ -526,10 +526,27 @@ impl Catalog {
                         .to_ascii_uppercase()
                 ],
             )?;
-            count += 1;
+            added.push((tx.last_insert_rowid(), file));
         }
         tx.commit()?;
-        Ok(count)
+        for (id, file) in &added {
+            if crate::storage::is_raw(file) {
+                // A sidecar that no longer matches its photo stays unused on disk.
+                let _ = self.import_sidecar(*id, file);
+            }
+        }
+        Ok(added.len())
+    }
+    /// Carries the edit a photo got outside any catalog, in its
+    /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
+    fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
+        let Some(sidecar) = crate::storage::load(file)? else {
+            return Ok(());
+        };
+        for bitmap in crate::storage::bitmaps(file)? {
+            self.put_bitmap(&bitmap)?;
+        }
+        self.save_edit(id, file, &sidecar.recipe, &sidecar.export)
     }
 }
 

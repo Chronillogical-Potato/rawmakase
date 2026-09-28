@@ -77,6 +77,21 @@ pub fn bitmap(raw: &Path, hash: &str) -> Result<Option<super::bitmaps::Bitmap>> 
         .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(&text)?))
         .transpose()
 }
+/// Every bitmap saved with the photo's spots and masks.
+pub fn bitmaps(raw: &Path) -> Result<Vec<super::bitmaps::Bitmap>> {
+    let id = Identity::read(raw)?;
+    let Some(path) = [local_path(raw), fallback_at(&id, &data_dir(), "local.json")]
+        .into_iter()
+        .find(|p| p.exists())
+    else {
+        return Ok(Vec::new());
+    };
+    parse_companion(&path, &id)?
+        .bitmaps
+        .values()
+        .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
+        .collect()
+}
 pub fn sidecar_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();
     p.push(".rawmakase.json");
