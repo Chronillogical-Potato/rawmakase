@@ -158,6 +158,13 @@ and RPM with nFPM 2.47.0, mapping each host library to its distribution
 package. There are no downstream repository credentials or automatic
 Homebrew/AUR publishers in this setup.
 
+The `recipes` job combines the Linux and both macOS builds with
+`native-packages aggregate --finalize-recipes` and renders
+`packaging/homebrew/rawmakase.rb.in` with the notarized DMGs' checksums. The
+release carries the resulting `rawmakase.rb` cask. Publishing it to a tap
+needs a `pch/homebrew-tap` repository, a deploy key secret and a `homebrew`
+entry under `repositories` in `native-packages.yaml`.
+
 ## AUR pause and updates
 
 GitHub includes the Arch binary package and a recipe archive containing a

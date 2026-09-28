@@ -1,0 +1,23 @@
+cask "rawmakase" do
+  arch arm: "arm64", intel: "x86_64"
+
+  version "@VERSION@"
+  sha256 arm:   "@MACOS_ARM64_SHA256@",
+         intel: "@MACOS_X86_64_SHA256@"
+
+  url "https://github.com/pch/rawmakase/releases/download/v#{version}/rawmakase-v#{version}-macos-#{arch}.dmg"
+  name "RAWmakase"
+  desc "Fast, non-destructive RAW photo developer"
+  homepage "https://github.com/pch/rawmakase"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  depends_on macos: ">= :sequoia"
+
+  app "RAWmakase.app"
+
+  zap trash: "~/Library/Application Support/RAWmakase"
+end
