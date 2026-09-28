@@ -1,5 +1,5 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
-use super::widgets::{section, segmented};
+use super::widgets::{COMPACT_SEGMENT_HEIGHT, section, segmented};
 use crate::app::theme;
 use crate::catalog::{Catalog, Collection, Folder, Photo};
 use anyhow::Result;
@@ -749,7 +749,10 @@ impl Library {
                             egui::TextEdit::singleline(&mut self.query)
                                 .hint_text("Search")
                                 .font(egui::FontId::proportional(12.))
-                                .desired_width(if compact { 120. } else { 190. }),
+                                .desired_width(if compact { 120. } else { 190. })
+                                // As tall as the flag switcher beside it.
+                                .min_size(Vec2::new(0., COMPACT_SEGMENT_HEIGHT))
+                                .vertical_align(egui::Align::Center),
                         )
                         .on_hover_text("Search filename, keyword, capture date or label")
                         .changed();
