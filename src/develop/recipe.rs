@@ -193,12 +193,21 @@ impl Recipe {
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
     ) -> Self {
         let mut recipe = Self::for_metadata(m);
-        if let Some(profile) = ["Adobe Color", "Adobe Standard"]
-            .into_iter()
-            .find_map(|name| {
-                profiles
-                    .iter()
-                    .find(|p| p.name == name && p.ensure_camera(m).is_ok())
+        let find = |name: &str| {
+            profiles
+                .iter()
+                .find(|p| p.name == name && p.ensure_camera(m).is_ok())
+        };
+        // As in Lightroom: Adobe Color, else Adobe Standard. Without those, a DNG
+        // keeps the profile it embeds, and any other file gets RAWmakase Color.
+        if let Some(profile) = find("Adobe Color")
+            .or_else(|| find("Adobe Standard"))
+            .or_else(|| {
+                recipe
+                    .profile
+                    .is_none()
+                    .then(|| find(crate::camera_profiles::open::COLOR))
+                    .flatten()
             })
         {
             recipe.profile = Some(profile.clone());

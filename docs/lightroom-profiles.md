@@ -1,6 +1,6 @@
 # Imported Lightroom camera and look profiles
 
-RAWmakase reads profiles only from its own library and files the user explicitly selects. It does not scan Lightroom, Camera Raw, or other Adobe application directories. Proprietary profile assets are not shipped with the application.
+RAWmakase reads profiles only from its own library and files the user explicitly selects. It does not scan Lightroom, Camera Raw, or other Adobe application directories. Proprietary profile assets are not shipped with the application; RAWmakase ships its own profiles instead (see [RAWmakase profiles](#rawmakase-profiles)).
 
 ## Import and select
 
@@ -14,7 +14,16 @@ rawmakase import-profiles '/selected/Fujifilm X100F Adobe Standard.dcp' '/select
 
 Selected files are validated and copied into `camera-profiles` under RAWmakase's application data directory (`~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` on Linux). An identical reimport is harmless. A different file with the same filename is reported instead of overwritten. The entire selection is validated before copying starts. Source files remain unchanged.
 
-Importing does not change the current edit. Choose the imported look in **Profile**. New unedited photos prefer a compatible imported Adobe Color, then imported Adobe Standard, then the bundled Sony A7 II profile where applicable, then LibRaw's camera matrix rendered with the DNG default tone curve (engine 4, see [color-pipeline.md](color-pipeline.md)). Saved edits retain their embedded profile and previous rendering flags.
+Importing does not change the current edit. Choose the imported look in **Profile**. New unedited photos prefer a compatible imported Adobe Color, then imported Adobe Standard, then a DNG's embedded profile, then RAWmakase Color. Saved edits retain their embedded profile and previous rendering flags, so edits made before RAWmakase Color existed keep LibRaw's camera matrix with the DNG default tone curve (engine 4, see [color-pipeline.md](color-pipeline.md)).
+
+## RAWmakase profiles
+
+Two profiles of our own are listed for every camera with a colour matrix, with no files to import. They follow Adobe's two layers: a per-camera base and a camera-independent look.
+
+- **RAWmakase Standard**: the camera's colour matrix (LibRaw's, or the D65 matrix of a DNG's own profile) with the DNG default tone curve. It renders exactly like "Default (camera matrix)", which the Profile menu now shows only for edits that already use it.
+- **RAWmakase Color**: a look on top of Standard, as Adobe Color is on Adobe Standard. A mild contrast curve and a few smooth hue, saturation and brightness shifts (reds, skin, yellows, foliage, aqua, sky), plus a slight saturation roll-off near white. Neutrals stay neutral. The table is generated from the parameters in `src/camera_profiles/open.rs`, not stored or derived from Adobe data.
+
+Both are embedded in the recipe like any other profile, so later changes to the look don't change existing edits. The look was tuned conservatively and has not yet been compared with Camera Raw renders; measured base profiles (ColorChecker shots per camera) can replace the matrix later without changing any preset.
 
 ## Rendering
 

@@ -83,6 +83,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../src/camera_profiles/reference.rs) | Verified camera-specific exposure baseline and neutral calibration data. |
 | [dng_tone.rs](../src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |
+| [open.rs](../src/camera_profiles/open.rs) | RAWmakase Standard and Color, our own profiles for every camera with a colour matrix. |
 
 ## Lens corrections
 

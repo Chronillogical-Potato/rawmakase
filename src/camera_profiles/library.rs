@@ -23,9 +23,8 @@ pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
     p.ensure_camera(m)?;
     Ok(Arc::new(p))
 }
-/// No camera profiles are bundled. Without an imported profile, rendering uses the
-/// camera matrix default (see `CameraProfile::camera_matrix_default`).
 /// The profile a DNG embeds for its camera, which Lightroom lists as the file's own.
+/// No Adobe profiles are bundled; RAWmakase's own profiles are in `open`.
 pub fn builtin(m: &Metadata) -> Option<Arc<CameraProfile>> {
     m.embedded_profile.clone()
 }
@@ -43,6 +42,12 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
     if let Some(p) = builtin(m) {
         profiles.push(p);
     }
+    profiles.extend(
+        [super::open::standard(m), super::open::color(m)]
+            .into_iter()
+            .flatten()
+            .map(Arc::new),
+    );
     let mut files = Vec::new();
     for dir in library_dirs() {
         collect(&dir, 0, &mut files);

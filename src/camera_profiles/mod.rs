@@ -504,6 +504,7 @@ fn matmul(a: Matrix, b: Matrix) -> Matrix {
 mod dcp;
 mod enhanced;
 mod library;
+pub mod open;
 pub use dcp::from_bytes;
 pub use library::{builtin, import_files, installed, library_dirs, load};
 #[cfg(test)]
