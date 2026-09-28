@@ -1,7 +1,9 @@
 use super::Editor;
 use super::dialogs::FileDialog;
+use super::icons::Icon;
 use super::widgets::{
-    TOOLBAR_SEGMENTS, menu_item, menu_separator, segment_bar, toolbar_action, toolbar_divider,
+    ButtonKind, TOOLBAR_SEGMENTS, action_button, menu_item, menu_separator, segment_bar,
+    toolbar_action, toolbar_divider,
 };
 use crate::app::theme;
 use crate::develop::Recipe;
@@ -77,13 +79,12 @@ impl Editor {
                         self.view.clipping = !self.view.clipping;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toolbar_action(
+                        if action_button(
                             ui,
                             "Export",
-                            94.,
-                            true,
+                            Some(Icon::Export),
+                            ButtonKind::Primary,
                             self.document.full().is_some(),
-                            4,
                         )
                         .on_hover_text(if cfg!(target_os = "macos") {
                             "Export… · ⇧⌘E"
@@ -94,7 +95,10 @@ impl Editor {
                         {
                             self.open_export_dialog();
                         }
-                        ui.menu_button("Settings", |ui| {
+                        ui.add_space(8.);
+                        let settings =
+                            action_button(ui, "Settings", None, ButtonKind::Secondary, true);
+                        egui::Popup::menu(&settings).show(|ui| {
                             ui.set_width(270.);
                             ui.spacing_mut().item_spacing.y = 0.;
                             let (cmd, shift) = if cfg!(target_os = "macos") {

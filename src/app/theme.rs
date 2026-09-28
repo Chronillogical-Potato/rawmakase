@@ -220,6 +220,10 @@ pub(super) fn selected_marker() -> Color32 {
 pub(super) fn accent() -> Color32 {
     current().accent
 }
+/// The primary-button colour under the pointer.
+pub(super) fn accent_hover() -> Color32 {
+    current().accent_hover
+}
 /// Text on a selected row or hovered menu item, which the accent fills.
 pub(super) fn on_accent_text(level: u8) -> Color32 {
     let palette = current();

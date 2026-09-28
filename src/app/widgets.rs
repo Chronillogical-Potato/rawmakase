@@ -827,6 +827,11 @@ pub(super) fn segment_bar<const N: usize>(
         .try_into()
         .expect("one response per label")
 }
+/// Corner radius for a control of this height, shared by segmented
+/// controls and action buttons so they read as one family.
+fn control_radius(height: f32) -> f32 {
+    (height * 0.27).round()
+}
 /// The narrowest track that fits every label untruncated: equal segments as
 /// wide as the widest label plus padding, and the pill's inset.
 fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
@@ -854,7 +859,7 @@ fn segment_track(
     style: &SegmentStyle,
 ) -> Vec<egui::Response> {
     let inset = 2.;
-    let radius = (style.height * 0.27).round();
+    let radius = control_radius(style.height);
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
     ui.painter().rect_filled(track, radius, theme::gray(21));
     let width = (track.width() - 2. * inset) / labels.len().max(1) as f32;
@@ -936,6 +941,90 @@ fn segment_track(
             }
         })
         .collect()
+}
+/// What an [`action_button`] does: the main action of its area, or any other.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ButtonKind {
+    Primary,
+    Secondary,
+}
+/// A toolbar button sized to its content: an optional icon and the label
+/// centred together, with the segmented controls' height and rounding.
+pub(super) fn action_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: Option<Icon>,
+    kind: ButtonKind,
+    enabled: bool,
+) -> egui::Response {
+    let height = TOOLBAR_SEGMENTS.height;
+    let (padding, icon_size, gap) = (12., 14., 6.);
+    let text = ui.painter().layout_no_wrap(
+        label.into(),
+        egui::FontId::proportional(TOOLBAR_SEGMENTS.font),
+        theme::gray(255),
+    );
+    let content = text.size().x + icon.map_or(0., |_| icon_size + gap);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(content + 2. * padding, height),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    let hovered = enabled && response.hovered();
+    let pressed = enabled && response.is_pointer_button_down_on();
+    let (fill, stroke, ink) = match (kind, enabled) {
+        (_, false) => (theme::gray(34), theme::gray(44), theme::gray(85)),
+        (ButtonKind::Primary, true) => (
+            if hovered && !pressed {
+                theme::accent_hover()
+            } else {
+                theme::accent()
+            },
+            Color32::TRANSPARENT,
+            theme::on_accent(),
+        ),
+        (ButtonKind::Secondary, true) => (
+            theme::gray(if pressed {
+                36
+            } else if hovered {
+                50
+            } else {
+                42
+            }),
+            theme::gray(60),
+            theme::gray(225),
+        ),
+    };
+    ui.painter().rect(
+        rect,
+        control_radius(height),
+        fill,
+        Stroke::new(1., stroke),
+        egui::StrokeKind::Inside,
+    );
+    // Icon and label form one group centred in the button.
+    let mut x = rect.center().x - content / 2.;
+    if let Some(icon) = icon {
+        icons::paint_at(
+            ui.painter(),
+            icon,
+            Pos2::new(x + icon_size / 2., rect.center().y),
+            icon_size,
+            ink,
+        );
+        x += icon_size + gap;
+    }
+    let y = rect.center().y - text.size().y / 2.;
+    ui.painter()
+        .galley_with_override_text_color(Pos2::new(x, y), text, ink);
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 /// Compact segmented control at least `width` wide, for panels and filters.
 pub(super) fn segmented<T: PartialEq + Copy>(
