@@ -186,6 +186,56 @@ impl Preset {
         recipe.validate()?;
         Ok((recipe, warnings))
     }
+    /// The camera profile this preset asks for, if any.
+    fn requested_profile(&self) -> Option<&str> {
+        self.settings
+            .get("CameraProfile")
+            .map(|name| match name.as_str() {
+                "Default Profile" => "Adobe Standard",
+                name => name,
+            })
+    }
+    /// The imported profile named `name` for this camera. A built-in preset falls back
+    /// from Adobe Standard to the DNG's own profile, then RAWmakase Standard, and from
+    /// Adobe Color to RAWmakase Color, so it works without Adobe's files. Another
+    /// camera's profile is never used, and one Adobe look never stands in for another.
+    fn resolve_profile(
+        &self,
+        name: &str,
+        m: &Metadata,
+        profiles: &[Arc<CameraProfile>],
+    ) -> Option<Arc<CameraProfile>> {
+        let find = |name: &str| {
+            profiles
+                .iter()
+                .find(|p| p.name == name && p.ensure_camera(m).is_ok())
+                .cloned()
+        };
+        find(name).or_else(|| {
+            if !self.builtin {
+                return None;
+            }
+            match name {
+                "Adobe Standard" => m
+                    .embedded_profile
+                    .clone()
+                    .or_else(|| find(crate::camera_profiles::open::STANDARD)),
+                "Adobe Color" => find(crate::camera_profiles::open::COLOR),
+                _ => None,
+            }
+        })
+    }
+    /// When this preset will render with a different profile than it names (a
+    /// built-in preset's fallback), the names of both.
+    pub fn profile_substitute(
+        &self,
+        m: &Metadata,
+        profiles: &[Arc<CameraProfile>],
+    ) -> Option<(String, String)> {
+        let name = self.requested_profile()?;
+        let used = self.resolve_profile(name, m, profiles)?;
+        (used.name != name).then(|| (name.to_string(), used.name.clone()))
+    }
     fn apply_profile(
         &self,
         settings: &mut Settings<'_>,
@@ -207,19 +257,10 @@ impl Preset {
             "Preset requires external RGB tables"
         );
         settings.seen.insert("CameraProfile".into());
-        if let Some(name) = v.get("CameraProfile") {
-            let name = if name == "Default Profile" {
-                "Adobe Standard"
-            } else {
-                name.as_str()
-            };
-            let profile = profiles
-                .iter()
-                .find(|p| p.name == name && p.ensure_camera(m).is_ok());
+        if let Some(name) = self.requested_profile() {
             r.profile = Some(
-                profile
-                    .with_context(|| format!("Missing camera profile ‘{name}’ for {}", m.model))?
-                    .clone(),
+                self.resolve_profile(name, m, profiles)
+                    .with_context(|| format!("Missing camera profile ‘{name}’ for {}", m.model))?,
             );
         }
         settings.seen.insert("RAWmakaseLookUUID".into());

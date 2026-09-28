@@ -92,6 +92,7 @@ pub fn convert_develop(
         blockers: Vec::new(),
         notes: Vec::new(),
         local: Default::default(),
+        builtin: false,
     };
     let mut warnings = Vec::new();
     // A record from before process version 2012 (6.7) with no 2012 tone keys.

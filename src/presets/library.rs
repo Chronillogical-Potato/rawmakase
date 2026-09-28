@@ -65,6 +65,10 @@ pub fn load_library() -> Library {
     library
         .presets
         .sort_by(|a, b| a.group.cmp(&b.group).then(a.name.cmp(&b.name)));
+    // Built-in presets come first, as in Lightroom.
+    let (builtin, errors) = super::builtin::presets();
+    library.presets.splice(0..0, builtin);
+    library.errors.extend(errors);
     library
 }
 pub fn favorite_path() -> PathBuf {

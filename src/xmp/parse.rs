@@ -217,6 +217,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         blockers,
         notes,
         local,
+        builtin: false,
     };
     ensure!(
         !preset.settings.is_empty() || !preset.curves.is_empty(),

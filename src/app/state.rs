@@ -198,6 +198,8 @@ impl Default for ViewState {
 pub(super) struct PresetBrowser {
     pub(super) library: Arc<crate::presets::Library>,
     pub(super) issues: Vec<Option<String>>,
+    /// Per preset: the profile it names and the one it renders with instead.
+    pub(super) substitutes: Vec<Option<(String, String)>>,
     pub(super) filter: String,
     pub(super) favorites: std::collections::BTreeSet<String>,
     pub(super) compatible_only: bool,
@@ -253,6 +255,7 @@ impl ViewState {
 impl PresetBrowser {
     pub fn clear_document(&mut self) {
         self.issues.clear();
+        self.substitutes.clear();
         self.selected.clear();
         self.preview = None;
         self.hover = None;

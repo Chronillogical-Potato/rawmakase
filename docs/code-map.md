@@ -104,6 +104,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
+| [builtin.rs](../src/presets/builtin.rs) | Built-in presets embedded from `assets/presets`, their group order and ids. |
 | [library.rs](../src/presets/library.rs) | XMP collection discovery, import without overwriting existing files, display names and favorites. |
 
 ## Persistence, catalog and export

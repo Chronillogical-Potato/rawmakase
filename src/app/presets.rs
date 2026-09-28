@@ -27,6 +27,7 @@ impl Editor {
         }
         let Some(m) = &self.document.metadata else {
             self.presets.issues.clear();
+            self.presets.substitutes.clear();
             return;
         };
         let base = Recipe::with_profiles(m, &self.document.profiles);
@@ -40,6 +41,13 @@ impl Editor {
                     .err()
                     .map(|e| format!("{e:#}"))
             })
+            .collect();
+        self.presets.substitutes = self
+            .presets
+            .library
+            .presets
+            .iter()
+            .map(|p| p.profile_substitute(m, &self.document.profiles))
             .collect();
     }
     pub(super) fn presets_ui(&mut self, ui: &mut egui::Ui) {
@@ -144,8 +152,13 @@ impl Editor {
                     }
                     ui.add_space(2.);
                     let query = self.presets.filter.to_lowercase();
-                    let mut groups: std::collections::BTreeMap<String, Vec<usize>> =
-                        Default::default();
+                    // Built-in groups first, in Lightroom's order, then imported
+                    // groups by name. A built-in and an imported group of the same
+                    // name stay apart.
+                    let mut groups: std::collections::BTreeMap<
+                        (bool, usize, String),
+                        Vec<usize>,
+                    > = Default::default();
                     for (i, p) in library.presets.iter().enumerate() {
                         let issue = self.presets.issues.get(i).and_then(Option::as_ref);
                         if self.presets.compatible_only && issue.is_some() {
@@ -160,7 +173,15 @@ impl Editor {
                         {
                             continue;
                         }
-                        groups.entry(p.group.clone()).or_default().push(i);
+                        let rank = if p.builtin {
+                            crate::presets::builtin::group_rank(&p.group)
+                        } else {
+                            0
+                        };
+                        groups
+                            .entry((!p.builtin, rank, p.group.clone()))
+                            .or_default()
+                            .push(i);
                     }
                     if groups.is_empty() && !library.presets.is_empty() {
                         ui.weak("No presets match these filters.");
@@ -172,8 +193,8 @@ impl Editor {
                     }
                     ui.spacing_mut().item_spacing.y = 0.;
                     let force_open = !query.is_empty() || self.presets.favorites_only;
-                    for (group, indices) in groups {
-                        let id = ui.make_persistent_id(("preset-group", &group));
+                    for ((imported, _, group), indices) in groups {
+                        let id = ui.make_persistent_id(("preset-group", imported, &group));
                         let open = force_open
                             || ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
                         if list_row(ui, &group, Some(indices.len()), 0, Some(open), false, true)
@@ -260,6 +281,12 @@ impl Editor {
                                     p.notes.join("\n")
                                 ),
                             };
+                            let detail = match self.presets.substitutes.get(i).and_then(Option::as_ref) {
+                                Some((asked, used)) => format!(
+                                    "{detail}\nMade for {asked}; renders with {used} because {asked} isn't imported for this camera"
+                                ),
+                                None => detail,
+                            };
                             response.on_hover_text(detail);
                         }
                     }
@@ -280,13 +307,17 @@ impl Editor {
                     self.document.full().map(|image| image.as_ref()),
                 ) {
                     Ok((r, skipped)) => {
+                        let substitute = library.presets[i]
+                            .profile_substitute(m, &self.document.profiles)
+                            .map(|(_, used)| format!(" · using {used}"))
+                            .unwrap_or_default();
                         self.document.recipe = r;
                         self.presets.selected = library.presets[i].id.clone();
                         self.status = if skipped.is_empty() {
-                            format!("Applied {}", library.presets[i].name)
+                            format!("Applied {}{substitute}", library.presets[i].name)
                         } else {
                             format!(
-                                "Applied {} · skipped: {}",
+                                "Applied {}{substitute} · skipped: {}",
                                 library.presets[i].name,
                                 skipped.join("; ")
                             )

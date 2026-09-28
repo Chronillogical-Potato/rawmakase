@@ -21,6 +21,9 @@ pub struct Preset {
     pub photo_settings: bool,
     /// Spot removal and masks (see `local`), as nested data.
     pub local: BTreeMap<String, local::Node>,
+    /// Shipped with RAWmakase (see `presets::builtin`). A built-in preset's Adobe
+    /// profile falls back to RAWmakase's own profile when it isn't imported.
+    pub builtin: bool,
 }
 
 // Compatibility exports; preset collection management lives in `presets`.

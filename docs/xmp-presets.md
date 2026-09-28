@@ -2,9 +2,22 @@
 
 The left Presets pane groups installed presets, searches names/groups, remembers favorites, and shows unavailable entries dimmed with an explanation on hover. The optional “Compatible only” filter hides entries that cannot be applied to the current camera. Hover for a temporary preview; click to apply as one undo step. Previewing does not save edits. Import accepts individual XMP files; the supplied archive has already been imported with its directory structure preserved.
 
-User library: `~/.local/share/rawmakase/xmp-presets`. Original XMP files remain unchanged. Favorites are stored separately in the application data directory. The supplied archive contains 926 XMP files: 921 presets/curves and five application preference/cache files excluded from the browser. No private preset or profile assets are bundled with RAWmakase.
+User library: `~/.local/share/rawmakase/xmp-presets`. Original XMP files remain unchanged. Favorites are stored separately in the application data directory. The supplied archive contains 926 XMP files: 921 presets/curves and five application preference/cache files excluded from the browser. No Adobe presets or profiles are bundled with RAWmakase; its own built-in presets are described below.
 
 Presets are sparse patches: omitted settings retain the current edit; explicit zero/false resets the corresponding control. Matching camera DCP profiles are resolved by name and camera model. Supported enhanced Look records resolve an explicitly imported XMP profile by name/UUID and camera. See [imported profiles](lightroom-profiles.md). The resulting recipe embeds the selected DCP and enhanced rendering data and stores applied settings, so reopening an edited photo does not require reapplying its XMP. Sidecar/preset schema 4 adds these effects; older recipes load with neutral defaults.
+
+## Built-in presets
+
+RAWmakase ships 26 presets of its own, listed before imported ones in Lightroom's group order: Color, Creative, B&W, Curve, Grain and Vignetting. They are ordinary Lightroom XMP presets in `assets/presets`, MIT-licensed like the rest of the code, embedded in the binary, and read-only in the app. Favorites of a built-in preset follow its UUID, so renaming or regrouping one keeps them.
+
+Only the Creative looks name a camera profile: Adobe Standard, which is what they were made with. Imported presets need the exact profile they name. Built-in presets fall back instead, so they work with nothing imported:
+
+- Adobe Standard: the imported Adobe Standard for this camera, else the DNG's embedded profile, else RAWmakase Standard.
+- Adobe Color: the imported Adobe Color, else RAWmakase Color.
+
+The hover text and status line say when a fallback is used. Another camera's profile is never used, and one Adobe look never stands in for another. See [RAWmakase profiles](lightroom-profiles.md#rawmakase-profiles).
+
+To add one, drop an `.xmp` into a group folder, list it in `src/presets/builtin.rs`, give it a new `crs:UUID` and `crs:Copyright="RAWmakase contributors, MIT licence"`, and run the preset tests; they check that every file is listed, parses, applies without imported profiles and names no other profile.
 
 ## Implemented settings
 
