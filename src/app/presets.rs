@@ -114,17 +114,22 @@ impl Editor {
                         self.presets.compatible_only = show == 2;
                     }
                     let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
-                    ui.label(
-                        egui::RichText::new(if self.document.metadata.is_some() {
-                            format!(
-                                "{} presets · {available} compatible with this camera",
-                                library.presets.len()
-                            )
-                        } else {
-                            format!("{} presets · pick a photo to apply", library.presets.len())
-                        })
-                        .size(10.)
-                        .color(theme::gray(125)),
+                    // One line whatever the count, so switching photos never
+                    // moves the list below.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(if self.document.metadata.is_some() {
+                                format!(
+                                    "{available} of {} presets fit this camera",
+                                    library.presets.len()
+                                )
+                            } else {
+                                format!("{} presets", library.presets.len())
+                            })
+                            .size(10.)
+                            .color(theme::gray(125)),
+                        )
+                        .truncate(),
                     );
                     if !library.errors.is_empty() {
                         ui.label(
