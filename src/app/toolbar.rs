@@ -2,8 +2,7 @@ use super::Editor;
 use super::dialogs::FileDialog;
 use super::icons::Icon;
 use super::widgets::{
-    ButtonKind, TOOLBAR_SEGMENTS, action_button, menu_item, menu_separator, segment_bar,
-    toolbar_action, toolbar_divider,
+    ButtonKind, action_button, menu_item, menu_separator, toolbar_action, toolbar_divider,
 };
 use crate::app::theme;
 use crate::develop::Recipe;
@@ -42,19 +41,6 @@ impl Editor {
                         self.redo();
                     }
                     toolbar_divider(ui);
-                    let [fit, actual] = segment_bar(
-                        ui,
-                        ["Fit", "100%"],
-                        Some(usize::from(self.view.zoom100)),
-                        &TOOLBAR_SEGMENTS,
-                    );
-                    if fit.on_hover_text("Fit image · F").clicked() {
-                        self.view.zoom100 = false;
-                    }
-                    if actual.on_hover_text("Actual pixels · 1").clicked() {
-                        self.set_zoom(1.);
-                    }
-                    ui.add_space(4.);
                     if toolbar_action(ui, "Before", 70., self.view.compare, true, 3)
                         .on_hover_text("Show original · Backslash")
                         .clicked()

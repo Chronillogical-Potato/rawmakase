@@ -799,8 +799,8 @@ pub(super) const TOP_BAR_SEGMENTS: SegmentStyle = SegmentStyle {
     height: 26.,
     font: 13.,
 };
-/// Toolbar toggles such as Fit and 100%, as tall as the toolbar buttons.
-pub(super) const TOOLBAR_SEGMENTS: SegmentStyle = SegmentStyle {
+/// Toolbar controls, as tall as the toolbar buttons.
+const TOOLBAR_SEGMENTS: SegmentStyle = SegmentStyle {
     height: 32.,
     font: 12.,
 };
