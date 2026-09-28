@@ -21,7 +21,7 @@ private libraries; run the extracted `usr/bin/rawmakase` or install the whole
 tree under `/usr`. Do not copy just its executable. Linux still needs system
 Vulkan/graphics drivers, window-system libraries and a working file-dialog portal.
 
-The current local `packaging/macos-app.sh` remains a development helper using
+The current local `packaging/macos/app.sh` remains a development helper using
 Homebrew dependencies. It does not produce the standalone release app.
 
 ## Apple credentials
@@ -136,7 +136,7 @@ gh release edit vX.Y.Z --notes-file packaging/release-notes/vX.Y.Z.md
 
 ## Dependency maintenance
 
-`release/native-deps.sh` pins LibRaw 0.22.2 and Little CMS 2.19.1 by SHA-256 and
+`packaging/native-deps.sh` pins LibRaw 0.22.2 and Little CMS 2.19.1 by SHA-256 and
 builds them into a private prefix. Update versions and hashes together after
 testing. Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
 The app's native wrapper retains OpenMP acceleration.
@@ -176,7 +176,7 @@ photo library/settings remain outside package-owned directories.
 
 ## Validation
 
-Run `actionlint .github/workflows/release.yml`, `shellcheck packaging/release/*.sh`
+Run `actionlint .github/workflows/release.yml`, `shellcheck packaging/*.sh packaging/macos/*.sh packaging/linux/*.sh`
 and `native-packages validate` before changing the workflow. A Mac bundle can
 be tested without Apple credentials using the bundler and `dmg.rb`; public
 releases always require signing.

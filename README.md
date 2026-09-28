@@ -49,7 +49,7 @@ DEB/RPM packages include LibRaw and Little CMS. Arch packages use system depende
 makepkg -si
 ```
 
-The development recipe is in [packaging/rawmakase-git](packaging/rawmakase-git/PKGBUILD).
+The development recipe is in [packaging/arch/rawmakase-git](packaging/arch/rawmakase-git/PKGBUILD).
 
 The `rawmakase-<version>-x86_64-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
 
@@ -73,7 +73,7 @@ make install PREFIX="$HOME/.local"    # binary, desktop entry, icon and licenses
 
 `make install` never builds, so `make && sudo make install PREFIX=/usr` does not compile as root. `make uninstall` removes the installed files.
 
-On macOS, `packaging/macos-app.sh` builds `target/release/RAWmakase.app`, which you can open from Finder. It uses the Homebrew libraries installed on your Mac and is not a signed, self-contained distribution.
+On macOS, `packaging/macos/app.sh` builds `target/release/RAWmakase.app`, which you can open from Finder. It uses the Homebrew libraries installed on your Mac and is not a signed, self-contained distribution.
 
 ## Usage
 

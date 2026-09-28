@@ -25,9 +25,9 @@ jobs:
         run: |
           GOBIN="$RUNNER_TEMP/tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
           "$RUNNER_TEMP/tools/actionlint"
-          shellcheck packaging/release/*.sh
-          ruby -c packaging/release/dmg.rb
-          ruby -c packaging/release/signing-diagnostics.rb
-          python3 -m py_compile packaging/release/*.py
+          shellcheck packaging/*.sh packaging/macos/*.sh packaging/linux/*.sh
+          ruby -c packaging/macos/dmg.rb
+          ruby -c packaging/macos/signing-diagnostics.rb
+          python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
           gem install native-packages --version 0.7.0 --no-document
           native-packages validate

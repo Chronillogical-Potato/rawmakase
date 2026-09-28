@@ -32,8 +32,8 @@ def main():
                            (root / "licenses/Adobe-DNG-SDK.txt", licenses / "Adobe-DNG-SDK.txt"),
                            (root / "licenses/Inter-OFL.txt", licenses / "Inter-OFL.txt"),
                            (root / "licenses/Lucide-ISC.txt", licenses / "Lucide-ISC.txt"),
-                           (root / "packaging/rawmakase.desktop", stage / "usr/share/applications/rawmakase.desktop"),
-                           (root / "packaging/rawmakase.svg", stage / "usr/share/icons/hicolor/scalable/apps/rawmakase.svg")]:
+                           (root / "packaging/applications/rawmakase.desktop", stage / "usr/share/applications/rawmakase.desktop"),
+                           (root / "packaging/icons/rawmakase.svg", stage / "usr/share/icons/hicolor/scalable/apps/rawmakase.svg")]:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     # These are supplied by the supported distribution, including its GPU stack.

@@ -36,8 +36,8 @@ assets, never commit private photos or screenshots. Verify every linked asset.
 Do not invent benchmarks, compatibility claims, contributor credits or fixes.
 No reference project or previous release style is required.
 
-1. Bump the version in `Cargo.toml`, `Cargo.lock`, `packaging/Info.plist` and
-   both `packaging/*/PKGBUILD` files (see the previous `Release x.y.z` commit).
+1. Bump the version in `Cargo.toml`, `Cargo.lock`, `packaging/macos/Info.plist` and
+   both `packaging/arch/*/PKGBUILD` files (see the previous `Release x.y.z` commit).
 2. Write and review the notes, run the required checks, and commit as
    `Release x.y.z`, with a short summary of what changed.
 3. Push `main`, verify the release commit is on `origin/main`, then create

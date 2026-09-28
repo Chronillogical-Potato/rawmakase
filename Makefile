@@ -23,8 +23,8 @@ install:
 	install -Dm644 licenses/Inter-OFL.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Inter-OFL.txt
 	install -Dm644 licenses/Lucide-ISC.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Lucide-ISC.txt
 ifneq ($(shell uname -s),Darwin)
-	install -Dm644 packaging/rawmakase.desktop $(DESTDIR)$(PREFIX)/share/applications/rawmakase.desktop
-	install -Dm644 packaging/rawmakase.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/rawmakase.svg
+	install -Dm644 packaging/applications/rawmakase.desktop $(DESTDIR)$(PREFIX)/share/applications/rawmakase.desktop
+	install -Dm644 packaging/icons/rawmakase.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/rawmakase.svg
 endif
 
 uninstall:

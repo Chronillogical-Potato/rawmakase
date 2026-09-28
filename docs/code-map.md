@@ -259,8 +259,8 @@ unit suite does not replace the photographic/manual checks in the validation doc
 | [Cargo.toml](../Cargo.toml), [Cargo.lock](../Cargo.lock) | Package/toolchain requirements, dependencies and locked resolution. |
 | [build.rs](../build.rs) | Locates LibRaw/Little CMS, compiles the C++ bridge and configures platform OpenMP linking. |
 | [Makefile](../Makefile) | Build/check and local install/uninstall shortcuts. |
-| [packaging/macos-app.sh](../packaging/macos-app.sh), [Info.plist](../packaging/Info.plist) | Local Finder-launchable macOS bundle and its metadata. |
-| [rawmakase.desktop](../packaging/rawmakase.desktop), [rawmakase.svg](../packaging/rawmakase.svg) | Linux launcher and application icon. |
+| [packaging/macos/app.sh](../packaging/macos/app.sh), [Info.plist](../packaging/macos/Info.plist) | Local Finder-launchable macOS bundle and its metadata. |
+| [rawmakase.desktop](../packaging/applications/rawmakase.desktop), [rawmakase.svg](../packaging/icons/rawmakase.svg) | Linux launcher and application icon. |
 | [LICENSE](../LICENSE), [Adobe notice](../licenses/Adobe-DNG-SDK.txt) | Project licensing and third-party DNG attribution. |
 | [README](../README.md) | Build/run instructions, controls, CLI examples and supported scope. |
 | [Architecture](architecture.md) | Module ownership, state/thread invariants and compatibility rules. |

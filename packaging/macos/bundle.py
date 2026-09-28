@@ -101,7 +101,7 @@ def main():
                 url = f"https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-{version}/{path}"
                 (folder / name).write_bytes(urllib.request.urlopen(url, timeout=60).read())
 
-    with (root / "packaging/Info.plist").open("rb") as handle:
+    with (root / "packaging/macos/Info.plist").open("rb") as handle:
         metadata = plistlib.load(handle)
     numeric = args.version.split("-", 1)[0]
     metadata.update(CFBundleShortVersionString=numeric, CFBundleVersion=numeric,
@@ -116,7 +116,7 @@ def main():
             for scale in (1, 2):
                 name = f"icon_{size}x{size}" + ("@2x" if scale == 2 else "") + ".png"
                 subprocess.run(["rsvg-convert", "-w", str(size * scale), "-h", str(size * scale),
-                                "-o", str(iconset / name), str(root / "packaging/rawmakase.svg")], check=True)
+                                "-o", str(iconset / name), str(root / "packaging/icons/rawmakase.svg")], check=True)
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "rawmakase.icns")], check=True)
     finally:
         shutil.rmtree(iconset)
@@ -125,7 +125,7 @@ def main():
     compiled = app.parent / "rawmakase-icon"
     compiled.mkdir(exist_ok=False)
     try:
-        result = subprocess.run(["xcrun", "actool", str(root / "packaging/RAWmakase.icon"), "--compile", str(compiled),
+        result = subprocess.run(["xcrun", "actool", str(root / "packaging/macos/RAWmakase.icon"), "--compile", str(compiled),
                                  "--app-icon", "RAWmakase", "--platform", "macosx",
                                  "--minimum-deployment-target", args.minimum_macos,
                                  "--output-partial-info-plist", str(compiled / "partial.plist")],
@@ -136,10 +136,10 @@ def main():
             with (app / "Contents/Info.plist").open("wb") as handle:
                 plistlib.dump(metadata, handle)
         elif os.environ.get("GITHUB_ACTIONS") == "true":
-            raise SystemExit("actool cannot compile packaging/RAWmakase.icon:\n"
+            raise SystemExit("actool cannot compile packaging/macos/RAWmakase.icon:\n"
                              + result.stderr.decode(errors="replace"))
         else:
-            print("actool cannot compile packaging/RAWmakase.icon; keeping the flat icon")
+            print("actool cannot compile packaging/macos/RAWmakase.icon; keeping the flat icon")
     finally:
         shutil.rmtree(compiled)
     # Ad-hoc signatures allow local verification; release signing replaces them.

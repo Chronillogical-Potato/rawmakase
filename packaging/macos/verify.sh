@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-dmg="${1:?usage: verify-macos.sh FILE.dmg ARCH}"
+dmg="${1:?usage: verify.sh FILE.dmg ARCH}"
 arch="${2:?expected architecture}"
 temporary=$(mktemp -d)
 mount="$temporary/mount"
