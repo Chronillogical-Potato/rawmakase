@@ -31,3 +31,24 @@ jobs:
           python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
           gem install native-packages --version 0.7.0 --no-document
           native-packages validate
+      - name: Check the Linux packaging tools
+        run: |
+          sudo apt-get install -y libarchive-tools
+          GOBIN="$RUNNER_TEMP/tools" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          export PATH="$RUNNER_TEMP/tools:$PATH"
+          native-packages doctor --target linux-amd64 --defer-recipes
+
+  doctor-macos:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+      - name: Check the macOS packaging tools
+        run: |
+          gem install native-packages --version 0.7.0 --no-document
+          native-packages doctor --target macos-arm64 --target macos-amd64 --defer-recipes
