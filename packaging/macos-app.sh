@@ -30,4 +30,21 @@ cp LICENSE "$bundle/Contents/Resources/licenses/RAWmakase.txt"
 cp licenses/Adobe-DNG-SDK.txt "$bundle/Contents/Resources/licenses/Adobe-DNG-SDK.txt"
 cp licenses/Inter-OFL.txt "$bundle/Contents/Resources/licenses/Inter-OFL.txt"
 cp licenses/Lucide-ISC.txt "$bundle/Contents/Resources/licenses/Lucide-ISC.txt"
+# The app icon, rendered as packaging/release/bundle-macos.py does.
+if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+    iconset="target/$profile/rawmakase.iconset"
+    rm -rf "$iconset"
+    mkdir "$iconset"
+    for size in 16 32 128 256 512; do
+        rsvg-convert -w "$size" -h "$size" -o "$iconset/icon_${size}x${size}.png" packaging/rawmakase.svg
+        rsvg-convert -w $((size * 2)) -h $((size * 2)) -o "$iconset/icon_${size}x${size}@2x.png" packaging/rawmakase.svg
+    done
+    iconutil -c icns "$iconset" -o "$bundle/Contents/Resources/rawmakase.icns"
+    rm -rf "$iconset"
+    plist="$bundle/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile rawmakase.icns' "$plist" 2>/dev/null ||
+        /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string rawmakase.icns' "$plist"
+else
+    echo 'brew install librsvg for the app icon' >&2
+fi
 echo "$bundle"
