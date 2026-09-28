@@ -319,8 +319,10 @@ pub(super) fn apply(ctx: &egui::Context, palette: Palette, text: &fastframe_text
 /// The palettes the Display preferences offer, and the one chosen.
 pub(super) struct Themes {
     pub(super) catalog: fastframe_theme::Catalog<Palette>,
-    /// A palette file's name; None is RAWmakase's own greys.
-    pub(super) selected: Option<String>,
+    /// The user's pick: a palette file's name, or None for RAWmakase's own
+    /// greys. Not picked yet (the outer None), Omarchy's theme is followed
+    /// on an Omarchy desktop, like the desktop's other apps.
+    chosen: Option<Option<String>>,
     applied: Palette,
     pub(super) text: fastframe_text::TextRendering,
     waker: fastframe_theme::Waker,
@@ -329,13 +331,13 @@ pub(super) struct Themes {
 impl Themes {
     pub(super) fn new(
         ctx: &egui::Context,
-        selected: Option<String>,
+        chosen: Option<Option<String>>,
         text: fastframe_text::TextRendering,
     ) -> Self {
         let wake = ctx.clone();
         Self {
             catalog: Default::default(),
-            selected,
+            chosen,
             applied: Palette::DEFAULT,
             text,
             waker: fastframe_theme::Waker::new(move || wake.request_repaint()),
@@ -356,7 +358,7 @@ impl Themes {
                 presets: true,
             });
         self.catalog
-            .start(Self::directory(), self.selected.clone(), &self.waker);
+            .start(Self::directory(), self.selected(), &self.waker);
         self.started = true;
     }
     /// Rescans on a change to the themes folder or Omarchy's theme, and
@@ -367,7 +369,7 @@ impl Themes {
         }
         if self.catalog.needs_reload() {
             self.catalog
-                .start(Self::directory(), self.selected.clone(), &self.waker);
+                .start(Self::directory(), self.selected(), &self.waker);
         }
         self.catalog.poll();
         let wanted = self.resolve();
@@ -376,9 +378,27 @@ impl Themes {
             apply(ctx, wanted, &self.text);
         }
     }
+    /// The user's pick, if they made one.
+    pub(super) fn chosen(&self) -> Option<Option<String>> {
+        self.chosen.clone()
+    }
+    /// The palette in use: the user's pick, or else Omarchy's theme where
+    /// the desktop is Omarchy and RAWmakase's greys elsewhere.
+    pub(super) fn selected(&self) -> Option<String> {
+        match &self.chosen {
+            Some(chosen) => chosen.clone(),
+            None => self
+                .catalog
+                .follows_omarchy()
+                .then(|| fastframe_theme::omarchy::FILENAME.to_string()),
+        }
+    }
+    pub(super) fn choose(&mut self, theme: Option<String>) {
+        self.chosen = Some(theme);
+    }
     /// The chosen palette, or the last one applied while it is being read.
     fn resolve(&self) -> Palette {
-        match &self.selected {
+        match &self.selected() {
             None => Palette::DEFAULT,
             Some(name) => self
                 .catalog
@@ -399,7 +419,7 @@ impl Themes {
     /// What to say under the setting, if anything.
     pub(super) fn status(&self) -> Option<String> {
         use fastframe_theme::{Problem, Status};
-        Some(match self.catalog.status(self.selected.as_deref())? {
+        Some(match self.catalog.status(self.selected().as_deref())? {
             Status::Loading => "Loading themes…".into(),
             Status::SelectedUnavailable => {
                 "The chosen theme is missing; the last one stays until it is back.".into()
@@ -438,5 +458,25 @@ mod tests {
         assert_eq!(map(&nord, 22), Color32::from_rgb(0x2e, 0x34, 0x40));
         assert_eq!(map(&nord, 225), Color32::from_rgb(0xd8, 0xde, 0xe9));
         assert_eq!(nord.accent, Color32::from_rgb(0x81, 0xa1, 0xc1));
+    }
+
+    fn themes(chosen: Option<Option<String>>, omarchy: bool) -> Themes {
+        let text = fastframe_text::TextRendering::platform_default();
+        let mut themes = Themes::new(&egui::Context::default(), chosen, text);
+        themes.catalog = fastframe_theme::Catalog::preview(Vec::new(), omarchy);
+        themes
+    }
+
+    #[test]
+    fn omarchy_is_followed_until_the_user_picks_a_theme() {
+        let omarchy = Some(fastframe_theme::omarchy::FILENAME.to_string());
+        assert_eq!(themes(None, true).selected(), omarchy);
+        assert_eq!(themes(None, false).selected(), None);
+        let mut picked = themes(None, true);
+        picked.choose(None);
+        assert_eq!(picked.selected(), None);
+        assert_eq!(picked.chosen(), Some(None));
+        let nord = Some("Nord.json".to_string());
+        assert_eq!(themes(Some(nord.clone()), true).selected(), nord);
     }
 }

@@ -32,6 +32,10 @@ pub struct Session {
     /// The interface's palette file; None is RAWmakase's own greys.
     #[serde(default)]
     pub theme: Option<String>,
+    /// The user picked `theme`. Until then Omarchy's theme is followed on
+    /// an Omarchy desktop, and RAWmakase's greys elsewhere.
+    #[serde(default)]
+    pub theme_chosen: bool,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))

@@ -158,7 +158,8 @@ impl Editor {
             updates,
             themes: theme::Themes::new(
                 ctx,
-                session.theme.clone(),
+                // Sessions from before `theme_chosen` saved only a palette.
+                (session.theme_chosen || session.theme.is_some()).then(|| session.theme.clone()),
                 fastframe_text::TextRendering::platform_default(),
             ),
             exports: Default::default(),
@@ -199,7 +200,8 @@ impl Editor {
                     demosaic: crate::raw::demosaic(),
                     no_update_checks: !self.updates.automatic,
                     skipped_version: self.updates.skipped.clone(),
-                    theme: self.themes.selected.clone(),
+                    theme: self.themes.chosen().flatten(),
+                    theme_chosen: self.themes.chosen().is_some(),
                 },
             )?;
         }

@@ -496,7 +496,8 @@ impl Editor {
                 |(_, n)| n.clone(),
             ),
         };
-        let mut chosen = self.themes.selected.clone();
+        let selected = self.themes.selected();
+        let mut chosen = selected.clone();
         form_row(ui, "Theme", |ui| {
             egui::ComboBox::from_id_salt("interface-theme")
                 .width(220.)
@@ -513,12 +514,12 @@ impl Editor {
             hint(
                 ui,
                 &self.themes.status().unwrap_or_else(|| {
-                    "Palette files in the themes folder are listed here. On Omarchy the desktop's theme is followed. The photo's backdrop stays neutral grey.".into()
+                    "Palette files in the themes folder are listed here. On Omarchy the desktop's theme is followed until you choose another. The photo's backdrop stays neutral grey.".into()
                 }),
             );
         });
-        if chosen != self.themes.selected {
-            self.themes.selected = chosen;
+        if chosen != selected {
+            self.themes.choose(chosen);
             let _ = self.save_session();
         }
         gap(ui);
