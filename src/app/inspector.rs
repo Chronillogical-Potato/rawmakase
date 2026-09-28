@@ -413,11 +413,7 @@ impl Editor {
                     .width(ui.available_width())
                     .selected_text(r.profile.as_ref().map_or(matrix, |p| p.name.as_str()))
                     .show_ui(ui, |ui| {
-                        // RAWmakase Standard renders like the camera matrix, so the
-                        // matrix entry only shows for edits that already use it.
-                        if r.profile.is_none()
-                            && ui.selectable_value(&mut r.profile, None, matrix).changed()
-                        {
+                        if ui.selectable_value(&mut r.profile, None, matrix).changed() {
                             r.engine = r.engine.max(3);
                         }
                         for profile in &profiles {

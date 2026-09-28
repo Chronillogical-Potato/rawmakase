@@ -197,6 +197,16 @@ pub fn convert_develop(
             preset.settings.insert(key.clone(), value);
         }
     }
+    // A look that isn't available is reported on its own, so the base profile's
+    // fallback and every other setting still apply.
+    if !preset.look_available(m, profiles) {
+        warnings.push(format!(
+            "Missing or unsupported enhanced profile ‘{}’ for {}",
+            preset.look, m.model
+        ));
+        preset.look.clear();
+        preset.settings.remove("RAWmakaseLookUUID");
+    }
     // Spots and masks convert on their own and report what they skip.
     let local_settings = std::mem::take(&mut preset.local);
     // Build a compatible patch before application. Related fields are validated together.

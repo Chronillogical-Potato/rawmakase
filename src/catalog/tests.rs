@@ -248,10 +248,18 @@ fn lightroom_edits_fall_back_to_rawmakase_profiles() -> Result<()> {
         assert_eq!(r.profile.as_ref().unwrap().name, used);
         assert!(w.iter().any(|s| s.contains(used)), "{w:?}");
     }
-    // Other Adobe looks aren't substituted.
-    let text = r#"s = { CameraProfile = "Adobe Vivid" }"#;
+    // Lightroom writes Adobe Color as a look over Adobe Standard.
+    let text = r#"s = { Exposure2012 = 0.5, CameraProfile = "Adobe Standard", Look = { Name = "Adobe Color", Amount = 1 } }"#;
     let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert_eq!(r.exposure, 0.5);
     assert_eq!(r.profile.as_ref().unwrap().name, open::COLOR);
+    assert!(w.iter().any(|s| s.contains(open::COLOR)), "{w:?}");
+    // Other Adobe looks aren't substituted: the look is reported, and the rest of
+    // the edit applies over the base profile's fallback.
+    let text = r#"s = { Exposure2012 = 0.5, CameraProfile = "Adobe Standard", Look = { Name = "Adobe Vivid", Amount = 1 } }"#;
+    let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(r.profile.as_ref().unwrap().name, open::STANDARD);
     assert!(w.iter().any(|s| s.contains("Adobe Vivid")), "{w:?}");
     Ok(())
 }

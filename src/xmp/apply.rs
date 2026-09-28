@@ -215,7 +215,7 @@ impl Preset {
                 .cloned()
         };
         find(name).or_else(|| {
-            if !self.builtin && !self.photo_settings {
+            if !self.falls_back() {
                 return None;
             }
             match name {
@@ -228,6 +228,49 @@ impl Preset {
             }
         })
     }
+    /// The imported enhanced look this preset names (Lightroom writes Adobe Color and
+    /// the other Adobe looks as a `Look` over Adobe Standard). Where `resolve_profile`
+    /// falls back, Adobe Color falls back to RAWmakase Color too.
+    fn resolve_look(
+        &self,
+        m: &Metadata,
+        profiles: &[Arc<CameraProfile>],
+    ) -> Option<Arc<CameraProfile>> {
+        profiles
+            .iter()
+            .find(|p| {
+                p.name == self.look
+                    && p.ensure_camera(m).is_ok()
+                    && p.enhanced.as_ref().is_some_and(|look| {
+                        self.settings
+                            .get("RAWmakaseLookUUID")
+                            .is_none_or(|uuid| look.uuid.eq_ignore_ascii_case(uuid))
+                    })
+            })
+            .cloned()
+            .or_else(|| {
+                (self.falls_back() && self.look == "Adobe Color")
+                    .then(|| {
+                        profiles
+                            .iter()
+                            .find(|p| {
+                                p.name == crate::camera_profiles::open::COLOR
+                                    && p.ensure_camera(m).is_ok()
+                            })
+                            .cloned()
+                    })
+                    .flatten()
+            })
+    }
+    /// Whether this preset's look, if it names one, can be rendered here.
+    pub fn look_available(&self, m: &Metadata, profiles: &[Arc<CameraProfile>]) -> bool {
+        self.look.is_empty() || self.resolve_look(m, profiles).is_some()
+    }
+    /// Built-in presets and a photo's own Lightroom edit stand in RAWmakase's profiles
+    /// for missing Adobe ones; imported presets need the exact profile.
+    fn falls_back(&self) -> bool {
+        self.builtin || self.photo_settings
+    }
     /// When this preset will render with a different profile than it names (see
     /// `resolve_profile`), the names of both.
     pub fn profile_substitute(
@@ -235,8 +278,12 @@ impl Preset {
         m: &Metadata,
         profiles: &[Arc<CameraProfile>],
     ) -> Option<(String, String)> {
-        let name = self.requested_profile()?;
-        let used = self.resolve_profile(name, m, profiles)?;
+        let (name, used) = if self.look.is_empty() {
+            let name = self.requested_profile()?;
+            (name, self.resolve_profile(name, m, profiles)?)
+        } else {
+            (self.look.as_str(), self.resolve_look(m, profiles)?)
+        };
         (used.name != name).then(|| (name.to_string(), used.name.clone()))
     }
     fn apply_profile(
@@ -268,24 +315,12 @@ impl Preset {
         }
         settings.seen.insert("RAWmakaseLookUUID".into());
         if !self.look.is_empty() {
-            let profile = profiles.iter().find(|p| {
-                p.name == self.look
-                    && p.ensure_camera(m).is_ok()
-                    && p.enhanced.as_ref().is_some_and(|look| {
-                        v.get("RAWmakaseLookUUID")
-                            .is_none_or(|uuid| look.uuid.eq_ignore_ascii_case(uuid))
-                    })
-            });
-            r.profile = Some(
-                profile
-                    .with_context(|| {
-                        format!(
-                            "Missing or unsupported enhanced profile ‘{}’ for {}",
-                            self.look, m.model
-                        )
-                    })?
-                    .clone(),
-            );
+            r.profile = Some(self.resolve_look(m, profiles).with_context(|| {
+                format!(
+                    "Missing or unsupported enhanced profile ‘{}’ for {}",
+                    self.look, m.model
+                )
+            })?);
             r.reference_curves = true;
             r.wide_gamut_curves = true;
         }
