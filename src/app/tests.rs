@@ -914,3 +914,34 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     }
     assert_eq!(editor.document.recipe, saved);
 }
+
+#[test]
+fn a_photo_from_outside_the_library_is_added_and_opened() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("photos.rawmakase");
+    crate::catalog::Catalog::create(&path)?;
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside)?;
+    let raw = outside.join("photo.ARW");
+    std::fs::write(&raw, b"identity fixture")?;
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+    // As if dropped on the window.
+    editor.open(raw.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while editor.pending_photo.is_some() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        editor.events(&ctx);
+    }
+    let raw = raw.canonicalize()?;
+    let id = editor
+        .library
+        .as_ref()
+        .and_then(|l| l.photos.iter().find(|p| p.path == raw))
+        .map(|p| p.id);
+    assert!(id.is_some(), "the photo's folder was added to the catalog");
+    assert_eq!(editor.document.catalog_photo, id);
+    assert!(!editor.library_mode);
+    Ok(())
+}

@@ -226,9 +226,13 @@ impl Editor {
                         self.develop_catalog_photo(id);
                     }
                 }
+                self.open_pending_photo();
                 let _ = self.save_session();
             }
-            Err(e) => self.status = format!("Catalog operation failed: {e}"),
+            Err(e) => {
+                self.pending_photo = None;
+                self.status = format!("Catalog operation failed: {e}");
+            }
         }
     }
 

@@ -130,6 +130,77 @@ impl Editor {
             ctx.request_repaint();
         });
     }
+    /// Adds a photo from outside the Library (dropped on the window or passed
+    /// on the command line) by adding its folder to the catalog, then opens it
+    /// in Develop.
+    pub(super) fn add_to_library(&mut self, path: PathBuf) {
+        let path = path.canonicalize().unwrap_or(path);
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        self.library_mode = true;
+        if let Some(id) = self.catalog_photo_at(&path) {
+            self.develop_catalog_photo(id);
+            return;
+        }
+        let Some(current) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
+            if self.activity.is_dialog() {
+                // The catalog is still opening; add the photo once it is ready.
+                self.pending_photo = Some((path, false));
+            } else {
+                self.status = format!("Open or create a catalog to edit {name}");
+            }
+            return;
+        };
+        let Some(folder) = path.parent().map(PathBuf::from) else {
+            return;
+        };
+        if self.activity.is_busy() || !self.flush() || !self.activity.begin_dialog() {
+            return;
+        }
+        self.pending_photo = Some((path, true));
+        self.status = format!("Adding {name}'s folder to the Library…");
+        let tx = self.tx.clone();
+        let ctx = self.context.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> anyhow::Result<_> {
+                crate::catalog::Catalog::open(&current)?.add_folder(&folder)?;
+                crate::app::library::Library::load(&current, ctx.clone())
+            })()
+            .map(Box::new)
+            .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Event::CatalogReady(result));
+            ctx.request_repaint();
+        });
+    }
+    /// The catalog photo stored at `path`, if any.
+    fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
+        self.library
+            .as_ref()?
+            .photos
+            .iter()
+            .find(|p| p.path == path)
+            .map(|p| p.id)
+    }
+    /// Opens the photo waiting to be added once the catalog is ready, adding
+    /// its folder first if that has not happened yet.
+    pub(super) fn open_pending_photo(&mut self) {
+        let Some((path, added)) = self.pending_photo.take() else {
+            return;
+        };
+        if let Some(id) = self.catalog_photo_at(&path) {
+            self.develop_catalog_photo(id);
+        } else if !added {
+            self.add_to_library(path);
+        } else {
+            self.status = format!(
+                "{} could not be added to the Library",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+        }
+    }
     pub(super) fn develop_catalog_photo(&mut self, id: i64) {
         let Some(p) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
             return;

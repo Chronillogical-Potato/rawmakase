@@ -7,6 +7,14 @@ use std::path::PathBuf;
 
 impl Editor {
     pub(super) fn open(&mut self, path: PathBuf) {
+        let catalog = path
+            .extension()
+            .is_some_and(|e| e == "rawmakase" || e == "lrcat");
+        if !catalog {
+            // Photos are edited through the Library only.
+            self.add_to_library(path);
+            return;
+        }
         if self.activity.is_busy() {
             return;
         }
@@ -16,13 +24,6 @@ impl Editor {
             self.status =
                 "Use Library → Import Lightroom catalog to select a new RAWmakase catalog destination"
                     .into();
-            self.library_mode = true;
-        } else {
-            // Photos are edited through the Library only.
-            self.status = format!(
-                "Add {}'s folder to the Library to edit it",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            );
             self.library_mode = true;
         }
     }

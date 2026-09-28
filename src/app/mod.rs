@@ -44,6 +44,9 @@ pub struct Editor {
     autosave: autosave::Autosave,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
+    /// A photo from outside the Library to open once the catalog is ready,
+    /// and whether its folder has already been added.
+    pending_photo: Option<(PathBuf, bool)>,
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     status: String,
@@ -126,7 +129,7 @@ impl Editor {
         let show_onboarding = !session.onboarding_done && session_file.is_some();
         // Only a real session checks GitHub, not an isolated test.
         let updates = updates::Updates::new(&session, session_file.is_some().then_some(ctx));
-        let path = path.or(session.last_path.filter(|p| p.exists()));
+        let last = session.last_path.clone().filter(|p| p.exists());
         let (tx, rx) = mpsc::channel();
         let loader = worker::loader(tx.clone(), ctx.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
@@ -175,14 +178,25 @@ impl Editor {
                 session.selected_photo,
                 session.develop,
             ),
+            pending_photo: None,
             status: "Pick a photo in the Library to begin".into(),
             catalog_work: None,
             importing: None,
             close_confirm: false,
         };
         app.reload_presets(ctx);
-        if let Some(path) = path {
-            app.open(path);
+        // A catalog passed on the command line opens instead of the last one;
+        // a photo passed there is added to the last catalog.
+        match path {
+            Some(path) if path.extension().is_some_and(|e| e == "rawmakase") => app.open(path),
+            path => {
+                if let Some(last) = last {
+                    app.open(last);
+                }
+                if let Some(path) = path {
+                    app.open(path);
+                }
+            }
         }
         app
     }
