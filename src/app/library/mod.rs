@@ -1019,7 +1019,7 @@ impl Library {
                             40
                         });
                         // Same cues as the grid: the label tints the cell, and
-                        // flag, stars and label chip sit on a strip below the photo.
+                        // flag and stars sit on a strip below the photo.
                         let fill = crate::app::photo_metadata::label_color(&p.label)
                             .map_or(base, |label| {
                                 base.lerp_to_gamma(label, if active { 0.35 } else { 0.25 })
@@ -1058,16 +1058,6 @@ impl Library {
                                 "★".repeat(p.rating as usize),
                                 egui::FontId::proportional(9.),
                                 theme::gray(if active { 30 } else { 200 }),
-                            );
-                        }
-                        if let Some(color) = crate::app::photo_metadata::label_color(&p.label) {
-                            ui.painter().rect_filled(
-                                egui::Rect::from_center_size(
-                                    egui::pos2(cell.right() - 10., y),
-                                    Vec2::splat(8.),
-                                ),
-                                1.,
-                                color,
                             );
                         }
                         if let Some(menu) = cell::photo_menu(&response, &p) {

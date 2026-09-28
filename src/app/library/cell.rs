@@ -133,16 +133,6 @@ pub(super) fn photo_cell(
             Color32::from_rgb(210, 150, 60),
         );
     }
-    if let Some(color) = label_color(&photo.label) {
-        let badge = Rect::from_center_size(Pos2::new(cell.right() - 12., y), Vec2::splat(9.));
-        painter.rect_filled(badge, 1., color);
-        painter.rect_stroke(
-            badge,
-            1.,
-            Stroke::new(1., theme::gray(30)),
-            StrokeKind::Inside,
-        );
-    }
     let action = photo_menu(&response, photo);
     (
         response.on_hover_text(format!(
