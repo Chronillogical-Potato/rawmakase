@@ -16,6 +16,13 @@ It is a personal project in active development. Rendering aims for close, not ex
 - **Fast previews**: a quick draft first, then full quality, with GPU finishing (Metal on macOS, Vulkan on Linux) and CPU fallback.
 - **Command line**: inspect, render, export thumbnails, import catalogs and benchmark without the GUI.
 
+## Coming soon
+
+- LUT support
+- AI-powered masks and object removal
+- Built-in open source preset library
+- Agentic features: e.g. culling assistance
+
 ## Install
 
 Download the package for your system from [GitHub Releases](https://github.com/pch/rawmakase/releases). Older releases may have only the original Arch-built Linux archive; use the requirements in that release's notes.
