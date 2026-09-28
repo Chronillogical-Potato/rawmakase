@@ -85,23 +85,28 @@ impl PreviewCache {
         } else {
             false
         };
+        // Maintenance is best effort, as another connection may hold the database, and
+        // never changes the answer: a failed delete still misses, a failed touch hits.
+        let forget = || {
+            let _ = self
+                .db
+                .execute("DELETE FROM previews WHERE source_path=?", [&key]);
+        };
         if generation != GENERATION || stale {
-            self.db
-                .execute("DELETE FROM previews WHERE source_path=?", [&key])?;
+            forget();
             return Ok(None);
         }
         let image = match image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg) {
             Ok(im) if im.width() <= 1024 && im.height() <= 1024 => im.to_rgb8(),
             _ => {
-                self.db
-                    .execute("DELETE FROM previews WHERE source_path=?", [&key])?;
+                forget();
                 return Ok(None);
             }
         };
-        self.db.execute(
+        let _ = self.db.execute(
             "UPDATE previews SET last_used=? WHERE source_path=?",
             params![now(), &key],
-        )?;
+        );
         Ok(Some(image))
     }
     pub fn store(
@@ -195,6 +200,25 @@ mod tests {
             (16, 16)
         );
         assert!(cache.load_tagged(&raw, "edit-2")?.is_none());
+        Ok(())
+    }
+    #[test]
+    fn reads_survive_failed_maintenance_writes() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let raw = d.path().join("photo.ARW");
+        std::fs::write(&raw, b"original raw")?;
+        let db = d.path().join("previews.sqlite3");
+        let mut cache = PreviewCache::open(&db)?;
+        let im = image::RgbImage::from_pixel(24, 16, image::Rgb([120, 70, 40]));
+        cache.store(&raw, &Identity::read(&raw)?, &im)?;
+        // Another connection holds the write lock: no touch or delete can happen.
+        let other = Connection::open(&db)?;
+        other.execute_batch("BEGIN IMMEDIATE")?;
+        assert!(cache.load(&raw)?.is_some());
+        std::fs::write(&raw, b"replacement raw")?;
+        assert!(cache.load(&raw)?.is_none());
+        other.execute_batch("COMMIT")?;
+        assert!(cache.load(&raw)?.is_none());
         Ok(())
     }
     #[test]

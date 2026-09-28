@@ -578,6 +578,10 @@ impl Library {
             }
         }
         while let Ok(result) = self.edit_rx.try_recv() {
+            if let previews::EditResult::CacheError(error) = result {
+                self.preview_progress.cache_failed(error);
+                continue;
+            }
             self.edits_pending = self.edits_pending.saturating_sub(1);
             match result {
                 previews::EditResult::Ready(path, im) => {
@@ -587,7 +591,7 @@ impl Library {
                 previews::EditResult::Skipped(path) => {
                     self.edited_requested.remove(&path);
                 }
-                previews::EditResult::Failed => {}
+                previews::EditResult::Failed | previews::EditResult::CacheError(_) => {}
             }
         }
     }

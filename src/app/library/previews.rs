@@ -118,6 +118,8 @@ pub(super) enum EditResult {
     /// The photo scrolled out of view first; request it again when shown.
     Skipped(PathBuf),
     Failed,
+    /// A preview could not be kept in the cache; it comes besides any result.
+    CacheError(String),
 }
 /// Edited previews on their own worker, so slow renders never delay the
 /// embedded previews that fill the grid first. The latest request goes
@@ -162,10 +164,13 @@ fn spawn_edited_with(
                 None => queue.pop().unwrap(),
             };
             let store = matches!(job, EditJob::Store { .. });
+            let mut cache_error = None;
             let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
                 EditJob::Store { path, tag, image } => {
-                    if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path)) {
-                        let _ = cache.store_tagged(&path, &tag, &identity, &image);
+                    if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path))
+                        && let Err(error) = cache.store_tagged(&path, &tag, &identity, &image)
+                    {
+                        cache_error = Some(error.to_string());
                     }
                     None
                 }
@@ -185,8 +190,10 @@ fn spawn_edited_with(
                             None => render(),
                         }
                         .ok()?;
-                        if let Some(cache) = &mut cache {
-                            let _ = cache.store_tagged(&path, &tag, &identity, &image);
+                        if let Some(cache) = &mut cache
+                            && let Err(error) = cache.store_tagged(&path, &tag, &identity, &image)
+                        {
+                            cache_error = Some(error.to_string());
                         }
                         Some(image)
                     });
@@ -201,10 +208,11 @@ fn spawn_edited_with(
                 cache = PreviewCache::open(&cache_path).ok();
                 (!store).then_some(EditResult::Failed)
             });
-            let Some(result) = result else {
-                continue;
-            };
-            if result_tx.send(result).is_err() {
+            let results = cache_error
+                .map(EditResult::CacheError)
+                .into_iter()
+                .chain(result);
+            if results.map(|r| result_tx.send(r)).any(|sent| sent.is_err()) {
                 break;
             }
             ctx.request_repaint();
@@ -253,6 +261,11 @@ impl Progress {
         if let Some(error) = &result.cache_error {
             self.cache_error = Some(error.clone());
         }
+    }
+
+    /// A preview could not be kept in the cache.
+    pub fn cache_failed(&mut self, error: String) {
+        self.cache_error = Some(error);
     }
 
     /// Worth a status line: still working, or something could not be prepared.
@@ -390,6 +403,29 @@ mod tests {
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
             EditResult::Ready(path, _) if path == works
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn edited_preview_cache_failures_are_reported() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("photo.png");
+        image::RgbImage::new(16, 16).save(&source)?;
+        let (tx, rx) = spawn_edited(
+            directory.path().join("previews.sqlite3"),
+            Wanted::default(),
+            egui::Context::default(),
+        );
+        // Larger than the cache keeps.
+        tx.send(EditJob::Store {
+            path: source,
+            tag: "edit".into(),
+            image: image::RgbImage::new(2048, 8),
+        })?;
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10))?,
+            EditResult::CacheError(_)
         ));
         Ok(())
     }
