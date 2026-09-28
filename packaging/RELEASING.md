@@ -151,10 +151,12 @@ Linux bundles imaging dependencies, preserves their notices, and leaves core
 OS/C++/OpenMP/zlib libraries to the host. The native source archives and build
 script are published alongside packages; application source is also attached.
 
-macOS packaging uses pinned `native-packages` 0.7.0. Linux staging uses nFPM
-2.47.0 directly because its private library payload and explicit runtime
-dependencies are specific to RAWmakase. There are no downstream repository
-credentials or automatic Homebrew/AUR publishers in this setup.
+Packaging uses pinned `native-packages` 0.7.0, configured in
+`native-packages.yaml`. `packaging/linux/bundle.py` stages the Linux archive
+with its private libraries; native-packages turns that archive into the DEB
+and RPM with nFPM 2.47.0, mapping each host library to its distribution
+package. There are no downstream repository credentials or automatic
+Homebrew/AUR publishers in this setup.
 
 ## AUR pause and updates
 

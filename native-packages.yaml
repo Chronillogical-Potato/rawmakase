@@ -6,12 +6,32 @@ nfpm:
   name: rawmakase
   maintainer: pch <https://github.com/pch>
   description: A fast, non-destructive RAW photo developer
+  homepage: https://github.com/pch/rawmakase
   license: MIT
 release:
   repository: pch/rawmakase
   prereleases: true
   checksums: SHA256SUMS
 version_file: Cargo.toml
+# Host libraries the Linux build links against; packaging/linux/bundle.py
+# bundles the imaging libraries and leaves these to the distribution.
+libraries:
+  libgomp.so.1: {deb: libgomp1, rpm: libgomp}
+  libz.so.1: {deb: zlib1g, rpm: zlib}
+  libvulkan.so.1: {deb: libvulkan1, rpm: vulkan-loader}
+  libxkbcommon.so.0: {deb: libxkbcommon0, rpm: libxkbcommon}
+  libxkbcommon-x11.so.0: {deb: libxkbcommon-x11-0, rpm: libxkbcommon-x11}
+  libwayland-client.so.0: {deb: libwayland-client0, rpm: libwayland-client}
+  libwayland-cursor.so.0: {deb: libwayland-cursor0, rpm: libwayland-cursor}
+  libwayland-egl.so.1: {deb: libwayland-egl1, rpm: libwayland-egl}
+  libX11.so.6: {deb: libx11-6, rpm: libX11}
+  libX11-xcb.so.1: {deb: libx11-xcb1, rpm: libX11-xcb}
+  libxcb.so.1: {deb: libxcb1, rpm: libxcb}
+  libXcursor.so.1: {deb: libxcursor1, rpm: libXcursor}
+  libXi.so.6: {deb: libxi6, rpm: libXi}
+  libXrandr.so.2: {deb: libxrandr2, rpm: libXrandr}
+  libEGL.so.1: {deb: libegl1, rpm: libglvnd-egl}
+  libGL.so.1: {deb: libgl1, rpm: libglvnd-glx}
 targets:
   macos-arm64:
     platform: macos
@@ -33,3 +53,71 @@ targets:
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
       output: 'rawmakase-v@VERSION@-macos-x86_64.dmg'
+  linux-amd64:
+    platform: linux
+    arch: amd64
+    libc: glibc
+    formats: [deb, rpm]
+    input:
+      local: dist/upload/rawmakase-@VERSION@-x86_64-linux.tar.gz
+      release_asset: rawmakase-@VERSION@-x86_64-linux.tar.gz
+    nfpm:
+      contents:
+        - src: '@PAYLOAD@/usr/bin/rawmakase'
+          dst: /usr/bin/rawmakase
+          file_info:
+            mode: 0755
+        - src: '@PAYLOAD@/usr/lib/rawmakase/'
+          dst: /usr/lib/rawmakase/
+          type: tree
+        - src: '@PAYLOAD@/usr/share/'
+          dst: /usr/share/
+          type: tree
+      # Loaded at runtime by the windowing and GPU stack, so not found by
+      # inspecting the binary.
+      overrides:
+        deb:
+          depends:
+            - libc6 (>= 2.39)
+            - libstdc++6 (>= 14)
+            - libgcc-s1
+            - libgomp1
+            - zlib1g
+            - libvulkan1
+            - libxkbcommon0
+            - libxkbcommon-x11-0
+            - libwayland-client0
+            - libwayland-cursor0
+            - libwayland-egl1
+            - libx11-6
+            - libx11-xcb1
+            - libxcb1
+            - libxcursor1
+            - libxi6
+            - libxrandr2
+            - libegl1
+            - libgl1
+          recommends:
+            - xdg-desktop-portal
+        rpm:
+          depends:
+            - glibc >= 2.39
+            - libstdc++ >= 14
+            - libgcc
+            - libgomp
+            - zlib
+            - vulkan-loader
+            - libxkbcommon
+            - libxkbcommon-x11
+            - libwayland-client
+            - libwayland-cursor
+            - libwayland-egl
+            - libX11
+            - libxcb
+            - libXcursor
+            - libXi
+            - libXrandr
+            - libglvnd-egl
+            - libglvnd-glx
+          recommends:
+            - xdg-desktop-portal

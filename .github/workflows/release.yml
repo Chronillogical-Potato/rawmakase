@@ -116,11 +116,17 @@ jobs:
           cp "$RUNNER_TEMP/native/sources/"* "$RUNNER_TEMP/native-sources/"
           cp packaging/native-deps.sh "$RUNNER_TEMP/native-sources/build/"
           tar -C "$RUNNER_TEMP/native-sources" -czf "dist/upload/rawmakase-$VERSION-native-sources.tar.gz" .
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
       - name: Build DEB and RPM
         run: |
+          sudo apt-get install -y libarchive-tools
           GOBIN="$RUNNER_TEMP/tools" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
-          "$RUNNER_TEMP/tools/nfpm" package --config packaging/linux/nfpm.yaml --packager deb --target dist/upload/
-          "$RUNNER_TEMP/tools/nfpm" package --config packaging/linux/nfpm.yaml --packager rpm --target dist/upload/
+          export PATH="$RUNNER_TEMP/tools:$PATH"
+          gem install native-packages --version 0.7.0 --no-document
+          native-packages build --version "$VERSION" --target linux-amd64 --defer-recipes --output "$RUNNER_TEMP/linux-packages"
+          cp "$RUNNER_TEMP/linux-packages/packages/linux-amd64/deb/"*.deb "$RUNNER_TEMP/linux-packages/packages/linux-amd64/rpm/"*.rpm dist/upload/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-linux
