@@ -91,9 +91,12 @@ impl Editor {
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
-            self.toolbar(ui);
+            // The Navigator column runs full height; the toolbar sits over
+            // the photo and the adjustments only.
             self.status_bar(ui);
             self.filmstrip(ui);
+            self.develop_left_panel(ui);
+            self.toolbar(ui);
             self.develop_panels(ui);
             self.finish_edit_frame(frame, &ctx);
         }
@@ -613,7 +616,7 @@ impl Editor {
         }
     }
 
-    fn develop_panels(&mut self, ui: &mut egui::Ui) {
+    fn develop_left_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::left("presets")
             .default_size(245.)
             .min_size(180.)
@@ -622,6 +625,8 @@ impl Editor {
                 self.navigator_ui(ui);
                 self.presets_ui(ui);
             });
+    }
+    fn develop_panels(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("adjustments")
             .default_size(330.)
             .min_size(300.)
