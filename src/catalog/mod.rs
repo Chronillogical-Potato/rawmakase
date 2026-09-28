@@ -540,10 +540,10 @@ impl Catalog {
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
     fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
-        let Some(sidecar) = crate::storage::load(file)? else {
+        let Some((sidecar, bitmaps)) = crate::storage::import(file)? else {
             return Ok(());
         };
-        for bitmap in crate::storage::bitmaps(file)? {
+        for bitmap in bitmaps {
             self.put_bitmap(&bitmap)?;
         }
         self.save_edit(id, file, &sidecar.recipe, &sidecar.export)

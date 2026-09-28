@@ -143,6 +143,35 @@ pub fn load(raw: &Path) -> Result<Option<Sidecar>> {
     load_at(raw, &data_dir())
 }
 fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
+    Ok(chosen(raw, store)?.map(|(mut sidecar, companion)| {
+        if let Some(companion) = companion {
+            sidecar.recipe = sidecar.recipe.with_local(companion.local);
+        }
+        sidecar
+    }))
+}
+/// A photo's sidecar edit and the bitmaps its spots and masks refer to, both from
+/// the store `load` chooses, for importing into the catalog.
+pub(crate) fn import(raw: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+    import_at(raw, &data_dir())
+}
+fn import_at(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+    let Some((mut sidecar, companion)) = chosen(raw, store)? else {
+        return Ok(None);
+    };
+    let mut bitmaps = Vec::new();
+    if let Some(companion) = companion {
+        bitmaps = companion
+            .bitmaps
+            .values()
+            .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
+            .collect::<Result<_>>()?;
+        sidecar.recipe = sidecar.recipe.with_local(companion.local);
+    }
+    Ok(Some((sidecar, bitmaps)))
+}
+/// The newer of the photo's two sidecar stores, and the spots and masks saved there.
+fn chosen(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Option<Companion>)>> {
     let id = Identity::read(raw)?;
     let primary = sidecar_path(raw);
     let backup = fallback_at(&id, store, "json");
@@ -165,14 +194,15 @@ fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
     } else {
         (a, local_path(raw))
     };
-    let Some(mut sidecar) = chosen else {
+    let Some(sidecar) = chosen else {
         return Ok(None);
     };
-    if local.exists() {
-        let companion = parse_companion(&local, &id)?;
-        sidecar.recipe = sidecar.recipe.with_local(companion.local);
-    }
-    Ok(Some(sidecar))
+    let companion = if local.exists() {
+        Some(parse_companion(&local, &id)?)
+    } else {
+        None
+    };
+    Ok(Some((sidecar, companion)))
 }
 pub fn save(raw: &Path, recipe: &Recipe, export: &ExportOptions) -> Result<PathBuf> {
     save_at(raw, recipe, export, &data_dir())
