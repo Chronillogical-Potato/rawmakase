@@ -18,7 +18,6 @@ pub struct LoadedHeader {
     pub export: ExportOptions,
     pub protected: bool,
     pub status: String,
-    pub files: Vec<PathBuf>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderStage {
@@ -68,11 +67,6 @@ pub enum Event {
         full: Arc<CameraImage>,
         status: String,
     },
-    Thumbnail {
-        id: u64,
-        path: PathBuf,
-        image: image::RgbImage,
-    },
     Rendered {
         id: u64,
         preview: Preview,
@@ -111,7 +105,6 @@ pub enum Preview {
     },
 }
 pub struct LoadJob {
-    pub catalog: bool,
     pub id: u64,
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,

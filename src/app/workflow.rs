@@ -41,12 +41,7 @@ impl Editor {
         self.presets.clear_document();
         self.view.clear_document();
         self.status = "Reading RAW…".into();
-        self.loader.submit(LoadJob {
-            catalog: photo.is_some(),
-            id,
-            path,
-            cancel,
-        });
+        self.loader.submit(LoadJob { id, path, cancel });
     }
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.
@@ -57,14 +52,15 @@ impl Editor {
         if !self.document.save.needs_save() {
             return true;
         }
-        if let Some(path) = &self.document.path {
-            let saved = if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo) {
-                l.catalog
-                    .save_edit(id, path, &self.document.recipe, &self.document.export)
-                    .map(|()| l.catalog.path.clone())
-            } else {
-                crate::storage::save(path, &self.document.recipe, &self.document.export)
-            };
+        if let (Some(path), Some(l), Some(id)) = (
+            &self.document.path,
+            &self.library,
+            self.document.catalog_photo,
+        ) {
+            let saved = l
+                .catalog
+                .save_edit(id, path, &self.document.recipe, &self.document.export)
+                .map(|()| l.catalog.path.clone());
             match saved {
                 Ok(p) => {
                     self.saved_to(&p);
@@ -92,12 +88,12 @@ impl Editor {
         let Some(raw) = self.document.path.clone() else {
             return;
         };
-        let target = match (&self.library, self.document.catalog_photo) {
-            (Some(l), Some(photo)) => super::autosave::Target::Catalog {
-                path: l.catalog.path.clone(),
-                photo,
-            },
-            _ => super::autosave::Target::Sidecar,
+        let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) else {
+            return;
+        };
+        let target = super::autosave::Target::Catalog {
+            path: l.catalog.path.clone(),
+            photo,
         };
         let job = super::autosave::Job {
             target,
@@ -291,24 +287,10 @@ impl Editor {
         self.preview.texture = picture;
     }
     pub(super) fn navigate(&mut self, delta: isize) {
-        if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo) {
-            if let Some(next) = l.navigate(id, delta as i32) {
-                self.develop_catalog_photo(next);
-            }
-            return;
-        }
-        if self.document.files.is_empty() {
-            return;
-        }
-        let i = self
-            .document
-            .path
-            .as_ref()
-            .and_then(|p| self.document.files.iter().position(|f| f == p))
-            .unwrap_or(0);
-        let next = (i as isize + delta).clamp(0, self.document.files.len() as isize - 1) as usize;
-        if next != i {
-            self.open(self.document.files[next].clone());
+        if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo)
+            && let Some(next) = l.navigate(id, delta as i32)
+        {
+            self.develop_catalog_photo(next);
         }
     }
 }

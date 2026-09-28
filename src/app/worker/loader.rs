@@ -15,48 +15,10 @@ use std::{
 struct FullJob {
     id: u64,
     path: std::path::PathBuf,
-    files: Vec<std::path::PathBuf>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     started: Instant,
     /// Decode cache key of `path`, when its identity could be read.
     key: Option<String>,
-    /// The full image came from the decode cache; only prefetch and thumbnails remain.
-    cached: bool,
-}
-/// Develops the photos after and before `pos` into the decode cache, so opening them
-/// next skips decoding. Runs on two threads, leaving the other cores to rendering,
-/// and stops when the load is cancelled.
-fn prefetch(files: &[std::path::PathBuf], pos: usize, cancel: &std::sync::atomic::AtomicBool) {
-    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
-    let Some(pool) = POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(2)
-            .thread_name(|i| format!("prefetch-{i}"))
-            .build()
-            .ok()
-    }) else {
-        return;
-    };
-    let cache = DecodeCache::default();
-    for file in [pos + 1, pos.wrapping_sub(1)]
-        .into_iter()
-        .filter_map(|i| files.get(i))
-    {
-        if cancel.load(Ordering::Relaxed) {
-            return;
-        }
-        let Ok(key) = DecodeCache::key(file) else {
-            continue;
-        };
-        if cache.contains(&key) {
-            continue;
-        }
-        let _ = pool.install(|| -> anyhow::Result<()> {
-            let image = raw::Raw::open(file)?.develop(false, cancel)?;
-            crate::develop::quality::recovered(&image, cancel)?;
-            cache.store(&key, &image)
-        });
-    }
 }
 fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
     Latest::new(move |job: FullJob| {
@@ -64,7 +26,7 @@ fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
             if job.cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            if !job.cached {
+            {
                 let image = Arc::new(raw::Raw::open(&job.path)?.develop(false, &job.cancel)?);
                 // Recovered here rather than by the first render, so the cache holds it.
                 crate::develop::quality::recovered(&image, &job.cancel)?;
@@ -82,26 +44,6 @@ fn full_loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<FullJob> {
                 );
                 if let Some(key) = &job.key {
                     let _ = DecodeCache::default().store(key, &image);
-                }
-            }
-            let pos = job.files.iter().position(|p| p == &job.path).unwrap_or(0);
-            prefetch(&job.files, pos, &job.cancel);
-            let start = pos.saturating_sub(16);
-            for file in job.files.iter().skip(start).take(32) {
-                if job.cancel.load(Ordering::Relaxed) {
-                    break;
-                }
-                if let Ok(im) = raw::Raw::open(file).and_then(|mut r| thumbnail(&mut r)) {
-                    let small = image::imageops::thumbnail(&im, 120, 72);
-                    send(
-                        &tx,
-                        &ctx,
-                        Event::Thumbnail {
-                            id: job.id,
-                            path: file.clone(),
-                            image: small,
-                        },
-                    );
                 }
             }
             Ok(())
@@ -125,41 +67,12 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
     let full = full_loader(tx.clone(), ctx.clone());
     Latest::new(move |job: LoadJob| {
         let result = (|| -> anyhow::Result<()> {
-            let files = if job.catalog {
-                vec![job.path.clone()]
-            } else {
-                crate::storage::list_raws(&job.path)?
-            };
-            let path = if job.path.is_dir() {
-                files
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("No RAW photos in this folder"))?
-            } else {
-                job.path.clone()
-            };
+            let path = job.path.clone();
             let mut raw = raw::Raw::open(&path)?;
             let metadata = raw.metadata.clone();
             let (profiles, warnings) = crate::camera_profiles::installed(&metadata);
-            let (recipe, export, protected, status) = match if job.catalog {
-                Ok(None)
-            } else {
-                crate::storage::load(&path)
-            } {
-                Ok(Some(s)) => (s.recipe, s.export, false, "Edits restored".into()),
-                Ok(None) => (
-                    Recipe::with_profiles(&metadata, &profiles),
-                    ExportOptions::default(),
-                    false,
-                    "Original".into(),
-                ),
-                Err(e) => (
-                    Recipe::with_profiles(&metadata, &profiles),
-                    ExportOptions::default(),
-                    true,
-                    format!("Sidecar protected: {e}"),
-                ),
-            };
+            // The catalog's edit replaces this once the header is installed.
+            let recipe = Recipe::with_profiles(&metadata, &profiles);
             send(
                 &tx,
                 &ctx,
@@ -168,10 +81,9 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                     path: path.clone(),
                     metadata,
                     recipe,
-                    export,
-                    protected,
-                    status,
-                    files: files.clone(),
+                    export: ExportOptions::default(),
+                    protected: false,
+                    status: "Original".into(),
                 })),
             );
             send(
@@ -225,15 +137,6 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                         status: format!("Opened from cache in {:.2}s", t.elapsed().as_secs_f32()),
                     },
                 );
-                full.submit(FullJob {
-                    id: job.id,
-                    path,
-                    files,
-                    cancel: job.cancel.clone(),
-                    started: t,
-                    key,
-                    cached: true,
-                });
                 return Ok(());
             }
             // Lightroom-style two stages: a half-size decode (about 0.2 s) makes
@@ -252,11 +155,9 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
             full.submit(FullJob {
                 id: job.id,
                 path,
-                files,
                 cancel: job.cancel.clone(),
                 started: t,
                 key,
-                cached: false,
             });
             Ok(())
         })();

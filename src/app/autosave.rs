@@ -17,12 +17,7 @@ pub(super) struct Job {
     pub export: ExportOptions,
 }
 pub(super) enum Target {
-    Catalog {
-        path: PathBuf,
-        photo: i64,
-    },
-    /// A sidecar beside the RAW, for photos opened outside a catalog.
-    Sidecar,
+    Catalog { path: PathBuf, photo: i64 },
 }
 /// Where the edit was saved, or why it was not.
 pub(super) type Done = Result<PathBuf, String>;
@@ -97,7 +92,6 @@ fn run(jobs: Receiver<Job>, done: Sender<Done>, ctx: egui::Context) {
 /// Keeps the catalog open between saves.
 fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
     match &job.target {
-        Target::Sidecar => crate::storage::save(&job.raw, &job.recipe, &job.export),
         Target::Catalog { path, photo } => {
             if catalog.as_ref().is_none_or(|c: &Catalog| &c.path != path) {
                 *catalog = None;

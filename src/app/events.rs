@@ -111,23 +111,6 @@ impl Editor {
                     }
                     self.schedule();
                 }
-                Event::Thumbnail {
-                    id,
-                    path: p,
-                    image: im,
-                } if id == self.load.id() && self.preview.thumbs.len() < 32 => {
-                    self.preview.thumbs.insert(
-                        p,
-                        ctx.load_texture(
-                            format!("thumb-{}", self.preview.thumbs.len()),
-                            egui::ColorImage::from_rgb(
-                                [im.width() as usize, im.height() as usize],
-                                im.as_raw(),
-                            ),
-                            egui::TextureOptions::LINEAR,
-                        ),
-                    );
-                }
                 Event::Rendered {
                     id,
                     preview,
@@ -244,7 +227,6 @@ impl Editor {
             export: ex,
             protected,
             status,
-            files,
             ..
         } = header;
         self.document.metadata = Some(m);
@@ -282,7 +264,6 @@ impl Editor {
             }
         }
         self.document.path = Some(p);
-        self.document.files = files;
         let _ = self.save_session();
     }
 }

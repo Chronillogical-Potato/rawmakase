@@ -557,7 +557,6 @@ fn catalog_header_keeps_the_recipe_resolved_by_the_loader() -> anyhow::Result<()
             export: Default::default(),
             protected: false,
             status: "Original".into(),
-            files: Vec::new(),
         })))
         .unwrap();
     editor.events(&ctx);

@@ -574,45 +574,6 @@ impl Editor {
             {
                 self.develop_catalog_photo(id);
             }
-        } else if self.document.catalog_photo.is_none() {
-            egui::Panel::bottom("filmstrip")
-                .exact_size(104.)
-                .show(ui, |ui| {
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let mut selected = None;
-                            for (i, p) in self.document.files.iter().enumerate() {
-                                ui.vertical(|ui| {
-                                    if let Some(t) = self.preview.thumbs.get(p) {
-                                        let response = ui.add(
-                                            egui::Button::image(
-                                                egui::Image::new(t)
-                                                    .fit_to_exact_size(Vec2::new(108., 64.)),
-                                            )
-                                            .selected(self.document.path.as_ref() == Some(p)),
-                                        );
-                                        if response.clicked() {
-                                            selected = Some(i);
-                                        }
-                                    } else if ui
-                                        .add_sized(
-                                            [108., 64.],
-                                            egui::Button::new("RAW")
-                                                .selected(self.document.path.as_ref() == Some(p)),
-                                        )
-                                        .clicked()
-                                    {
-                                        selected = Some(i);
-                                    }
-                                    ui.small(p.file_name().unwrap_or_default().to_string_lossy());
-                                });
-                            }
-                            if let Some(i) = selected {
-                                self.open(self.document.files[i].clone());
-                            }
-                        });
-                    });
-                });
         }
     }
 

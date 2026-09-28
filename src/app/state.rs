@@ -5,14 +5,13 @@ use crate::{
     raw::{CameraImage, Metadata},
 };
 use eframe::egui::{self, Vec2};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 #[derive(Default)]
 pub(super) struct Document {
     pub(super) save: super::save_state::SaveState,
     pub(super) history: super::history::History,
     pub(super) path: Option<PathBuf>,
-    pub(super) files: Vec<PathBuf>,
     pub(super) metadata: Option<Metadata>,
     image: Option<Arc<CameraImage>>,
     pub(super) recipe: Recipe,
@@ -97,7 +96,6 @@ pub(super) struct PreviewState {
     pub(super) region: Option<Picture>,
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<Picture>,
-    pub(super) thumbs: HashMap<PathBuf, egui::TextureHandle>,
     pub(super) histogram: [[u32; 256]; 3],
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
@@ -112,7 +110,6 @@ impl Default for PreviewState {
             texture: None,
             region: None,
             navigator: None,
-            thumbs: HashMap::new(),
             histogram: [[0; 256]; 3],
             status: String::new(),
             last_fit_edge: 0,
@@ -218,7 +215,6 @@ impl PreviewState {
         self.texture = None;
         self.region = None;
         self.navigator = None;
-        self.thumbs.clear();
         self.histogram = [[0; 256]; 3];
         self.status.clear();
         self.last_fit_edge = 0;
