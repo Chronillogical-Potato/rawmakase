@@ -83,6 +83,11 @@ pub enum Event {
         stage: RenderStage,
         status: String,
     },
+    /// The whole photo's histogram, for a render that showed a 100% region.
+    Histogram {
+        id: u64,
+        histogram: Box<[[u32; 256]; 3]>,
+    },
     Failed {
         id: u64,
         task: TaskKind,

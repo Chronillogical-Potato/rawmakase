@@ -131,11 +131,7 @@ impl Editor {
             });
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
-                .on_hover_text(if self.view.zoom100 {
-                    "Output histogram of the visible 100% region"
-                } else {
-                    "Output histogram of the displayed image"
-                });
+                .on_hover_text("Output histogram of the whole photo");
         });
     }
     /// Lightroom's tool strip: Crop, Remove and Masking, with the open tool's drawer

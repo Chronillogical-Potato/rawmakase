@@ -146,6 +146,9 @@ pub(in crate::app) fn renderer_with_backend(
     // Whether the last full 100% region was presented on the GPU quickly enough that a
     // reduced preview before it would only add work and a blurry frame.
     let mut quick_region = false;
+    // The whole photo's histogram for the last edit shown at 100%, so panning
+    // there does not render the whole photo again.
+    let mut whole_shown: Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)> = None;
     Latest::new(move |job: RenderJob| {
         let processor = processor.get_or_insert_with(|| match &backend {
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
@@ -352,6 +355,9 @@ pub(in crate::app) fn renderer_with_backend(
                     ),
                 }
                 showing_region = job.region.is_some();
+                if job.region.is_some() {
+                    whole_histogram(&job, processor, &fit, &mut whole_shown, &tx, &ctx)?;
+                }
                 return Ok(());
             }
             if let Some(region) = job.region {
@@ -391,6 +397,7 @@ pub(in crate::app) fn renderer_with_backend(
                 zoomed =
                     publish(out, RenderStage::Region, true, gpu).map(|out| Shown::new(&job, out));
                 showing_region = true;
+                whole_histogram(&job, processor, &fit, &mut whole_shown, &tx, &ctx)?;
                 return Ok(());
             }
             let out = processor.render_to(
@@ -420,6 +427,55 @@ pub(in crate::app) fn renderer_with_backend(
             );
         }
     })
+}
+
+type Histogram = Box<[[u32; 256]; 3]>;
+
+/// At 100% the view shows a region, but the histogram describes the whole
+/// photo, as Lightroom's does: from the Fit render of the same edit when there
+/// is one, and otherwise from a render at the Fit's size, which reuses the Fit
+/// view's cached stages.
+fn whole_histogram(
+    job: &RenderJob,
+    processor: &mut develop::PreviewRenderer,
+    fit: &Option<Shown>,
+    whole: &mut Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)>,
+    tx: &Sender<Event>,
+    ctx: &egui::Context,
+) -> anyhow::Result<()> {
+    let same = |image: &Arc<crate::raw::CameraImage>, recipe: &develop::Recipe| {
+        Arc::ptr_eq(image, &job.image) && *recipe == job.recipe
+    };
+    let histogram = if let Some((.., histogram)) = whole.as_ref().filter(|(i, r, _)| same(i, r)) {
+        histogram.clone()
+    } else if let Some(shown) = fit.as_ref().filter(|s| same(&s.image, &s.recipe)) {
+        match &shown.out {
+            Shot::Pixels(out) => Box::new(out.histogram()),
+            Shot::Frame { histogram, .. } => histogram.clone(),
+        }
+    } else {
+        let out = processor.render_to(
+            &job.image,
+            &job.recipe,
+            job.max_edge,
+            None,
+            &job.cancel,
+            None,
+        )?;
+        Box::new(out.pixels().histogram())
+    };
+    *whole = Some((job.image.clone(), job.recipe.clone(), histogram.clone()));
+    if !job.cancel.load(Ordering::Relaxed) {
+        send(
+            tx,
+            ctx,
+            Event::Histogram {
+                id: job.id,
+                histogram,
+            },
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -517,5 +573,51 @@ mod tests {
         let back = run(&worker, &rx, 6, &image, &recipe, None);
         assert_eq!(back.len(), 1);
         assert_ne!(back[0].1, fit[0].1);
+    }
+    #[test]
+    fn the_histogram_describes_the_whole_photo_at_100_percent() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = renderer(tx, egui::Context::default());
+        let image = image();
+        let mut recipe = develop::Recipe::default();
+        let region = Some([10, 10, 80, 60]);
+        // The histogram each job ends with, as the app keeps it.
+        let histogram = |id: u64, recipe: &develop::Recipe, region: Option<[u32; 4]>| {
+            worker.submit(RenderJob {
+                id,
+                image: image.clone(),
+                max_edge: 60,
+                cancel: Arc::new(AtomicBool::new(false)),
+                recipe: recipe.clone(),
+                region,
+                monitor: None,
+                clipping: false,
+                navigator: region.is_none(),
+                thumbnail: false,
+                overlay: Default::default(),
+            });
+            loop {
+                match rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap() {
+                    Event::Rendered {
+                        id: i,
+                        stage,
+                        histogram,
+                        ..
+                    } if i == id && region.is_none() && stage != RenderStage::Draft => {
+                        return histogram;
+                    }
+                    Event::Histogram { id: i, histogram } if i == id => return histogram,
+                    Event::Failed { error, .. } => panic!("{error}"),
+                    _ => {}
+                }
+            }
+        };
+        let fit = histogram(1, &recipe, None);
+        assert_eq!(histogram(2, &recipe, region), fit);
+        // Edited at 100%: the whole photo's new histogram, as Fit then shows it.
+        recipe.exposure = 0.5;
+        let edited = histogram(3, &recipe, region);
+        assert_ne!(edited, fit);
+        assert_eq!(histogram(4, &recipe, None), edited);
     }
 }

@@ -140,11 +140,15 @@ impl Editor {
                     stage,
                     status,
                 } if id == self.preview.task.id() => {
-                    self.preview.histogram = *histogram;
                     let region = matches!(
                         self.preview.pending_mode,
                         super::state::TextureMode::Region(_)
                     );
+                    // A region's own histogram would describe only what is
+                    // visible; the whole photo's follows as `Histogram`.
+                    if !region {
+                        self.preview.histogram = *histogram;
+                    }
                     match preview {
                         worker::Preview::Pixels {
                             image,
@@ -171,6 +175,9 @@ impl Editor {
                         }
                     }
                     self.preview.status = status;
+                }
+                Event::Histogram { id, histogram } if id == self.preview.task.id() => {
+                    self.preview.histogram = *histogram;
                 }
                 Event::Failed {
                     id,
