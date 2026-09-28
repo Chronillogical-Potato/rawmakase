@@ -8,35 +8,10 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
-    io::Read,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Identity {
-    pub size: u64,
-    pub modified_ns: u128,
-    pub prefix_hash: String,
-}
-impl Identity {
-    pub fn read(path: &Path) -> Result<Self> {
-        let m = fs::metadata(path)?;
-        let mut bytes = Vec::new();
-        File::open(path)?.take(65536).read_to_end(&mut bytes)?;
-        let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
-            (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
-        });
-        Ok(Self {
-            size: m.len(),
-            modified_ns: m.modified()?.duration_since(UNIX_EPOCH)?.as_nanos(),
-            prefix_hash: format!("{hash:016x}"),
-        })
-    }
-    fn key(&self) -> String {
-        format!("{}-{}-{}", self.prefix_hash, self.size, self.modified_ns)
-    }
-}
+pub use super::identity::Identity;
 /// A photo's saved edit. Unknown fields (from a newer release) are kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Sidecar {

@@ -2,6 +2,7 @@
 pub mod bitmaps;
 mod files;
 mod format;
+mod identity;
 mod session;
 mod sidecar;
 
