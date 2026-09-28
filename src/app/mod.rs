@@ -46,6 +46,8 @@ pub struct Editor {
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     status: String,
+    /// What a running catalog import or open is doing.
+    catalog_work: Option<String>,
     /// Progress of a running profile or preset import.
     importing: Option<std::sync::Arc<std::sync::Mutex<String>>>,
     close_confirm: bool,
@@ -168,6 +170,7 @@ impl Editor {
                 session.develop,
             ),
             status: "Open a RAW photo to begin".into(),
+            catalog_work: None,
             importing: None,
             close_confirm: false,
         };

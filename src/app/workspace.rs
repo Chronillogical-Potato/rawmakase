@@ -69,6 +69,7 @@ impl Editor {
         self.poll_updates(&ctx);
         self.themes.poll(&ctx);
         if let Some(library) = &mut self.library {
+            library.publish_shown();
             library.poll_previews(&ctx);
         }
         // Preferences is modal: keys go to it, not to the photo behind.
@@ -333,12 +334,17 @@ impl Editor {
         let ctx = ui.ctx().clone();
         egui::Panel::bottom("library-status").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.small(
-                    self.library
-                        .as_ref()
-                        .filter(|l| !l.message.is_empty())
-                        .map_or(self.status.as_str(), |l| l.message.as_str()),
-                );
+                if let Some(work) = &self.catalog_work {
+                    ui.add(egui::Spinner::new().size(11.));
+                    ui.small(work);
+                } else {
+                    ui.small(
+                        self.library
+                            .as_ref()
+                            .filter(|l| !l.message.is_empty())
+                            .map_or(self.status.as_str(), |l| l.message.as_str()),
+                    );
+                }
                 self.preview_progress(ui);
             });
         });

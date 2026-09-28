@@ -67,6 +67,11 @@ impl Editor {
                         else {
                             return Ok(None);
                         };
+                        let _ = tx.send(Event::CatalogWorking(format!(
+                            "Importing {}…",
+                            source.file_name().unwrap_or_default().to_string_lossy()
+                        )));
+                        ctx.request_repaint();
                         Some(crate::catalog::lightroom::import_lightroom(
                             &source,
                             &destination,
@@ -98,6 +103,13 @@ impl Editor {
                     }
                 })
             })();
+            if let Ok(Some(path)) = &result {
+                let _ = tx.send(Event::CatalogWorking(format!(
+                    "Opening {}…",
+                    path.file_stem().unwrap_or_default().to_string_lossy()
+                )));
+                ctx.request_repaint();
+            }
             let event = match result {
                 Ok(Some(path)) => Event::CatalogReady(
                     crate::app::library::Library::load(&path, ctx.clone())

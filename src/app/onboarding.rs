@@ -244,6 +244,16 @@ impl Editor {
                     }
                 });
             });
+            if let Some(work) = &self.catalog_work {
+                ui.add_space(10.);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().size(12.).color(theme::gray(170)));
+                    hint(
+                        ui,
+                        &format!("{work} This can take a few minutes for a large catalog."),
+                    );
+                });
+            }
         });
 
         // Profiles before presets: many presets name a profile.

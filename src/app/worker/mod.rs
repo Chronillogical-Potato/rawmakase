@@ -43,6 +43,8 @@ pub enum TaskKind {
 
 pub enum Event {
     DialogClosed,
+    /// A catalog import or open is under way, as a status line.
+    CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
     Open(PathBuf),
     Monitor(PathBuf),

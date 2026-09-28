@@ -11,7 +11,14 @@ impl Editor {
         self.import_progress(ctx);
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::CatalogReady(result) => self.catalog_ready(result),
+                Event::CatalogWorking(message) => {
+                    self.status = message.clone();
+                    self.catalog_work = Some(message);
+                }
+                Event::CatalogReady(result) => {
+                    self.catalog_work = None;
+                    self.catalog_ready(result);
+                }
 
                 Event::Open(p) => {
                     self.activity.finish_dialog();

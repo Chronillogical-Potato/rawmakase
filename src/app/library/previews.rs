@@ -2,8 +2,12 @@
 use crate::{catalog::preview_cache::PreviewCache, storage::Identity};
 use eframe::egui;
 use std::{
+    collections::HashSet,
     path::PathBuf,
-    sync::mpsc::{self, Receiver, SyncSender},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, SyncSender},
+    },
 };
 
 pub(super) struct PreviewResult {
@@ -88,22 +92,59 @@ pub(super) enum EditJob {
         image: image::RgbImage,
     },
 }
+/// Photos shown in the grid or filmstrip in the last frame. Edited previews
+/// are rendered only for these, so scrolling past photos leaves no backlog.
+pub(super) type Wanted = Arc<Mutex<HashSet<PathBuf>>>;
+/// What an edited preview job came to.
+pub(super) enum EditResult {
+    Ready(PathBuf, image::RgbImage),
+    /// The photo scrolled out of view first; request it again when shown.
+    Skipped(PathBuf),
+    Failed,
+}
 /// Edited previews on their own worker, so slow renders never delay the
-/// embedded previews that fill the grid first.
+/// embedded previews that fill the grid first. The latest request goes
+/// first, and renders run on two threads so browsing stays responsive.
 pub(super) fn spawn_edited(
     cache_path: PathBuf,
+    wanted: Wanted,
     ctx: egui::Context,
-) -> (mpsc::Sender<EditJob>, Receiver<PreviewResult>) {
+) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
     let (tx, rx) = mpsc::channel::<EditJob>();
     let (result_tx, result_rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .thread_name(|i| format!("edited-preview-{i}"))
+            .build()
+            .ok();
         let mut cache = PreviewCache::open(&cache_path).ok();
-        while let Ok(job) = rx.recv() {
-            match job {
+        let mut queue = Vec::new();
+        loop {
+            if queue.is_empty() {
+                match rx.recv() {
+                    Ok(job) => queue.push(job),
+                    Err(_) => break,
+                }
+            }
+            queue.extend(rx.try_iter());
+            // Stores first: they are cheap and keep Develop's renders.
+            let job = match queue
+                .iter()
+                .position(|j| matches!(j, EditJob::Store { .. }))
+            {
+                Some(i) => queue.remove(i),
+                None => queue.pop().unwrap(),
+            };
+            let result = match job {
                 EditJob::Store { path, tag, image } => {
                     if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path)) {
                         let _ = cache.store_tagged(&path, &tag, &identity, &image);
                     }
+                    continue;
+                }
+                EditJob::Render { path, .. } if !wanted.lock().unwrap().contains(&path) => {
+                    EditResult::Skipped(path)
                 }
                 EditJob::Render { path, source } => {
                     let tag = source.tag();
@@ -112,26 +153,27 @@ pub(super) fn spawn_edited(
                         .and_then(|c| c.load_tagged(&path, &tag).ok().flatten());
                     let image = cached.or_else(|| {
                         let identity = Identity::read(&path).ok()?;
-                        let image = render_edited(&path, &source).ok()?;
+                        let render = || render_edited(&path, &source);
+                        let image = match &pool {
+                            Some(pool) => pool.install(render),
+                            None => render(),
+                        }
+                        .ok()?;
                         if let Some(cache) = &mut cache {
                             let _ = cache.store_tagged(&path, &tag, &identity, &image);
                         }
                         Some(image)
                     });
-                    if image.is_some()
-                        && result_tx
-                            .send(PreviewResult {
-                                path,
-                                image,
-                                cache_error: None,
-                            })
-                            .is_err()
-                    {
-                        break;
+                    match image {
+                        Some(image) => EditResult::Ready(path, image),
+                        None => EditResult::Failed,
                     }
-                    ctx.request_repaint();
                 }
+            };
+            if result_tx.send(result).is_err() {
+                break;
             }
+            ctx.request_repaint();
         }
     });
     (tx, result_rx)
@@ -184,16 +226,29 @@ impl Progress {
         self.completed < self.total || self.failed > 0 || self.cache_error.is_some()
     }
     /// One line of small text, the same height as the status row it sits in.
-    pub fn show(&self, ui: &mut egui::Ui) {
-        if self.total == 0 {
-            return;
+    /// In a right-to-left layout, so the spinner comes first and sits right.
+    pub fn show(&self, ui: &mut egui::Ui, edits_pending: usize) {
+        let building = self.completed < self.total || edits_pending > 0;
+        if building {
+            ui.add(egui::Spinner::new().size(11.));
         }
-        if let Some(error) = &self.cache_error {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                egui::RichText::new("Preview cache could not be updated").small(),
-            )
-            .on_hover_text(error);
+        if edits_pending > 0 {
+            ui.small(format!(
+                "Rendering {edits_pending} edited {}",
+                if edits_pending == 1 {
+                    "preview"
+                } else {
+                    "previews"
+                }
+            ))
+            .on_hover_text(
+                "Photos with Lightroom or RAWmakase edits are rendered with them, \
+                 visible ones first. Each is kept, so this happens once.",
+            );
+        }
+        if self.completed < self.total {
+            ui.small(format!("Preparing previews {} / {}", self.completed, self.total))
+                .on_hover_text("Cached previews load first; missing ones are built in the background as you browse.");
         }
         if self.failed > 0 {
             ui.small(format!("{} previews unavailable", self.failed))
@@ -201,9 +256,12 @@ impl Progress {
                     "The original may be offline, damaged, or have no usable embedded preview.",
                 );
         }
-        if self.completed < self.total {
-            ui.small(format!("Preparing previews {} / {}", self.completed, self.total))
-                .on_hover_text("Cached previews load first; missing ones are built in the background as you browse.");
+        if let Some(error) = &self.cache_error {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                egui::RichText::new("Preview cache could not be updated").small(),
+            )
+            .on_hover_text(error);
         }
     }
 }

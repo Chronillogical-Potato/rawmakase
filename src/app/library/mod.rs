@@ -52,8 +52,14 @@ pub struct Library {
     thumb_rx: Receiver<previews::PreviewResult>,
     /// Edited previews: rendered from each photo's edit on a second worker.
     edit_tx: std::sync::mpsc::Sender<previews::EditJob>,
-    edit_rx: Receiver<previews::PreviewResult>,
+    edit_rx: Receiver<previews::EditResult>,
     edited_requested: HashSet<PathBuf>,
+    /// Photos asking for an edited preview this frame, and last frame's
+    /// as the worker sees them.
+    edit_seen: HashSet<PathBuf>,
+    edit_wanted: previews::Wanted,
+    /// Edited previews queued and not yet back.
+    edits_pending: usize,
     /// Photos whose shown thumbnail already reflects their edit.
     edited_ready: HashSet<PathBuf>,
     preview_progress: previews::Progress,
@@ -70,8 +76,12 @@ impl Library {
             crate::catalog::preview_cache::PreviewCache::path(),
             ctx.clone(),
         );
-        let (edit_tx, edit_rx) =
-            previews::spawn_edited(crate::catalog::preview_cache::PreviewCache::path(), ctx);
+        let edit_wanted = previews::Wanted::default();
+        let (edit_tx, edit_rx) = previews::spawn_edited(
+            crate::catalog::preview_cache::PreviewCache::path(),
+            edit_wanted.clone(),
+            ctx,
+        );
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -105,6 +115,9 @@ impl Library {
             edit_tx,
             edit_rx,
             edited_requested: HashSet::new(),
+            edit_seen: HashSet::new(),
+            edit_wanted,
+            edits_pending: 0,
             edited_ready: HashSet::new(),
             preview_progress: Default::default(),
             message: String::new(),
@@ -567,12 +580,25 @@ impl Library {
             }
         }
         while let Ok(result) = self.edit_rx.try_recv() {
-            if let Some(im) = result.image {
-                self.edited_ready.insert(result.path.clone());
-                self.insert_thumb(ctx, result.path, &im);
+            self.edits_pending = self.edits_pending.saturating_sub(1);
+            match result {
+                previews::EditResult::Ready(path, im) => {
+                    self.edited_ready.insert(path.clone());
+                    self.insert_thumb(ctx, path, &im);
+                }
+                previews::EditResult::Skipped(path) => {
+                    self.edited_requested.remove(&path);
+                }
+                previews::EditResult::Failed => {}
             }
         }
     }
+    /// Hands the worker the photos shown last frame. Call once per frame.
+    pub(super) fn publish_shown(&mut self) {
+        let shown = std::mem::take(&mut self.edit_seen);
+        *self.edit_wanted.lock().unwrap() = shown;
+    }
+
     fn insert_thumb(&mut self, ctx: &egui::Context, path: PathBuf, im: &image::RgbImage) {
         if !self.thumbs.contains_key(&path) {
             while self.thumbs.len() >= 192 {
@@ -599,6 +625,7 @@ impl Library {
     }
     /// Queues an edited preview for a photo with a saved or Lightroom edit.
     fn request_edited(&mut self, photo: &Photo) {
+        self.edit_seen.insert(photo.path.clone());
         if !self.edited_requested.insert(photo.path.clone()) {
             return;
         }
@@ -608,11 +635,16 @@ impl Library {
         let source = recipe
             .map(previews::EditSource::Recipe)
             .or(lightroom.map(previews::EditSource::Lightroom));
-        if let Some(source) = source {
-            let _ = self.edit_tx.send(previews::EditJob::Render {
-                path: photo.path.clone(),
-                source,
-            });
+        if let Some(source) = source
+            && self
+                .edit_tx
+                .send(previews::EditJob::Render {
+                    path: photo.path.clone(),
+                    source,
+                })
+                .is_ok()
+        {
+            self.edits_pending += 1;
         }
     }
     /// Shows Develop's latest render as the photo's thumbnail and caches it
@@ -695,10 +727,10 @@ impl Library {
         self.thumbs.get(path)
     }
     pub(super) fn preview_progress_active(&self) -> bool {
-        self.preview_progress.active()
+        self.preview_progress.active() || self.edits_pending > 0
     }
     pub(super) fn preview_progress(&self, ui: &mut egui::Ui) {
-        self.preview_progress.show(ui);
+        self.preview_progress.show(ui, self.edits_pending);
     }
     fn filter_bar(&mut self, ui: &mut egui::Ui) {
         use crate::app::photo_metadata::{LABELS, label_color};
