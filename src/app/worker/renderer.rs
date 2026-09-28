@@ -1,4 +1,4 @@
-use super::{Event, Latest, Preview, RenderJob, RenderStage, TaskKind, send};
+use super::{Event, Latest, Preview, RenderJob, RenderStage, RetiredTextures, TaskKind, send};
 use crate::{
     develop::{self, gpu, quality::Output},
     raw,
@@ -141,11 +141,18 @@ pub(in crate::app) fn renderer_with_backend(
         }));
         if let Err(panic) = rendered {
             // Whatever the panic interrupted is suspect: start over from nothing.
-            // The UI stops drawing presented textures before they are freed.
-            if state.textures.as_ref().is_some_and(|t| !t.ids.is_empty()) {
-                send(&tx, &ctx, Event::RendererReset);
+            // The UI frees the presented textures once it stops drawing them.
+            if let Some(Textures { state: gpu, ids }) = state.textures.take()
+                && !ids.is_empty()
+            {
+                let ids = ids.into_values().collect();
+                send(
+                    &tx,
+                    &ctx,
+                    Event::RendererReset(RetiredTextures { state: gpu, ids }),
+                );
             }
-            state.reset();
+            state = RendererState::default();
             send(
                 &tx,
                 &ctx,
@@ -179,18 +186,6 @@ struct RendererState {
     /// The whole photo's histogram for the last edit shown at 100%, so panning
     /// there does not render the whole photo again.
     whole_shown: Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)>,
-}
-impl RendererState {
-    /// Drops everything, unregistering the textures frames were presented into.
-    fn reset(&mut self) {
-        if let Some(textures) = &mut self.textures {
-            let mut renderer = textures.state.renderer.write();
-            for (_, id) in textures.ids.drain() {
-                renderer.free_texture(&id);
-            }
-        }
-        *self = Self::default();
-    }
 }
 
 fn render(
