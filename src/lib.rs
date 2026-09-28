@@ -4,8 +4,8 @@
 //! for DCP transforms, and [`develop`] for recipes and rendering. [`xmp`] translates
 //! Adobe settings; [`presets`] manages reusable native and XMP presets.
 //!
-//! [`storage`] owns sidecars and session persistence, [`catalog`] owns the photo
-//! database and Lightroom import, and [`export`] writes finished images.
+//! [`storage`] owns session persistence and legacy sidecar import, [`catalog`] owns
+//! the photo database, edits and Lightroom import, and [`export`] writes finished images.
 //! [`app`] composes these APIs into the desktop editor; [`comparison`] provides
 //! reference-image validation and [`platform`] isolates OS integration.
 //!

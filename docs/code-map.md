@@ -18,7 +18,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/catalog/lightroom/develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/app/save_state.rs), [background saver](../src/app/autosave.rs), [sidecars](../src/storage/sidecar.rs), [format migration](../src/storage/format.rs) | Catalog edits, native presets and persistence tests |
+| Change autosave or saved formats | [Save policy](../src/app/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/storage/sidecar.rs), [format migration](../src/storage/format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -112,7 +112,8 @@ recipes and the installed preset collection; they do not own the renderer.
 | [files.rs](../src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
 | [format.rs](../src/storage/format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
-| [sidecar.rs](../src/storage/sidecar.rs) | RAW fingerprints, sidecar loading/saving, fallback storage and conflict protection; spots and masks in the companion `*.rawmakase-local.json`. |
+| [identity.rs](../src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
+| [sidecar.rs](../src/storage/sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The library API can still write them. |
 | [session.rs](../src/storage/session.rs) | Last-opened path and monitor-profile preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, folders, photos, collections, metadata, edits, relinking and folder ingestion. |
 | [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
@@ -151,7 +152,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
-| [export.rs](../src/app/export.rs) | Export dialog, remembered export settings, background exports and their progress. |
+| [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
 | [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking; hands the pointer to the active tool. |
@@ -171,9 +172,9 @@ above rather than implementing SQL, file formats or pixel processing.
 | File | Responsibility |
 | --- | --- |
 | [worker/mod.rs](../src/app/worker/mod.rs) | Named event payloads, load/render jobs, task kinds, render stages and repaint notification. |
-| [worker/latest.rs](../src/app/worker/latest.rs) | Single-slot mailbox: submitting a new job replaces pending work rather than growing a queue. |
-| [worker/loader.rs](../src/app/worker/loader.rs) | RAW metadata/profile/sidecar loading, embedded preview, the half-size then full decoded image and neighboring thumbnails. |
-| [worker/renderer.rs](../src/app/worker/renderer.rs) | Fit previews, reduced-then-full 100% regions, cancellation, monitor conversion and clipping overlays. |
+| [worker/latest.rs](../src/app/worker/latest.rs) | Single-slot mailbox: submitting a new job replaces pending work rather than growing a queue. A panicking job does not end the thread. |
+| [worker/loader.rs](../src/app/worker/loader.rs) | RAW metadata and profile loading, embedded preview, the half-size then full decoded image and neighboring thumbnails. |
+| [worker/renderer.rs](../src/app/worker/renderer.rs) | Fit previews, reduced-then-full 100% regions, cancellation, monitor conversion and clipping overlays. After a panic it reports the job failed and rebuilds all of its state. |
 
 ## How an operation moves through the app
 
@@ -189,9 +190,9 @@ above rather than implementing SQL, file formats or pixel processing.
    followed by a full-quality fit or region result.
 3. **Save edits:** workspace autosave and navigation/close flushing call
    `workflow`; autosave writes in the background (`autosave`), and flushing
-   waits for it before saving synchronously. Catalog photos save through `catalog`; standalone photos use
-   `storage::sidecar`. Protected edits cannot autosave, and failed writes remain
-   pending for retry. Presets are separately saved reusable recipes.
+   waits for it before saving synchronously. Photos are edited only through the
+   Library, so edits always save through `catalog`. An edit the catalog cannot load
+   is protected and cannot autosave, and failed writes remain pending for retry. Presets are separately saved reusable recipes.
 4. **Export:** foreground activity coordinates destination/overwrite handling.
    The export job captures the recipe, renders through the development API, then
    calls `export` to encode and publish. Output embeds sRGB independently of the
@@ -213,7 +214,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | Data | Location and lifetime |
 | --- | --- |
 | Original RAW and Lightroom catalog | User-selected source files; treated as read-only. |
-| Standalone edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks (experimental); identity-keyed JSON under the data directory's `sidecars/` when adjacent storage is unavailable. Protected conflicts must not be overwritten. |
+| Legacy sidecar edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks, or identity-keyed JSON under the data directory's `sidecars/`, saved by releases before 0.1.8. Imported into the catalog when their folder is added and left on disk unchanged. |
 | Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots and masks are in the `local_edits` table, raster data in `bitmaps`. |
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF destination. |
 | Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
