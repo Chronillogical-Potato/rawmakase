@@ -671,9 +671,7 @@ impl Editor {
     }
 
     fn pending_work(&mut self, ctx: &egui::Context) {
-        if self.document.save.ready() && !self.document.history.in_gesture() {
-            self.flush();
-        }
+        self.autosave(ctx);
         if self.document.save.needs_save() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }

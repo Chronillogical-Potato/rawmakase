@@ -42,7 +42,12 @@ impl Editor {
             cancel,
         });
     }
+    /// Saves the edit now, after any background save in flight; false if
+    /// it could not be saved.
     pub(super) fn flush(&mut self) -> bool {
+        if let Some(done) = self.autosave.wait() {
+            self.background_saved(done);
+        }
         if !self.document.save.needs_save() {
             return true;
         }
@@ -56,10 +61,7 @@ impl Editor {
             };
             match saved {
                 Ok(p) => {
-                    self.status = format!(
-                        "Saved {}",
-                        p.file_name().unwrap_or_default().to_string_lossy()
-                    );
+                    self.saved_to(&p);
                     self.document.save.saved();
                 }
                 Err(e) => {
@@ -70,6 +72,56 @@ impl Editor {
             }
         }
         true
+    }
+    /// Autosave: collects a finished background save and, once the edit
+    /// has settled, starts the next.
+    pub(super) fn autosave(&mut self, ctx: &egui::Context) {
+        if let Some(done) = self.autosave.poll() {
+            self.background_saved(done);
+        }
+        if !self.document.save.ready() || self.document.history.in_gesture() || self.autosave.busy()
+        {
+            return;
+        }
+        let Some(raw) = self.document.path.clone() else {
+            return;
+        };
+        let target = match (&self.library, self.document.catalog_photo) {
+            (Some(l), Some(photo)) => super::autosave::Target::Catalog {
+                path: l.catalog.path.clone(),
+                photo,
+            },
+            _ => super::autosave::Target::Sidecar,
+        };
+        let job = super::autosave::Job {
+            target,
+            raw,
+            recipe: self.document.recipe.clone(),
+            export: self.document.export.clone(),
+        };
+        match self.autosave.submit(job, ctx) {
+            Ok(()) => self.document.save.saving(),
+            // No saver thread: save here, as before.
+            Err(_) => {
+                self.flush();
+            }
+        }
+    }
+    fn background_saved(&mut self, done: super::autosave::Done) {
+        let result = done.as_ref().map(|_| ()).map_err(Clone::clone);
+        if !self.document.save.finished(result) {
+            return;
+        }
+        match done {
+            Ok(p) => self.saved_to(&p),
+            Err(e) => self.status = format!("Edits not saved: {e}"),
+        }
+    }
+    fn saved_to(&mut self, path: &std::path::Path) {
+        self.status = format!(
+            "Saved {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
     }
     pub(super) fn history(&mut self, old: Recipe) {
         if self.document.history.record(old, &self.document.recipe) {

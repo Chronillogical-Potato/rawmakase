@@ -128,6 +128,9 @@ The deeper review also fixed concrete correctness issues:
   until an actual saved catalog edit replaces it.
 - Reloading preset compatibility cancels an outstanding hover render.
 - Protected edits never enter autosave; failed saves remain pending for retry.
+- Autosave writes on its own thread and catalog connection, so a slow disk
+  cannot stall editing. Saves before navigation and close wait for it, then
+  save synchronously.
 
 Existing public paths such as `core`, `profile`, `io`, `library`, `worker`,
 `curve`, `effects` and `quality` remain compatibility exports. The old catalog

@@ -41,6 +41,7 @@ pub struct Editor {
     updates: updates::Updates,
     themes: theme::Themes,
     exports: export::Exports,
+    autosave: autosave::Autosave,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<(String, Option<i64>, bool)>,
     /// That position as last written to the session.
@@ -163,6 +164,7 @@ impl Editor {
                 fastframe_text::TextRendering::platform_default(),
             ),
             exports: Default::default(),
+            autosave: Default::default(),
             restore: Some((
                 session.library_source.clone(),
                 session.selected_photo,
@@ -336,6 +338,7 @@ mod task;
 
 mod activity;
 
+mod autosave;
 mod save_state;
 
 mod editing;

@@ -5,6 +5,65 @@ use crate::raw::{CameraImage, Metadata};
 use eframe::egui::{Pos2, Rect};
 use std::sync::Arc;
 #[test]
+fn autosave_writes_the_catalog_in_the_background() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    let mut c = crate::catalog::Catalog::create(&catalog)?;
+    c.add_folder(&photos)?;
+    drop(c);
+    let ctx = egui::Context::default();
+    let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
+    let id = l.photos[0].id;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    let settled = || {
+        save_state::SaveState::Pending(
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+        )
+    };
+    editor.document.recipe.exposure = 0.8;
+    editor.document.save = settled();
+    editor.autosave(&ctx);
+    assert!(editor.autosave.busy());
+    // Edited again while that save runs: still unsaved once it finishes.
+    editor.document.recipe.exposure = 1.1;
+    editor.document.save.mark_changed();
+    while editor.autosave.busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        editor.autosave(&ctx);
+    }
+    assert!(matches!(
+        editor.document.save,
+        save_state::SaveState::Pending(_)
+    ));
+    let saved = |editor: &Editor| -> anyhow::Result<f32> {
+        let library = editor.library.as_ref().unwrap();
+        Ok(library
+            .catalog
+            .load_edit(id, &photo)?
+            .unwrap()
+            .recipe
+            .exposure)
+    };
+    assert_eq!(saved(&editor)?, 0.8);
+    // A save before navigation waits for the one in flight, then saves.
+    editor.document.save = settled();
+    editor.autosave(&ctx);
+    editor.document.recipe.exposure = 1.4;
+    editor.document.save.mark_changed();
+    assert!(editor.flush());
+    assert!(!editor.autosave.busy());
+    assert!(!editor.document.save.needs_save());
+    assert_eq!(saved(&editor)?, 1.4);
+    Ok(())
+}
+#[test]
 fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let photos = dir.path().join("photos");
