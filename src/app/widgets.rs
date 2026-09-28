@@ -820,7 +820,7 @@ pub(super) fn segment_bar<const N: usize>(
     selected: Option<usize>,
     style: &SegmentStyle,
 ) -> [egui::Response; N] {
-    let width = segments_width(ui, &labels, style);
+    let width = segments_width(ui, &labels, style, 12.);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, style.height.max(28.)), Sense::hover());
     segment_track(ui, rect, response.id, &labels, selected, style)
@@ -834,7 +834,7 @@ fn control_radius(height: f32) -> f32 {
 }
 /// The narrowest track that fits every label untruncated: equal segments as
 /// wide as the widest label plus padding, and the pill's inset.
-fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
+fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle, padding: f32) -> f32 {
     let font = egui::FontId::proportional(style.font);
     let widest = labels
         .iter()
@@ -845,7 +845,7 @@ fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
                 .x
         })
         .fold(0., f32::max);
-    labels.len() as f32 * (widest + 24.) + 4.
+    labels.len() as f32 * (widest + 2. * padding) + 4.
 }
 /// The shared look of every segmented control: a dark track holding
 /// equal-width segments, with a raised pill that slides to the selected one
@@ -1026,7 +1026,9 @@ pub(super) fn action_button(
         response
     }
 }
-/// Compact segmented control at least `width` wide, for panels and filters.
+/// Compact segmented control for panels and filters: at least `width` wide
+/// with roomy segments, but never wider than the space left in the panel;
+/// there the padding shrinks first so labels stay whole.
 pub(super) fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -1034,7 +1036,9 @@ pub(super) fn segmented<T: PartialEq + Copy>(
     width: f32,
 ) -> bool {
     let labels: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
-    let width = width.max(segments_width(ui, &labels, &COMPACT_SEGMENTS));
+    let preferred = segments_width(ui, &labels, &COMPACT_SEGMENTS, 12.);
+    let tightest = segments_width(ui, &labels, &COMPACT_SEGMENTS, 4.);
+    let width = width.max(preferred).min(ui.available_width().max(tightest));
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, COMPACT_SEGMENTS.height), Sense::hover());
     let selected = options.iter().position(|(option, _)| *option == *value);
