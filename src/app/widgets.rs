@@ -793,11 +793,11 @@ fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
 pub(super) fn workspace_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
         label.into(),
-        egui::FontId::proportional(16.),
+        egui::FontId::proportional(13.),
         theme::gray(255),
     );
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(galley.size().x + 24., 28.), Sense::click());
+        ui.allocate_exact_size(Vec2::new(galley.size().x + 20., 28.), Sense::click());
     let color = theme::gray(if selected {
         248
     } else if !ui.is_enabled() {
@@ -813,7 +813,7 @@ pub(super) fn workspace_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> e
         // Accent bar under the active module.
         let bar = Rect::from_center_size(
             Pos2::new(rect.center().x, rect.bottom() + 5.),
-            Vec2::new(rect.width() - 20., 2.),
+            Vec2::new(rect.width() - 16., 2.),
         );
         ui.painter()
             .rect_filled(bar, 1., Color32::from_rgb(120, 165, 210));

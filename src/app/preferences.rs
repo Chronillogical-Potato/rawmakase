@@ -601,7 +601,7 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
         ui.painter(),
         super::icons::Icon::Settings,
         rect.center(),
-        18.,
+        15.,
         color,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

@@ -169,7 +169,7 @@ impl Editor {
                     // Every element is painted in a 28 px slot so all centers line up.
                     let wordmark = ui.painter().layout_no_wrap(
                         "RAWmakase".into(),
-                        egui::FontId::proportional(14.),
+                        egui::FontId::proportional(13.),
                         theme::gray(232),
                     );
                     let (rect, _) = ui.allocate_exact_size(
@@ -185,8 +185,8 @@ impl Editor {
                         ui.allocate_exact_size(Vec2::new(29., 28.), egui::Sense::hover());
                     ui.painter().line_segment(
                         [
-                            rect.center() - Vec2::new(0., 9.),
-                            rect.center() + Vec2::new(0., 9.),
+                            rect.center() - Vec2::new(0., 7.),
+                            rect.center() + Vec2::new(0., 7.),
                         ],
                         egui::Stroke::new(1., theme::gray(70)),
                     );
@@ -221,7 +221,7 @@ impl Editor {
                         ui.painter(),
                         super::icons::Icon::ChevronDown,
                         rect.right_center() - Vec2::new(14., 0.),
-                        13.,
+                        11.,
                         color,
                     );
                     let response = response
@@ -295,8 +295,8 @@ impl Editor {
                                 ui.allocate_exact_size(Vec2::new(1., 28.), egui::Sense::hover());
                             ui.painter().line_segment(
                                 [
-                                    rect.center() - Vec2::new(0., 8.),
-                                    rect.center() + Vec2::new(0., 8.),
+                                    rect.center() - Vec2::new(0., 7.),
+                                    rect.center() + Vec2::new(0., 7.),
                                 ],
                                 egui::Stroke::new(1., theme::gray(70)),
                             );
