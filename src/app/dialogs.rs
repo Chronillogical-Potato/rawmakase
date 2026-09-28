@@ -4,8 +4,6 @@ use eframe::egui;
 
 #[derive(Clone, Copy)]
 pub(super) enum FileDialog {
-    OpenRaw,
-    OpenFolder,
     MonitorProfile,
     LoadPreset,
     SavePreset,
@@ -66,10 +64,6 @@ impl Editor {
                 return;
             }
             let selected = match kind {
-                FileDialog::OpenRaw => rfd::FileDialog::new()
-                    .add_filter("Camera RAW", &crate::storage::RAW_EXTENSIONS)
-                    .pick_file(),
-                FileDialog::OpenFolder => rfd::FileDialog::new().pick_folder(),
                 FileDialog::MonitorProfile => rfd::FileDialog::new()
                     .add_filter("ICC profile", &["icc", "icm"])
                     .pick_file(),
@@ -86,7 +80,6 @@ impl Editor {
             };
             let event = selected
                 .map(|p| match kind {
-                    FileDialog::OpenRaw | FileDialog::OpenFolder => Event::Open(p),
                     FileDialog::MonitorProfile => Event::Monitor(p),
                     FileDialog::CameraProfile
                     | FileDialog::LensProfile

@@ -135,7 +135,7 @@ impl Editor {
             ui.painter().text(
                 area.center(),
                 egui::Align2::CENTER_CENTER,
-                "Open a RAW photo, or pick one in the Library",
+                "Pick a photo in the Library to edit it",
                 egui::FontId::proportional(15.),
                 theme::gray(120),
             );

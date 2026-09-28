@@ -11,7 +11,7 @@ use std::{path::PathBuf, sync::atomic::AtomicBool, time::Instant};
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
-    /// Open a RAW file or folder in the editor
+    /// Open a RAWmakase catalog; photos are edited through its Library
     path: Option<PathBuf>,
 }
 #[derive(Subcommand)]

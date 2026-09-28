@@ -121,7 +121,7 @@ impl Editor {
                                 library.presets.len()
                             )
                         } else {
-                            format!("{} presets · open a RAW to apply", library.presets.len())
+                            format!("{} presets · pick a photo to apply", library.presets.len())
                         })
                         .size(10.)
                         .color(theme::gray(125)),

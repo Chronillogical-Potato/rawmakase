@@ -78,12 +78,11 @@ On macOS, `packaging/macos/app.sh` builds `target/release/RAWmakase.app`, which 
 ## Usage
 
 ```sh
-rawmakase                  # reopen the last catalog or photo
-rawmakase ~/Pictures/raw   # open a folder
-rawmakase photo.dng        # open one photo
+rawmakase                     # reopen the last catalog
+rawmakase Photos.rawmakase    # open a catalog
 ```
 
-You can also drop a file or folder onto the window. The first launch offers to create a catalog or import a Lightroom catalog; both are available later from the **Catalog** menu. The camera's embedded JPEG shows immediately while the RAW develops.
+Photos are edited through the Library: add their folder to the catalog, then pick a photo. You can also drop a catalog onto the window. The first launch offers to create a catalog or import a Lightroom catalog; both are available later from the **Catalog** menu. The camera's embedded JPEG shows immediately while the RAW develops.
 
 Useful shortcuts:
 

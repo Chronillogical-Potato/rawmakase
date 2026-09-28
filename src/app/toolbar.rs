@@ -29,17 +29,6 @@ impl Editor {
                 ui.visuals_mut().widgets.hovered.bg_fill = theme::gray(52);
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::gray(52);
                 ui.horizontal(|ui| {
-                    ui.menu_button("Open", |ui| {
-                        if ui.button("Open RAW file…").clicked() {
-                            self.dialog(FileDialog::OpenRaw, &ctx);
-                            ui.close();
-                        }
-                        if ui.button("Open folder…").clicked() {
-                            self.dialog(FileDialog::OpenFolder, &ctx);
-                            ui.close();
-                        }
-                    });
-                    toolbar_divider(ui);
                     if toolbar_action(ui, "", 32., false, self.document.history.can_undo(), 1)
                         .on_hover_text("Undo · Ctrl+Z")
                         .clicked()

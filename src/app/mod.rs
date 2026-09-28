@@ -175,7 +175,7 @@ impl Editor {
                 session.selected_photo,
                 session.develop,
             ),
-            status: "Open a RAW photo to begin".into(),
+            status: "Pick a photo in the Library to begin".into(),
             catalog_work: None,
             importing: None,
             close_confirm: false,

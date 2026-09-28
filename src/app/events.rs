@@ -20,10 +20,6 @@ impl Editor {
                     self.catalog_ready(result);
                 }
 
-                Event::Open(p) => {
-                    self.activity.finish_dialog();
-                    self.open(p);
-                }
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
                     self.view.monitor = Some(p);

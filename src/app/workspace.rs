@@ -1,5 +1,4 @@
 use super::Editor;
-use super::dialogs::FileDialog;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
@@ -376,9 +375,6 @@ impl Editor {
 
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
-                self.dialog(FileDialog::OpenRaw, ctx);
-            }
             let (mut copy, mut paste, mut reset, mut zoom_step) = (false, false, false, 0);
             let mut export = None;
             ctx.input(|i| {

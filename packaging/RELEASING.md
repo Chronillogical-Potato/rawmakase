@@ -199,7 +199,7 @@ tests and dependency audits.
 CLI and container checks do not validate a real desktop, Metal/Vulkan driver,
 or photo development. Before announcing the first packaged release, test a
 downloaded DMG on a Mac without Homebrew and the Linux packages on real desktops:
-open a RAW file/folder, preview and edit, import a catalog/profile, export JPEG
+add a photo folder to the Library, preview and edit, import a catalog/profile, export JPEG
 and TIFF, and upgrade while preserving settings. Test both Mac architectures
 and Linux Wayland/X11. Do not claim older OS compatibility without testing the
 executable and every bundled library against that baseline.

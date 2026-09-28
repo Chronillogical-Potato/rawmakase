@@ -18,7 +18,12 @@ impl Editor {
                     .into();
             self.library_mode = true;
         } else {
-            self.open_raw(path, None);
+            // Photos are edited through the Library only.
+            self.status = format!(
+                "Add {}'s folder to the Library to edit it",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+            self.library_mode = true;
         }
     }
     pub(super) fn open_raw(&mut self, path: PathBuf, photo: Option<i64>) {
