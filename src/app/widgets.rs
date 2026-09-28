@@ -820,7 +820,7 @@ pub(super) fn segment_bar<const N: usize>(
     selected: Option<usize>,
     style: &SegmentStyle,
 ) -> [egui::Response; N] {
-    let width = segments_width(ui, &labels, style, 12.);
+    let width = segments_width(ui, &labels, style);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, style.height.max(28.)), Sense::hover());
     segment_track(ui, rect, response.id, &labels, selected, style)
@@ -832,24 +832,74 @@ pub(super) fn segment_bar<const N: usize>(
 fn control_radius(height: f32) -> f32 {
     (height * 0.27).round()
 }
-/// The narrowest track that fits every label untruncated: equal segments as
-/// wide as the widest label plus padding, and the pill's inset.
-fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle, padding: f32) -> f32 {
-    let font = egui::FontId::proportional(style.font);
-    let widest = labels
+/// Padding each side of a label: roomy when there is space, never below the
+/// minimum.
+const SEGMENT_PADDING: f32 = 12.;
+const SEGMENT_MIN_PADDING: f32 = 8.;
+/// The pill's gap to the track.
+const SEGMENT_INSET: f32 = 2.;
+fn label_widths(ui: &egui::Ui, labels: &[&str], font: f32) -> Vec<f32> {
+    labels
         .iter()
         .map(|label| {
             ui.painter()
-                .layout_no_wrap((*label).into(), font.clone(), theme::gray(255))
+                .layout_no_wrap(
+                    (*label).into(),
+                    egui::FontId::proportional(font),
+                    theme::gray(255),
+                )
                 .size()
                 .x
         })
+        .collect()
+}
+/// A roomy track: equal segments as wide as the widest label plus padding.
+fn segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
+    let widest = label_widths(ui, labels, style.font)
+        .into_iter()
         .fold(0., f32::max);
-    labels.len() as f32 * (widest + 2. * padding) + 4.
+    labels.len() as f32 * (widest + 2. * SEGMENT_PADDING) + 2. * SEGMENT_INSET
+}
+/// The narrowest track that keeps the minimum padding: each segment only as
+/// wide as its own label, at the label size one point down.
+fn tightest_segments_width(ui: &egui::Ui, labels: &[&str], style: &SegmentStyle) -> f32 {
+    label_widths(ui, labels, style.font - 1.)
+        .into_iter()
+        .map(|width| width + 2. * SEGMENT_MIN_PADDING)
+        .sum::<f32>()
+        + 2. * SEGMENT_INSET
+}
+/// Segment widths and label size for a track `inner` wide: equal widths when
+/// every label gets its minimum padding, else each label's own width with the
+/// leftover shared out, at a point smaller if even that does not fit.
+fn segment_layout(
+    ui: &egui::Ui,
+    labels: &[&str],
+    style: &SegmentStyle,
+    inner: f32,
+) -> (Vec<f32>, f32) {
+    let count = labels.len().max(1) as f32;
+    for font in [style.font, style.font - 1.] {
+        let widths = label_widths(ui, labels, font);
+        let widest = widths.iter().copied().fold(0., f32::max);
+        if inner / count >= widest + 2. * SEGMENT_MIN_PADDING {
+            return (vec![inner / count; labels.len()], font);
+        }
+        let needed: f32 = widths.iter().map(|w| w + 2. * SEGMENT_MIN_PADDING).sum();
+        if needed <= inner || font < style.font {
+            let extra = (inner - needed).max(0.) / count;
+            let widths = widths
+                .iter()
+                .map(|w| w + 2. * SEGMENT_MIN_PADDING + extra)
+                .collect();
+            return (widths, font);
+        }
+    }
+    unreachable!("the smaller font always returns")
 }
 /// The shared look of every segmented control: a dark track holding
-/// equal-width segments, with a raised pill that slides to the selected one
-/// while the labels cross-fade, like Claude's view switcher.
+/// segments sized to their labels, with a raised pill that slides to the
+/// selected one while the labels cross-fade, like Claude's view switcher.
 fn segment_track(
     ui: &mut egui::Ui,
     rect: Rect,
@@ -858,14 +908,31 @@ fn segment_track(
     selected: Option<usize>,
     style: &SegmentStyle,
 ) -> Vec<egui::Response> {
-    let inset = 2.;
+    let inset = SEGMENT_INSET;
     let radius = control_radius(style.height);
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
     ui.painter().rect_filled(track, radius, theme::gray(21));
-    let width = (track.width() - 2. * inset) / labels.len().max(1) as f32;
+    let (widths, font) = segment_layout(ui, labels, style, track.width() - 2. * inset);
+    let starts: Vec<f32> = widths
+        .iter()
+        .scan(inset, |x, width| {
+            let start = *x;
+            *x += width;
+            Some(start)
+        })
+        .collect();
+    // A fractional position lies between two segments while the pill slides.
     let segment = |position: f32| {
+        let last = widths.len().saturating_sub(1);
+        let (low, high) = (
+            (position.floor() as usize).min(last),
+            (position.ceil() as usize).min(last),
+        );
+        let t = position - position.floor();
+        let left = starts[low] + (starts[high] - starts[low]) * t;
+        let width = widths[low] + (widths[high] - widths[low]) * t;
         Rect::from_min_size(
-            track.min + Vec2::new(inset + position * width, inset),
+            track.min + Vec2::new(left, inset),
             Vec2::new(width, track.height() - 2. * inset),
         )
     };
@@ -925,7 +992,7 @@ fn segment_track(
         };
         let text = ui.painter().layout_no_wrap(
             (*label).into(),
-            egui::FontId::proportional(style.font),
+            egui::FontId::proportional(font),
             theme::gray(255),
         );
         ui.painter()
@@ -1028,7 +1095,8 @@ pub(super) fn action_button(
 }
 /// Compact segmented control for panels and filters: at least `width` wide
 /// with roomy segments, but never wider than the space left in the panel;
-/// there the padding shrinks first so labels stay whole.
+/// there segments shrink to their labels, then the text a point, so labels
+/// stay whole with at least 8 px padding.
 pub(super) fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -1036,8 +1104,8 @@ pub(super) fn segmented<T: PartialEq + Copy>(
     width: f32,
 ) -> bool {
     let labels: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
-    let preferred = segments_width(ui, &labels, &COMPACT_SEGMENTS, 12.);
-    let tightest = segments_width(ui, &labels, &COMPACT_SEGMENTS, 4.);
+    let preferred = segments_width(ui, &labels, &COMPACT_SEGMENTS);
+    let tightest = tightest_segments_width(ui, &labels, &COMPACT_SEGMENTS);
     let width = width.max(preferred).min(ui.available_width().max(tightest));
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, COMPACT_SEGMENTS.height), Sense::hover());
