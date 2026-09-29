@@ -127,32 +127,9 @@ h1 span { color: var(--salmon); }
 .card::before {
   content: ""; position: absolute; left: 28px; top: 0; width: 36px; height: 3px; border-radius: 0 0 3px 3px; background: var(--salmon);
 }
-.card h3, .points h3, .more h3 { margin: 0 0 10px; font: 700 20px/1.2 var(--sans); letter-spacing: -0.02em; }
-.card p, .points p, .more p { margin: 0; font-size: 15px; color: var(--rice-dim); }
+.card h3, .more h3 { margin: 0 0 10px; font: 700 20px/1.2 var(--sans); letter-spacing: -0.02em; }
+.card p, .more p { margin: 0; font-size: 15px; color: var(--rice-dim); }
 .aside { margin: 28px 0 0; font-size: 14px; color: var(--rice-faint); }
-
-.speed-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 48px; align-items: center; }
-.gpu {
-  position: relative; aspect-ratio: 4 / 3; border-radius: 18px; border: 1px solid var(--line); overflow: hidden;
-  display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 36px;
-  background:
-    repeating-linear-gradient(90deg, rgba(242, 237, 227, 0.04) 0 1px, transparent 1px 28px),
-    repeating-linear-gradient(0deg, rgba(242, 237, 227, 0.04) 0 1px, transparent 1px 28px),
-    radial-gradient(circle at 30% 40%, rgba(235, 116, 73, 0.28), transparent 60%),
-    var(--nori);
-}
-.gpu::after {
-  content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -40%;
-  background: linear-gradient(90deg, transparent, rgba(235, 116, 73, 0.18), transparent);
-  animation: sweep 3.2s cubic-bezier(.6, 0, .4, 1) infinite;
-}
-.gpu span { position: relative; font: 800 clamp(36px, 5vw, 60px)/1 var(--sans); letter-spacing: -0.05em; }
-.gpu span:nth-child(2) { color: var(--salmon); }
-.gpu span:nth-child(3) { font: 500 14px/1 var(--mono); color: var(--rice-faint); letter-spacing: 0; margin-top: 8px; }
-@keyframes sweep { to { left: 100%; } }
-.points { list-style: none; margin: 0; padding: 0; }
-.points li { padding: 22px 0; border-top: 1px solid var(--line); }
-.points li:last-child { border-bottom: 1px solid var(--line); }
 
 .more { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px 40px; }
 .more li { padding-top: 18px; border-top: 1px solid var(--line); }
@@ -200,7 +177,7 @@ h1 span { color: var(--salmon); }
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; padding-top: 40px; }
   .hero-mark { order: -1; width: min(300px, 70vw); margin: 0 auto; }
-    .cards, .speed-grid { grid-template-columns: 1fr; }
+    .cards { grid-template-columns: 1fr; }
   .more { grid-template-columns: 1fr 1fr; }
   .platform-grid { grid-template-columns: 1fr; }
 }

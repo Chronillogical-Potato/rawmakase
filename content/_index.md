@@ -16,13 +16,6 @@ compat:
     text: "Import the XMP presets you already own or bought, and apply them in one click."
   - name: "Camera profiles"
     text: "Import DCP and XMP camera profiles, so colors start from the rendering you're used to."
-speed:
-  - name: "GPU finishing"
-    text: "Previews are finished on the GPU with Metal on macOS and Vulkan on Linux, with a CPU fallback."
-  - name: "Draft, then full quality"
-    text: "A quick draft shows up first while you drag a slider, and the full-quality render follows right after."
-  - name: "Written in Rust"
-    text: "Native, multithreaded code on top of LibRaw, supporting every camera LibRaw does."
 more:
   - name: "Develop"
     text: "White balance, Auto WB and tone, exposure, Shadows and Highlights, Clarity, Dehaze, curves, HSL, color grading, detail, crop, Transform and lens corrections."
