@@ -24,8 +24,12 @@ pub(super) struct Document {
     pub(super) pending_lightroom: bool,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
-    /// An Auto estimate is running for this photo.
-    pub(super) auto_running: bool,
+    /// The Auto estimate for this photo; dropping it with the document cancels it.
+    pub(super) auto: super::task::Task,
+    /// What the running estimate measures: the recipe without the settings Auto sets.
+    pub(super) auto_input: Option<Recipe>,
+    /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
+    pub(super) auto_applied: Option<Recipe>,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.

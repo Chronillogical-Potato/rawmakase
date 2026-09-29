@@ -498,7 +498,7 @@ impl Editor {
             if reset {
                 self.reset_settings();
             }
-            if auto {
+            if auto && !self.auto_in_effect() {
                 self.start_auto(super::worker::AutoKind::Settings);
             }
             match export {

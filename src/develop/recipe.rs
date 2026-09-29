@@ -378,12 +378,61 @@ impl Recipe {
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         let mut adjusted = m.clone();
         adjusted.wb = std::array::from_fn(|c| m.wb[c] * self.wb[c]);
-        if let Some([temperature, tint]) = self
+        // A profile that cannot map gains back (no ColorMatrix1) is also left to the
+        // fallback model, which is what update_wb then uses.
+        let Some([temperature, tint]) = self
             .color_profile(m)
             .and_then(|p| p.as_shot_white_balance(&adjusted))
-        {
-            self.temperature = temperature.clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-            self.tint = tint.clamp(-TINT_LIMIT, TINT_LIMIT);
+        else {
+            self.sync_fallback_white_balance_controls(m);
+            return;
+        };
+        self.temperature = temperature.clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
+        self.tint = tint.clamp(-TINT_LIMIT, TINT_LIMIT);
+        // Gains the controls cannot show become the nearest they can, so the next
+        // Temperature or Tint edit does not jump.
+        if self.temperature != temperature || self.tint != tint {
+            self.update_wb(m);
+        }
+    }
+    /// Temperature and Tint that [`Self::update_wb`] maps to the current gains, solved
+    /// under its fallback model (recipes without a camera profile). Temperature sets the red/blue
+    /// ratio and Tint scales both against green, so each is solved in turn.
+    pub(super) fn sync_fallback_white_balance_controls(&mut self, m: &Metadata) {
+        let model = |temperature: f32| {
+            let mut r = self.clone();
+            r.temperature = temperature;
+            r.tint = 0.;
+            r.update_wb(m);
+            r.wb
+        };
+        let red_blue = |wb: [f32; 3]| (wb[0].max(1e-6) / wb[2].max(1e-6)).ln();
+        let target = red_blue(self.wb);
+        // The model's locus covers 2000–15000 K; the ratio is monotonic along it.
+        let (mut lo, mut hi) = (2000f32, 15000f32);
+        let rising = red_blue(model(hi)) > red_blue(model(lo));
+        for _ in 0..40 {
+            let mid = (lo * hi).sqrt();
+            if (red_blue(model(mid)) < target) == rising {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let temperature = (lo * hi).sqrt();
+        let neutral = model(temperature);
+        let tint = 50.
+            * ((self.wb[0] * self.wb[2]).max(1e-12) / (neutral[0] * neutral[2]).max(1e-12)).log2();
+        self.temperature = temperature.clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
+        self.tint = tint.clamp(-TINT_LIMIT, TINT_LIMIT);
+        // Gains the controls cannot reproduce become the ones they show, so the next
+        // Temperature or Tint edit does not jump. That covers gains past either end of
+        // the locus or the Tint limit, and a profile whose white balance Tint does not
+        // scale the way the fallback model's does.
+        let mut shown = self.clone();
+        shown.update_wb(m);
+        if (0..3).any(|c| (shown.wb[c] / self.wb[c].max(1e-6) - 1.).abs() > 1e-3) {
+            self.wb = shown.wb;
         }
     }
     pub fn update_wb(&mut self, m: &Metadata) {

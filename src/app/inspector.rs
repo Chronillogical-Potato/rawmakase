@@ -4,6 +4,7 @@ use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
     adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
+    toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -353,23 +354,53 @@ impl Editor {
         let profile_errors = self.document.profile_errors.clone();
         let histogram = self.preview.histogram;
         // Auto needs the decoded photo, and runs one estimate at a time.
-        let auto_ready = self.document.full().is_some() && !self.document.auto_running;
+        let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
+        let auto_in_effect = self.auto_in_effect();
         let mut auto_request = None;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
         if adjustment_section(ui, "Basic", |ui| {
-            control_row(ui, "Treatment", |ui| {
-                let mut mono = r.effects.monochrome;
-                let w = ui.available_width();
-                segmented(
-                    ui,
-                    &mut mono,
-                    &[(false, "Color"), (true, "Black & White")],
-                    w,
-                );
-                r.effects.monochrome = mono;
-            });
+            // Auto, and Black & White as an on/off toggle, in place of Lightroom's
+            // Treatment switcher.
+            let shortcut = if cfg!(target_os = "macos") {
+                "⌘⇧U"
+            } else {
+                "Ctrl+Shift+U"
+            };
+            // Right-aligned, B&W at the panel's edge and Auto to its left; styled as the
+            // toolbar's Before and Clipping.
+            let (row, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::hover());
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(row)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.;
+                    let mono = r.effects.monochrome;
+                    if toolbar_action(ui, "B&W", 52., mono, true, 0)
+                        .on_hover_text(if mono {
+                            "Black & White is on"
+                        } else {
+                            "Convert to Black & White"
+                        })
+                        .clicked()
+                    {
+                        r.effects.monochrome = !mono;
+                    }
+                    let tip = if auto_in_effect {
+                        "Auto settings are applied".to_owned()
+                    } else {
+                        format!("Set white balance and tone automatically · {shortcut}")
+                    };
+                    let auto =
+                        toolbar_action(ui, "Auto", 52., false, auto_ready && !auto_in_effect, 0);
+                    if auto.on_hover_text(tip).clicked() {
+                        auto_request = Some(AutoKind::Settings);
+                    }
+                },
+            );
             let old_profile = r.profile.clone();
             // From engine 4 the matrix path renders through the DNG default look.
             let matrix = if r.engine >= 4 {
@@ -525,20 +556,7 @@ impl Editor {
             {
                 r.update_wb(m);
             }
-            let shortcut = if cfg!(target_os = "macos") {
-                "⌘⇧U"
-            } else {
-                "Ctrl+Shift+U"
-            };
-            if subheading_button(
-                ui,
-                "Tone",
-                "Auto",
-                &format!("Set white balance and tone automatically · {shortcut}"),
-                auto_ready,
-            ) {
-                auto_request = Some(AutoKind::Settings);
-            }
+            subheading(ui, "Tone");
             slider_with(
                 ui,
                 "Exposure",
@@ -1260,37 +1278,6 @@ fn subheading(ui: &mut egui::Ui, text: &str) {
         egui::FontId::proportional(11.),
         theme::gray(165),
     );
-}
-/// [`subheading`] with a small button at the row's right end, as Lightroom's Tone
-/// group has Auto; returns whether it was clicked.
-fn subheading_button(
-    ui: &mut egui::Ui,
-    text: &str,
-    button: &str,
-    tip: &str,
-    enabled: bool,
-) -> bool {
-    super::widgets::set_edit_context(ui, text);
-    ui.add_space(8.);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), Sense::hover());
-    ui.painter().text(
-        rect.left_center() + Vec2::new(88., 0.),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(11.),
-        theme::gray(165),
-    );
-    let button_rect = Rect::from_min_max(Pos2::new(rect.right() - 56., rect.top()), rect.max);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(button_rect), |ui| {
-        ui.add_enabled(
-            enabled,
-            egui::Button::new(egui::RichText::new(button).size(11.)).min_size(button_rect.size()),
-        )
-        .on_hover_text(tip)
-        .on_disabled_hover_text(tip)
-        .clicked()
-    })
-    .inner
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
 /// 83 px label column, controls from the rail start (88 px) to the right edge,

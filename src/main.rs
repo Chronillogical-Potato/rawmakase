@@ -75,7 +75,8 @@ enum Command {
         #[arg(long)]
         recipe: Option<PathBuf>,
         /// Apply Auto white balance and tone, as the Basic panel's Auto button does.
-        #[arg(long)]
+        /// Auto sets Exposure itself, so it cannot be combined with --exposure.
+        #[arg(long, conflicts_with = "exposure")]
         auto: bool,
     },
     Benchmark {

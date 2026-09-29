@@ -1015,12 +1015,12 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     }));
     let before = editor.document.recipe.clone();
     editor.start_auto(worker::AutoKind::Settings);
-    assert!(editor.document.auto_running);
+    assert!(editor.document.auto.is_running());
     // A second request while the first runs is ignored.
     editor.start_auto(worker::AutoKind::Settings);
     editor.document.recipe.saturation = 0.25;
     let start = std::time::Instant::now();
-    while editor.document.auto_running {
+    while editor.document.auto.is_running() {
         assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
         std::thread::sleep(std::time::Duration::from_millis(10));
         editor.events(&ctx);
@@ -1087,7 +1087,7 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
         output.textures_delta.clear();
     };
     press(&mut e);
-    assert!(!e.document.auto_running, "no photo yet");
+    assert!(!e.document.auto.is_running(), "no photo yet");
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 8,
@@ -1106,5 +1106,133 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
         scale_clipped: 0,
     }));
     press(&mut e);
-    assert!(e.document.auto_running);
+    assert!(e.document.auto.is_running());
+}
+#[test]
+fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let start = editor.document.recipe.clone();
+    // A Shadows drag is under way when the estimate arrives. Auto sets Shadows too,
+    // so the drag does not make the estimate stale.
+    editor.document.recipe.shadows = 0.1;
+    let mid = editor.document.recipe.clone();
+    editor.document.history.observe(start.clone(), &mid, true);
+    let mut auto = start.clone();
+    auto.exposure = 1.;
+    editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
+    let with_auto = editor.document.recipe.clone();
+    assert_eq!(with_auto.exposure, 1.);
+    editor.document.recipe.shadows = 0.2;
+    let end = editor.document.recipe.clone();
+    editor
+        .document
+        .history
+        .observe(with_auto.clone(), &end, false);
+    let names: Vec<_> = editor
+        .document
+        .history
+        .steps()
+        .0
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    assert_eq!(names[1], "Auto Settings");
+    // Undoing the rest of the drag keeps Auto; the next undo removes only Auto.
+    editor.undo();
+    assert_eq!(editor.document.recipe, with_auto);
+    editor.undo();
+    assert_eq!(editor.document.recipe, mid);
+    editor.undo();
+    assert_eq!(editor.document.recipe, start);
+}
+#[test]
+fn auto_runs_again_when_the_crop_changed_while_it_ran() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 8,
+        height: 8,
+        pixels: vec![[0.1; 3]; 64],
+        metadata: Metadata {
+            width: 8,
+            height: 8,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    // An estimate for the uncropped photo arrives after the photo was cropped.
+    let mut auto = editor.document.recipe.clone();
+    auto.exposure = 1.;
+    editor.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
+    editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
+    assert_eq!(editor.document.recipe.exposure, 0.);
+    assert!(!editor.document.history.can_undo());
+    assert!(
+        editor.document.auto.is_running(),
+        "Auto runs again for the crop"
+    );
+}
+#[test]
+fn auto_runs_again_when_it_failed_on_settings_changed_since() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 8,
+        height: 8,
+        pixels: vec![[0.1; 3]; 64],
+        metadata: Metadata {
+            width: 8,
+            height: 8,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    // An estimate that failed on the uncropped photo arrives after the photo was cropped.
+    editor.document.auto_input = Some(editor.document.recipe.clone());
+    editor.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
+    editor.auto_ready(
+        worker::AutoKind::Settings,
+        Err("Auto: no usable pixels".into()),
+    );
+    assert!(!editor.status.contains("usable"), "{}", editor.status);
+    assert!(
+        editor.document.auto.is_running(),
+        "Auto runs again for the crop"
+    );
+}
+#[test]
+fn auto_is_off_while_its_settings_stand() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    assert!(!editor.auto_in_effect());
+    let mut auto = editor.document.recipe.clone();
+    auto.exposure = 1.;
+    editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
+    assert!(editor.auto_in_effect());
+    // Any change, to a slider Auto sets or to what it measured, turns it back on, and
+    // so does undoing Auto.
+    editor.document.recipe.exposure = 0.5;
+    assert!(!editor.auto_in_effect());
+    editor.document.recipe.exposure = 1.;
+    assert!(editor.auto_in_effect());
+    editor.document.recipe.crop[0] = 0.1;
+    assert!(!editor.auto_in_effect());
+    editor.document.recipe.crop[0] = 0.;
+    assert!(editor.auto_in_effect());
+    editor.undo();
+    assert!(!editor.auto_in_effect());
 }

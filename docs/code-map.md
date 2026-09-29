@@ -144,7 +144,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [workflow.rs](../src/app/workflow.rs) | Opening/navigating photos, flushing edits, scheduling previews, publishing textures and launching exports. |
 | [events.rs](../src/app/events.rs) | Receives worker messages, rejects stale generations and applies accepted results to editor state. |
 | [dialogs.rs](../src/app/dialogs.rs) | Typed dialog intents and native file/folder choosers. |
-| [auto.rs](../src/app/auto.rs) | Runs Auto (the Tone group's button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
+| [auto.rs](../src/app/auto.rs) | Runs Auto (the Basic panel's Auto button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs, Lightroom import, folder addition, relinking and applying imported edits. |
 
 ### Panels and interaction

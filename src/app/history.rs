@@ -67,6 +67,14 @@ impl History {
     pub fn in_gesture(&self) -> bool {
         self.gesture.is_some()
     }
+    /// Records a pointer gesture still in progress, up to `current`, so a step made
+    /// outside the UI (an asynchronous result) lands after it; the rest of the drag
+    /// becomes a step of its own.
+    pub fn finish_gesture(&mut self, current: &Recipe) {
+        if let Some(before) = self.gesture.take() {
+            self.record(before, current);
+        }
+    }
     pub fn begin_frame(&mut self) {
         self.replaying = false;
     }
