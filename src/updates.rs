@@ -3,9 +3,10 @@
 //! installs it with rollback. RAWmakase keeps its configuration, its HTTP
 //! client and the notice (`app::updates`).
 //!
-//! Only the Apple Silicon disk image updates itself. Intel Macs, the Linux
-//! tarball (which bundles libraries beside the executable) and package-managed
-//! installs are told about a release and pointed at its page.
+//! The Apple Silicon disk image and the Windows installer update themselves.
+//! Intel Macs, the Linux tarball and Windows archive (which keep libraries
+//! beside the executable) and package-managed installs are told about a
+//! release and pointed at its page.
 use anyhow::Result;
 pub use fastframe_update::{Launch, Prepared, Release, Unsupported, Updater};
 use fastframe_update::{MacConfig, MacTarget, Request, Response, Transport, UpdateConfig};

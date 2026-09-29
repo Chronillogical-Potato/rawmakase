@@ -14,12 +14,21 @@ notarization must pass before anything is published. No AUR pushes occur.
 | Fedora x86_64 and aarch64 | `.rpm` | Fedora 43+ |
 | Arch x86_64 | `.pkg.tar.zst` | Current Arch system dependencies |
 | Linux archive | `rawmakase-VERSION-x86_64-linux.tar.gz`, `rawmakase-VERSION-aarch64-linux.tar.gz` | Same system baseline as DEB/RPM; not a universal static binary |
+| Windows x86_64 installer | `rawmakase-vVERSION-x86_64-pc-windows-msvc-setup.exe` | Windows 10+; per-user install, no administrator rights |
+| Windows x86_64 archive | `rawmakase-vVERSION-x86_64-pc-windows-msvc.zip` | Windows 10+ |
 
 The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
 not need Homebrew. The Linux tarball contains the same `/usr` layout, including
 private libraries; run the extracted `usr/bin/rawmakase` or install the whole
 tree under `/usr`. Do not copy just its executable. Linux still needs system
 Vulkan/graphics drivers, window-system libraries and a working file-dialog portal.
+
+The Windows installer and archive hold the same folder: `rawmakase.exe` with
+LibRaw and Little CMS linked in statically, the Microsoft C++ and OpenMP
+runtime DLLs beside it (so no Visual C++ Redistributable is needed) and the
+licenses. Neither is code-signed yet, so SmartScreen warns on first run;
+signing can be added later as an `after_package` hook on the `windows-amd64`
+target, before checksums are recorded.
 
 The current local `packaging/macos/app.sh` remains a development helper using
 Homebrew dependencies. It does not produce the standalone release app.
@@ -61,8 +70,12 @@ the key they were built with: losing it means asking users to download the next
 release by hand, and a new key must first ship alongside the old one (see
 fastframe-update's notes on rotating the publisher key).
 
-The updater looks for `rawmakase-vVERSION-macos-arm64.dmg` by name. Intel Macs
-and Linux installs are shown the release page instead.
+The updater looks for `rawmakase-vVERSION-macos-arm64.dmg` and
+`rawmakase-vVERSION-x86_64-pc-windows-msvc-setup.exe` by name. A copy the Windows
+installer set up (it writes `rawmakase-installer.txt` beside the executable)
+updates by running the next release's setup program silently. Intel Macs, Linux
+installs and the Windows archive are shown the release page instead. Never
+rename these assets.
 
 ## Publishing and rehearsal
 
@@ -151,6 +164,18 @@ Linux bundles imaging dependencies, preserves their notices, and leaves core
 OS/C++/OpenMP/zlib libraries to the host. The native source archives and build
 script are published alongside packages; application source is also attached.
 
+Windows builds with MSVC. `packaging/windows/deps.ps1` builds the same LibRaw
+and Little CMS versions (plus libjpeg-turbo, zlib and JasPer, which LibRaw
+needs) as static libraries with vcpkg, pinned to one vcpkg commit; update that
+commit when the versions above change. `build.rs` finds them through vcpkg's
+pkg-config files and compiles the wrapper with `/openmp`.
+`packaging/windows/stage.ps1` copies the executable, licenses and every
+Microsoft runtime DLL it imports, and fails on any other DLL that is not part of
+Windows. The `windows-amd64` target in `native-packages.yaml` runs
+`packaging/windows/setup.ps1`, which compiles `packaging/windows/rawmakase.iss`
+with Inno Setup. Never change that script's `AppId`: it is how Windows tells an
+update from a second installation.
+
 Packaging uses pinned `native-packages` 0.7.0, configured in
 `native-packages.yaml`. The Linux archives are built natively on x86_64 and
 arm64 runners; `packaging/linux/bundle.py` stages each with its private
@@ -193,13 +218,16 @@ releases always require signing.
 Release CI installs/removes DEB/RPM packages in clean Ubuntu 24.04, Debian 13,
 Fedora 43 and Fedora 44 containers on both x86_64 and arm64 runners; checks linked and dynamically loaded GUI
 libraries; and verifies removal preserves user data. Arch builds its exact
-tagged source recipe, installs it and runs the CLI. Existing CI covers Rust
+tagged source recipe, installs it and runs the CLI. Windows installs the finished
+setup program silently, checks the installed app's `--version` and marker, and
+uninstalls it (`packaging/windows/verify.ps1`); pull requests that touch packaging
+run the same build and check and keep the installer as an Actions artifact. Existing CI covers Rust
 tests and dependency audits.
 
 CLI and container checks do not validate a real desktop, Metal/Vulkan driver,
 or photo development. Before announcing the first packaged release, test a
 downloaded DMG on a Mac without Homebrew and the Linux packages on real desktops:
 add a photo folder to the Library, preview and edit, import a catalog/profile, export JPEG
-and TIFF, and upgrade while preserving settings. Test both Mac architectures
-and Linux Wayland/X11. Do not claim older OS compatibility without testing the
+and TIFF, and upgrade while preserving settings. Test both Mac architectures,
+Linux Wayland/X11, and the Windows installer and an in-app update on a real PC. Do not claim older OS compatibility without testing the
 executable and every bundled library against that baseline.

@@ -268,6 +268,60 @@ jobs:
           path: dist/upload/*
           if-no-files-found: error
 
+  windows:
+    name: Windows installer and archive (x86_64)
+    needs: [prepare, ci]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: release-source
+          persist-credentials: false
+      - name: Build dependencies and app
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+          packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
+          cargo build --release --locked --manifest-path release-source/Cargo.toml --target-dir "$env:GITHUB_WORKSPACE\target"
+          packaging/windows/stage.ps1 target\release\rawmakase.exe "$env:RUNNER_TEMP\deps" dist\windows
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+      - name: Installer and portable archive
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+          }
+          gem install native-packages --version 0.7.0 --no-document
+          $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
+          native-packages build --version $env:VERSION --target windows-amd64 --defer-recipes --output "$env:RUNNER_TEMP\windows-packages"
+          New-Item -ItemType Directory dist\upload | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\windows-packages\packages\windows-amd64\inno\*.exe" dist\upload\
+          # The portable archive has no updater marker: like the Linux archive,
+          # it is told about new releases rather than replacing itself.
+          $name = "rawmakase-v$env:VERSION-x86_64-pc-windows-msvc"
+          Copy-Item dist\windows "dist\$name" -Recurse
+          Compress-Archive -Path "dist\$name" -DestinationPath "dist\upload\$name.zip"
+      - name: Verify the finished download
+        run: packaging/windows/verify.ps1 "dist\upload\rawmakase-v$env:VERSION-x86_64-pc-windows-msvc-setup.exe" $env:VERSION
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows-amd64
+          path: dist/upload/*
+          if-no-files-found: error
+
   # native-packages' shared workflow turns the Linux archives into DEB and RPM
   # packages and renders the Homebrew cask from the notarized DMGs, then checks
   # the packages install cleanly, all before anything is published.
@@ -301,7 +355,7 @@ jobs:
 
   publish:
     name: Publish verified packages
-    needs: [prepare, linux, arch, macos, packages]
+    needs: [prepare, linux, arch, macos, windows, packages]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
