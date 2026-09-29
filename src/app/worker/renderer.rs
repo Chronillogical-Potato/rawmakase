@@ -666,6 +666,7 @@ mod tests {
             clipping: false,
             navigator: true,
             thumbnail: false,
+            samples: false,
             overlay: Default::default(),
         });
         loop {

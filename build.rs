@@ -1,23 +1,17 @@
 fn main() {
     let macos = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos");
+    // Link directives are printed after the glue library is compiled: GNU ld
+    // with --as-needed (the default linker on aarch64 Linux) drops a shared
+    // library named before the static archive that uses it.
     let raw = pkg_config::Config::new()
         .atleast_version("0.22")
-        .cargo_metadata(!macos)
+        .cargo_metadata(false)
+        .env_metadata(true)
         .probe("libraw_r")
         .expect("Install libraw development headers (>= 0.22)");
-    if macos {
-        // Homebrew LibRaw 0.22 advertises the removed GNU C++ runtime.
-        for path in &raw.link_paths {
-            println!("cargo:rustc-link-search=native={}", path.display());
-        }
-        for lib in &raw.libs {
-            println!(
-                "cargo:rustc-link-lib={}",
-                if lib == "stdc++" { "c++" } else { lib }
-            );
-        }
-    }
     let cms = pkg_config::Config::new()
+        .cargo_metadata(false)
+        .env_metadata(true)
         .probe("lcms2")
         .expect("Install lcms2 development headers");
     let mut b = cc::Build::new();
@@ -43,14 +37,30 @@ fn main() {
             "cargo:rustc-link-search=native={}",
             prefix.join("lib").display()
         );
-        println!("cargo:rustc-link-lib=omp");
     } else {
         b.flag("-fopenmp");
-        println!("cargo:rustc-link-lib=gomp");
     }
     for p in raw.include_paths.iter().chain(cms.include_paths.iter()) {
         b.include(p);
     }
     b.compile("rawmakase_native");
+    for lib in [&raw, &cms] {
+        for path in &lib.link_paths {
+            println!("cargo:rustc-link-search=native={}", path.display());
+        }
+        for name in &lib.libs {
+            // Homebrew LibRaw 0.22 advertises the removed GNU C++ runtime.
+            let name = if macos && name == "stdc++" {
+                "c++"
+            } else {
+                name
+            };
+            println!("cargo:rustc-link-lib={name}");
+        }
+    }
+    println!(
+        "cargo:rustc-link-lib={}",
+        if macos { "omp" } else { "gomp" }
+    );
     println!("cargo:rerun-if-changed=native/raw.cpp");
 }

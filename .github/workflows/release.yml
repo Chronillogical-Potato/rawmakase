@@ -77,13 +77,25 @@ jobs:
       source-ref: ${{ needs.prepare.outputs.sha }}
 
   linux:
-    name: Linux DEB and RPM (x86_64)
+    name: Linux archive (${{ matrix.arch }})
     needs: [prepare, ci]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: linux-arm64
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,59 +123,19 @@ jobs:
           cargo build --release --locked --manifest-path release-source/Cargo.toml --target-dir "$GITHUB_WORKSPACE/target"
           python3 packaging/linux/bundle.py target/release/rawmakase dist/linux-root "$RUNNER_TEMP/native"
           mkdir -p dist/upload
-          tar -C dist/linux-root -czf "dist/upload/rawmakase-$VERSION-x86_64-linux.tar.gz" usr
-          mkdir -p "$RUNNER_TEMP/native-sources/build"
-          cp "$RUNNER_TEMP/native/sources/"* "$RUNNER_TEMP/native-sources/"
-          cp packaging/native-deps.sh "$RUNNER_TEMP/native-sources/build/"
-          tar -C "$RUNNER_TEMP/native-sources" -czf "dist/upload/rawmakase-$VERSION-native-sources.tar.gz" .
-      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
-        with:
-          ruby-version: '3.3'
-      - name: Build DEB and RPM
-        run: |
-          sudo apt-get install -y libarchive-tools
-          GOBIN="$RUNNER_TEMP/tools" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
-          export PATH="$RUNNER_TEMP/tools:$PATH"
-          gem install native-packages --version 0.7.0 --no-document
-          # Every packaging job shares one timestamp so the recipes job can
-          # combine their builds.
-          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
-          export SOURCE_DATE_EPOCH
-          native-packages build --version "$VERSION" --target linux-amd64 --defer-recipes --output "$RUNNER_TEMP/linux-packages"
-          cp "$RUNNER_TEMP/linux-packages/packages/linux-amd64/deb/"*.deb "$RUNNER_TEMP/linux-packages/packages/linux-amd64/rpm/"*.rpm dist/upload/
+          tar -C dist/linux-root -czf "dist/upload/rawmakase-$VERSION-$ARCH-linux.tar.gz" usr
+          # Both architectures bundle the same library sources; publish them once.
+          if [[ "$TARGET" = linux-amd64 ]]; then
+            mkdir -p "$RUNNER_TEMP/native-sources/build"
+            cp "$RUNNER_TEMP/native/sources/"* "$RUNNER_TEMP/native-sources/"
+            cp packaging/native-deps.sh "$RUNNER_TEMP/native-sources/build/"
+            tar -C "$RUNNER_TEMP/native-sources" -czf "dist/upload/rawmakase-$VERSION-native-sources.tar.gz" .
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-linux
+          name: release-${{ matrix.target }}
           path: dist/upload/*
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: packages-linux-amd64
-          path: ${{ runner.temp }}/linux-packages
-          include-hidden-files: true
-          if-no-files-found: error
-
-  linux-install:
-    name: Install on ${{ matrix.image }}
-    needs: linux
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [ubuntu:24.04, debian:13-slim, fedora:43, fedora:44]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-linux
-          path: packages
-      - name: Clean installation, runtime libraries and removal
-        env:
-          IMAGE: ${{ matrix.image }}
-        run: docker run --rm -v "$PWD/packages:/packages:ro" -v "$PWD/packaging/linux:/checks:ro" "$IMAGE" bash /checks/verify.sh
 
   arch:
     name: Arch package and source recipe
@@ -280,8 +252,7 @@ jobs:
             test -n "${!key}" || { echo "Missing repository secret: $key" >&2; exit 1; }
           done
           gem install native-packages --version 0.7.0 --no-document
-          # Every packaging job shares one timestamp so the recipes job can
-          # combine their builds.
+          # The cask is rendered later, once both DMGs exist.
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
           ruby packaging/macos/signing-diagnostics.rb build --version "$VERSION" --target "$TARGET" --defer-recipes --output "$RUNNER_TEMP/macos-packages"
@@ -296,49 +267,41 @@ jobs:
           name: release-${{ matrix.target }}
           path: dist/upload/*
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: packages-${{ matrix.target }}
-          path: ${{ runner.temp }}/macos-packages
-          include-hidden-files: true
-          if-no-files-found: error
 
-  recipes:
-    name: Homebrew cask
-    needs: [prepare, linux, macos]
+  # native-packages' shared workflow turns the Linux archives into DEB and RPM
+  # packages and renders the Homebrew cask from the notarized DMGs, then checks
+  # the packages install cleanly, all before anything is published.
+  package-inputs:
+    name: Gather packaging inputs
+    needs: [linux, macos]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: packages-*
-          path: ${{ runner.temp }}/builds
-      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
-        with:
-          ruby-version: '3.3'
-      - name: Render the cask from the finished DMGs
-        run: |
-          gem install native-packages --version 0.7.0 --no-document
-          builds="$RUNNER_TEMP/builds"
-          native-packages aggregate "$builds/packages-linux-amd64" "$builds/packages-macos-arm64" "$builds/packages-macos-amd64" \
-            --finalize-recipes --output "$RUNNER_TEMP/complete"
-          mkdir -p dist/upload
-          cp "$RUNNER_TEMP/complete/recipes/homebrew/rawmakase.rb" dist/upload/rawmakase.rb
-          cat dist/upload/rawmakase.rb
+          pattern: release-*
+          path: dist
+          merge-multiple: true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-recipes
-          path: dist/upload/*
+          name: package-inputs
+          path: |
+            dist/*-linux.tar.gz
+            dist/*.dmg
           if-no-files-found: error
+
+  packages:
+    needs: [prepare, package-inputs]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/packaging.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source-artifact: package-inputs
 
   publish:
     name: Publish verified packages
-    needs: [prepare, linux-install, arch, macos, recipes]
+    needs: [prepare, linux, arch, macos, packages]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -358,6 +321,12 @@ jobs:
         with:
           name: reviewed-notes
           path: release-notes
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-packages
+          path: native-packages
+      - name: Add the DEB and RPM packages and the Homebrew cask
+        run: cp native-packages/packages/*/deb/*.deb native-packages/packages/*/rpm/*.rpm native-packages/recipes/homebrew/rawmakase.rb dist/
       - name: Final checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS

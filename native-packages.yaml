@@ -32,12 +32,15 @@ libraries:
   libXrandr.so.2: {deb: libxrandr2, rpm: libXrandr}
   libEGL.so.1: {deb: libegl1, rpm: libglvnd-egl}
   libGL.so.1: {deb: libgl1, rpm: libglvnd-glx}
-# The Homebrew cask is rendered once both DMGs are signed and notarized.
+# The Homebrew cask is rendered once both DMGs are signed and notarized. The
+# release workflow gathers them beside the Linux archives in dist/.
 assets:
   MACOS_ARM64:
     file: rawmakase-@TAG@-macos-arm64.dmg
+    local: dist/rawmakase-@TAG@-macos-arm64.dmg
   MACOS_X86_64:
     file: rawmakase-@TAG@-macos-x86_64.dmg
+    local: dist/rawmakase-@TAG@-macos-x86_64.dmg
 templates:
   homebrew/rawmakase.rb: packaging/homebrew/rawmakase.rb.in
 targets:
@@ -67,8 +70,76 @@ targets:
     libc: glibc
     formats: [deb, rpm]
     input:
-      local: dist/upload/rawmakase-@VERSION@-x86_64-linux.tar.gz
+      local: dist/rawmakase-@VERSION@-x86_64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-x86_64-linux.tar.gz
+    nfpm:
+      contents:
+        - src: '@PAYLOAD@/usr/bin/rawmakase'
+          dst: /usr/bin/rawmakase
+          file_info:
+            mode: 0755
+        - src: '@PAYLOAD@/usr/lib/rawmakase/'
+          dst: /usr/lib/rawmakase/
+          type: tree
+        - src: '@PAYLOAD@/usr/share/'
+          dst: /usr/share/
+          type: tree
+      # Loaded at runtime by the windowing and GPU stack, so not found by
+      # inspecting the binary.
+      overrides:
+        deb:
+          depends:
+            - libc6 (>= 2.39)
+            - libstdc++6 (>= 14)
+            - libgcc-s1
+            - libgomp1
+            - zlib1g
+            - libvulkan1
+            - libxkbcommon0
+            - libxkbcommon-x11-0
+            - libwayland-client0
+            - libwayland-cursor0
+            - libwayland-egl1
+            - libx11-6
+            - libx11-xcb1
+            - libxcb1
+            - libxcursor1
+            - libxi6
+            - libxrandr2
+            - libegl1
+            - libgl1
+          recommends:
+            - xdg-desktop-portal
+        rpm:
+          depends:
+            - glibc >= 2.39
+            - libstdc++ >= 14
+            - libgcc
+            - libgomp
+            - zlib
+            - vulkan-loader
+            - libxkbcommon
+            - libxkbcommon-x11
+            - libwayland-client
+            - libwayland-cursor
+            - libwayland-egl
+            - libX11
+            - libxcb
+            - libXcursor
+            - libXi
+            - libXrandr
+            - libglvnd-egl
+            - libglvnd-glx
+          recommends:
+            - xdg-desktop-portal
+  linux-arm64:
+    platform: linux
+    arch: arm64
+    libc: glibc
+    formats: [deb, rpm]
+    input:
+      local: dist/rawmakase-@VERSION@-aarch64-linux.tar.gz
+      release_asset: rawmakase-@VERSION@-aarch64-linux.tar.gz
     nfpm:
       contents:
         - src: '@PAYLOAD@/usr/bin/rawmakase'

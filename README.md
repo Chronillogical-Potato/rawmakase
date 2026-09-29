@@ -36,19 +36,19 @@ Download the package for your system from [GitHub Releases](https://github.com/p
 
 Choose `rawmakase-v<version>-macos-arm64.dmg` for Apple Silicon or `rawmakase-v<version>-macos-x86_64.dmg` for Intel. Open the DMG, drag **RAWmakase** into **Applications**, and launch it there. Release DMGs are signed and notarized, and include their imaging libraries; Homebrew is not required.
 
-### Linux (x86_64)
+### Linux (x86_64 and aarch64)
 
-Download the package, then run the matching command from its folder, replacing the filename with the one you downloaded:
+Download the package for your architecture (`amd64`/`x86_64` or `arm64`/`aarch64`), then run the matching command from its folder, replacing the filename with the one you downloaded:
 
 | System | Package | Install |
 | --- | --- | --- |
 | Ubuntu 24.04+ / Debian 13+ | `.deb` | `sudo apt install ./rawmakase_<version>_amd64.deb` |
 | Fedora 43+ | `.rpm` | `sudo dnf install ./rawmakase-<version>-1.x86_64.rpm` |
-| Arch Linux | `.pkg.tar.zst` | `sudo pacman -U ./rawmakase-<version>-1-x86_64.pkg.tar.zst` |
+| Arch Linux (x86_64) | `.pkg.tar.zst` | `sudo pacman -U ./rawmakase-<version>-1-x86_64.pkg.tar.zst` |
 
 DEB/RPM packages include LibRaw and Little CMS. Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
 
-**AUR publication is paused.** Install the Arch package directly, or download and extract `rawmakase-<version>-arch-recipe.tar.gz` into an empty folder and build as a normal user:
+**AUR publication is paused.** Install the Arch package directly, or (on Arch Linux ARM too) download and extract `rawmakase-<version>-arch-recipe.tar.gz` into an empty folder and build as a normal user:
 
 ```sh
 makepkg -si
@@ -56,7 +56,7 @@ makepkg -si
 
 The development recipe is in [packaging/arch/rawmakase-git](packaging/arch/rawmakase-git/PKGBUILD).
 
-The `rawmakase-<version>-x86_64-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
+The `rawmakase-<version>-<arch>-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
 
 ### Updates and verification
 

@@ -10,10 +10,10 @@ notarization must pass before anything is published. No AUR pushes occur.
 | --- | --- | --- |
 | macOS Apple Silicon | `rawmakase-vVERSION-macos-arm64.dmg` | macOS 15+ |
 | macOS Intel | `rawmakase-vVERSION-macos-x86_64.dmg` | macOS 15+ |
-| Debian / Ubuntu x86_64 | `.deb` | Ubuntu 24.04+ or Debian 13+ |
-| Fedora x86_64 | `.rpm` | Fedora 43+ |
+| Debian / Ubuntu x86_64 and arm64 | `.deb` | Ubuntu 24.04+ or Debian 13+ |
+| Fedora x86_64 and aarch64 | `.rpm` | Fedora 43+ |
 | Arch x86_64 | `.pkg.tar.zst` | Current Arch system dependencies |
-| Linux x86_64 archive | `rawmakase-VERSION-x86_64-linux.tar.gz` | Same system baseline as DEB/RPM; not a universal static binary |
+| Linux archive | `rawmakase-VERSION-x86_64-linux.tar.gz`, `rawmakase-VERSION-aarch64-linux.tar.gz` | Same system baseline as DEB/RPM; not a universal static binary |
 
 The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
 not need Homebrew. The Linux tarball contains the same `/usr` layout, including
@@ -152,16 +152,16 @@ OS/C++/OpenMP/zlib libraries to the host. The native source archives and build
 script are published alongside packages; application source is also attached.
 
 Packaging uses pinned `native-packages` 0.7.0, configured in
-`native-packages.yaml`. `packaging/linux/bundle.py` stages the Linux archive
-with its private libraries; native-packages turns that archive into the DEB
-and RPM with nFPM 2.47.0, mapping each host library to its distribution
-package. There are no downstream repository credentials or automatic
-Homebrew/AUR publishers in this setup.
-
-The `recipes` job combines the Linux and both macOS builds with
-`native-packages aggregate --finalize-recipes` and renders
-`packaging/homebrew/rawmakase.rb.in` with the notarized DMGs' checksums. The
-release carries the resulting `rawmakase.rb` cask. Publishing it to a tap
+`native-packages.yaml`. The Linux archives are built natively on x86_64 and
+arm64 runners; `packaging/linux/bundle.py` stages each with its private
+libraries. The release then calls `.github/workflows/packaging.yml`, which runs
+native-packages' shared packaging workflow on those archives and both DMGs: it
+installs the nFPM version `tool.nfpm` names, builds the DEB and RPM for each
+architecture (mapping each host library to its distribution package) and
+renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
+checksums. The release carries the resulting `rawmakase.rb` cask. There are no
+downstream repository credentials or automatic Homebrew/AUR publishers in
+this setup. Publishing it to a tap
 needs a `pch/homebrew-tap` repository, a deploy key secret and a `homebrew`
 entry under `repositories` in `native-packages.yaml`.
 
@@ -191,7 +191,7 @@ be tested without Apple credentials using the bundler and `dmg.rb`; public
 releases always require signing.
 
 Release CI installs/removes DEB/RPM packages in clean Ubuntu 24.04, Debian 13,
-Fedora 43 and Fedora 44 containers; checks linked and dynamically loaded GUI
+Fedora 43 and Fedora 44 containers on both x86_64 and arm64 runners; checks linked and dynamically loaded GUI
 libraries; and verifies removal preserves user data. Arch builds its exact
 tagged source recipe, installs it and runs the CLI. Existing CI covers Rust
 tests and dependency audits.
