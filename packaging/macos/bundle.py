@@ -8,6 +8,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 
 
@@ -23,6 +24,33 @@ def system(path):
     return path.startswith(("/usr/lib/", "/System/Library/"))
 
 
+def install_icon_assets(root, resources, minimum_macos, precompiled=None):
+    """Install the layered icon, requiring supplied release assets to be usable."""
+    if precompiled is not None:
+        if not precompiled.is_file() or precompiled.stat().st_size == 0:
+            raise SystemExit(f"Missing or empty compiled icon: {precompiled}")
+        shutil.copy2(precompiled, resources / "Assets.car")
+        return True
+    # Local builds can compile with Xcode 26 or retain the flat icon. Release
+    # builds supply the catalog compiled on macOS 26, avoiding actool on macOS 15.
+    with tempfile.TemporaryDirectory(prefix="rawmakase-icon-") as temporary:
+        compiled = Path(temporary)
+        result = subprocess.run(["xcrun", "actool", str(root / "packaging/macos/RAWmakase.icon"), "--compile", str(compiled),
+                                 "--app-icon", "RAWmakase", "--platform", "macosx",
+                                 "--minimum-deployment-target", minimum_macos,
+                                 "--output-partial-info-plist", str(compiled / "partial.plist")],
+                                capture_output=True)
+        catalog = compiled / "Assets.car"
+        if result.returncode == 0 and catalog.is_file() and catalog.stat().st_size > 0:
+            shutil.copy2(catalog, resources / "Assets.car")
+            return True
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise SystemExit("actool cannot compile packaging/macos/RAWmakase.icon:\n"
+                             + result.stderr.decode(errors="replace"))
+        print("actool cannot compile packaging/macos/RAWmakase.icon; keeping the flat icon")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -30,6 +58,8 @@ def main():
     parser.add_argument("version")
     parser.add_argument("native_prefix", type=Path)
     parser.add_argument("--minimum-macos", default="15.0")
+    parser.add_argument("--icon-assets", type=Path,
+                        help="Assets.car compiled on macOS 26 for the layered app icon")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     app = args.output.resolve()
@@ -120,28 +150,11 @@ def main():
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "rawmakase.icns")], check=True)
     finally:
         shutil.rmtree(iconset)
-    # With Xcode 26's actool, macOS 26 draws the layered Liquid Glass icon;
-    # older systems and toolchains keep the flat icns above.
-    compiled = app.parent / "rawmakase-icon"
-    compiled.mkdir(exist_ok=False)
-    try:
-        result = subprocess.run(["xcrun", "actool", str(root / "packaging/macos/RAWmakase.icon"), "--compile", str(compiled),
-                                 "--app-icon", "RAWmakase", "--platform", "macosx",
-                                 "--minimum-deployment-target", args.minimum_macos,
-                                 "--output-partial-info-plist", str(compiled / "partial.plist")],
-                                capture_output=True)
-        if result.returncode == 0 and (compiled / "Assets.car").is_file():
-            shutil.copy2(compiled / "Assets.car", resources / "Assets.car")
-            metadata["CFBundleIconName"] = "RAWmakase"
-            with (app / "Contents/Info.plist").open("wb") as handle:
-                plistlib.dump(metadata, handle)
-        elif os.environ.get("GITHUB_ACTIONS") == "true":
-            raise SystemExit("actool cannot compile packaging/macos/RAWmakase.icon:\n"
-                             + result.stderr.decode(errors="replace"))
-        else:
-            print("actool cannot compile packaging/macos/RAWmakase.icon; keeping the flat icon")
-    finally:
-        shutil.rmtree(compiled)
+    # macOS 26 draws the layered icon; older systems use the flat icns above.
+    if install_icon_assets(root, resources, args.minimum_macos, args.icon_assets):
+        metadata["CFBundleIconName"] = "RAWmakase"
+        with (app / "Contents/Info.plist").open("wb") as handle:
+            plistlib.dump(metadata, handle)
     # Ad-hoc signatures allow local verification; release signing replaces them.
     # Signing the main executable can validate its enclosing bundle, so sign
     # every nested library first (Intel libraries may arrive unsigned).

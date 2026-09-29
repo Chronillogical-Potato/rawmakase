@@ -179,9 +179,38 @@ jobs:
           path: dist/upload/*
           if-no-files-found: error
 
+  macos-icon:
+    name: Compile macOS icon
+    needs: prepare
+    # Icon Composer's asset runtime crashes on macOS 15. Compile only the
+    # architecture-independent icon here; keep binaries/libraries on macOS 15.
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test icon packaging
+        run: python3 -m unittest discover -s packaging/macos -p 'test_*.py'
+      - name: Compile the Liquid Glass icon
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+        run: |
+          xcodebuild -version
+          mkdir -p compiled-icon
+          xcrun actool packaging/macos/RAWmakase.icon --compile compiled-icon \
+            --app-icon RAWmakase --platform macosx --minimum-deployment-target 15.0 \
+            --output-partial-info-plist compiled-icon/partial.plist
+          test -s compiled-icon/Assets.car
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-icon
+          path: compiled-icon/Assets.car
+          if-no-files-found: error
+
   macos:
     name: macOS (${{ matrix.arch }})
-    needs: [prepare, ci]
+    needs: [prepare, ci, macos-icon]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -207,16 +236,11 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
           path: release-source
           persist-credentials: false
-      - name: Use Xcode 26 for the Liquid Glass icon
-        run: |
-          # The runner's default Xcode cannot compile packaging/macos/RAWmakase.icon.
-          xcode=$(printf '%s\n' /Applications/Xcode_26*.app | sort -V | tail -n 1)
-          test -d "$xcode" || { echo "No Xcode 26 on this runner; the app icon needs it" >&2; exit 1; }
-          sudo xcode-select -s "$xcode/Contents/Developer"
-          # Installs the system components actool's asset catalog agent needs;
-          # without them it crashes on a non-default Xcode.
-          sudo xcodebuild -runFirstLaunch
-          xcodebuild -version
+      - name: Download the compiled Liquid Glass icon
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-icon
+          path: compiled-icon
       - name: Build dependencies and app
         run: |
           brew install pkg-config libomp jpeg-turbo librsvg
@@ -234,7 +258,7 @@ jobs:
           export LIBOMP_PREFIX
           export CXXFLAGS="-DCMS_NO_REGISTER_KEYWORD"
           cargo build --release --locked --manifest-path release-source/Cargo.toml --target-dir "$GITHUB_WORKSPACE/target"
-          python3 packaging/macos/bundle.py target/release/rawmakase dist/RAWmakase.app "$VERSION" "$RUNNER_TEMP/native" --minimum-macos "$MACOSX_DEPLOYMENT_TARGET"
+          python3 packaging/macos/bundle.py target/release/rawmakase dist/RAWmakase.app "$VERSION" "$RUNNER_TEMP/native" --minimum-macos "$MACOSX_DEPLOYMENT_TARGET" --icon-assets compiled-icon/Assets.car
       - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
         with:
           ruby-version: '3.3'

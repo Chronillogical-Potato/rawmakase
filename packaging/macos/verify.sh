@@ -9,6 +9,9 @@ trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true; rm -rf "$temporary"' EXIT
 xcrun stapler validate "$dmg"
 hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
 app="$mount/RAWmakase.app"
+test -s "$app/Contents/Resources/Assets.car"
+test -s "$app/Contents/Resources/rawmakase.icns"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist")" = RAWmakase
 codesign --verify --strict --deep "$app"
 spctl --assess --type execute --verbose=2 "$app"
 for binary in "$app/Contents/MacOS/rawmakase" "$app/Contents/Frameworks/"*.dylib; do

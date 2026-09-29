@@ -160,6 +160,12 @@ Mac bundling follows transitive dependencies, rewrites library paths, preserves
 native notices and Homebrew source/version metadata, and fails on unresolved
 paths or conflicting library names. JPEG and OpenMP come from the runner's
 Homebrew installation; they are recorded in the app's license directory.
+The layered Liquid Glass icon is compiled once with Xcode 26.3 on macOS 26;
+its asset runtime crashes on the macOS 15 runners. Both Mac builds download
+that `Assets.car` and pass it to `bundle.py --icon-assets`. The executables and
+libraries still build on macOS 15, and each app keeps the flat icon for older
+systems. The finished DMG check requires both icons and the layered icon's
+Info.plist entry before accepting the package.
 Linux bundles imaging dependencies, preserves their notices, and leaves core
 OS/C++/OpenMP/zlib libraries to the host. The native source archives and build
 script are published alongside packages; application source is also attached.

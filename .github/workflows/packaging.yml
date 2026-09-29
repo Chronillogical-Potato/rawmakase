@@ -41,6 +41,7 @@ jobs:
           ruby -c packaging/macos/dmg.rb
           ruby -c packaging/macos/signing-diagnostics.rb
           python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
+          python3 -m unittest discover -s packaging/macos -p 'test_*.py'
           gem install native-packages --version 0.7.0 --no-document
           native-packages validate
       - name: Parse the Windows packaging scripts
