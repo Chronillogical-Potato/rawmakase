@@ -21,7 +21,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RAWmakase · RAW photo editor for Linux and macOS</title>
+  <title>RAWmakase · RAW photo editor for macOS, Linux and Windows</title>
   <meta name="description" content="{{ site.Params.description }}">
   <meta name="theme-color" content="#16191c">
   <meta property="og:title" content="RAWmakase">
@@ -52,6 +52,7 @@
     <section class="hero wrap">
       <div class="hero-copy">
         <h1 class="reveal" style="--d:0">RAW<span>makase</span></h1>
+        <p class="say reveal" style="--d:0">raw-ma-ka-se, from RAW + omakase</p>
         <p class="tagline reveal" style="--d:1">{{ .Params.tagline }}</p>
         <p class="lede reveal" style="--d:2">{{ .Params.lede }}</p>
         <div class="cta reveal" style="--d:3">
@@ -141,15 +142,16 @@
             <li><a href="{{ $dl }}rawmakase-{{ $v }}-arch-recipe.tar.gz"><b>Arch PKGBUILD</b><code>rawmakase-{{ $v }}-arch-recipe.tar.gz</code>{{ partial "icon.html" "download-simple" }}</a></li>
             <li><a href="{{ $dl }}rawmakase-{{ $v }}-x86_64-linux.tar.gz"><b>Tarball</b><code>rawmakase-{{ $v }}-x86_64-linux.tar.gz</code>{{ partial "icon.html" "download-simple" }}</a></li>
           </ul>
-          <p class="note">aarch64 builds arrive with the next release. Needs a working graphics driver (Vulkan).</p>
+          <p class="note">For aarch64, get the arm64 .deb, aarch64 .rpm or tarball from the <a href="{{ $releases }}">release page</a>. Needs a working graphics driver (Vulkan).</p>
         </article>
 
-        <article class="platform soon" data-os="windows">
-          <h3>Windows <span>in progress</span></h3>
-          <div class="soon-plate">
-            <p>Coming soon.</p>
-            <p class="note">Follow along on <a href="{{ $repo }}">GitHub</a> to know when the first build lands.</p>
-          </div>
+        <article class="platform" data-os="windows">
+          <h3>Windows <span>10 or newer, x86_64</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe"><b>Installer</b><code>rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc.zip"><b>Portable zip</b><code>rawmakase-v{{ $v }}-x86_64-pc-windows-msvc.zip</code>{{ partial "icon.html" "download-simple" }}</a></li>
+          </ul>
+          <p class="note">Installs for your user account, no administrator rights needed. The installer isn't code-signed yet, so if SmartScreen warns, choose More info, then Run anyway.</p>
         </article>
       </div>
     </section>
@@ -175,6 +177,9 @@
         btn.firstChild.textContent = "Download for macOS ";
       } else if (os === "linux") {
         btn.firstChild.textContent = "Download for Linux ";
+      } else if (os === "windows") {
+        btn.href = "{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe";
+        btn.firstChild.textContent = "Download for Windows ";
       }
     })();
   </script>
