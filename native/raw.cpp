@@ -5,7 +5,9 @@
 #include <string>
 #endif
 #include <lcms2.h>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -128,7 +130,9 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
         auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
         handle.cancel=cancel; handle.context=context;
         raw.set_progress_handler(progress,&handle);
+#ifdef _OPENMP
         omp_set_num_threads(std::max(1, omp_get_num_procs()));
+#endif
         auto& p=raw.imgdata.params;
         p.use_camera_wb=1; p.use_auto_wb=0; p.no_auto_bright=1;
         p.adjust_maximum_thr=0; p.highlight=1; p.output_color=0;

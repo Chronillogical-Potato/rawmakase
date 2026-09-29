@@ -60,7 +60,7 @@ The `rawmakase-<version>-<arch>-linux.tar.gz` download contains the same bundled
 
 ### Windows (10 or newer, x86_64)
 
-Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for your user account only, without administrator rights, and adds RAWmakase to the Start menu. The installer is not code-signed yet, so Microsoft Defender SmartScreen may warn about an unrecognized app: choose **More info → Run anyway**. For a copy without installing, extract `rawmakase-v<version>-x86_64-pc-windows-msvc.zip` and run `rawmakase.exe` from the extracted folder, keeping its DLLs beside it.
+Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for your user account only, without administrator rights, and adds RAWmakase to the Start menu. The installer is not code-signed yet, so Microsoft Defender SmartScreen may warn about an unrecognized app: choose **More info → Run anyway**. For a copy without installing, extract `rawmakase-v<version>-x86_64-pc-windows-msvc.zip` and run `rawmakase.exe` from the extracted folder.
 
 ### Updates and verification
 

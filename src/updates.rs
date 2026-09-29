@@ -4,9 +4,9 @@
 //! client and the notice (`app::updates`).
 //!
 //! The Apple Silicon disk image and the Windows installer update themselves.
-//! Intel Macs, the Linux tarball and Windows archive (which keep libraries
-//! beside the executable) and package-managed installs are told about a
-//! release and pointed at its page.
+//! Intel Macs, the Linux tarball (which bundles libraries beside the
+//! executable), the Windows archive and package-managed installs are told
+//! about a release and pointed at its page.
 use anyhow::Result;
 pub use fastframe_update::{Launch, Prepared, Release, Unsupported, Updater};
 use fastframe_update::{MacConfig, MacTarget, Request, Response, Transport, UpdateConfig};

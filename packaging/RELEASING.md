@@ -23,10 +23,9 @@ private libraries; run the extracted `usr/bin/rawmakase` or install the whole
 tree under `/usr`. Do not copy just its executable. Linux still needs system
 Vulkan/graphics drivers, window-system libraries and a working file-dialog portal.
 
-The Windows installer and archive hold the same folder: `rawmakase.exe` with
-LibRaw and Little CMS linked in statically, the Microsoft C++ and OpenMP
-runtime DLLs beside it (so no Visual C++ Redistributable is needed) and the
-licenses. Neither is code-signed yet, so SmartScreen warns on first run;
+The Windows installer and archive hold the same folder: `rawmakase.exe`, with
+LibRaw, Little CMS and the C runtime linked in statically (so no Visual C++
+Redistributable is needed), and the licenses. Neither is code-signed yet, so SmartScreen warns on first run;
 signing can be added later as an `after_package` hook on the `windows-amd64`
 target, before checksums are recorded.
 
@@ -169,10 +168,11 @@ Windows builds with MSVC. `packaging/windows/deps.ps1` builds the same LibRaw
 and Little CMS versions (plus libjpeg-turbo, zlib and JasPer, which LibRaw
 needs) as static libraries with vcpkg, pinned to one vcpkg commit; update that
 commit when the versions above change. `build.rs` finds them through vcpkg's
-pkg-config files and compiles the wrapper with `/openmp`.
-`packaging/windows/stage.ps1` copies the executable, licenses and every
-Microsoft runtime DLL it imports, and fails on any other DLL that is not part of
-Windows. The `windows-amd64` target in `native-packages.yaml` runs
+pkg-config files. Windows builds link the C runtime statically
+(`.cargo/config.toml`) and compile the wrapper without OpenMP, so
+`rawmakase.exe` imports only Windows' own DLLs: the updater runs a copy of it
+alone as its helper. `packaging/windows/stage.ps1` copies the executable and
+licenses and fails if the executable imports any other DLL. The `windows-amd64` target in `native-packages.yaml` runs
 `packaging/windows/setup.ps1`, which compiles `packaging/windows/rawmakase.iss`
 with Inno Setup. Never change that script's `AppId`: it is how Windows tells an
 update from a second installation.

@@ -2,7 +2,9 @@ fn main() {
     let macos = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos");
     // Windows builds use MSVC with static LibRaw and Little CMS from vcpkg
     // (packaging/windows/deps.ps1), found through the pkg-config files vcpkg
-    // writes; static linking needs their private dependencies too.
+    // writes; static linking needs their private dependencies too. With the
+    // static C runtime (.cargo/config.toml) and no OpenMP, the executable needs
+    // only Windows' own DLLs: the updater runs a lone copy of it as its helper.
     let msvc = std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
     // Link directives are printed after the glue library is compiled: GNU ld
     // with --as-needed (the default linker on aarch64 Linux) drops a shared
@@ -44,9 +46,7 @@ fn main() {
             prefix.join("lib").display()
         );
     } else if msvc {
-        // MSVC's OpenMP runtime is vcomp140.dll, shipped beside the executable.
-        b.flag("/openmp")
-            .define("NOMINMAX", None)
+        b.define("NOMINMAX", None)
             .define("CMS_NO_REGISTER_KEYWORD", None);
     } else {
         b.flag("-fopenmp");
@@ -69,16 +69,12 @@ fn main() {
             println!("cargo:rustc-link-lib={name}");
         }
     }
-    println!(
-        "cargo:rustc-link-lib={}",
-        if macos {
-            "omp"
-        } else if msvc {
-            "vcomp"
-        } else {
-            "gomp"
-        }
-    );
+    if !msvc {
+        println!(
+            "cargo:rustc-link-lib={}",
+            if macos { "omp" } else { "gomp" }
+        );
+    }
     println!("cargo:rerun-if-changed=native/raw.cpp");
 
     #[cfg(windows)]

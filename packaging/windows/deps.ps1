@@ -1,7 +1,7 @@
 # Builds LibRaw and Little CMS for the MSVC build with vcpkg, pinned to a
 # commit with the same versions packaging/native-deps.sh builds elsewhere
-# (LibRaw 0.22.2, lcms2 2.19.1). Static libraries against the dynamic C
-# runtime, release builds only; build.rs finds them through vcpkg's
+# (LibRaw 0.22.2, lcms2 2.19.1). Static libraries against the static C
+# runtime the app links (.cargo/config.toml), release builds only; build.rs finds them through vcpkg's
 # pkg-config files.
 #
 #   packaging/windows/deps.ps1 C:\path\to\deps
@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
 $commit = 'b8b8df2201ad8509b81a830fe0957bcb98e06c27'
-$triplet = 'x64-windows-static-md-release'
+$triplet = 'x64-windows-static-release'
 $hostTriplet = 'x64-windows-release'
 $vcpkg = Join-Path $Root 'vcpkg'
 
