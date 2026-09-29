@@ -119,6 +119,7 @@ impl Editor {
                     preview,
                     histogram,
                     thumbnail,
+                    samples,
                     stage,
                     status,
                 } if id == self.preview.task.id() => {
@@ -148,6 +149,11 @@ impl Editor {
                             size,
                             navigator,
                         } => self.set_presented(region, (id, size), navigator),
+                    }
+                    if region {
+                        self.preview.region_samples = samples;
+                    } else {
+                        self.preview.samples = samples;
                     }
                     self.preview.mode = self.preview.pending_mode;
                     if stage != RenderStage::Draft {

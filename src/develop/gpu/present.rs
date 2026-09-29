@@ -1,6 +1,7 @@
 //! Preview display on the device: the developed pixels are finished (`present.wgsl`)
 //! straight into a texture the viewport draws, so a preview is never read back or
-//! uploaded again. Only the histogram and, when asked, a small thumbnail come back.
+//! uploaded again. Only the histogram and, when asked, a small thumbnail or the
+//! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input};
 use crate::develop::{Recipe, pipeline::pixel_params::PixelParams, quality};
 use anyhow::{Context, Result, ensure};
@@ -34,6 +35,9 @@ pub struct Display {
     pub navigator: Option<u32>,
     /// Long edge of a reduced copy read back for library thumbnails.
     pub thumbnail: Option<u32>,
+    /// Read back the shown pixels without overlays or monitor profile, for the
+    /// white balance selector's loupe.
+    pub samples: bool,
 }
 /// A presented preview.
 pub struct Frame {
@@ -48,6 +52,8 @@ pub struct Frame {
     pub histogram: Box<[[u32; 256]; 3]>,
     /// Width, height and RGB bytes of the reduced copy for thumbnails.
     pub thumbnail: Option<(u32, u32, Vec<u8>)>,
+    /// Width, height and RGB bytes of the shown pixels, when `Display::samples`.
+    pub samples: Option<(u32, u32, Vec<u8>)>,
     /// Textures dropped since the previous frame; nothing draws them any more.
     pub released: Vec<wgpu::Texture>,
 }
@@ -88,7 +94,7 @@ pub(crate) struct Finish {
 enum Kind {
     Photo(Slot),
     Navigator,
-    /// Internal: the photo without overlays, and its reduced copy for thumbnails.
+    /// Internal: the photo without overlays, for thumbnails and loupe samples.
     Plain,
     Thumbnail,
 }
@@ -495,16 +501,17 @@ impl Processor {
                 [width, height],
             );
         }
-        // Library thumbnails show the photo without the overlay or monitor profile.
+        // Library thumbnails and loupe samples show the photo without the overlay or
+        // monitor profile.
         let overlays = display.clipping || display.monitor.is_some();
-        let plain = (display.thumbnail.is_some() && overlays).then(|| {
+        let plain = ((display.thumbnail.is_some() || display.samples) && overlays).then(|| {
             let plain = presenter
                 .target(&device, Kind::Plain, cw, ch)
                 .texture
                 .clone();
             let view = plain.create_view(&Default::default());
             record(&mut encoder, &view, false, &[&present], [cw, ch]);
-            view
+            (plain, view)
         });
         encoder.clear_buffer(&presenter.histogram, 0, None);
         record(&mut encoder, &view, true, &[&present], [cw, ch]);
@@ -543,28 +550,13 @@ impl Processor {
             .navigator
             .map(|edge| reduce(Kind::Navigator, &view, edge, &mut encoder));
         let thumbnail = display.thumbnail.map(|edge| {
-            let source = plain.as_ref().unwrap_or(&view);
+            let source = plain.as_ref().map_or(&view, |(_, view)| view);
             let texture = reduce(Kind::Thumbnail, source, edge, &mut encoder);
-            let row = (texture.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Thumbnail readback"),
-                size: row as u64 * texture.height() as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-            encoder.copy_texture_to_buffer(
-                texture.as_image_copy(),
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &buffer,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(row),
-                        rows_per_image: None,
-                    },
-                },
-                texture.size(),
-            );
-            (texture.width(), texture.height(), row, buffer)
+            readback(&device, &mut encoder, &texture, "Thumbnail readback")
+        });
+        let samples = display.samples.then(|| {
+            let source = plain.as_ref().map_or(&texture, |(texture, _)| texture);
+            readback(&device, &mut encoder, source, "Loupe readback")
         });
         encoder.copy_buffer_to_buffer(
             &presenter.histogram,
@@ -585,13 +577,14 @@ impl Processor {
                 });
         };
         map(&presenter.histogram_staging);
-        if let Some((.., buffer)) = &thumbnail {
+        let readbacks: Vec<_> = thumbnail.iter().chain(&samples).collect();
+        for (.., buffer) in &readbacks {
             map(buffer);
         }
         drop(tx);
         let poll = super::wait(&device, submission);
         let mapped: Result<()> = poll.map_err(anyhow::Error::from).and_then(|_| {
-            for _ in 0..1 + thumbnail.is_some() as usize {
+            for _ in 0..1 + readbacks.len() {
                 rx.recv_timeout(Duration::from_secs(1))
                     .context("GPU readback timed out")??;
             }
@@ -599,7 +592,7 @@ impl Processor {
         });
         let unmap = |presenter: &Presenter| {
             presenter.histogram_staging.unmap();
-            if let Some((.., buffer)) = &thumbnail {
+            for (.., buffer) in &readbacks {
                 buffer.unmap();
             }
         };
@@ -619,19 +612,19 @@ impl Processor {
                 histogram[c].copy_from_slice(channel);
             }
         }
-        let small = match &thumbnail {
-            Some((tw, th, row, buffer)) => {
-                let bytes = buffer.slice(..).get_mapped_range()?;
-                let rgb = bytes
-                    .chunks_exact(*row as usize)
-                    .flat_map(|r| r[..*tw as usize * 4].as_chunks::<4>().0.iter())
-                    .flat_map(|p| [p[0], p[1], p[2]])
-                    .collect();
-                Some((*tw, *th, rgb))
-            }
-            None => None,
+        let rgb = |(tw, th, row, buffer): &(u32, u32, u32, wgpu::Buffer)| -> Result<_> {
+            let bytes = buffer.slice(..).get_mapped_range()?;
+            let rgb = bytes
+                .chunks_exact(*row as usize)
+                .flat_map(|r| r[..*tw as usize * 4].as_chunks::<4>().0.iter())
+                .flat_map(|p| [p[0], p[1], p[2]])
+                .collect();
+            Ok((*tw, *th, rgb))
         };
+        let small = thumbnail.as_ref().map(rgb).transpose();
+        let shown = samples.as_ref().map(rgb).transpose();
         unmap(presenter);
+        let (small, shown) = (small?, shown?);
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         Ok(Frame {
             width: cw,
@@ -641,7 +634,37 @@ impl Processor {
             navigator,
             histogram,
             thumbnail: small,
+            samples: shown,
             released: std::mem::take(&mut presenter.released),
         })
     }
+}
+/// Records a copy of `texture` into a mappable buffer: width, height, padded row
+/// bytes and the buffer.
+fn readback(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    texture: &wgpu::Texture,
+    label: &str,
+) -> (u32, u32, u32, wgpu::Buffer) {
+    let row = (texture.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: row as u64 * texture.height() as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: None,
+            },
+        },
+        texture.size(),
+    );
+    (texture.width(), texture.height(), row, buffer)
 }

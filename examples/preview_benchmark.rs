@@ -157,6 +157,7 @@ fn main() -> Result<()> {
                     monitor: None,
                     navigator: None,
                     thumbnail: None,
+                    samples: false,
                 };
                 let t = Instant::now();
                 let (edge, at) = if i % 2 == 0 {
@@ -221,6 +222,7 @@ fn main() -> Result<()> {
                     monitor: None,
                     navigator: (slot == develop::gpu::Slot::Whole).then_some(360),
                     thumbnail: None,
+                    samples: false,
                 };
                 for i in 0..=iterations {
                     if mode.starts_with("clarity") {

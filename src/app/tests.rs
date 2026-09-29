@@ -452,6 +452,7 @@ fn stale_preview_results_are_discarded() {
         },
         histogram: Box::new([[0; 256]; 3]),
         thumbnail: None,
+        samples: None,
         stage: worker::RenderStage::Fit,
         status: "stale".into(),
     })
@@ -518,6 +519,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                 },
                 histogram: Box::new([[0; 256]; 3]),
                 thumbnail: None,
+                samples: None,
                 stage,
                 status: status.into(),
             })
