@@ -1,7 +1,10 @@
 # cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
 
 [graph]
-targets = ["x86_64-unknown-linux-gnu"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
 
 [advisories]
 # Unmaintained crates deep in the GUI/GPU stacks are reported, but only for direct dependencies.
