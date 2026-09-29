@@ -105,6 +105,24 @@ fn attach_console() {
         }
     }
 }
+/// Started from the Start menu there is no console to print a failure to, so
+/// the app would vanish without a word.
+#[cfg(windows)]
+fn show_error(error: &anyhow::Error) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let text = wide(&format!("RAWmakase could not start.\n\n{error:#}"));
+    let title = wide("RAWmakase");
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        )
+    };
+}
 fn main() -> Result<()> {
     #[cfg(windows)]
     attach_console();
@@ -325,7 +343,12 @@ fn main() -> Result<()> {
             );
         }
         None => {
-            rawmakase::app::run(a.path, launch)?;
+            let run = rawmakase::app::run(a.path, launch);
+            #[cfg(windows)]
+            if let Err(e) = &run {
+                show_error(e);
+            }
+            run?;
         }
     }
     Ok(())

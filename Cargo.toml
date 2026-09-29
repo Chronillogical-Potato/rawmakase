@@ -41,7 +41,7 @@ fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", 
 # The terminal a release build's command-line output goes to, and the
 # Desktop and Pictures export folders.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 cc = "1"
