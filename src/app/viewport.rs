@@ -1,4 +1,5 @@
 use super::Editor;
+use super::icons::{self, Icon};
 use super::state::{TextureMode, Tool};
 use super::widgets::{section, segmented};
 use crate::app::theme;
@@ -381,6 +382,23 @@ impl Editor {
             self.view.zoom100 = !self.view.zoom100;
             self.schedule();
         }
+        if self.view.is(Tool::WhiteBalance) {
+            // The loupe reads the shown pixels, which renders keep only while the
+            // selector is active.
+            if !self.preview.samples_requested {
+                self.preview.samples_requested = true;
+                self.schedule();
+            }
+            if let Some(pos) = response.hover_pos()
+                && rect.contains(pos)
+            {
+                self.white_balance_loupe(ui, pos, rect, region_rect, area);
+            }
+        } else if self.preview.samples_requested {
+            self.preview.samples_requested = false;
+            self.preview.samples = None;
+            self.preview.region_samples = None;
+        }
         if self.view.is(Tool::WhiteBalance)
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
@@ -526,5 +544,143 @@ impl Editor {
         if self.view.zoom100 && self.region() != self.preview.last_region {
             self.schedule();
         }
+    }
+    /// Lightroom's white balance selector over the photo: an eyedropper cursor
+    /// whose tip is the picked point, and a loupe of the pixels around it with the
+    /// values of the one under the tip.
+    fn white_balance_loupe(
+        &self,
+        ui: &egui::Ui,
+        pos: Pos2,
+        rect: Rect,
+        region: Option<Rect>,
+        area: Rect,
+    ) {
+        const CELLS: i32 = 5;
+        const CELL: f32 = 30.;
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                egui::Id::new("white-balance-loupe"),
+            ))
+            .with_clip_rect(area);
+        // Lucide's pipette has its tip at (2, 22) of 24.
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+        let icon = 22.;
+        let tip = Vec2::new(icon / 2. - icon * 2. / 24., icon / 2. - icon * 22. / 24.);
+        for d in [
+            Vec2::new(1., 0.),
+            Vec2::new(-1., 0.),
+            Vec2::new(0., 1.),
+            Vec2::new(0., -1.),
+        ] {
+            icons::paint_at(
+                &painter,
+                Icon::Eyedropper,
+                pos + tip + d,
+                icon,
+                Color32::BLACK,
+            );
+        }
+        icons::paint_at(&painter, Icon::Eyedropper, pos + tip, icon, Color32::WHITE);
+        let (samples, shown) = match (&self.preview.region_samples, region) {
+            (Some(samples), Some(region)) if region.contains(pos) => (samples, region),
+            _ => match &self.preview.samples {
+                Some(samples) => (samples, rect),
+                None => return,
+            },
+        };
+        let (w, h) = samples.dimensions();
+        let at = |p: f32, lo: f32, len: f32, n: u32| ((p - lo) / len * n as f32).floor() as i32;
+        let cx = at(pos.x, shown.left(), shown.width(), w);
+        let cy = at(pos.y, shown.top(), shown.height(), h);
+        let pixel = |x: i32, y: i32| {
+            (x >= 0 && y >= 0 && x < w as i32 && y < h as i32)
+                .then(|| samples.get_pixel(x as u32, y as u32).0)
+        };
+        let text = pixel(cx, cy).map_or_else(String::new, |p| {
+            let pct = |v: u8| f32::from(v) / 2.55;
+            format!(
+                "R {:.1}   G {:.1}   B {:.1} %",
+                pct(p[0]),
+                pct(p[1]),
+                pct(p[2])
+            )
+        });
+        let values =
+            painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::gray(225));
+        let grid = CELLS as f32 * CELL;
+        let pad = 8.;
+        let line = 24.;
+        // Wide enough for the values, with the grid centred.
+        let size = Vec2::new(
+            (grid + 2. * pad).max(values.size().x + 2. * pad + 8.),
+            grid + 2. * line,
+        );
+        // Just below and right of the tip, as in Lightroom, sliding along the photo
+        // area's edges. Only at the bottom does it move, to above-left, clear of the
+        // eyedropper.
+        let gap = Vec2::new(10., 14.);
+        let mut min = pos + gap;
+        if min.y + size.y > area.bottom() {
+            min = pos - gap - size;
+        }
+        min.x = min.x.min(area.right() - size.x).max(area.left());
+        min.y = min.y.max(area.top());
+        let frame = Rect::from_min_size(min, size);
+        painter.add(
+            egui::Shadow {
+                offset: [0, 4],
+                blur: 16,
+                spread: 0,
+                color: Color32::from_black_alpha(120),
+            }
+            .as_shape(frame, 8.),
+        );
+        painter.rect_filled(frame, 8., theme::gray(24));
+        painter.text(
+            Pos2::new(frame.center().x, frame.top() + line / 2.),
+            egui::Align2::CENTER_CENTER,
+            "Pick a target neutral",
+            egui::FontId::proportional(12.),
+            theme::gray(215),
+        );
+        let origin = Pos2::new(frame.center().x - grid / 2., frame.top() + line);
+        let cells = Rect::from_min_size(origin, Vec2::splat(grid));
+        painter.rect_filled(cells, 0., theme::gray(60));
+        let half = CELLS / 2;
+        for j in 0..CELLS {
+            for i in 0..CELLS {
+                let cell = Rect::from_min_size(
+                    origin + Vec2::new(i as f32, j as f32) * CELL,
+                    Vec2::splat(CELL),
+                )
+                .shrink(0.5);
+                let color = pixel(cx + i - half, cy + j - half)
+                    .map_or(theme::photo_backdrop(), |[r, g, b]| {
+                        Color32::from_rgb(r, g, b)
+                    });
+                painter.rect_filled(cell, 0., color);
+            }
+        }
+        // A small cross marks the picked pixel, dark or light to stay visible on it.
+        let center = cells.center();
+        let mark = pixel(cx, cy).map_or(Color32::WHITE, |[r, g, b]| {
+            let luma = 0.3 * f32::from(r) + 0.59 * f32::from(g) + 0.11 * f32::from(b);
+            if luma > 110. {
+                Color32::from_black_alpha(150)
+            } else {
+                Color32::from_white_alpha(170)
+            }
+        });
+        for d in [Vec2::new(4., 0.), Vec2::new(0., 4.)] {
+            painter.line_segment([center - d, center + d], Stroke::new(1., mark));
+        }
+        painter.galley(
+            Pos2::new(frame.center().x, frame.bottom() - line / 2.) - values.size() / 2.,
+            values,
+            theme::gray(225),
+        );
     }
 }

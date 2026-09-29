@@ -438,6 +438,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 monitor: None,
                 navigator: Some(20),
                 thumbnail: Some(30),
+                samples: true,
             };
             let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
             let Output::Frame(frame) =
@@ -487,6 +488,17 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             assert_eq!(navigator.width().max(navigator.height()), 20);
             let (tw, th, bytes) = frame.thumbnail.as_ref().unwrap();
             assert_eq!(((*tw).max(*th), bytes.len()), (30, (tw * th * 3) as usize));
+            // The loupe's samples are the photo without the clipping overlay.
+            let (sw, sh, samples) = frame.samples.as_ref().unwrap();
+            assert_eq!((*sw, *sh), (frame.width, frame.height));
+            let plain = expected.rgb8();
+            let worst = samples
+                .iter()
+                .zip(&plain)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            assert!(worst <= 1, "{label}: loupe samples differ by {worst}");
         }
     }
     Ok(())

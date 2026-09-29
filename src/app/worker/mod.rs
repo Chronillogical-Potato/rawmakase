@@ -87,6 +87,8 @@ pub enum Event {
         histogram: Box<[[u32; 256]; 3]>,
         /// A reduced copy for the library, without overlays, when the job asked for one.
         thumbnail: Option<image::RgbImage>,
+        /// The shown pixels without overlays or monitor profile, when the job asked.
+        samples: Option<image::RgbImage>,
         stage: RenderStage,
         status: String,
     },
@@ -160,6 +162,8 @@ pub struct RenderJob {
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.
     pub thumbnail: bool,
+    /// Also return the shown pixels, for the white balance selector's loupe.
+    pub samples: bool,
     pub overlay: Overlay,
 }
 fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {

@@ -265,6 +265,7 @@ impl Editor {
                 clipping: self.view.clipping,
                 navigator: !self.view.zoom100,
                 thumbnail: region.is_none() && self.shows_library_edit(),
+                samples: self.view.is(super::state::Tool::WhiteBalance),
                 overlay: self.overlay(),
             });
         }

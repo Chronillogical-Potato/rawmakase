@@ -103,6 +103,12 @@ pub(super) struct PreviewState {
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<Picture>,
     pub(super) histogram: [[u32; 256]; 3],
+    /// The shown pixels of `texture` and `region` while the white balance selector
+    /// is active, for its loupe.
+    pub(super) samples: Option<image::RgbImage>,
+    pub(super) region_samples: Option<image::RgbImage>,
+    /// Whether a render with loupe samples was asked for since the selector opened.
+    pub(super) samples_requested: bool,
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
     pub(super) last_region: Option<[u32; 4]>,
@@ -117,6 +123,9 @@ impl Default for PreviewState {
             region: None,
             navigator: None,
             histogram: [[0; 256]; 3],
+            samples: None,
+            region_samples: None,
+            samples_requested: false,
             status: String::new(),
             last_fit_edge: 0,
             last_region: None,

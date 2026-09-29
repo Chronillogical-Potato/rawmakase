@@ -477,7 +477,8 @@ impl Editor {
                 r.use_camera_baseline(m);
                 r.sync_white_balance_controls(m);
             }
-            ui.add_space(4.);
+            // White balance is its own group below the profile, as in Lightroom.
+            ui.add_space(12.);
             let as_shot = metadata.as_ref().map(|m| {
                 let mut shot = r.clone();
                 shot.reset_white_balance(m);
@@ -495,8 +496,27 @@ impl Editor {
                         .find(|(_, t, n)| near((*t, *n)))
                         .map_or("Custom", |(name, _, _)| *name)
                 };
+                // The selector sits at the row's far left, so the menu lines up
+                // with Profile's.
+                let rect = Rect::from_center_size(
+                    Pos2::new(ui.max_rect().left() - 88. + 13., ui.max_rect().center().y),
+                    Vec2::new(26., 20.),
+                );
+                let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
+                let picking = view.is(Tool::WhiteBalance);
+                if picking || response.hovered() {
+                    ui.painter()
+                        .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
+                }
+                eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
+                if response
+                    .on_hover_text("White balance selector (W): click a neutral area of the photo")
+                    .clicked()
+                {
+                    view.toggle(Tool::WhiteBalance);
+                }
                 egui::ComboBox::from_id_salt("white-balance")
-                    .width((ui.available_width() - 30.).max(80.))
+                    .width(ui.available_width())
                     .selected_text(selected)
                     .show_ui(ui, |ui| {
                         if ui
@@ -528,19 +548,6 @@ impl Editor {
                             egui::Button::selectable(selected == "Custom", "Custom"),
                         );
                     });
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(26., 20.), Sense::click());
-                let picking = view.is(Tool::WhiteBalance);
-                if picking || response.hovered() {
-                    ui.painter()
-                        .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
-                }
-                eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
-                if response
-                    .on_hover_text("White balance selector (W): click a neutral area of the photo")
-                    .clicked()
-                {
-                    view.toggle(Tool::WhiteBalance);
-                }
             });
             let old = (r.temperature, r.tint);
             slider(

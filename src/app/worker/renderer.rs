@@ -73,7 +73,9 @@ impl Shown {
                 generation,
                 ..
             } => {
-                same && self.clipping == job.clipping
+                // A cached frame kept no loupe samples.
+                same && !job.samples
+                    && self.clipping == job.clipping
                     && self.monitor == job.monitor
                     && self.navigator == job.navigator
                     && gpu.and_then(|g| g.generation(texture)) == Some(*generation)
@@ -194,6 +196,7 @@ pub(in crate::app) fn renderer_with_backend(
                 monitor: monitor.clone(),
                 navigator: navigator.then_some(NAVIGATOR),
                 thumbnail: thumbnail.then_some(THUMBNAIL),
+                samples: job.samples,
             })
         };
         let whole = display(gpu::Slot::Whole, job.navigator, job.thumbnail);
@@ -211,6 +214,10 @@ pub(in crate::app) fn renderer_with_backend(
                 return;
             }
             let mut rgb = out.rgb8();
+            let samples = job
+                .samples
+                .then(|| image::RgbImage::from_raw(out.width, out.height, rgb.clone()))
+                .flatten();
             let reduce = |rgb: &[u8], edge: u32| {
                 let full = image::RgbImage::from_raw(out.width, out.height, rgb.to_vec())?;
                 let k = (edge as f32 / out.width.max(out.height) as f32).min(1.);
@@ -283,6 +290,7 @@ pub(in crate::app) fn renderer_with_backend(
                         navigator,
                     },
                     thumbnail,
+                    samples,
                     stage,
                     status: status(stage, if gpu { "GPU finish" } else { "CPU" }, &warning),
                 },
@@ -322,6 +330,9 @@ pub(in crate::app) fn renderer_with_backend(
                                 thumbnail: frame
                                     .thumbnail
                                     .and_then(|(w, h, rgb)| image::RgbImage::from_raw(w, h, rgb)),
+                                samples: frame
+                                    .samples
+                                    .and_then(|(w, h, rgb)| image::RgbImage::from_raw(w, h, rgb)),
                                 stage,
                                 status: status(stage, "GPU", &warning),
                             },
@@ -349,6 +360,7 @@ pub(in crate::app) fn renderer_with_backend(
                             preview: preview.preview(),
                             histogram: histogram.clone(),
                             thumbnail: None,
+                            samples: None,
                             stage,
                             status: status(stage, "GPU", &warning),
                         },
@@ -527,6 +539,7 @@ mod tests {
             clipping: false,
             navigator: region.is_none(),
             thumbnail: false,
+            samples: false,
             overlay: Default::default(),
         });
         let mut stages = Vec::new();
@@ -594,6 +607,7 @@ mod tests {
                 clipping: false,
                 navigator: region.is_none(),
                 thumbnail: false,
+                samples: false,
                 overlay: Default::default(),
             });
             loop {
