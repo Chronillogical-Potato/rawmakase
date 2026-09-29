@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 use std::{
-    fs::{self, File},
+    fs,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -46,7 +46,15 @@ pub(crate) fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     f.write_all(b"\n")?;
     f.as_file().sync_all()?;
     f.persist(path).map_err(|e| e.error)?;
-    File::open(parent)?.sync_all()?;
+    sync_dir(parent)
+}
+/// Makes a rename into `dir` durable. Unix only: Windows cannot open a folder
+/// as a file, and NTFS journals the rename itself.
+pub(crate) fn sync_dir(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }
 pub fn list_raws(path: &Path) -> Result<Vec<PathBuf>> {
