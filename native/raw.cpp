@@ -1,4 +1,9 @@
 #include <libraw/libraw.h>
+#ifdef _WIN32
+// After LibRaw, which includes winsock2.h ahead of windows.h as Windows requires.
+#include <windows.h>
+#include <string>
+#endif
 #include <lcms2.h>
 #include <omp.h>
 #include <algorithm>
@@ -63,12 +68,25 @@ static int progress(void* p, LibRaw_progress, int, int) {
     return h->cancel && h->cancel(h->context);
 }
 static void message(char* err, const char* text) { std::snprintf(err, 512, "%s", text); }
+// Paths arrive as UTF-8. Windows' narrow file API uses the ANSI code page, so
+// they are widened for LibRaw's wide-character open there.
+static int open_path(Raw& raw, const char* path) {
+#ifdef _WIN32
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+    if (n <= 0) return LIBRAW_IO_ERROR;
+    std::wstring wide(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.data(), n);
+    return raw.open_file(wide.c_str());
+#else
+    return raw.open_file(path);
+#endif
+}
 extern "C" {
 const char* ora_version() { return LibRaw::version(); }
 void* ora_open(const char* path, Metadata* m, char* err) {
     try {
         auto h = std::make_unique<Handle>();
-        int rc = h->raw.open_file(path);
+        int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
         auto& d = h->raw.imgdata;
         if (d.idata.colors != 3 || (!d.idata.filters)) {

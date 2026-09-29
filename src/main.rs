@@ -1,3 +1,5 @@
+// Release builds on Windows open no console window beside the app.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rawmakase::{

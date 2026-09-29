@@ -147,9 +147,18 @@ impl Drop for Raw {
         unsafe { ora_close(self.handle) }
     }
 }
+#[cfg(unix)]
 fn path_string(p: &Path) -> Result<CString> {
     use std::os::unix::ffi::OsStrExt;
     Ok(CString::new(p.as_os_str().as_bytes())?)
+}
+/// UTF-8, which the native side widens for LibRaw's wide-character open.
+#[cfg(windows)]
+fn path_string(p: &Path) -> Result<CString> {
+    let utf8 = p
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Path is not valid Unicode: {}", p.display()))?;
+    Ok(CString::new(utf8)?)
 }
 fn error(buf: &[c_char]) -> String {
     unsafe { CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned() }
