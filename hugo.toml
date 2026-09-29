@@ -1,0 +1,10 @@
+baseURL = "/" # set to the real domain once there is one
+languageCode = "en-us"
+title = "RAWmakase"
+disableKinds = ["taxonomy", "term", "section", "page", "RSS", "sitemap"]
+
+[params]
+  # Bump this one value when a new release ships; every download link follows it.
+  version = "0.1.8"
+  repo = "https://github.com/pch/rawmakase"
+  description = "A fast, non-destructive RAW photo editor for Linux and macOS. Open source, written in Rust."

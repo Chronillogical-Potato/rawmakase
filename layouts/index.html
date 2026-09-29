@@ -1,0 +1,151 @@
+{{- $v := site.Params.version -}}
+{{- $repo := site.Params.repo -}}
+{{- $dl := printf "%s/releases/download/v%s/" $repo $v -}}
+{{- $releases := printf "%s/releases/latest" $repo -}}
+{{- $css := resources.Get "css/main.css" | minify | fingerprint -}}
+{{- $shot := resources.Get "images/screenshot.png" -}}
+{{- $shotLarge := $shot.Resize "1600x webp q82" -}}
+{{- $shotSmall := $shot.Resize "800x webp q80" -}}
+<!doctype html>
+<html lang="{{ site.LanguageCode }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAWmakase · RAW photo editor for Linux and macOS</title>
+  <meta name="description" content="{{ site.Params.description }}">
+  <meta name="theme-color" content="#16191c">
+  <meta property="og:title" content="RAWmakase">
+  <meta property="og:description" content="{{ site.Params.description }}">
+  <meta property="og:image" content="{{ $shotLarge.Permalink }}">
+  <link rel="icon" href="{{ "rawmakase.svg" | relURL }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="nav wrap">
+    <a class="brand" href="#top"><img src="{{ "rawmakase.svg" | relURL }}" alt="" width="28" height="28"> RAWmakase</a>
+    <nav>
+      <a href="#menu">Features</a>
+      <a href="#download">Download</a>
+      <a href="{{ $repo }}">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <p class="kicker reveal" style="--d:0">Open source · MIT · Written in Rust</p>
+        <h1 class="reveal" style="--d:1">RAW<em>makase</em></h1>
+        <p class="tagline reveal" style="--d:2">{{ .Params.tagline }}</p>
+        <p class="lede reveal" style="--d:3">{{ .Params.lede }}</p>
+        <div class="cta reveal" style="--d:4">
+          <a class="btn btn-primary" id="primary-download" href="#download">Download <span class="ver">v{{ $v }}</span></a>
+          <a class="btn btn-ghost" href="{{ $repo }}">View source</a>
+        </div>
+        <p class="platforms reveal" style="--d:5">macOS 15+ (Apple Silicon &amp; Intel) · Linux · Windows soon</p>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <div class="rings"><span></span><span></span><span></span></div>
+        <img src="{{ "rawmakase.svg" | relURL }}" alt="" width="360" height="360">
+      </div>
+      <p class="omakase" aria-hidden="true">お任せ</p>
+    </section>
+
+    <section class="video wrap" aria-label="Video tour">
+      <figure class="frame">
+        <img src="{{ $shotLarge.RelPermalink }}" srcset="{{ $shotSmall.RelPermalink }} 800w, {{ $shotLarge.RelPermalink }} 1600w" sizes="(max-width: 1180px) 100vw, 1120px" width="{{ $shotLarge.Width }}" height="{{ $shotLarge.Height }}" alt="RAWmakase Develop view with presets, the photo and tone controls" loading="eager">
+        <div class="play">
+          <span class="disc" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></span>
+          <span class="play-label">Video tour coming soon</span>
+        </div>
+      </figure>
+    </section>
+
+    <section class="menu wrap" id="menu">
+      <header class="section-head">
+        <p class="kicker">Tonight's menu</p>
+        <h2>Everything a photo needs, <em>served in order.</em></h2>
+        <p>A Lightroom-style workflow you already know: organise in the Library, finish in Develop, export when it's right.</p>
+      </header>
+      <ol class="courses">
+        {{- range $i, $c := .Params.menu }}
+        <li>
+          <span class="num">{{ printf "%02d" (add $i 1) }}</span>
+          <h3>{{ $c.name }}</h3>
+          <p>{{ $c.text }}</p>
+        </li>
+        {{- end }}
+      </ol>
+      <p class="aside">Linux is first-class, not an afterthought. Rendering aims for close, not exact, parity with Lightroom.</p>
+    </section>
+
+    <section class="download wrap" id="download">
+      <header class="section-head">
+        <p class="kicker">Download · v{{ $v }}</p>
+        <h2>Take a seat.</h2>
+        <p>Free and open source. Pick the build for your system, or browse <a href="{{ $releases }}">every release on GitHub</a>.</p>
+      </header>
+
+      <div class="platform-grid">
+        <article class="platform" data-os="mac">
+          <h3>macOS <span>15 Sequoia or newer</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-arm64.dmg"><b>Apple Silicon</b><code>rawmakase-v{{ $v }}-macos-arm64.dmg</code></a></li>
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-x86_64.dmg"><b>Intel</b><code>rawmakase-v{{ $v }}-macos-x86_64.dmg</code></a></li>
+            <li><a href="{{ $dl }}rawmakase.rb"><b>Homebrew cask</b><code>rawmakase.rb</code></a></li>
+          </ul>
+          <p class="note">Signed and notarized. Open the DMG and drag RAWmakase into Applications.</p>
+        </article>
+
+        <article class="platform" data-os="linux">
+          <h3>Linux <span>x86_64</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase_{{ $v }}_amd64.deb"><b>Ubuntu 24.04+ · Debian 13+</b><code>rawmakase_{{ $v }}_amd64.deb</code></a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-1.x86_64.rpm"><b>Fedora 43+</b><code>rawmakase-{{ $v }}-1.x86_64.rpm</code></a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-1-x86_64.pkg.tar.zst"><b>Arch Linux</b><code>rawmakase-{{ $v }}-1-x86_64.pkg.tar.zst</code></a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-arch-recipe.tar.gz"><b>Arch PKGBUILD</b><code>rawmakase-{{ $v }}-arch-recipe.tar.gz</code></a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-x86_64-linux.tar.gz"><b>Tarball</b><code>rawmakase-{{ $v }}-x86_64-linux.tar.gz</code></a></li>
+          </ul>
+          <p class="note">aarch64 builds arrive with the next release. Needs a working graphics driver (Vulkan).</p>
+        </article>
+
+        <article class="platform soon" data-os="windows">
+          <h3>Windows <span>in progress</span></h3>
+          <div class="soon-plate">
+            <p>Coming soon.</p>
+            <p class="note">Follow along on <a href="{{ $repo }}">GitHub</a> to know when the first build lands.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot wrap">
+    <div class="brand"><img src="{{ "rawmakase.svg" | relURL }}" alt="" width="24" height="24"> RAWmakase</div>
+    <p>MIT licensed · <a href="{{ $repo }}">Source on GitHub</a> · Built on <a href="https://www.libraw.org/">LibRaw</a></p>
+    <p class="fine">RAWmakase is an independent project and is not affiliated with or endorsed by Adobe. Lightroom is a trademark of Adobe Inc.</p>
+  </footer>
+
+  <script>
+    (function () {
+      var ua = navigator.userAgent, os = /Mac/.test(ua) ? "mac" : /Linux|X11/.test(ua) && !/Android/.test(ua) ? "linux" : /Win/.test(ua) ? "windows" : null;
+      var card = os && document.querySelector('.platform[data-os="' + os + '"]');
+      if (!card) return;
+      card.classList.add("yours");
+      var btn = document.getElementById("primary-download");
+      if (os === "mac") {
+        var arm = true;
+        try { var c = document.createElement("canvas").getContext("webgl"); var r = c && c.getParameter(c.getExtension("WEBGL_debug_renderer_info").UNMASKED_RENDERER_WEBGL); if (r && /Intel/.test(r)) arm = false; } catch (e) {}
+        btn.href = "{{ $dl }}rawmakase-v{{ $v }}-macos-" + (arm ? "arm64" : "x86_64") + ".dmg";
+        btn.firstChild.textContent = "Download for macOS ";
+      } else if (os === "linux") {
+        btn.firstChild.textContent = "Download for Linux ";
+      }
+    })();
+  </script>
+</body>
+</html>
