@@ -4,8 +4,12 @@ title = "RAWmakase"
 disableKinds = ["taxonomy", "term", "section", "page", "RSS", "sitemap"]
 
 [params]
-  # Bump this one value when a new release ships; every download link follows it.
+  # Fallback only: builds read the latest release from GitHub and use that version.
   version = "0.1.8"
   repo = "https://github.com/pch/rawmakase"
   x = "https://x.com/p_ch"
   description = "A fast, non-destructive RAW photo editor for Linux and macOS. Open source, written in Rust."
+
+[caches.getresource]
+  # Always ask GitHub for the latest release instead of reusing a cached answer.
+  maxAge = 0

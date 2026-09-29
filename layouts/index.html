@@ -1,5 +1,15 @@
-{{- $v := site.Params.version -}}
 {{- $repo := site.Params.repo -}}
+{{- /* Download links follow the latest GitHub release at build time; params.version is the fallback when the API can't be reached. */ -}}
+{{- $v := site.Params.version -}}
+{{- $api := replace $repo "https://github.com/" "https://api.github.com/repos/" -}}
+{{- $opts := dict "headers" (dict "Accept" "application/vnd.github+json") -}}
+{{- with try (resources.GetRemote (printf "%s/releases/latest" $api) $opts) -}}
+  {{- with .Err -}}
+    {{- warnf "Latest release lookup failed, using params.version %s: %s" site.Params.version . -}}
+  {{- else with .Value -}}
+    {{- with (. | transform.Unmarshal).tag_name -}}{{- $v = strings.TrimPrefix "v" . -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- $dl := printf "%s/releases/download/v%s/" $repo $v -}}
 {{- $releases := printf "%s/releases/latest" $repo -}}
 {{- $css := resources.Get "css/main.css" | minify | fingerprint -}}
