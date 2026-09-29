@@ -64,6 +64,17 @@ targets:
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
       output: 'rawmakase-v@VERSION@-macos-x86_64.dmg'
+  # packaging/windows/stage.ps1 prepares dist/windows on the Windows runner.
+  windows-amd64:
+    platform: windows
+    arch: amd64
+    formats: [inno]
+    input:
+      kind: directory
+      local: dist/windows
+    native:
+      command: [pwsh, -NoProfile, -File, packaging/windows/setup.ps1, '@PAYLOAD@', '@PACKAGE@', '@VERSION@']
+      output: 'rawmakase-v@VERSION@-x86_64-pc-windows-msvc-setup.exe'
   linux-amd64:
     platform: linux
     arch: amd64

@@ -1,0 +1,7 @@
+# Windows builds link the C runtime statically, so rawmakase.exe needs only
+# Windows' own DLLs: the updater runs a copy of it alone as its helper.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

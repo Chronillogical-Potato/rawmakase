@@ -26,6 +26,8 @@ fn legacy_sidecar_and_preset_migrate_without_curve_changes() -> Result<()> {
     assert_eq!(load_preset(&preset)?, loaded.recipe);
     Ok(())
 }
+// Unix directory permissions; Windows has no read-only folders in this sense.
+#[cfg(unix)]
 #[test]
 fn readonly_folder_uses_fallback_and_restores() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;

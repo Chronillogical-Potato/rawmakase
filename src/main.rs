@@ -1,3 +1,5 @@
+// Release builds on Windows open no console window beside the app.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rawmakase::{
@@ -85,7 +87,45 @@ enum Command {
         iterations: usize,
     },
 }
+/// A windows-subsystem program starts without a console, so commands run from
+/// a terminal would print nothing. Writes to that terminal instead, unless the
+/// output is already redirected to a file or pipe.
+#[cfg(windows)]
+fn attach_console() {
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE},
+    };
+    // SAFETY: plain Win32 calls with no pointers; failure (no parent console,
+    // as when started from Explorer) leaves the process as it was.
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+/// Started from the Start menu there is no console to print a failure to, so
+/// the app would vanish without a word.
+#[cfg(windows)]
+fn show_error(error: &anyhow::Error) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let text = wide(&format!("RAWmakase could not start.\n\n{error:#}"));
+    let title = wide("RAWmakase");
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        )
+    };
+}
 fn main() -> Result<()> {
+    #[cfg(windows)]
+    attach_console();
     // Before anything else: this process may be the update helper.
     let launch = rawmakase::updates::intercept();
     rayon::ThreadPoolBuilder::new()
@@ -303,7 +343,12 @@ fn main() -> Result<()> {
             );
         }
         None => {
-            rawmakase::app::run(a.path, launch)?;
+            let run = rawmakase::app::run(a.path, launch);
+            #[cfg(windows)]
+            if let Err(e) = &run {
+                show_error(e);
+            }
+            run?;
         }
     }
     Ok(())

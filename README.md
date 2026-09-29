@@ -1,12 +1,12 @@
 <h1><img src="packaging/icons/rawmakase.svg" width="48" height="48" align="top" alt=""> RAWmakase</h1>
 
-RAWmakase is a fast, non-destructive RAW photo developer for Linux and macOS, written in Rust. It opens RAW files from any camera LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from any camera LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
 ![RAWmakase Develop view with presets, the photo, and tone controls](docs/images/screenshot.png)
 
 <p align="center">
   <a href="https://github.com/pch/rawmakase/releases/latest"><strong>⬇ Download the latest version</strong></a><br>
-  <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · <a href="#install">install notes</a></sub>
+  <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · Windows (x86_64) · <a href="#install">install notes</a></sub>
 </p>
 
 It is a personal project in active development. Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
@@ -57,6 +57,10 @@ makepkg -si
 The development recipe is in [packaging/arch/rawmakase-git](packaging/arch/rawmakase-git/PKGBUILD).
 
 The `rawmakase-<version>-<arch>-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
+
+### Windows (10 or newer, x86_64)
+
+Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for your user account only, without administrator rights, and adds RAWmakase to the Start menu. The installer is not code-signed yet, so Microsoft Defender SmartScreen may warn about an unrecognized app: choose **More info → Run anyway**. For a copy without installing, extract `rawmakase-v<version>-x86_64-pc-windows-msvc.zip` and run `rawmakase.exe` from the extracted folder.
 
 ### Updates and verification
 
@@ -129,7 +133,7 @@ rawmakase help
 
 - Catalogs, with every edit: the `.rawmakase` file you choose.
 - Edits saved beside photos by releases before 0.1.8 (`photo.dng.rawmakase.json`, with spots and masks in `photo.dng.rawmakase-local.json`, or in the data directory's `sidecars/` folder for read-only locations) are brought into the catalog when you add their folder, and left as they are.
-- Profiles, presets, previews and session state: `~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` (default `~/.local/share/rawmakase`) on Linux. `RAWMAKASE_DATA_DIR` overrides it.
+- Profiles, presets, previews and session state: `~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` (default `~/.local/share/rawmakase`) on Linux, `%APPDATA%\RAWmakase` on Windows. `RAWMAKASE_DATA_DIR` overrides it.
 
 Exports are always sRGB. The display defaults to sRGB; pick a monitor ICC profile under **More** only if your compositor does not already manage color.
 
@@ -156,7 +160,7 @@ RAWMAKASE_FIXTURES=~/raw-fixtures cargo test --release --test raw_fixtures -- --
 
 GPU tests are ignored as well; run them with `cargo test --lib gpu -- --ignored` on a machine with a compute adapter.
 
-CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. A stable `vX.Y.Z` tag on `main` matching `Cargo.toml` builds both macOS DMGs and the Linux packages. Publication waits for Apple notarization and package checks. See [packaging/RELEASING.md](packaging/RELEASING.md) for credentials, rehearsal runs, supported systems and the AUR pause.
+CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. A stable `vX.Y.Z` tag on `main` matching `Cargo.toml` builds both macOS DMGs, the Linux packages and the Windows installer. Publication waits for Apple notarization and package checks. See [packaging/RELEASING.md](packaging/RELEASING.md) for credentials, rehearsal runs, supported systems and the AUR pause.
 
 ## License
 

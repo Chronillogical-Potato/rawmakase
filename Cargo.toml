@@ -38,9 +38,18 @@ egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
 fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
 fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
 
+# The terminal a release build's command-line output goes to, and the
+# Desktop and Pictures export folders.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
 [build-dependencies]
 cc = "1"
 pkg-config = "0.3"
+
+# The icon and version information Windows shows for the executable.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 lto = "thin"

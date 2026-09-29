@@ -34,6 +34,11 @@ fn autosave_writes_the_catalog_in_the_background() -> anyhow::Result<()> {
     // Edited again while that save runs: still unsaved once it finishes.
     editor.document.recipe.exposure = 1.1;
     editor.document.save.mark_changed();
+    // On a slow machine the save can outlast the settle delay; keep the loop
+    // below from starting the next save before this one is checked.
+    if let save_state::SaveState::Saving { changed: Some(at) } = &mut editor.document.save {
+        *at += std::time::Duration::from_secs(3600);
+    }
     while editor.autosave.busy() {
         std::thread::sleep(std::time::Duration::from_millis(5));
         editor.autosave(&ctx);

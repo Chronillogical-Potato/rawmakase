@@ -91,8 +91,49 @@ impl Default for ExportSettings {
 fn path() -> PathBuf {
     crate::storage::data_dir().join("export.json")
 }
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+#[cfg(not(windows))]
+fn desktop() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Desktop")
+}
+#[cfg(not(windows))]
+fn pictures() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Pictures")
+}
+/// Windows can move Desktop and Pictures (OneDrive backup does), so they are
+/// asked for rather than assumed under the profile folder.
+#[cfg(windows)]
+fn desktop() -> PathBuf {
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Desktop, "Desktop")
+}
+#[cfg(windows)]
+fn pictures() -> PathBuf {
+    known_folder(
+        &windows_sys::Win32::UI::Shell::FOLDERID_Pictures,
+        "Pictures",
+    )
+}
+#[cfg(windows)]
+fn known_folder(id: &windows_sys::core::GUID, fallback: &str) -> PathBuf {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::{System::Com::CoTaskMemFree, UI::Shell::SHGetKnownFolderPath};
+    let mut raw: windows_sys::core::PWSTR = std::ptr::null_mut();
+    // SAFETY: on success `raw` is a NUL-terminated string the shell allocated;
+    // it is read up to the NUL and then freed, as the API requires either way.
+    let found = unsafe {
+        let found = (SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut raw) >= 0
+            && !raw.is_null())
+        .then(|| {
+            let len = (0..).take_while(|&i| *raw.add(i) != 0).count();
+            PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(
+                raw, len,
+            )))
+        });
+        CoTaskMemFree(raw as *const _);
+        found
+    };
+    found.unwrap_or_else(|| {
+        PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(fallback)
+    })
 }
 
 impl ExportSettings {
@@ -108,8 +149,8 @@ impl ExportSettings {
     pub fn base_folder(&self, source: &Path) -> Option<PathBuf> {
         match self.destination {
             Destination::SameFolder => source.parent().map(Path::to_path_buf),
-            Destination::Desktop => Some(home().join("Desktop")),
-            Destination::Pictures => Some(home().join("Pictures")),
+            Destination::Desktop => Some(desktop()),
+            Destination::Pictures => Some(pictures()),
             Destination::Folder => self.folder.clone(),
         }
     }

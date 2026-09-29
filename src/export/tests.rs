@@ -21,7 +21,7 @@ fn icc_export_and_sixteen_bit_precision() -> Result<()> {
     let jpg = dir.path().join("out.jpg");
     export(&jpg, &source, &image, &m, &ExportOptions::default(), false)?;
     let mut decoder =
-        image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(File::open(jpg)?))?;
+        image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(fs::File::open(jpg)?))?;
     assert!(decoder.icc_profile()?.unwrap().len() > 100);
     assert!(
         decoder

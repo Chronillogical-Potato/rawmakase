@@ -1,6 +1,13 @@
 #include <libraw/libraw.h>
+#ifdef _WIN32
+// After LibRaw, which includes winsock2.h ahead of windows.h as Windows requires.
+#include <windows.h>
+#include <string>
+#endif
 #include <lcms2.h>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -63,12 +70,25 @@ static int progress(void* p, LibRaw_progress, int, int) {
     return h->cancel && h->cancel(h->context);
 }
 static void message(char* err, const char* text) { std::snprintf(err, 512, "%s", text); }
+// Paths arrive as UTF-8. Windows' narrow file API uses the ANSI code page, so
+// they are widened for LibRaw's wide-character open there.
+static int open_path(Raw& raw, const char* path) {
+#ifdef _WIN32
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+    if (n <= 0) return LIBRAW_IO_ERROR;
+    std::wstring wide(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.data(), n);
+    return raw.open_file(wide.c_str());
+#else
+    return raw.open_file(path);
+#endif
+}
 extern "C" {
 const char* ora_version() { return LibRaw::version(); }
 void* ora_open(const char* path, Metadata* m, char* err) {
     try {
         auto h = std::make_unique<Handle>();
-        int rc = h->raw.open_file(path);
+        int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
         auto& d = h->raw.imgdata;
         if (d.idata.colors != 3 || (!d.idata.filters)) {
@@ -110,7 +130,9 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
         auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
         handle.cancel=cancel; handle.context=context;
         raw.set_progress_handler(progress,&handle);
+#ifdef _OPENMP
         omp_set_num_threads(std::max(1, omp_get_num_procs()));
+#endif
         auto& p=raw.imgdata.params;
         p.use_camera_wb=1; p.use_auto_wb=0; p.no_auto_bright=1;
         p.adjust_maximum_thr=0; p.highlight=1; p.output_color=0;

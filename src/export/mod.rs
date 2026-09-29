@@ -13,10 +13,7 @@ use crate::{
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 pub use settings::{Destination, Existing, ExportSettings, Format};
-use std::{
-    fs::{self, File},
-    path::Path,
-};
+use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,8 +136,7 @@ pub fn export_with(
     } else {
         temp.persist_noclobber(path).map_err(|e| e.error)?;
     }
-    File::open(parent)?.sync_all()?;
-    Ok(())
+    crate::storage::sync_dir(parent)
 }
 
 #[cfg(test)]
