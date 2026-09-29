@@ -1,6 +1,6 @@
 ---
 title: "RAWmakase"
-tagline: "Your Lightroom workflow. Free, open source and fast."
+tagline: "The Lightroom-compatible RAW editor. Free, open source and fast."
 lede: "RAWmakase is a free RAW photo editor for Linux and macOS, with no subscription and no lock-in. Bring your Lightroom Classic catalog, presets and camera profiles, keep editing with the Library and Develop controls you already know, and let the GPU keep up with you."
 free:
   - name: "Free"
