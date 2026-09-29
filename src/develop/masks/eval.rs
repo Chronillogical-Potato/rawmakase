@@ -8,7 +8,7 @@ use crate::develop::retouch::profile;
 use crate::develop::{Geometry, ImageFrame, Recipe};
 use crate::raw::CameraImage;
 use rayon::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// Weights of the rendered masks over a region: one byte per mask and pixel,
 /// pixel-major, and each mask's slider values times its Amount.
@@ -63,28 +63,52 @@ pub(crate) enum Selection {
     /// One mask, whatever its adjustment (the overlay).
     One(usize),
 }
-/// Brush rasters kept between renders, by strokes hash.
+/// What a brush raster was made from: its strokes, the frame's proportions and, for
+/// Auto Mask, the image whose colours guided it.
+struct RasterKey {
+    strokes: u64,
+    space: [u32; 2],
+    /// Weak, so a cached raster keeps no photo alive, while its address cannot be
+    /// reused by another image as long as the entry exists.
+    guide: Option<Weak<CameraImage>>,
+}
+impl PartialEq for RasterKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.strokes == other.strokes
+            && self.space == other.space
+            && match (&self.guide, &other.guide) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.ptr_eq(b),
+                _ => false,
+            }
+    }
+}
+/// Brush rasters kept between renders.
 #[derive(Default)]
 pub(crate) struct RasterCache {
-    entries: Vec<(u64, usize, Arc<Raster>)>,
+    entries: Vec<(RasterKey, Arc<Raster>)>,
 }
 impl RasterCache {
-    fn get(&mut self, key: u64, guide: usize, make: impl FnOnce() -> Arc<Raster>) -> Arc<Raster> {
-        if let Some(i) = self.entries.iter().position(|e| e.0 == key && e.1 == guide) {
+    fn get(&mut self, key: RasterKey, make: impl FnOnce() -> Arc<Raster>) -> Arc<Raster> {
+        if let Some(i) = self.entries.iter().position(|e| e.0 == key) {
             let e = self.entries.remove(i);
-            let raster = e.2.clone();
+            let raster = e.1.clone();
             self.entries.insert(0, e);
             return raster;
         }
         let raster = make();
-        self.entries.insert(0, (key, guide, raster.clone()));
+        self.entries.insert(0, (key, raster.clone()));
         // Keep the most recent rasters within 256 MB.
         let mut total = 0;
         self.entries.retain(|e| {
-            total += e.2.bytes();
+            total += e.1.bytes();
             total <= 256 << 20
         });
         raster
+    }
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 enum Shape {
@@ -118,13 +142,29 @@ pub(crate) struct Weigher {
     ranges: bool,
 }
 impl Weigher {
-    /// `image` supplies Auto Mask colours and the image frame; `cache` keeps brush
-    /// rasters between renders.
-    pub(crate) fn new(
-        image: &CameraImage,
+    /// `image` supplies Auto Mask colours and the image frame.
+    pub(crate) fn new(image: &CameraImage, masks: &[MaskGroup], selection: Selection) -> Self {
+        Self::build(image, masks, selection, None)
+    }
+    /// As `new`, with brush rasters kept in `cache` between renders.
+    pub(crate) fn cached(
+        image: &Arc<CameraImage>,
         masks: &[MaskGroup],
         selection: Selection,
         cache: Option<&mut RasterCache>,
+    ) -> Self {
+        Self::build(
+            image,
+            masks,
+            selection,
+            cache.map(|cache| (cache, Arc::downgrade(image))),
+        )
+    }
+    fn build(
+        image: &CameraImage,
+        masks: &[MaskGroup],
+        selection: Selection,
+        cache: Option<(&mut RasterCache, Weak<CameraImage>)>,
     ) -> Self {
         let frame = ImageFrame::new(image);
         let space = Space::new(frame.aspect());
@@ -151,10 +191,15 @@ impl Weigher {
                         MaskShape::Brush { strokes } => {
                             let auto = strokes.iter().any(|s| s.auto_mask);
                             let make = || brush::rasterize(strokes, space, auto.then_some(&guide));
-                            // Auto Mask rasters depend on the image they were made from.
-                            let id = if auto { image as *const _ as usize } else { 0 };
-                            Shape::Brush(match cache.as_deref_mut() {
-                                Some(cache) => cache.get(brush::key(strokes), id, make),
+                            Shape::Brush(match &mut cache {
+                                Some((cache, guide_image)) => cache.get(
+                                    RasterKey {
+                                        strokes: brush::key(strokes),
+                                        space: space.scale.map(f32::to_bits),
+                                        guide: auto.then(|| guide_image.clone()),
+                                    },
+                                    make,
+                                ),
                                 None => make(),
                             })
                         }

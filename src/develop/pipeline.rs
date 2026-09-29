@@ -1104,7 +1104,7 @@ pub(crate) fn mask_weights(
     {
         return Ok(Some(Arc::new(hit.with_deltas(&r.masks))));
     }
-    let weigher = Weigher::new(
+    let weigher = Weigher::cached(
         &toned.image,
         &r.masks,
         Selection::Active,

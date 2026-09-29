@@ -147,3 +147,54 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
     assert_eq!(load_at(&raw, &store)?.unwrap().recipe, r);
     Ok(())
 }
+/// The imported edit and its bitmaps come from the same store: the newer one.
+#[test]
+fn import_takes_the_edit_and_its_bitmaps_from_one_store() -> Result<()> {
+    use super::super::bitmaps::{Bitmap, to_base64};
+    let d = tempfile::tempdir()?;
+    let raw = d.path().join("photo.ARW");
+    fs::write(&raw, b"fixture")?;
+    let store = d.path().join("store");
+    let id = Identity::read(&raw)?;
+    let bitmap = |value: u8| Bitmap {
+        width: 2,
+        height: 1,
+        channels: 1,
+        depth: 1,
+        data: vec![value; 2],
+    };
+    let companion = |path: &Path, bitmap: &Bitmap| -> Result<()> {
+        atomic_json(
+            path,
+            &Companion {
+                schema: COMPANION_SCHEMA,
+                source: id.clone(),
+                local: Default::default(),
+                bitmaps: [(bitmap.hash(), to_base64(&bitmap.compress()?))].into(),
+            },
+        )
+    };
+    let edit = |exposure| Recipe {
+        exposure,
+        ..Default::default()
+    };
+    // Beside the photo, older.
+    let primary = save_at(&raw, &edit(0.1), &ExportOptions::default(), &store)?;
+    companion(&local_path(&raw), &bitmap(1))?;
+    // In the fallback store, newer.
+    let backup = fallback_at(&id, &store, "json");
+    let mut sidecar: serde_json::Value = serde_json::from_reader(File::open(&primary)?)?;
+    sidecar["recipe"]["exposure"] = 0.9.into();
+    atomic_json(&backup, &sidecar)?;
+    companion(&fallback_at(&id, &store, "local.json"), &bitmap(2))?;
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    File::options()
+        .write(true)
+        .open(&primary)?
+        .set_modified(old)?;
+    let (imported, bitmaps) = import_at(&raw, &store)?.unwrap();
+    assert_eq!(imported.recipe.exposure, 0.9);
+    assert_eq!(bitmaps, [bitmap(2)]);
+    assert_eq!(load_at(&raw, &store)?.unwrap().recipe, imported.recipe);
+    Ok(())
+}

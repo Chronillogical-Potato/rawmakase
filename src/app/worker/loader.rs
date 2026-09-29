@@ -21,6 +21,15 @@ struct FullJob {
     key: Option<String>,
     prefetch: Option<Prefetch>,
 }
+/// Runs `load`, turning a panic into an error, so the photo does not stay loading.
+fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(load)).unwrap_or_else(|panic| {
+        Err(anyhow::anyhow!(
+            "Loading failed: {}",
+            super::panic_message(&*panic)
+        ))
+    })
+}
 /// Develops a neighbour into the decode cache on two threads, leaving the other
 /// cores to rendering the photo on screen.
 fn prefetcher() -> Latest<Prefetch> {
@@ -59,7 +68,7 @@ fn full_loader(
 ) -> Latest<FullJob> {
     Latest::new(move |mut job: FullJob| {
         let prefetch = job.prefetch.take();
-        let result = (|| -> anyhow::Result<()> {
+        let result = caught(|| -> anyhow::Result<()> {
             if job.cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
@@ -88,7 +97,7 @@ fn full_loader(
                 prefetcher.submit(prefetch);
             }
             Ok(())
-        })();
+        });
         if let Err(e) = result
             && !job.cancel.load(Ordering::Relaxed)
         {
@@ -109,7 +118,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
     let full = full_loader(tx.clone(), ctx.clone(), prefetcher.clone());
     Latest::new(move |mut job: LoadJob| {
         let prefetch = job.prefetch.take();
-        let result = (|| -> anyhow::Result<()> {
+        let result = caught(|| -> anyhow::Result<()> {
             let path = job.path.clone();
             let mut raw = raw::Raw::open(&path)?;
             let metadata = raw.metadata.clone();
@@ -207,7 +216,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 prefetch,
             });
             Ok(())
-        })();
+        });
         if let Err(e) = result
             && !job.cancel.load(Ordering::Relaxed)
         {

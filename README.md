@@ -127,8 +127,8 @@ rawmakase help
 
 ### Where data lives
 
-- Edits for photos opened outside a catalog: `photo.dng.rawmakase.json` next to the RAW (spots and masks in `photo.dng.rawmakase-local.json`), or in the data directory's `sidecars/` folder for read-only locations.
-- Catalogs: the `.rawmakase` file you choose.
+- Catalogs, with every edit: the `.rawmakase` file you choose.
+- Edits saved beside photos by releases before 0.1.8 (`photo.dng.rawmakase.json`, with spots and masks in `photo.dng.rawmakase-local.json`, or in the data directory's `sidecars/` folder for read-only locations) are brought into the catalog when you add their folder, and left as they are.
 - Profiles, presets, previews and session state: `~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` (default `~/.local/share/rawmakase`) on Linux. `RAWMAKASE_DATA_DIR` overrides it.
 
 Exports are always sRGB. The display defaults to sRGB; pick a monitor ICC profile under **More** only if your compositor does not already manage color.

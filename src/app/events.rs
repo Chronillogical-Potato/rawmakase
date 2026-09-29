@@ -183,6 +183,10 @@ impl Editor {
                     self.status = error;
                     self.preview.task.finish(id);
                 }
+                Event::RendererReset(retired) => {
+                    self.preview.forget_presented();
+                    drop(retired);
+                }
                 Event::DialogClosed => {
                     self.activity.finish_dialog();
                 }
@@ -234,18 +238,13 @@ impl Editor {
             metadata: m,
             recipe: r,
             export: ex,
-            protected,
             status,
             ..
         } = header;
         self.document.metadata = Some(m);
         self.document.recipe = r;
         self.document.export = ex;
-        if protected {
-            self.document.save.protect(status.clone());
-        } else {
-            self.document.save.saved();
-        }
+        self.document.save.saved();
         self.status = status;
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
             self.document.lightroom_history =

@@ -379,3 +379,24 @@ fn adding_a_folder_imports_sidecar_edits() -> Result<()> {
     assert!(crate::storage::sidecar_path(&edited).exists());
     Ok(())
 }
+#[test]
+fn lightroom_history_is_backfilled_once() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let dest = d.path().join("catalog.rawmakase");
+    let mut cat = Catalog::create(&dest)?;
+    // A stored Lightroom catalog from before history steps were kept.
+    let original = d.path().join("original.lrcat");
+    Connection::open(&original)?.execute_batch("CREATE TABLE Adobe_images(id_local INTEGER)")?;
+    cat.db.execute(
+        "INSERT INTO sources(path, original_size, original_catalog) VALUES ('x.lrcat', 0, ?)",
+        [std::fs::read(&original)?],
+    )?;
+    assert_eq!(cat.backfill_lightroom_history()?, 0);
+    // Reading it again would now fail: it is not read again, on this or a later open.
+    cat.db
+        .execute("UPDATE sources SET original_catalog=randomblob(4096)", [])?;
+    assert_eq!(cat.backfill_lightroom_history()?, 0);
+    drop(cat);
+    assert_eq!(Catalog::open(&dest)?.backfill_lightroom_history()?, 0);
+    Ok(())
+}

@@ -43,7 +43,7 @@ pub fn overlay_weights(
             [0, 0, out.width, out.height]
         }
     };
-    let weigher = Weigher::new(image, &recipe.masks, Selection::One(index), None);
+    let weigher = Weigher::new(image, &recipe.masks, Selection::One(index));
     let w = weigher.weights(image, recipe, &g, region, Some(out));
     Some(w.data.iter().map(|v| *v as f32 / 255.).collect())
 }

@@ -102,7 +102,24 @@ pub enum Event {
         task: TaskKind,
         error: String,
     },
+    /// The renderer recovered from a failure and no longer uses the textures its
+    /// previews were presented into: stop drawing them, then drop this to free them.
+    RendererReset(RetiredTextures),
     Exported(String),
+}
+/// Textures the renderer registered with the UI and no longer uses. Freed when
+/// dropped, so the UI releases them only once it no longer draws them.
+pub struct RetiredTextures {
+    state: eframe::egui_wgpu::RenderState,
+    ids: Vec<egui::TextureId>,
+}
+impl Drop for RetiredTextures {
+    fn drop(&mut self) {
+        let mut renderer = self.state.renderer.write();
+        for id in &self.ids {
+            renderer.free_texture(id);
+        }
+    }
 }
 /// A rendered preview as the viewport draws it.
 pub enum Preview {
@@ -175,6 +192,7 @@ mod latest;
 mod loader;
 mod renderer;
 pub use latest::Latest;
+pub(crate) use latest::panic_message;
 pub use loader::loader;
 pub use renderer::renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

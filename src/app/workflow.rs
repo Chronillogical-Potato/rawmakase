@@ -118,12 +118,9 @@ impl Editor {
         let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) else {
             return;
         };
-        let target = super::autosave::Target::Catalog {
-            path: l.catalog.path.clone(),
-            photo,
-        };
         let job = super::autosave::Job {
-            target,
+            catalog: l.catalog.path.clone(),
+            photo,
             raw,
             recipe: self.document.recipe.clone(),
             export: self.document.export.clone(),

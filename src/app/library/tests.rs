@@ -253,3 +253,58 @@ fn thumbnails_keep_portrait_and_landscape_proportions() {
     assert_eq!(fit(6000, 4000, 640), (640, 427));
     assert_eq!(fit(300, 200, 640), (300, 200));
 }
+
+#[test]
+fn a_stuck_volume_check_is_not_started_again() {
+    use std::sync::{Arc, Mutex, mpsc};
+    let online = Arc::new(Mutex::new(HashMap::new()));
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (release, stalled) = mpsc::channel::<()>();
+    let stalled = Mutex::new(stalled);
+    let (changed_tx, changed) = mpsc::channel();
+    let mounts = || vec![PathBuf::from("/Volumes/Stalled")];
+    // A probe that hangs, as `is_dir` can on a stalled mount.
+    assert!(super::spawn_volume_check(
+        &online,
+        &busy,
+        mounts(),
+        move || changed_tx.send(()).unwrap(),
+        move |_| {
+            stalled.lock().unwrap().recv().unwrap();
+            (true, None)
+        },
+    ));
+    for _ in 0..3 {
+        assert!(!super::spawn_volume_check(
+            &online,
+            &busy,
+            mounts(),
+            || {},
+            |_| unreachable!("a second check started"),
+        ));
+    }
+    release.send(()).unwrap();
+    changed
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(
+        online
+            .lock()
+            .unwrap()
+            .get(&PathBuf::from("/Volumes/Stalled")),
+        Some(&(true, None))
+    );
+    // Once it finishes, the next check runs.
+    let started = std::time::Instant::now();
+    while busy.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::yield_now();
+    }
+    assert!(super::spawn_volume_check(
+        &online,
+        &busy,
+        mounts(),
+        || {},
+        |_| (false, None)
+    ));
+}

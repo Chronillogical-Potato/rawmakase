@@ -11,13 +11,12 @@ use std::{
 
 /// An edit to write, as it was when the save started.
 pub(super) struct Job {
-    pub target: Target,
+    /// The catalog the edit goes to, and the photo in it.
+    pub catalog: PathBuf,
+    pub photo: i64,
     pub raw: PathBuf,
     pub recipe: Recipe,
     pub export: ExportOptions,
-}
-pub(super) enum Target {
-    Catalog { path: PathBuf, photo: i64 },
 }
 /// Where the edit was saved, or why it was not.
 pub(super) type Done = Result<PathBuf, String>;
@@ -91,15 +90,12 @@ fn run(jobs: Receiver<Job>, done: Sender<Done>, ctx: egui::Context) {
 
 /// Keeps the catalog open between saves.
 fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
-    match &job.target {
-        Target::Catalog { path, photo } => {
-            if catalog.as_ref().is_none_or(|c: &Catalog| &c.path != path) {
-                *catalog = None;
-                *catalog = Some(Catalog::open(path)?);
-            }
-            let c = catalog.as_ref().expect("opened above");
-            c.save_edit(*photo, &job.raw, &job.recipe, &job.export)?;
-            Ok(path.clone())
-        }
+    let path = &job.catalog;
+    if catalog.as_ref().is_none_or(|c: &Catalog| &c.path != path) {
+        *catalog = None;
+        *catalog = Some(Catalog::open(path)?);
     }
+    let c = catalog.as_ref().expect("opened above");
+    c.save_edit(job.photo, &job.raw, &job.recipe, &job.export)?;
+    Ok(path.clone())
 }

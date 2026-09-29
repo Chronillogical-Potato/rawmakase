@@ -17,7 +17,7 @@ files should preserve.
 | `develop` | Validated recipes, geometry, color processing, curves, effects, detail rendering and output pixel buffers | `recipe.rs`, `pipeline.rs`, `quality.rs`, `geometry.rs` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
-| `storage` | RAW identity checks, protected sidecars, session state, application paths, shared format versions and atomic JSON writes | `sidecar.rs`, `session.rs`, `format.rs`, `files.rs` |
+| `storage` | RAW identity checks, legacy sidecar import, session state, application paths, shared format versions and atomic JSON writes | `identity.rs`, `sidecar.rs`, `session.rs`, `format.rs`, `files.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import and best-effort conversion of serialized Develop settings | `mod.rs`, `develop.rs` |
@@ -86,10 +86,10 @@ inject a temporary file, without changing the process-wide environment.
 - Parsing XMP produces settings, while application validates and resolves a
   recipe. Collection discovery and favorites belong in `presets`.
 - Validate recipe changes at domain boundaries. Saved format versions and
-  migrations are shared by native presets and sidecars. Changes to recipe defaults
+  migrations are shared by native presets, catalog edits and legacy sidecars. Changes to recipe defaults
   must account for older saved edits and rendering-engine choices.
 - Keep original RAWs and Lightroom sources read-only. Preserve unsupported source
-  data, sidecar conflict protection, no-clobber publication, ICC/EXIF handling and
+  data, legacy sidecars, no-clobber publication, ICC/EXIF handling and
   temporary-file write behavior.
 - Rendering math stays in `develop` and `camera_profiles`. Fit previews, regions
   and exports must continue to share the relevant processing paths.
@@ -122,7 +122,7 @@ The deeper review also fixed concrete correctness issues:
   writes, catalog creation/import, RAW enumeration and image export.
 - Saved-recipe migration validates the envelope and recipe object before mutation;
   malformed legacy recipes return errors rather than panicking.
-- Export defaults are validated before sidecar/catalog writes and on restoration.
+- Export defaults are validated before catalog writes and on restoration.
   Existing invalid edits remain protected against replacement.
 - Catalog header handling keeps the profile-resolved recipe supplied by the loader
   until an actual saved catalog edit replaces it.

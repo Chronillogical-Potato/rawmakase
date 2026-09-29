@@ -553,10 +553,10 @@ fn local_stage(
         let (gain, key) = local_gain(im, &spatial, scale, cancel, cache.as_deref_mut())?;
         (toned.gain, toned.gain_key) = (Some(gain), key);
     }
-    // The engine 4 Shadows/Highlights map starts from a reduced copy of the toned image.
+    // The engine 4 Shadows/Highlights map starts from a reduced copy of the toned image,
+    // for the global sliders or a mask's.
     if let Some(cache) = cache
-        && measured
-        && (r.shadows != 0. || r.highlights != 0.)
+        && develop::pipeline::pixel_params::needs_map(r)
     {
         let key = ReducedKey::new(&toned);
         let bytes = |im: &CameraImage| im.pixels.len() * 12;
@@ -699,7 +699,7 @@ fn render_resident(
             return Ok(None);
         }
     }
-    if base.shadows != 0. || base.highlights != 0. {
+    if develop::pipeline::pixel_params::needs_map(&base) {
         let edge = develop::local_tone::MAP_EDGE;
         let size = if source.width.max(source.height) <= edge {
             (source.width, source.height)

@@ -29,22 +29,16 @@ pub(super) fn toolbar_action(
         },
     );
     let hover = enabled && response.hovered();
-    let fill = if icon == 4 {
-        theme::gray(if hover { 225 } else { 200 })
+    let fill = theme::gray(if selected {
+        62
+    } else if hover {
+        48
     } else {
-        theme::gray(if selected {
-            62
-        } else if hover {
-            48
-        } else {
-            29
-        })
-    };
+        29
+    });
     ui.painter().rect_filled(rect, 5., fill);
     let color = theme::gray(if !enabled {
         85
-    } else if icon == 4 {
-        25
     } else if selected || hover {
         235
     } else {
@@ -68,7 +62,6 @@ pub(super) fn toolbar_action(
         1 => Some(Icon::Undo),
         2 => Some(Icon::Redo),
         3 => Some(Icon::BeforeAfter),
-        4 => Some(Icon::Export),
         _ => None,
     };
     if let Some(glyph) = glyph {

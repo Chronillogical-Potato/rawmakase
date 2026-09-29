@@ -32,6 +32,11 @@ const LOCAL_EDITS_TABLE: &str =
 /// Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
 const BITMAPS_TABLE: &str =
     "CREATE TABLE IF NOT EXISTS bitmaps(hash TEXT PRIMARY KEY, data BLOB NOT NULL);";
+/// Facts about the catalog itself, by name.
+const META_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);";
+/// Set in `meta` once Lightroom history has been recovered from the stored catalog.
+const HISTORY_BACKFILLED: &str = "lightroom_history_backfilled";
 /// Copies history steps from an attached Lightroom catalog named `lr`.
 pub(crate) const COPY_LIGHTROOM_HISTORY: &str =
     "INSERT OR IGNORE INTO lightroom_history(photo,position,name,created,text)
@@ -93,6 +98,7 @@ impl Catalog {
         db.execute_batch(LIGHTROOM_HISTORY_TABLE)?;
         db.execute_batch(BITMAPS_TABLE)?;
         db.execute_batch(LOCAL_EDITS_TABLE)?;
+        db.execute_batch(META_TABLE)?;
         Ok(Self {
             path: path.into(),
             db,
@@ -383,6 +389,28 @@ impl Catalog {
     /// Catalogs imported before history was kept still hold the original
     /// Lightroom catalog; copy its history steps once. Returns steps added.
     pub fn backfill_lightroom_history(&mut self) -> Result<usize> {
+        // Once is enough: without history to recover, the stored catalog would
+        // otherwise be written out and attached on every open.
+        let done = self
+            .db
+            .query_row(
+                "SELECT 1 FROM meta WHERE key=?",
+                [HISTORY_BACKFILLED],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if done {
+            return Ok(0);
+        }
+        let copied = self.copy_lightroom_history()?;
+        self.db.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
+            [HISTORY_BACKFILLED],
+        )?;
+        Ok(copied)
+    }
+    fn copy_lightroom_history(&mut self) -> Result<usize> {
         let have: i64 = self
             .db
             .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
@@ -540,10 +568,10 @@ impl Catalog {
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
     fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
-        let Some(sidecar) = crate::storage::load(file)? else {
+        let Some((sidecar, bitmaps)) = crate::storage::import(file)? else {
             return Ok(());
         };
-        for bitmap in crate::storage::bitmaps(file)? {
+        for bitmap in bitmaps {
             self.put_bitmap(&bitmap)?;
         }
         self.save_edit(id, file, &sidecar.recipe, &sidecar.export)

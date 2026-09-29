@@ -8,35 +8,10 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
-    io::Read,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Identity {
-    pub size: u64,
-    pub modified_ns: u128,
-    pub prefix_hash: String,
-}
-impl Identity {
-    pub fn read(path: &Path) -> Result<Self> {
-        let m = fs::metadata(path)?;
-        let mut bytes = Vec::new();
-        File::open(path)?.take(65536).read_to_end(&mut bytes)?;
-        let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
-            (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
-        });
-        Ok(Self {
-            size: m.len(),
-            modified_ns: m.modified()?.duration_since(UNIX_EPOCH)?.as_nanos(),
-            prefix_hash: format!("{hash:016x}"),
-        })
-    }
-    fn key(&self) -> String {
-        format!("{}-{}-{}", self.prefix_hash, self.size, self.modified_ns)
-    }
-}
+pub use super::identity::Identity;
 /// A photo's saved edit. Unknown fields (from a newer release) are kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Sidecar {
@@ -143,6 +118,35 @@ pub fn load(raw: &Path) -> Result<Option<Sidecar>> {
     load_at(raw, &data_dir())
 }
 fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
+    Ok(chosen(raw, store)?.map(|(mut sidecar, companion)| {
+        if let Some(companion) = companion {
+            sidecar.recipe = sidecar.recipe.with_local(companion.local);
+        }
+        sidecar
+    }))
+}
+/// A photo's sidecar edit and the bitmaps its spots and masks refer to, both from
+/// the store `load` chooses, for importing into the catalog.
+pub(crate) fn import(raw: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+    import_at(raw, &data_dir())
+}
+fn import_at(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+    let Some((mut sidecar, companion)) = chosen(raw, store)? else {
+        return Ok(None);
+    };
+    let mut bitmaps = Vec::new();
+    if let Some(companion) = companion {
+        bitmaps = companion
+            .bitmaps
+            .values()
+            .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
+            .collect::<Result<_>>()?;
+        sidecar.recipe = sidecar.recipe.with_local(companion.local);
+    }
+    Ok(Some((sidecar, bitmaps)))
+}
+/// The newer of the photo's two sidecar stores, and the spots and masks saved there.
+fn chosen(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Option<Companion>)>> {
     let id = Identity::read(raw)?;
     let primary = sidecar_path(raw);
     let backup = fallback_at(&id, store, "json");
@@ -165,14 +169,15 @@ fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
     } else {
         (a, local_path(raw))
     };
-    let Some(mut sidecar) = chosen else {
+    let Some(sidecar) = chosen else {
         return Ok(None);
     };
-    if local.exists() {
-        let companion = parse_companion(&local, &id)?;
-        sidecar.recipe = sidecar.recipe.with_local(companion.local);
-    }
-    Ok(Some(sidecar))
+    let companion = if local.exists() {
+        Some(parse_companion(&local, &id)?)
+    } else {
+        None
+    };
+    Ok(Some((sidecar, companion)))
 }
 pub fn save(raw: &Path, recipe: &Recipe, export: &ExportOptions) -> Result<PathBuf> {
     save_at(raw, recipe, export, &data_dir())

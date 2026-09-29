@@ -29,6 +29,8 @@ pub struct Library {
     /// Per volume mount (the startup disk as "/"): attached, and free/total bytes.
     volumes_online: std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, VolumeState>>>,
     volumes_checked: Option<std::time::Instant>,
+    /// A check is still running, perhaps stuck on a stalled mount: start no other.
+    volumes_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
     folder_scope: Option<HashSet<i64>>,
     selected_folder: String,
     expanded: HashSet<String>,
@@ -91,6 +93,7 @@ impl Library {
             roots: Vec::new(),
             volumes_online: Default::default(),
             volumes_checked: None,
+            volumes_busy: Default::default(),
             folder_scope: None,
             selected_folder: String::new(),
             expanded: HashSet::new(),
@@ -542,25 +545,20 @@ impl Library {
             .map(|v| v.mount.clone().unwrap_or_else(|| PathBuf::from("/")))
             .collect();
         ctx.request_repaint_after(std::time::Duration::from_secs(3));
-        let online = self.volumes_online.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let state: HashMap<PathBuf, VolumeState> = mounts
-                .into_iter()
-                .map(|m| {
-                    let attached = m.is_dir();
-                    let space = attached
-                        .then(|| crate::platform::volume::space(&m))
-                        .flatten();
-                    (m, (attached, space))
-                })
-                .collect();
-            let mut shared = online.lock().unwrap();
-            if *shared != state {
-                *shared = state;
-                ctx.request_repaint();
-            }
-        });
+        spawn_volume_check(
+            &self.volumes_online,
+            &self.volumes_busy,
+            mounts,
+            move || ctx.request_repaint(),
+            |m| {
+                let attached = m.is_dir();
+                let space = attached
+                    .then(|| crate::platform::volume::space(m))
+                    .flatten();
+                (attached, space)
+            },
+        );
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
@@ -580,6 +578,10 @@ impl Library {
             }
         }
         while let Ok(result) = self.edit_rx.try_recv() {
+            if let previews::EditResult::CacheError(error) = result {
+                self.preview_progress.cache_failed(error);
+                continue;
+            }
             self.edits_pending = self.edits_pending.saturating_sub(1);
             match result {
                 previews::EditResult::Ready(path, im) => {
@@ -589,7 +591,7 @@ impl Library {
                 previews::EditResult::Skipped(path) => {
                     self.edited_requested.remove(&path);
                 }
-                previews::EditResult::Failed => {}
+                previews::EditResult::Failed | previews::EditResult::CacheError(_) => {}
             }
         }
     }
@@ -1227,6 +1229,47 @@ fn filter_caption(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(11.).color(theme::gray(150))
 }
 type VolumeState = (bool, Option<(u64, u64)>);
+/// Probes `mounts` on a background thread into `online`, calling `changed` when the
+/// result differs, unless the previous check is still running: probing a stalled
+/// mount can hang, and new threads would pile up behind it. Returns whether a check
+/// started.
+fn spawn_volume_check(
+    online: &std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, VolumeState>>>,
+    busy: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    mounts: Vec<PathBuf>,
+    changed: impl FnOnce() + Send + 'static,
+    probe: impl Fn(&std::path::Path) -> VolumeState + Send + 'static,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    if busy.swap(true, Ordering::Acquire) {
+        return false;
+    }
+    /// Clears the flag however the check ends.
+    struct Done(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Done {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
+    let done = Done(busy.clone());
+    let online = online.clone();
+    std::thread::spawn(move || {
+        let _done = done;
+        let state: HashMap<PathBuf, VolumeState> = mounts
+            .into_iter()
+            .map(|m| {
+                let state = probe(&m);
+                (m, state)
+            })
+            .collect();
+        let mut shared = online.lock().unwrap();
+        if *shared != state {
+            *shared = state;
+            changed();
+        }
+    });
+    true
+}
 /// A Lightroom volume header bar: an LED lit green when the drive is
 /// attached, the drive name, free / total space (or Offline), and a
 /// disclosure arrow that folds its folders away.

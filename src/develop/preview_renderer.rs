@@ -458,6 +458,42 @@ mod tests {
         // The stage cache filled up to its entry limit across the edits.
         assert_eq!(warm.cache.samples.len(), 4);
     }
+    #[test]
+    fn mask_shadows_reduce_the_photo_once() {
+        use crate::develop::masks::{MaskComponent, MaskGroup, MaskShape};
+        let (w, h) = (300, 200);
+        let mut im = image(w, h, 0.);
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let v = 0.1 + 0.3 * (i as u32 % w) as f32 / w as f32;
+            *p = [v * 1.2, v, v * 0.6];
+        }
+        let cancel = AtomicBool::new(false);
+        let mut warm = PreviewRenderer::default();
+        let mut r = Recipe {
+            reference_curves: true,
+            ..Default::default()
+        };
+        let mut mask = MaskGroup {
+            components: vec![MaskComponent::new(MaskShape::Linear {
+                from: [0.2, 0.5],
+                to: [0.8, 0.5],
+            })],
+            ..Default::default()
+        };
+        mask.adjust.shadows = 0.5;
+        r.masks.push(mask);
+        assert!(crate::develop::pipeline::pixel_params::needs_map(&r));
+        for exposure in [0., 0.3] {
+            r.exposure = exposure;
+            let cached = warm.render(&im, &r, 150, None, &cancel).unwrap();
+            let fresh = PreviewRenderer::default()
+                .render(&im, &r, 150, None, &cancel)
+                .unwrap();
+            assert_eq!(cached.pixels, fresh.pixels);
+        }
+        // Exposure comes after the map's input: one reduction serves both renders.
+        assert_eq!(warm.cache.reduced.len(), 1);
+    }
     /// Spot removal renders the same in Fit, 100% regions and exports, and edits to
     /// it patch the cached pyramid correctly.
     #[test]
