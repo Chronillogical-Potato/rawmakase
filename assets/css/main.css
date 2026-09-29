@@ -188,7 +188,7 @@ h1 span { color: var(--salmon); }
 }
 @media (max-width: 560px) {
   .nav nav { gap: 16px; font-size: 14px; }
-  .nav nav a:first-child { display: none; }
+  .nav nav a:nth-child(-n + 2) { display: none; }
   .more { grid-template-columns: 1fr; }
   .disc { width: 64px; height: 64px; }
   .disc svg { width: 26px; height: 26px; }
