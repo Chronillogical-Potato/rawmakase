@@ -1,4 +1,4 @@
-baseURL = "/" # set to the real domain once there is one
+baseURL = "https://rawmakase.com/"
 languageCode = "en-us"
 title = "RAWmakase"
 disableKinds = ["taxonomy", "term", "section", "page", "RSS", "sitemap"]
