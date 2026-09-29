@@ -6,12 +6,24 @@ on:
   push:
     branches: [main]
     paths: ['packaging/**', 'native-packages.yaml', '.github/workflows/**']
+  # The release workflow packages its own builds here before publishing.
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released (for example 0.1.9)
+        type: string
+        required: true
+      source-artifact:
+        description: Artifact holding the Linux archives and both DMGs
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   validate:
+    if: inputs.version == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -31,14 +43,9 @@ jobs:
           python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
           gem install native-packages --version 0.7.0 --no-document
           native-packages validate
-      - name: Check the Linux packaging tools
-        run: |
-          sudo apt-get install -y libarchive-tools
-          GOBIN="$RUNNER_TEMP/tools" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
-          export PATH="$RUNNER_TEMP/tools:$PATH"
-          native-packages doctor --target linux-amd64 --defer-recipes
 
   doctor-macos:
+    if: inputs.version == ''
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -52,3 +59,44 @@ jobs:
         run: |
           gem install native-packages --version 0.7.0 --no-document
           native-packages doctor --target macos-arm64 --target macos-amd64 --defer-recipes
+
+  # native-packages' shared workflow installs nfpm and builds the DEB and RPM
+  # packages and the Homebrew cask. Pull requests package the published v0.1.8
+  # x86_64 archive, the last release before aarch64 builds; a release packages
+  # its own archives for both architectures.
+  packages:
+    permissions:
+      contents: write
+    uses: crmne/native-packages/.github/workflows/package.yml@dc0cb1586894ca0239c53fd02d4da8064712671c # v0.7.0
+    with:
+      targets: ${{ inputs.version != '' && 'linux-amd64,linux-arm64' || 'linux-amd64' }}
+      version: ${{ inputs.version || 'v0.1.8' }}
+      source-artifact: ${{ inputs.source-artifact }}
+      publish: false
+
+  install:
+    name: Install on ${{ matrix.image }} (${{ matrix.platform.target }})
+    needs: packages
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu:24.04, debian:13-slim, fedora:43, fedora:44]
+        platform: ${{ fromJSON(inputs.version != '' && '[{"runner":"ubuntu-24.04","target":"linux-amd64"},{"runner":"ubuntu-24.04-arm","target":"linux-arm64"}]' || '[{"runner":"ubuntu-24.04","target":"linux-amd64"}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-packages
+          path: native-packages
+      - name: Clean installation, runtime libraries and removal
+        env:
+          IMAGE: ${{ matrix.image }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mkdir packages
+          cp "native-packages/packages/$TARGET/deb/"*.deb "native-packages/packages/$TARGET/rpm/"*.rpm packages/
+          docker run --rm -v "$PWD/packages:/packages:ro" -v "$PWD/packaging/linux:/checks:ro" "$IMAGE" bash /checks/verify.sh
