@@ -45,6 +45,11 @@ a { color: inherit; }
 .nav nav { display: flex; gap: 28px; font-size: 15px; }
 .nav nav a { text-decoration: none; color: var(--rice-dim); transition: color .2s; }
 .nav nav a:hover { color: var(--rice); }
+.nav nav { align-items: center; }
+.social { display: inline-flex; color: var(--rice-dim); transition: color .2s; }
+.social:hover { color: var(--rice); }
+.foot-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.foot-top .brand { margin-bottom: 0 !important; }
 
 /* Hero */
 .hero {
