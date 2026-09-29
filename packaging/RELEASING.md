@@ -62,8 +62,9 @@ signature over `checksums.txt`, against the public key embedded from
 `assets/update-public-key.hex`. There is no unsigned fallback.
 
 The publish job signs with `RAWMAKASE_UPDATE_SIGNING_KEY` (the PKCS#8 PEM
-private key), a secret of the `release-signing` environment, which is limited
-to `v*` tags and requires a maintainer's approval. Keep a backup of the private
+private key), a secret of the `release-signing` environment, which permits
+`v*` tags and manual rebuilds from `main`. Both require a maintainer's approval;
+administrator bypass is disabled. Keep a backup of the private
 key outside GitHub, which never shows a secret again. Installed apps trust only
 the key they were built with: losing it means asking users to download the next
 release by hand, and a new key must first ship alongside the old one (see
@@ -91,7 +92,10 @@ branch, so tags created before this workflow can also be tested. Tags from
 before Windows support (v0.1.8 and earlier) skip the Windows build.
 This still builds, signs, notarizes and verifies packages, then retains them as
 Actions artifacts. It does not replace any existing release assets. A normal
-tag push publishes automatically. Publishing to an existing release attaches
+tag push proceeds to publication after maintainer approval. To repair packaging
+for an existing tag without moving it, run **Release** from `main` with that
+tag and **publish** enabled, then approve `release-signing` after all checks pass.
+Publishing to an existing release attaches
 the generated packages and refreshes assets with matching names, including
 `SHA256SUMS`; the reviewed notes replace the release description and unrelated
 assets are preserved. AUR publication

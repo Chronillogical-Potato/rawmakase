@@ -394,7 +394,7 @@ jobs:
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # Holds RAWMAKASE_UPDATE_SIGNING_KEY; limited to v* tags, with approval.
+    # Holds RAWMAKASE_UPDATE_SIGNING_KEY; v* tags and manual main rebuilds need approval.
     environment: release-signing
     permissions:
       contents: write
