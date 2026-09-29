@@ -20,7 +20,7 @@
   <link rel="icon" href="{{ "rawmakase.svg" | relURL }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
 </head>
 <body>
@@ -29,7 +29,7 @@
   <header class="nav wrap">
     <a class="brand" href="#top"><img src="{{ "rawmakase.svg" | relURL }}" alt="" width="28" height="28"> RAWmakase</a>
     <nav>
-      <a href="#menu">Features</a>
+      <a href="#features">Features</a>
       <a href="#download">Download</a>
       <a href="{{ $repo }}">GitHub</a>
     </nav>
@@ -39,7 +39,7 @@
     <section class="hero wrap">
       <div class="hero-copy">
         <p class="kicker reveal" style="--d:0">Open source · MIT · Written in Rust</p>
-        <h1 class="reveal" style="--d:1">RAW<em>makase</em></h1>
+        <h1 class="reveal" style="--d:1">RAW<span>makase</span></h1>
         <p class="tagline reveal" style="--d:2">{{ .Params.tagline }}</p>
         <p class="lede reveal" style="--d:3">{{ .Params.lede }}</p>
         <div class="cta reveal" style="--d:4">
@@ -52,7 +52,6 @@
         <div class="rings"><span></span><span></span><span></span></div>
         <img src="{{ "rawmakase.svg" | relURL }}" alt="" width="360" height="360">
       </div>
-      <p class="omakase" aria-hidden="true">お任せ</p>
     </section>
 
     <section class="video wrap" aria-label="Video tour">
@@ -65,22 +64,51 @@
       </figure>
     </section>
 
-    <section class="menu wrap" id="menu">
+    <section class="feature wrap" id="features">
       <header class="section-head">
-        <p class="kicker">Tonight's menu</p>
-        <h2>Everything a photo needs, <em>served in order.</em></h2>
-        <p>A Lightroom-style workflow you already know: organise in the Library, finish in Develop, export when it's right.</p>
+        <p class="kicker">Lightroom-compatible</p>
+        <h2>Bring your Lightroom work with you.</h2>
+        <p>Years of catalogs, presets and profiles don't have to stay behind. RAWmakase reads them, and the Library and Develop layout will feel familiar from the first minute.</p>
       </header>
-      <ol class="courses">
-        {{- range $i, $c := .Params.menu }}
-        <li>
-          <span class="num">{{ printf "%02d" (add $i 1) }}</span>
-          <h3>{{ $c.name }}</h3>
-          <p>{{ $c.text }}</p>
-        </li>
+      <div class="cards">
+        {{- range .Params.compat }}
+        <article class="card">
+          <h3>{{ .name }}</h3>
+          <p>{{ .text }}</p>
+        </article>
         {{- end }}
-      </ol>
-      <p class="aside">Linux is first-class, not an afterthought. Rendering aims for close, not exact, parity with Lightroom.</p>
+      </div>
+      <p class="aside">Rendering aims for close, not exact, parity with Lightroom.</p>
+    </section>
+
+    <section class="feature speed wrap">
+      <header class="section-head">
+        <p class="kicker">Fast</p>
+        <h2>Edits that keep up with you.</h2>
+        <p>Slider changes render on the GPU, so you see the result while you're still dragging.</p>
+      </header>
+      <div class="speed-grid">
+        <div class="gpu" aria-hidden="true">
+          <span>Metal</span><span>Vulkan</span><span>CPU fallback</span>
+        </div>
+        <ul class="points">
+          {{- range .Params.speed }}
+          <li><h3>{{ .name }}</h3><p>{{ .text }}</p></li>
+          {{- end }}
+        </ul>
+      </div>
+    </section>
+
+    <section class="feature wrap">
+      <header class="section-head">
+        <p class="kicker">And the rest</p>
+        <h2>A complete RAW workflow.</h2>
+      </header>
+      <ul class="more">
+        {{- range .Params.more }}
+        <li><h3>{{ .name }}</h3><p>{{ .text }}</p></li>
+        {{- end }}
+      </ul>
     </section>
 
     <section class="download wrap" id="download">
