@@ -287,7 +287,14 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
           path: release-source
           persist-credentials: false
-      - name: Build dependencies and app
+      # Tags from before Windows support (v0.1.8 and earlier) cannot build
+      # for Windows; a rehearsal or rebuild of one skips this job's work.
+      - name: Windows support in the release source
+        id: source
+        shell: bash
+        run: echo "windows=$(test -f release-source/packaging/windows/deps.ps1 && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - if: steps.source.outputs.windows == 'true'
+        name: Build dependencies and app
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install 1.98.1 --profile minimal
@@ -295,10 +302,12 @@ jobs:
           packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
           cargo build --release --locked --manifest-path release-source/Cargo.toml --target-dir "$env:GITHUB_WORKSPACE\target"
           packaging/windows/stage.ps1 target\release\rawmakase.exe "$env:RUNNER_TEMP\deps" dist\windows
-      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+      - if: steps.source.outputs.windows == 'true'
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
         with:
           ruby-version: '3.3'
-      - name: Installer and portable archive
+      - if: steps.source.outputs.windows == 'true'
+        name: Installer and portable archive
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
@@ -314,9 +323,11 @@ jobs:
           $name = "rawmakase-v$env:VERSION-x86_64-pc-windows-msvc"
           Copy-Item dist\windows "dist\$name" -Recurse
           Compress-Archive -Path "dist\$name" -DestinationPath "dist\upload\$name.zip"
-      - name: Verify the finished download
+      - if: steps.source.outputs.windows == 'true'
+        name: Verify the finished download
         run: packaging/windows/verify.ps1 "dist\upload\rawmakase-v$env:VERSION-x86_64-pc-windows-msvc-setup.exe" $env:VERSION
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - if: steps.source.outputs.windows == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows-amd64
           path: dist/upload/*

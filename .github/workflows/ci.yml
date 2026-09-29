@@ -88,21 +88,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
-      - name: Rust
+      # Release rehearsals of tags from before Windows support skip this job.
+      - name: Windows support in this source
+        id: source
+        shell: bash
+        run: echo "windows=$(test -f packaging/windows/deps.ps1 && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - if: steps.source.outputs.windows == 'true'
+        name: Rust
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
       # vcpkg's binary cache; release builds (release.yml) start from scratch.
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - if: steps.source.outputs.windows == 'true'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~\AppData\Local\vcpkg\archives
           key: vcpkg-${{ hashFiles('packaging/windows/deps.ps1') }}
-      - name: LibRaw and Little CMS
+      - if: steps.source.outputs.windows == 'true'
+        name: LibRaw and Little CMS
         run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - if: steps.source.outputs.windows == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - if: steps.source.outputs.windows == 'true'
+        run: cargo clippy --all-targets --locked -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
-      - run: cargo test --locked
+      - if: steps.source.outputs.windows == 'true'
+        run: cargo test --locked
 
   package:
     name: Build Arch package

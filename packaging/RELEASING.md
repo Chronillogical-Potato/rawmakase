@@ -88,7 +88,8 @@ For a rehearsal without a new publication, manually run **Release**, select
 `main` as the workflow branch, enter an existing stable **tag** (such as
 `v0.1.1`), and uncheck **publish** (enabled by default). The workflow validates and builds
 the tag’s exact source commit using packaging tools from the selected workflow
-branch, so tags created before this workflow can also be tested.
+branch, so tags created before this workflow can also be tested. Tags from
+before Windows support (v0.1.8 and earlier) skip the Windows build.
 This still builds, signs, notarizes and verifies packages, then retains them as
 Actions artifacts. It does not replace any existing release assets. A normal
 tag push publishes automatically. Publishing to an existing release attaches

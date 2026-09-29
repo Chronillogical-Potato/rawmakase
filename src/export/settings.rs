@@ -91,8 +91,10 @@ impl Default for ExportSettings {
 fn path() -> PathBuf {
     crate::storage::data_dir().join("export.json")
 }
+/// The user's profile folder; Windows sets USERPROFILE rather than HOME.
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    PathBuf::from(std::env::var_os(var).unwrap_or_default())
 }
 
 impl ExportSettings {

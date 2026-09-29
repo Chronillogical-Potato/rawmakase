@@ -87,7 +87,27 @@ enum Command {
         iterations: usize,
     },
 }
+/// A windows-subsystem program starts without a console, so commands run from
+/// a terminal would print nothing. Writes to that terminal instead, unless the
+/// output is already redirected to a file or pipe.
+#[cfg(windows)]
+fn attach_console() {
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE},
+    };
+    // SAFETY: plain Win32 calls with no pointers; failure (no parent console,
+    // as when started from Explorer) leaves the process as it was.
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
 fn main() -> Result<()> {
+    #[cfg(windows)]
+    attach_console();
     // Before anything else: this process may be the update helper.
     let launch = rawmakase::updates::intercept();
     rayon::ThreadPoolBuilder::new()
