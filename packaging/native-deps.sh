@@ -29,9 +29,10 @@ make -j"$jobs"
 make install
 cp LICENSE "$prefix/notices/lcms2-LICENSE"
 cd "$work/LibRaw-0.22.2"
-# The application's C++ wrapper uses OpenMP; LibRaw itself need not do so.
+# LibRaw still unpacks the sensor data before RAWmakase's own demosaic, and its
+# decoders for compressed files (Fujifilm RAF, Canon CR3) are OpenMP-parallel.
 # JPEG and zlib retain support for compressed DNG files.
-./configure --prefix="$prefix" --disable-static --disable-examples --disable-openmp --enable-jpeg --enable-zlib --enable-lcms
+./configure --prefix="$prefix" --disable-static --disable-examples --enable-openmp --enable-jpeg --enable-zlib --enable-lcms
 for feature in USE_JPEG USE_ZLIB USE_LCMS2; do
   grep -q -- "-D$feature" Makefile || { echo "LibRaw configured without $feature" >&2; exit 1; }
 done
