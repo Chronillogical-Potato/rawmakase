@@ -38,7 +38,7 @@
   <main id="top">
     <section class="hero wrap">
       <div class="hero-copy">
-        <p class="kicker reveal" style="--d:0">Open source · MIT · Written in Rust</p>
+        <p class="kicker reveal" style="--d:0">Free · No subscription · Open source</p>
         <h1 class="reveal" style="--d:1">RAW<span>makase</span></h1>
         <p class="tagline reveal" style="--d:2">{{ .Params.tagline }}</p>
         <p class="lede reveal" style="--d:3">{{ .Params.lede }}</p>
@@ -79,6 +79,22 @@
         {{- end }}
       </div>
       <p class="aside">Rendering aims for close, not exact, parity with Lightroom.</p>
+    </section>
+
+    <section class="feature wrap">
+      <header class="section-head">
+        <p class="kicker">Free</p>
+        <h2>No subscription. No catch.</h2>
+        <p>RAWmakase is free and open source. There's nothing to renew, and your photos and edits stay with you.</p>
+      </header>
+      <div class="cards">
+        {{- range .Params.free }}
+        <article class="card">
+          <h3>{{ .name }}</h3>
+          <p>{{ .text }}</p>
+        </article>
+        {{- end }}
+      </div>
     </section>
 
     <section class="feature speed wrap">

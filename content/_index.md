@@ -1,7 +1,14 @@
 ---
 title: "RAWmakase"
-tagline: "Your Lightroom workflow, on a fast open-source RAW editor."
-lede: "RAWmakase is a RAW photo editor for Linux and macOS. Bring your Lightroom Classic catalog, presets and camera profiles, keep editing with the Library and Develop controls you already know, and let the GPU keep up with you."
+tagline: "Your Lightroom workflow. Free, open source and GPU-fast."
+lede: "RAWmakase is a free RAW photo editor for Linux and macOS, with no subscription and no lock-in. Bring your Lightroom Classic catalog, presets and camera profiles, keep editing with the Library and Develop controls you already know, and let the GPU keep up with you."
+free:
+  - name: "Free"
+    text: "No price, no subscription, no trial. Every feature, for everyone."
+  - name: "Open source"
+    text: "MIT licensed on GitHub. Read the code, file issues, or build it yourself."
+  - name: "Yours to keep"
+    text: "Edits live in a local catalog you own, and your originals are never modified."
 compat:
   - name: "Catalog import"
     text: "Open a Lightroom Classic catalog and get your ratings, flags, color labels, keywords and compatible develop settings, with folder relinking. The original catalog and your photos are never written to."
