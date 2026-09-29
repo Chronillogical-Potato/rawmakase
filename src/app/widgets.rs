@@ -585,6 +585,8 @@ pub(super) fn tone_curve_ui(
     );
     ui.ctx().data_mut(|d| d.insert_temp(id, state));
 }
+/// Width of a slider's number field at the right of its row.
+const SLIDER_VALUE_WIDTH: f32 = 52.;
 /// Lightroom-style slider. Normalized ranges within ±1 display as integers
 /// (×100), matching Lightroom's numbers while the recipe keeps its units.
 pub(super) fn slider(
@@ -652,16 +654,29 @@ pub(super) fn slider_with(
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
         }
-        let value_rect = Rect::from_min_max(Pos2::new(row.right() - 43., row.top()), row.max);
-        let mut displayed = *value * scale;
-        let value_response = ui.place(
-            value_rect,
-            egui::DragValue::new(&mut displayed)
-                .range(start * scale..=end * scale)
-                .speed(span * scale / 500.)
-                .custom_formatter(move |v, _| slider_text(v, decimals, signed))
-                .custom_parser(|s| s.trim().trim_start_matches('+').parse().ok()),
+        let value_rect = Rect::from_min_max(
+            Pos2::new(row.right() - SLIDER_VALUE_WIDTH, row.top()),
+            row.max,
         );
+        let mut displayed = *value * scale;
+        // A fixed field that fits the widest value ("50000", "+5.00"): typing or
+        // dragging never widens it over the rail.
+        let value_response = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(value_rect), |ui| {
+                ui.set_clip_rect(value_rect.intersect(ui.clip_rect()));
+                let spacing = ui.spacing_mut();
+                spacing.interact_size.x = SLIDER_VALUE_WIDTH;
+                spacing.button_padding.x = 4.;
+                ui.place(
+                    value_rect,
+                    egui::DragValue::new(&mut displayed)
+                        .range(start * scale..=end * scale)
+                        .speed(span * scale / 500.)
+                        .custom_formatter(move |v, _| slider_text(v, decimals, signed))
+                        .custom_parser(|s| s.trim().trim_start_matches('+').parse().ok()),
+                )
+            })
+            .inner;
         if value_response.changed() {
             *value = (displayed / scale).clamp(start, end);
         }
