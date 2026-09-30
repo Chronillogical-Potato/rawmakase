@@ -99,6 +99,46 @@ fn resolved_photo_white_balance_differs_from_as_shot_preset() -> Result<()> {
     Ok(())
 }
 #[test]
+fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
+    let (width, height) = (32u32, 24u32);
+    let m = Metadata {
+        width,
+        height,
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let im = crate::raw::CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        // A warm cast.
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.05 + 0.4 * (i % width) as f32 / width as f32;
+                [v * 1.3, v, v * 0.7]
+            })
+            .collect(),
+        metadata: m.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let preset = parse(
+        Path::new("preset.xmp"),
+        &xml(r#"c:WhiteBalance="Auto""#, ""),
+    )?;
+    let result = preset.apply(&Recipe::default(), &m, &[], Some(&im))?;
+    let auto = crate::develop::auto_white_balance(&im, &Recipe::default())?;
+    assert_eq!(
+        (result.wb, result.temperature, result.tint),
+        (auto.wb, auto.temperature, auto.tint)
+    );
+    assert_eq!(result.auto_white_balance, auto.auto_white_balance);
+    Ok(())
+}
+#[test]
 fn partial_preset_preserves_omitted_settings_and_zero_resets() -> Result<()> {
     let p = parse(
         Path::new("toolkit.xmp"),

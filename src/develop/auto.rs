@@ -9,7 +9,10 @@ use super::{
     pipeline::{preview, render},
     quality::recovered,
 };
-use crate::{color_math::srgb_decode, raw::CameraImage};
+use crate::{
+    color_math::srgb_decode,
+    raw::{CameraImage, Metadata},
+};
 use anyhow::{Result, bail, ensure};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -113,9 +116,27 @@ fn tone_copy(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Camera
     Ok(small)
 }
 
+/// Lightroom's Auto white balance, as measured on 133 photos from three cameras (see
+/// docs/tone-controls.md): gray world, then this many mired warmer…
+const WARM_MIRED: f32 = 23.;
+/// …and this much greener,
+const TINT_SHIFT: f32 = -3.;
+/// within these Temperature and Tint limits.
+const AUTO_TEMPERATURE: (f32, f32) = (2850., 7500.);
+const AUTO_TINT: (f32, f32) = (0., 30.);
+
 fn fit_white_balance(im: &CameraImage, r: &mut Recipe) -> Result<()> {
-    r.wb = neutral_gains(&crop_samples(im, r))?;
-    r.sync_white_balance_controls(&im.metadata);
+    fit_white_balance_to(&crop_samples(im, r), &im.metadata, r)
+}
+
+fn fit_white_balance_to(samples: &[[f32; 3]], m: &Metadata, r: &mut Recipe) -> Result<()> {
+    r.wb = gray_world(samples)?;
+    r.sync_white_balance_controls(m);
+    let (lo, hi) = AUTO_TEMPERATURE;
+    let mired = (1e6 / r.temperature - WARM_MIRED).max(1e6 / hi);
+    r.temperature = (1e6 / mired).clamp(lo, hi);
+    r.tint = (r.tint + TINT_SHIFT).clamp(AUTO_TINT.0, AUTO_TINT.1);
+    r.update_wb(m);
     r.auto_white_balance = Some([r.temperature, r.tint]);
     Ok(())
 }
@@ -144,67 +165,22 @@ fn crop_samples(im: &CameraImage, r: &Recipe) -> Vec<[f32; 3]> {
     samples
 }
 
-/// Per-channel white balance gains, relative to As Shot and normalised to green.
-///
-/// Starting from As Shot, each pass averages only the pixels that look nearly neutral
-/// under the previous estimate, with a tighter tolerance each time, so a large
-/// coloured surface (grass, sky, a wall) pulls less than in plain gray world. Gray
-/// world is the fallback when too little of the photo is near neutral. Pixels near
-/// clipping or in the noise floor are ignored.
-fn neutral_gains(pixels: &[[f32; 3]]) -> Result<[f32; 3]> {
-    let usable: Vec<[f32; 3]> = pixels
-        .iter()
-        .filter(|p| p.iter().all(|v| *v > 0.002 && *v < 0.9))
-        .copied()
-        .collect();
-    ensure!(
-        usable.len() >= 16,
-        "No usable pixels for automatic white balance"
-    );
-    let mut gains = None;
-    for tolerance in [0.5, 0.25, 0.12] {
-        match neutral_average(&usable, gains.unwrap_or([1.; 3]), tolerance) {
-            Some(g) => gains = Some(g),
-            // Too few neutral candidates: the previous, broader estimate is safer.
-            None => break,
-        }
-    }
-    Ok(gains
-        .or_else(|| neutral_average(&usable, [1.; 3], f32::INFINITY))
-        .unwrap_or([1.; 3]))
-}
-
-/// Gains that make the average of the pixels within `tolerance` of neutral under
-/// `gains` neutral, if enough of the photo qualifies.
-fn neutral_average(pixels: &[[f32; 3]], gains: [f32; 3], tolerance: f32) -> Option<[f32; 3]> {
+/// Per-channel gains, relative to As Shot and normalised to green, that make the
+/// average of the photo neutral (gray world). Pixels near clipping or in the noise
+/// floor are ignored.
+fn gray_world(pixels: &[[f32; 3]]) -> Result<[f32; 3]> {
     let mut sum = [0f64; 3];
     let mut count = 0usize;
     for p in pixels {
-        if chroma(std::array::from_fn(|c| p[c] * gains[c])) <= tolerance {
+        if p.iter().all(|v| *v > 0.002 && *v < 0.9) {
             for c in 0..3 {
                 sum[c] += p[c] as f64;
             }
             count += 1;
         }
     }
-    if count < (pixels.len() / 50).max(16) {
-        return None;
-    }
-    // Corrections beyond two stops per channel are more likely a coloured subject than
-    // a coloured light.
-    Some(std::array::from_fn(|c| {
-        (sum[1] / sum[c].max(1e-12)).clamp(0.25, 4.) as f32
-    }))
-}
-
-/// Distance of a colour from neutral in normalised chromaticity: 0 for gray, 0.2 for
-/// about ±10% red and blue, 2 for a pure primary.
-fn chroma(p: [f32; 3]) -> f32 {
-    let sum = p[0] + p[1] + p[2];
-    if sum <= 0. {
-        return f32::INFINITY;
-    }
-    3. * ((p[0] / sum - 1. / 3.).abs() + (p[2] / sum - 1. / 3.).abs())
+    ensure!(count >= 16, "No usable pixels for automatic white balance");
+    Ok(std::array::from_fn(|c| (sum[1] / sum[c]) as f32))
 }
 
 /// Sorted luminance and brightest-channel values of a render, in display encoding.
@@ -423,7 +399,7 @@ mod tests {
     #[test]
     fn white_balance_neutralises_a_colour_cast() {
         let cast = [1.4, 1., 0.6];
-        let gains = neutral_gains(&scene(cast, 0.5).pixels).unwrap();
+        let gains = gray_world(&scene(cast, 0.5).pixels).unwrap();
         for c in 0..3 {
             assert!(
                 (gains[c] * cast[c] - 1.).abs() < 0.02,
@@ -432,18 +408,50 @@ mod tests {
         }
     }
 
+    /// Temperature and Tint Lightroom's Auto gives a photo whose gray world is `r`'s.
+    fn lightroom_auto(r: &Recipe) -> (f32, f32) {
+        let temperature = 1e6 / (1e6 / r.temperature - WARM_MIRED).max(1e6 / AUTO_TEMPERATURE.1);
+        (
+            temperature.clamp(AUTO_TEMPERATURE.0, AUTO_TEMPERATURE.1),
+            (r.tint + TINT_SHIFT).clamp(AUTO_TINT.0, AUTO_TINT.1),
+        )
+    }
+
     #[test]
-    fn white_balance_follows_neutral_areas_over_a_coloured_surface() {
-        // Two thirds of the photo is saturated green; the rest is gray under a mild
-        // warm light, which is what should be corrected.
+    fn white_balance_is_gray_world_made_warmer_as_in_lightroom() {
         let mut im = scene([1.1, 1., 0.9], 0.5);
-        let n = im.pixels.len();
-        for p in &mut im.pixels[..n * 2 / 3] {
-            *p = [0.05, 0.4, 0.08];
+        // A camera matrix gives the recipe the default camera-matrix profile.
+        im.metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        let base = Recipe::for_metadata(&im.metadata);
+        let auto = auto_white_balance(&im, &base).unwrap();
+        let mut gray = base.clone();
+        gray.wb = gray_world(&im.pixels).unwrap();
+        gray.sync_white_balance_controls(&im.metadata);
+        let (temperature, tint) = lightroom_auto(&gray);
+        assert!(
+            (auto.temperature - temperature).abs() < 1. && (auto.tint - tint).abs() < 0.01,
+            "{} {} vs {temperature} {tint}",
+            auto.temperature,
+            auto.tint
+        );
+        assert!(auto.temperature > gray.temperature, "{}", auto.temperature);
+        assert_eq!(auto.auto_white_balance, Some([auto.temperature, auto.tint]));
+    }
+
+    #[test]
+    fn white_balance_stays_within_lightroom_auto_limits() {
+        for cast in [[0.3, 1., 3.], [3., 1., 0.3], [1., 0.5, 1.], [1., 2., 1.]] {
+            let mut im = scene(cast, 0.3);
+            im.metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+            let auto = auto_white_balance(&im, &Recipe::for_metadata(&im.metadata)).unwrap();
+            assert!(
+                (AUTO_TEMPERATURE.0..=AUTO_TEMPERATURE.1).contains(&auto.temperature)
+                    && (AUTO_TINT.0..=AUTO_TINT.1).contains(&auto.tint),
+                "{cast:?}: {} {}",
+                auto.temperature,
+                auto.tint
+            );
         }
-        let gains = neutral_gains(&im.pixels).unwrap();
-        assert!((gains[0] * 1.1 - 1.).abs() < 0.03, "{gains:?}");
-        assert!((gains[2] * 0.9 - 1.).abs() < 0.03, "{gains:?}");
     }
 
     #[test]
@@ -637,7 +645,9 @@ mod tests {
         assert!(r.engine >= 3);
         let recovered = super::super::quality::recover_highlights(&im);
         assert_ne!(recovered.pixels, im.pixels);
-        let decoded = neutral_gains(&crop_samples(&im, &r)).unwrap();
+        let mut decoded = r.clone();
+        fit_white_balance_to(&crop_samples(&im, &r), &im.metadata, &mut decoded).unwrap();
+        let decoded = decoded.wb;
         let estimated = auto_white_balance(&im, &r).unwrap().wb;
         for c in 0..3 {
             assert!(
@@ -707,16 +717,21 @@ mod tests {
             ..Default::default()
         };
         let auto = auto_white_balance(&im, &base).unwrap();
-        assert!(
-            (auto.wb[0] * 1.3 - 1.).abs() < 0.03 && (auto.wb[2] * 0.7 - 1.).abs() < 0.03,
-            "{:?}",
-            auto.wb
-        );
+        // As if the whole photo were under the warm light.
+        let warm = auto_white_balance(&scene([1.3, 1., 0.7], 0.5), &Recipe::default()).unwrap();
+        for c in 0..3 {
+            assert!(
+                (auto.wb[c] / warm.wb[c] - 1.).abs() < 0.02,
+                "{:?} vs {:?}",
+                auto.wb,
+                warm.wb
+            );
+        }
     }
 
     #[test]
-    fn neutral_photos_keep_as_shot_white_balance() {
-        let gains = neutral_gains(&scene([1.; 3], 0.5).pixels).unwrap();
+    fn neutral_photos_need_no_gray_world_correction() {
+        let gains = gray_world(&scene([1.; 3], 0.5).pixels).unwrap();
         assert!(gains.iter().all(|g| (g - 1.).abs() < 1e-3), "{gains:?}");
     }
 

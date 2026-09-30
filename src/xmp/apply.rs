@@ -397,21 +397,8 @@ impl Preset {
                     r.update_wb(m);
                     r.auto_white_balance = Some([r.temperature, r.tint]);
                 } else if let Some(im) = image {
-                    let mut avg = [0.; 3];
-                    let mut count = 0.;
-                    for p in im.pixels.iter().step_by(16) {
-                        if p.iter().all(|v| *v > 0.005 && *v < 0.9) {
-                            for c in 0..3 {
-                                avg[c] += p[c];
-                            }
-                            count += 1.;
-                        }
-                    }
-                    ensure!(count > 0., "No usable pixels for automatic white balance");
-                    r.wb = std::array::from_fn(|c| (avg[1] / avg[c].max(1e-8)).clamp(0.01, 100.));
-                    r.tint = 0.;
-                    r.sync_white_balance_controls(m);
-                    r.auto_white_balance = Some([r.temperature, r.tint]);
+                    // Settings without resolved values get the WB menu's Auto.
+                    *r = crate::develop::auto_white_balance(im, r)?;
                 }
             }
             Some("Custom") | None => {
