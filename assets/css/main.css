@@ -198,7 +198,7 @@ h1 span { color: var(--salmon); }
 .agent h3 { margin: 0 0 10px; font: 700 22px/1.2 var(--sans); letter-spacing: -0.02em; }
 .agent-copy p { margin: 0; font-size: 15px; color: var(--rice-dim); }
 .agent-copy a { color: var(--salmon); text-underline-offset: 3px; }
-.prompt { padding: 18px 20px; border-radius: 12px; background: var(--nori); border: 1px solid var(--line); }
+.prompt { padding: 18px 20px; border-radius: 12px; background: var(--ink); border: 1px solid var(--line); }
 .prompt p { margin: 0 0 14px; font: 400 13px/1.6 var(--mono); color: var(--rice); }
 .prompt-copy {
   display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line);
