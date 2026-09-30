@@ -107,7 +107,7 @@ h1 span { color: var(--salmon); }
 /* Video placeholder */
 .video { padding-bottom: 144px; }
 .frame {
-  position: relative; margin: 0; border-radius: 18px; overflow: hidden;
+  position: relative; margin: 0; overflow: hidden;
   border: 1px solid var(--line); background: var(--nori);
   box-shadow: 0 60px 120px -40px rgba(0, 0, 0, 0.8), 0 0 0 10px rgba(242, 237, 227, 0.025);
 }
