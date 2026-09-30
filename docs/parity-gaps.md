@@ -45,7 +45,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Geometry
 
-- **Upright** renders from the corrections Lightroom stores with an edit ([transform](transform.md)); RAWmakase cannot analyse a photo for Upright yet, so presets that only name a mode are reported.
+- **Upright** renders imported edits from the corrections Lightroom stores, exactly. For new edits and mode-only presets RAWmakase analyses the photo itself; on 160 photos its Level is within a median 13 px of Lightroom's at 2000 px, Vertical and Auto about 60 px (mostly framing), Full about 180 px ([transform](transform.md)). Guided and Constrain Crop are not implemented.
 
 ## Local and finishing adjustments
 

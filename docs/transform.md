@@ -10,7 +10,13 @@ Lightroom stores the correction for every mode, `crs:UprightTransform_0` to `_5`
 
 Checked against Camera Raw renders of five photos (Sony A7 II and Fujifilm X100F; landscape, both portrait orientations; Level, Vertical and Full; with and without lens profiles): the stored matrices reproduce Camera Raw's geometry within 0.0002 of the image size, and RAWmakase's renders within 1.3 px at 2000 px, the same as the untransformed renders.
 
-A preset or edit that names an Upright mode without Lightroom's stored corrections is reported as unsupported.
+A preset that names only an Upright mode applies, and the app analyses each photo it is applied to. A photo's own settings (sidecar or catalog) without Lightroom's stored corrections, and Guided without a stored correction, are reported as unsupported.
+
+## Upright analysis
+
+For new edits, `develop::upright` finds straight edges in a 1024-pixel luminance copy of the displayed photo (an LSD-style detector), then the vertical vanishing point (edges within 20° of vertical, weighted by squared length, with a prior against strong tilts) and a horizontal one orthogonal to it. Lightroom's corrections are camera rotations K·R·K⁻¹ at focal length f = 35mm-equivalent / 36 in long-edge units (fitted to its stored corrections within 1e-9): Level rolls, Vertical takes the vertical vanishing point to vertical, Full also pans to the facade turned least, and Auto corrects part of the tilt. Lightroom then enlarges the result to fill the frame when that takes at most 110%; otherwise Level keeps its size and the other modes fit its width.
+
+Against Lightroom's own corrections on 160 of the author's photos (median, at 2000 px): Level 13 px, Vertical 58 px, Auto 59 px, Full 186 px. Most of the Vertical and Auto difference is framing; the straightening itself usually agrees within 10 px.
 
 ## Sliders
 
