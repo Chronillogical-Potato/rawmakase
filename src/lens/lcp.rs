@@ -136,13 +136,15 @@ fn key(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-fn matches(e: &Entry, m: &Metadata) -> bool {
+fn lens_matches(e: &Entry, m: &Metadata) -> bool {
     let lens = key(&m.lens_model);
-    !lens.is_empty()
-        && e.lens.iter().any(|l| key(l) == lens)
-        && (e.make.is_empty()
-            || key(&e.make) == key(&m.make)
-            || key(&m.make).contains(&key(&e.make)))
+    !lens.is_empty() && e.lens.iter().any(|l| key(l) == lens)
+}
+/// Whether the profile was made on this camera make. Adobe profiles third-party
+/// lenses on one body per mount (a Sigma L-mount lens on a Sigma fp), and
+/// Lightroom applies them to other makes too, preferring the same make.
+fn make_matches(e: &Entry, m: &Metadata) -> bool {
+    e.make.is_empty() || key(&e.make) == key(&m.make) || key(&m.make).contains(&key(&e.make))
 }
 
 /// Parameters interpolated in focal length (and APEX aperture for vignetting).
@@ -209,7 +211,10 @@ fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 
 /// The correction for a photo from matching profile entries.
 pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
-    let mut found: Vec<&Entry> = entries.iter().filter(|e| matches(e, m)).collect();
+    let mut found: Vec<&Entry> = entries.iter().filter(|e| lens_matches(e, m)).collect();
+    if found.iter().any(|e| make_matches(e, m)) {
+        found.retain(|e| make_matches(e, m));
+    }
     if found.iter().any(|e| e.raw) {
         found.retain(|e| e.raw);
     }
@@ -272,29 +277,42 @@ pub fn library_dirs() -> Vec<PathBuf> {
         .map(|p| p.join("lens-profiles"))
         .collect()
 }
-/// The imported profile correction for a photo, if any imported profile matches.
+/// The imported profile correction for a photo, if any imported profile matches:
+/// one made on the same camera make, else one for the same lens on another make.
 pub fn installed(m: &Metadata) -> Option<LensCorrection> {
     if m.lens_model.is_empty() {
         return None;
     }
+    let mut other_make = None;
     for dir in library_dirs() {
         let Ok(files) = std::fs::read_dir(dir) else {
             continue;
         };
-        for f in files.flatten() {
-            let p = f.path();
+        let mut files: Vec<PathBuf> = files.flatten().map(|f| f.path()).collect();
+        files.sort();
+        for p in files {
             if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lcp")) {
                 continue;
             }
-            if let Ok(text) = std::fs::read_to_string(&p)
-                && let Ok(entries) = parse(&text)
-                && let Some(c) = correction(&entries, m)
+            let Ok(entries) = std::fs::read_to_string(&p)
+                .map_err(anyhow::Error::from)
+                .and_then(|t| parse(&t))
+            else {
+                continue;
+            };
+            if entries
+                .iter()
+                .any(|e| lens_matches(e, m) && make_matches(e, m))
             {
-                return Some(c);
+                if let Some(c) = correction(&entries, m) {
+                    return Some(c);
+                }
+            } else if other_make.is_none() {
+                other_make = correction(&entries, m);
             }
         }
     }
-    None
+    other_make
 }
 /// Validates and copies lens profiles into the data directory.
 pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
@@ -394,6 +412,11 @@ mod tests {
         let mut other = a7ii(1.8);
         other.lens_model = "FE 85mm F1.8".into();
         assert!(correction(&entries, &other).is_none());
+        // A profile made on another camera make still applies, as in Lightroom.
+        let mut other_make = a7ii(1.8);
+        other_make.make = "Panasonic".into();
+        let c2 = correction(&entries, &other_make).unwrap();
+        assert_eq!(c2.vignetting_gain(1.), c.vignetting_gain(1.));
         assert!(parse("<x/>").is_err());
     }
     #[test]
