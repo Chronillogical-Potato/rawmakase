@@ -604,8 +604,8 @@ fn framing(g: Mat, width: f32, height: f32, level: bool) -> Mat {
 
 /// Lightroom's Upright corrections for every mode, indexed by
 /// [`super::UprightMode::code`], as [`super::Upright::corrections`] stores them: forward
-/// homographies in 0–1 coordinates of the photo as recorded. Guided is left as the
-/// identity.
+/// homographies in 0–1 coordinates of the photo as recorded. Guided needs guides drawn
+/// on the photo, so there is none for it.
 pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     let (image, w, h) = analysis_image(im, r);
     let f = focal(&im.metadata);
@@ -634,7 +634,7 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     let to_recorded = mat(orient, crate::color_math::inverse(centred));
     let from_recorded = mat(centred, crate::color_math::inverse(orient));
     let rotations = rotations(&found);
-    let mut out = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    let mut out = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
     for (code, rotation) in rotations.iter().enumerate().skip(1) {
         let g = mat(k, mat(*rotation, k_inverse));
         let level = code == super::UprightMode::Level.code();

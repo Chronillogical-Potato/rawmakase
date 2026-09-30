@@ -176,6 +176,12 @@ impl Upright {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+    /// Keeps the mode but drops what was analysed from one photo, for settings moving
+    /// to another: the corrections, and Lightroom's analysis details.
+    pub fn clear_analysis(&mut self) {
+        self.corrections.clear();
+        self.lightroom.clear();
+    }
     pub fn validate(&self) -> bool {
         self.corrections.len() <= UprightMode::ALL.len()
             && self.corrections.iter().flatten().all(|v| v.is_finite())

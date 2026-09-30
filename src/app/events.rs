@@ -38,6 +38,7 @@ impl Editor {
                             }
                             let old = std::mem::replace(&mut self.document.recipe, r);
                             self.history(old);
+                            self.ensure_upright();
                             self.schedule();
                         }
                         Err(e) => self.status = e.to_string(),

@@ -24,6 +24,8 @@ pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     // Auto white balance was estimated for this photo; applied elsewhere its values are
     // just Custom.
     recipe.auto_white_balance = None;
+    // Upright's corrections were analysed from this photo; the mode stays.
+    recipe.upright.clear_analysis();
     atomic_json(
         path,
         &Preset {
@@ -38,10 +40,11 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     let mut v: serde_json::Value = serde_json::from_reader(File::open(path)?)?;
     migrate_recipe(&mut v)?;
     let p: Preset = serde_json::from_value(v)?;
-    let recipe = p.recipe.with_local(crate::develop::LocalEdits {
+    let mut recipe = p.recipe.with_local(crate::develop::LocalEdits {
         retouch: Vec::new(),
         masks: p.masks,
     });
+    recipe.upright.clear_analysis();
     recipe.validate()?;
     Ok(recipe)
 }

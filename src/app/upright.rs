@@ -1,6 +1,6 @@
 //! The Transform panel's Upright analysis, run off the UI thread.
 use super::{Editor, worker::Event};
-use crate::develop::Recipe;
+use crate::develop::{Recipe, UprightMode};
 
 /// What the analysis measures: the photo's orientation and lens correction.
 fn inputs(r: &Recipe) -> (u8, bool, bool, bool, bool, u32) {
@@ -46,7 +46,7 @@ impl Editor {
     /// after undoing to a state from before an analysis, or opening such a photo.
     pub(super) fn ensure_upright(&mut self) {
         let u = &self.document.recipe.upright;
-        if u.mode != crate::develop::UprightMode::Off
+        if !matches!(u.mode, UprightMode::Off | UprightMode::Guided)
             && u.corrections.len() <= u.mode.code()
             && !self.document.upright.is_running()
         {
@@ -84,7 +84,14 @@ impl Editor {
             std::iter::once(&mut self.document.recipe).chain(self.document.history.states_mut())
         {
             if fits(r) {
+                // An imported Guided correction has no analysis to replace it.
+                let guided = r
+                    .upright
+                    .corrections
+                    .get(UprightMode::Guided.code())
+                    .copied();
                 r.upright.corrections = corrections.clone();
+                r.upright.corrections.extend(guided);
                 // Lightroom's own analysis details no longer describe these corrections.
                 r.upright.lightroom.clear();
             }

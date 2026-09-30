@@ -173,7 +173,10 @@ impl Editor {
             // Auto white balance was estimated for the copied photo; here its values
             // are just Custom.
             recipe.auto_white_balance = None;
+            // Upright's corrections were analysed from the copied photo: analyse this one.
+            recipe.upright.clear_analysis();
             self.document.recipe = recipe;
+            self.ensure_upright();
             self.status = "Settings pasted".into();
         }
     }

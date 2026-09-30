@@ -1063,9 +1063,10 @@ impl Editor {
                 // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let off = r.upright.mode == UprightMode::Off;
+                        // Guided has nothing to analyse until guides can be drawn.
+                        let analysed = !matches!(r.upright.mode, UprightMode::Off | UprightMode::Guided);
                         if ui
-                            .add_enabled(upright_ready && !off, egui::Button::new("Update"))
+                            .add_enabled(upright_ready && analysed, egui::Button::new("Update"))
                             .on_hover_text("Analyse the photo again, e.g. after changing lens corrections")
                             .clicked()
                         {
