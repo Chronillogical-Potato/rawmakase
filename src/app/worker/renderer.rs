@@ -245,6 +245,13 @@ fn render(
         };
         // Overlays are drawn into CPU pixels.
         let overlay = job.overlay != super::Overlay::None;
+        let drawn: Vec<wgpu::Texture> = textures.as_ref().map_or_else(Vec::new, |t| {
+            t.ids
+                .iter()
+                .filter(|(_, id)| job.drawn.contains(id))
+                .map(|(texture, _)| texture.clone())
+                .collect()
+        });
         let display = |slot, navigator: bool, thumbnail: bool| {
             (textures.is_some() && !overlay).then(|| gpu::Display {
                 slot,
@@ -253,6 +260,7 @@ fn render(
                 navigator: navigator.then_some(NAVIGATOR),
                 thumbnail: thumbnail.then_some(THUMBNAIL),
                 samples: job.samples,
+                drawn: drawn.clone(),
             })
         };
         let whole = display(gpu::Slot::Whole, job.navigator, job.thumbnail);
@@ -601,6 +609,7 @@ mod tests {
             thumbnail: false,
             samples: false,
             overlay: Default::default(),
+            drawn: Vec::new(),
         });
         let mut stages = Vec::new();
         loop {
@@ -668,6 +677,7 @@ mod tests {
             thumbnail: false,
             samples: false,
             overlay: Default::default(),
+            drawn: Vec::new(),
         });
         loop {
             match rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap() {
@@ -703,6 +713,7 @@ mod tests {
                 thumbnail: false,
                 samples: false,
                 overlay: Default::default(),
+                drawn: Vec::new(),
             });
             loop {
                 match rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap() {

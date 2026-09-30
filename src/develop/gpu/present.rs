@@ -38,6 +38,10 @@ pub struct Display {
     /// Read back the shown pixels without overlays or monitor profile, for the
     /// white balance selector's loupe.
     pub samples: bool,
+    /// Textures the viewport is drawing until this preview arrives. They are never
+    /// written: panning at 100% renders a region of the same size, and writing it
+    /// into the drawn texture would show the new pixels at the old position.
+    pub drawn: Vec<wgpu::Texture>,
 }
 /// A presented preview.
 pub struct Frame {
@@ -103,8 +107,8 @@ struct Target {
     texture: wgpu::Texture,
     generation: u64,
 }
-/// Textures kept per kind: a view alternates between two sizes while a slider moves
-/// at 100% (reduced preview, full region).
+/// Textures kept per kind besides drawn ones: a view alternates between two sizes
+/// while a slider moves at 100% (reduced preview, full region).
 const TARGETS: usize = 2;
 
 pub(super) struct Presenter {
@@ -238,16 +242,21 @@ impl Presenter {
             generation: 0,
         }
     }
-    /// A texture of `kind` and size, reusing one when the size is unchanged.
+    /// A texture of `kind` and size, reusing one when the size is unchanged and it is
+    /// not `drawn`.
     fn target(
         &mut self,
         device: &wgpu::Device,
         kind: Kind,
         width: u32,
         height: u32,
+        drawn: &[wgpu::Texture],
     ) -> &mut Target {
         if let Some(i) = self.targets.iter().position(|t| {
-            t.kind == kind && t.texture.width() == width && t.texture.height() == height
+            t.kind == kind
+                && t.texture.width() == width
+                && t.texture.height() == height
+                && !drawn.contains(&t.texture)
         }) {
             let target = self.targets.remove(i);
             self.targets.insert(0, target);
@@ -283,7 +292,9 @@ impl Presenter {
             );
             let keep = if internal { 1 } else { TARGETS };
             let same: Vec<usize> = (0..self.targets.len())
-                .filter(|i| self.targets[*i].kind == kind)
+                .filter(|i| {
+                    self.targets[*i].kind == kind && !drawn.contains(&self.targets[*i].texture)
+                })
                 .collect();
             for &i in same.iter().skip(keep).rev() {
                 let old = self.targets.remove(i);
@@ -489,7 +500,7 @@ impl Processor {
                 pass.dispatch_workgroups(x.div_ceil(16), y.div_ceil(16), 1);
             }
         };
-        let photo = presenter.target(&device, Kind::Photo(display.slot), cw, ch);
+        let photo = presenter.target(&device, Kind::Photo(display.slot), cw, ch, &display.drawn);
         let (texture, generation) = (photo.texture.clone(), photo.generation);
         let view = texture.create_view(&Default::default());
         if sharpen {
@@ -506,7 +517,7 @@ impl Processor {
         let overlays = display.clipping || display.monitor.is_some();
         let plain = ((display.thumbnail.is_some() || display.samples) && overlays).then(|| {
             let plain = presenter
-                .target(&device, Kind::Plain, cw, ch)
+                .target(&device, Kind::Plain, cw, ch, &[])
                 .texture
                 .clone();
             let view = plain.create_view(&Default::default());
@@ -520,7 +531,10 @@ impl Processor {
                           edge: u32,
                           encoder: &mut wgpu::CommandEncoder| {
             let (rw, rh) = quality::output_size(cw, ch, edge.max(1));
-            let target = presenter.target(&device, kind, rw, rh).texture.clone();
+            let target = presenter
+                .target(&device, kind, rw, rh, &display.drawn)
+                .texture
+                .clone();
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Reduce bindings"),
                 layout: &presenter.reduce_layout,

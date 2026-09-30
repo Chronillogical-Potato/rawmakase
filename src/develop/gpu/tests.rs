@@ -439,6 +439,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 navigator: Some(20),
                 thumbnail: Some(30),
                 samples: true,
+                drawn: Vec::new(),
             };
             let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
             let Output::Frame(frame) =
@@ -500,6 +501,80 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .unwrap();
             assert!(worst <= 1, "{label}: loupe samples differ by {worst}");
         }
+    }
+    Ok(())
+}
+
+/// Panning at 100% renders regions of one size; each goes into a texture other than
+/// the one the viewport draws, which would otherwise show it at the old position.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn panning_never_writes_the_drawn_region() -> Result<()> {
+    use crate::{
+        develop::{PreviewRenderer, quality::Output},
+        raw::{CameraImage, Metadata},
+    };
+    let (w, h) = (120, 80);
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| [0.2 + (i % w) as f32 / w as f32 * 0.5, 0.3, 0.4])
+            .collect(),
+        metadata: Metadata {
+            width: w,
+            height: h,
+            wb: [2., 1., 1.8],
+            cam_xyz: [[1.1, -0.5, -0.1], [-0.4, 1.2, 0.2], [-0.1, 0.15, 0.5]],
+            ..Default::default()
+        },
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let recipe = Recipe {
+        profile: Some(std::sync::Arc::new(
+            crate::camera_profiles::CameraProfile::camera_matrix_default(&image.metadata)
+                .unwrap()
+                .with_test_tables(),
+        )),
+        reference_curves: true,
+        reference_color: true,
+        reference_calibration: true,
+        ..Default::default()
+    };
+    let mut gpu = PreviewRenderer::with_gpu();
+    let cancel = AtomicBool::new(false);
+    let mut drawn: Option<(wgpu::Texture, u64)> = None;
+    for x in [0, 4, 8, 12, 16] {
+        let display = super::Display {
+            slot: super::Slot::Region,
+            clipping: false,
+            monitor: None,
+            navigator: None,
+            thumbnail: None,
+            samples: false,
+            drawn: drawn.iter().map(|(t, _)| t.clone()).collect(),
+        };
+        let Output::Frame(frame) = gpu.render_to(
+            &image,
+            &recipe,
+            0,
+            Some([x, 10, 60, 40]),
+            &cancel,
+            Some(&display),
+        )?
+        else {
+            panic!("{:?}", gpu.fallback_reason());
+        };
+        if let Some((texture, generation)) = &drawn {
+            assert!(frame.texture != *texture, "x={x}: wrote the drawn region");
+            let processor = gpu.gpu().unwrap();
+            assert_eq!(processor.generation(texture), Some(*generation), "x={x}");
+            assert!(!frame.released.contains(texture), "x={x}: released it");
+        }
+        drawn = Some((frame.texture, frame.generation));
     }
     Ok(())
 }
