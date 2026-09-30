@@ -22,9 +22,12 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes the run in progress on the same branch. Release
+# validation (called with source-ref) gets its own group, so it never queues
+# behind or cancels a push run on main, and is never cancelled itself.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ inputs.source-ref && format('ci-release-{0}', inputs.source-ref) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ !inputs.source-ref }}
 
 env:
   CARGO_TERM_COLOR: always

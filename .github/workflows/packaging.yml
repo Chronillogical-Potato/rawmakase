@@ -33,6 +33,12 @@ on:
 permissions:
   contents: read
 
+# As in CI: a newer push supersedes the run in progress, while a release's
+# packaging (called with a version) has its own group and is never cancelled.
+concurrency:
+  group: ${{ inputs.version && format('packaging-release-{0}', inputs.version) || format('packaging-{0}', github.ref) }}
+  cancel-in-progress: ${{ !inputs.version }}
+
 jobs:
   validate:
     if: inputs.version == ''
