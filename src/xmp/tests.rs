@@ -113,11 +113,16 @@ fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
         recovered: Default::default(),
         width,
         height,
-        // A warm cast.
+        // A warm left half and a cool right half.
         pixels: (0..width * height)
             .map(|i| {
-                let v = 0.05 + 0.4 * (i % width) as f32 / width as f32;
-                [v * 1.3, v, v * 0.7]
+                let x = i % width;
+                let v = 0.05 + 0.4 * x as f32 / width as f32;
+                if x < width / 2 {
+                    [v * 1.3, v, v * 0.7]
+                } else {
+                    [v * 0.7, v, v * 1.3]
+                }
             })
             .collect(),
         metadata: m.clone(),
@@ -125,12 +130,19 @@ fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
         scale_factor: 1.,
         scale_clipped: 0,
     };
-    let preset = parse(
-        Path::new("preset.xmp"),
-        &xml(r#"c:WhiteBalance="Auto""#, ""),
-    )?;
+    // Measured on the preset's crop: the warm half.
+    let attrs =
+        r#"c:WhiteBalance="Auto" c:CropLeft="0" c:CropTop="0" c:CropRight="0.45" c:CropBottom="1""#;
+    let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;
     let result = preset.apply(&Recipe::default(), &m, &[], Some(&im))?;
-    let auto = crate::develop::auto_white_balance(&im, &Recipe::default())?;
+    assert_eq!(result.crop, [0., 0., 0.45, 1.]);
+    let cropped = Recipe {
+        crop: result.crop,
+        ..Default::default()
+    };
+    let auto = crate::develop::auto_white_balance(&im, &cropped)?;
+    let whole = crate::develop::auto_white_balance(&im, &Recipe::default())?;
+    assert_ne!(auto.wb, whole.wb);
     assert_eq!(
         (result.wb, result.temperature, result.tint),
         (auto.wb, auto.temperature, auto.tint)
