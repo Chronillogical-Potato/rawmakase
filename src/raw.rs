@@ -30,6 +30,7 @@ struct NativeMetadata {
     model: [c_char; 64],
     cam_xyz: [f32; 9],
     lens: [c_char; 128],
+    focal_35mm: f32,
 }
 unsafe extern "C" {
     fn ora_version() -> *const c_char;
@@ -93,6 +94,9 @@ pub struct Metadata {
     /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
+    /// EXIF FocalLengthIn35mmFormat, 0 when unknown.
+    #[serde(default)]
+    pub focal_35mm: f32,
     /// DNG BaselineExposure, when the file is a DNG that records one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
@@ -201,6 +205,7 @@ impl Raw {
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: crate::lens::embedded::read(path_ref),
             lens_model: error(&m.lens).trim().to_string(),
+            focal_35mm: m.focal_35mm,
             baseline_exposure: None,
             profile_lens: None,
             embedded_profile: None,

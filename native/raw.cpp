@@ -25,6 +25,7 @@ struct Metadata {
     char make[64], model[64];
     float cam_xyz[9];
     char lens[128];
+    float focal_35mm;
 };
 typedef int (*Cancel)(void*);
 }
@@ -118,6 +119,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         for(float& v:m->daylight_wb) v=std::max(0.001f,v/green);
         std::snprintf(m->make,64,"%s",d.idata.make);
         std::snprintf(m->model,64,"%s",d.idata.model);
+        m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         std::snprintf(m->lens,128,"%s",d.lens.Lens[0] ? d.lens.Lens : d.lens.makernotes.Lens);
         return h.release();
     } catch(const std::exception& e) { message(err,e.what()); return nullptr; }
