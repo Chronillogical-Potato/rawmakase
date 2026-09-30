@@ -1266,3 +1266,69 @@ fn auto_is_off_while_its_settings_stand() {
     editor.undo();
     assert!(!editor.auto_in_effect());
 }
+#[test]
+fn undoing_an_upright_mode_turns_it_off_once_analysed() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let original = e.document.recipe.clone();
+    e.document.recipe.upright.mode = UprightMode::Vertical;
+    e.history(original.clone());
+    // The analysis arrives after the click that chose the mode.
+    let (generation, _) = e.document.upright.start();
+    let analysed = e.document.recipe.clone();
+    let mut corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    corrections[4][6] = 0.1;
+    e.upright_ready(generation, &analysed, Ok(corrections.clone()));
+    assert_eq!(e.document.recipe.upright.corrections, corrections);
+    // It is not a step of its own: one undo leaves Upright off, redo brings it back
+    // corrected.
+    assert_eq!(e.document.history.steps().1, 1);
+    e.undo();
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Off);
+    e.redo();
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
+    assert_eq!(e.document.recipe.upright.corrections, corrections);
+}
+#[test]
+fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    let mut guided = identity;
+    guided[2] = 0.05;
+    e.document.recipe.upright.mode = UprightMode::Guided;
+    e.document.recipe.upright.corrections =
+        vec![identity, identity, identity, identity, identity, guided];
+    // Update analyses the other modes; Lightroom's Guided correction survives.
+    let (generation, _) = e.document.upright.start();
+    let analysed = e.document.recipe.clone();
+    e.upright_ready(generation, &analysed, Ok(vec![identity; 5]));
+    assert_eq!(e.document.recipe.upright.corrections[5], guided);
+    // Pasted onto another photo, the mode comes along but not the corrections.
+    e.document.recipe.upright.mode = UprightMode::Vertical;
+    e.copy_settings();
+    e.paste_settings();
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
+    assert!(e.document.recipe.upright.corrections.is_empty());
+}
+#[test]
+fn upright_analysis_yields_to_corrections_applied_meanwhile() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.recipe.upright.mode = UprightMode::Level;
+    let (generation, _) = e.document.upright.start();
+    let analysed = e.document.recipe.clone();
+    // A Lightroom preset with its own corrections lands before the analysis.
+    let mut imported = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    imported[3][2] = 0.02;
+    e.document.recipe.upright.corrections = imported.clone();
+    e.upright_ready(
+        generation,
+        &analysed,
+        Ok(vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5]),
+    );
+    assert_eq!(e.document.recipe.upright.corrections, imported);
+}

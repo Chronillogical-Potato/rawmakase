@@ -216,6 +216,11 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
         .is_err()
     );
     assert!(develop_fields("s = { a = 1, a = 2 }").is_err());
+    // With the corrections Lightroom stores, Upright imports.
+    let text = r#"s = { PerspectiveUpright = 1, UprightTransformCount = 2, UprightTransform_0 = "1,0,0,0,1,0,0,0,1", UprightTransform_1 = "1.01,0,0,0,1.01,0,0.002,0,1" }"#;
+    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.upright.corrections[1][6], 0.002);
     Ok(())
 }
 #[test]

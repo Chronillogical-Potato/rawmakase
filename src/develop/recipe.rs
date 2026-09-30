@@ -76,6 +76,9 @@ pub struct Recipe {
     /// Transform panel sliders (engine 4).
     #[serde(default)]
     pub transform: crate::develop::Transform,
+    /// Lightroom's Upright (engine 4), applied before the Transform sliders.
+    #[serde(default, skip_serializing_if = "crate::develop::Upright::is_default")]
+    pub upright: crate::develop::Upright,
     pub rotation: u8,
     pub flip_x: bool,
     pub flip_y: bool,
@@ -154,6 +157,7 @@ impl Default for Recipe {
             crop: [0., 0., 1., 1.],
             straighten: 0.,
             transform: Default::default(),
+            upright: Default::default(),
             rotation: 0,
             flip_x: false,
             flip_y: false,
@@ -301,6 +305,7 @@ impl Recipe {
             "Invalid rotation"
         );
         ensure!(self.transform.validate(), "Invalid transform");
+        ensure!(self.upright.validate(), "Invalid Upright");
         ensure!(
             (0. ..=2.).contains(&self.lens_distortion)
                 && (0. ..=2.).contains(&self.lens_vignetting),

@@ -30,6 +30,8 @@ pub(super) struct Document {
     pub(super) auto_input: Option<Recipe>,
     /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
     pub(super) auto_applied: Option<Recipe>,
+    /// The Transform panel's Upright analysis for this photo.
+    pub(super) upright: super::task::Task,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.

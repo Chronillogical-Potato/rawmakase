@@ -108,6 +108,8 @@ impl Preset {
         self.apply_basic(&mut settings, &mut recipe)?;
         // Auto white balance is measured on the crop, so geometry comes first.
         self.apply_geometry(&mut settings, &mut recipe)?;
+        // Before white balance: Auto measures the photo as Upright frames it.
+        self.apply_upright(&mut settings, &mut recipe)?;
         self.apply_white_balance(&mut settings, &mut recipe, m, image)?;
         self.apply_color_mixer(&mut settings, &mut recipe)?;
         self.apply_curves(&mut settings, &mut recipe)?;
@@ -161,6 +163,9 @@ impl Preset {
         });
         stage(&mut recipe, &|r| {
             self.apply_geometry(&mut settings.borrow_mut(), r)
+        });
+        stage(&mut recipe, &|r| {
+            self.apply_upright(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|r| {
             self.apply_white_balance(&mut settings.borrow_mut(), r, m, image)
@@ -792,6 +797,78 @@ impl Preset {
         Ok(())
     }
 
+    /// Lightroom's Upright mode and the corrections it stored for every mode.
+    fn apply_upright(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
+        use crate::develop::UprightMode;
+        let v = settings.values;
+        settings.seen.insert("PerspectiveUpright".into());
+        let mut lightroom = BTreeMap::new();
+        let mut corrections = Vec::new();
+        for (key, value) in v.range("Upright".to_string()..) {
+            let Some(name) = key.strip_prefix("Upright") else {
+                break;
+            };
+            settings.seen.insert(key.clone());
+            if name == "TransformCount" {
+                continue;
+            }
+            let Some(i) = name.strip_prefix("Transform_") else {
+                lightroom.insert(key.clone(), value.clone());
+                continue;
+            };
+            let i: usize = i
+                .parse()
+                .ok()
+                .filter(|&i| i < UprightMode::ALL.len())
+                .with_context(|| format!("Unsupported {key}"))?;
+            let m: Vec<f32> = value
+                .split(',')
+                .map(|x| x.trim().parse::<f32>())
+                .collect::<Result<_, _>>()
+                .with_context(|| format!("Invalid {key}"))?;
+            let m: [f32; 9] = m
+                .try_into()
+                .ok()
+                .filter(|m: &[f32; 9]| m.iter().all(|x| x.is_finite()))
+                .with_context(|| format!("Invalid {key}"))?;
+            if corrections.len() <= i {
+                corrections.resize(i + 1, None);
+            }
+            corrections[i] = Some(m);
+        }
+        // Lightroom stores every mode; keep only the unbroken run from Off, so a mode
+        // without its own correction is never stood in for by an identity.
+        let corrections: Vec<[f32; 9]> = corrections.into_iter().map_while(|m| m).collect();
+        let Some(code) = number(v, "PerspectiveUpright")? else {
+            ensure!(
+                corrections.is_empty(),
+                "Upright corrections without PerspectiveUpright"
+            );
+            return Ok(());
+        };
+        let mode = UprightMode::from_code(code as usize)
+            .filter(|_| code.fract() == 0.)
+            .with_context(|| format!("Unsupported PerspectiveUpright {code}"))?;
+        // A preset names only the mode; the app analyses each photo it is applied to.
+        // A photo's own settings always carry Lightroom's corrections.
+        let stored = mode == UprightMode::Off || mode.code() < corrections.len();
+        ensure!(
+            stored || !self.photo_settings,
+            "PerspectiveUpright without Lightroom's stored correction is not supported yet"
+        );
+        // Guided can't be analysed without its guides.
+        ensure!(
+            stored || mode != UprightMode::Guided,
+            "Guided Upright without Lightroom's stored correction is not supported yet"
+        );
+        r.upright = crate::develop::Upright {
+            mode,
+            corrections,
+            lightroom,
+        };
+        Ok(())
+    }
+
     /// Lightroom's spot removal and masks, replacing the recipe's when the settings
     /// have them; returns what could not be converted.
     fn apply_local(&self, r: &mut Recipe, m: &Metadata) -> Vec<String> {
@@ -815,7 +892,6 @@ impl Preset {
             ("CurveRefineSaturation", "100"),
             ("AutoLateralCA", "0"),
             ("LensManualDistortionAmount", "0"),
-            ("PerspectiveUpright", "0"),
             ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),
             ("IncrementalTint", "0"),

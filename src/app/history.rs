@@ -111,6 +111,15 @@ impl History {
             .push_back((std::mem::replace(current, next), step));
         true
     }
+    /// Every recorded state, to update what is derived from the photo rather than
+    /// edited, such as Upright's analysis.
+    pub fn states_mut(&mut self) -> impl Iterator<Item = &mut Recipe> {
+        self.undo
+            .iter_mut()
+            .chain(self.redo.iter_mut())
+            .map(|(r, _)| r)
+            .chain(self.gesture.as_mut())
+    }
     /// Observe UI edits after drawing. Undo/redo must not create a new undo entry.
     pub fn observe(&mut self, before: Recipe, after: &Recipe, pointer_down: bool) -> bool {
         let changed = before != *after;
@@ -163,7 +172,7 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         "Color Grading"
     } else if (a.lens_builtin, a.lens_profile) != (b.lens_builtin, b.lens_profile) {
         "Lens Corrections"
-    } else if a.transform != b.transform {
+    } else if a.transform != b.transform || a.upright != b.upright {
         "Transform"
     } else if a.retouch != b.retouch {
         return Step::new(retouch_step(b, a), "");

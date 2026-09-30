@@ -210,6 +210,7 @@ impl SampleKey {
                 flip_x: r.flip_x,
                 flip_y: r.flip_y,
                 transform: r.transform,
+                upright: r.upright.clone(),
                 lens_builtin: r.lens_builtin,
                 lens_profile: r.lens_profile,
                 lens_distortion: r.lens_distortion,

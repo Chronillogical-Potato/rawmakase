@@ -29,7 +29,52 @@ impl Default for Transform {
         }
     }
 }
+/// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
+/// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
+pub fn display_axes(turns: u8, flip_x: bool, flip_y: bool) -> [[f32; 2]; 2] {
+    let recorded = |x: f32, y: f32| {
+        let x = if flip_x { 1. - x } else { x };
+        let y = if flip_y { 1. - y } else { y };
+        super::image_space::turn(turns, x, y)
+    };
+    let [ox, oy] = recorded(0., 0.);
+    let [xx, xy] = recorded(1., 0.);
+    let [yx, yy] = recorded(0., 1.);
+    [[xx - ox, yx - ox], [xy - oy, yy - oy]]
+}
 impl Transform {
+    /// The sliders as Lightroom shows them on the displayed photo, when `self` holds
+    /// them as stored, in the recorded frame (`m` from [`display_axes`]). Lightroom
+    /// stores Vertical −70 on a photo turned 90° left as `PerspectiveHorizontal` +70.
+    pub fn displayed(&self, m: [[f32; 2]; 2]) -> Self {
+        self.reoriented([[m[0][0], m[1][0]], [m[0][1], m[1][1]]])
+    }
+    /// The stored sliders for sliders shown on the displayed photo: the inverse of
+    /// [`Self::displayed`].
+    pub fn recorded(&self, m: [[f32; 2]; 2]) -> Self {
+        self.reoriented(m)
+    }
+    /// Perspective (h, v) and offsets (x, −y) are vectors in the frame; a swap of axes
+    /// flips Aspect, and a mirror flips Rotate.
+    fn reoriented(&self, m: [[f32; 2]; 2]) -> Self {
+        let map = |[x, y]: [f32; 2]| [m[0][0] * x + m[0][1] * y, m[1][0] * x + m[1][1] * y];
+        let [horizontal, vertical] = map([self.horizontal, self.vertical]);
+        let [offset_x, minus_y] = map([self.offset_x, -self.offset_y]);
+        let determinant = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+        Self {
+            vertical,
+            horizontal,
+            rotate: self.rotate * determinant,
+            aspect: if m[0][0] == 0. {
+                -self.aspect
+            } else {
+                self.aspect
+            },
+            scale: self.scale,
+            offset_x,
+            offset_y: -minus_y,
+        }
+    }
     pub fn is_identity(&self) -> bool {
         *self == Self::default()
     }
@@ -48,22 +93,21 @@ impl Transform {
             && (0.5..=1.5).contains(&self.scale)
     }
     /// Homography from output to source coordinates, both centred, y down, in units
-    /// of the long edge. The forward (source-to-output) matrices were fitted to Camera
-    /// Raw 18.6 renders of each slider (docs/transform.md): Vertical is
-    /// [[1, 0, 0], [0, k, 0], [0, -v, 1]] and Horizontal its transpose counterpart,
-    /// with k(s) = 1 + 0.347 s² + 0.334 s⁴; Aspect scales y by 2^(0.137 a) and x by the
-    /// inverse; offsets move by 0.811 of the image size, positive Y upward.
+    /// of the long edge. The forward (source-to-output) matrix was fitted to Camera Raw
+    /// 18.6 renders (docs/transform.md): Rotate applies first, then Vertical and
+    /// Horizontal together, then Aspect, Scale and the offsets. With q = (h, v) and
+    /// s = |q|, Vertical and Horizontal are [[I + e(s) q qᵀ / s², 0], [−qᵀ, 1]] with
+    /// e(s) = 0.0391 s² + 0.9251 s³ − 0.2827 s⁴; Aspect scales y by 2^(0.137 a) and x by
+    /// the inverse; offsets move by 0.811 of the image size, positive Y upward.
     fn inverse(&self, width: f32, height: f32) -> [[f32; 3]; 3] {
-        let k = |s: f32| 1. + 0.347 * s * s + 0.334 * s.powi(4);
-        let vertical = [
-            [1., 0., 0.],
-            [0., k(self.vertical), 0.],
-            [0., -self.vertical, 1.],
-        ];
-        let horizontal = [
-            [k(self.horizontal), 0., 0.],
-            [0., 1., 0.],
-            [-self.horizontal, 0., 1.],
+        let (qx, qy) = (self.horizontal, self.vertical);
+        let s = qx.hypot(qy);
+        // e(s) / s²
+        let e = 0.0391 + 0.9251 * s - 0.2827 * s * s;
+        let perspective = [
+            [1. + e * qx * qx, e * qx * qy, 0.],
+            [e * qx * qy, 1. + e * qy * qy, 0.],
+            [-qx, -qy, 1.],
         ];
         let (sr, cr) = self.rotate.to_radians().sin_cos();
         let rotate = [[cr, -sr, 0.], [sr, cr, 0.], [0., 0., 1.]];
@@ -78,10 +122,90 @@ impl Transform {
             [0., 1., -self.offset_y * 0.811 * height],
             [0., 0., 1.],
         ];
-        let forward = mat(offset, mat(scale, mat(rotate, mat(horizontal, vertical))));
+        let forward = mat(offset, mat(scale, mat(perspective, rotate)));
         crate::color_math::inverse(forward)
     }
 }
+/// Lightroom's Upright modes, in Adobe's `crs:PerspectiveUpright` order.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UprightMode {
+    #[default]
+    Off,
+    Auto,
+    Full,
+    Level,
+    Vertical,
+    Guided,
+}
+impl UprightMode {
+    pub const ALL: [Self; 6] = [
+        Self::Off,
+        Self::Auto,
+        Self::Full,
+        Self::Level,
+        Self::Vertical,
+        Self::Guided,
+    ];
+    /// Adobe's `crs:PerspectiveUpright` value, which also indexes `UprightTransform_N`.
+    pub fn code(self) -> usize {
+        self as usize
+    }
+    pub fn from_code(code: usize) -> Option<Self> {
+        Self::ALL.get(code).copied()
+    }
+}
+/// Lightroom's Upright: the chosen mode and the correction for each mode, as Lightroom
+/// stores them so that switching modes needs no new analysis.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Upright {
+    pub mode: UprightMode,
+    /// Forward (source-to-output) homographies indexed by [`UprightMode::code`], row
+    /// major, in 0–1 coordinates of the photo as the camera recorded it, before any
+    /// rotation or flip and after the camera's default crop. This is how Lightroom
+    /// stores `crs:UprightTransform_N`; Camera Raw renders them exactly (docs/transform.md).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub corrections: Vec<[f32; 9]>,
+    /// Lightroom's other Upright settings (analysis centre, focal length, version,
+    /// guides), kept to write back unchanged.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub lightroom: std::collections::BTreeMap<String, String>,
+}
+impl Upright {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+    /// Keeps the mode but drops what was analysed from one photo, for settings moving
+    /// to another: the corrections, and Lightroom's analysis details.
+    pub fn clear_analysis(&mut self) {
+        self.corrections.clear();
+        self.lightroom.clear();
+        // Guided can't be analysed again without its guides.
+        if self.mode == UprightMode::Guided {
+            self.mode = UprightMode::Off;
+        }
+    }
+    pub fn validate(&self) -> bool {
+        self.corrections.len() <= UprightMode::ALL.len()
+            && self.corrections.iter().all(|m| {
+                let [a, b, c, d, e, f, g, h, i] = *m;
+                let determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+                // Rendering inverts it; a singular one would silently render as Off.
+                m.iter().all(|v| v.is_finite()) && determinant.abs() > 1e-6
+            })
+    }
+    /// The chosen mode's correction, when it is not the identity.
+    pub fn correction(&self) -> Option<[[f32; 3]; 3]> {
+        if self.mode == UprightMode::Off {
+            return None;
+        }
+        let m = self.corrections.get(self.mode.code())?;
+        let m: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| m[3 * i + j]));
+        (m != IDENTITY && m[2][2] != 0.).then_some(m)
+    }
+}
+const IDENTITY: [[f32; 3]; 3] = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
 fn mat(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
@@ -101,7 +225,8 @@ pub struct Geometry {
     source_width: u32,
     source_height: u32,
     inset: [f32; 4],
-    /// Output-to-source Transform homography, when not the identity.
+    /// Output-to-source homography of Upright and the Transform sliders, when not the
+    /// identity, in 0–1 coordinates of the photo as recorded (after flips and turns).
     transform: Option<[[f32; 3]; 3]>,
     /// Its inverse, source to output.
     forward: Option<[[f32; 3]; 3]>,
@@ -122,8 +247,11 @@ impl Geometry {
         } else {
             1.
         };
-        let transform = (r.engine >= 4 && !r.transform.is_identity())
-            .then(|| r.transform.inverse(ow / ow.max(oh), oh / ow.max(oh)));
+        let transform = Self::homography(
+            r,
+            im.width as f32 * frame.inset[2],
+            im.height as f32 * frame.inset[3],
+        );
         Self {
             width: (w * factor).round().max(1.) as u32,
             height: (h * factor).round().max(1.) as u32,
@@ -142,14 +270,44 @@ impl Geometry {
             forward: transform.map(crate::color_math::inverse),
         }
     }
+    /// Upright followed by the Transform sliders, output to source, in 0–1 coordinates
+    /// of the photo as recorded (`width` by `height`). Camera Raw applies both in that
+    /// frame, before rotating or flipping the photo, so on a photo turned to portrait
+    /// Vertical keystones across the screen (docs/transform.md).
+    fn homography(r: &Recipe, width: f32, height: f32) -> Option<[[f32; 3]; 3]> {
+        if r.engine < 4 {
+            return None;
+        }
+        let upright = r.upright.correction();
+        if upright.is_none() && r.transform.is_identity() {
+            return None;
+        }
+        let mut h = IDENTITY;
+        if !r.transform.is_identity() {
+            let (sx, sy) = (width / width.max(height), height / width.max(height));
+            // 0–1 coordinates to the sliders' centred, long-edge units.
+            let centred = [[sx, 0., -0.5 * sx], [0., sy, -0.5 * sy], [0., 0., 1.]];
+            h = mat(
+                crate::color_math::inverse(centred),
+                mat(r.transform.inverse(sx, sy), centred),
+            );
+        }
+        if let Some(u) = upright {
+            h = mat(crate::color_math::inverse(u), h);
+        }
+        Some(h)
+    }
     /// Whether a transformed output position has no source pixel; Lightroom shows
     /// white there.
+    /// Pixels beyond the camera's default crop count as outside, as in Lightroom.
     pub fn outside(&self, x: f32, y: f32) -> bool {
+        let (w, h) = (self.source_width as f32, self.source_height as f32);
+        let [left, top, width, height] = self.inset;
         self.transform.is_some()
-            && (x < -0.5
-                || y < -0.5
-                || x > self.source_width as f32 - 0.5
-                || y > self.source_height as f32 - 0.5)
+            && (x < left * w - 0.5
+                || y < top * h - 0.5
+                || x > (left + width) * w - 0.5
+                || y > (top + height) * h - 0.5)
     }
     /// The fields `source` reads, laid out for `gpu/local.wgsl` (`S_CROP` to the end of
     /// `S_HOMOGRAPHY`): crop, oriented size, zoom, sine and cosine, turns, flips, inset,
@@ -183,28 +341,27 @@ impl Geometry {
         let nx = (c * x + s * y) / self.oriented_width + 0.5;
         let ny = (-s * x + c * y) / self.oriented_height + 0.5;
         let (mut x, mut y) = (nx, ny);
-        if let Some(h) = &self.transform {
-            let long = self.oriented_width.max(self.oriented_height);
-            let px = (x - 0.5) * self.oriented_width / long;
-            let py = (y - 0.5) * self.oriented_height / long;
-            let w = h[2][0] * px + h[2][1] * py + h[2][2];
-            // Points behind the virtual camera have no source; send them off-image.
-            let w = if w > 1e-6 { w } else { 1e-6 };
-            x = (h[0][0] * px + h[0][1] * py + h[0][2]) / w * long / self.oriented_width + 0.5;
-            y = (h[1][0] * px + h[1][1] * py + h[1][2]) / w * long / self.oriented_height + 0.5;
-        }
         if self.flip_x {
             x = 1. - x;
         }
         if self.flip_y {
             y = 1. - y;
         }
-        let (x, y) = match self.turns {
+        let (mut x, mut y) = match self.turns {
             1 => (y, 1. - x),
             2 => (1. - x, 1. - y),
             3 => (1. - y, x),
             _ => (x, y),
         };
+        if let Some(h) = &self.transform {
+            let w = h[2][0] * x + h[2][1] * y + h[2][2];
+            // Points behind the virtual camera have no source; send them off-image.
+            let w = if w > 1e-6 { w } else { 1e-6 };
+            (x, y) = (
+                (h[0][0] * x + h[0][1] * y + h[0][2]) / w,
+                (h[1][0] * x + h[1][1] * y + h[1][2]) / w,
+            );
+        }
         [
             (self.inset[0] + x * self.inset[2]) * self.source_width as f32 - 0.5,
             (self.inset[1] + y * self.inset[3]) * self.source_height as f32 - 0.5,
@@ -215,21 +372,23 @@ impl Geometry {
     pub fn view(&self, x: f32, y: f32) -> [f32; 2] {
         let x = ((x + 0.5) / self.source_width as f32 - self.inset[0]) / self.inset[2];
         let y = ((y + 0.5) / self.source_height as f32 - self.inset[1]) / self.inset[3];
+        let (x, y) = match &self.forward {
+            Some(f) => {
+                let w = f[2][0] * x + f[2][1] * y + f[2][2];
+                let w = if w.abs() > 1e-6 { w } else { 1e-6 };
+                (
+                    (f[0][0] * x + f[0][1] * y + f[0][2]) / w,
+                    (f[1][0] * x + f[1][1] * y + f[1][2]) / w,
+                )
+            }
+            None => (x, y),
+        };
         let [mut x, mut y] = super::image_space::turn((4 - self.turns) % 4, x, y);
         if self.flip_x {
             x = 1. - x;
         }
         if self.flip_y {
             y = 1. - y;
-        }
-        if let Some(f) = &self.forward {
-            let long = self.oriented_width.max(self.oriented_height);
-            let px = (x - 0.5) * self.oriented_width / long;
-            let py = (y - 0.5) * self.oriented_height / long;
-            let w = f[2][0] * px + f[2][1] * py + f[2][2];
-            let w = if w.abs() > 1e-6 { w } else { 1e-6 };
-            x = (f[0][0] * px + f[0][1] * py + f[0][2]) / w * long / self.oriented_width + 0.5;
-            y = (f[1][0] * px + f[1][1] * py + f[1][2]) / w * long / self.oriented_height + 0.5;
         }
         let big_x = (x - 0.5) * self.oriented_width;
         let big_y = (y - 0.5) * self.oriented_height;
@@ -242,5 +401,96 @@ impl Geometry {
             (xc - self.crop[0]) / (self.crop[2] - self.crop[0]),
             (yc - self.crop[1]) / (self.crop[3] - self.crop[1]),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sliders_show_along_the_displayed_axes_as_in_lightroom() {
+        // Lightroom's Vertical −70 on a photo the camera turned 90° left (LibRaw flip
+        // 5, three quarter turns) is stored as PerspectiveHorizontal +70.
+        let stored = Transform {
+            horizontal: 0.7,
+            ..Default::default()
+        };
+        let shown = stored.displayed(display_axes(3, false, false));
+        assert!(
+            (shown.vertical + 0.7).abs() < 1e-6 && shown.horizontal.abs() < 1e-6,
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn displayed_sliders_are_the_same_homography_on_the_displayed_photo() {
+        let stored = Transform {
+            vertical: 0.3,
+            horizontal: -0.2,
+            rotate: 4.,
+            aspect: 0.4,
+            scale: 1.1,
+            offset_x: 0.2,
+            offset_y: -0.1,
+        };
+        let (w, h) = (1., 2. / 3.);
+        for turns in 0..4 {
+            for (flip_x, flip_y) in [(false, false), (true, false), (false, true)] {
+                let m = display_axes(turns, flip_x, flip_y);
+                let shown = stored.displayed(m);
+                assert_eq!(shown.recorded(m), stored);
+                let swapped = m[0][0] == 0.;
+                let (dw, dh) = if swapped { (h, w) } else { (w, h) };
+                // Displayed centred coordinates to recorded ones.
+                let to = [[m[0][0], m[0][1], 0.], [m[1][0], m[1][1], 0.], [0., 0., 1.]];
+                let expected = mat(
+                    crate::color_math::inverse(to),
+                    mat(stored.inverse(w, h), to),
+                );
+                let got = shown.inverse(dw, dh);
+                for i in 0..3 {
+                    for j in 0..3 {
+                        let (a, b) = (got[i][j] / got[2][2], expected[i][j] / expected[2][2]);
+                        assert!(
+                            (a - b).abs() < 1e-5,
+                            "{turns} {flip_x} {flip_y}: {got:?} {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+#[cfg(test)]
+mod upright_tests {
+    use super::*;
+    #[test]
+    fn clearing_the_analysis_turns_guided_off() {
+        let mut u = Upright {
+            mode: UprightMode::Guided,
+            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6],
+            ..Default::default()
+        };
+        u.clear_analysis();
+        assert_eq!(u.mode, UprightMode::Off);
+        u.mode = UprightMode::Vertical;
+        u.clear_analysis();
+        assert_eq!(u.mode, UprightMode::Vertical);
+    }
+}
+#[cfg(test)]
+mod singular_tests {
+    use super::*;
+    #[test]
+    fn singular_upright_corrections_are_invalid() {
+        let mut u = Upright {
+            mode: UprightMode::Level,
+            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4],
+            ..Default::default()
+        };
+        assert!(u.validate());
+        u.corrections[3] = [1., 0., 0., 0., 0., 0., 0., 0., 1.];
+        assert!(!u.validate());
     }
 }

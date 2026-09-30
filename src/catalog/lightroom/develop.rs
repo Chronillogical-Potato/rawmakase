@@ -213,6 +213,16 @@ pub fn convert_develop(
     let mut accepted = preset.clone();
     accepted.settings.clear();
     let mut grouped = std::collections::BTreeSet::new();
+    // Upright's mode and the corrections Lightroom stored for it.
+    let upright: Vec<&str> = std::iter::once("PerspectiveUpright")
+        .chain(
+            preset
+                .settings
+                .keys()
+                .map(String::as_str)
+                .filter(|k| k.starts_with("Upright")),
+        )
+        .collect();
     for keys in [
         vec!["WhiteBalance", "Temperature", "Tint"],
         vec![
@@ -227,6 +237,7 @@ pub fn convert_develop(
             "ParametricMidtoneSplit",
             "ParametricHighlightSplit",
         ],
+        upright,
     ] {
         let mut p = preset.clone();
         p.settings.retain(|k, _| keys.contains(&k.as_str()));

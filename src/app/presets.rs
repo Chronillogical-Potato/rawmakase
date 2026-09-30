@@ -306,12 +306,14 @@ impl Editor {
                     &self.document.profiles,
                     self.document.full().map(|image| image.as_ref()),
                 ) {
-                    Ok((r, skipped)) => {
+                    Ok((mut r, skipped)) => {
                         let substitute = library.presets[i]
                             .profile_substitute(m, &self.document.profiles)
                             .map(|(_, used)| format!(" · using {used}"))
                             .unwrap_or_default();
+                        this_photos_upright(&mut r, &self.document.recipe);
                         self.document.recipe = r;
+                        self.ensure_upright();
                         self.presets.selected = library.presets[i].id.clone();
                         self.status = if skipped.is_empty() {
                             format!("Applied {}{substitute}", library.presets[i].name)
@@ -340,13 +342,14 @@ impl Editor {
                     .as_ref()
                     .is_some_and(|(_, t)| t.elapsed() > Duration::from_millis(300))
                 && let Some(m) = &self.document.metadata
-                && let Ok((r, _)) = library.presets[i].apply_lenient(
+                && let Ok((mut r, _)) = library.presets[i].apply_lenient(
                     &self.document.recipe,
                     m,
                     &self.document.profiles,
                     self.document.full().map(|image| image.as_ref()),
                 )
             {
+                this_photos_upright(&mut r, &self.document.recipe);
                 self.presets.preview = Some(r);
                 self.schedule();
             }
@@ -496,7 +499,9 @@ impl Editor {
         });
         if let Some(n) = go_to {
             let current = &mut self.document.recipe;
-            self.document.history.go_to(n, current);
+            if self.document.history.go_to(n, current) {
+                self.ensure_upright();
+            }
         }
         if let Some(i) = lightroom
             && let Some(m) = &self.document.metadata
@@ -522,6 +527,18 @@ impl Editor {
                 }
                 Err(e) => self.status = format!("History step not applied: {e:#}"),
             }
+        }
+    }
+}
+/// A preset's Upright mode, with this photo's own corrections rather than any the preset
+/// carries from the photo it was saved from; a mode without one is analysed on apply.
+fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
+    if r.upright != current.upright {
+        let mode = r.upright.mode;
+        r.upright.clone_from(&current.upright);
+        r.upright.mode = mode;
+        if mode == crate::develop::UprightMode::Guided && r.upright.correction().is_none() {
+            r.upright.mode = current.upright.mode;
         }
     }
 }

@@ -357,6 +357,10 @@ impl Editor {
         let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
         let auto_in_effect = self.auto_in_effect();
         let mut auto_request = None;
+        // Upright analyses the decoded photo once and keeps a correction for every mode.
+        let upright_ready = self.document.full().is_some() && !self.document.upright.is_running();
+        let mut upright_request = false;
+        let mut guided_unavailable = false;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -1055,28 +1059,54 @@ impl Editor {
                 hint_row(ui, "Update the process in Calibration to use Transform.");
             }
             ui.add_enabled_ui(supported, |ui| {
+                use crate::develop::UprightMode;
+                // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
-                    // Automatic Upright needs line detection, which isn't built yet.
-                    ui.add_enabled_ui(false, |ui| {
-                        let w = ui.available_width();
-                        let mut mode = 0;
-                        segmented(
-                            ui,
-                            &mut mode,
-                            &[(0, "Off"), (1, "Auto"), (2, "Level"), (3, "Vertical"), (4, "Full")],
-                            w,
-                        );
-                    })
-                    .response
-                    .on_disabled_hover_text("Automatic Upright isn't available yet; use the sliders.");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Guided has nothing to analyse until guides can be drawn.
+                        let analysed = !matches!(r.upright.mode, UprightMode::Off | UprightMode::Guided);
+                        if ui
+                            .add_enabled(upright_ready && analysed, egui::Button::new("Update"))
+                            .on_hover_text("Analyse the photo again, e.g. after changing lens corrections")
+                            .clicked()
+                        {
+                            upright_request = true;
+                        }
+                    });
                 });
+                let u = &mut r.upright;
+                let before = u.mode;
+                for row in [
+                    [(UprightMode::Off, "Off"), (UprightMode::Auto, "Auto"), (UprightMode::Guided, "Guided")],
+                    [(UprightMode::Level, "Level"), (UprightMode::Vertical, "Vertical"), (UprightMode::Full, "Full")],
+                ] {
+                    let w = ui.available_width();
+                    segmented(ui, &mut u.mode, &row, w);
+                }
+                if u.mode != before {
+                    if u.mode == UprightMode::Guided && u.corrections.len() <= u.mode.code() {
+                        // Guided needs guides drawn on the photo, which isn't built yet;
+                        // a photo imported with Guided keeps Lightroom's correction.
+                        u.mode = before;
+                        guided_unavailable = true;
+                    } else if u.mode != UprightMode::Off && u.corrections.len() <= u.mode.code() {
+                        upright_request = true;
+                    }
+                }
                 control_row(ui, "", |ui| {
                     let mut constrain = false;
                     ui.add_enabled(false, egui::Checkbox::new(&mut constrain, "Constrain Crop"))
                         .on_disabled_hover_text("Not available yet. Areas outside the photo render white; crop them out with the Crop tool.");
                 });
                 subheading(ui, "Transform");
-                let t = &mut r.transform;
+                // Stored as Camera Raw applies them, before the photo is turned for
+                // display; shown, as in Lightroom, along the displayed photo's axes.
+                let turns = metadata.as_ref().map_or(0, |m| {
+                    crate::develop::ImageFrame::for_metadata(m).turns
+                });
+                let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
+                let mut shown = r.transform.displayed(axes);
+                let t = &mut shown;
                 slider(ui, "Vertical", &mut t.vertical, -1. ..=1., 0.);
                 slider(ui, "Horizontal", &mut t.horizontal, -1. ..=1., 0.);
                 slider_with(ui, "Rotate", &mut t.rotate, -10. ..=10., 0., Some((1., 1)), None);
@@ -1084,9 +1114,13 @@ impl Editor {
                 slider_with(ui, "Scale", &mut t.scale, 0.5..=1.5, 1., Some((100., 0)), None);
                 slider(ui, "Offset X", &mut t.offset_x, -1. ..=1., 0.);
                 slider(ui, "Offset Y", &mut t.offset_y, -1. ..=1., 0.);
+                if shown != r.transform.displayed(axes) {
+                    r.transform = shown.recorded(axes);
+                }
             });
         }) {
             r.transform = Default::default();
+            r.upright = Default::default();
         }
 
         if adjustment_section(ui, "Effects", |ui| {
@@ -1221,6 +1255,12 @@ impl Editor {
         }
         if let Some(kind) = auto_request {
             self.start_auto(kind);
+        }
+        if upright_request {
+            self.start_upright();
+        }
+        if guided_unavailable {
+            self.status = "Guided Upright isn't available yet".into();
         }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());

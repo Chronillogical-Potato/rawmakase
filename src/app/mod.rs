@@ -342,6 +342,7 @@ mod presets;
 mod retouch_tool;
 #[cfg(test)]
 mod tests;
+mod upright;
 mod viewport;
 mod widgets;
 pub mod worker;
