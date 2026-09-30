@@ -170,6 +170,9 @@ impl Editor {
                 .label(super::history::Step::new("Paste Settings", ""));
             recipe.retouch = std::mem::take(&mut self.document.recipe.retouch);
             recipe.masks = std::mem::take(&mut self.document.recipe.masks);
+            // Auto white balance was estimated for the copied photo; here its values
+            // are just Custom.
+            recipe.auto_white_balance = None;
             self.document.recipe = recipe;
             self.status = "Settings pasted".into();
         }
@@ -205,7 +208,7 @@ impl Editor {
                     (format!("{cmd}{shift}C"), "Copy settings"),
                     (format!("{cmd}{shift}V"), "Paste settings"),
                     (format!("{cmd}{shift}R"), "Reset all settings"),
-                    (format!("{cmd}{shift}U"), "Auto white balance and tone"),
+                    (format!("{cmd}{shift}U"), "Auto tone"),
                     (format!("{cmd}{shift}E"), "Export…"),
                     (
                         if cfg!(target_os = "macos") {

@@ -408,6 +408,7 @@ impl Editor {
             let u = (pos.x - rect.left()) / rect.width();
             let v = (pos.y - rect.top()) / rect.height();
             self.document.recipe.wb = develop::neutral_pick(&im, &self.document.recipe, u, v);
+            self.document.recipe.auto_white_balance = None;
             self.document
                 .recipe
                 .sync_white_balance_controls(&im.metadata);

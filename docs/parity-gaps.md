@@ -16,7 +16,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 - **Parametric tone curve** (Highlights/Lights/Darks/Shadows regions) is not measured. **Point curves** match on ramps, but saturated colors under an S master curve still differ (ramp MAE 0.0024, peak 0.11).
 - **Curve Refine Saturation** other than 100 is unsupported and reported on import.
 - **Black point** level (0.0015) is fitted, not taken from Adobe; very deep shadows on some photos remain +0.17 EV.
-- **Auto** (white balance and tone) is RAWmakase's own estimate, not Adobe's. It has been checked by eye on Nikon photos only and not yet compared with Lightroom's Auto values; see [tone controls](tone-controls.md#auto).
+- **Auto** (tone, and the WB menu's Auto white balance) is RAWmakase's own estimate, not Adobe's. It has been checked by eye on Nikon photos only and not yet compared with Lightroom's Auto values; see [tone controls](tone-controls.md#auto).
 
 ## Color
 

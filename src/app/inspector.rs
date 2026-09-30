@@ -392,7 +392,7 @@ impl Editor {
                     let tip = if auto_in_effect {
                         "Auto settings are applied".to_owned()
                     } else {
-                        format!("Set white balance and tone automatically · {shortcut}")
+                        format!("Set the tone sliders automatically · {shortcut}")
                     };
                     let auto =
                         toolbar_action(ui, "Auto", 52., false, auto_ready && !auto_in_effect, 0);
@@ -488,7 +488,9 @@ impl Editor {
                 let current = (r.temperature, r.tint);
                 let near =
                     |(t, n): (f32, f32)| (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5;
-                let selected = if as_shot.is_some_and(near) {
+                let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
+                    "Auto"
+                } else if as_shot.is_some_and(near) {
                     "As Shot"
                 } else {
                     WB_PRESETS
@@ -528,7 +530,10 @@ impl Editor {
                             r.reset_white_balance(m);
                         }
                         if ui
-                            .add_enabled(auto_ready, egui::Button::selectable(false, "Auto"))
+                            .add_enabled(
+                                auto_ready,
+                                egui::Button::selectable(selected == "Auto", "Auto"),
+                            )
                             .on_hover_text("Make the photo's near-neutral areas neutral")
                             .clicked()
                         {
@@ -541,6 +546,7 @@ impl Editor {
                                 r.temperature = temperature;
                                 r.tint = tint;
                                 r.update_wb(m);
+                                r.auto_white_balance = None;
                             }
                         }
                         ui.add_enabled(
@@ -562,6 +568,7 @@ impl Editor {
                 && let Some(m) = &metadata
             {
                 r.update_wb(m);
+                r.auto_white_balance = None;
             }
             subheading(ui, "Tone");
             slider_with(
