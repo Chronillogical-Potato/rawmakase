@@ -1,5 +1,6 @@
 /target/
 /dist/
+/.cache/packaging/
 *.ARW
 *.arw
 *.RAF

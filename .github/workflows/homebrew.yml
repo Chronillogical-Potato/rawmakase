@@ -1,0 +1,93 @@
+name: Publish Homebrew cask
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release to put in the tap (for example v0.1.9)
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      HOMEBREW_TAP_SSH_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the latest published stable release
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Select a stable vX.Y.Z tag.' >&2; exit 1; }
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          test "$RELEASE_TAG" = "$latest" || { echo 'Only the latest stable release can update the tap.' >&2; exit 1; }
+          git merge-base --is-ancestor "refs/tags/$RELEASE_TAG^{commit}" origin/main
+      - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+      - name: Prepare and verify the published cask
+        run: |
+          gem install native-packages --version 0.7.0 --no-document
+          native-packages validate
+          # Recipe-only preparation downloads and checks both published DMGs.
+          native-packages prepare "${RELEASE_TAG#v}" --output dist/homebrew-recipes
+      - name: Audit and install the cask
+        run: |
+          brew tap-new pch/rawmakase-validation
+          tap=$(brew --repository pch/rawmakase-validation)
+          mkdir -p "$tap/Casks" "$RUNNER_TEMP/homebrew-apps"
+          cp dist/homebrew-recipes/homebrew/rawmakase.rb "$tap/Casks/rawmakase.rb"
+          brew style --cask pch/rawmakase-validation/rawmakase
+          brew audit --cask --online pch/rawmakase-validation/rawmakase
+          brew install --cask --appdir="$RUNNER_TEMP/homebrew-apps" pch/rawmakase-validation/rawmakase
+          "$RUNNER_TEMP/homebrew-apps/RAWmakase.app/Contents/MacOS/rawmakase" --help
+          codesign --verify --deep --strict "$RUNNER_TEMP/homebrew-apps/RAWmakase.app"
+          spctl --assess --type execute "$RUNNER_TEMP/homebrew-apps/RAWmakase.app"
+          brew uninstall --cask pch/rawmakase-validation/rawmakase
+          test ! -e "$RUNNER_TEMP/homebrew-apps/RAWmakase.app"
+          brew untap pch/rawmakase-validation
+      - name: Stage and review the tap update
+        run: |
+          native-packages stage homebrew dist/homebrew-recipes
+          native-packages diff homebrew
+      - name: Publish with the tap deploy key
+        env:
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          test -n "$HOMEBREW_TAP_SSH_KEY"
+          install -d -m 700 "$RUNNER_TEMP/homebrew-ssh"
+          key="$RUNNER_TEMP/homebrew-ssh/key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$HOMEBREW_TAP_SSH_KEY" > "$key"
+          chmod 600 "$key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/homebrew-ssh/known_hosts"
+          test -s "$RUNNER_TEMP/homebrew-ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/homebrew-ssh/known_hosts"
+          # Limit the credential rewrite to this one repository.
+          git config --global url."ssh://git@github.com/pch/homebrew-tap.git".insteadOf https://github.com/pch/homebrew-tap.git
+          native-packages publish homebrew

@@ -34,6 +34,16 @@ Download the package for your system from [GitHub Releases](https://github.com/p
 
 ### macOS (15 or newer)
 
+Install with Homebrew:
+
+```sh
+brew install --cask pch/tap/rawmakase
+```
+
+Update with `brew upgrade --cask rawmakase`.
+
+Or install the DMG directly:
+
 Choose `rawmakase-v<version>-macos-arm64.dmg` for Apple Silicon or `rawmakase-v<version>-macos-x86_64.dmg` for Intel. Open the DMG, drag **RAWmakase** into **Applications**, and launch it there. Release DMGs are signed and notarized, and include their imaging libraries; Homebrew is not required.
 
 ### Linux (x86_64 and aarch64)

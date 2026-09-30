@@ -43,6 +43,17 @@ assets:
     local: dist/rawmakase-@TAG@-macos-x86_64.dmg
 templates:
   homebrew/rawmakase.rb: packaging/homebrew/rawmakase.rb.in
+repositories:
+  homebrew:
+    url: https://github.com/pch/homebrew-tap.git
+    push_url: https://github.com/pch/homebrew-tap.git
+    branch: main
+    package_path: Casks
+    files:
+      homebrew/rawmakase.rb: Casks/rawmakase.rb
+    version_file: Casks/rawmakase.rb
+    version_pattern: 'version "([^"]+)"'
+    publish: push
 targets:
   macos-arm64:
     platform: macos

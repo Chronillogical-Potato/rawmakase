@@ -461,3 +461,12 @@ jobs:
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "WEBSITE_DISPATCH_TOKEN not set, skipping"; exit 0; fi
           gh api repos/pch/rawmakase-website/dispatches -f event_type=rawmakase-release
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: [prepare, publish]
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets:
+      HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}

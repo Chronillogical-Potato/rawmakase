@@ -195,11 +195,32 @@ native-packages' shared packaging workflow on those archives and both DMGs: it
 installs the nFPM version `tool.nfpm` names, builds the DEB and RPM for each
 architecture (mapping each host library to its distribution package) and
 renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
-checksums. The release carries the resulting `rawmakase.rb` cask. There are no
-downstream repository credentials or automatic Homebrew/AUR publishers in
-this setup. Publishing it to a tap
-needs a `pch/homebrew-tap` repository, a deploy key secret and a `homebrew`
-entry under `repositories` in `native-packages.yaml`.
+checksums. The release carries the resulting `rawmakase.rb` cask.
+
+### Homebrew tap
+
+After GitHub publication, `.github/workflows/homebrew.yml` updates
+[`pch/homebrew-tap`](https://github.com/pch/homebrew-tap). Users install with
+`brew install --cask pch/tap/rawmakase` and update with
+`brew upgrade --cask rawmakase`.
+
+The workflow prepares only the recipe from the published release, verifies both
+DMG checksums and renders the checked-in cask template with those hashes. It
+runs Homebrew style and online audits, installs the app on macOS, checks its CLI,
+signature and Gatekeeper acceptance, and uninstalls it before publishing. The
+`homebrew` destination in `native-packages.yaml` maps the recipe to
+`Casks/rawmakase.rb`. AUR publication remains disabled.
+
+The application repository's `HOMEBREW_TAP_SSH_KEY` Actions secret holds an SSH
+private key whose public key is a write-enabled deploy key on the tap alone.
+The normal `GITHUB_TOKEN` cannot push to a separate repository. No broad personal
+access token or newer shared packaging workflow is needed for this publisher.
+
+To bootstrap or retry a tap update without rebuilding or replacing release
+assets, run **Publish Homebrew cask** from Actions on `main`, supplying the latest
+published stable tag. Older versions and prereleases are rejected; updates are
+serialized and native-packages also refuses downgrades. A release is complete
+only after this workflow succeeds and the tap contains the expected version.
 
 ## AUR pause and updates
 
