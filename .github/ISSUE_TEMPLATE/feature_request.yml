@@ -1,0 +1,81 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing workflow.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please suggest one feature per issue and use a title that describes the desired improvement.
+
+        Before filling this in:
+        1. Search [existing issues](https://github.com/pch/rawmakase/issues?q=is%3Aissue) for similar requests. If one already covers your idea, add a reaction or useful details there.
+        2. Check the [README](https://github.com/pch/rawmakase#readme) and [latest release](https://github.com/pch/rawmakase/releases/latest) for existing support.
+        3. Describe the task you want to accomplish and what a successful result would look like. You do not need to propose an implementation.
+
+        If an existing feature fails to work as expected, use the [bug-report form](https://github.com/pch/rawmakase/issues/new?template=bug_report.yml).
+
+        Attachments are public. Share only material you have permission to publish; check photos and metadata for personal information. Do not upload private catalogs or proprietary Adobe profiles.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for similar requests.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to accomplish, how you do it today, and what is missing or difficult. Explain who would benefit and how often this comes up.
+      placeholder: "When I ..., I need to ..., but currently ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: What would you like RAWmakase to do?
+      description: Describe the desired behavior from a user's point of view. Include where it would fit in the app or command line, and the smallest useful version of the feature if you can.
+      placeholder: "I would like to ... so that ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example workflow and expected result
+      description: Give a concrete example showing the input, the actions you would take, and the result you would expect. This helps clarify when the feature would meet your needs.
+      placeholder: |
+        Starting with:
+        I would:
+        The expected result:
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: What have you tried or considered? Explain why an existing workflow, external tool, or different approach does not meet your needs. Skip if you have not found an alternative.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Relevant version, operating system, and camera details
+      description: Include these when the request depends on your setup, camera support, or file format. Skip details unrelated to the feature.
+      placeholder: |
+        RAWmakase version:
+        Operating system and version:
+        Camera make/model and RAW format:
+        Other relevant input/output formats or hardware:
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Screenshots, mockups, and examples
+      description: Drag screenshots, sketches, or recordings here, or link to a relevant example. Explain what each illustrates. For a feature in another app, name the app and describe the specific behavior you want. Non-sensitive sample files are welcome but optional.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Link related issues or documentation, and mention any constraints or accessibility needs that would affect the feature.
