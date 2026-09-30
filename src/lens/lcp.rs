@@ -136,13 +136,40 @@ fn key(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-fn matches(e: &Entry, m: &Metadata) -> bool {
+fn lens_matches(e: &Entry, m: &Metadata) -> bool {
     let lens = key(&m.lens_model);
-    !lens.is_empty()
-        && e.lens.iter().any(|l| key(l) == lens)
-        && (e.make.is_empty()
-            || key(&e.make) == key(&m.make)
-            || key(&m.make).contains(&key(&e.make)))
+    !lens.is_empty() && e.lens.iter().any(|l| key(l) == lens)
+}
+/// The photo's crop factor, when its 35mm-equivalent focal length is recorded.
+fn crop_factor(m: &Metadata) -> Option<f32> {
+    (m.focal > 0. && m.focal_35mm > 0.).then(|| m.focal_35mm / m.focal)
+}
+/// How well the profile fits the photo's camera: 0 made on the same make, 1 on a
+/// make sharing a lens mount, 2 on any other; None when a profile from another make
+/// was made on a smaller sensor and does not cover the photo. Adobe profiles
+/// third-party lenses on one body per mount (a Sigma L-mount lens on a Sigma fp),
+/// and Lightroom applies them to other makes too.
+fn make_rank(e: &Entry, m: &Metadata) -> Option<u8> {
+    const MOUNTS: [&[&str]; 2] = [
+        &["sigma", "panasonic", "leica"],
+        &["olympus", "om digital", "panasonic"],
+    ];
+    let (profile, camera) = (key(&e.make), key(&m.make));
+    if profile.is_empty() || profile == camera || camera.contains(&profile) {
+        return Some(0);
+    }
+    if crop_factor(m).is_some_and(|c| e.sensor_factor > c * 1.1) {
+        return None;
+    }
+    Some(
+        if MOUNTS.iter().any(|makes| {
+            makes.iter().any(|k| profile.contains(k)) && makes.iter().any(|k| camera.contains(k))
+        }) {
+            1
+        } else {
+            2
+        },
+    )
 }
 
 /// Parameters interpolated in focal length (and APEX aperture for vignetting).
@@ -209,7 +236,9 @@ fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 
 /// The correction for a photo from matching profile entries.
 pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
-    let mut found: Vec<&Entry> = entries.iter().filter(|e| matches(e, m)).collect();
+    let mut found: Vec<&Entry> = entries.iter().filter(|e| lens_matches(e, m)).collect();
+    let best = found.iter().filter_map(|e| make_rank(e, m)).min()?;
+    found.retain(|e| make_rank(e, m) == Some(best));
     if found.iter().any(|e| e.raw) {
         found.retain(|e| e.raw);
     }
@@ -224,10 +253,13 @@ pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
     };
     let long = w.max(h);
     let half = (w * w + h * h).sqrt() * 0.5;
-    let fx = first
-        .focal_x
-        .unwrap_or(focal * first.sensor_factor / 36.)
-        .max(1e-3);
+    // The model is normalised to the profiled sensor; rescale to this one when
+    // their formats differ (a full-frame profile on an APS-C body).
+    let format = crop_factor(m)
+        .map(|c| c / first.sensor_factor)
+        .filter(|r| (r.ln()).abs() > 1.1f32.ln())
+        .unwrap_or(1.);
+    let fx = (first.focal_x.unwrap_or(focal * first.sensor_factor / 36.) * format).max(1e-3);
     let to_model = half / (fx * long);
     let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
     let poly = |k: [f32; 3], r: f32| {
@@ -272,29 +304,50 @@ pub fn library_dirs() -> Vec<PathBuf> {
         .map(|p| p.join("lens-profiles"))
         .collect()
 }
-/// The imported profile correction for a photo, if any imported profile matches.
+/// The imported profile correction for a photo, if any imported profile matches:
+/// one made on the same camera make, else on a make sharing the mount, else on
+/// any make.
 pub fn installed(m: &Metadata) -> Option<LensCorrection> {
     if m.lens_model.is_empty() {
         return None;
     }
+    let mut best: Option<(u8, LensCorrection)> = None;
     for dir in library_dirs() {
         let Ok(files) = std::fs::read_dir(dir) else {
             continue;
         };
-        for f in files.flatten() {
-            let p = f.path();
+        let mut files: Vec<PathBuf> = files.flatten().map(|f| f.path()).collect();
+        files.sort();
+        for p in files {
             if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lcp")) {
                 continue;
             }
-            if let Ok(text) = std::fs::read_to_string(&p)
-                && let Ok(entries) = parse(&text)
-                && let Some(c) = correction(&entries, m)
-            {
-                return Some(c);
+            let Ok(entries) = std::fs::read_to_string(&p)
+                .map_err(anyhow::Error::from)
+                .and_then(|t| parse(&t))
+            else {
+                continue;
+            };
+            let Some(rank) = entries
+                .iter()
+                .filter(|e| lens_matches(e, m))
+                .filter_map(|e| make_rank(e, m))
+                .min()
+            else {
+                continue;
+            };
+            if best.as_ref().is_some_and(|(b, _)| *b <= rank) {
+                continue;
+            }
+            if let Some(c) = correction(&entries, m) {
+                if rank == 0 {
+                    return Some(c);
+                }
+                best = Some((rank, c));
             }
         }
     }
-    None
+    best.map(|(_, c)| c)
 }
 /// Validates and copies lens profiles into the data directory.
 pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
@@ -394,6 +447,34 @@ mod tests {
         let mut other = a7ii(1.8);
         other.lens_model = "FE 85mm F1.8".into();
         assert!(correction(&entries, &other).is_none());
+        // A profile made on another camera make still applies, as in Lightroom.
+        let mut other_make = a7ii(1.8);
+        other_make.make = "Panasonic".into();
+        let c2 = correction(&entries, &other_make).unwrap();
+        assert_eq!(c2.vignetting_gain(1.), c.vignetting_gain(1.));
+        let entry = |make: &str| Entry {
+            make: make.into(),
+            ..entries[0].clone()
+        };
+        let mut lumix = a7ii(1.8);
+        lumix.make = "Panasonic".into();
+        assert_eq!(make_rank(&entry("Panasonic"), &lumix), Some(0));
+        assert_eq!(make_rank(&entry("SIGMA"), &lumix), Some(1));
+        assert_eq!(make_rank(&entry("SONY"), &lumix), Some(2));
+        assert_eq!(make_rank(&entry("SONY"), &a7ii(1.8)), Some(0));
+        // A Micro Four Thirds profile does not cover a full-frame Lumix S.
+        lumix.focal_35mm = 55.;
+        let mft = Entry {
+            sensor_factor: 2.,
+            ..entry("OLYMPUS")
+        };
+        assert_eq!(make_rank(&mft, &lumix), None);
+        // A full-frame profile on an APS-C body is scaled to the smaller sensor:
+        // the APS-C corner sits at 2/3 of the full-frame radius.
+        let mut aps_c = a7ii(1.8);
+        aps_c.focal_35mm = 55. * 1.5;
+        let crop = correction(&entries, &aps_c).unwrap();
+        assert!((crop.vignetting_gain(1.) - c.vignetting_gain(2. / 3.)).abs() < 0.01);
         assert!(parse("<x/>").is_err());
     }
     #[test]
