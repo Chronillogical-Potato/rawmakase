@@ -107,11 +107,18 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
       # vcpkg's binary cache; release builds (release.yml) start from scratch.
+      # vcpkg's package hashes cover the image's CMake and PowerShell versions,
+      # and runners mix image versions during a rollout, so each image version
+      # keeps its own cache.
+      - if: steps.source.outputs.windows == 'true'
+        id: image
+        shell: bash
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
       - if: steps.source.outputs.windows == 'true'
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ hashFiles('packaging/windows/deps.ps1') }}
+          key: vcpkg-${{ steps.image.outputs.version }}-${{ hashFiles('packaging/windows/deps.ps1') }}
       - if: steps.source.outputs.windows == 'true'
         name: LibRaw and Little CMS
         run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
