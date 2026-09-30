@@ -31,10 +31,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Line tables keep test backtraces readable while cutting build time and the
+  # size of the cached target directories. Release builds are unaffected.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   check:
-    name: Lint, test, and smoke test
+    name: Lint and test
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     timeout-minutes: 45
@@ -46,7 +49,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
+      # Only pushes to main save caches: pull requests restore main's, and
+      # release validation would save caches nothing else restores.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - name: Check minimum Rust version
         run: |
           msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
@@ -56,10 +63,6 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       - run: cargo test --locked
-      - name: CLI smoke test
-        run: |
-          cargo build --release --locked
-          target/release/rawmakase --help
       - name: Validate desktop entry
         run: desktop-file-validate packaging/applications/rawmakase.desktop
 
@@ -81,6 +84,8 @@ jobs:
           rustup default stable
           bash packaging/native-deps.sh "$RUNNER_TEMP/native"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - name: Test
         run: |
           export PKG_CONFIG_PATH="$RUNNER_TEMP/native/lib/pkgconfig"
@@ -127,6 +132,8 @@ jobs:
         run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
       - if: steps.source.outputs.windows == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - if: steps.source.outputs.windows == 'true'
         run: cargo clippy --all-targets --locked -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
@@ -134,7 +141,7 @@ jobs:
         run: cargo test --locked
 
   package:
-    name: Build Arch package
+    name: Build, install and run Arch package
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     timeout-minutes: 45
@@ -152,6 +159,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target-arch"
+          save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - name: makepkg (current checkout)
         run: |
           useradd -m builder
@@ -165,6 +173,11 @@ jobs:
           # The tests already run in the lint job; --nocheck skips a second full build.
           su builder -c "export CARGO_HOME='$HOME/.cargo' && git config --global --add safe.directory '*' && cd packaging/arch/rawmakase-git && makepkg --noconfirm --nocheck"
           namcap packaging/arch/rawmakase-git/PKGBUILD packaging/arch/rawmakase-git/*.pkg.tar.zst
+      # The release build's smoke test: install the package and run it.
+      - name: Install and run
+        run: |
+          pacman -U --noconfirm packaging/arch/rawmakase-git/*.pkg.tar.zst
+          rawmakase --help
 
   audit:
     name: Dependency licenses and advisories
