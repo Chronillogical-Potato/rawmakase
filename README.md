@@ -72,6 +72,14 @@ The `rawmakase-<version>-<arch>-linux.tar.gz` download contains the same bundled
 
 Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for your user account only, without administrator rights, and adds RAWmakase to the Start menu. The installer is not code-signed yet, so Microsoft Defender SmartScreen may warn about an unrecognized app: choose **More info → Run anyway**. For a copy without installing, extract `rawmakase-v<version>-x86_64-pc-windows-msvc.zip` and run `rawmakase.exe` from the extracted folder.
 
+### Let your agent install it
+
+Point your coding agent to [GitHub Releases](https://github.com/pch/rawmakase/releases) and tell it to install the latest version for your operating system, or give it this prompt:
+
+```text
+Install the latest release of RAWmakase for my operating system from https://github.com/pch/rawmakase/releases. Pick the right package for my OS and CPU architecture, verify it against the release's checksums, install it, and tell me how to launch it.
+```
+
 ### Updates and verification
 
 To update, download a newer release and repeat the installation steps (replace the app in Applications on macOS). Settings and catalogs are kept separately from the installed application. There is currently no in-app updater or automatic package repository.
