@@ -43,7 +43,7 @@ pub enum TaskKind {
 /// What an Auto request sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoKind {
-    /// White balance and the six Tone sliders, as Lightroom's Auto button.
+    /// The six Tone sliders, as Lightroom's Auto button; white balance is kept.
     Settings,
     /// White balance alone, the WB menu's Auto.
     WhiteBalance,

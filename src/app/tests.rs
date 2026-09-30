@@ -1001,7 +1001,7 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
         recovered: Default::default(),
         width,
         height,
-        // A dim, warm gradient: Auto brightens it and cools it.
+        // A dim, warm gradient: Auto brightens it, and the WB menu's Auto cools it.
         pixels: (0..width * height)
             .map(|i| {
                 let v = 0.002 + 0.06 * (i % width) as f32 / width as f32;
@@ -1034,7 +1034,11 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     }
     let auto = editor.document.recipe.clone();
     assert!(auto.exposure > 1., "exposure {}", auto.exposure);
-    assert!(auto.wb[0] < 1. && auto.wb[2] > 1., "wb {:?}", auto.wb);
+    // Auto sets tone only; white balance is the WB menu's Auto.
+    assert_eq!(
+        (auto.wb, auto.temperature, auto.tint),
+        (before.wb, before.temperature, before.tint)
+    );
     assert_eq!(auto.saturation, 0.25);
     let (steps, applied) = editor.document.history.steps();
     assert_eq!(applied, 1);
@@ -1045,6 +1049,19 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     assert_eq!(editor.document.recipe, expected);
     editor.redo();
     assert_eq!(editor.document.recipe, auto);
+
+    editor.start_auto(worker::AutoKind::WhiteBalance);
+    while editor.document.auto.is_running() {
+        assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        editor.events(&ctx);
+    }
+    let r = &editor.document.recipe;
+    assert!(r.wb[0] < 1. && r.wb[2] > 1., "wb {:?}", r.wb);
+    assert_eq!(r.auto_white_balance, Some([r.temperature, r.tint]));
+    assert_eq!(r.exposure, auto.exposure);
+    let (steps, _) = editor.document.history.steps();
+    assert_eq!(steps[1].name, "White Balance");
 }
 #[test]
 fn stale_auto_results_are_ignored_after_moving_on() {

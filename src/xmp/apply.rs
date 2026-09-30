@@ -395,6 +395,7 @@ impl Preset {
                     r.temperature = temperature;
                     r.tint = tint;
                     r.update_wb(m);
+                    r.auto_white_balance = Some([r.temperature, r.tint]);
                 } else if let Some(im) = image {
                     let mut avg = [0.; 3];
                     let mut count = 0.;
@@ -410,6 +411,7 @@ impl Preset {
                     r.wb = std::array::from_fn(|c| (avg[1] / avg[c].max(1e-8)).clamp(0.01, 100.));
                     r.tint = 0.;
                     r.sync_white_balance_controls(m);
+                    r.auto_white_balance = Some([r.temperature, r.tint]);
                 }
             }
             Some("Custom") | None => {

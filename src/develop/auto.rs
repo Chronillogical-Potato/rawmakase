@@ -1,4 +1,4 @@
-//! One-click Auto: white balance and the Basic tone sliders, chosen for a photo.
+//! One-click Auto: the Basic tone sliders, and white balance, chosen for a photo.
 //!
 //! White balance is estimated from the camera pixels. The tone sliders are fitted by
 //! rendering a small copy of the photo through the real pipeline and measuring the
@@ -34,24 +34,6 @@ const MAX_CLIP_CONCESSION: f32 = 1.;
 /// clipped at Exposure 0.
 const MAX_CLIPPED: f32 = 0.01;
 
-/// White balance and tone together, as the Basic panel's Auto button applies them.
-/// Every other setting of `base` is kept.
-pub fn auto_adjust(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
-    auto_adjust_cancellable(im, base, &AtomicBool::new(false))
-}
-
-/// [`auto_adjust`] that stops with an error between renders once `cancel` is set.
-pub fn auto_adjust_cancellable(
-    im: &CameraImage,
-    base: &Recipe,
-    cancel: &AtomicBool,
-) -> Result<Recipe> {
-    let mut r = auto_white_balance_cancellable(im, base, cancel)?;
-    fit_tone(&tone_copy(im, base, cancel)?, &mut r, cancel)?;
-    r.validate()?;
-    Ok(r)
-}
-
 /// `base` with white balance chosen so the photo's near-neutral areas render neutral.
 pub fn auto_white_balance(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
     auto_white_balance_cancellable(im, base, &AtomicBool::new(false))
@@ -75,12 +57,21 @@ pub fn auto_white_balance_cancellable(
 }
 
 /// `base` with Exposure, Contrast, Highlights, Shadows, Whites and Blacks fitted to the
-/// photo as `base` otherwise renders it.
+/// photo as `base` otherwise renders it, as the Basic panel's Auto button applies them.
+/// White balance and every other setting of `base` are kept, as in Lightroom.
 pub fn auto_tone(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
-    let cancel = AtomicBool::new(false);
-    let small = tone_copy(im, base, &cancel)?;
+    auto_tone_cancellable(im, base, &AtomicBool::new(false))
+}
+
+/// [`auto_tone`] that stops with an error between renders once `cancel` is set.
+pub fn auto_tone_cancellable(
+    im: &CameraImage,
+    base: &Recipe,
+    cancel: &AtomicBool,
+) -> Result<Recipe> {
+    let small = tone_copy(im, base, cancel)?;
     let mut r = base.clone();
-    fit_tone(&small, &mut r, &cancel)?;
+    fit_tone(&small, &mut r, cancel)?;
     r.validate()?;
     Ok(r)
 }
@@ -125,6 +116,7 @@ fn tone_copy(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Camera
 fn fit_white_balance(im: &CameraImage, r: &mut Recipe) -> Result<()> {
     r.wb = neutral_gains(&crop_samples(im, r))?;
     r.sync_white_balance_controls(&im.metadata);
+    r.auto_white_balance = Some([r.temperature, r.tint]);
     Ok(())
 }
 
@@ -694,7 +686,7 @@ mod tests {
     fn a_cancelled_estimate_stops_with_an_error() {
         let im = scene([1.; 3], 0.5);
         let cancel = AtomicBool::new(true);
-        assert!(auto_adjust_cancellable(&im, &Recipe::default(), &cancel).is_err());
+        assert!(auto_tone_cancellable(&im, &Recipe::default(), &cancel).is_err());
     }
 
     #[test]
@@ -775,25 +767,24 @@ mod tests {
     }
 
     #[test]
-    fn auto_sets_only_white_balance_and_tone() {
+    fn auto_tone_sets_only_the_tone_sliders() {
         let im = scene([1.2, 1., 0.8], 0.1);
         let mut base = Recipe {
             saturation: 0.3,
             crop: [0.1, 0.1, 0.9, 0.9],
             exposure: -3.,
             contrast: 0.9,
+            temperature: 4300.,
+            tint: 12.,
+            wb: [1.1, 1., 0.7],
             ..Default::default()
         };
         base.effects.clarity = -0.2;
-        let auto = auto_adjust(&im, &base).unwrap();
+        let auto = auto_tone(&im, &base).unwrap();
         auto.validate().unwrap();
-        assert_ne!(auto.wb, base.wb);
         assert_ne!(auto.exposure, base.exposure);
-        // Everything else is as it was.
+        // White balance, even a manual one, and everything else is as it was.
         let mut expected = auto.clone();
-        expected.wb = base.wb;
-        expected.temperature = base.temperature;
-        expected.tint = base.tint;
         expected.exposure = base.exposure;
         expected.contrast = base.contrast;
         expected.highlights = base.highlights;
@@ -802,7 +793,12 @@ mod tests {
         expected.blacks = base.blacks;
         assert_eq!(expected, base);
         // Estimates are independent of the tone sliders they replace.
-        let fresh = auto_adjust(&im, &Recipe::default()).unwrap();
+        let untouched = Recipe {
+            exposure: 0.,
+            contrast: 0.,
+            ..base.clone()
+        };
+        let fresh = auto_tone(&im, &untouched).unwrap();
         assert_eq!(fresh.exposure, auto.exposure);
         assert_eq!(fresh.whites, auto.whites);
     }

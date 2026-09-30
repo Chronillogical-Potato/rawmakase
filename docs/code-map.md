@@ -70,7 +70,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
 | [white_balance.rs](../src/develop/white_balance.rs) | Fallback illuminant and as-shot temperature estimation. |
-| [auto.rs](../src/develop/auto.rs) | Auto: white balance from near-neutral pixels, and the Basic tone sliders fitted by measuring renders of a small copy of the photo. |
+| [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders fitted by measuring renders of a small copy of the photo, and white balance from near-neutral pixels. |
 
 ## Camera profiles
 

@@ -6,19 +6,26 @@ use super::{
 };
 use crate::develop::Recipe;
 
-/// Everything an estimate was fitted against: `r` without the settings Auto chooses.
-fn inputs(r: &Recipe) -> Recipe {
-    Recipe {
-        wb: [1.; 3],
-        temperature: 0.,
-        tint: 0.,
-        exposure: 0.,
-        contrast: 0.,
-        highlights: 0.,
-        shadows: 0.,
-        whites: 0.,
-        blacks: 0.,
-        ..r.clone()
+/// Everything an estimate of `kind` was fitted against: `r` without the settings it
+/// chooses. Auto tone is fitted to the photo's white balance, so that is an input.
+fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
+    match kind {
+        AutoKind::Settings => Recipe {
+            exposure: 0.,
+            contrast: 0.,
+            highlights: 0.,
+            shadows: 0.,
+            whites: 0.,
+            blacks: 0.,
+            ..r.clone()
+        },
+        AutoKind::WhiteBalance => Recipe {
+            wb: [1.; 3],
+            temperature: 0.,
+            tint: 0.,
+            auto_white_balance: None,
+            ..r.clone()
+        },
     }
 }
 
@@ -41,13 +48,13 @@ impl Editor {
         let (_, cancel) = self.document.auto.start();
         let id = self.load.id();
         let base = self.document.recipe.clone();
-        self.document.auto_input = Some(inputs(&base));
+        self.document.auto_input = Some(inputs(kind, &base));
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             // A panic still sends a result, so Auto does not stay disabled.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match kind {
-                AutoKind::Settings => crate::develop::auto_adjust_cancellable(&im, &base, &cancel),
+                AutoKind::Settings => crate::develop::auto_tone_cancellable(&im, &base, &cancel),
                 AutoKind::WhiteBalance => {
                     crate::develop::auto_white_balance_cancellable(&im, &base, &cancel)
                 }
@@ -71,8 +78,8 @@ impl Editor {
             .document
             .auto_input
             .take()
-            .or_else(|| result.as_deref().ok().map(inputs));
-        if fitted.is_some_and(|f| f != inputs(&self.document.recipe)) {
+            .or_else(|| result.as_deref().ok().map(|r| inputs(kind, r)));
+        if fitted.is_some_and(|f| f != inputs(kind, &self.document.recipe)) {
             self.start_auto(kind);
             return;
         }
@@ -90,9 +97,6 @@ impl Editor {
         }
         let old = self.document.recipe.clone();
         let r = &mut self.document.recipe;
-        r.wb = auto.wb;
-        r.temperature = auto.temperature;
-        r.tint = auto.tint;
         let step = match kind {
             AutoKind::Settings => {
                 r.exposure = auto.exposure;
@@ -104,7 +108,13 @@ impl Editor {
                 self.document.auto_applied = Some(r.clone());
                 Step::new("Auto Settings", "")
             }
-            AutoKind::WhiteBalance => Step::new("White Balance", "Auto"),
+            AutoKind::WhiteBalance => {
+                r.wb = auto.wb;
+                r.temperature = auto.temperature;
+                r.tint = auto.tint;
+                r.auto_white_balance = auto.auto_white_balance;
+                Step::new("White Balance", "Auto")
+            }
         };
         self.document.history.label(step);
         self.history(old);

@@ -13,7 +13,7 @@ It is a personal project in active development. Rendering aims for close, not ex
 
 ## Features
 
-- **Develop**: white balance and picker, one-click Auto white balance and tone, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
+- **Develop**: white balance and picker, one-click Auto tone and Auto white balance, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders and collections, ratings, flags, color labels, keywords, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
 - **Presets and profiles**: Lightroom XMP presets, plus DCP and XMP camera profiles you import yourself.
@@ -125,7 +125,7 @@ Useful shortcuts:
 | J | Clipping indicators |
 | Backslash | Before / after |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
-| Cmd/Ctrl+Shift+U | Auto white balance and tone |
+| Cmd/Ctrl+Shift+U | Auto tone |
 
 Double-click a slider to reset it, or type its value for precision.
 

@@ -76,10 +76,13 @@ enum Command {
         overwrite: bool,
         #[arg(long)]
         recipe: Option<PathBuf>,
-        /// Apply Auto white balance and tone, as the Basic panel's Auto button does.
+        /// Apply Auto tone, as the Basic panel's Auto button does; white balance is kept.
         /// Auto sets Exposure itself, so it cannot be combined with --exposure.
         #[arg(long, conflicts_with = "exposure")]
         auto: bool,
+        /// Apply Auto white balance, as the WB menu's Auto does (before --auto).
+        #[arg(long)]
+        auto_wb: bool,
     },
     Benchmark {
         input: PathBuf,
@@ -230,6 +233,7 @@ fn main() -> Result<()> {
             overwrite,
             recipe,
             auto,
+            auto_wb,
         }) => {
             let t = Instant::now();
             let r = raw::Raw::open(&input)?;
@@ -267,14 +271,22 @@ fn main() -> Result<()> {
                     edit.exposure = e;
                 }
             }
-            if auto {
+            if auto_wb {
                 let t = Instant::now();
-                edit = develop::auto_adjust(&im, &edit)?;
+                edit = develop::auto_white_balance(&im, &edit)?;
                 eprintln!(
-                    "Auto ({:?}): temperature {:.0} tint {:+.0} exposure {:+.2} contrast {:+.0} highlights {:+.0} shadows {:+.0} whites {:+.0} blacks {:+.0}",
+                    "Auto white balance ({:?}): temperature {:.0} tint {:+.0}",
                     t.elapsed(),
                     edit.temperature,
-                    edit.tint,
+                    edit.tint
+                );
+            }
+            if auto {
+                let t = Instant::now();
+                edit = develop::auto_tone(&im, &edit)?;
+                eprintln!(
+                    "Auto ({:?}): exposure {:+.2} contrast {:+.0} highlights {:+.0} shadows {:+.0} whites {:+.0} blacks {:+.0}",
+                    t.elapsed(),
                     edit.exposure,
                     edit.contrast * 100.,
                     edit.highlights * 100.,

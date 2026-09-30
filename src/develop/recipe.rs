@@ -51,6 +51,10 @@ pub struct Recipe {
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
+    /// Temperature and Tint that Auto white balance chose, so the WB menu shows Auto
+    /// while the photo still has them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_white_balance: Option<[f32; 2]>,
     pub contrast: f32,
     pub highlights: f32,
     pub shadows: f32,
@@ -130,6 +134,7 @@ impl Default for Recipe {
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
+            auto_white_balance: None,
             contrast: 0.,
             highlights: 0.,
             shadows: 0.,
