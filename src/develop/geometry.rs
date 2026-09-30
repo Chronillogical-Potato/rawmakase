@@ -29,7 +29,52 @@ impl Default for Transform {
         }
     }
 }
+/// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
+/// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
+pub fn display_axes(turns: u8, flip_x: bool, flip_y: bool) -> [[f32; 2]; 2] {
+    let recorded = |x: f32, y: f32| {
+        let x = if flip_x { 1. - x } else { x };
+        let y = if flip_y { 1. - y } else { y };
+        super::image_space::turn(turns, x, y)
+    };
+    let [ox, oy] = recorded(0., 0.);
+    let [xx, xy] = recorded(1., 0.);
+    let [yx, yy] = recorded(0., 1.);
+    [[xx - ox, yx - ox], [xy - oy, yy - oy]]
+}
 impl Transform {
+    /// The sliders as Lightroom shows them on the displayed photo, when `self` holds
+    /// them as stored, in the recorded frame (`m` from [`display_axes`]). Lightroom
+    /// stores Vertical −70 on a photo turned 90° left as `PerspectiveHorizontal` +70.
+    pub fn displayed(&self, m: [[f32; 2]; 2]) -> Self {
+        self.reoriented([[m[0][0], m[1][0]], [m[0][1], m[1][1]]])
+    }
+    /// The stored sliders for sliders shown on the displayed photo: the inverse of
+    /// [`Self::displayed`].
+    pub fn recorded(&self, m: [[f32; 2]; 2]) -> Self {
+        self.reoriented(m)
+    }
+    /// Perspective (h, v) and offsets (x, −y) are vectors in the frame; a swap of axes
+    /// flips Aspect, and a mirror flips Rotate.
+    fn reoriented(&self, m: [[f32; 2]; 2]) -> Self {
+        let map = |[x, y]: [f32; 2]| [m[0][0] * x + m[0][1] * y, m[1][0] * x + m[1][1] * y];
+        let [horizontal, vertical] = map([self.horizontal, self.vertical]);
+        let [offset_x, minus_y] = map([self.offset_x, -self.offset_y]);
+        let determinant = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+        Self {
+            vertical,
+            horizontal,
+            rotate: self.rotate * determinant,
+            aspect: if m[0][0] == 0. {
+                -self.aspect
+            } else {
+                self.aspect
+            },
+            scale: self.scale,
+            offset_x,
+            offset_y: -minus_y,
+        }
+    }
     pub fn is_identity(&self) -> bool {
         *self == Self::default()
     }
@@ -338,5 +383,64 @@ impl Geometry {
             (xc - self.crop[0]) / (self.crop[2] - self.crop[0]),
             (yc - self.crop[1]) / (self.crop[3] - self.crop[1]),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sliders_show_along_the_displayed_axes_as_in_lightroom() {
+        // Lightroom's Vertical −70 on a photo the camera turned 90° left (LibRaw flip
+        // 5, three quarter turns) is stored as PerspectiveHorizontal +70.
+        let stored = Transform {
+            horizontal: 0.7,
+            ..Default::default()
+        };
+        let shown = stored.displayed(display_axes(3, false, false));
+        assert!(
+            (shown.vertical + 0.7).abs() < 1e-6 && shown.horizontal.abs() < 1e-6,
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn displayed_sliders_are_the_same_homography_on_the_displayed_photo() {
+        let stored = Transform {
+            vertical: 0.3,
+            horizontal: -0.2,
+            rotate: 4.,
+            aspect: 0.4,
+            scale: 1.1,
+            offset_x: 0.2,
+            offset_y: -0.1,
+        };
+        let (w, h) = (1., 2. / 3.);
+        for turns in 0..4 {
+            for (flip_x, flip_y) in [(false, false), (true, false), (false, true)] {
+                let m = display_axes(turns, flip_x, flip_y);
+                let shown = stored.displayed(m);
+                assert_eq!(shown.recorded(m), stored);
+                let swapped = m[0][0] == 0.;
+                let (dw, dh) = if swapped { (h, w) } else { (w, h) };
+                // Displayed centred coordinates to recorded ones.
+                let to = [[m[0][0], m[0][1], 0.], [m[1][0], m[1][1], 0.], [0., 0., 1.]];
+                let expected = mat(
+                    crate::color_math::inverse(to),
+                    mat(stored.inverse(w, h), to),
+                );
+                let got = shown.inverse(dw, dh);
+                for i in 0..3 {
+                    for j in 0..3 {
+                        let (a, b) = (got[i][j] / got[2][2], expected[i][j] / expected[2][2]);
+                        assert!(
+                            (a - b).abs() < 1e-5,
+                            "{turns} {flip_x} {flip_y}: {got:?} {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

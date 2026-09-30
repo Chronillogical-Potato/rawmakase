@@ -1098,7 +1098,14 @@ impl Editor {
                         .on_disabled_hover_text("Not available yet. Areas outside the photo render white; crop them out with the Crop tool.");
                 });
                 subheading(ui, "Transform");
-                let t = &mut r.transform;
+                // Stored as Camera Raw applies them, before the photo is turned for
+                // display; shown, as in Lightroom, along the displayed photo's axes.
+                let turns = metadata.as_ref().map_or(0, |m| {
+                    crate::develop::ImageFrame::for_metadata(m).turns
+                });
+                let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
+                let mut shown = r.transform.displayed(axes);
+                let t = &mut shown;
                 slider(ui, "Vertical", &mut t.vertical, -1. ..=1., 0.);
                 slider(ui, "Horizontal", &mut t.horizontal, -1. ..=1., 0.);
                 slider_with(ui, "Rotate", &mut t.rotate, -10. ..=10., 0., Some((1., 1)), None);
@@ -1106,6 +1113,9 @@ impl Editor {
                 slider_with(ui, "Scale", &mut t.scale, 0.5..=1.5, 1., Some((100., 0)), None);
                 slider(ui, "Offset X", &mut t.offset_x, -1. ..=1., 0.);
                 slider(ui, "Offset Y", &mut t.offset_y, -1. ..=1., 0.);
+                if shown != r.transform.displayed(axes) {
+                    r.transform = shown.recorded(axes);
+                }
             });
         }) {
             r.transform = Default::default();
