@@ -1,0 +1,146 @@
+name: Bug report
+description: Report a problem with enough detail to reproduce and investigate it.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please report one problem per issue and use a title that describes what fails.
+
+        Before filling this in:
+        1. Search [existing issues](https://github.com/pch/rawmakase/issues?q=is%3Aissue) for the same problem.
+        2. Check the [latest release](https://github.com/pch/rawmakase/releases/latest). If practical, try it and say whether the problem still happens. You can still report a problem if you cannot update.
+        3. Try to reproduce the problem with the fewest steps and files possible. For intermittent problems, describe the last occurrence.
+        4. Include exact settings and error messages, plus screenshots or a sample when useful.
+
+        Attachments are public. Share only material you have permission to publish; check photos and metadata for personal information. Do not upload private catalogs or proprietary Adobe profiles. A non-sensitive test photo is welcome, but a sample is not required to report a bug.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: RAWmakase version
+      description: Give the exact version, not just "latest". Use the downloaded package name or `rawmakase --version` if available. For a source build, include the commit hash.
+      placeholder: "Example: 0.1.9; also reproduced on 0.1.10"
+    validations:
+      required: true
+
+  - type: input
+    id: installation
+    attributes:
+      label: Installation method
+      description: Include the package filename or source when available.
+      placeholder: "DMG, Homebrew, DEB, RPM, Arch package, Linux archive, Windows installer/ZIP, or source build"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: system-version
+    attributes:
+      label: OS version and CPU architecture
+      description: Include the full OS version (and distribution on Linux), plus Apple Silicon/Intel, x86_64, or ARM64. Say if the architecture is unknown.
+      placeholder: "Example: Ubuntu 24.04, x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Start from launching the app. Name the view or command, input files, exact settings, and action that triggers the problem. For catalog issues, say whether the catalog is new, existing, or imported from Lightroom.
+      placeholder: |
+        1. Open RAWmakase with ...
+        2. Import/open ...
+        3. Set ... to ...
+        4. Click/run ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens?
+      description: Describe the result and paste the exact error text, if any. For image issues, say whether you see the problem in the thumbnail, Develop preview, exported file, or all of them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen?
+      description: Describe the expected result. If comparing with another photo editor, name its version, profile, and relevant settings.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Only happened once
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: camera-and-raw
+    attributes:
+      label: Camera model and RAW format
+      description: For problems involving photos, give the exact camera make/model and file extension. Include RAW mode, bit depth, compression, lens, and firmware if known. For converted DNGs, name the original format and converter/version. Skip for unrelated problems.
+      placeholder: |
+        Camera make and model:
+        RAW extension (e.g. .CR3, .NEF, .ARW, .RAF, .DNG):
+        RAW mode / bit depth / compression:
+        Original camera file or converted file:
+        Lens / firmware (if relevant):
+        Affects one photo, some photos, or all photos tested:
+
+  - type: textarea
+    id: settings-and-hardware
+    attributes:
+      label: Relevant settings and hardware
+      description: For rendering/color problems, include the selected camera profile, preset, edits, and export settings. For display, crash, or performance problems, add CPU, RAM, GPU/driver, display scaling, monitor ICC profile, and Linux desktop/Wayland/X11 if known. Include only relevant details.
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Screenshots, recordings, and sample files
+      description: |
+        Drag screenshots or a short recording here and explain what each shows. For a decoding/rendering problem, a non-sensitive original RAW file is more useful than a screenshot alone. If GitHub rejects the file, put it in a ZIP or link to a publicly accessible download. Include relevant shareable settings or XMP sidecars when needed. If you cannot share a sample, say so.
+      placeholder: |
+        Screenshot/recording and what it shows:
+        Sample file or download link:
+        Settings needed to reproduce with the sample:
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Error messages and diagnostics
+      description: |
+        Paste relevant terminal output or attach an available crash report. If you use the command line, include the exact command. For a RAW-file problem, output from `rawmakase inspect "sample.dng"` may help (replace the filename with your sample). Review output for personal paths or metadata before posting. Skip if unavailable.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Previous versions and workarounds
+      description: Did this work in an earlier version? Give the last known working version, any workaround, and what you have already tried. If you could not test the latest release, explain why here.
