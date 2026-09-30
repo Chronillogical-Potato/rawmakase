@@ -1062,6 +1062,12 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     assert_eq!(r.exposure, auto.exposure);
     let (steps, _) = editor.document.history.steps();
     assert_eq!(steps[1].name, "White Balance");
+    // Pasted onto a photo, the values were not estimated for it: the WB menu says Custom.
+    editor.copy_settings();
+    editor.paste_settings();
+    let r = &editor.document.recipe;
+    assert!(r.wb[0] < 1. && r.wb[2] > 1., "wb {:?}", r.wb);
+    assert_eq!(r.auto_white_balance, None);
 }
 #[test]
 fn stale_auto_results_are_ignored_after_moving_on() {

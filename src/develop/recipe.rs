@@ -388,6 +388,7 @@ impl Recipe {
         self.temperature = values[0].clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
         self.tint = values[1].clamp(-TINT_LIMIT, TINT_LIMIT);
         self.wb = [1.; 3];
+        self.auto_white_balance = None;
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         let mut adjusted = m.clone();

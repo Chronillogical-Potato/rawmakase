@@ -546,6 +546,7 @@ impl Editor {
                                 r.temperature = temperature;
                                 r.tint = tint;
                                 r.update_wb(m);
+                                r.auto_white_balance = None;
                             }
                         }
                         ui.add_enabled(
@@ -567,6 +568,7 @@ impl Editor {
                 && let Some(m) = &metadata
             {
                 r.update_wb(m);
+                r.auto_white_balance = None;
             }
             subheading(ui, "Tone");
             slider_with(

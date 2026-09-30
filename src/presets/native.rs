@@ -20,7 +20,10 @@ struct Preset {
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;
     // Spot removal is specific to its photo; Lightroom presets never include it.
-    let (recipe, local) = r.split_local();
+    let (mut recipe, local) = r.split_local();
+    // Auto white balance was estimated for this photo; applied elsewhere its values are
+    // just Custom.
+    recipe.auto_white_balance = None;
     atomic_json(
         path,
         &Preset {
