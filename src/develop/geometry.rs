@@ -188,7 +188,12 @@ impl Upright {
     }
     pub fn validate(&self) -> bool {
         self.corrections.len() <= UprightMode::ALL.len()
-            && self.corrections.iter().flatten().all(|v| v.is_finite())
+            && self.corrections.iter().all(|m| {
+                let [a, b, c, d, e, f, g, h, i] = *m;
+                let determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+                // Rendering inverts it; a singular one would silently render as Off.
+                m.iter().all(|v| v.is_finite()) && determinant.abs() > 1e-6
+            })
     }
     /// The chosen mode's correction, when it is not the identity.
     pub fn correction(&self) -> Option<[[f32; 3]; 3]> {
@@ -472,5 +477,20 @@ mod upright_tests {
         u.mode = UprightMode::Vertical;
         u.clear_analysis();
         assert_eq!(u.mode, UprightMode::Vertical);
+    }
+}
+#[cfg(test)]
+mod singular_tests {
+    use super::*;
+    #[test]
+    fn singular_upright_corrections_are_invalid() {
+        let mut u = Upright {
+            mode: UprightMode::Level,
+            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4],
+            ..Default::default()
+        };
+        assert!(u.validate());
+        u.corrections[3] = [1., 0., 0., 0., 0., 0., 0., 0., 1.];
+        assert!(!u.validate());
     }
 }
