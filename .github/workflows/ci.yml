@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.github/triage.yml'
+      - '.github/workflows/triage.yml'
+      - '.github/workflows/workflow-lint.yml'
   pull_request:
+    paths-ignore:
+      - '.github/triage.yml'
+      - '.github/workflows/triage.yml'
+      - '.github/workflows/workflow-lint.yml'
   workflow_call:
     inputs:
       source-ref:

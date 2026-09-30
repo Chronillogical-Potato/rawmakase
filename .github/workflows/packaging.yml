@@ -2,10 +2,22 @@ name: Packaging checks
 
 on:
   pull_request:
-    paths: ['packaging/**', 'native-packages.yaml', '.github/workflows/**']
+    paths:
+      - 'packaging/**'
+      - 'native-packages.yaml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/packaging.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/homebrew.yml'
   push:
     branches: [main]
-    paths: ['packaging/**', 'native-packages.yaml', '.github/workflows/**']
+    paths:
+      - 'packaging/**'
+      - 'native-packages.yaml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/packaging.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/homebrew.yml'
   # The release workflow packages its own builds here before publishing.
   workflow_call:
     inputs:

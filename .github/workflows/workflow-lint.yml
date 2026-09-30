@@ -1,0 +1,33 @@
+name: Workflow checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/triage.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/triage.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate workflows and triage policy
+        run: |
+          GOBIN="$RUNNER_TEMP/tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+          "$RUNNER_TEMP/tools/actionlint"
+          ruby -ryaml -e 'YAML.safe_load_file(".github/triage.yml")'
