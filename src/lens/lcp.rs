@@ -140,11 +140,25 @@ fn lens_matches(e: &Entry, m: &Metadata) -> bool {
     let lens = key(&m.lens_model);
     !lens.is_empty() && e.lens.iter().any(|l| key(l) == lens)
 }
-/// Whether the profile was made on this camera make. Adobe profiles third-party
-/// lenses on one body per mount (a Sigma L-mount lens on a Sigma fp), and
-/// Lightroom applies them to other makes too, preferring the same make.
-fn make_matches(e: &Entry, m: &Metadata) -> bool {
-    e.make.is_empty() || key(&e.make) == key(&m.make) || key(&m.make).contains(&key(&e.make))
+/// How well the profile's camera make fits the photo's: 0 the same make, 1 a make
+/// sharing a lens mount, 2 any other. Adobe profiles third-party lenses on one body
+/// per mount (a Sigma L-mount lens on a Sigma fp), and Lightroom applies them to
+/// other makes too.
+fn make_rank(e: &Entry, m: &Metadata) -> u8 {
+    const MOUNTS: [&[&str]; 2] = [
+        &["sigma", "panasonic", "leica"],
+        &["olympus", "om digital", "panasonic"],
+    ];
+    let (profile, camera) = (key(&e.make), key(&m.make));
+    if profile.is_empty() || profile == camera || camera.contains(&profile) {
+        0
+    } else if MOUNTS.iter().any(|makes| {
+        makes.iter().any(|k| profile.contains(k)) && makes.iter().any(|k| camera.contains(k))
+    }) {
+        1
+    } else {
+        2
+    }
 }
 
 /// Parameters interpolated in focal length (and APEX aperture for vignetting).
@@ -212,9 +226,8 @@ fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 /// The correction for a photo from matching profile entries.
 pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
     let mut found: Vec<&Entry> = entries.iter().filter(|e| lens_matches(e, m)).collect();
-    if found.iter().any(|e| make_matches(e, m)) {
-        found.retain(|e| make_matches(e, m));
-    }
+    let best = found.iter().map(|e| make_rank(e, m)).min()?;
+    found.retain(|e| make_rank(e, m) == best);
     if found.iter().any(|e| e.raw) {
         found.retain(|e| e.raw);
     }
@@ -278,12 +291,13 @@ pub fn library_dirs() -> Vec<PathBuf> {
         .collect()
 }
 /// The imported profile correction for a photo, if any imported profile matches:
-/// one made on the same camera make, else one for the same lens on another make.
+/// one made on the same camera make, else on a make sharing the mount, else on
+/// any make.
 pub fn installed(m: &Metadata) -> Option<LensCorrection> {
     if m.lens_model.is_empty() {
         return None;
     }
-    let mut other_make = None;
+    let mut best: Option<(u8, LensCorrection)> = None;
     for dir in library_dirs() {
         let Ok(files) = std::fs::read_dir(dir) else {
             continue;
@@ -300,19 +314,26 @@ pub fn installed(m: &Metadata) -> Option<LensCorrection> {
             else {
                 continue;
             };
-            if entries
+            let Some(rank) = entries
                 .iter()
-                .any(|e| lens_matches(e, m) && make_matches(e, m))
-            {
-                if let Some(c) = correction(&entries, m) {
+                .filter(|e| lens_matches(e, m))
+                .map(|e| make_rank(e, m))
+                .min()
+            else {
+                continue;
+            };
+            if best.as_ref().is_some_and(|(b, _)| *b <= rank) {
+                continue;
+            }
+            if let Some(c) = correction(&entries, m) {
+                if rank == 0 {
                     return Some(c);
                 }
-            } else if other_make.is_none() {
-                other_make = correction(&entries, m);
+                best = Some((rank, c));
             }
         }
     }
-    other_make
+    best.map(|(_, c)| c)
 }
 /// Validates and copies lens profiles into the data directory.
 pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
@@ -417,6 +438,16 @@ mod tests {
         other_make.make = "Panasonic".into();
         let c2 = correction(&entries, &other_make).unwrap();
         assert_eq!(c2.vignetting_gain(1.), c.vignetting_gain(1.));
+        let entry = |make: &str| Entry {
+            make: make.into(),
+            ..entries[0].clone()
+        };
+        let mut lumix = a7ii(1.8);
+        lumix.make = "Panasonic".into();
+        assert_eq!(make_rank(&entry("Panasonic"), &lumix), 0);
+        assert_eq!(make_rank(&entry("SIGMA"), &lumix), 1);
+        assert_eq!(make_rank(&entry("SONY"), &lumix), 2);
+        assert_eq!(make_rank(&entry("SONY"), &a7ii(1.8)), 0);
         assert!(parse("<x/>").is_err());
     }
     #[test]
