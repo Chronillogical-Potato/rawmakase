@@ -457,3 +457,20 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
     assert!(warnings.iter().any(|w| w.contains("PerspectiveUpright")));
     Ok(())
 }
+#[test]
+fn upright_modes_without_a_stored_correction_stay_unanalysed() {
+    // Only Vertical's correction, not Off's to Level's: nothing is filled in for them.
+    let preset = parse(
+        Path::new("partial.xmp"),
+        &xml(
+            r#"c:PerspectiveUpright="4" c:UprightTransform_4="1,0,0,0,1,0,0,0.1,1""#,
+            "",
+        ),
+    )
+    .unwrap();
+    assert!(
+        preset
+            .apply(&Recipe::default(), &Metadata::default(), &[], None)
+            .is_err()
+    );
+}

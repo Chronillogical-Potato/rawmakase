@@ -181,6 +181,10 @@ impl Upright {
     pub fn clear_analysis(&mut self) {
         self.corrections.clear();
         self.lightroom.clear();
+        // Guided can't be analysed again without its guides.
+        if self.mode == UprightMode::Guided {
+            self.mode = UprightMode::Off;
+        }
     }
     pub fn validate(&self) -> bool {
         self.corrections.len() <= UprightMode::ALL.len()
@@ -451,5 +455,22 @@ mod tests {
                 }
             }
         }
+    }
+}
+#[cfg(test)]
+mod upright_tests {
+    use super::*;
+    #[test]
+    fn clearing_the_analysis_turns_guided_off() {
+        let mut u = Upright {
+            mode: UprightMode::Guided,
+            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6],
+            ..Default::default()
+        };
+        u.clear_analysis();
+        assert_eq!(u.mode, UprightMode::Off);
+        u.mode = UprightMode::Vertical;
+        u.clear_analysis();
+        assert_eq!(u.mode, UprightMode::Vertical);
     }
 }

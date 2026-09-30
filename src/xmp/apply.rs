@@ -832,10 +832,13 @@ impl Preset {
                 .filter(|m: &[f32; 9]| m.iter().all(|x| x.is_finite()))
                 .with_context(|| format!("Invalid {key}"))?;
             if corrections.len() <= i {
-                corrections.resize(i + 1, [1., 0., 0., 0., 1., 0., 0., 0., 1.]);
+                corrections.resize(i + 1, None);
             }
-            corrections[i] = m;
+            corrections[i] = Some(m);
         }
+        // Lightroom stores every mode; keep only the unbroken run from Off, so a mode
+        // without its own correction is never stood in for by an identity.
+        let corrections: Vec<[f32; 9]> = corrections.into_iter().map_while(|m| m).collect();
         let Some(code) = number(v, "PerspectiveUpright")? else {
             ensure!(
                 corrections.is_empty(),

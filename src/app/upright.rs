@@ -85,7 +85,11 @@ impl Editor {
         };
         // The analysis is part of the photo, not an edit: every state in History that
         // it fits gets it too, so undoing the mode choice leaves nothing half-applied.
-        let fits = |r: &Recipe| inputs(r) == inputs(analysed);
+        // States with corrections of their own (imported from Lightroom, or another
+        // analysis) keep them.
+        let fits = |r: &Recipe| {
+            inputs(r) == inputs(analysed) && r.upright.corrections == analysed.upright.corrections
+        };
         for r in
             std::iter::once(&mut self.document.recipe).chain(self.document.history.states_mut())
         {
