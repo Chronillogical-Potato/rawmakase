@@ -106,12 +106,14 @@ impl Preset {
         recipe.reference_color = true;
         self.apply_profile(&mut settings, &mut recipe, m, profiles)?;
         self.apply_basic(&mut settings, &mut recipe)?;
+        // Auto white balance is measured on the crop, so geometry comes first.
+        self.apply_geometry(&mut settings, &mut recipe)?;
         self.apply_white_balance(&mut settings, &mut recipe, m, image)?;
         self.apply_color_mixer(&mut settings, &mut recipe)?;
         self.apply_curves(&mut settings, &mut recipe)?;
         self.apply_grading(&mut settings, &mut recipe)?;
         self.apply_effects(&mut settings, &mut recipe)?;
-        self.apply_auto_tone_and_crop(&mut settings, &mut recipe, m, image)?;
+        self.apply_auto_tone(&mut settings, &mut recipe, m, image)?;
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
         self.validate_remaining(&mut settings)?;
@@ -158,6 +160,9 @@ impl Preset {
             self.apply_basic(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|r| {
+            self.apply_geometry(&mut settings.borrow_mut(), r)
+        });
+        stage(&mut recipe, &|r| {
             self.apply_white_balance(&mut settings.borrow_mut(), r, m, image)
         });
         stage(&mut recipe, &|r| {
@@ -173,7 +178,7 @@ impl Preset {
             self.apply_effects(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|r| {
-            self.apply_auto_tone_and_crop(&mut settings.borrow_mut(), r, m, image)
+            self.apply_auto_tone(&mut settings.borrow_mut(), r, m, image)
         });
         stage(&mut recipe, &|_| {
             self.validate_remaining(&mut settings.borrow_mut())
@@ -397,21 +402,8 @@ impl Preset {
                     r.update_wb(m);
                     r.auto_white_balance = Some([r.temperature, r.tint]);
                 } else if let Some(im) = image {
-                    let mut avg = [0.; 3];
-                    let mut count = 0.;
-                    for p in im.pixels.iter().step_by(16) {
-                        if p.iter().all(|v| *v > 0.005 && *v < 0.9) {
-                            for c in 0..3 {
-                                avg[c] += p[c];
-                            }
-                            count += 1.;
-                        }
-                    }
-                    ensure!(count > 0., "No usable pixels for automatic white balance");
-                    r.wb = std::array::from_fn(|c| (avg[1] / avg[c].max(1e-8)).clamp(0.01, 100.));
-                    r.tint = 0.;
-                    r.sync_white_balance_controls(m);
-                    r.auto_white_balance = Some([r.temperature, r.tint]);
+                    // Settings without resolved values get the WB menu's Auto.
+                    *r = crate::develop::auto_white_balance(im, r)?;
                 }
             }
             Some("Custom") | None => {
@@ -723,7 +715,7 @@ impl Preset {
         Ok(())
     }
 
-    fn apply_auto_tone_and_crop(
+    fn apply_auto_tone(
         &self,
         settings: &mut Settings<'_>,
         r: &mut Recipe,
@@ -752,6 +744,12 @@ impl Preset {
                 r.exposure = (0.18 / l[l.len() / 2]).log2().clamp(-8., 8.);
             }
         }
+        Ok(())
+    }
+
+    /// Straighten, lens corrections, Transform and crop.
+    fn apply_geometry(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
+        let v = settings.values;
         settings.assign("CropAngle", &mut r.straighten, 1., -45., 45.)?;
         settings.seen.insert("LensProfileEnable".into());
         // Which Adobe profile Lightroom chose; RAWmakase matches imported profiles itself.
