@@ -69,6 +69,13 @@ pub enum Event {
         kind: AutoKind,
         result: Result<Box<crate::develop::Recipe>, String>,
     },
+    /// Upright's corrections for the photo loaded as `id`, analysed from `analysed`.
+    Upright {
+        id: u64,
+        generation: u64,
+        analysed: Box<crate::develop::Recipe>,
+        result: Result<Vec<[f32; 9]>, String>,
+    },
     XmpLibrary(Arc<crate::presets::Library>),
     PresetSave(PathBuf),
     Header(Box<LoadedHeader>),

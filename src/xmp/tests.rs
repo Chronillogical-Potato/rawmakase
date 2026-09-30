@@ -420,3 +420,40 @@ fn lightroom_catalog_tables_parse_as_data() -> Result<()> {
     assert!(Node::from_lua("{ \"unterminated }").is_err());
     Ok(())
 }
+#[test]
+fn upright_imports_lightroom_stored_corrections() -> Result<()> {
+    let identity = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,1.000000000";
+    let vertical = "1.324242917,-0.010468300,-0.000000000,-0.979818960,1.404760585,0.799977181,-2.019842538,-0.000002219,3.019842538";
+    let attrs = format!(
+        r#"c:Exposure2012="0.5" c:PerspectiveUpright="4" c:UprightVersion="151388160" c:UprightCenterMode="0" c:UprightFocalLength35mm="34.9225" c:UprightTransformCount="6" c:UprightTransform_0="{identity}" c:UprightTransform_1="{identity}" c:UprightTransform_2="{identity}" c:UprightTransform_3="{identity}" c:UprightTransform_4="{vertical}" c:UprightTransform_5="{identity}""#
+    );
+    let r = parse(Path::new("upright.xmp"), &xml(&attrs, ""))?.apply(
+        &Recipe::default(),
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    let u = &r.upright;
+    assert_eq!(u.mode, crate::develop::UprightMode::Vertical);
+    assert_eq!(u.corrections.len(), 6);
+    assert!((u.corrections[4][6] + 2.019_842_6).abs() < 1e-6);
+    assert_eq!(u.lightroom["UprightFocalLength35mm"], "34.9225");
+    assert!(!u.lightroom.contains_key("UprightTransformCount"));
+    // Lightroom computes the correction when a preset only names the mode; RAWmakase
+    // cannot yet, so it reports that and applies the rest.
+    let preset = parse(
+        Path::new("preset.xmp"),
+        &xml(r#"c:Exposure2012="0.5" c:PerspectiveUpright="3""#, ""),
+    )?;
+    let base = Recipe::default();
+    assert!(
+        preset
+            .apply(&base, &Metadata::default(), &[], None)
+            .is_err()
+    );
+    let (r, warnings) = preset.apply_lenient(&base, &Metadata::default(), &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert!(r.upright.is_default());
+    assert!(warnings.iter().any(|w| w.contains("PerspectiveUpright")));
+    Ok(())
+}

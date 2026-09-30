@@ -30,6 +30,7 @@ struct NativeMetadata {
     model: [c_char; 64],
     cam_xyz: [f32; 9],
     lens: [c_char; 128],
+    focal_35mm: f32,
 }
 unsafe extern "C" {
     fn ora_version() -> *const c_char;
@@ -81,6 +82,9 @@ pub struct Metadata {
     pub shutter: f32,
     pub aperture: f32,
     pub focal: f32,
+    /// Focal length in 35mm equivalent (EXIF FocalLengthIn35mmFilm); 0 when unknown.
+    #[serde(default)]
+    pub focal_35mm: f32,
     pub wb: [f32; 3],
     pub daylight_wb: [f32; 3],
     pub matrix: [[f32; 3]; 3],
@@ -195,6 +199,7 @@ impl Raw {
             shutter: m.shutter,
             aperture: m.aperture,
             focal: m.focal,
+            focal_35mm: m.focal_35mm,
             wb: m.wb,
             daylight_wb: m.daylight_wb,
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),

@@ -274,6 +274,9 @@ mod tests {
         };
         r.transform.vertical = 0.3;
         r.transform.rotate = 2.;
+        r.upright.mode = crate::develop::UprightMode::Vertical;
+        r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
+        r.upright.corrections[4] = [1.1, 0.02, -0.05, 0.03, 1.05, -0.02, 0.2, 0.01, 1.];
         let map = ViewMapping::new(&im, &r);
         for p in [[0.3, 0.4], [0.5, 0.5], [0.7, 0.2]] {
             let view = map.to_view(p);
@@ -283,6 +286,32 @@ mod tests {
                 "{p:?} {view:?} {back:?}"
             );
         }
+    }
+    #[test]
+    fn upright_applies_in_the_recorded_frame() {
+        // A photo the camera turned to portrait: Lightroom's Upright correction is in
+        // the frame the camera recorded, so a shift along its x samples 10% further
+        // along the decoded image's width.
+        let im = image(6);
+        let plain = Recipe::default();
+        let mut r = plain.clone();
+        r.upright.mode = crate::develop::UprightMode::Auto;
+        r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
+        r.upright.corrections[1] = [1., 0., 0.1, 0., 1., 0., 0., 0., 1.];
+        let (a, b) = (Geometry::new(&im, &plain, 0), Geometry::new(&im, &r, 0));
+        for [u, v] in [[0.3, 0.4], [0.8, 0.1]] {
+            let [ax, ay] = a.source(u, v);
+            let [bx, by] = b.source(u, v);
+            assert!(
+                (ax - bx - 28.).abs() < 1e-3 && (ay - by).abs() < 1e-3,
+                "{u} {v}"
+            );
+        }
+        r.engine = 3;
+        assert_eq!(
+            Geometry::new(&im, &r, 0).source(0.3, 0.4),
+            a.source(0.3, 0.4)
+        );
     }
     #[test]
     fn lens_inverse_undoes_forward() {

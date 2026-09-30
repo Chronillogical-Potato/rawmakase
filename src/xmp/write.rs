@@ -340,6 +340,18 @@ fn settings(r: &Recipe) -> Settings {
     s.put("PerspectiveScale", t.scale, 0.01, 0, false);
     s.put("PerspectiveX", t.offset_x, 0.01, 2, true);
     s.put("PerspectiveY", t.offset_y, 0.01, 2, true);
+    let u = &r.upright;
+    s.text("PerspectiveUpright", u.mode.code().to_string());
+    if !u.corrections.is_empty() {
+        s.text("UprightTransformCount", u.corrections.len().to_string());
+    }
+    for (i, m) in u.corrections.iter().enumerate() {
+        let m: Vec<String> = m.iter().map(|x| format!("{x:.9}")).collect();
+        s.text(&format!("UprightTransform_{i}"), m.join(","));
+    }
+    for (key, value) in &u.lightroom {
+        s.text(key, value.clone());
+    }
     for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
         s.put(&format!("Crop{name}"), r.crop[i], 1., 6, false);
     }

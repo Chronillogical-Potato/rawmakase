@@ -18,6 +18,7 @@ pub mod masks;
 mod pipeline;
 mod preview_renderer;
 mod pyramid;
+pub mod upright;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
@@ -30,7 +31,7 @@ pub use crate::color_math::{mul, srgb_encode};
 pub use auto::{
     auto_tone, auto_tone_cancellable, auto_white_balance, auto_white_balance_cancellable,
 };
-pub use geometry::{Geometry, Transform};
+pub use geometry::{Geometry, Transform, Upright, UprightMode};
 pub use image_space::{ImageFrame, ViewMapping};
 pub use pipeline::{
     neutral_pick, preview, render, render_legacy, render_region, render_region_legacy,

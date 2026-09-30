@@ -45,8 +45,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Geometry
 
-- **Upright** (Auto, Level, Vertical, Full, Guided) is not implemented; XMP files that use it are rejected.
-- The order in which Transform sliders compose was not measured separately. Aspect ±50 shows a slightly higher error than the other sliders.
+- **Upright** renders from the corrections Lightroom stores with an edit ([transform](transform.md)); RAWmakase cannot analyse a photo for Upright yet, so presets that only name a mode are reported.
 
 ## Local and finishing adjustments
 

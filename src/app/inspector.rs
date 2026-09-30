@@ -357,6 +357,10 @@ impl Editor {
         let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
         let auto_in_effect = self.auto_in_effect();
         let mut auto_request = None;
+        // Upright analyses the decoded photo once and keeps a correction for every mode.
+        let upright_ready = self.document.full().is_some() && !self.document.upright.is_running();
+        let mut upright_request = false;
+        let mut guided_unavailable = false;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -1055,21 +1059,39 @@ impl Editor {
                 hint_row(ui, "Update the process in Calibration to use Transform.");
             }
             ui.add_enabled_ui(supported, |ui| {
+                use crate::develop::UprightMode;
+                // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
-                    // Automatic Upright needs line detection, which isn't built yet.
-                    ui.add_enabled_ui(false, |ui| {
-                        let w = ui.available_width();
-                        let mut mode = 0;
-                        segmented(
-                            ui,
-                            &mut mode,
-                            &[(0, "Off"), (1, "Auto"), (2, "Level"), (3, "Vertical"), (4, "Full")],
-                            w,
-                        );
-                    })
-                    .response
-                    .on_disabled_hover_text("Automatic Upright isn't available yet; use the sliders.");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let off = r.upright.mode == UprightMode::Off;
+                        if ui
+                            .add_enabled(upright_ready && !off, egui::Button::new("Update"))
+                            .on_hover_text("Analyse the photo again, e.g. after changing lens corrections")
+                            .clicked()
+                        {
+                            upright_request = true;
+                        }
+                    });
                 });
+                let u = &mut r.upright;
+                let before = u.mode;
+                for row in [
+                    [(UprightMode::Off, "Off"), (UprightMode::Auto, "Auto"), (UprightMode::Guided, "Guided")],
+                    [(UprightMode::Level, "Level"), (UprightMode::Vertical, "Vertical"), (UprightMode::Full, "Full")],
+                ] {
+                    let w = ui.available_width();
+                    segmented(ui, &mut u.mode, &row, w);
+                }
+                if u.mode != before {
+                    if u.mode == UprightMode::Guided && u.corrections.len() <= u.mode.code() {
+                        // Guided needs guides drawn on the photo, which isn't built yet;
+                        // a photo imported with Guided keeps Lightroom's correction.
+                        u.mode = before;
+                        guided_unavailable = true;
+                    } else if u.mode != UprightMode::Off && u.corrections.len() <= u.mode.code() {
+                        upright_request = true;
+                    }
+                }
                 control_row(ui, "", |ui| {
                     let mut constrain = false;
                     ui.add_enabled(false, egui::Checkbox::new(&mut constrain, "Constrain Crop"))
@@ -1087,6 +1109,7 @@ impl Editor {
             });
         }) {
             r.transform = Default::default();
+            r.upright = Default::default();
         }
 
         if adjustment_section(ui, "Effects", |ui| {
@@ -1221,6 +1244,12 @@ impl Editor {
         }
         if let Some(kind) = auto_request {
             self.start_auto(kind);
+        }
+        if upright_request {
+            self.start_upright();
+        }
+        if guided_unavailable {
+            self.status = "Guided Upright isn't available yet".into();
         }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());

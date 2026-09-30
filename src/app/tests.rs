@@ -1266,3 +1266,27 @@ fn auto_is_off_while_its_settings_stand() {
     editor.undo();
     assert!(!editor.auto_in_effect());
 }
+#[test]
+fn undoing_an_upright_mode_turns_it_off_once_analysed() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let original = e.document.recipe.clone();
+    e.document.recipe.upright.mode = UprightMode::Vertical;
+    e.history(original.clone());
+    // The analysis arrives after the click that chose the mode.
+    let (generation, _) = e.document.upright.start();
+    let analysed = e.document.recipe.clone();
+    let mut corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    corrections[4][6] = 0.1;
+    e.upright_ready(generation, &analysed, Ok(corrections.clone()));
+    assert_eq!(e.document.recipe.upright.corrections, corrections);
+    // It is not a step of its own: one undo leaves Upright off, redo brings it back
+    // corrected.
+    assert_eq!(e.document.history.steps().1, 1);
+    e.undo();
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Off);
+    e.redo();
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
+    assert_eq!(e.document.recipe.upright.corrections, corrections);
+}

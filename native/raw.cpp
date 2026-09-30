@@ -25,6 +25,7 @@ struct Metadata {
     char make[64], model[64];
     float cam_xyz[9];
     char lens[128];
+    float focal_35mm;
 };
 typedef int (*Cancel)(void*);
 }
@@ -104,6 +105,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->fuji_dynamic_range=d.makernotes.fuji.DevelopmentDynamicRange;
         m->iso=d.other.iso_speed; m->shutter=d.other.shutter;
         m->aperture=d.other.aperture; m->focal=d.other.focal_len;
+        m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         for(int c=0;c<3;++c) {
             m->daylight_wb[c] = d.color.pre_mul[c];
             m->wb[c] = d.color.cam_mul[c] > 0 ? d.color.cam_mul[c] : d.color.pre_mul[c];

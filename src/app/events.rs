@@ -46,6 +46,12 @@ impl Editor {
                 Event::Auto { id, kind, result } if id == self.load.id() => {
                     self.auto_ready(kind, result)
                 }
+                Event::Upright {
+                    id,
+                    generation,
+                    analysed,
+                    result,
+                } if id == self.load.id() => self.upright_ready(generation, &analysed, result),
                 Event::XmpLibrary(library) => {
                     self.presets.library = library;
                     self.refresh_preset_support();
@@ -109,6 +115,8 @@ impl Editor {
                 Event::Ready { id, full, status } if id == self.load.id() => {
                     self.document.set_image(full);
                     self.load.finish(id);
+                    // An Upright mode chosen before the photo decoded still needs analysing.
+                    self.ensure_upright();
                     if !self.document.save.is_protected() {
                         self.status = status;
                     }

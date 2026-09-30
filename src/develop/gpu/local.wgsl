@@ -297,16 +297,6 @@ fn source(u: f32, v: f32) -> vec2<f32> {
     let cs = s(S_COS);
     var nx = (cs * x + sn * y) / ow + 0.5;
     var ny = (-sn * x + cs * y) / oh + 0.5;
-    if s(S_TRANSFORM) != 0.0 {
-        let long = max(ow, oh);
-        let px = (nx - 0.5) * ow / long;
-        let py = (ny - 0.5) * oh / long;
-        let hm = S_HOMOGRAPHY;
-        var w = s(hm + 6u) * px + s(hm + 7u) * py + s(hm + 8u);
-        if !(w > 1e-6) { w = 1e-6; }
-        nx = (s(hm) * px + s(hm + 1u) * py + s(hm + 2u)) / w * long / ow + 0.5;
-        ny = (s(hm + 3u) * px + s(hm + 4u) * py + s(hm + 5u)) / w * long / oh + 0.5;
-    }
     if s(S_FLIP) != 0.0 { nx = 1.0 - nx; }
     if s(S_FLIP + 1u) != 0.0 { ny = 1.0 - ny; }
     var ox = nx;
@@ -316,6 +306,14 @@ fn source(u: f32, v: f32) -> vec2<f32> {
         case 2u: { ox = 1.0 - nx; oy = 1.0 - ny; }
         case 3u: { ox = 1.0 - ny; oy = nx; }
         default: {}
+    }
+    if s(S_TRANSFORM) != 0.0 {
+        let hm = S_HOMOGRAPHY;
+        var w = s(hm + 6u) * ox + s(hm + 7u) * oy + s(hm + 8u);
+        if !(w > 1e-6) { w = 1e-6; }
+        let tx = (s(hm) * ox + s(hm + 1u) * oy + s(hm + 2u)) / w;
+        oy = (s(hm + 3u) * ox + s(hm + 4u) * oy + s(hm + 5u)) / w;
+        ox = tx;
     }
     return vec2(
         (s(S_INSET) + ox * s(S_INSET + 2u)) * s(S_WIDTH) - 0.5,

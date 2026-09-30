@@ -65,6 +65,17 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     r.grading[0] = [220. / 360., 0.2, -0.1];
     r.effects.clarity = 0.15;
     r.curve.points = vec![[0., 0.1], [0.5, 0.55], [1., 1.]];
+    let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    r.upright = crate::develop::Upright {
+        mode: crate::develop::UprightMode::Level,
+        corrections: vec![
+            identity,
+            identity,
+            identity,
+            [1.02, -0.01, 0.005, 0.02, 1.02, -0.02, 0., 0., 1.],
+        ],
+        lightroom: [("UprightVersion".into(), "151388160".into())].into(),
+    };
     let photo = crate::xmp::write::Photo {
         raw_name: "DSC07924.ARW".into(),
         captured: Some("2018:08:26 10:39:33".into()),
@@ -98,6 +109,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     }
     assert_eq!(back.crop, r.crop);
     assert_eq!(back.curve.points.len(), 3);
+    assert_eq!(back.upright, r.upright);
     Ok(())
 }
 #[test]
