@@ -307,6 +307,8 @@ mod tests {
                 "{u} {v}"
             );
         }
+        // The camera's default crop starts 10 pixels in: the margin shows white.
+        assert!(b.outside(5., 100.) && !b.outside(15., 100.));
         r.engine = 3;
         assert_eq!(
             Geometry::new(&im, &r, 0).source(0.3, 0.4),

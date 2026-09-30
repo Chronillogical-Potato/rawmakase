@@ -1313,3 +1313,22 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
     assert!(e.document.recipe.upright.corrections.is_empty());
 }
+#[test]
+fn upright_analysis_yields_to_corrections_applied_meanwhile() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.recipe.upright.mode = UprightMode::Level;
+    let (generation, _) = e.document.upright.start();
+    let analysed = e.document.recipe.clone();
+    // A Lightroom preset with its own corrections lands before the analysis.
+    let mut imported = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    imported[3][2] = 0.02;
+    e.document.recipe.upright.corrections = imported.clone();
+    e.upright_ready(
+        generation,
+        &analysed,
+        Ok(vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5]),
+    );
+    assert_eq!(e.document.recipe.upright.corrections, imported);
+}

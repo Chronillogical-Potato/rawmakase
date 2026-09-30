@@ -290,12 +290,15 @@ impl Geometry {
     }
     /// Whether a transformed output position has no source pixel; Lightroom shows
     /// white there.
+    /// Pixels beyond the camera's default crop count as outside, as in Lightroom.
     pub fn outside(&self, x: f32, y: f32) -> bool {
+        let (w, h) = (self.source_width as f32, self.source_height as f32);
+        let [left, top, width, height] = self.inset;
         self.transform.is_some()
-            && (x < -0.5
-                || y < -0.5
-                || x > self.source_width as f32 - 0.5
-                || y > self.source_height as f32 - 0.5)
+            && (x < left * w - 0.5
+                || y < top * h - 0.5
+                || x > (left + width) * w - 0.5
+                || y > (top + height) * h - 0.5)
     }
     /// The fields `source` reads, laid out for `gpu/local.wgsl` (`S_CROP` to the end of
     /// `S_HOMOGRAPHY`): crop, oriented size, zoom, sine and cosine, turns, flips, inset,

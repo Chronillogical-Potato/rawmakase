@@ -66,6 +66,12 @@ impl Editor {
             return;
         }
         self.document.upright.finish(generation);
+        // Settings applied meanwhile (a preset, a History step) may bring their own
+        // corrections; those win.
+        if self.document.recipe.upright.corrections != analysed.upright.corrections {
+            self.ensure_upright();
+            return;
+        }
         if inputs(analysed) != inputs(&self.document.recipe) {
             self.start_upright();
             return;

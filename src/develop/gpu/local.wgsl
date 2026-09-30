@@ -328,8 +328,12 @@ fn sample_region(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocat
     let x = su(S_REGION) + i % rw;
     let y = su(S_REGION + 1u) + i / rw;
     let at = source((f32(x) + 0.5) / s(S_OUT), (f32(y) + 0.5) / s(S_OUT + 1u));
-    let outside = s(S_TRANSFORM) != 0.0
-        && (at.x < -0.5 || at.y < -0.5 || at.x > s(S_WIDTH) - 0.5 || at.y > s(S_HEIGHT) - 0.5);
+    // Beyond the camera's default crop counts as outside, as `Geometry::outside`.
+    let x0 = s(S_INSET) * s(S_WIDTH) - 0.5;
+    let y0 = s(S_INSET + 1u) * s(S_HEIGHT) - 0.5;
+    let x1 = (s(S_INSET) + s(S_INSET + 2u)) * s(S_WIDTH) - 0.5;
+    let y1 = (s(S_INSET + 1u) + s(S_INSET + 3u)) * s(S_HEIGHT) - 0.5;
+    let outside = s(S_TRANSFORM) != 0.0 && (at.x < x0 || at.y < y0 || at.x > x1 || at.y > y1);
     var p = vec3(1.0);
     var pos = vec2(OUTSIDE);
     if !outside {
