@@ -70,6 +70,8 @@ jobs:
           path: ${{ runner.temp }}/release-notes/notes.md
           if-no-files-found: error
 
+  # The platform builds run alongside CI rather than after it; publish waits
+  # for both, so nothing ships unless CI passed on the exact release commit.
   ci:
     needs: prepare
     uses: ./.github/workflows/ci.yml
@@ -78,7 +80,7 @@ jobs:
 
   linux:
     name: Linux archive (${{ matrix.arch }})
-    needs: [prepare, ci]
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -139,7 +141,7 @@ jobs:
 
   arch:
     name: Arch package and source recipe
-    needs: [prepare, ci]
+    needs: prepare
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     timeout-minutes: 60
@@ -164,7 +166,9 @@ jobs:
             packaging/arch/rawmakase/PKGBUILD > dist/arch/PKGBUILD
           useradd -m builder
           chown -R builder dist
-          su builder -c "cd '$GITHUB_WORKSPACE/dist/arch' && makepkg --noconfirm && makepkg --printsrcinfo > .SRCINFO"
+          # CI runs the tests on this exact commit; check() stays in the recipe
+          # for anyone building it themselves.
+          su builder -c "cd '$GITHUB_WORKSPACE/dist/arch' && makepkg --noconfirm --nocheck && makepkg --printsrcinfo > .SRCINFO"
           namcap dist/arch/PKGBUILD dist/arch/*.pkg.tar.zst
           pacman -U --noconfirm dist/arch/*.pkg.tar.zst
           rawmakase --version
@@ -210,7 +214,7 @@ jobs:
 
   macos:
     name: macOS (${{ matrix.arch }})
-    needs: [prepare, ci, macos-icon]
+    needs: [prepare, macos-icon]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -294,7 +298,7 @@ jobs:
 
   windows:
     name: Windows installer and archive (x86_64)
-    needs: [prepare, ci]
+    needs: prepare
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -390,7 +394,7 @@ jobs:
 
   publish:
     name: Publish verified packages
-    needs: [prepare, linux, arch, macos, windows, packages]
+    needs: [prepare, ci, linux, arch, macos, windows, packages]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
