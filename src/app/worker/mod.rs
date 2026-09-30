@@ -182,6 +182,8 @@ pub struct RenderJob {
     /// Also return the shown pixels, for the white balance selector's loupe.
     pub samples: bool,
     pub overlay: Overlay,
+    /// Presented textures the viewport draws until this job's preview arrives.
+    pub drawn: Vec<egui::TextureId>,
 }
 fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
     let _ = tx.send(event);

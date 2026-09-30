@@ -264,6 +264,7 @@ impl Editor {
                 thumbnail: region.is_none() && self.shows_library_edit(),
                 samples: self.view.is(super::state::Tool::WhiteBalance),
                 overlay: self.overlay(),
+                drawn: self.preview.presented(),
             });
         }
     }

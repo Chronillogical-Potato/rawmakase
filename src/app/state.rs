@@ -242,6 +242,15 @@ impl PreviewState {
         self.last_region = None;
         self.mode = TextureMode::Whole;
     }
+    /// Textures the renderer presented into that the viewport draws.
+    pub fn presented(&self) -> Vec<egui::TextureId> {
+        [&self.texture, &self.region, &self.navigator]
+            .into_iter()
+            .flatten()
+            .filter(|p| p.is_presented())
+            .map(Picture::id)
+            .collect()
+    }
     /// Stops drawing textures the renderer presented into, once it has freed them.
     /// Not rendering again at once: a render that keeps failing would repeat.
     pub fn forget_presented(&mut self) {
