@@ -50,9 +50,8 @@ pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) 
                     let v = (y as f32 + (j as f32 + 0.5) / taps as f32) / h as f32;
                     let [sx, sy] = g.source(u, v);
                     let [sx, sy] = lens.as_ref().map_or([sx, sy], |l| l.forward(sx, sy));
-                    if sx >= 0. && sy >= 0. {
-                        sum += at(sx as usize, sy as usize);
-                    }
+                    // Clamped to the edge, as rendering samples.
+                    sum += at(sx.max(0.) as usize, sy.max(0.) as usize);
                 }
             }
             out[y * w + x] = sum / (taps * taps) as f32;

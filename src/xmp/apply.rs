@@ -849,8 +849,10 @@ impl Preset {
         let mode = UprightMode::from_code(code as usize)
             .filter(|_| code.fract() == 0.)
             .with_context(|| format!("Unsupported PerspectiveUpright {code}"))?;
+        // A preset names only the mode; the app analyses each photo it is applied to.
+        // A photo's own settings always carry Lightroom's corrections.
         ensure!(
-            mode == UprightMode::Off || mode.code() < corrections.len(),
+            mode == UprightMode::Off || mode.code() < corrections.len() || !self.photo_settings,
             "PerspectiveUpright without Lightroom's stored correction is not supported yet"
         );
         r.upright = crate::develop::Upright {

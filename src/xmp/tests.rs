@@ -439,19 +439,25 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
     assert!((u.corrections[4][6] + 2.019_842_6).abs() < 1e-6);
     assert_eq!(u.lightroom["UprightFocalLength35mm"], "34.9225");
     assert!(!u.lightroom.contains_key("UprightTransformCount"));
-    // Lightroom computes the correction when a preset only names the mode; RAWmakase
-    // cannot yet, so it reports that and applies the rest.
+    // A preset names only the mode: it applies, and the app analyses each photo.
     let preset = parse(
         Path::new("preset.xmp"),
         &xml(r#"c:Exposure2012="0.5" c:PerspectiveUpright="3""#, ""),
     )?;
-    let base = Recipe::default();
-    assert!(
-        preset
-            .apply(&base, &Metadata::default(), &[], None)
-            .is_err()
-    );
-    let (r, warnings) = preset.apply_lenient(&base, &Metadata::default(), &[], None)?;
+    let r = preset.apply(&Recipe::default(), &Metadata::default(), &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(r.upright.mode, crate::develop::UprightMode::Level);
+    assert!(r.upright.corrections.is_empty());
+    // A photo's own settings without Lightroom's correction are reported.
+    let sidecar = parse(
+        Path::new("photo.xmp"),
+        &xml(
+            r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:Exposure2012="0.5" c:PerspectiveUpright="3""#,
+            "",
+        ),
+    )?;
+    let (r, warnings) =
+        sidecar.apply_lenient(&Recipe::default(), &Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 0.5);
     assert!(r.upright.is_default());
     assert!(warnings.iter().any(|w| w.contains("PerspectiveUpright")));
@@ -459,7 +465,8 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
 }
 #[test]
 fn upright_modes_without_a_stored_correction_stay_unanalysed() {
-    // Only Vertical's correction, not Off's to Level's: nothing is filled in for them.
+    // Only Vertical's correction, not Off's to Level's: nothing is filled in for them,
+    // so the preset's Vertical is analysed like any mode-only preset.
     let preset = parse(
         Path::new("partial.xmp"),
         &xml(
@@ -468,9 +475,8 @@ fn upright_modes_without_a_stored_correction_stay_unanalysed() {
         ),
     )
     .unwrap();
-    assert!(
-        preset
-            .apply(&Recipe::default(), &Metadata::default(), &[], None)
-            .is_err()
-    );
+    let r = preset
+        .apply(&Recipe::default(), &Metadata::default(), &[], None)
+        .unwrap();
+    assert!(r.upright.corrections.is_empty());
 }
