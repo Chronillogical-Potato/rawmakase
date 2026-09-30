@@ -101,12 +101,26 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Build dependencies and app
+      - name: Rust
         run: |
-          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install stable --profile minimal
           rustup default stable
-          packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
+      # The same vcpkg cache as the CI job (see ci.yml).
+      - id: image
+        shell: bash
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ steps.image.outputs.version }}-${{ hashFiles('packaging/windows/deps.ps1') }}
+      - name: LibRaw and Little CMS
+        run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build and stage app
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo build --release --locked
           packaging/windows/stage.ps1 target\release\rawmakase.exe "$env:RUNNER_TEMP\deps" dist\windows
       - uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
