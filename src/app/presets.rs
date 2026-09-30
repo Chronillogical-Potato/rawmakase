@@ -306,12 +306,18 @@ impl Editor {
                     &self.document.profiles,
                     self.document.full().map(|image| image.as_ref()),
                 ) {
-                    Ok((r, skipped)) => {
+                    Ok((mut r, skipped)) => {
                         let substitute = library.presets[i]
                             .profile_substitute(m, &self.document.profiles)
                             .map(|(_, used)| format!(" · using {used}"))
                             .unwrap_or_default();
+                        // A preset's Upright corrections, if any, were analysed from
+                        // another photo: keep the mode and analyse this one.
+                        if r.upright != self.document.recipe.upright {
+                            r.upright.clear_analysis();
+                        }
                         self.document.recipe = r;
+                        self.ensure_upright();
                         self.presets.selected = library.presets[i].id.clone();
                         self.status = if skipped.is_empty() {
                             format!("Applied {}{substitute}", library.presets[i].name)
@@ -496,7 +502,9 @@ impl Editor {
         });
         if let Some(n) = go_to {
             let current = &mut self.document.recipe;
-            self.document.history.go_to(n, current);
+            if self.document.history.go_to(n, current) {
+                self.ensure_upright();
+            }
         }
         if let Some(i) = lightroom
             && let Some(m) = &self.document.metadata
