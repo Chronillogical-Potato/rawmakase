@@ -29,6 +29,8 @@ jobs:
       - uses: crmne/copilot-triage@2c1636ec994f3d1e07650d1dcc4f9245d9fbe2be # v0.6.2
         with:
           copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          # Choose a model available to the token's Copilot plan.
+          model: auto
           kind: issue
           number: ${{ inputs.number || github.event.issue.number }}
           # Manual runs preview a decision in the job summary; they still use Copilot credits.
