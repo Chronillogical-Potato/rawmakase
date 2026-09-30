@@ -192,7 +192,7 @@ h1 span { color: var(--salmon); }
 .files a:hover b { color: var(--salmon); }
 .files code { font: 400 12px/1.3 var(--mono); color: var(--rice-faint); overflow-wrap: anywhere; }
 .agent {
-  margin-top: 20px; padding: 28px; border-radius: 18px; border: 1px solid var(--line); background: var(--ink-2);
+  margin-top: 56px; padding: 28px; border-radius: 18px; border: 1px solid var(--line); background: var(--ink-2);
   display: grid; grid-template-columns: 1fr 1.3fr; gap: 28px; align-items: center;
 }
 .agent h3 { margin: 0 0 10px; font: 700 22px/1.2 var(--sans); letter-spacing: -0.02em; }
