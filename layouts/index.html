@@ -128,7 +128,7 @@
           <ul class="files">
             <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-arm64.dmg"><b>Apple Silicon</b><code>rawmakase-v{{ $v }}-macos-arm64.dmg</code>{{ partial "icon.html" "download-simple" }}</a></li>
             <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-x86_64.dmg"><b>Intel</b><code>rawmakase-v{{ $v }}-macos-x86_64.dmg</code>{{ partial "icon.html" "download-simple" }}</a></li>
-            <li><a href="{{ $dl }}rawmakase.rb"><b>Homebrew cask</b><code>rawmakase.rb</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><button type="button" class="copy" data-copy="brew install --cask pch/tap/rawmakase" aria-label="Copy Homebrew install command"><b>Homebrew</b><code>brew install --cask pch/tap/rawmakase</code>{{ partial "icon.html" "copy-simple" }}<span class="copied" aria-live="polite"></span></button></li>
           </ul>
           <p class="note">Signed and notarized. Open the DMG and drag RAWmakase into Applications.</p>
         </article>
@@ -164,6 +164,14 @@
   </footer>
 
   <script>
+    document.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        navigator.clipboard.writeText(b.dataset.copy).then(function () {
+          var l = b.querySelector(".copied"); l.textContent = "Copied";
+          clearTimeout(b._t); b._t = setTimeout(function () { l.textContent = ""; }, 1600);
+        });
+      });
+    });
     (function () {
       var ua = navigator.userAgent, os = /Mac/.test(ua) ? "mac" : /Linux|X11/.test(ua) && !/Android/.test(ua) ? "linux" : /Win/.test(ua) ? "windows" : null;
       var card = os && document.querySelector('.platform[data-os="' + os + '"]');
