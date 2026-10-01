@@ -1,6 +1,6 @@
 //! Additional photographic controls used by imported XMP recipes.
 use crate::{
-    curve::ToneCurve,
+    develop::curve::ToneCurve,
     develop::{Recipe, Rendered},
 };
 use anyhow::{Result, ensure};

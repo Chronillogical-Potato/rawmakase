@@ -1,6 +1,6 @@
 use rawmakase::{
-    core::{self, Recipe},
-    profile,
+    camera_profiles,
+    develop::{self, Recipe},
     raw::{CameraImage, Metadata},
 };
 #[test]
@@ -17,7 +17,7 @@ fn imported_profiles_render_and_roundtrip() -> anyhow::Result<()> {
         {
             continue;
         }
-        let p = match profile::from_bytes(&std::fs::read(&path)?) {
+        let p = match camera_profiles::from_bytes(&std::fs::read(&path)?) {
             Ok(p) => p,
             Err(e) => {
                 errors.push(format!("{}: {e:#}", path.display()));
@@ -47,7 +47,7 @@ fn imported_profiles_render_and_roundtrip() -> anyhow::Result<()> {
             scale_clipped: 0,
             recovered: Default::default(),
         };
-        let out = core::render(&im, &recipe, 0)?;
+        let out = develop::render(&im, &recipe, 0)?;
         assert!(
             out.pixels
                 .iter()
@@ -71,7 +71,7 @@ fn imported_enhanced_profiles_match_camera_and_resolve_xmp() -> anyhow::Result<(
     let raw = rawmakase::raw::Raw::open(&std::path::PathBuf::from(std::env::var(
         "RAWMAKASE_PROFILE_RAW",
     )?))?;
-    let (profiles, errors) = profile::installed(&raw.metadata);
+    let (profiles, errors) = camera_profiles::installed(&raw.metadata);
     assert!(errors.is_empty(), "{errors:?}");
     for name in [
         "Adobe Color",
@@ -113,8 +113,8 @@ fn imported_enhanced_profiles_match_camera_and_resolve_xmp() -> anyhow::Result<(
             scale_clipped: 0,
             recovered: Default::default(),
         };
-        let full = core::render(&image, &recipe, 0)?;
-        let tile = core::render_region(&image, &recipe, [4, 4, 8, 8])?;
+        let full = develop::render(&image, &recipe, 0)?;
+        let tile = develop::render_region(&image, &recipe, [4, 4, 8, 8])?;
         for y in 0..8 {
             for x in 0..8 {
                 assert_eq!(tile.pixels[y * 8 + x], full.pixels[(y + 4) * 16 + x + 4]);

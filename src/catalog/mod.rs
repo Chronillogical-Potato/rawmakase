@@ -178,7 +178,8 @@ impl Catalog {
             })?
             .collect::<rusqlite::Result<_>>()?)
     }
-    pub fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
+    #[cfg(test)]
+    pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
         Ok(self
             .db
             .prepare("SELECT photo FROM collection_photos WHERE collection=?")?

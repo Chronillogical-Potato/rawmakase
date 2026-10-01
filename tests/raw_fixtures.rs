@@ -1,7 +1,8 @@
 use rawmakase::{
-    core::{self, Recipe},
-    io::{self, ExportOptions},
+    develop::{self, Recipe},
+    export::{self, ExportOptions},
     raw::Raw,
+    storage,
 };
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 #[test]
@@ -12,7 +13,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
         .build_global()
         .ok();
     let dir = PathBuf::from(std::env::var("RAWMAKASE_FIXTURES").expect("Set RAWMAKASE_FIXTURES"));
-    let files = io::list_raws(&dir)?;
+    let files = storage::list_raws(&dir)?;
     assert!(
         files
             .iter()
@@ -25,7 +26,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
     );
     let temp = tempfile::tempdir()?;
     for (index, path) in files.iter().enumerate() {
-        let before = io::Identity::read(path)?;
+        let before = storage::Identity::read(path)?;
         assert!(
             Raw::open(path)?
                 .develop(false, &AtomicBool::new(true))
@@ -43,11 +44,11 @@ fn raw_development_and_export() -> anyhow::Result<()> {
         recipe.exposure = -1.;
         recipe.rotation = 1;
         recipe.crop = [0.1, 0.1, 0.9, 0.9];
-        let output = core::render(&image, &recipe, 320)?;
+        let output = develop::render(&image, &recipe, 320)?;
         assert!(output.height > output.width);
         for extension in ["jpg", "tiff"] {
             let p = temp.path().join(format!("{index}.{extension}"));
-            io::export(
+            export::export(
                 &p,
                 path,
                 &output,
@@ -70,7 +71,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
                 );
             }
             assert!(
-                io::export(
+                export::export(
                     &p,
                     path,
                     &output,
@@ -81,7 +82,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
                 .is_err()
             );
         }
-        assert_eq!(before, io::Identity::read(path)?);
+        assert_eq!(before, storage::Identity::read(path)?);
     }
     Ok(())
 }
@@ -94,7 +95,7 @@ fn navigation_memory_stress() -> anyhow::Result<()> {
         .build_global()
         .ok();
     let dir = PathBuf::from(std::env::var("RAWMAKASE_FIXTURES")?);
-    let files = io::list_raws(&dir)?;
+    let files = storage::list_raws(&dir)?;
     assert!(!files.is_empty());
     fn rss() -> u64 {
         #[cfg(target_os = "macos")]
@@ -126,9 +127,9 @@ fn navigation_memory_stress() -> anyhow::Result<()> {
     for i in 0..50 {
         {
             let im = Raw::open(&files[i % files.len()])?.develop(false, &AtomicBool::new(false))?;
-            let small = core::preview(&im, 1600);
+            let small = develop::preview(&im, 1600);
             let r = Recipe::for_metadata(&im.metadata);
-            let _ = core::render(&small, &r, 1600)?;
+            let _ = develop::render(&small, &r, 1600)?;
         }
         let memory = rss();
         if i == 5 {

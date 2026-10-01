@@ -27,14 +27,13 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | File | Responsibility |
 | --- | --- |
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
-| [src/lib.rs](../src/lib.rs) | Canonical domain exports and hidden compatibility aliases for older library paths. |
+| [src/lib.rs](../src/lib.rs) | The module list. The library serves the binary, examples and tests; it is not a stable public API. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files as RAWmakase sees them: metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
 | [src/color_math.rs](../src/color_math.rs) | Private shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
-| [src/io.rs](../src/io.rs) | Compatibility reexports for the former combined persistence/export API; add implementations to their domain instead. |
 | [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs) | OS integration entry point and Linux GVFS/FUSE path bridge. |
 
 ## Development and rendering
