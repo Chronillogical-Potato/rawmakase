@@ -73,6 +73,9 @@ impl Editor {
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.
     pub(super) fn flush(&mut self) -> bool {
+        if let Some(library) = &mut self.library {
+            library.commit_copy_name();
+        }
         if let Some(done) = self.autosave.wait() {
             self.background_saved(done);
         }

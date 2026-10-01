@@ -104,6 +104,9 @@ pub(super) enum EditJob {
     /// copies share a file but not an edit, so results go by photo.
     Render {
         id: i64,
+        /// Matches the result to this request, not to a later photo that
+        /// reused a removed copy's id.
+        ticket: u64,
         path: PathBuf,
         source: EditSource,
     },
@@ -119,9 +122,9 @@ pub(super) enum EditJob {
 pub(super) type Wanted = Arc<Mutex<HashSet<i64>>>;
 /// What an edited preview job came to.
 pub(super) enum EditResult {
-    Ready(i64, image::RgbImage),
+    Ready(i64, u64, image::RgbImage),
     /// The photo scrolled out of view first; request it again when shown.
-    Skipped(i64),
+    Skipped(i64, u64),
     Failed,
     /// A preview could not be kept in the cache; it comes besides any result.
     CacheError(String),
@@ -179,10 +182,15 @@ fn spawn_edited_with(
                     }
                     None
                 }
-                EditJob::Render { id, .. } if !wanted.lock().unwrap().contains(&id) => {
-                    Some(EditResult::Skipped(id))
+                EditJob::Render { id, ticket, .. } if !wanted.lock().unwrap().contains(&id) => {
+                    Some(EditResult::Skipped(id, ticket))
                 }
-                EditJob::Render { id, path, source } => {
+                EditJob::Render {
+                    id,
+                    ticket,
+                    path,
+                    source,
+                } => {
                     let tag = source.tag();
                     let cached = cache
                         .as_ref()
@@ -203,7 +211,7 @@ fn spawn_edited_with(
                         Some(image)
                     });
                     Some(match image {
-                        Some(image) => EditResult::Ready(id, image),
+                        Some(image) => EditResult::Ready(id, ticket, image),
                         None => EditResult::Failed,
                     })
                 }
@@ -394,6 +402,7 @@ mod tests {
         let source = EditSource::Recipe("{}".into());
         let job = |id, path: &PathBuf| EditJob::Render {
             id,
+            ticket: 0,
             path: path.clone(),
             source: source.clone(),
         };
@@ -405,7 +414,7 @@ mod tests {
         tx.send(job(2, &works))?;
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
-            EditResult::Ready(2, _)
+            EditResult::Ready(2, 0, _)
         ));
         Ok(())
     }

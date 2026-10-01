@@ -358,7 +358,10 @@ impl Editor {
             Ok(master) => {
                 self.status = library.message.clone();
                 if self.document.catalog_photo == Some(id) {
-                    if let Some(master) = master {
+                    // Removed from Develop: show its master there instead.
+                    if let Some(master) = master
+                        && !self.library_mode
+                    {
                         self.develop_catalog_photo(master);
                     }
                     // Nothing may save into the removed copy.

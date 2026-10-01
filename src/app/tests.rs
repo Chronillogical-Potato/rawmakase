@@ -1402,3 +1402,42 @@ fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::
     }
     Ok(())
 }
+#[test]
+fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("image.ARW"), b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let master = l.photos[0].id;
+    let copy = l.create_virtual_copy(master)?;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    // The copy was last open in Develop; the user is back in the Library.
+    editor.document.catalog_photo = Some(copy);
+    editor.library_mode = true;
+    editor.remove_copy = Some(copy);
+    // Return confirms the dialog.
+    let input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| editor.remove_copy_window(ui.ctx()));
+    output.textures_delta.clear();
+    assert!(editor.remove_copy.is_none());
+    assert!(editor.library_mode);
+    assert_eq!(editor.document.catalog_photo, None);
+    let library = editor.library.as_ref().unwrap();
+    assert!(library.photo(copy).is_none());
+    assert_eq!(library.selected, Some(master));
+    Ok(())
+}

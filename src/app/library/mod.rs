@@ -64,7 +64,10 @@ pub struct Library {
     /// Edited previews: rendered from each photo's edit on a second worker.
     edit_tx: std::sync::mpsc::Sender<previews::EditJob>,
     edit_rx: Receiver<previews::EditResult>,
-    edited_requested: HashSet<i64>,
+    /// Photos with an edited preview requested, by the ticket of the latest
+    /// request; results of earlier requests are dropped.
+    edited_requested: HashMap<i64, u64>,
+    next_ticket: u64,
     /// Photos asking for an edited preview this frame, and last frame's
     /// as the worker sees them.
     edit_seen: HashSet<i64>,
@@ -132,7 +135,8 @@ impl Library {
             thumb_rx: result_rx,
             edit_tx,
             edit_rx,
-            edited_requested: HashSet::new(),
+            edited_requested: HashMap::new(),
+            next_ticket: 0,
             edit_seen: HashSet::new(),
             edit_wanted,
             edits_pending: 0,
@@ -149,6 +153,15 @@ impl Library {
         Ok(s)
     }
     pub fn refresh(&mut self) -> Result<()> {
+        self.reload()?;
+        self.available = available_paths(&self.photos);
+        self.failed.clear();
+        self.filter();
+        Ok(())
+    }
+    /// Reads the catalog again without checking which files are online,
+    /// for changes that add or remove no file, such as virtual copies.
+    fn reload(&mut self) -> Result<()> {
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
         self.photos
@@ -159,8 +172,6 @@ impl Library {
         }
         self.collections = self.catalog.collections()?;
         self.roots = self.catalog.roots()?;
-        self.available = available_paths(&self.photos);
-        self.failed.clear();
         self.filter();
         Ok(())
     }
@@ -293,7 +304,7 @@ impl Library {
     /// Creates a virtual copy of `id` and selects it.
     pub(super) fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
         let copy = self.catalog.create_virtual_copy(id)?;
-        self.refresh()?;
+        self.reload()?;
         self.show(copy);
         if let Some(p) = self.photo(copy) {
             self.message = format!("Created {} of {}", p.copy_name, p.filename);
@@ -302,7 +313,7 @@ impl Library {
     }
     pub(super) fn set_copy_as_master(&mut self, id: i64) -> Result<()> {
         self.catalog.set_copy_as_master(id)?;
-        self.refresh()?;
+        self.reload()?;
         self.show(id);
         if let Some(p) = self.photo(id) {
             self.message = format!("This copy is now the master of {}", p.filename);
@@ -313,8 +324,8 @@ impl Library {
     pub(super) fn remove_virtual_copy(&mut self, id: i64) -> Result<Option<i64>> {
         let photo = self.photo(id).cloned();
         self.catalog.remove_virtual_copy(id)?;
-        self.edited.remove(&id);
-        self.refresh()?;
+        self.forget_previews(id);
+        self.reload()?;
         let master = photo.as_ref().and_then(|p| p.master);
         if let Some(master) = master {
             self.show(master);
@@ -665,9 +676,15 @@ impl Library {
             }
             self.edits_pending = self.edits_pending.saturating_sub(1);
             match result {
-                previews::EditResult::Ready(id, im) => self.insert_edited(ctx, id, &im),
-                previews::EditResult::Skipped(id) => {
-                    self.edited_requested.remove(&id);
+                previews::EditResult::Ready(id, ticket, im) => {
+                    if self.edited_requested.get(&id) == Some(&ticket) {
+                        self.insert_edited(ctx, id, &im);
+                    }
+                }
+                previews::EditResult::Skipped(id, ticket) => {
+                    if self.edited_requested.get(&id) == Some(&ticket) {
+                        self.edited_requested.remove(&id);
+                    }
                 }
                 previews::EditResult::Failed | previews::EditResult::CacheError(_) => {}
             }
@@ -724,6 +741,18 @@ impl Library {
             ),
         );
     }
+    fn ticket(&mut self) -> u64 {
+        self.next_ticket += 1;
+        self.next_ticket
+    }
+    /// Forgets a removed photo's previews, so a later photo given its id
+    /// starts afresh.
+    fn forget_previews(&mut self, id: i64) {
+        self.edited.remove(&id);
+        self.edited_order.retain(|other| *other != id);
+        self.edited_requested.remove(&id);
+        self.edit_seen.remove(&id);
+    }
     /// The photo's preview: its edit once rendered, else the embedded one.
     fn texture(&self, photo: &Photo) -> Option<&egui::TextureHandle> {
         self.edited
@@ -741,9 +770,11 @@ impl Library {
     /// Queues an edited preview for a photo with a saved or Lightroom edit.
     fn request_edited(&mut self, photo: &Photo) {
         self.edit_seen.insert(photo.id);
-        if !self.edited_requested.insert(photo.id) {
+        if self.edited_requested.contains_key(&photo.id) {
             return;
         }
+        let ticket = self.ticket();
+        self.edited_requested.insert(photo.id, ticket);
         let Ok((recipe, lightroom)) = self.catalog.edit_texts(photo.id) else {
             return;
         };
@@ -755,6 +786,7 @@ impl Library {
                 .edit_tx
                 .send(previews::EditJob::Render {
                     id: photo.id,
+                    ticket,
                     path: photo.path.clone(),
                     source,
                 })
@@ -776,7 +808,9 @@ impl Library {
             return;
         };
         let tag = previews::EditSource::Recipe(recipe_json).tag();
-        self.edited_requested.insert(id);
+        // Renders still in flight are older than Develop's.
+        let ticket = self.ticket();
+        self.edited_requested.insert(id, ticket);
         self.insert_edited(ctx, id, &image);
         let _ = self
             .edit_tx
@@ -1343,11 +1377,24 @@ impl Library {
                 .margin(egui::Margin::symmetric(4, 1))
                 .vertical_align(egui::Align::Center),
         );
-        if response.lost_focus() && text.trim() != photo.copy_name {
-            let name = text.trim().to_string();
-            self.rename_copy(photo.id, &name);
-            self.copy_name = Some((photo.id, name));
+        if response.lost_focus() {
+            self.commit_copy_name();
         }
+    }
+    /// Saves a Copy Name still being typed, e.g. when the Library panel
+    /// goes away before the field loses focus.
+    pub(super) fn commit_copy_name(&mut self) {
+        let Some((id, text)) = &self.copy_name else {
+            return;
+        };
+        let (id, name) = (*id, text.trim().to_string());
+        if self
+            .photo(id)
+            .is_some_and(|p| p.master.is_some() && p.copy_name != name)
+        {
+            self.rename_copy(id, &name);
+        }
+        self.copy_name = Some((id, name));
     }
 }
 /// A fixed-height metadata row: caption column, then the truncated value
