@@ -120,6 +120,10 @@ pub(super) struct PreviewState {
     pub(super) last_region: Option<[u32; 4]>,
     pub(super) mode: TextureMode,
     pub(super) pending_mode: TextureMode,
+    /// The crop `texture` was rendered with, when known: until a render for a new
+    /// crop lands, the old one is placed where its crop sits instead of stretched.
+    pub(super) crop: Option<[f32; 4]>,
+    pub(super) pending_crop: [f32; 4],
 }
 impl Default for PreviewState {
     fn default() -> Self {
@@ -137,6 +141,8 @@ impl Default for PreviewState {
             last_region: None,
             mode: TextureMode::Whole,
             pending_mode: TextureMode::Whole,
+            crop: None,
+            pending_crop: [0., 0., 1., 1.],
         }
     }
 }
@@ -162,6 +168,8 @@ pub(super) struct ViewState {
     pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
+    /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
+    pub(super) aspect_read: bool,
     /// Spot removal settings, selection and drag in progress.
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Masking panel state.
@@ -191,6 +199,7 @@ impl Default for ViewState {
             tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
+            aspect_read: false,
             retouch: Default::default(),
             masking: Default::default(),
             monitor: None,
@@ -243,6 +252,7 @@ impl PreviewState {
         self.last_fit_edge = 0;
         self.last_region = None;
         self.mode = TextureMode::Whole;
+        self.crop = None;
     }
     /// Textures the renderer presented into that the viewport draws.
     pub fn presented(&self) -> Vec<egui::TextureId> {
@@ -272,6 +282,7 @@ impl ViewState {
         self.tool = if self.tool == tool { Tool::None } else { tool };
         if matches!(self.tool, Tool::Crop) {
             self.zoom100 = false;
+            self.aspect_read = false;
         }
     }
     pub fn clear_document(&mut self) {

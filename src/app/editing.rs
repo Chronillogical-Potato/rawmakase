@@ -22,6 +22,8 @@ impl Editor {
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
         self.document.history.begin_frame();
+        // Before the frame looks at it, so reading it changes no crop.
+        self.read_aspect();
         EditFrame {
             generation: self.load.id(),
             recipe: self.document.recipe.clone(),
