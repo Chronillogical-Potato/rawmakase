@@ -26,6 +26,10 @@ pub struct Recipe {
     pub lens_distortion: f32,
     #[serde(default = "one")]
     pub lens_vignetting: f32,
+    /// Lightroom's Remove Chromatic Aberration: red and blue fringing measured from the
+    /// photo itself, in place of any lens data's lateral CA (`crs:AutoLateralCA`).
+    #[serde(default)]
+    pub lens_ca: bool,
     /// Use the DCP tone curve without a second generic scene shoulder.
     #[serde(default)]
     pub profile_tone: bool,
@@ -120,6 +124,7 @@ impl Default for Recipe {
             lens_profile: false,
             lens_distortion: 1.,
             lens_vignetting: 1.,
+            lens_ca: false,
             profile_tone: true,
             effects: Default::default(),
             preset_name: String::new(),

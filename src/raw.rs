@@ -103,6 +103,10 @@ pub struct Metadata {
     /// Correction from an imported Adobe lens profile matching this lens; rebuilt on open.
     #[serde(skip)]
     pub profile_lens: Option<crate::lens::LensCorrection>,
+    /// Lateral chromatic aberration measured from the decoded image, shared by every
+    /// image made from it (see `crate::lens::auto_ca::prime`).
+    #[serde(skip)]
+    pub lateral_ca: std::sync::Arc<std::sync::OnceLock<Option<[crate::lens::Radial; 2]>>>,
     /// Camera profile embedded in a DNG; rebuilt from the file on open.
     #[serde(skip)]
     pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -208,6 +212,7 @@ impl Raw {
             lens_model: error(&m.lens).trim().to_string(),
             baseline_exposure: None,
             profile_lens: None,
+            lateral_ca: Default::default(),
             embedded_profile: None,
         };
         let mut metadata = metadata;

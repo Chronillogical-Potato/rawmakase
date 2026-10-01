@@ -257,7 +257,10 @@ fn warp_sample(x: f32, y: f32) -> vec3<f32> {
     }
     var scale = vec3(g);
     if has(S_RED) {
-        scale = vec3(g * table_eval(S_RED, r), g, g * table_eval(S_BLUE, r));
+        // `lens_gpu_params`: a measured aberration (S_LENS 2) is evaluated at the
+        // distorted radius.
+        let rc = select(r, r * g, s(S_LENS) > 1.5);
+        scale = vec3(g * table_eval(S_RED, rc), g, g * table_eval(S_BLUE, rc));
     }
     let gx = cx + dx * scale.y - 0.5;
     let gy = cy + dy * scale.y - 0.5;

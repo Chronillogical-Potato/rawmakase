@@ -480,3 +480,21 @@ fn upright_modes_without_a_stored_correction_stay_unanalysed() {
         .unwrap();
     assert!(r.upright.corrections.is_empty());
 }
+#[test]
+fn remove_chromatic_aberration_imports_and_presets_leave_it_when_omitted() -> Result<()> {
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("ca.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let on = apply(r#"c:AutoLateralCA="1""#, &Recipe::default())?;
+    assert!(on.lens_ca);
+    assert!(apply(r#"c:Exposure2012="0.5""#, &on)?.lens_ca);
+    assert!(!apply(r#"c:AutoLateralCA="0""#, &on)?.lens_ca);
+    // Recipes before engine 4 render without lens corrections, so it is refused.
+    let old = Recipe {
+        engine: 3,
+        ..Default::default()
+    };
+    assert!(apply(r#"c:AutoLateralCA="1""#, &old).is_err());
+    assert!(!apply(r#"c:AutoLateralCA="0""#, &old)?.lens_ca);
+    Ok(())
+}

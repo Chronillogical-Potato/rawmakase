@@ -219,6 +219,9 @@ impl PreviewRenderer {
         needed: f32,
         cancel: &AtomicBool,
     ) -> Result<(Arc<CameraImage>, Arc<CameraImage>)> {
+        if recipe.lens_ca {
+            crate::lens::auto_ca::prime(image);
+        }
         let source = quality::retouched(image, recipe, cancel, Some(&mut self.retouch))?;
         match &mut self.pyramid {
             Some(p) if Arc::ptr_eq(p.source(), &source) => {}

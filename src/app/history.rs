@@ -170,7 +170,9 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         "HSL / Color"
     } else if a.grading != b.grading || a.effects.global_grade != b.effects.global_grade {
         "Color Grading"
-    } else if (a.lens_builtin, a.lens_profile) != (b.lens_builtin, b.lens_profile) {
+    } else if (a.lens_builtin, a.lens_profile, a.lens_ca)
+        != (b.lens_builtin, b.lens_profile, b.lens_ca)
+    {
         "Lens Corrections"
     } else if a.transform != b.transform || a.upright != b.upright {
         "Transform"

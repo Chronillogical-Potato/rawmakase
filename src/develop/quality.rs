@@ -966,6 +966,9 @@ pub(crate) fn render_preview(
     if let Some(p) = &r.profile {
         p.ensure_camera(&im.metadata)?;
     }
+    if r.lens_ca {
+        crate::lens::auto_ca::prime(im);
+    }
     let source = retouched(im, r, cancel, stages.as_mut().map(|s| &mut *s.retouch))?;
     let g = Geometry::new(&source, r, 0);
     let [x, y, w, h] = region.unwrap_or([0, 0, g.width, g.height]);

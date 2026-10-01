@@ -41,7 +41,8 @@ These controls were fitted to Camera Raw renders and match within the default-re
 - **Sony built-in corrections** are read but off by default: Lightroom uses them only with profile corrections on. With an imported Adobe profile, Sony matches Camera Raw within ±0.02 EV in the corners.
 - **LCP** interpolation uses the farthest focus distance, since focus distance is not read from the files. Tangential distortion terms and off-centre optical centres are ignored.
 - **DNG GainMap opcodes** (phone lens shading) are not applied.
-- **Manual lens vignetting, Defringe and Remove Chromatic Aberration** are not measured against Camera Raw.
+- **Remove Chromatic Aberration** measures lateral CA radially from the image centre; Camera Raw's own estimate is not reproduced exactly, and off-centre (decentred) CA is not corrected ([lens corrections](lens-corrections.md#remove-chromatic-aberration)).
+- **Manual lens vignetting and Defringe** are not measured against Camera Raw.
 
 ## Geometry
 

@@ -116,6 +116,8 @@ pub(crate) fn turn(turns: u8, x: f32, y: f32) -> [f32; 2] {
 #[derive(Clone, Copy)]
 pub(crate) struct LensMap<'a> {
     pub(crate) lens: &'a crate::lens::LensCorrection,
+    /// Measured lateral chromatic aberration replacing the lens data's own.
+    pub(crate) chromatic: Option<&'a [crate::lens::Radial; 2]>,
     pub(crate) center: [f32; 2],
     pub(crate) half: f32,
     pub(crate) fill: f32,
@@ -124,10 +126,18 @@ pub(crate) struct LensMap<'a> {
 }
 impl<'a> LensMap<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
-        let lens = r.lens_correction(&im.metadata)?;
+        let chromatic = crate::lens::auto_ca::measured(im).filter(|_| r.lens_ca && r.engine >= 4);
+        let lens = match r.lens_correction(&im.metadata) {
+            Some(lens) => lens,
+            None => {
+                chromatic?;
+                &crate::lens::NO_CORRECTION
+            }
+        };
         let (w, h) = (im.width as f32, im.height as f32);
         Some(Self {
             lens,
+            chromatic,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
             fill: lens.fill_scale_with(r.lens_distortion),
@@ -138,9 +148,8 @@ impl<'a> LensMap<'a> {
     pub(crate) fn scales(&self, x: f32, y: f32) -> ([f32; 2], [f32; 3]) {
         let dx = (x + 0.5 - self.center[0]) * self.fill;
         let dy = (y + 0.5 - self.center[1]) * self.fill;
-        let scale = self
-            .lens
-            .radial_scale_with((dx * dx + dy * dy).sqrt() / self.half, self.amount);
+        let r = (dx * dx + dy * dy).sqrt() / self.half;
+        let scale = self.lens.radial_scale_ca(r, self.amount, self.chromatic);
         ([dx, dy], scale)
     }
     pub(crate) fn forward(&self, x: f32, y: f32) -> [f32; 2] {
@@ -326,6 +335,7 @@ mod tests {
         };
         let map = LensMap {
             lens: &lens,
+            chromatic: None,
             center: [150., 100.],
             half: 180.,
             fill: 0.95,

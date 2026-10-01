@@ -90,6 +90,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | File | Responsibility |
 | --- | --- |
 | [lens/mod.rs](../src/lens/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. |
+| [lens/auto_ca.rs](../src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
 | [lens/embedded.rs](../src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
 
 ## XMP and presets

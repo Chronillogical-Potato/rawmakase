@@ -58,6 +58,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         straighten: 1.5,
         crop: [0.1, 0.05, 0.9, 0.95],
         sharpening: 0.4,
+        lens_ca: true,
         ..Default::default()
     };
     r.hsl[3][0] = 0.26;
@@ -88,6 +89,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     };
     let packet = crate::xmp::write::packet(&r, &m, &photo);
     assert!(packet.contains("crs:Exposure2012=\"+0.40\""));
+    assert!(packet.contains("crs:AutoLateralCA=\"1\""));
     assert!(packet.contains("xmp:CreateDate=\"2018-08-26T10:39:33\""));
     assert!(packet.contains("coffee &amp; books"));
     let preset = crate::xmp::parse(Path::new("export.xmp"), &packet)?;
@@ -110,6 +112,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     assert_eq!(back.crop, r.crop);
     assert_eq!(back.curve.points.len(), 3);
     assert_eq!(back.upright, r.upright);
+    assert!(back.lens_ca);
     Ok(())
 }
 #[test]

@@ -318,6 +318,7 @@ fn settings(r: &Recipe) -> Settings {
         );
     }
     s.text("LensProfileEnable", if r.lens_profile { "1" } else { "0" });
+    s.text("AutoLateralCA", if r.lens_ca { "1" } else { "0" });
     s.put(
         "LensProfileDistortionScale",
         r.lens_distortion,

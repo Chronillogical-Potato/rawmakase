@@ -374,6 +374,11 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         ],
         ..Default::default()
     };
+    // Remove Chromatic Aberration's measurement, as if made from the photo.
+    let _ = metadata.lateral_ca.set(Some([
+        radial(vec![1., 1.002, 1.004]),
+        radial(vec![1., 0.998, 0.997]),
+    ]));
     let image = CameraImage {
         width: w,
         height: h,
@@ -409,7 +414,14 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let mut gpu = PreviewRenderer::with_gpu();
     let mut cpu = PreviewRenderer::default();
     let cancel = AtomicBool::new(false);
-    for (spatial, clipping) in [(false, false), (true, false), (true, true)] {
+    // `ca`: 1 the measured aberration alone, 2 with the built-in distortion.
+    for (spatial, clipping, ca) in [
+        (false, false, 0),
+        (true, false, 0),
+        (true, true, 0),
+        (true, false, 1),
+        (true, false, 2),
+    ] {
         let mut recipe = base.clone();
         if spatial {
             recipe.effects.grain = 0.4;
@@ -429,6 +441,10 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.lens_distortion = 0.8;
             recipe.noise_luma = 0.4;
             recipe.noise_chroma = 0.5;
+        }
+        if ca > 0 {
+            recipe.lens_builtin = ca == 2;
+            recipe.lens_ca = true;
         }
         for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
             let display = super::Display {
@@ -474,7 +490,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .map(|(a, b)| a.abs_diff(*b))
                 .max()
                 .unwrap();
-            let label = format!("spatial={spatial} clipping={clipping} {max_edge} {region:?}");
+            let label =
+                format!("spatial={spatial} clipping={clipping} ca={ca} {max_edge} {region:?}");
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(
                 "{label}: largest difference {worst}, {changed} of {} values",
