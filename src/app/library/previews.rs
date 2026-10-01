@@ -1,5 +1,5 @@
 //! Bounded, asynchronous disk-cache work and its UI progress.
-use crate::{catalog::preview_cache::PreviewCache, storage::Identity};
+use crate::catalog::preview_cache::{PreviewCache, Stamp};
 use eframe::egui;
 use std::{
     collections::HashSet,
@@ -46,10 +46,10 @@ fn spawn_with(
                     }
                 });
                 let image = cached.or_else(|| {
-                    let identity = Identity::read(&path).ok()?;
+                    let stamp = Stamp::read(&path).ok()?;
                     let image = thumbnail(&path).ok()?;
                     if let Some(cache) = &mut cache
-                        && let Err(error) = cache.store(&path, &identity, &image)
+                        && let Err(error) = cache.store(&path, &stamp, &image)
                     {
                         cache_error = Some(error.to_string());
                     }
@@ -175,8 +175,8 @@ fn spawn_edited_with(
             let mut cache_error = None;
             let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
                 EditJob::Store { path, tag, image } => {
-                    if let (Some(cache), Ok(identity)) = (&mut cache, Identity::read(&path))
-                        && let Err(error) = cache.store_tagged(&path, &tag, &identity, &image)
+                    if let (Some(cache), Ok(stamp)) = (&mut cache, Stamp::read(&path))
+                        && let Err(error) = cache.store_tagged(&path, &tag, &stamp, &image)
                     {
                         cache_error = Some(error.to_string());
                     }
@@ -196,7 +196,7 @@ fn spawn_edited_with(
                         .as_ref()
                         .and_then(|c| c.load_tagged(&path, &tag).ok().flatten());
                     let image = cached.or_else(|| {
-                        let identity = Identity::read(&path).ok()?;
+                        let stamp = Stamp::read(&path).ok()?;
                         let render = || render_edited(&path, &source);
                         let image = match &pool {
                             Some(pool) => pool.install(render),
@@ -204,7 +204,7 @@ fn spawn_edited_with(
                         }
                         .ok()?;
                         if let Some(cache) = &mut cache
-                            && let Err(error) = cache.store_tagged(&path, &tag, &identity, &image)
+                            && let Err(error) = cache.store_tagged(&path, &tag, &stamp, &image)
                         {
                             cache_error = Some(error.to_string());
                         }
