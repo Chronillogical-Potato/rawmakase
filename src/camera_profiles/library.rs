@@ -245,6 +245,36 @@ fn import_into(
     Ok(imported)
 }
 
+/// Adobe's own profiles for this camera from a local Lightroom / Camera Raw
+/// installation (Adobe Standard plus Camera Matching), skipping ones already
+/// in the library, so the app can offer to import them. Nothing is read from
+/// those folders otherwise; rendering only sees imported profiles.
+pub fn adobe_installed(m: &Metadata) -> Vec<std::path::PathBuf> {
+    let root = Path::new(if cfg!(target_os = "macos") {
+        "/Library/Application Support/Adobe/CameraRaw/CameraProfiles"
+    } else if cfg!(windows) {
+        "C:\\ProgramData\\Adobe\\CameraRaw\\CameraProfiles"
+    } else {
+        return Vec::new();
+    });
+    let camera = format!("{} {}", m.make, m.model);
+    let mut paths = vec![
+        root.join("Adobe Standard")
+            .join(format!("{camera} Adobe Standard.dcp")),
+    ];
+    if let Ok(entries) = std::fs::read_dir(root.join("Camera").join(&camera)) {
+        paths.extend(entries.flatten().map(|e| e.path()));
+    }
+    let installed = crate::storage::data_dir().join("camera-profiles");
+    paths
+        .into_iter()
+        .filter(|p| {
+            p.is_file()
+                && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dcp"))
+                && p.file_name().is_some_and(|n| !installed.join(n).exists())
+        })
+        .collect()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
