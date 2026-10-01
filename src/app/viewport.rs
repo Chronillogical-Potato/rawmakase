@@ -400,7 +400,10 @@ impl Editor {
         // A tool that owns the pointer (spots, brushes, gradients) takes drags and
         // clicks; the hand tool pans only when no tool claims them.
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
-        let hand = !tool_owns_pointer && !self.view.is(Tool::WhiteBalance);
+        // Holding Space pans while an eyedropper is open, as in Lightroom.
+        let space = ui.input(|i| i.key_down(egui::Key::Space));
+        let picking = self.view.picks_color() && !space && !self.view.compare;
+        let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
         if self.view.zoom100 && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
             self.view.pan[0] = (self.view.pan[0] - delta.x / rect.width()).clamp(0., 1.);
@@ -437,7 +440,7 @@ impl Editor {
             self.view.zoom100 = !self.view.zoom100;
             self.schedule();
         }
-        if self.view.is(Tool::WhiteBalance) {
+        if self.view.picks_color() {
             // The loupe reads the shown pixels, which renders keep only while the
             // selector is active.
             if !self.preview.samples_requested {
@@ -455,6 +458,7 @@ impl Editor {
             self.preview.region_samples = None;
         }
         if self.view.is(Tool::WhiteBalance)
+            && picking
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
@@ -468,6 +472,31 @@ impl Editor {
                 .recipe
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
+        }
+        // Before shows the unedited photo, so picking there would edit what is not shown.
+        if self.view.is(Tool::Defringe)
+            && picking
+            && response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && rect.contains(pos)
+        {
+            let metadata = self.document.full().map(|im| im.metadata.clone());
+            // The samples must come from the settings the pick is mapped through.
+            let current = self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe());
+            match self
+                .shown_color(pos, rect, region_rect)
+                .filter(|_| current)
+                .zip(metadata)
+            {
+                Some((rgb, m)) => match develop::pick_fringe(&mut self.document.recipe, &m, rgb) {
+                    Some(_) => self.view.tool = Tool::None,
+                    None => {
+                        self.status =
+                            "Cannot set the fringe color: click a purple or green fringe".into();
+                    }
+                },
+                None => self.status = "Wait for the preview to update, then pick again".into(),
+            }
         }
         if self.view.is(Tool::Crop) && !self.view.zoom100 && self.document.full().is_some() {
             let c = self.document.recipe.crop;
@@ -604,6 +633,34 @@ impl Editor {
     /// Lightroom's white balance selector over the photo: an eyedropper cursor
     /// whose tip is the picked point, and a loupe of the pixels around it with the
     /// values of the one under the tip.
+    /// The shown color (encoded sRGB, 0–1) at `pos`, from the samples renders keep while
+    /// an eyedropper is active.
+    fn shown_color(&self, pos: Pos2, rect: Rect, region: Option<Rect>) -> Option<[f32; 3]> {
+        let (samples, shown) = match (&self.preview.region_samples, region) {
+            (Some(samples), Some(region)) if region.contains(pos) => (samples, region),
+            _ => (self.preview.samples.as_ref()?, rect),
+        };
+        let (w, h) = samples.dimensions();
+        let cx = ((pos.x - shown.left()) / shown.width() * w as f32).floor() as i32;
+        let cy = ((pos.y - shown.top()) / shown.height() * h as f32).floor() as i32;
+        // The most colourful of the 3 × 3 pixels: a fringe can be a single pixel wide
+        // beside neutral ones, which an average would wash out.
+        (cy - 1..=cy + 1)
+            .flat_map(|y| (cx - 1..=cx + 1).map(move |x| (x, y)))
+            .filter(|&(x, y)| x >= 0 && y >= 0 && x < w as i32 && y < h as i32)
+            .map(|(x, y)| {
+                samples
+                    .get_pixel(x as u32, y as u32)
+                    .0
+                    .map(|v| f32::from(v) / 255.)
+            })
+            .max_by(|a, b| {
+                let spread = |p: &[f32; 3]| {
+                    p.iter().fold(0f32, |m, v| m.max(*v)) - p.iter().fold(1f32, |m, v| m.min(*v))
+                };
+                spread(a).total_cmp(&spread(b))
+            })
+    }
     fn white_balance_loupe(
         &self,
         ui: &egui::Ui,

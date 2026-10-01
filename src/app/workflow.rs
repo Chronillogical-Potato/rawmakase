@@ -256,6 +256,7 @@ impl Editor {
                 fit
             };
             self.preview.pending_crop = self.effective_recipe().crop;
+            self.preview.pending_recipe = Some(self.effective_recipe());
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,
                 super::state::TextureMode::Region,
@@ -271,7 +272,7 @@ impl Editor {
                 clipping: self.view.clipping,
                 navigator: !self.view.zoom100,
                 thumbnail: region.is_none() && self.shows_library_edit(),
-                samples: self.view.is(super::state::Tool::WhiteBalance),
+                samples: self.view.picks_color(),
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),
             });

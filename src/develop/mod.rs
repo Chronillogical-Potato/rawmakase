@@ -34,7 +34,7 @@ pub use auto::{
 pub use geometry::{Geometry, Transform, Upright, UprightMode, display_axes};
 pub use image_space::{ImageFrame, ViewMapping};
 pub use pipeline::{
-    neutral_pick, preview, render, render_legacy, render_region, render_region_legacy,
+    neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
 pub use recipe::{LocalEdits, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
