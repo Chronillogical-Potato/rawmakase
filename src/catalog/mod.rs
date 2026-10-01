@@ -116,7 +116,13 @@ impl Catalog {
                 Ok(F {
                     id: r.get(0)?,
                     root: r.get(1)?,
-                    relative: r.get(2)?,
+                    // Folders added on Windows were stored with its separator;
+                    // the Library's tree and saved sources split on '/'.
+                    relative: if cfg!(windows) {
+                        r.get::<_, String>(2)?.replace('\\', "/")
+                    } else {
+                        r.get(2)?
+                    },
                     base: r.get(3)?,
                     mapped: r.get(4)?,
                     count: r.get::<_, i64>(5)? as usize,

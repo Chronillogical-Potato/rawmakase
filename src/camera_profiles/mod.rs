@@ -506,7 +506,7 @@ mod enhanced;
 mod library;
 pub mod open;
 pub use dcp::from_bytes;
-pub use library::{builtin, import_files, installed, library_dirs, load};
+pub use library::{adobe_installed, builtin, import_files, installed, library_dirs, load};
 #[cfg(test)]
 mod tests;
 
