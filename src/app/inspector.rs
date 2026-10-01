@@ -983,7 +983,25 @@ impl Editor {
                     import_folder = Some(ImportKind::LensProfiles);
                 }
             });
-            subheading(ui, "Defringe");
+            let row = subheading(ui, "Defringe");
+            // The Fringe Color Selector, at the row's far left as White Balance's.
+            let rect = Rect::from_center_size(
+                Pos2::new(row.left() + 13., row.center().y),
+                Vec2::new(26., 20.),
+            );
+            let response = ui.interact(rect, ui.id().with("fringe-selector"), Sense::click());
+            let picking = view.is(Tool::Defringe);
+            if picking || response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
+            }
+            eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
+            if response
+                .on_hover_text("Fringe color selector: click a purple or green fringe in the photo")
+                .clicked()
+            {
+                view.toggle(Tool::Defringe);
+            }
             for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
                 ui.push_id(("defringe", i), |ui| {
                     slider_with(
@@ -1329,7 +1347,7 @@ fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
     }
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.
-fn subheading(ui: &mut egui::Ui, text: &str) {
+fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
     super::widgets::set_edit_context(ui, text);
     ui.add_space(8.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.), Sense::hover());
@@ -1340,6 +1358,7 @@ fn subheading(ui: &mut egui::Ui, text: &str) {
         egui::FontId::proportional(11.),
         theme::gray(165),
     );
+    rect
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
 /// 83 px label column, controls from the rail start (88 px) to the right edge,

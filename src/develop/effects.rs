@@ -174,22 +174,76 @@ impl Effects {
         }
         (x + delta * 4. * x * (1. - x)).clamp(0., 1.)
     }
+    /// Lightroom's Fringe Color Selector: points the Purple or Green hue range at the
+    /// fringe colour `rgb` (encoded sRGB, as shown) and turns that Amount on if it is
+    /// off. Returns which (0 purple, 1 green), or `None` when the colour is neither.
+    pub fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
+        let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+        if lab[1].hypot(lab[2]) < 0.02 {
+            return None;
+        }
+        let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+        // The nearer window that holds the hue well inside its slider: the outer ends
+        // reach reds, yellows and blues, which are not fringes.
+        let (i, at) = DEFRINGE_CENTERS
+            .into_iter()
+            .map(|center| ((hue - center + 0.5).rem_euclid(1.) - 0.5) / DEFRINGE_WINDOW + 0.5)
+            .enumerate()
+            .filter(|(_, at)| (0.15..=0.85).contains(at))
+            .min_by(|a, b| (a.1 - 0.5).abs().total_cmp(&(b.1 - 0.5).abs()))?;
+        // A range 20 wide on Lightroom's 0–100 hue sliders around the picked colour.
+        let lo = (at - 0.1).clamp(0., 0.8);
+        self.defringe_ranges[i] = [lo, lo + 0.2];
+        if self.defringe[i] == 0. {
+            // Lightroom's Amount 5 of 20.
+            self.defringe[i] = 0.25;
+        }
+        Some(i)
+    }
+    /// Lightroom's Defringe: chroma of hues inside the Purple and Green ranges is
+    /// reduced, the more the higher Amount and the chroma (see
+    /// docs/lens-corrections.md).
     pub fn defringe_color(&self, mut lab: [f32; 3], h: f32) -> [f32; 3] {
-        // Hue bands are expressed relative to the purple/green windows of the control.
-        for (i, center) in [0.85f32, 0.4].into_iter().enumerate() {
-            let range = self.defringe_ranges[i];
-            let lo = center + (range[0] - 0.5) * 0.3;
-            let hi = center + (range[1] - 0.5) * 0.3;
-            let mid = (lo + hi) * 0.5;
-            let width = ((hi - lo) * 0.5).max(0.005);
-            let d = (h - mid + 0.5).rem_euclid(1.) - 0.5;
-            let w = (1. - (d.abs() / width)).clamp(0., 1.);
-            let k = 1. - self.defringe[i] * w;
+        for (i, center) in DEFRINGE_CENTERS.into_iter().enumerate() {
+            if self.defringe[i] == 0. {
+                continue;
+            }
+            let chroma = lab[1].hypot(lab[2]);
+            let k = 1.
+                - defringe_weight(h, center, self.defringe_ranges[i])
+                    * defringe_strength(self.defringe[i], chroma);
             lab[1] *= k;
             lab[2] *= k;
         }
         lab
     }
+}
+/// Centres of the Purple and Green hue windows (Oklab hue, 0–1) and the hue span of
+/// each Hue slider's 0–100, fitted to Camera Raw 18.6 renders.
+const DEFRINGE_CENTERS: [f32; 2] = [0.875, 0.46];
+const DEFRINGE_WINDOW: f32 = 0.5;
+/// Half width of the soft edge of a hue range.
+const DEFRINGE_SOFT: f32 = 0.025;
+/// Share of chroma kept at full strength for a grey-ish colour, falling as chroma
+/// rises (Oklab chroma scale), and the Amount (0–20) over which strength builds up.
+const DEFRINGE_KEEP: f32 = 0.45;
+const DEFRINGE_CHROMA: f32 = 0.09;
+const DEFRINGE_RATE: f32 = 2.5;
+/// How much of hue `h` the range `[lo, hi]` (0–1 of the Hue slider) of the window
+/// centred at `center` selects.
+fn defringe_weight(h: f32, center: f32, [lo, hi]: [f32; 2]) -> f32 {
+    let d = (h - center + 0.5).rem_euclid(1.) - 0.5;
+    let step = |x: f32| {
+        let t = ((x + DEFRINGE_SOFT) / (2. * DEFRINGE_SOFT)).clamp(0., 1.);
+        t * t * (3. - 2. * t)
+    };
+    step(d - (lo - 0.5) * DEFRINGE_WINDOW) * step((hi - 0.5) * DEFRINGE_WINDOW - d)
+}
+/// Share of chroma removed at full weight for Amount `amount` (0–1): Camera Raw
+/// removes more of a stronger fringe colour.
+fn defringe_strength(amount: f32, chroma: f32) -> f32 {
+    (1. - DEFRINGE_KEEP * (-chroma / DEFRINGE_CHROMA).exp())
+        * (1. - (-amount * 20. / DEFRINGE_RATE).exp())
 }
 fn hash(x: i32, y: i32, seed: u32) -> f32 {
     let mut v = (x as u32).wrapping_mul(0x9e3779b9) ^ (y as u32).wrapping_mul(0x85ebca6b) ^ seed;
@@ -277,4 +331,34 @@ pub(crate) fn spatial_finish_scaled(
             *v = (*v * gain + noise).clamp(0., 1.);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fringe_selector_sets_the_band_of_the_picked_color() {
+        let mut e = Effects::default();
+        assert_eq!(e.pick_fringe([0.6, 0.3, 0.8]), Some(0));
+        assert_eq!(e.defringe[0], 0.25);
+        let [lo, hi] = e.defringe_ranges[0];
+        assert!((hi - lo - 0.2).abs() < 1e-6 && (0. ..=1.).contains(&lo) && hi <= 1.);
+        // The picked hue is inside the new range and is removed.
+        let lab = crate::develop::pipeline::srgb_to_lab(
+            [0.6f32, 0.3, 0.8].map(crate::color_math::srgb_decode),
+        );
+        let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+        e.defringe[0] = 1.;
+        let out = e.defringe_color(lab, hue);
+        assert!(out[1].hypot(out[2]) < lab[1].hypot(lab[2]) * 0.5);
+        // An Amount already set is kept.
+        e.defringe[1] = 0.6;
+        assert_eq!(e.pick_fringe([0.3, 0.7, 0.3]), Some(1));
+        assert_eq!(e.defringe[1], 0.6);
+        // Neither purple nor green, or no colour at all.
+        let before = e.clone();
+        assert_eq!(e.pick_fringe([0.8, 0.2, 0.2]), None);
+        assert_eq!(e.pick_fringe([0.5, 0.5, 0.5]), None);
+        assert_eq!(e, before);
+    }
 }

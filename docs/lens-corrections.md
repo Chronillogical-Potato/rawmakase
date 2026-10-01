@@ -70,6 +70,16 @@ The same measurement on rendered sRGB output (Adobe Standard, full size) of 13 p
 Output-space figures are only comparable with each other: the colour matrix mixes channels, so they differ from the camera-space ones above.
 
 Camera Raw renders with the setting off also show Sony's lateral CA corrected, as RAWmakase does only with built-in corrections on; this was seen on two A7 II photos and has not been investigated further.
+## Defringe
+
+Lightroom's Defringe (`crs:DefringePurpleAmount`, `…GreenAmount` and their Hue ranges) reduces the chroma of hues inside the Purple and Green ranges. `Effects::defringe_color` does it per pixel in Oklab, after the colour controls:
+
+- The Purple and Green windows are centred at Oklab hue 0.875 and 0.46 (0–1). Each Hue slider's 0–100 spans 0.5 of hue around its centre, and a range's ends are softened over ±0.025.
+- At full weight the share of chroma removed is (1 − 0.45·e^(−C/0.09)) · (1 − e^(−Amount/2.5)), with C the Oklab chroma and Amount 0–20: a stronger fringe colour loses more of its chroma, and Amount 5 already does most of the work.
+
+The constants were fitted to Camera Raw 18.6 renders of two A7 II photos (FE 55mm F1.8 ZA at f/1.8 and f/5.3) at Purple 5, 10 and 20, Purple 20 with a 45–55 range, and Green 10 and 20, comparing the chroma kept per hue between each render and the same photo without Defringe. The mean difference from Camera Raw fell from 0.14–0.26 to 0.05–0.11 across those cases. Camera Raw also reduces chroma somewhat more next to strong edges, including hues just outside the range; that spatial part is not reproduced.
+
+The Fringe Color Selector (the eyedropper at the Defringe heading) reads the shown colour, picks the nearer window that holds its hue, sets that range to 20 wide around it and Amount to 5 when it was 0. Reds, yellows, blues and near-greys are refused.
 
 ## DNG files
 

@@ -155,6 +155,8 @@ pub(super) enum Tool {
     None,
     Crop,
     WhiteBalance,
+    /// Defringe's Fringe Color Selector.
+    Defringe,
     /// Spot removal: Heal and Clone.
     Remove,
     Mask,
@@ -276,6 +278,10 @@ impl PreviewState {
 impl ViewState {
     pub fn is(&self, tool: Tool) -> bool {
         self.tool == tool
+    }
+    /// An eyedropper is active: the White Balance or Fringe Color Selector.
+    pub fn picks_color(&self) -> bool {
+        matches!(self.tool, Tool::WhiteBalance | Tool::Defringe)
     }
     /// Opens `tool`, or closes it when it is already open.
     pub fn toggle(&mut self, tool: Tool) {

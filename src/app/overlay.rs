@@ -21,7 +21,7 @@ impl Editor {
         }
         let _ = area;
         match self.view.tool {
-            Tool::None | Tool::Crop | Tool::WhiteBalance => false,
+            Tool::None | Tool::Crop | Tool::WhiteBalance | Tool::Defringe => false,
             Tool::Remove => {
                 self.retouch_overlay(ui, response, rect);
                 true

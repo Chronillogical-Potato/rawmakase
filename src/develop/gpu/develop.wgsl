@@ -597,17 +597,23 @@ fn hue_weights(hue: f32) -> array<f32, 8> {
     return weights;
 }
 // effects::Effects::defringe_color
+fn defringe_step(x: f32) -> f32 {
+    let t = clamp((x + 0.025) / 0.05, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
 fn defringe(lab_in: vec3<f32>, h: f32) -> vec3<f32> {
     var lab = lab_in;
-    var centers = array<f32, 2>(0.85, 0.4);
+    var centers = array<f32, 2>(0.875, 0.46);
     for (var i = 0u; i < 2u; i++) {
-        let lo = centers[i] + (p(P_DEFRINGE_RANGES + i * 2u) - 0.5) * 0.3;
-        let hi = centers[i] + (p(P_DEFRINGE_RANGES + i * 2u + 1u) - 0.5) * 0.3;
-        let mid = (lo + hi) * 0.5;
-        let width = max((hi - lo) * 0.5, 0.005);
-        let d = rem_euclid(h - mid + 0.5, 1.0) - 0.5;
-        let w = clamp(1.0 - (abs(d) / width), 0.0, 1.0);
-        let k = 1.0 - p(P_DEFRINGE + i) * w;
+        let amount = p(P_DEFRINGE + i);
+        if amount == 0.0 { continue; }
+        let lo = (p(P_DEFRINGE_RANGES + i * 2u) - 0.5) * 0.5;
+        let hi = (p(P_DEFRINGE_RANGES + i * 2u + 1u) - 0.5) * 0.5;
+        let d = rem_euclid(h - centers[i] + 0.5, 1.0) - 0.5;
+        let w = defringe_step(d - lo) * defringe_step(hi - d);
+        let chroma = length(lab.yz);
+        let strength = (1.0 - 0.45 * exp(-chroma / 0.09)) * (1.0 - exp(-amount * 20.0 / 2.5));
+        let k = 1.0 - w * strength;
         lab.y *= k;
         lab.z *= k;
     }

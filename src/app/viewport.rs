@@ -404,7 +404,7 @@ impl Editor {
         // A tool that owns the pointer (spots, brushes, gradients) takes drags and
         // clicks; the hand tool pans only when no tool claims them.
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
-        let hand = !tool_owns_pointer && !self.view.is(Tool::WhiteBalance);
+        let hand = !tool_owns_pointer && !self.view.picks_color();
         if self.view.zoom100 && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
             self.view.pan[0] = (self.view.pan[0] - delta.x / rect.width()).clamp(0., 1.);
@@ -441,7 +441,7 @@ impl Editor {
             self.view.zoom100 = !self.view.zoom100;
             self.schedule();
         }
-        if self.view.is(Tool::WhiteBalance) {
+        if self.view.picks_color() {
             // The loupe reads the shown pixels, which renders keep only while the
             // selector is active.
             if !self.preview.samples_requested {
@@ -472,6 +472,22 @@ impl Editor {
                 .recipe
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
+        }
+        if self.view.is(Tool::Defringe)
+            && response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && rect.contains(pos)
+        {
+            match self.shown_color(pos, rect, region_rect) {
+                Some(rgb) => match self.document.recipe.effects.pick_fringe(rgb) {
+                    Some(_) => self.view.tool = Tool::None,
+                    None => {
+                        self.status =
+                            "Cannot set the fringe color: click a purple or green fringe".into();
+                    }
+                },
+                None => self.status = "Cannot read the color there yet".into(),
+            }
         }
         if self.view.is(Tool::Crop) && !self.view.zoom100 && self.document.full().is_some() {
             let c = self.document.recipe.crop;
@@ -608,6 +624,30 @@ impl Editor {
     /// Lightroom's white balance selector over the photo: an eyedropper cursor
     /// whose tip is the picked point, and a loupe of the pixels around it with the
     /// values of the one under the tip.
+    /// The shown color (encoded sRGB, 0–1) at `pos`, averaged over 3 × 3 pixels, from
+    /// the samples renders keep while an eyedropper is active.
+    fn shown_color(&self, pos: Pos2, rect: Rect, region: Option<Rect>) -> Option<[f32; 3]> {
+        let (samples, shown) = match (&self.preview.region_samples, region) {
+            (Some(samples), Some(region)) if region.contains(pos) => (samples, region),
+            _ => (self.preview.samples.as_ref()?, rect),
+        };
+        let (w, h) = samples.dimensions();
+        let cx = ((pos.x - shown.left()) / shown.width() * w as f32).floor() as i32;
+        let cy = ((pos.y - shown.top()) / shown.height() * h as f32).floor() as i32;
+        let (mut sum, mut n) = ([0f32; 3], 0.);
+        for y in cy - 1..=cy + 1 {
+            for x in cx - 1..=cx + 1 {
+                if x >= 0 && y >= 0 && x < w as i32 && y < h as i32 {
+                    let p = samples.get_pixel(x as u32, y as u32).0;
+                    for c in 0..3 {
+                        sum[c] += f32::from(p[c]) / 255.;
+                    }
+                    n += 1.;
+                }
+            }
+        }
+        (n > 0.).then(|| sum.map(|v| v / n))
+    }
     fn white_balance_loupe(
         &self,
         ui: &egui::Ui,

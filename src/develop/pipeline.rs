@@ -11,7 +11,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use std::sync::Arc;
-fn srgb_to_lab(p: [f32; 3]) -> [f32; 3] {
+pub(crate) fn srgb_to_lab(p: [f32; 3]) -> [f32; 3] {
     let a = mul(
         [
             [0.41222146, 0.53633255, 0.051445995],
