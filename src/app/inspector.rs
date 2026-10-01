@@ -234,7 +234,7 @@ impl Editor {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
                 control_row(ui, "Aspect", |ui| {
-                    const ASPECTS: [(f32, &str); 8] = [
+                    const ASPECTS: [(f32, &str); 9] = [
                         (-1., "Original"),
                         (0., "Free"),
                         (1., "1 x 1"),
@@ -243,6 +243,7 @@ impl Editor {
                         (1.5, "2 x 3"),
                         (4. / 3., "3 x 4"),
                         (16. / 9., "16 x 9"),
+                        (65. / 24., "65 x 24 (XPan)"),
                     ];
                     egui::ComboBox::from_id_salt("crop-aspect")
                         .width(ui.available_width())
