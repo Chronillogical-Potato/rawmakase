@@ -83,6 +83,9 @@ pub struct Library {
     copy_request: Option<CopyAction>,
     /// The Copy Name being typed, for the photo it belongs to.
     copy_name: Option<(i64, String)>,
+    /// Saving `copy_name` failed; it waits for the next flush rather than
+    /// being retried, and discarded, as the selection moves.
+    copy_name_failed: bool,
     pub message: String,
 }
 impl Library {
@@ -145,6 +148,7 @@ impl Library {
             preview_progress: Default::default(),
             copy_request: None,
             copy_name: None,
+            copy_name_failed: false,
             message: String::new(),
         };
         s.refresh()?;
@@ -175,6 +179,7 @@ impl Library {
         // Names may have changed, and a removed copy's id can be reused. Copy
         // commands save a name being typed before they run.
         self.copy_name = None;
+        self.copy_name_failed = false;
         self.filter();
         Ok(())
     }
@@ -1363,19 +1368,32 @@ impl Library {
             .as_ref()
             .is_none_or(|(id, _)| *id != photo.id)
         {
-            // Another copy was selected before the field lost focus: keep its name.
-            if let Err(e) = self.commit_copy_name() {
+            // Another copy was selected before the field lost focus: keep its
+            // name. One that cannot be saved stays pending, and this copy's
+            // name is shown but not editable until it is.
+            if !self.copy_name_failed
+                && let Err(e) = self.commit_copy_name()
+            {
                 self.message = format!("Copy name could not be saved: {e}");
             }
-            self.copy_name = Some((photo.id, photo.copy_name.clone()));
+            if !self.copy_name_failed {
+                self.copy_name = Some((photo.id, photo.copy_name.clone()));
+            }
         }
-        let Some((_, text)) = &mut self.copy_name else {
-            return;
-        };
         let field = egui::Rect::from_min_max(
             egui::pos2(rect.left() + 88., rect.top() + 1.),
             egui::pos2(rect.right(), rect.bottom() - 1.),
         );
+        let Some((_, text)) = self.copy_name.as_mut().filter(|(id, _)| *id == photo.id) else {
+            ui.painter().text(
+                egui::pos2(field.left() + 4., field.center().y),
+                egui::Align2::LEFT_CENTER,
+                &photo.copy_name,
+                egui::FontId::proportional(11.),
+                theme::gray(205),
+            );
+            return;
+        };
         let response = ui.put(
             field,
             egui::TextEdit::singleline(text)
@@ -1402,9 +1420,12 @@ impl Library {
             .photo(id)
             .is_some_and(|p| p.master.is_some() && p.copy_name != name)
         {
-            self.rename_copy(id, &name)?;
+            let saved = self.rename_copy(id, &name);
+            self.copy_name_failed = saved.is_err();
+            saved?;
         }
         self.copy_name = Some((id, name));
+        self.copy_name_failed = false;
         Ok(())
     }
     #[cfg(test)]
@@ -1414,6 +1435,7 @@ impl Library {
     /// Drops a Copy Name that could not be saved, e.g. closing without saving.
     pub(super) fn discard_copy_name(&mut self) {
         self.copy_name = None;
+        self.copy_name_failed = false;
     }
 }
 /// A fixed-height metadata row: caption column, then the truncated value
