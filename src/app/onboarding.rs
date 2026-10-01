@@ -417,7 +417,7 @@ impl Editor {
 
         step(ui, 5, "Good to know", None, |ui| {
             for line in [
-                "Masks and healing aren't rendered yet; they stay in the catalog.",
+                "AI and color-range masks aren't rendered yet; they stay in the catalog.",
                 "Export presets, watermarks and plug-ins don't carry over.",
                 "Calibrated display? Set it in Develop under Settings › Monitor Profile.",
             ] {
