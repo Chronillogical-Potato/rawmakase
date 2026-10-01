@@ -376,6 +376,64 @@ impl MaskKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Which edits each cached stage recomputes for: the stages before the per-pixel
+    /// one must change with their own settings and must not with later ones.
+    #[test]
+    fn stage_keys_follow_the_settings_each_stage_reads() {
+        let base = Recipe::default();
+        let edit = |f: &dyn Fn(&mut Recipe)| {
+            let mut r = base.clone();
+            f(&mut r);
+            r
+        };
+        let changes = |r: &Recipe| {
+            let (a, b) = (stage_recipes(&base), stage_recipes(r));
+            (a.blurs != b.blurs, a.samples != b.samples)
+        };
+        // (edit, changes the blurs, changes the samples)
+        let cases: [(&str, Recipe, bool, bool); 12] = [
+            ("temperature", edit(&|r| r.temperature = 3000.), true, false),
+            (
+                "lens vignetting",
+                edit(&|r| r.lens_vignetting = 0.5),
+                true,
+                true,
+            ),
+            ("lens CA", edit(&|r| r.lens_ca = true), false, true),
+            (
+                "distortion",
+                edit(&|r| r.lens_distortion = 0.5),
+                false,
+                true,
+            ),
+            (
+                "crop",
+                edit(&|r| r.crop = [0.1, 0.1, 0.9, 0.9]),
+                false,
+                true,
+            ),
+            ("straighten", edit(&|r| r.straighten = 2.), false, true),
+            ("noise", edit(&|r| r.noise_luma = 0.3), false, true),
+            (
+                "chroma detail",
+                edit(&|r| r.effects.chroma_detail = 0.1),
+                false,
+                true,
+            ),
+            ("exposure", edit(&|r| r.exposure = 1.), false, false),
+            ("curve", edit(&|r| r.contrast = 0.4), false, false),
+            (
+                "defringe",
+                edit(&|r| r.effects.defringe = [0.5, 0.]),
+                false,
+                false,
+            ),
+            ("sharpening", edit(&|r| r.sharpening = 0.9), false, false),
+        ];
+        for (name, r, blurs, samples) in cases {
+            assert_eq!(changes(&r), (blurs, samples), "{name}");
+        }
+    }
     #[test]
     fn lru_keeps_recent_entries_within_budget() -> Result<()> {
         let mut lru: Lru<u32, Vec<u8>> = Lru::default();
