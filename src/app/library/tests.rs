@@ -373,5 +373,10 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
         "B&W"
     );
     assert_eq!(library.photo(copy).unwrap().copy_name, "B&W");
+    // A removed copy's draft never renames a new copy that reuses its id.
+    library.remove_virtual_copy(copy)?;
+    let next = library.create_virtual_copy(library.photos[0].id)?;
+    library.commit_copy_name();
+    assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
     Ok(())
 }

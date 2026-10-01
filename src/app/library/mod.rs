@@ -172,6 +172,9 @@ impl Library {
         }
         self.collections = self.catalog.collections()?;
         self.roots = self.catalog.roots()?;
+        // Names may have changed, and a removed copy's id can be reused. Copy
+        // commands save a name being typed before they run.
+        self.copy_name = None;
         self.filter();
         Ok(())
     }
