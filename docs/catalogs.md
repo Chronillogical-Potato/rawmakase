@@ -1,6 +1,6 @@
 # RAWmakase catalogs and Lightroom import
 
-Use **Catalog → Import Lightroom catalog…**, select a closed `.lrcat`, then choose a new `.rawmakase` filename. Existing destination files are never overwritten. **New catalog** creates an empty library; **Add photo folder** recursively registers ARW, RAF, JPEG, PNG and TIFF files without copying or modifying them.
+Use **Catalog → Import Lightroom catalog…**, select a closed `.lrcat`, then choose a new `.rawmakase` filename. Existing destination files are never overwritten. **New catalog** creates an empty library; **Add photo folder** recursively registers RAW files (any extension in `RAW_EXTENSIONS`), JPEG, PNG and TIFF files without copying or modifying them.
 
 **Library** (`G`) provides a virtualized thumbnail grid, folder browsing, filename/keyword/date/label search, minimum-rating and flag filters, offline filtering, capture-date sorting, and rating/flag/color-label editing. Double-click an available RAW file (any LibRaw format, see `RAW_EXTENSIONS` in `src/storage/files.rs`) or select it and use **Develop** (`D`). JPEG, PNG and TIFF remain browsable but can't be developed. Library thumbnails are original embedded/file previews, not Lightroom-rendered previews.
 

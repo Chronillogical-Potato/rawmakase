@@ -1,10 +1,10 @@
 # Imported Lightroom camera and look profiles
 
-RAWmakase reads profiles only from its own library and files the user explicitly selects. It does not scan Lightroom, Camera Raw, or other Adobe application directories. Proprietary profile assets are not shipped with the application; RAWmakase ships its own profiles instead (see [RAWmakase profiles](#rawmakase-profiles)).
+RAWmakase renders with profiles from its own library and files the user explicitly selects. Proprietary profile assets are not shipped with the application; RAWmakase ships its own profiles instead (see [RAWmakase profiles](#rawmakase-profiles)). On macOS and Windows, the Develop **Profile** menu looks in Camera Raw's profile folder (`/Library/Application Support/Adobe/CameraRaw/CameraProfiles`, `C:\ProgramData\Adobe\CameraRaw\CameraProfiles`) for the current camera's Adobe Standard and Camera Matching profiles, and offers **Import Adobe profiles for this camera** when it finds some that are not imported yet. To decide whether to offer the button it only lists that folder's file names for the current camera; no profile is opened, parsed or copied until the button is used, and then the files are copied like any other import.
 
 ## Import and select
 
-Use **Edit → Import profiles…** or **Import profiles…** beside the Develop Profile selector. Select one or more `.dcp` / `.xmp` files. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
+Use **Import profiles…** in the Develop Profile menu or **Import Profiles…** in Preferences. Select one or more `.dcp` / `.xmp` files. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
 
 The CLI uses the same importer:
 
@@ -57,6 +57,6 @@ Measurements are encoded-sRGB MAE at an 800-pixel long edge, using the existing 
 | Adobe Vivid | DSCF7853 | — | 0.03074 |
 | Adobe Monochrome | DSCF7853 | — | 0.03087 |
 
-The baseline renders use the same recipe and camera DCP without the enhanced look layer. Color improves approximately 20%, Neutral 52%, and Portrait 3% on these examples. These results support similar overall looks on the tested X100F images, not exact slider equivalence across cameras. Monochrome mixing, local tones, clarity, saturation, lens corrections and detail processing remain independently implemented. A Julka-folder RAW was also rendered using the imported default Adobe Color as a separate loading/rendering smoke check.
+The baseline renders use the same recipe and camera DCP without the enhanced look layer. Color improves approximately 20%, Neutral 52%, and Portrait 3% on these examples. These results support similar overall looks on the tested X100F images, not exact slider equivalence across cameras. Monochrome mixing, local tones, clarity, saturation, lens corrections and detail processing remain independently implemented. A further RAW was rendered with the imported default Adobe Color as a loading/rendering smoke check.
 
 Private comparison files remain in `target/profile-parity/` and a private local directory. The repository contains no private photos, exported references, or Adobe profile assets. Tests cover import persistence/conflicts, malformed and truncated table payloads, synthetic hue rotation, camera restrictions, default selection, XMP/catalog resolution, embedded-profile round trips, finite output, monochrome neutrality and full-image/region equivalence. The supplied 62 DCPs and all six imported Adobe Raw looks passed private checks.

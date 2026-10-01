@@ -13,8 +13,12 @@ files should preserve.
 | Module | Owns | Main extension points |
 | --- | --- | --- |
 | `raw` | LibRaw/Little CMS boundary, camera metadata, decoded images, oriented embedded thumbnails | RAW decoding and native color management |
-| `camera_profiles` | DCP parsing and validation, camera transforms, profile discovery, reference metadata and DNG temperature/tint | `dcp.rs`, `library.rs`, `reference.rs` |
-| `develop` | Validated recipes, geometry, color processing, curves, effects, detail rendering and output pixel buffers | `recipe.rs`, `pipeline.rs`, `quality.rs`, `geometry.rs` |
+| `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
+| `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
+| `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build | `decode_cache.rs` |
+| `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
+| `lens` | Lens correction model, the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement | `mod.rs`, `embedded.rs`, `lcp.rs`, `auto_ca.rs` |
+| `develop` | Validated recipes, geometry, color processing, curves, effects, local adjustments, detail rendering, the GPU port and output pixel buffers | `recipe.rs`, `pipeline.rs`, `quality.rs`, `geometry.rs`, `gpu/` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
 | `storage` | RAW identity checks, legacy sidecar import, session state, application paths, shared format versions and atomic JSON writes | `identity.rs`, `sidecar.rs`, `session.rs`, `format.rs`, `files.rs` |
@@ -22,7 +26,8 @@ files should preserve.
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import and best-effort conversion of serialized Develop settings | `mod.rs`, `develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
-| `platform` | OS integration such as the Linux GVFS filesystem bridge | `network.rs` |
+| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager and the browser | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs` |
+| `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 
 `color_math` is a private collection of shared numeric primitives. Camera profiles
@@ -33,27 +38,9 @@ library discovers its folders through the other.
 ## Desktop composition
 
 `app/mod.rs` owns the `Editor`, initialization and lifecycle. Its fields remain
-private. UI and workflow methods have visibility limited to the app module:
-
-- `workspace.rs`: a short frame coordinator, workspace panels, shortcuts and pending-work UI.
-- `toolbar.rs`: develop commands and menu presentation.
-- `state.rs`: document, decoded-image pair, preview, viewport and preset-browser ownership.
-- `history.rs`: bounded undo/redo and gesture transactions.
-- `editing.rs`: frame snapshots tied to a document generation.
-- `activity.rs`: mutually exclusive dialogs, overwrite confirmation and export.
-- `task.rs`: operation generations, cancellation and running/completed state.
-- `save_state.rs`: clean, pending, failed and protected edit persistence.
-- `events.rs`: generation-checked worker result dispatch and accepted-result handlers.
-- `inspector.rs`: develop controls and histogram.
-- `viewport.rs`: image display, zoom, pan, crop and white-balance picking.
-- `presets.rs`: preset filtering, favorites, compatibility and hover previews.
-- `catalog.rs`: catalog operations and applying imported Lightroom edits.
-- `workflow.rs`: opening photos, saving edits, preview scheduling and export orchestration.
-- `dialogs.rs`: exhaustive file/catalog action enums and native file choosers.
-- `widgets.rs`: reusable toolbar, slider and tone-curve widgets.
-- `photo_metadata.rs`: rating, label and flag controls and shortcuts.
-- `library/`: browsing state and grid, with separate tree, cell and thumbnail modules.
-- `worker/`: event/job definitions, coalescing mailbox, RAW loader and preview renderer.
+private. UI and workflow methods have visibility limited to the app module, one
+file per tool, workflow or policy; the Develop adjustment panels currently share
+`inspector.rs`. The [code map](code-map.md#desktop-application) lists them.
 
 `Editor` deliberately remains the coordinator for state shared across panels.
 A panel should call the domain API responsible for an operation, rather than
@@ -97,82 +84,46 @@ inject a temporary file, without changing the process-wide environment.
   `raw`. Use the existing asset-path policy instead of duplicating environment
   variable handling in feature modules.
 
-## Review and compatibility
+## Invariants the code relies on
 
-The structural review found several responsibilities sharing large files:
-`app.rs` mixed workflows and all editor panels; `core.rs` combined recipes,
-geometry and pixel processing; `io.rs` combined unrelated persistence and export
-formats; `catalog.rs` combined the native database with Lightroom adaptation.
-These responsibilities now have explicit owners. Camera-profile parsing and
-library discovery, XMP parsing and application, library widgets, and worker
-lifecycles have also been separated.
-
-Numeric dialog selectors were replaced with exhaustive enums. Relink actions
-carry their target ID, so a new menu item cannot silently become another operation
-through a catch-all numeric branch. Dense catalog/UI expressions were expanded,
-and catalog DDL now lives in `catalog/schema.sql`.
-
-XMP application is a sequence of named profile, basic, white-balance, color,
-curve, grading, effects and geometry stages. Each stage mutates a private recipe;
-unsupported settings and final validation must pass before that recipe is returned.
-
-The deeper review also fixed concrete correctness issues:
-
-- Bare relative filenames now resolve their parent to `.` consistently for JSON
+- Dialog and relink actions are exhaustive enums carrying their target ID, so a
+  new menu item cannot silently become another operation through a catch-all
+  branch.
+- XMP application is a sequence of named profile, basic, white-balance, color,
+  curve, grading, effects and geometry stages. Each stage mutates a private
+  recipe; unsupported settings and final validation must pass before that recipe
+  is returned.
+- Bare relative filenames resolve their parent to `.` consistently for JSON
   writes, catalog creation/import, RAW enumeration and image export.
-- Saved-recipe migration validates the envelope and recipe object before mutation;
-  malformed legacy recipes return errors rather than panicking.
+- Saved-recipe migration validates the envelope and recipe object before
+  mutation; malformed legacy recipes return errors rather than panicking.
 - Export defaults are validated before catalog writes and on restoration.
-  Existing invalid edits remain protected against replacement.
-- Catalog header handling keeps the profile-resolved recipe supplied by the loader
-  until an actual saved catalog edit replaces it.
-- Reloading preset compatibility cancels an outstanding hover render.
-- Protected edits never enter autosave; failed saves remain pending for retry.
+  An edit the catalog cannot load is protected: it never enters autosave and is
+  not replaced. Failed saves remain pending for retry.
 - Autosave writes on its own thread and catalog connection, so a slow disk
   cannot stall editing. Saves before navigation and close wait for it, then
   save synchronously.
 
-Existing public paths such as `core`, `profile`, `io`, `library`, `worker`,
-`curve`, `effects` and `quality` remain compatibility exports. The old catalog
-import and XMP-library entry points also remain available. Implementations and
-production callers use the new module paths. Do not add new functionality to
-compatibility facades. The application worker protocol itself changed from
-positional tuples to named payloads; callers constructing `worker::Event` values
-must update those constructions. The domain APIs and serialized data formats
-remain compatible.
+## Compatibility
 
-This refactor preserves recipe serialization, schema/pipeline versions, rendering
-algorithms, default asset locations and CLI commands. It introduces no new
-runtime dependencies or database migration. It does not establish Lightroom
-rendering parity beyond the existing implementation.
+The library paths `core`, `profile`, `io`, `library`, `worker`, `curve`,
+`effects`, `quality`, `network` and `preview_cache` are hidden aliases of the
+modules above, left from before the domain split. They are path aliases only:
+the types behind them have changed since (`worker::Event` moved from tuple
+variants to named payloads), so old code is not guaranteed to compile through
+them. They contain no implementation; do not add functionality to them, and do
+not use them in new code. The compatibility surface is the saved data: recipe
+and preset envelopes are versioned and migrated by `storage::format`; a catalog
+must be exactly version 1 to open (other versions are refused, the file left
+unchanged), and its schema only ever gains tables, applied idempotently on open;
+see [catalogs](catalogs.md#sqlite-format-version-1).
 
 ## Validation
 
-Use Rust 1.98 or newer with the native libraries documented in the main README:
-
-```sh
-cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-```
-
-The original suite passed 86 tests. The expanded suite adds regressions for bounded
-history, gesture coalescing, cancellation, stale and cross-task failures, overwrite
-confirmation, document changes during a frame, loader-resolved recipes, preset
-hover invalidation, injected session persistence, malformed migration input and
-invalid export defaults. Relative-path persistence runs in a child process with
-its own working directory and data directory, avoiding global test interference.
-
-Existing coverage for lossless catalog import/relinking, profile validation,
-color/geometry, preview/export consistency, ICC/EXIF, and editor interactions
-remains in place. The external private-fixture tests continue to compile through
-the domain compatibility APIs.
-
-Five tests require private Lightroom catalogs, RAWs, profiles or installed XMP
-presets and remain explicitly ignored by default. They were not run for this
-refactor. Automated egui interaction tests ran; a manual desktop session and
-Linux runtime validation were not performed. See `validation.md` for the broader
-photographic validation procedure.
+`make check` runs the standard suite (see the [README](../README.md#development)).
+Photographic checks, measured results and dated validation records live in
+[validation.md](validation.md), the per-stage measurement pages and
+[macOS and Lightroom validation](macos-lightroom-validation.md).
 
 ## Preview compute backend
 

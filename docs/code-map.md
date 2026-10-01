@@ -34,7 +34,12 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [src/color_math.rs](../src/color_math.rs) | Private shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
 | [src/io.rs](../src/io.rs) | Compatibility reexports for the former combined persistence/export API; add implementations to their domain instead. |
-| [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs) | OS integration entry point and Linux GVFS/FUSE path bridge. |
+| [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
+| [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
+| [src/tiff.rs](../src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF). |
+| [src/time.rs](../src/time.rs) | Calendar dates from Unix time, without a date library. |
+| [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
+| [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs), [volume.rs](../src/platform/volume.rs), [reveal.rs](../src/platform/reveal.rs), [web.rs](../src/platform/web.rs) | OS integration: Linux GVFS/FUSE path bridge, which drive a path is on, showing a file in the file manager, opening web pages. |
 
 ## Development and rendering
 
@@ -54,6 +59,11 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [masks/range.rs](../src/develop/masks/range.rs) | Color Range and Luminance Range weights from developed Oklab colours. |
 | [masks/local.rs](../src/develop/masks/local.rs) | A mask's sliders as per-pixel deltas, and where each acts in the pipeline. |
 | [pipeline.rs](../src/develop/pipeline.rs) | Color/tone processing, sampling, render entry points, neutral picking and legacy engine paths. |
+| [basic_tone.rs](../src/develop/basic_tone.rs), [basic_tone_data.rs](../src/develop/basic_tone_data.rs) | Engine 4 Contrast, Whites, Blacks and Dehaze as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md). |
+| [local_tone.rs](../src/develop/local_tone.rs), [local_tone_data.rs](../src/develop/local_tone_data.rs) | Engine 4 Shadows and Highlights: an edge-aware local operator fitted to Camera Raw, and its tables. |
+| [color_mixer.rs](../src/develop/color_mixer.rs), [color_mixer.bin](../src/develop/color_mixer.bin) | Engine 4 HSL mixer, Saturation and Vibrance as measured hue/saturation/value lookups. See [color mixer](color-mixer.md). |
+| [color_grade.rs](../src/develop/color_grade.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading as measured per-luminance gains, and its tables. |
+| [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto. See [transform](transform.md). |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
@@ -63,6 +73,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [gpu/develop.rs](../src/develop/gpu/develop.rs) | GPU per-pixel color and tone stage: sample buffers kept per stage-cache entry, dispatch and readback. |
 | [gpu/develop.wgsl](../src/develop/gpu/develop.wgsl) | WGSL port of the engine 4 per-pixel pipeline (profile tables, tone, curves, mixer, grading). |
 | [pipeline/pixel_params.rs](../src/develop/pipeline/pixel_params.rs) | Which recipes the GPU stage covers, and its parameters and tables. |
+| [gpu/resident.rs](../src/develop/gpu/resident.rs), [gpu/logs.wgsl](../src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
+| [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
 | [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion and histogram generation. |
 | [curve.rs](../src/develop/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
@@ -78,7 +90,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | --- | --- |
 | [camera_profiles/mod.rs](../src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
 | [dcp.rs](../src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
-| [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching (no Adobe-directory discovery). |
+| [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching. Rendering never reads Adobe's folders; the one-click import of a camera's Adobe profiles in the Develop Profile menu lists them from `app/inspector.rs`. |
 | [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments. |
 | [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../src/camera_profiles/reference.rs) | Verified camera-specific exposure baseline and neutral calibration data. |
@@ -92,6 +104,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [lens/mod.rs](../src/lens/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. |
 | [lens/auto_ca.rs](../src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
 | [lens/embedded.rs](../src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
+| [lens/lcp.rs](../src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles` and matched to the photo's lens. |
 
 ## XMP and presets
 
@@ -103,6 +116,8 @@ recipes and the installed preset collection; they do not own the renderer.
 | [xmp/mod.rs](../src/xmp/mod.rs) | Parsed preset/settings model and XMP API. |
 | [parse.rs](../src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
+| [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
+| [local.rs](../src/xmp/local.rs) | Lightroom's spot removal and masks (`RetouchAreas`, legacy `RetouchInfo`, mask correction lists) from XMP or a catalog, as retouch operations and masks; import only. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
 | [builtin.rs](../src/presets/builtin.rs) | Built-in presets embedded from `assets/presets`, their group order and ids. |
@@ -125,8 +140,11 @@ recipes and the installed preset collection; they do not own the renderer.
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
 | [lightroom/develop.rs](../src/catalog/lightroom/develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
-| [export/mod.rs](../src/export/mod.rs) | Export option validation, JPEG/16-bit TIFF encoding, original-file protection, overwrite policy and atomic publication. |
-| [export/metadata.rs](../src/export/metadata.rs) | Selected EXIF/TIFF metadata and descriptions; avoids copying unsafe source offsets and maker notes. |
+| [export/mod.rs](../src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
+| [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
+| [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | Selected EXIF/TIFF metadata and descriptions, and the camera's own EXIF read from the RAW; maker notes and offsets into the RAW are left out. |
+| [export/job.rs](../src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
+| [export/settings.rs](../src/export/settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export. |
 
 ## Desktop application
 
@@ -150,6 +168,9 @@ above rather than implementing SQL, file formats or pixel processing.
 | [dialogs.rs](../src/app/dialogs.rs) | Typed dialog intents and native file/folder choosers. |
 | [auto.rs](../src/app/auto.rs) | Runs Auto (the Basic panel's Auto button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs, Lightroom import, folder addition, relinking and applying imported edits. |
+| [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported. |
+| [upright.rs](../src/app/upright.rs) | Runs the Transform panel's Upright analysis off the UI thread. |
+| [updates.rs](../src/app/updates.rs) | The update notice under the toolbar and the About rows in Preferences; the checks and downloads themselves are in `src/updates.rs`. |
 
 ### Panels and interaction
 
@@ -159,6 +180,8 @@ above rather than implementing SQL, file formats or pixel processing.
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
+| [onboarding.rs](../src/app/onboarding.rs) | First-run setup: a catalog, then optional Lightroom profiles and presets. |
+| [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
 | [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking; hands the pointer to the active tool. |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
@@ -171,6 +194,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [library/tree.rs](../src/app/library/tree.rs) | Folder/collection hierarchy, rows and tree actions. |
 | [library/cell.rs](../src/app/library/cell.rs) | Individual photo grid cells. |
 | [library/thumbnails.rs](../src/app/library/thumbnails.rs) | Batched file availability and bounded thumbnail work using the RAW API and preview cache. |
+| [library/previews.rs](../src/app/library/previews.rs) | The two preview workers (embedded thumbnails, and each photo's edited preview) with their disk cache and progress. |
 
 ### Background work
 
@@ -190,9 +214,14 @@ above rather than implementing SQL, file formats or pixel processing.
    replaces the loader's resolved defaults for a catalog photo.
 2. **Edit and preview:** panels change the recipe. `app::editing` and `history`
    group the change; save policy marks it pending. `workflow` submits the effective
-   recipe and viewport to the renderer. The worker calls `develop`; engine 3 previews optionally finish sharpening/resizing on the GPU, then the worker performs
-   display conversion. Accepted results become preview textures. Drafts are
-   followed by a full-quality fit or region result.
+   recipe and viewport to the renderer. The worker calls `develop`; with a usable
+   GPU and a recipe the GPU stage covers (engine 4 with the reference flags, see
+   `pipeline/pixel_params.rs`), the color and tone stage and the finishing run on
+   the device and the result is drawn straight from its texture; otherwise the
+   worker renders on the CPU and prepares the display bytes. Accepted results
+   become the preview. At 100%, an edit or pan whose region is not already cached
+   and takes more than a moment publishes a reduced draft first, then the
+   full-resolution region.
 3. **Save edits:** workspace autosave and navigation/close flushing call
    `workflow`; autosave writes in the background (`autosave`), and flushing
    waits for it before saving synchronously. Photos are edited only through the
@@ -244,6 +273,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
 | [develop/gpu/tests.rs](../src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
+| [tests/color/](../tests/color/main.rs), [tests/corpus/README.md](../tests/corpus/README.md) | The color corpus: synthetic chart DNGs rendered and compared with committed snapshots and Camera Raw renders on every `cargo test`; private photo and Adobe-profile tiers behind `RAWMAKASE_CORPUS`. |
 | [examples/preview_benchmark.rs](../examples/preview_benchmark.rs) | Read-only release benchmark of first Fit, slider Fit, 100% region and export renders on a supplied RAW; checks Fit against the resized export. |
 | [tests/persistence.rs](../tests/persistence.rs) | Public API regressions for relative paths, malformed legacy recipes and invalid export defaults; isolates process-wide path settings in a child process. |
 | [tests/raw_fixtures.rs](../tests/raw_fixtures.rs) | Ignored private RAW development/export and repeated-navigation memory tests (`RAWMAKASE_FIXTURES`). |
@@ -254,9 +284,10 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [scripts/make-curve-fixtures.py](../scripts/make-curve-fixtures.py) | Generates synthetic TIFF ramps for manual Lightroom curve comparisons. |
 | [scripts/compare-preview.py](../scripts/compare-preview.py) | Compares resized sRGB previews without exposure/color fitting; distinct from the Rust comparison command. |
 
-Use the [README checks](../README.md#checks) for the standard suite. Private fixture
-checks require external data and are explicitly ignored by default. A passing
-unit suite does not replace the photographic/manual checks in the validation docs.
+Use the [README's development section](../README.md#development) for the standard
+suite. Private fixture checks require external data and are explicitly ignored by
+default. A passing unit suite does not replace the photographic/manual checks in
+the validation docs.
 
 ## Build, packaging and documentation
 
@@ -279,7 +310,9 @@ unit suite does not replace the photographic/manual checks in the validation doc
 | [Validation](validation.md) | Recorded checks, evidence limits, reproduction and measured performance. |
 | [macOS / Lightroom validation](macos-lightroom-validation.md) | Dated photographic comparisons and platform validation results. |
 | [Parity gaps](parity-gaps.md) | Known differences and work still needed for Lightroom parity. |
-| [Implementation status](implementation-status.md) | Milestone record; use this map for the current file layout. |
+| [Tone controls](tone-controls.md), [color mixer](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md), [demosaic](demosaic.md) | How each engine 4 stage was measured against Camera Raw and what it does. |
+| [Retouching](retouching.md), [masking](masking.md) | The Remove and Masking tools: use, rendering and what is not implemented. |
+| [Lightroom profiles](lightroom-profiles.md) | RAWmakase's own profiles, importing Adobe and third-party profiles, and supported profile features. |
 
 When adding or moving a module, update its entry here. Put API contracts in Rust
 doc comments, ownership decisions in the architecture guide, and measured results
