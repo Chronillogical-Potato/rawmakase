@@ -561,6 +561,40 @@ fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
         (a[i] * (1. - fx) + b[i] * fx) * (1. - fy) + (c[i] * (1. - fx) + d[i] * fx) * fy
     })
 }
+/// Lightroom's Fringe Color Selector on the shown colour `rgb` (encoded sRGB): the
+/// Purple or Green range is pointed at it (see [`Effects::pick_fringe`]). Defringe
+/// tests the hue before the HSL Hue sliders of engines before 4 turn it, so the shown
+/// hue is turned back first.
+///
+/// [`Effects::pick_fringe`]: super::effects::Effects::pick_fringe
+pub fn pick_fringe(r: &mut Recipe, rgb: [f32; 3]) -> Option<usize> {
+    let lab = srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+    let hue_of = |lab: [f32; 3]| {
+        lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
+    };
+    let shown = hue_of(lab);
+    let turns = !(r.engine >= 4 && r.reference_curves) && r.hsl.iter().any(|band| band[0] != 0.);
+    let hue = if turns {
+        // The hue the HSL rotation (`color_stage`) turns closest to the shown one.
+        let turned = |h: f32| {
+            let shift: f32 = r
+                .hsl
+                .iter()
+                .zip(hue_weights(h))
+                .map(|(band, w)| band[0] * w)
+                .sum();
+            h + shift / 8.
+        };
+        let distance = |h: f32| ((turned(h) - shown + 0.5).rem_euclid(1.) - 0.5).abs();
+        (0..1440)
+            .map(|i| i as f32 / 1440.)
+            .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+            .unwrap_or(shown)
+    } else {
+        shown
+    };
+    r.effects.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
+}
 pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     let g = Geometry::new(im, r, 0);
     let [x, y] = g.source(u, v);

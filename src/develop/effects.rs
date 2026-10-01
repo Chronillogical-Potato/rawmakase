@@ -179,10 +179,15 @@ impl Effects {
     /// off. Returns which (0 purple, 1 green), or `None` when the colour is neither.
     pub fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
         let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
-        if lab[1].hypot(lab[2]) < 0.02 {
+        let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+        self.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
+    }
+    /// As [`Self::pick_fringe`], for a colour of Oklab `hue` and `chroma` as Defringe
+    /// sees it.
+    pub(crate) fn pick_fringe_hue(&mut self, hue: f32, chroma: f32) -> Option<usize> {
+        if chroma < 0.02 {
             return None;
         }
-        let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         // The nearer window that holds the hue well inside its slider: the outer ends
         // reach reds, yellows and blues, which are not fringes.
         let (i, at) = DEFRINGE_CENTERS
@@ -360,5 +365,27 @@ mod tests {
         assert_eq!(e.pick_fringe([0.8, 0.2, 0.2]), None);
         assert_eq!(e.pick_fringe([0.5, 0.5, 0.5]), None);
         assert_eq!(e, before);
+    }
+    #[test]
+    fn fringe_selector_turns_back_hsl_hue_shifts() {
+        let purple = [0.6, 0.3, 0.8];
+        let pick = |hue_shift: f32| {
+            let mut r = crate::develop::Recipe {
+                engine: 3,
+                ..Default::default()
+            };
+            for band in &mut r.hsl {
+                band[0] = hue_shift;
+            }
+            assert_eq!(crate::develop::pick_fringe(&mut r, purple), Some(0));
+            r.effects.defringe_ranges[0][0]
+        };
+        // Every band turned by 0.4 turns hues by 0.05, a tenth of the Hue slider.
+        assert!(
+            (pick(0.) - pick(0.4) - 0.1).abs() < 0.01,
+            "{} {}",
+            pick(0.),
+            pick(0.4)
+        );
     }
 }

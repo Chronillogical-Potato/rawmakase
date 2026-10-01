@@ -404,7 +404,10 @@ impl Editor {
         // A tool that owns the pointer (spots, brushes, gradients) takes drags and
         // clicks; the hand tool pans only when no tool claims them.
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
-        let hand = !tool_owns_pointer && !self.view.picks_color();
+        // Holding Space pans while an eyedropper is open, as in Lightroom.
+        let space = ui.input(|i| i.key_down(egui::Key::Space));
+        let picking = self.view.picks_color() && !space && !self.view.compare;
+        let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
         if self.view.zoom100 && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
             self.view.pan[0] = (self.view.pan[0] - delta.x / rect.width()).clamp(0., 1.);
@@ -459,6 +462,7 @@ impl Editor {
             self.preview.region_samples = None;
         }
         if self.view.is(Tool::WhiteBalance)
+            && picking
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
@@ -473,13 +477,15 @@ impl Editor {
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
         }
+        // Before shows the unedited photo, so picking there would edit what is not shown.
         if self.view.is(Tool::Defringe)
+            && picking
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
             match self.shown_color(pos, rect, region_rect) {
-                Some(rgb) => match self.document.recipe.effects.pick_fringe(rgb) {
+                Some(rgb) => match develop::pick_fringe(&mut self.document.recipe, rgb) {
                     Some(_) => self.view.tool = Tool::None,
                     None => {
                         self.status =
