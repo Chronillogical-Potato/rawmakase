@@ -1,5 +1,6 @@
 use super::lightroom::develop_fields;
 use super::*;
+use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;
     db.execute_batch("CREATE TABLE AgLibraryRootFolder(id_local INTEGER, absolutePath TEXT);
@@ -276,9 +277,12 @@ fn lightroom_history_text_decodes_plain_and_compressed() {
     z.write_all(text.as_bytes()).unwrap();
     let mut blob = (text.len() as u32).to_be_bytes().to_vec();
     blob.extend(z.finish().unwrap());
-    assert_eq!(super::decode_history_text(&blob).as_deref(), Some(text));
     assert_eq!(
-        super::decode_history_text(text.as_bytes()).as_deref(),
+        super::lightroom::history::decode_history_text(&blob).as_deref(),
+        Some(text)
+    );
+    assert_eq!(
+        super::lightroom::history::decode_history_text(text.as_bytes()).as_deref(),
         Some(text)
     );
 }
