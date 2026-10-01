@@ -32,36 +32,37 @@ unchanged.
 
 CodeQL uses the root `codeql.yml` workflow instead of GitHub's automatic default
 setup, which cannot apply these workflow trigger filters. It retains the same
-five languages, default queries and weekly scans of the repository. Switch off
-default setup when activating this workflow so it does not run a second set of
-unfiltered scans or reject the workflow's analysis uploads.
+five languages, default queries and weekly scans of the repository. Default
+setup is disabled; do not re-enable it alongside this workflow, since it would
+run unfiltered scans and reject the workflow's analysis uploads.
 
 Page copy and features live in `content/_index.md`; the layout is
 `layouts/index.html`. Generated output and Hugo's cache are ignored by Git.
 
-## GitHub Pages migration
+## Hosting and migration record
 
 The website was imported from `pch/rawmakase-website` at
 `82968d56ad4612af2f6a3443bfee31c27318bf85`, preserving its original Git history
-as a parent of the import commit. Merge this branch with a merge commit;
-squashing or rebasing would discard that ancestry.
+as a parent of the import commit. [PR #42](https://github.com/pch/rawmakase/pull/42)
+was merged with that ancestry intact on 2026-10-01.
 
-To transfer the live site after merging:
+`rawmakase.com` is configured on `pch/rawmakase` with **GitHub Actions** as the
+Pages source and **Enforce HTTPS** enabled. The certificate covers both
+`rawmakase.com` and `www.rawmakase.com`; `www` redirects to the apex domain.
+The existing DNS records still point to GitHub Pages. The `github-pages`
+environment allows the `main` branch and `v*` tags, since releases also deploy
+the website.
 
-1. Enable GitHub Pages for `pch/rawmakase`, with **GitHub Actions** as its
-   source. The `github-pages` environment must allow the `main` branch and
-   `v*` tags, since the release workflow also deploys the website.
-2. Disable the old repository's Deploy workflow. Remove its custom domain,
-   then set `rawmakase.com` on the main repository's Pages settings. Verify
-   the existing DNS records still point to GitHub Pages; the GitHub owner
-   is unchanged. Keep the old source available for rollback.
-3. Run **Website** from `main`. Wait for deployment and the domain's HTTPS
-   certificate, enable **Enforce HTTPS**, then verify `rawmakase.com`, its
-   images, and the download links against the latest published release.
-4. Only after verification, replace the old repository's README with a link
-   here and archive that repository. Remove the obsolete
-   `WEBSITE_DISPATCH_TOKEN` secret from the main repository.
+Before transferring the domain, the new deployment was verified against the
+previous live site's HTML. After transfer, the page, images, download links,
+HTTPS certificate and `www` redirect were checked again. The old repository's
+Deploy workflow is disabled, its custom domain was removed, and its README
+points here. That repository is archived and the obsolete
+`WEBSITE_DISPATCH_TOKEN` secret has been removed from `pch/rawmakase`.
 
-If the cutover fails, remove the domain from the main repository, restore it
-on `pch/rawmakase-website`, re-enable its Deploy workflow and deploy there.
-Do not delete the old Pages site or archive its repository before verification.
+For an emergency hosting rollback, unarchive `pch/rawmakase-website`, remove
+the domain from the main repository and restore it on the old repository.
+Re-enable its Deploy workflow and deploy there, then verify HTTPS and the
+published page. The old source and Pages site have been retained for this
+purpose. App release publication will still call the main repository's website
+workflow, so restore the main hosting configuration after resolving the problem.
