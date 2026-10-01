@@ -338,16 +338,13 @@ impl Library {
         }
         Ok(master)
     }
-    fn rename_copy(&mut self, id: i64, name: &str) {
-        match self.catalog.set_copy_name(id, name) {
-            Ok(()) => {
-                if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
-                    p.copy_name = name.trim().to_string();
-                }
-                self.filter();
-            }
-            Err(e) => self.message = format!("Copy name could not be saved: {e}"),
+    fn rename_copy(&mut self, id: i64, name: &str) -> Result<()> {
+        self.catalog.set_copy_name(id, name)?;
+        if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
+            p.copy_name = name.trim().to_string();
         }
+        self.filter();
+        Ok(())
     }
     /// Selects `id`, leaving filters that would hide it so it stays in view.
     fn show(&mut self, id: i64) {
@@ -1380,24 +1377,36 @@ impl Library {
                 .margin(egui::Margin::symmetric(4, 1))
                 .vertical_align(egui::Align::Center),
         );
-        if response.lost_focus() {
-            self.commit_copy_name();
+        if response.lost_focus()
+            && let Err(e) = self.commit_copy_name()
+        {
+            self.message = format!("Copy name could not be saved: {e}");
         }
     }
     /// Saves a Copy Name still being typed, e.g. when the Library panel
-    /// goes away before the field loses focus.
-    pub(super) fn commit_copy_name(&mut self) {
+    /// goes away before the field loses focus. On failure the name stays
+    /// pending, to be saved again or discarded.
+    pub(super) fn commit_copy_name(&mut self) -> Result<()> {
         let Some((id, text)) = &self.copy_name else {
-            return;
+            return Ok(());
         };
         let (id, name) = (*id, text.trim().to_string());
         if self
             .photo(id)
             .is_some_and(|p| p.master.is_some() && p.copy_name != name)
         {
-            self.rename_copy(id, &name);
+            self.rename_copy(id, &name)?;
         }
         self.copy_name = Some((id, name));
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(super) fn set_copy_name_draft(&mut self, id: i64, name: &str) {
+        self.copy_name = Some((id, name.into()));
+    }
+    /// Drops a Copy Name that could not be saved, e.g. closing without saving.
+    pub(super) fn discard_copy_name(&mut self) {
+        self.copy_name = None;
     }
 }
 /// A fixed-height metadata row: caption column, then the truncated value

@@ -1420,7 +1420,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     editor.document.catalog_photo = Some(copy);
     editor.library_mode = true;
     editor.remove_copy = Some(copy);
-    // Return confirms the dialog.
+    // Return alone never confirms the dialog.
     let input = egui::RawInput {
         events: vec![egui::Event::Key {
             key: egui::Key::Enter,
@@ -1433,11 +1433,39 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     };
     let mut output = ctx.run_ui(input, |ui| editor.remove_copy_window(ui.ctx()));
     output.textures_delta.clear();
-    assert!(editor.remove_copy.is_none());
+    assert_eq!(editor.remove_copy, Some(copy));
+    assert!(editor.library.as_ref().unwrap().photo(copy).is_some());
+    editor.remove_copy = None;
+    editor.remove_virtual_copy(copy);
     assert!(editor.library_mode);
     assert_eq!(editor.document.catalog_photo, None);
     let library = editor.library.as_ref().unwrap();
     assert!(library.photo(copy).is_none());
     assert_eq!(library.selected, Some(master));
+    Ok(())
+}
+#[test]
+fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("image.ARW"), b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let copy = l.create_virtual_copy(l.photos[0].id)?;
+    // A copy that is gone from the catalog cannot be renamed.
+    l.catalog.remove_virtual_copy(copy)?;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .set_copy_name_draft(copy, "B&W");
+    assert!(!editor.flush());
+    editor.library.as_mut().unwrap().discard_copy_name();
+    assert!(editor.flush());
     Ok(())
 }

@@ -132,7 +132,22 @@ impl Editor {
                 self.library_mode = true;
             }
             // Lightroom's Create Virtual Copy, in Library and Develop.
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Quote)) {
+            // Only the first key-down: a held key must not make copy after copy.
+            let create = ctx.input(|i| {
+                i.modifiers.command
+                    && i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Key {
+                                key: egui::Key::Quote,
+                                pressed: true,
+                                repeat: false,
+                                ..
+                            }
+                        )
+                    })
+            });
+            if create {
                 let id = if self.library_mode {
                     self.library.as_ref().and_then(|l| l.selected)
                 } else {
@@ -646,6 +661,9 @@ impl Editor {
                 }
                 if !self.exporting() && ui.button("Close without saving").clicked() {
                     self.document.save.saved();
+                    if let Some(library) = &mut self.library {
+                        library.discard_copy_name();
+                    }
                     self.close_confirm = false;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }

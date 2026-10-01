@@ -337,9 +337,9 @@ impl Editor {
                     if ui.button("Cancel").clicked() {
                         choice = Some(false);
                     }
-                    if primary_button(ui, "Remove").clicked()
-                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
+                    // Only a click or the focused button confirms: a stray
+                    // Return must never remove a copy.
+                    if primary_button(ui, "Remove").clicked() {
                         choice = Some(true);
                     }
                 });
@@ -348,7 +348,13 @@ impl Editor {
             return;
         };
         self.remove_copy = None;
-        if !remove || self.activity.is_busy() || !self.flush() {
+        if remove {
+            self.remove_virtual_copy(id);
+        }
+    }
+    /// Removes virtual copy `id` once confirmed.
+    pub(super) fn remove_virtual_copy(&mut self, id: i64) {
+        if self.activity.is_busy() || !self.flush() {
             return;
         }
         let Some(library) = &mut self.library else {

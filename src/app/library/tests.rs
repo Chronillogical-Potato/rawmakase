@@ -366,7 +366,7 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     let mut library = Library::load(&path, egui::Context::default())?;
     let copy = library.create_virtual_copy(library.photos[0].id)?;
     library.copy_name = Some((copy, " B&W ".into()));
-    library.commit_copy_name();
+    library.commit_copy_name()?;
     let saved = library.catalog.photos()?;
     assert_eq!(
         saved.iter().find(|p| p.id == copy).unwrap().copy_name,
@@ -376,7 +376,7 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     // A removed copy's draft never renames a new copy that reuses its id.
     library.remove_virtual_copy(copy)?;
     let next = library.create_virtual_copy(library.photos[0].id)?;
-    library.commit_copy_name();
+    library.commit_copy_name()?;
     assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
     Ok(())
 }
