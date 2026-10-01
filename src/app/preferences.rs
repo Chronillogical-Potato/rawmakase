@@ -200,7 +200,12 @@ impl Editor {
                 );
                 content.add_space(10.);
                 match self.preferences.tab {
-                    Tab::General => self.general_page(&mut content),
+                    // The usage report makes General taller than the window.
+                    Tab::General => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.general_page(ui));
+                    }
                     Tab::Catalog => self.catalog_page(&mut content),
                     Tab::Profiles => self.profiles_page(&mut content),
                     Tab::Performance => self.performance_page(&mut content),
@@ -286,6 +291,11 @@ impl Editor {
             value(ui, &crate::raw::version());
         });
         form_row(ui, "Updates", |ui| self.automatic_updates_checkbox(ui));
+        #[cfg(feature = "telemetry")]
+        {
+            form_row(ui, "Usage stats", |ui| self.usage_stats_preference(ui));
+            form_row(ui, "", |ui| self.usage_stats_details(ui));
+        }
         gap(ui);
         group(ui, "Locations");
         let data = crate::storage::data_dir();

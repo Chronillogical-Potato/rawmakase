@@ -37,7 +37,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
 | [src/tiff.rs](../src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF). |
-| [src/time.rs](../src/time.rs) | Calendar dates from Unix time, without a date library. |
+| [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
+| [src/time.rs](../src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
 | [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs), [volume.rs](../src/platform/volume.rs), [reveal.rs](../src/platform/reveal.rs), [web.rs](../src/platform/web.rs) | OS integration: Linux GVFS/FUSE path bridge, which drive a path is on, showing a file in the file manager, opening web pages. |
 
@@ -174,6 +175,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs, Lightroom import, folder addition, relinking and applying imported edits. |
 | [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported. |
 | [upright.rs](../src/app/upright.rs) | Runs the Transform panel's Upright analysis off the UI thread. |
+| [stats.rs](../src/app/stats.rs) | The one-time question about sharing usage stats and its Preferences row; the report itself is in `src/stats.rs`. |
 | [updates.rs](../src/app/updates.rs) | The update notice under the toolbar and the About rows in Preferences; the checks and downloads themselves are in `src/updates.rs`. |
 
 ### Panels and interaction

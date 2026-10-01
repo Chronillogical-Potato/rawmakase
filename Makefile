@@ -12,6 +12,7 @@ build:
 check:
 	cargo fmt --check
 	cargo clippy --locked --all-targets -- -D warnings
+	cargo clippy --locked --all-targets --no-default-features -- -D warnings
 	cargo test --locked
 
 # Install does not rebuild, so `make && sudo make install PREFIX=/usr` never compiles as root.

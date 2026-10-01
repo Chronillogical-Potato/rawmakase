@@ -26,6 +26,8 @@ pub mod lens;
 pub mod platform;
 pub mod presets;
 pub mod raw;
+#[cfg(feature = "telemetry")]
+pub mod stats;
 pub mod storage;
 mod tiff;
 pub mod time;

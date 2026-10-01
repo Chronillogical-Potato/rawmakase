@@ -40,8 +40,15 @@ fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", 
 
 # The terminal a release build's command-line output goes to, and the
 # Desktop and Pictures export folders.
+[features]
+default = ["telemetry"]
+# The opt-in weekly usage report (src/stats.rs). Packagers who don't want it
+# build with --no-default-features: the question, the Preferences row and all
+# reporting are then left out.
+telemetry = []
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 cc = "1"

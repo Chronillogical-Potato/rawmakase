@@ -39,6 +39,8 @@ pub struct Editor {
     onboarding_done: bool,
     preferences: preferences::Preferences,
     updates: updates::Updates,
+    #[cfg(feature = "telemetry")]
+    stats: stats::UsageStats,
     themes: theme::Themes,
     exports: export::Exports,
     autosave: autosave::Autosave,
@@ -133,6 +135,19 @@ impl Editor {
         let show_onboarding = !session.onboarding_done && session_file.is_some();
         // Only a real session checks GitHub, not an isolated test.
         let updates = updates::Updates::new(&session, session_file.is_some().then_some(ctx));
+        #[cfg(feature = "telemetry")]
+        let adapter = match &backend {
+            worker::RenderBackend::Gpu(Some(render_state)) => Some(render_state.adapter.get_info()),
+            _ => None,
+        };
+        #[cfg(feature = "telemetry")]
+        let stats = stats::UsageStats::new(
+            adapter.as_ref(),
+            session_file
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map(|dir| (dir.to_path_buf(), ctx)),
+        );
         let last = session.last_path.clone().filter(|p| p.exists());
         let (tx, rx) = mpsc::channel();
         let loader = worker::loader(tx.clone(), ctx.clone());
@@ -164,6 +179,8 @@ impl Editor {
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
             updates,
+            #[cfg(feature = "telemetry")]
+            stats,
             themes: theme::Themes::new(
                 ctx,
                 // Sessions from before `theme_chosen` saved only a palette.
@@ -343,6 +360,8 @@ mod photo_metadata;
 mod preferences;
 mod presets;
 mod retouch_tool;
+#[cfg(feature = "telemetry")]
+mod stats;
 #[cfg(test)]
 mod tests;
 mod upright;
