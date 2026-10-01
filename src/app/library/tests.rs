@@ -380,3 +380,28 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
     Ok(())
 }
+#[test]
+fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("names.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    let master = library.photos[0].id;
+    let first = library.create_virtual_copy(master)?;
+    let second = library.create_virtual_copy(master)?;
+    library.copy_name = Some((first, "B&W".into()));
+    // The panel is drawn for the newly selected copy before the field
+    // reports losing focus.
+    let photo = library.photo(second).unwrap().clone();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        library.copy_name_row(ui, &photo)
+    });
+    output.textures_delta.clear();
+    assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
+    assert_eq!(library.copy_name, Some((second, "Copy 2".into())));
+    Ok(())
+}

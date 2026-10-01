@@ -1469,3 +1469,22 @@ fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Re
     assert!(editor.flush());
     Ok(())
 }
+#[test]
+fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let copy = l.create_virtual_copy(l.photos[0].id)?;
+    l.set_copy_as_master(copy)?;
+    let path = l.photo(copy).unwrap().path.clone();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    assert_eq!(editor.catalog_photo_at(&path), Some(copy));
+    Ok(())
+}

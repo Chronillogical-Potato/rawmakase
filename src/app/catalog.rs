@@ -175,13 +175,15 @@ impl Editor {
             ctx.request_repaint();
         });
     }
-    /// The catalog photo stored at `path`, if any.
-    fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
+    /// The catalog photo stored at `path`, if any: its master rather than
+    /// a virtual copy.
+    pub(super) fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
         self.library
             .as_ref()?
             .photos
             .iter()
-            .find(|p| p.path == path)
+            .filter(|p| p.path == path)
+            .min_by_key(|p| p.master.is_some())
             .map(|p| p.id)
     }
     /// Opens the photo waiting to be added once the catalog is ready, adding

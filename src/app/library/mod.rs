@@ -349,6 +349,9 @@ impl Library {
     /// Selects `id`, leaving filters that would hide it so it stays in view.
     fn show(&mut self, id: i64) {
         if !self.visible.iter().any(|i| self.photos[*i].id == id) {
+            if !self.members.contains(&id) {
+                self.collection = None;
+            }
             self.query.clear();
             self.rating = 0;
             self.flag = 2;
@@ -1360,6 +1363,10 @@ impl Library {
             .as_ref()
             .is_none_or(|(id, _)| *id != photo.id)
         {
+            // Another copy was selected before the field lost focus: keep its name.
+            if let Err(e) = self.commit_copy_name() {
+                self.message = format!("Copy name could not be saved: {e}");
+            }
             self.copy_name = Some((photo.id, photo.copy_name.clone()));
         }
         let Some((_, text)) = &mut self.copy_name else {
