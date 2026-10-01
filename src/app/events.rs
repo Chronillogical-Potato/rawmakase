@@ -165,6 +165,7 @@ impl Editor {
                     } else {
                         self.preview.samples = samples;
                     }
+                    self.preview.samples_recipe = self.preview.pending_recipe.clone();
                     self.preview.mode = self.preview.pending_mode;
                     if !region {
                         self.preview.crop = Some(self.preview.pending_crop);

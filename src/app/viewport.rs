@@ -481,7 +481,13 @@ impl Editor {
             && rect.contains(pos)
         {
             let metadata = self.document.full().map(|im| im.metadata.clone());
-            match self.shown_color(pos, rect, region_rect).zip(metadata) {
+            // The samples must come from the settings the pick is mapped through.
+            let current = self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe());
+            match self
+                .shown_color(pos, rect, region_rect)
+                .filter(|_| current)
+                .zip(metadata)
+            {
                 Some((rgb, m)) => match develop::pick_fringe(&mut self.document.recipe, &m, rgb) {
                     Some(_) => self.view.tool = Tool::None,
                     None => {
@@ -489,7 +495,7 @@ impl Editor {
                             "Cannot set the fringe color: click a purple or green fringe".into();
                     }
                 },
-                None => self.status = "Cannot read the color there yet".into(),
+                None => self.status = "Wait for the preview to update, then pick again".into(),
             }
         }
         if self.view.is(Tool::Crop) && !self.view.zoom100 && self.document.full().is_some() {
@@ -627,8 +633,8 @@ impl Editor {
     /// Lightroom's white balance selector over the photo: an eyedropper cursor
     /// whose tip is the picked point, and a loupe of the pixels around it with the
     /// values of the one under the tip.
-    /// The shown color (encoded sRGB, 0–1) at `pos`, averaged over 3 × 3 pixels, from
-    /// the samples renders keep while an eyedropper is active.
+    /// The shown color (encoded sRGB, 0–1) at `pos`, from the samples renders keep while
+    /// an eyedropper is active.
     fn shown_color(&self, pos: Pos2, rect: Rect, region: Option<Rect>) -> Option<[f32; 3]> {
         let (samples, shown) = match (&self.preview.region_samples, region) {
             (Some(samples), Some(region)) if region.contains(pos) => (samples, region),
@@ -637,19 +643,23 @@ impl Editor {
         let (w, h) = samples.dimensions();
         let cx = ((pos.x - shown.left()) / shown.width() * w as f32).floor() as i32;
         let cy = ((pos.y - shown.top()) / shown.height() * h as f32).floor() as i32;
-        let (mut sum, mut n) = ([0f32; 3], 0.);
-        for y in cy - 1..=cy + 1 {
-            for x in cx - 1..=cx + 1 {
-                if x >= 0 && y >= 0 && x < w as i32 && y < h as i32 {
-                    let p = samples.get_pixel(x as u32, y as u32).0;
-                    for c in 0..3 {
-                        sum[c] += f32::from(p[c]) / 255.;
-                    }
-                    n += 1.;
-                }
-            }
-        }
-        (n > 0.).then(|| sum.map(|v| v / n))
+        // The most colourful of the 3 × 3 pixels: a fringe can be a single pixel wide
+        // beside neutral ones, which an average would wash out.
+        (cy - 1..=cy + 1)
+            .flat_map(|y| (cx - 1..=cx + 1).map(move |x| (x, y)))
+            .filter(|&(x, y)| x >= 0 && y >= 0 && x < w as i32 && y < h as i32)
+            .map(|(x, y)| {
+                samples
+                    .get_pixel(x as u32, y as u32)
+                    .0
+                    .map(|v| f32::from(v) / 255.)
+            })
+            .max_by(|a, b| {
+                let spread = |p: &[f32; 3]| {
+                    p.iter().fold(0f32, |m, v| m.max(*v)) - p.iter().fold(1f32, |m, v| m.min(*v))
+                };
+                spread(a).total_cmp(&spread(b))
+            })
     }
     fn white_balance_loupe(
         &self,

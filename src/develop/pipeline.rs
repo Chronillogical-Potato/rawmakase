@@ -571,8 +571,8 @@ fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
 /// Lightroom's Fringe Color Selector on the shown colour `rgb` (encoded sRGB): the
 /// Purple or Green range is pointed at it (see [`Effects::pick_fringe`]). Defringe
 /// tests the hue before the HSL Hue sliders of engines before 4, colour grading and
-/// legacy channel curves change it, so the picked hue is the one those stages turn
-/// closest to the shown hue.
+/// legacy channel curves change it, so the picked colour is the one those stages
+/// render closest to the shown colour.
 ///
 /// [`Effects::pick_fringe`]: super::effects::Effects::pick_fringe
 pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize> {
@@ -584,9 +584,8 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
     let effective = r.resolved(m).into_owned();
     let lut = CurveSet::new(&effective);
     let turns = !lut.basic_curves && effective.hsl.iter().any(|band| band[0] != 0.);
-    // The shown colour of one Defringe sees at hue `h` and chroma `c`, with the shown
-    // lightness.
-    let rendered = |h: f32, c: f32| {
+    // The shown colour of one Defringe sees at lightness `l`, hue `h` and chroma `c`.
+    let rendered = |[l, h, c]: [f32; 3]| {
         let shift: f32 = if turns {
             effective
                 .hsl
@@ -598,17 +597,43 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
             0.
         };
         let angle = (h + shift / 8.) * std::f32::consts::TAU;
-        let out = finish_color([lab[0], angle.cos() * c, angle.sin() * c], &effective, &lut);
+        let out = finish_color([l, angle.cos() * c, angle.sin() * c], &effective, &lut);
         srgb_to_lab(out.map(crate::color_math::srgb_decode))
     };
-    let miss = |[h, c]: [f32; 2]| {
-        let p = rendered(h, c);
-        (p[1] - lab[1]).powi(2) + (p[2] - lab[2]).powi(2)
+    let miss = |p: [f32; 3]| {
+        let q = rendered(p);
+        (0..3).map(|i| (q[i] - lab[i]).powi(2)).sum::<f32>()
     };
-    let [hue, chroma] = (0..360)
-        .flat_map(|i| (0..=40).map(move |j| [i as f32 / 360., j as f32 * 0.01]))
-        .min_by(|a, b| miss(*a).total_cmp(&miss(*b)))
-        .unwrap_or([shown, chroma]);
+    let best = |candidates: &mut dyn Iterator<Item = [f32; 3]>| {
+        candidates.min_by(|a, b| miss(*a).total_cmp(&miss(*b)))
+    };
+    // A coarse search over lightness, hue and chroma, then a finer one around the best.
+    let coarse = [1. / 20., 1. / 120., 1. / 50.];
+    let [l, h, c] = best(&mut (0..=20).flat_map(|i| {
+        (0..120).flat_map(move |j| {
+            (0..=20).map(move |k| {
+                [
+                    i as f32 * coarse[0],
+                    j as f32 * coarse[1],
+                    k as f32 * coarse[2],
+                ]
+            })
+        })
+    }))
+    .unwrap_or([lab[0], shown, chroma]);
+    let fine = |i: i32, step: f32| i as f32 * step / 5.;
+    let [_, hue, chroma] = best(&mut (-5..=5).flat_map(|i| {
+        (-5..=5).flat_map(move |j| {
+            (-5..=5).map(move |k| {
+                [
+                    (l + fine(i, coarse[0])).clamp(0., 1.),
+                    (h + fine(j, coarse[1])).rem_euclid(1.),
+                    (c + fine(k, coarse[2])).max(0.),
+                ]
+            })
+        })
+    }))
+    .unwrap_or([l, h, c]);
     r.effects.pick_fringe_hue(hue, chroma)
 }
 pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {

@@ -115,6 +115,10 @@ pub(super) struct PreviewState {
     pub(super) region_samples: Option<image::RgbImage>,
     /// Whether a render with loupe samples was asked for since the selector opened.
     pub(super) samples_requested: bool,
+    /// The recipe the shown samples were rendered with, and that of the render in
+    /// flight.
+    pub(super) samples_recipe: Option<crate::develop::Recipe>,
+    pub(super) pending_recipe: Option<crate::develop::Recipe>,
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
     pub(super) last_region: Option<[u32; 4]>,
@@ -136,6 +140,8 @@ impl Default for PreviewState {
             samples: None,
             region_samples: None,
             samples_requested: false,
+            samples_recipe: None,
+            pending_recipe: None,
             status: String::new(),
             last_fit_edge: 0,
             last_region: None,

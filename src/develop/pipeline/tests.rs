@@ -511,3 +511,26 @@ fn fringe_selector_reaches_the_hue_defringe_tests_through_grading() {
     assert_eq!(pick_fringe(&mut r, &Metadata::default(), shown), Some(0));
     assert!(chroma(r.effects.defringe_color(lab, hue)) < chroma(lab) * 0.6);
 }
+#[test]
+fn fringe_selector_reaches_the_hue_defringe_tests_through_channel_curves() {
+    // A green fringe as Defringe sees it, darkened and turned by a lowered legacy green
+    // channel curve.
+    let hue = 0.45f32;
+    let angle = hue * std::f32::consts::TAU;
+    let lab = [0.6, angle.cos() * 0.08, angle.sin() * 0.08];
+    let mut r = Recipe {
+        engine: 3,
+        reference_curves: false,
+        wide_gamut_curves: false,
+        ..Default::default()
+    };
+    r.effects.channels[1] = ToneCurve {
+        points: vec![[0., 0.], [1., 0.6]],
+        ..Default::default()
+    };
+    let lut = CurveSet::new(&r);
+    let shown = finish_color(lab, &r, &lut);
+    let chroma = |lab: [f32; 3]| lab[1].hypot(lab[2]);
+    assert_eq!(pick_fringe(&mut r, &Metadata::default(), shown), Some(1));
+    assert!(chroma(r.effects.defringe_color(lab, hue)) < chroma(lab) * 0.6);
+}
