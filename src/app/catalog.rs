@@ -175,13 +175,15 @@ impl Editor {
             ctx.request_repaint();
         });
     }
-    /// The catalog photo stored at `path`, if any.
-    fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
+    /// The catalog photo stored at `path`, if any: its master rather than
+    /// a virtual copy.
+    pub(super) fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
         self.library
             .as_ref()?
             .photos
             .iter()
-            .find(|p| p.path == path)
+            .filter(|p| p.path == path)
+            .min_by_key(|p| p.master.is_some())
             .map(|p| p.id)
     }
     /// Opens the photo waiting to be added once the catalog is ready, adding
@@ -263,6 +265,122 @@ impl Editor {
             Err(e) => {
                 self.document.lightroom_notice = format!("Lightroom settings not applied: {e:#}")
             }
+        }
+    }
+}
+impl Editor {
+    /// Carries out a virtual copy command after saving the open edit, so a
+    /// new copy starts from what is on screen. In Develop a new copy opens.
+    pub(super) fn virtual_copy(&mut self, action: crate::app::library::CopyAction) {
+        use crate::app::library::CopyAction;
+        if let CopyAction::Remove(id) = action {
+            self.remove_copy = Some(id);
+            return;
+        }
+        if self.activity.is_busy() || !self.flush() {
+            return;
+        }
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        let result = match action {
+            CopyAction::Create(id) => library.create_virtual_copy(id).map(Some),
+            CopyAction::SetMaster(id) => library.set_copy_as_master(id).map(|()| None),
+            CopyAction::Remove(_) => unreachable!(),
+        };
+        match result {
+            Ok(open) => {
+                self.status = library.message.clone();
+                if let Some(id) = open
+                    && !self.library_mode
+                {
+                    self.develop_catalog_photo(id);
+                }
+            }
+            Err(e) => self.status = format!("Virtual copy failed: {e:#}"),
+        }
+    }
+    /// Asks before removing a virtual copy, as Lightroom does; a copy shown
+    /// in Develop gives way to its master.
+    pub(super) fn remove_copy_window(&mut self, ctx: &egui::Context) {
+        use super::widgets::{modal_frame, primary_button};
+        let Some(id) = self.remove_copy else {
+            return;
+        };
+        let Some(photo) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
+            self.remove_copy = None;
+            return;
+        };
+        let mut choice = None;
+        let response = egui::Modal::new(egui::Id::new("remove-virtual-copy"))
+            .frame(modal_frame().inner_margin(24))
+            .show(ctx, |ui| {
+                ui.set_width(420.);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Remove “{}” of {}?",
+                        photo.copy_name, photo.filename
+                    ))
+                    .size(15.)
+                    .color(super::theme::gray(236)),
+                );
+                ui.add_space(6.);
+                ui.label(
+                    egui::RichText::new(
+                        "Its edit, rating and keywords are removed from the catalog. \
+                         The photo file and its other copies are not affected.",
+                    )
+                    .size(12.)
+                    .color(super::theme::gray(150)),
+                );
+                ui.add_space(20.);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
+                    if ui.button("Cancel").clicked() {
+                        choice = Some(false);
+                    }
+                    // Only a click or the focused button confirms: a stray
+                    // Return must never remove a copy.
+                    if primary_button(ui, "Remove").clicked() {
+                        choice = Some(true);
+                    }
+                });
+            });
+        let Some(remove) = choice.or(response.should_close().then_some(false)) else {
+            return;
+        };
+        self.remove_copy = None;
+        if remove {
+            self.remove_virtual_copy(id);
+        }
+    }
+    /// Removes virtual copy `id` once confirmed.
+    pub(super) fn remove_virtual_copy(&mut self, id: i64) {
+        if self.activity.is_busy() || !self.flush() {
+            return;
+        }
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        match library.remove_virtual_copy(id) {
+            Ok(master) => {
+                self.status = library.message.clone();
+                if self.document.catalog_photo == Some(id) {
+                    // Removed from Develop: show its master there instead.
+                    if let Some(master) = master
+                        && !self.library_mode
+                    {
+                        self.develop_catalog_photo(master);
+                    }
+                    // Nothing may save into the removed copy.
+                    if self.document.catalog_photo == Some(id) {
+                        self.document.reset(None);
+                        self.preview.clear_document();
+                        self.library_mode = true;
+                    }
+                }
+            }
+            Err(e) => self.status = format!("Virtual copy not removed: {e:#}"),
         }
     }
 }

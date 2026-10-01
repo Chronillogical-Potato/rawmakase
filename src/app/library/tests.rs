@@ -44,6 +44,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
         label: String::new(),
         format: "RAF".into(),
         copy_name: String::new(),
+        master: None,
         keywords: String::new(),
         has_lightroom_edits: false,
     };
@@ -307,4 +308,129 @@ fn a_stuck_volume_check_is_not_started_again() {
         || {},
         |_| (false, None)
     ));
+}
+#[test]
+fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("copies.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    let master = library.photos[0].id;
+    let (tx, rx) = std::sync::mpsc::channel();
+    library.edit_rx = rx;
+    let copy = library.create_virtual_copy(master)?;
+    library.edited_requested.insert(copy, 7);
+    library.edit_seen.insert(copy);
+    // A result for an older request is dropped.
+    tx.send(previews::EditResult::Ready(
+        copy,
+        6,
+        image::RgbImage::new(4, 4),
+    ))?;
+    library.poll_previews(&ctx);
+    assert!(!library.has_edited_thumbnail(copy));
+    tx.send(previews::EditResult::Ready(
+        copy,
+        7,
+        image::RgbImage::new(4, 4),
+    ))?;
+    library.poll_previews(&ctx);
+    assert!(library.has_edited_thumbnail(copy));
+    // Removing the copy forgets it, so a new copy given its id renders again,
+    // and the removed copy's late result is dropped.
+    assert_eq!(library.remove_virtual_copy(copy)?, Some(master));
+    assert!(!library.edited_requested.contains_key(&copy));
+    assert!(!library.edited_order.contains(&copy));
+    assert!(!library.edit_seen.contains(&copy));
+    tx.send(previews::EditResult::Ready(
+        copy,
+        7,
+        image::RgbImage::new(4, 4),
+    ))?;
+    library.poll_previews(&ctx);
+    assert!(!library.has_edited_thumbnail(copy));
+    Ok(())
+}
+#[test]
+fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("names.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let copy = library.create_virtual_copy(library.photos[0].id)?;
+    library.copy_name = Some((copy, " B&W ".into()));
+    library.commit_copy_name()?;
+    let saved = library.catalog.photos()?;
+    assert_eq!(
+        saved.iter().find(|p| p.id == copy).unwrap().copy_name,
+        "B&W"
+    );
+    assert_eq!(library.photo(copy).unwrap().copy_name, "B&W");
+    // A removed copy's draft never renames a new copy that reuses its id.
+    library.remove_virtual_copy(copy)?;
+    let next = library.create_virtual_copy(library.photos[0].id)?;
+    library.commit_copy_name()?;
+    assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
+    Ok(())
+}
+#[test]
+fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("names.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    let master = library.photos[0].id;
+    let first = library.create_virtual_copy(master)?;
+    let second = library.create_virtual_copy(master)?;
+    library.copy_name = Some((first, "B&W".into()));
+    // The panel is drawn for the newly selected copy before the field
+    // reports losing focus.
+    let photo = library.photo(second).unwrap().clone();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        library.copy_name_row(ui, &photo)
+    });
+    output.textures_delta.clear();
+    assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
+    assert_eq!(library.copy_name, Some((second, "Copy 2".into())));
+    Ok(())
+}
+#[test]
+fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("names.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    let master = library.photos[0].id;
+    let first = library.create_virtual_copy(master)?;
+    let second = library.create_virtual_copy(master)?;
+    // Renaming fails once the copy is gone from the catalog.
+    library.catalog.remove_virtual_copy(first)?;
+    library.copy_name = Some((first, "B&W".into()));
+    let photo = library.photo(second).unwrap().clone();
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            library.copy_name_row(ui, &photo)
+        });
+        output.textures_delta.clear();
+    }
+    assert_eq!(library.copy_name, Some((first, "B&W".into())));
+    assert!(library.commit_copy_name().is_err());
+    library.discard_copy_name();
+    assert!(library.commit_copy_name().is_ok());
+    Ok(())
 }
