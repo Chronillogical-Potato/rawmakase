@@ -113,7 +113,8 @@ impl Catalog {
         )?;
         Ok(hash)
     }
-    pub fn bitmap(&self, hash: &str) -> Result<Option<crate::storage::bitmaps::Bitmap>> {
+    #[cfg(test)]
+    pub(crate) fn bitmap(&self, hash: &str) -> Result<Option<crate::storage::bitmaps::Bitmap>> {
         let data: Option<Vec<u8>> = self
             .db
             .query_row("SELECT data FROM bitmaps WHERE hash=?", [hash], |r| {
@@ -234,7 +235,8 @@ impl Catalog {
             })?
             .collect::<rusqlite::Result<_>>()?)
     }
-    pub fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
+    #[cfg(test)]
+    pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
         Ok(self
             .db
             .prepare("SELECT photo FROM collection_photos WHERE collection=?")?

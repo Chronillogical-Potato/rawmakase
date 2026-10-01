@@ -21,29 +21,34 @@ fn clip(r: PixelRect, w: u32, h: u32) -> PixelRect {
     ]
 }
 
-/// The values the membrane is solved in. Only `Log` renders; the tests compare the
-/// others.
+/// The values the membrane is solved in. Only `Log` renders; the tests compare it
+/// with the alternatives, which exist only there.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum Domain {
+    #[cfg(test)]
     Linear,
     /// ln(x + 0.001)
     Log,
     /// ln(1 + x)
+    #[cfg(test)]
     Log1p,
 }
 impl Domain {
     fn to(self, v: f32) -> f32 {
         match self {
+            #[cfg(test)]
             Domain::Linear => v,
             Domain::Log => (v.max(0.) + 1e-3).ln(),
+            #[cfg(test)]
             Domain::Log1p => v.max(0.).ln_1p(),
         }
     }
     fn from(self, v: f32) -> f32 {
         match self {
+            #[cfg(test)]
             Domain::Linear => v,
             Domain::Log => (v.exp() - 1e-3).max(0.),
+            #[cfg(test)]
             Domain::Log1p => v.exp_m1().max(0.),
         }
     }
