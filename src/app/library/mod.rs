@@ -17,6 +17,15 @@ pub enum Action {
     RelinkFolder(i64),
     AddFolder,
 }
+/// Lightroom's virtual copy commands, carried out by the editor so the open
+/// edit is saved first.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CopyAction {
+    Create(i64),
+    SetMaster(i64),
+    /// Asks first, as Lightroom does.
+    Remove(i64),
+}
 pub struct Library {
     pub catalog: Catalog,
     pub photos: Vec<Photo>,
@@ -55,16 +64,22 @@ pub struct Library {
     /// Edited previews: rendered from each photo's edit on a second worker.
     edit_tx: std::sync::mpsc::Sender<previews::EditJob>,
     edit_rx: Receiver<previews::EditResult>,
-    edited_requested: HashSet<PathBuf>,
+    edited_requested: HashSet<i64>,
     /// Photos asking for an edited preview this frame, and last frame's
     /// as the worker sees them.
-    edit_seen: HashSet<PathBuf>,
+    edit_seen: HashSet<i64>,
     edit_wanted: previews::Wanted,
     /// Edited previews queued and not yet back.
     edits_pending: usize,
-    /// Photos whose shown thumbnail already reflects their edit.
-    edited_ready: HashSet<PathBuf>,
+    /// Previews showing each photo's edit, by photo: virtual copies share a
+    /// file, and so its embedded preview in `thumbs`, but not an edit.
+    edited: HashMap<i64, egui::TextureHandle>,
+    edited_order: VecDeque<i64>,
     preview_progress: previews::Progress,
+    /// A virtual copy command from a thumbnail menu, for the editor.
+    copy_request: Option<CopyAction>,
+    /// The Copy Name being typed, for the photo it belongs to.
+    copy_name: Option<(i64, String)>,
     pub message: String,
 }
 impl Library {
@@ -121,8 +136,11 @@ impl Library {
             edit_seen: HashSet::new(),
             edit_wanted,
             edits_pending: 0,
-            edited_ready: HashSet::new(),
+            edited: HashMap::new(),
+            edited_order: VecDeque::new(),
             preview_progress: Default::default(),
+            copy_request: None,
+            copy_name: None,
             message: String::new(),
         };
         s.refresh()?;
@@ -268,6 +286,66 @@ impl Library {
         }
         Ok(if advance { next } else { None })
     }
+    /// A virtual copy command chosen from a thumbnail menu since last asked.
+    pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
+        self.copy_request.take()
+    }
+    /// Creates a virtual copy of `id` and selects it.
+    pub(super) fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
+        let copy = self.catalog.create_virtual_copy(id)?;
+        self.refresh()?;
+        self.show(copy);
+        if let Some(p) = self.photo(copy) {
+            self.message = format!("Created {} of {}", p.copy_name, p.filename);
+        }
+        Ok(copy)
+    }
+    pub(super) fn set_copy_as_master(&mut self, id: i64) -> Result<()> {
+        self.catalog.set_copy_as_master(id)?;
+        self.refresh()?;
+        self.show(id);
+        if let Some(p) = self.photo(id) {
+            self.message = format!("This copy is now the master of {}", p.filename);
+        }
+        Ok(())
+    }
+    /// Removes virtual copy `id`; returns its master, which is selected.
+    pub(super) fn remove_virtual_copy(&mut self, id: i64) -> Result<Option<i64>> {
+        let photo = self.photo(id).cloned();
+        self.catalog.remove_virtual_copy(id)?;
+        self.edited.remove(&id);
+        self.refresh()?;
+        let master = photo.as_ref().and_then(|p| p.master);
+        if let Some(master) = master {
+            self.show(master);
+        }
+        if let Some(p) = photo {
+            self.message = format!("Removed {} of {}", p.copy_name, p.filename);
+        }
+        Ok(master)
+    }
+    fn rename_copy(&mut self, id: i64, name: &str) {
+        match self.catalog.set_copy_name(id, name) {
+            Ok(()) => {
+                if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
+                    p.copy_name = name.trim().to_string();
+                }
+                self.filter();
+            }
+            Err(e) => self.message = format!("Copy name could not be saved: {e}"),
+        }
+    }
+    /// Selects `id`, leaving filters that would hide it so it stays in view.
+    fn show(&mut self, id: i64) {
+        if !self.visible.iter().any(|i| self.photos[*i].id == id) {
+            self.query.clear();
+            self.rating = 0;
+            self.flag = 2;
+            self.label_filter = None;
+            self.filter();
+        }
+        self.selected = Some(id);
+    }
     pub fn metadata_controls(&mut self, ui: &mut egui::Ui, id: i64) -> bool {
         if let Some(photo) = self.photo(id).cloned()
             && let Some(edit) = crate::app::photo_metadata::controls(ui, &photo, &self.labels())
@@ -289,7 +367,7 @@ impl Library {
                     let texture = self
                         .selected
                         .and_then(|id| self.photo(id))
-                        .and_then(|p| self.thumbs.get(&p.path));
+                        .and_then(|p| self.texture(p));
                     let (rect, _) = ui.allocate_exact_size(
                         Vec2::new(ui.available_width(), ui.available_width() * 0.66),
                         egui::Sense::hover(),
@@ -495,9 +573,14 @@ impl Library {
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
                     let field = |f: fn(&Photo) -> &str| photo.as_ref().map_or("", f).to_string();
+                    metadata_row(ui, "File Name", &field(|p| &p.filename));
+                    match photo.as_ref().filter(|p| p.master.is_some()) {
+                        Some(p) => self.copy_name_row(ui, p),
+                        None => {
+                            metadata_row(ui, "Copy Name", "");
+                        }
+                    }
                     for (key, value, hover) in [
-                        ("File Name", field(|p| &p.filename), None),
-                        ("Copy Name", field(|p| &p.copy_name), None),
                         (
                             "Folder",
                             folder,
@@ -569,8 +652,6 @@ impl Library {
             } = result;
             self.pending.remove(&path);
             match im {
-                // An edited preview that arrived first wins over the embedded one.
-                Some(_) if self.edited_ready.contains(&path) => {}
                 Some(im) => self.insert_thumb(ctx, path, &im),
                 None => {
                     self.failed.insert(path);
@@ -584,12 +665,9 @@ impl Library {
             }
             self.edits_pending = self.edits_pending.saturating_sub(1);
             match result {
-                previews::EditResult::Ready(path, im) => {
-                    self.edited_ready.insert(path.clone());
-                    self.insert_thumb(ctx, path, &im);
-                }
-                previews::EditResult::Skipped(path) => {
-                    self.edited_requested.remove(&path);
+                previews::EditResult::Ready(id, im) => self.insert_edited(ctx, id, &im),
+                previews::EditResult::Skipped(id) => {
+                    self.edited_requested.remove(&id);
                 }
                 previews::EditResult::Failed | previews::EditResult::CacheError(_) => {}
             }
@@ -608,8 +686,6 @@ impl Library {
                     break;
                 };
                 self.thumbs.remove(&old);
-                self.edited_requested.remove(&old);
-                self.edited_ready.remove(&old);
             }
             self.thumb_order.push_back(path.clone());
         }
@@ -625,10 +701,47 @@ impl Library {
             ),
         );
     }
+    fn insert_edited(&mut self, ctx: &egui::Context, id: i64, im: &image::RgbImage) {
+        if !self.edited.contains_key(&id) {
+            while self.edited.len() >= 192 {
+                let Some(old) = self.edited_order.pop_front() else {
+                    break;
+                };
+                self.edited.remove(&old);
+                self.edited_requested.remove(&old);
+            }
+            self.edited_order.push_back(id);
+        }
+        self.edited.insert(
+            id,
+            ctx.load_texture(
+                format!("edited-{id}"),
+                egui::ColorImage::from_rgb(
+                    [im.width() as usize, im.height() as usize],
+                    im.as_raw(),
+                ),
+                egui::TextureOptions::LINEAR,
+            ),
+        );
+    }
+    /// The photo's preview: its edit once rendered, else the embedded one.
+    fn texture(&self, photo: &Photo) -> Option<&egui::TextureHandle> {
+        self.edited
+            .get(&photo.id)
+            .or_else(|| self.thumbs.get(&photo.path))
+    }
+    /// Queues the previews a shown photo needs: the embedded one until its
+    /// edited one is in, and the edited one for a saved or Lightroom edit.
+    fn request_previews(&mut self, photo: &Photo, ctx: &egui::Context) {
+        if !self.edited.contains_key(&photo.id) {
+            self.request_thumbnail(&photo.path, ctx);
+        }
+        self.request_edited(photo);
+    }
     /// Queues an edited preview for a photo with a saved or Lightroom edit.
     fn request_edited(&mut self, photo: &Photo) {
-        self.edit_seen.insert(photo.path.clone());
-        if !self.edited_requested.insert(photo.path.clone()) {
+        self.edit_seen.insert(photo.id);
+        if !self.edited_requested.insert(photo.id) {
             return;
         }
         let Ok((recipe, lightroom)) = self.catalog.edit_texts(photo.id) else {
@@ -641,6 +754,7 @@ impl Library {
             && self
                 .edit_tx
                 .send(previews::EditJob::Render {
+                    id: photo.id,
                     path: photo.path.clone(),
                     source,
                 })
@@ -654,19 +768,19 @@ impl Library {
     pub(super) fn update_edited(
         &mut self,
         ctx: &egui::Context,
-        path: &std::path::Path,
+        id: i64,
         image: image::RgbImage,
         recipe_json: String,
     ) {
+        let Some(path) = self.photo(id).map(|p| p.path.clone()) else {
+            return;
+        };
         let tag = previews::EditSource::Recipe(recipe_json).tag();
-        self.edited_requested.insert(path.to_path_buf());
-        self.edited_ready.insert(path.to_path_buf());
-        self.insert_thumb(ctx, path.to_path_buf(), &image);
-        let _ = self.edit_tx.send(previews::EditJob::Store {
-            path: path.to_path_buf(),
-            tag,
-            image,
-        });
+        self.edited_requested.insert(id);
+        self.insert_edited(ctx, id, &image);
+        let _ = self
+            .edit_tx
+            .send(previews::EditJob::Store { path, tag, image });
     }
     /// The folder shown, as a tree key ("" is All Photographs).
     pub(super) fn source_key(&self) -> &str {
@@ -721,12 +835,12 @@ impl Library {
         self.selected
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
-    pub(super) fn has_edited_thumbnail(&self, path: &std::path::Path) -> bool {
-        self.edited_ready.contains(path) && self.thumbs.contains_key(path)
+    pub(super) fn has_edited_thumbnail(&self, id: i64) -> bool {
+        self.edited.contains_key(&id)
     }
     /// The Library's cached preview for a photo, if one is loaded.
-    pub(super) fn thumbnail(&self, path: &std::path::Path) -> Option<&egui::TextureHandle> {
-        self.thumbs.get(path)
+    pub(super) fn thumbnail(&self, id: i64) -> Option<&egui::TextureHandle> {
+        self.texture(self.photo(id)?)
     }
     pub(super) fn preview_progress_active(&self) -> bool {
         self.preview_progress.active() || self.edits_pending > 0
@@ -984,7 +1098,11 @@ impl Library {
                         None => format!("{} photos", self.visible.len()),
                     }));
                     if let Some(p) = &photo {
-                        ui.label(filter_caption(&p.filename));
+                        ui.label(filter_caption(&format!(
+                            "{}{}",
+                            p.filename,
+                            cell::copy_suffix(p)
+                        )));
                     }
                     if photo.is_some() {
                         ui.add_space((ui.available_width() - 250.).max(8.));
@@ -1017,8 +1135,7 @@ impl Library {
                         if !ui.is_rect_visible(rect) {
                             continue;
                         }
-                        self.request_thumbnail(&p.path, ui.ctx());
-                        self.request_edited(&p);
+                        self.request_previews(&p, ui.ctx());
                         let cell = rect.shrink(2.);
                         let base = theme::gray(if active {
                             120
@@ -1035,19 +1152,23 @@ impl Library {
                             });
                         ui.painter().rect_filled(cell, 2., fill);
                         let strip = 14.;
-                        if let Some(texture) = self.thumbs.get(&p.path) {
+                        if let Some(texture) = self.texture(&p) {
                             let area = egui::Rect::from_min_max(
                                 cell.min + Vec2::splat(5.),
                                 cell.max - Vec2::new(5., strip + 2.),
                             );
                             let size = texture.size_vec2();
                             let scale = (area.width() / size.x).min(area.height() / size.y);
+                            let image = egui::Rect::from_center_size(area.center(), size * scale);
                             ui.painter().image(
                                 texture.id(),
-                                egui::Rect::from_center_size(area.center(), size * scale),
+                                image,
                                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
                                 Color32::WHITE,
                             );
+                            if p.master.is_some() {
+                                cell::copy_badge(ui.painter(), image, fill);
+                            }
                         }
                         let y = cell.bottom() - strip / 2. - 2.;
                         let mut x = cell.left() + 6.;
@@ -1081,7 +1202,12 @@ impl Library {
                             }
                         }
                         let context = crate::app::widgets::context_clicked(&response);
-                        if response.on_hover_text(&p.filename).clicked() && !active && !context {
+                        if response
+                            .on_hover_text(format!("{}{}", p.filename, cell::copy_suffix(&p)))
+                            .clicked()
+                            && !active
+                            && !context
+                        {
                             target = Some(p.id);
                         }
                     }
@@ -1119,12 +1245,11 @@ impl Library {
                                     };
                                     let p = self.photos[index].clone();
                                     let exists = self.available.contains(&p.path);
-                                    self.request_thumbnail(&p.path, ui.ctx());
-                                    self.request_edited(&p);
+                                    self.request_previews(&p, ui.ctx());
                                     let (response, edit) = photo_cell(
                                         ui,
                                         &p,
-                                        self.thumbs.get(&p.path),
+                                        self.texture(&p),
                                         self.selected == Some(p.id),
                                         row * columns + col + 1,
                                         exists,
@@ -1178,8 +1303,51 @@ impl Library {
                     self.message = format!("Metadata could not be saved: {e}");
                 }
             }
+            PhotoAction::Copy(copy) => self.copy_request = Some(copy),
         }
         None
+    }
+}
+impl Library {
+    /// The Copy Name row of a virtual copy, editable in place like
+    /// Lightroom's Metadata panel; saved on Return or when focus leaves.
+    fn copy_name_row(&mut self, ui: &mut egui::Ui, photo: &Photo) {
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), egui::Sense::hover());
+        ui.painter().text(
+            egui::pos2(rect.left() + 84., rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "Copy Name",
+            egui::FontId::proportional(11.),
+            theme::gray(135),
+        );
+        if self
+            .copy_name
+            .as_ref()
+            .is_none_or(|(id, _)| *id != photo.id)
+        {
+            self.copy_name = Some((photo.id, photo.copy_name.clone()));
+        }
+        let Some((_, text)) = &mut self.copy_name else {
+            return;
+        };
+        let field = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 88., rect.top() + 1.),
+            egui::pos2(rect.right(), rect.bottom() - 1.),
+        );
+        let response = ui.put(
+            field,
+            egui::TextEdit::singleline(text)
+                .font(egui::FontId::proportional(11.))
+                .text_color(theme::gray(205))
+                .margin(egui::Margin::symmetric(4, 1))
+                .vertical_align(egui::Align::Center),
+        );
+        if response.lost_focus() && text.trim() != photo.copy_name {
+            let name = text.trim().to_string();
+            self.rename_copy(photo.id, &name);
+            self.copy_name = Some((photo.id, name));
+        }
     }
 }
 /// A fixed-height metadata row: caption column, then the truncated value

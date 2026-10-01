@@ -100,8 +100,13 @@ impl EditSource {
     }
 }
 pub(super) enum EditJob {
-    /// Render (or load from cache) the photo with its edit.
-    Render { path: PathBuf, source: EditSource },
+    /// Render (or load from cache) catalog photo `id` with its edit. Virtual
+    /// copies share a file but not an edit, so results go by photo.
+    Render {
+        id: i64,
+        path: PathBuf,
+        source: EditSource,
+    },
     /// Keep an already rendered preview, e.g. from Develop.
     Store {
         path: PathBuf,
@@ -111,12 +116,12 @@ pub(super) enum EditJob {
 }
 /// Photos shown in the grid or filmstrip in the last frame. Edited previews
 /// are rendered only for these, so scrolling past photos leaves no backlog.
-pub(super) type Wanted = Arc<Mutex<HashSet<PathBuf>>>;
+pub(super) type Wanted = Arc<Mutex<HashSet<i64>>>;
 /// What an edited preview job came to.
 pub(super) enum EditResult {
-    Ready(PathBuf, image::RgbImage),
+    Ready(i64, image::RgbImage),
     /// The photo scrolled out of view first; request it again when shown.
-    Skipped(PathBuf),
+    Skipped(i64),
     Failed,
     /// A preview could not be kept in the cache; it comes besides any result.
     CacheError(String),
@@ -174,10 +179,10 @@ fn spawn_edited_with(
                     }
                     None
                 }
-                EditJob::Render { path, .. } if !wanted.lock().unwrap().contains(&path) => {
-                    Some(EditResult::Skipped(path))
+                EditJob::Render { id, .. } if !wanted.lock().unwrap().contains(&id) => {
+                    Some(EditResult::Skipped(id))
                 }
-                EditJob::Render { path, source } => {
+                EditJob::Render { id, path, source } => {
                     let tag = source.tag();
                     let cached = cache
                         .as_ref()
@@ -198,7 +203,7 @@ fn spawn_edited_with(
                         Some(image)
                     });
                     Some(match image {
-                        Some(image) => EditResult::Ready(path, image),
+                        Some(image) => EditResult::Ready(id, image),
                         None => EditResult::Failed,
                     })
                 }
@@ -379,10 +384,7 @@ mod tests {
             Ok(image::open(path)?.to_rgb8())
         }
         let wanted = Wanted::default();
-        wanted
-            .lock()
-            .unwrap()
-            .extend([panics.clone(), works.clone()]);
+        wanted.lock().unwrap().extend([1, 2]);
         let (tx, rx) = spawn_edited_with(
             directory.path().join("previews.sqlite3"),
             wanted,
@@ -390,19 +392,20 @@ mod tests {
             render,
         );
         let source = EditSource::Recipe("{}".into());
-        let job = |path: &PathBuf| EditJob::Render {
+        let job = |id, path: &PathBuf| EditJob::Render {
+            id,
             path: path.clone(),
             source: source.clone(),
         };
-        tx.send(job(&panics))?;
+        tx.send(job(1, &panics))?;
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
             EditResult::Failed
         ));
-        tx.send(job(&works))?;
+        tx.send(job(2, &works))?;
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
-            EditResult::Ready(path, _) if path == works
+            EditResult::Ready(2, _)
         ));
         Ok(())
     }

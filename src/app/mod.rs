@@ -57,6 +57,8 @@ pub struct Editor {
     /// Progress of a running profile or preset import.
     importing: Option<std::sync::Arc<std::sync::Mutex<String>>>,
     close_confirm: bool,
+    /// The virtual copy waiting for the user to confirm its removal.
+    remove_copy: Option<i64>,
 }
 impl Editor {
     pub fn new(
@@ -186,6 +188,7 @@ impl Editor {
             catalog_work: None,
             importing: None,
             close_confirm: false,
+            remove_copy: None,
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;

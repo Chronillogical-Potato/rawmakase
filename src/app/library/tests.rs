@@ -44,6 +44,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
         label: String::new(),
         format: "RAF".into(),
         copy_name: String::new(),
+        master: None,
         keywords: String::new(),
         has_lightroom_edits: false,
     };

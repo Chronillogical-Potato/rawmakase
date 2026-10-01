@@ -72,7 +72,7 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open || self.export_modal();
+        let modal = self.preferences.open || self.export_modal() || self.remove_copy.is_some();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -100,6 +100,10 @@ impl Editor {
             self.develop_panels(ui);
             self.finish_edit_frame(frame, &ctx);
         }
+        if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
+            self.virtual_copy(request);
+        }
+        self.remove_copy_window(&ctx);
         self.shortcuts_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
@@ -126,6 +130,17 @@ impl Editor {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             if ctx.input(|i| i.key_pressed(egui::Key::G)) && self.flush() {
                 self.library_mode = true;
+            }
+            // Lightroom's Create Virtual Copy, in Library and Develop.
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Quote)) {
+                let id = if self.library_mode {
+                    self.library.as_ref().and_then(|l| l.selected)
+                } else {
+                    self.document.catalog_photo
+                };
+                if let Some(id) = id {
+                    self.virtual_copy(crate::app::library::CopyAction::Create(id));
+                }
             }
             if ctx.input(|i| i.key_pressed(egui::Key::D)) {
                 if self.library_mode {

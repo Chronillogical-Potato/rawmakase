@@ -405,3 +405,87 @@ fn lightroom_history_is_backfilled_once() -> Result<()> {
     assert_eq!(Catalog::open(&dest)?.backfill_lightroom_history()?, 0);
     Ok(())
 }
+#[test]
+fn virtual_copies_are_created_promoted_renamed_and_removed() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("image.ARW"), b"synthetic raw identity")?;
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    cat.add_folder(&folder)?;
+    let original = cat.photos()?[0].clone();
+    let path = original.path.clone();
+    cat.set_metadata(original.id, 3, 1, "Red")?;
+    let edit = Recipe {
+        exposure: 1.25,
+        ..Default::default()
+    };
+    cat.save_edit(original.id, &path, &edit, &ExportOptions::default())?;
+    cat.db.execute_batch(&format!(
+        "INSERT INTO keywords(id,name) VALUES(1,'City');
+         INSERT INTO photo_keywords VALUES({},1);",
+        original.id
+    ))?;
+    // A copy of a copy belongs to the same master.
+    let first = cat.create_virtual_copy(original.id)?;
+    let second = cat.create_virtual_copy(first)?;
+    let photos = cat.photos()?;
+    assert_eq!(photos.len(), 3);
+    let copy = photos.iter().find(|p| p.id == first).unwrap();
+    assert_eq!(copy.path, path);
+    assert_eq!(copy.master, Some(original.id));
+    assert_eq!(copy.copy_name, "Copy 1");
+    assert_eq!((copy.rating, copy.flag, copy.label.as_str()), (3, 1, "Red"));
+    assert_eq!(copy.keywords, "City");
+    let copy = photos.iter().find(|p| p.id == second).unwrap();
+    assert_eq!(
+        (copy.master, copy.copy_name.as_str()),
+        (Some(original.id), "Copy 2")
+    );
+    assert_eq!(cat.load_edit(first, &path)?.unwrap().recipe, edit);
+    // Each copy keeps its own edit.
+    let other = Recipe {
+        exposure: -0.5,
+        ..Default::default()
+    };
+    cat.save_edit(first, &path, &other, &ExportOptions::default())?;
+    assert_eq!(cat.load_edit(original.id, &path)?.unwrap().recipe, edit);
+    assert_eq!(cat.load_edit(first, &path)?.unwrap().recipe, other);
+
+    assert!(cat.set_copy_name(original.id, "Nope").is_err());
+    cat.set_copy_name(second, "  B&W ")?;
+    cat.set_copy_as_master(second)?;
+    assert!(cat.set_copy_as_master(second).is_err());
+    let photos = cat.photos()?;
+    let find = |id| photos.iter().find(|p| p.id == id).unwrap();
+    assert_eq!(
+        (find(second).master, find(second).copy_name.as_str()),
+        (None, "")
+    );
+    assert_eq!(
+        (
+            find(original.id).master,
+            find(original.id).copy_name.as_str()
+        ),
+        (Some(second), "B&W")
+    );
+    assert_eq!(find(first).master, Some(second));
+    // The next copy takes the first free number.
+    let third = cat.create_virtual_copy(second)?;
+    assert_eq!(
+        cat.photos()?
+            .iter()
+            .find(|p| p.id == third)
+            .unwrap()
+            .copy_name,
+        "Copy 2"
+    );
+
+    assert!(cat.remove_virtual_copy(second).is_err());
+    cat.remove_virtual_copy(first)?;
+    let photos = cat.photos()?;
+    assert_eq!(photos.len(), 3);
+    assert!(photos.iter().all(|p| p.id != first));
+    assert!(cat.load_edit(original.id, &path)?.is_some());
+    Ok(())
+}

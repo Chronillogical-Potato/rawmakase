@@ -1371,3 +1371,34 @@ fn crop_tool_reads_each_photos_own_aspect() {
     assert!((custom - 0.75).abs() < 1e-6);
     assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
 }
+#[test]
+fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let l = library::Library::load(&catalog, ctx.clone())?;
+    let id = l.photos[0].id;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.library_mode = false;
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    editor.document.recipe.exposure = 0.7;
+    editor.document.save.mark_changed();
+    editor.virtual_copy(library::CopyAction::Create(id));
+    let library = editor.library.as_ref().unwrap();
+    let copy = library.photos.iter().find(|p| p.id != id).unwrap();
+    assert_eq!((copy.master, copy.copy_name.as_str()), (Some(id), "Copy 1"));
+    assert_eq!(library.selected, Some(copy.id));
+    assert_eq!(editor.document.catalog_photo, Some(copy.id));
+    for photo_id in [id, copy.id] {
+        let saved = library.catalog.load_edit(photo_id, &photo)?.unwrap();
+        assert_eq!(saved.recipe.exposure, 0.7);
+    }
+    Ok(())
+}
