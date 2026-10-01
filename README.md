@@ -158,6 +158,7 @@ Exports are always sRGB. The display defaults to sRGB; pick a monitor ICC profil
 ## Development
 
 Start with the [code map](docs/code-map.md) and the [architecture guide](docs/architecture.md).
+The [website source and deployment guide](website/README.md) live in `website/`.
 
 ```sh
 make check    # cargo fmt --check, clippy -D warnings, cargo test
@@ -178,7 +179,7 @@ RAWMAKASE_FIXTURES=~/raw-fixtures cargo test --release --test raw_fixtures -- --
 
 GPU tests are ignored as well; run them with `cargo test --lib gpu -- --ignored` on a machine with a compute adapter.
 
-CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit on every push and pull request. A stable `vX.Y.Z` tag on `main` matching `Cargo.toml` builds both macOS DMGs, the Linux packages and the Windows installer. Publication waits for Apple notarization and package checks. See [packaging/RELEASING.md](packaging/RELEASING.md) for credentials, rehearsal runs, supported systems and the AUR pause.
+Application CI runs `make check`, a release build, an Arch package build and a `cargo deny` license and advisory audit. Website-only pushes and pull requests run the Hugo build instead; website workflow edits also run the workflow linter. A stable `vX.Y.Z` tag on `main` matching `Cargo.toml` builds both macOS DMGs, the Linux packages and the Windows installer. Publication waits for Apple notarization and package checks, then refreshes the website's download links. See [packaging/RELEASING.md](packaging/RELEASING.md) for credentials, rehearsal runs, supported systems and the AUR pause.
 
 ## License
 

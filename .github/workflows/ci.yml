@@ -4,11 +4,15 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      - 'website/**'
+      - '.github/workflows/website.yml'
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'
   pull_request:
     paths-ignore:
+      - 'website/**'
+      - '.github/workflows/website.yml'
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'
