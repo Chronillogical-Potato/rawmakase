@@ -90,10 +90,9 @@ impl Editor {
                     // the first render instead of flashing the original.
                     let edited = self
                         .document
-                        .path
-                        .as_ref()
+                        .catalog_photo
                         .zip(self.library.as_ref())
-                        .is_some_and(|(p, l)| l.has_edited_thumbnail(p));
+                        .is_some_and(|(id, l)| l.has_edited_thumbnail(id));
                     if edited {
                         continue;
                     }
@@ -309,9 +308,9 @@ impl Editor {
         let Ok(json) = serde_json::to_string(&self.document.recipe) else {
             return;
         };
-        let (Some(library), Some(path)) = (&mut self.library, self.document.path.clone()) else {
+        let (Some(library), Some(id)) = (&mut self.library, self.document.catalog_photo) else {
             return;
         };
-        library.update_edited(ctx, &path, small, json);
+        library.update_edited(ctx, id, small, json);
     }
 }
