@@ -459,3 +459,210 @@ fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()
     assert!(library.commit_copy_name().is_ok());
     Ok(())
 }
+
+/// A catalog of `names` in one folder, with the Library open on it.
+fn library_of(names: &[&str]) -> Result<(tempfile::TempDir, Library)> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in names {
+        std::fs::write(folder.join(name), b"synthetic raw")?;
+    }
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let library = Library::load(&path, egui::Context::default())?;
+    Ok((directory, library))
+}
+fn visible_names(library: &Library) -> Vec<&str> {
+    library
+        .visible
+        .iter()
+        .map(|i| library.photos[*i].filename.as_str())
+        .collect()
+}
+#[test]
+fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let id = |library: &Library, name: &str| {
+        library
+            .photos
+            .iter()
+            .find(|p| p.filename == name)
+            .unwrap()
+            .id
+    };
+    let (a, b, c) = (
+        id(&library, "a.RAF"),
+        id(&library, "b.RAF"),
+        id(&library, "c.RAF"),
+    );
+    library.catalog.set_metadata(a, 3, 1, "Red")?;
+    library.catalog.set_metadata(b, 5, 0, "")?;
+    library.catalog.set_metadata(c, 0, -1, "Client")?;
+    library.refresh()?;
+    library.wait_for_availability();
+    assert_eq!(visible_names(&library), ["a.RAF", "b.RAF", "c.RAF"]);
+    library.reverse = true;
+    library.filter();
+    assert_eq!(visible_names(&library), ["c.RAF", "b.RAF", "a.RAF"]);
+    library.reverse = false;
+    library.rating = 3;
+    library.filter();
+    assert_eq!(visible_names(&library), ["a.RAF", "b.RAF"]);
+    library.flag = 1;
+    library.filter();
+    assert_eq!(visible_names(&library), ["a.RAF"]);
+    library.flag = 2;
+    library.rating = 0;
+    library.label_filter = Some("Client".into());
+    library.filter();
+    assert_eq!(visible_names(&library), ["c.RAF"]);
+    library.label_filter = None;
+    library.query = "B.r".into();
+    library.filter();
+    assert_eq!(visible_names(&library), ["b.RAF"]);
+    library.query = "client".into();
+    library.filter();
+    assert_eq!(visible_names(&library), ["c.RAF"]);
+    library.query.clear();
+    library.folder_scope = Some(HashSet::new());
+    library.filter();
+    assert!(library.visible.is_empty());
+    library.folder_scope = None;
+    library.only_missing = true;
+    library.filter();
+    assert!(library.visible.is_empty());
+    library.only_missing = false;
+    // The selection follows the filter out, and comes back through `show`.
+    library.selected = Some(c);
+    library.flag = 1;
+    library.filter();
+    assert_eq!(library.selected, None);
+    library.show(c);
+    assert_eq!(library.flag, 2);
+    assert_eq!(library.selected, Some(c));
+    assert_eq!(visible_names(&library).len(), 3);
+    // Navigation clamps at both ends of the visible order.
+    assert_eq!(library.navigate(a, -1), Some(a));
+    assert_eq!(library.navigate(a, 2), Some(c));
+    assert_eq!(library.navigate(c, 5), Some(c));
+    assert_eq!(library.navigate(999, 1), None);
+    Ok(())
+}
+#[test]
+fn restore_source_scopes_to_the_folder_and_its_subfolders() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("photos");
+    for sub in ["", "trip", "trip/day2", "other"] {
+        let folder = root.join(sub);
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(folder.join("image.RAF"), b"synthetic raw")?;
+    }
+    let path = directory.path().join("sources.rawmakase");
+    Catalog::create(&path)?.add_folder(&root)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    assert_eq!(library.visible.len(), 4);
+    let root_id = library.roots[0].0;
+    let in_day2 = library
+        .photos
+        .iter()
+        .find(|p| p.path.ends_with("day2/image.RAF"))
+        .unwrap()
+        .id;
+    let key = format!("root:{root_id}/trip");
+    library.restore_source(&key, Some(in_day2));
+    assert_eq!(library.source_key(), key);
+    assert_eq!(library.visible.len(), 2);
+    assert_eq!(library.selected, Some(in_day2));
+    assert!(library.expanded.contains(&format!("root:{root_id}")));
+    assert!(library.expanded.contains(&key));
+    assert_eq!(library.source_name(), "trip");
+    // A folder that is not in the catalog leaves the scope as it was.
+    library.restore_source("root:999/elsewhere", None);
+    assert_eq!(library.source_key(), key);
+    assert_eq!(library.visible.len(), 2);
+    library.restore_source("", None);
+    assert_eq!(library.visible.len(), 2);
+    Ok(())
+}
+#[test]
+fn thumbnail_requests_are_not_repeated_while_pending_or_failed() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    let ctx = library.ctx.clone();
+    let (tx, rx) = std::sync::mpsc::sync_channel(8);
+    library.thumb_tx = tx;
+    let path = library.photos[0].path.clone();
+    library.request_thumbnail(&path, &ctx);
+    library.request_thumbnail(&path, &ctx);
+    assert_eq!(rx.try_iter().count(), 1);
+    assert!(library.pending.contains(&path));
+    library.pending.remove(&path);
+    library.failed.insert(path.clone());
+    library.request_thumbnail(&path, &ctx);
+    assert_eq!(rx.try_iter().count(), 0);
+    library.failed.clear();
+    library.insert_thumb(&ctx, path.clone(), &image::RgbImage::new(2, 2));
+    library.request_thumbnail(&path, &ctx);
+    assert_eq!(rx.try_iter().count(), 0);
+    assert!(library.texture(&library.photos[0]).is_some());
+    Ok(())
+}
+#[test]
+fn preview_textures_keep_the_newest_192() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    let ctx = library.ctx.clone();
+    let image = image::RgbImage::new(2, 2);
+    for n in 0..193 {
+        library.insert_thumb(&ctx, PathBuf::from(format!("{n}.RAF")), &image);
+        library.edited_requested.insert(n, 1);
+        library.insert_edited(&ctx, n, &image);
+    }
+    assert_eq!(library.thumbs.len(), 192);
+    assert!(!library.thumbs.contains_key(&PathBuf::from("0.RAF")));
+    assert!(library.thumbs.contains_key(&PathBuf::from("192.RAF")));
+    assert_eq!(library.edited.len(), 192);
+    assert!(!library.has_edited_thumbnail(0));
+    assert!(!library.edited_requested.contains_key(&0));
+    assert!(library.has_edited_thumbnail(192));
+    // Replacing a texture does not count as a new one.
+    library.insert_thumb(&ctx, PathBuf::from("192.RAF"), &image);
+    assert_eq!(library.thumb_order.len(), 192);
+    Ok(())
+}
+#[test]
+fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    let ctx = library.ctx.clone();
+    let id = library.photos[0].id;
+    let (job_tx, jobs) = std::sync::mpsc::channel();
+    let (result_tx, results) = std::sync::mpsc::channel();
+    library.edit_tx = job_tx;
+    library.edit_rx = results;
+    // A photo without an edit asks the catalog once and sends nothing.
+    let photo = library.photos[0].clone();
+    library.request_edited(&photo);
+    library.request_edited(&photo);
+    assert!(jobs.try_recv().is_err());
+    assert_eq!(library.edits_pending, 0);
+    let first = library.edited_requested[&id];
+    // Develop's render arrives: it is shown, kept, and outranks `first`.
+    library.update_edited(&ctx, id, image::RgbImage::new(4, 4), "{}".into());
+    assert!(library.has_edited_thumbnail(id));
+    assert!(matches!(
+        jobs.try_recv(),
+        Ok(previews::EditJob::Store { .. })
+    ));
+    let newest = library.edited_requested[&id];
+    assert!(newest > first);
+    library.edits_pending = 1;
+    result_tx.send(previews::EditResult::Skipped(id, first))?;
+    library.poll_previews(&ctx);
+    assert_eq!(library.edited_requested.get(&id), Some(&newest));
+    assert_eq!(library.edits_pending, 0);
+    // A cache error is reported without touching the previews.
+    result_tx.send(previews::EditResult::CacheError("disk full".into()))?;
+    library.poll_previews(&ctx);
+    assert!(library.preview_progress_active());
+    assert!(library.has_edited_thumbnail(id));
+    Ok(())
+}
