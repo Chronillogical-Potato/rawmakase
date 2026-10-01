@@ -78,7 +78,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | --- | --- |
 | [camera_profiles/mod.rs](../src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
 | [dcp.rs](../src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
-| [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching (no Adobe-directory discovery). |
+| [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
 | [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments. |
 | [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../src/camera_profiles/reference.rs) | Verified camera-specific exposure baseline and neutral calibration data. |
@@ -167,7 +167,12 @@ above rather than implementing SQL, file formats or pixel processing.
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application and temporary hover previews. |
 | [photo_metadata.rs](../src/app/photo_metadata.rs) | Rating, color label and pick/reject controls and shortcuts. |
 | [widgets.rs](../src/app/widgets.rs) | Shared buttons, adjustment sections, sliders, curve editor and workspace tabs. |
-| [library/mod.rs](../src/app/library/mod.rs) | Library browsing state, filtering, catalog navigation, metadata writes and grid/sidebar composition. |
+| [library/mod.rs](../src/app/library/mod.rs) | The Library: composes the owners below, writes metadata and virtual-copy changes to the catalog, and draws the sidebar, grid, filmstrip and info panel. |
+| [library/filter.rs](../src/app/library/filter.rs) | The source (folder scope or collection), the filter bar's search, flag, rating and label, the offline filter and sort order; computes what is shown. |
+| [library/availability.rs](../src/app/library/availability.rs) | Which originals are online, found out in the background while the Library already shows them. |
+| [library/volumes.rs](../src/app/library/volumes.rs) | Whether each drive is attached and its free space, probed off the UI thread, and the volume header row. |
+| [library/textures.rs](../src/app/library/textures.rs) | The bounded embedded and edited preview textures, their requests to the preview workers and the tickets that drop stale results. |
+| [library/copy_name.rs](../src/app/library/copy_name.rs) | The Copy Name field: the name being typed, saved on commit and kept across selection changes and failed saves. |
 | [library/tree.rs](../src/app/library/tree.rs) | Folder/collection hierarchy, rows and tree actions. |
 | [library/cell.rs](../src/app/library/cell.rs) | Individual photo grid cells. |
 | [library/thumbnails.rs](../src/app/library/thumbnails.rs) | Batched file availability and bounded thumbnail work using the RAW API and preview cache. |
