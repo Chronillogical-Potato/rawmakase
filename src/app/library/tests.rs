@@ -241,9 +241,34 @@ fn root_mapping_survives_reopen() -> Result<()> {
     let l = Library::load(&db, ctx.clone())?;
     l.catalog.relink_root(root, &new)?;
     drop(l);
-    let l = Library::load(&db, ctx)?;
+    let mut l = Library::load(&db, ctx)?;
     assert_eq!(l.photos[0].path, new.join("image.ARW"));
+    l.wait_for_availability();
     assert!(l.available.contains(&l.photos[0].path));
+    Ok(())
+}
+
+/// Listing every folder can take seconds on a network share, so the Library
+/// opens first and marks missing originals once the check is done.
+#[test]
+fn library_opens_before_the_online_check_and_then_marks_missing_photos() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    std::fs::write(d.path().join("kept.ARW"), b"source")?;
+    std::fs::write(d.path().join("gone.ARW"), b"source")?;
+    let db = d.path().join("photos.rawmakase");
+    Catalog::create(&db)?.add_folder(d.path())?;
+    std::fs::remove_file(d.path().join("gone.ARW"))?;
+    let mut l = Library::load(&db, egui::Context::default())?;
+    let gone = d.path().canonicalize()?.join("gone.ARW");
+    assert!(l.photos.iter().any(|p| p.path == gone));
+    assert_eq!(l.available_count(), 2);
+    l.only_missing = true;
+    l.filter();
+    assert!(l.visible.is_empty());
+    l.wait_for_availability();
+    assert_eq!(l.available_count(), 1);
+    assert!(!l.is_available(&gone));
+    assert_eq!(l.visible.len(), 1);
     Ok(())
 }
 

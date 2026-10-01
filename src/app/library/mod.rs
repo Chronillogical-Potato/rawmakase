@@ -55,6 +55,11 @@ pub struct Library {
     strip_current: Option<i64>,
     visible: Vec<usize>,
     available: HashSet<PathBuf>,
+    /// Which originals are online, while that is being found out: listing
+    /// every folder can take seconds on a network share, so the Library opens
+    /// without waiting and treats photos as online until it is known.
+    checking: Option<Receiver<HashSet<PathBuf>>>,
+    ctx: egui::Context,
     thumbs: HashMap<PathBuf, egui::TextureHandle>,
     thumb_order: VecDeque<PathBuf>,
     pending: HashSet<PathBuf>,
@@ -103,7 +108,7 @@ impl Library {
         let (edit_tx, edit_rx) = previews::spawn_edited(
             crate::catalog::preview_cache::PreviewCache::path(),
             edit_wanted.clone(),
-            ctx,
+            ctx.clone(),
         );
         let mut s = Self {
             catalog,
@@ -130,6 +135,8 @@ impl Library {
             strip_current: None,
             visible: Vec::new(),
             available: HashSet::new(),
+            checking: None,
+            ctx,
             thumbs: HashMap::new(),
             thumb_order: VecDeque::new(),
             pending: HashSet::new(),
@@ -158,7 +165,7 @@ impl Library {
     }
     pub fn refresh(&mut self) -> Result<()> {
         self.reload()?;
-        self.available = available_paths(&self.photos);
+        self.check_availability();
         self.failed.clear();
         self.filter();
         Ok(())
@@ -183,10 +190,49 @@ impl Library {
         self.filter();
         Ok(())
     }
+    /// Finds out which originals are online, in the background.
+    fn check_availability(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let photos = self.photos.clone();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            if tx.send(available_paths(&photos)).is_ok() {
+                ctx.request_repaint();
+            }
+        });
+        self.checking = Some(rx);
+    }
+    /// Takes the result of the online check once it is there.
+    fn poll_availability(&mut self, wait: bool) {
+        let Some(rx) = &self.checking else { return };
+        let result = if wait {
+            rx.recv()
+                .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected)
+        } else {
+            rx.try_recv()
+        };
+        match result {
+            Ok(available) => self.available = available,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            // The check failed: claim nothing is offline.
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.available = self.photos.iter().map(|p| p.path.clone()).collect()
+            }
+        }
+        self.checking = None;
+        self.filter();
+    }
+    /// Waits for the online check, for callers that report on it.
+    pub fn wait_for_availability(&mut self) {
+        self.poll_availability(true);
+    }
+    fn is_available(&self, path: &std::path::Path) -> bool {
+        self.checking.is_some() || self.available.contains(path)
+    }
     pub fn available_count(&self) -> usize {
         self.photos
             .iter()
-            .filter(|p| self.available.contains(&p.path))
+            .filter(|p| self.is_available(&p.path))
             .count()
     }
     fn filter(&mut self) {
@@ -206,7 +252,7 @@ impl Library {
                         .is_none_or(|label| &p.label == label)
                     && p.rating >= self.rating
                     && (self.flag == 2 || p.flag == self.flag)
-                    && (!self.only_missing || !self.available.contains(&p.path))
+                    && (!self.only_missing || !self.is_available(&p.path))
                     && (q.is_empty()
                         || format!(
                             "{} {} {} {} {}",
@@ -664,6 +710,7 @@ impl Library {
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
+        self.poll_availability(false);
         while let Ok(result) = self.thumb_rx.try_recv() {
             self.preview_progress.finish(&result);
             let previews::PreviewResult {
@@ -1286,7 +1333,7 @@ impl Library {
                                         break;
                                     };
                                     let p = self.photos[index].clone();
-                                    let exists = self.available.contains(&p.path);
+                                    let exists = self.is_available(&p.path);
                                     self.request_previews(&p, ui.ctx());
                                     let (response, edit) = photo_cell(
                                         ui,

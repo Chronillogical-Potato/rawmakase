@@ -115,6 +115,7 @@ impl Editor {
                     crate::app::library::Library::load(&path, ctx.clone())
                         .map(|mut l| {
                             if matches!(kind, CatalogDialog::Folder(FolderAction::RelinkRoot(_) | FolderAction::RelinkFolder(_))) {
+                                l.wait_for_availability();
                                 let available=l.available_count();
                                 l.message=format!("Folder relinked. {available} of {} photos are available.",l.photos.len());
                                 if available==0 {l.message.push_str(" No files matched this location; check that the selected folder contains the expected subfolders.");}
