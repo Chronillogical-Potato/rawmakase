@@ -4,7 +4,8 @@
 //! Each key holds only the recipe fields its stage reads, so exposure, curve, HSL
 //! and grading edits reuse all three and rerun only the per-pixel stage.
 //!
-//! When a stage starts reading another recipe field, add it to that stage's key here.
+//! [`stage_recipes`] places every recipe field: a new field does not compile until it
+//! is added to the stages that read it, or to those that only later stages read.
 use super::{
     Geometry, Recipe,
     effects::Effects,
@@ -105,6 +106,147 @@ impl<T> PartialEq for Same<T> {
     }
 }
 
+/// The recipe as the cached stages read it: the local-tone blurs and the samples.
+struct StageRecipes {
+    blurs: Recipe,
+    samples: Recipe,
+}
+/// Splits `r` into what each cached stage reads. `Recipe` and `Effects` are taken
+/// apart without `..`, so adding a field to either is a compile error here until it is
+/// placed: a stage that reads a field it does not key on would reuse stale results.
+fn stage_recipes(r: &Recipe) -> StageRecipes {
+    let Recipe {
+        engine,
+        wb,
+        temperature,
+        profile,
+        lens_builtin,
+        lens_profile,
+        lens_distortion,
+        lens_vignetting,
+        lens_ca,
+        crop,
+        rotation,
+        straighten,
+        flip_x,
+        flip_y,
+        transform,
+        upright,
+        noise_luma,
+        noise_chroma,
+        effects,
+        // Shadows/Highlights and their exposure are keyed by `LocalKey`; spot removal
+        // changes the source image, which every key holds.
+        exposure: _,
+        camera_exposure: _,
+        shadows: _,
+        highlights: _,
+        retouch: _,
+        // Read only by the per-pixel stage and the finishing stages after these.
+        profile_tone: _,
+        tint: _,
+        auto_white_balance: _,
+        wide_gamut_curves: _,
+        reference_curves: _,
+        reference_calibration: _,
+        reference_color: _,
+        contrast: _,
+        whites: _,
+        blacks: _,
+        black_point: _,
+        white_point: _,
+        midtone: _,
+        curve: _,
+        saturation: _,
+        vibrance: _,
+        hsl: _,
+        grading: _,
+        sharpening: _,
+        sharpening_radius: _,
+        sharpening_detail: _,
+        sharpening_masking: _,
+        masks: _,
+        // Not read when rendering.
+        preset_name: _,
+        preset_settings: _,
+        unknown: _,
+    } = r;
+    let Effects {
+        luma_detail,
+        luma_contrast,
+        chroma_detail,
+        chroma_smoothness,
+        // Keyed by `LocalKey`.
+        clarity: _,
+        texture: _,
+        // Read only by the per-pixel stage and the finishing stages after these.
+        channels: _,
+        parametric: _,
+        splits: _,
+        calibration: _,
+        shadow_tint: _,
+        monochrome: _,
+        gray_mix: _,
+        balance: _,
+        blending: _,
+        global_grade: _,
+        dehaze: _,
+        grain: _,
+        grain_size: _,
+        grain_roughness: _,
+        grain_seed: _,
+        vignette: _,
+        vignette_midpoint: _,
+        vignette_roundness: _,
+        vignette_feather: _,
+        vignette_highlights: _,
+        vignette_style: _,
+        lens_vignette: _,
+        lens_vignette_midpoint: _,
+        defringe: _,
+        defringe_ranges: _,
+    } = effects;
+    StageRecipes {
+        // Log luminance after white balance, profile matrix and lens vignetting.
+        blurs: Recipe {
+            engine: *engine,
+            wb: *wb,
+            temperature: *temperature,
+            profile: profile.clone(),
+            lens_builtin: *lens_builtin,
+            lens_profile: *lens_profile,
+            lens_vignetting: *lens_vignetting,
+            ..Default::default()
+        },
+        // Geometry, lens correction and noise reduction.
+        samples: Recipe {
+            engine: *engine,
+            crop: *crop,
+            rotation: *rotation,
+            straighten: *straighten,
+            flip_x: *flip_x,
+            flip_y: *flip_y,
+            transform: *transform,
+            upright: upright.clone(),
+            lens_builtin: *lens_builtin,
+            lens_profile: *lens_profile,
+            lens_distortion: *lens_distortion,
+            lens_vignetting: *lens_vignetting,
+            lens_ca: *lens_ca,
+            noise_luma: *noise_luma,
+            noise_chroma: *noise_chroma,
+            effects: Effects {
+                luma_detail: *luma_detail,
+                luma_contrast: *luma_contrast,
+                chroma_detail: *chroma_detail,
+                chroma_smoothness: *chroma_smoothness,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    }
+}
+
 /// Local-tone blurs: log luminance after white balance, profile matrix and lens
 /// vignetting, before exposure.
 #[derive(Clone, PartialEq)]
@@ -120,16 +262,7 @@ impl BlurKey {
             image: Same(image.clone()),
             scale: scale.to_bits(),
             texture,
-            recipe: Recipe {
-                engine: r.engine,
-                wb: r.wb,
-                temperature: r.temperature,
-                profile: r.profile.clone(),
-                lens_builtin: r.lens_builtin,
-                lens_profile: r.lens_profile,
-                lens_vignetting: r.lens_vignetting,
-                ..Default::default()
-            },
+            recipe: stage_recipes(r).blurs,
         }
     }
 }
@@ -195,38 +328,13 @@ impl SampleKey {
         region: [u32; 4],
         spread: f32,
     ) -> Self {
-        let e = &r.effects;
         Self {
             image: Same(toned.image.clone()),
             gain: toned.gain_key.clone(),
             size: [g.width, g.height],
             region,
             spread: spread.to_bits(),
-            recipe: Recipe {
-                engine: r.engine,
-                crop: r.crop,
-                rotation: r.rotation,
-                straighten: r.straighten,
-                flip_x: r.flip_x,
-                flip_y: r.flip_y,
-                transform: r.transform,
-                upright: r.upright.clone(),
-                lens_builtin: r.lens_builtin,
-                lens_profile: r.lens_profile,
-                lens_distortion: r.lens_distortion,
-                lens_vignetting: r.lens_vignetting,
-                lens_ca: r.lens_ca,
-                noise_luma: r.noise_luma,
-                noise_chroma: r.noise_chroma,
-                effects: Effects {
-                    luma_detail: e.luma_detail,
-                    luma_contrast: e.luma_contrast,
-                    chroma_detail: e.chroma_detail,
-                    chroma_smoothness: e.chroma_smoothness,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
+            recipe: stage_recipes(r).samples,
         }
     }
 }
