@@ -777,7 +777,9 @@ fn shaders_are_valid_wgsl() {
     for (name, source, entries) in modules {
         let module = wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{name}:\n{}", e.emit_to_string(&source)));
-        Validator::new(ValidationFlags::all(), Capabilities::all())
+        // No optional feature is requested from the device (`Processor::new` and the
+        // UI's device use the defaults), so the shaders must validate without any.
+        Validator::new(ValidationFlags::all(), Capabilities::empty())
             .validate(&module)
             .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
         let found: Vec<&str> = module
