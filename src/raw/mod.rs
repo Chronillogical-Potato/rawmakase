@@ -1,67 +1,16 @@
-use anyhow::{Result, bail, ensure};
+//! RAW files: opening them through LibRaw, their metadata as RAWmakase keeps it
+//! (with the DNG, RAF and lens details read on top), development into linear
+//! camera-space pixels, the embedded preview, and the monitor colour transform.
+//! The native boundary itself is in [`ffi`].
+use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::{CStr, CString, c_char, c_int, c_void},
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
 };
-#[repr(C)]
-struct NativeMetadata {
-    width: u32,
-    height: u32,
-    raw_width: u32,
-    raw_height: u32,
-    crop_width: u32,
-    crop_height: u32,
-    crop_left: u32,
-    crop_top: u32,
-    flip: i32,
-    xtrans: i32,
-    fuji_dynamic_range: u32,
-    iso: f32,
-    shutter: f32,
-    aperture: f32,
-    focal: f32,
-    wb: [f32; 3],
-    daylight_wb: [f32; 3],
-    matrix: [f32; 9],
-    make: [c_char; 64],
-    model: [c_char; 64],
-    cam_xyz: [f32; 9],
-    lens: [c_char; 128],
-    focal_35mm: f32,
-}
-unsafe extern "C" {
-    fn ora_version() -> *const c_char;
-    fn ora_open(path: *const c_char, m: *mut NativeMetadata, err: *mut c_char) -> *mut c_void;
-    fn ora_close(h: *mut c_void);
-    fn ora_develop(
-        h: *mut c_void,
-        fast: c_int,
-        cancel: extern "C" fn(*mut c_void) -> c_int,
-        ctx: *mut c_void,
-        w: *mut u32,
-        height: *mut u32,
-        gain: *mut f32,
-        scale: *mut f32,
-        clipped: *mut u32,
-        err: *mut c_char,
-    ) -> c_int;
-    fn ora_copy(h: *mut c_void, out: *mut f32);
-    fn ora_cfa_open(
-        h: *mut c_void,
-        w: *mut u32,
-        height: *mut u32,
-        pattern: *mut u8,
-        err: *mut c_char,
-    ) -> c_int;
-    fn ora_cfa_copy(h: *mut c_void, out: *mut f32);
-    fn ora_thumbnail(h: *mut c_void, data: *mut *mut u8, size: *mut u32, err: *mut c_char)
-    -> c_int;
-    fn ora_srgb_profile(data: *mut u8, size: u32) -> u32;
-    fn ora_display(path: *const c_char, data: *mut u8, count: u32) -> c_int;
-}
+mod ffi;
+pub use ffi::{display_transform, srgb_profile, version};
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,
@@ -136,7 +85,7 @@ pub fn demosaic() -> Demosaic {
     }
 }
 pub struct Raw {
-    handle: *mut c_void,
+    handle: ffi::Handle,
     pub metadata: Metadata,
 }
 #[derive(Clone)]
@@ -150,44 +99,18 @@ pub struct CameraImage {
     pub scale_factor: f32,
     pub scale_clipped: u32,
 }
-impl Drop for Raw {
-    fn drop(&mut self) {
-        unsafe { ora_close(self.handle) }
-    }
-}
-#[cfg(unix)]
-fn path_string(p: &Path) -> Result<CString> {
-    use std::os::unix::ffi::OsStrExt;
-    Ok(CString::new(p.as_os_str().as_bytes())?)
-}
-/// UTF-8, which the native side widens for LibRaw's wide-character open.
-#[cfg(windows)]
-fn path_string(p: &Path) -> Result<CString> {
-    let utf8 = p
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Path is not valid Unicode: {}", p.display()))?;
-    Ok(CString::new(utf8)?)
-}
-fn error(buf: &[c_char]) -> String {
-    unsafe { CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned() }
-}
-extern "C" fn cancelled(ctx: *mut c_void) -> c_int {
-    unsafe { (&*(ctx as *const AtomicBool)).load(Ordering::Relaxed) as c_int }
-}
-pub fn version() -> String {
-    unsafe { CStr::from_ptr(ora_version()).to_string_lossy().into_owned() }
-}
 impl Raw {
     pub fn open(path: &Path) -> Result<Self> {
         let path_ref = path;
-        let path = path_string(path)?;
-        let mut err = [0; 512];
-        let mut m: NativeMetadata = unsafe { std::mem::zeroed() };
-        let handle = unsafe { ora_open(path.as_ptr(), &mut m, err.as_mut_ptr()) };
-        ensure!(!handle.is_null(), "{}", error(&err));
+        let (handle, m) = ffi::Handle::open(path)?;
+        let text = |bytes: &[std::ffi::c_char]| {
+            let bytes: Vec<u8> = bytes.iter().map(|&c| c as u8).collect();
+            let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            String::from_utf8_lossy(&bytes[..end]).into_owned()
+        };
         let metadata = Metadata {
-            make: error(&m.make),
-            model: error(&m.model),
+            make: text(&m.make),
+            model: text(&m.model),
             width: m.width,
             height: m.height,
             raw_width: m.raw_width,
@@ -209,7 +132,7 @@ impl Raw {
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: crate::lens::embedded::read(path_ref),
-            lens_model: error(&m.lens).trim().to_string(),
+            lens_model: text(&m.lens).trim().to_string(),
             baseline_exposure: None,
             profile_lens: None,
             lateral_ca: Default::default(),
@@ -245,17 +168,9 @@ impl Raw {
         metadata.profile_lens = crate::lens::lcp::installed(&metadata);
         Ok(Self { handle, metadata })
     }
+    /// The embedded JPEG preview, as stored.
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {
-        let mut data = std::ptr::null_mut();
-        let mut size = 0;
-        let mut err = [0; 512];
-        let rc = unsafe { ora_thumbnail(self.handle, &mut data, &mut size, err.as_mut_ptr()) };
-        ensure!(rc == 0, "{}", error(&err));
-        ensure!(
-            !data.is_null() && size > 0 && size < 100_000_000,
-            "Invalid preview length"
-        );
-        Ok(unsafe { std::slice::from_raw_parts(data, size as usize).to_vec() })
+        self.handle.thumbnail()
     }
     pub fn develop(self, fast: bool, cancel: &AtomicBool) -> Result<CameraImage> {
         // Half-size drafts always use LibRaw's fast half-size path.
@@ -270,29 +185,15 @@ impl Raw {
     /// Unpacked CFA data demosaiced by `crate::demosaic`; `None` when the file is not
     /// single-channel Bayer or X-Trans data.
     fn develop_cfa(&self, cancel: &AtomicBool) -> Result<Option<CameraImage>> {
-        let (mut w, mut h) = (0u32, 0u32);
-        let mut pattern = [0u8; crate::demosaic::PATTERN * crate::demosaic::PATTERN];
-        let mut err = [0; 512];
-        let rc = unsafe {
-            ora_cfa_open(
-                self.handle,
-                &mut w,
-                &mut h,
-                pattern.as_mut_ptr(),
-                err.as_mut_ptr(),
-            )
-        };
-        if rc > 0 {
+        let Some(ffi::Cfa {
+            width: w,
+            height: h,
+            pattern,
+            mut data,
+        }) = self.handle.cfa()?
+        else {
             return Ok(None);
-        }
-        ensure!(rc == 0, "{}", error(&err));
-        ensure!(
-            w > 0 && h > 0 && u64::from(w) * u64::from(h) <= 150_000_000,
-            "Invalid RAW dimensions"
-        );
-        ensure!(pattern.iter().all(|c| *c < 3), "Unsupported colour filter");
-        let mut data = vec![0f32; w as usize * h as usize];
-        unsafe { ora_cfa_copy(self.handle, data.as_mut_ptr()) };
+        };
         ensure!(!cancel.load(Ordering::Relaxed), "Development cancelled");
         let wb = self.metadata.wb;
         let (width, height) = (w as usize, h as usize);
@@ -328,33 +229,13 @@ impl Raw {
         }))
     }
     fn develop_libraw(self, fast: bool, cancel: &AtomicBool) -> Result<CameraImage> {
-        let (mut w, mut h, mut gain, mut scale, mut clipped) = (0, 0, 0., 0., 0);
-        let mut err = [0; 512];
-        let rc = unsafe {
-            ora_develop(
-                self.handle,
-                fast as c_int,
-                cancelled,
-                cancel as *const _ as *mut c_void,
-                &mut w,
-                &mut h,
-                &mut gain,
-                &mut scale,
-                &mut clipped,
-                err.as_mut_ptr(),
-            )
-        };
-        ensure!(rc == 0, "{}", error(&err));
-        ensure!(
-            w > 0 && h > 0 && u64::from(w) * u64::from(h) <= 150_000_000,
-            "Invalid RAW dimensions"
-        );
-        let mut pixels = vec![[0f32; 3]; w as usize * h as usize];
-        unsafe { ora_copy(self.handle, pixels.as_mut_ptr().cast()) };
-        ensure!(
-            gain.is_finite() && pixels.iter().flatten().all(|v| v.is_finite()),
-            "Non-finite RAW pixels"
-        );
+        let ffi::Developed {
+            width: w,
+            height: h,
+            scale,
+            clipped,
+            pixels,
+        } = self.handle.develop(fast, cancel)?;
         Ok(CameraImage {
             recovered: Default::default(),
             width: w,
@@ -400,24 +281,6 @@ fn fuji_crop(path: &Path) -> Option<[u32; 4]> {
     let ([left, top], [width, height]) = (origin?, size?);
     (width > 0 && height > 0).then_some([left, top, width, height])
 }
-pub fn srgb_profile() -> Result<Vec<u8>> {
-    let size = unsafe { ora_srgb_profile(std::ptr::null_mut(), 0) };
-    ensure!(size > 0, "Cannot create sRGB profile");
-    let mut data = vec![0; size as usize];
-    ensure!(
-        unsafe { ora_srgb_profile(data.as_mut_ptr(), size) } == size,
-        "Cannot serialize sRGB profile"
-    );
-    Ok(data)
-}
-pub fn display_transform(path: &Path, data: &mut [u8]) -> Result<()> {
-    ensure!(data.len().is_multiple_of(3), "Invalid RGB buffer");
-    let p = path_string(path)?;
-    if unsafe { ora_display(p.as_ptr(), data.as_mut_ptr(), (data.len() / 3).try_into()?) } != 0 {
-        bail!("Cannot use monitor ICC profile {}", path.display());
-    }
-    Ok(())
-}
 pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
     use image::{ImageDecoder, metadata::Orientation};
     let bytes = raw.thumbnail()?;
@@ -438,9 +301,6 @@ pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
 
 #[cfg(test)]
 mod tests {
-    unsafe extern "C" {
-        fn ora_scale_probe(wb: f32, error: *mut f32) -> i32;
-    }
     #[test]
     fn reads_fujifilm_default_crop() {
         let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
@@ -466,15 +326,6 @@ mod tests {
         let f = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(f.path(), b"not a raw file").unwrap();
         assert!(super::Raw::open(f.path()).is_err());
-    }
-    #[test]
-    fn integer_boundary_retains_near_saturation_ramps() {
-        for wb in [1., 2.5, 8., 16.] {
-            let mut error = 0.;
-            let clipped = unsafe { ora_scale_probe(wb, &mut error) };
-            assert_eq!(clipped, 0);
-            assert!(error < wb / 59000., "WB {wb}: error {error}");
-        }
     }
     #[test]
     fn monitor_srgb_roundtrip() -> anyhow::Result<()> {

@@ -1,10 +1,12 @@
 //! Read-only Lightroom catalog import and best-effort Develop conversion.
 mod develop;
+pub(super) mod history;
 use super::Catalog;
 use anyhow::{Context, Result, ensure};
 pub use develop::convert_develop;
 #[cfg(test)]
 pub(super) use develop::develop_fields;
+pub use history::HistoryStep;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 
@@ -104,7 +106,7 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
         tx.execute_batch("UPDATE photos SET lightroom_develop=(SELECT text FROM lr.Adobe_imageDevelopSettings WHERE image=photos.id LIMIT 1);")?;
     }
     if has("Adobe_libraryImageDevelopHistoryStep")? {
-        tx.execute_batch(crate::catalog::COPY_LIGHTROOM_HISTORY)?;
+        tx.execute_batch(history::COPY_LIGHTROOM_HISTORY)?;
     }
     if has("AgLibraryCollection")? {
         tx.execute_batch("INSERT INTO collections SELECT id_local,name,parent,creationId FROM lr.AgLibraryCollection;")?;

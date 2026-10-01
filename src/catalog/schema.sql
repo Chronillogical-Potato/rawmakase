@@ -1,6 +1,10 @@
-PRAGMA foreign_keys=ON;
+-- Every table of a RAWmakase catalog (SQLite application id 0x4f4d4152,
+-- user_version 1). Idempotent: `Catalog::create` runs it on a new file and
+-- `Catalog::open` on every open, so a catalog from an earlier release gains the
+-- tables added since. Tables are only ever added; a change to an existing one
+-- needs a new user_version and a migration.
 
-CREATE TABLE sources (
+CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL,
     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -8,19 +12,19 @@ CREATE TABLE sources (
     original_catalog BLOB NOT NULL
 );
 
-CREATE TABLE roots (
+CREATE TABLE IF NOT EXISTS roots (
     id INTEGER PRIMARY KEY,
     original_path TEXT NOT NULL,
     mapped_path TEXT
 );
 
-CREATE TABLE folders (
+CREATE TABLE IF NOT EXISTS folders (
     id INTEGER PRIMARY KEY,
     root INTEGER NOT NULL REFERENCES roots(id),
     relative_path TEXT NOT NULL
 );
 
-CREATE TABLE photos (
+CREATE TABLE IF NOT EXISTS photos (
     id INTEGER PRIMARY KEY,
     folder INTEGER NOT NULL REFERENCES folders(id),
     filename TEXT NOT NULL,
@@ -40,37 +44,68 @@ CREATE TABLE photos (
     edited_at TEXT
 );
 
-CREATE INDEX photos_folder ON photos(folder);
+CREATE INDEX IF NOT EXISTS photos_folder ON photos(folder);
 
-CREATE INDEX photos_captured ON photos(captured);
+CREATE INDEX IF NOT EXISTS photos_captured ON photos(captured);
 
-CREATE TABLE collections (
+CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     parent INTEGER,
     kind TEXT NOT NULL
 );
 
-CREATE TABLE collection_photos (
+CREATE TABLE IF NOT EXISTS collection_photos (
     collection INTEGER NOT NULL REFERENCES collections(id),
     photo INTEGER NOT NULL REFERENCES photos(id),
     position TEXT,
     PRIMARY KEY(collection,photo)
 );
 
-CREATE TABLE keywords (
+CREATE TABLE IF NOT EXISTS keywords (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     parent INTEGER
 );
 
-CREATE TABLE photo_keywords (
+CREATE TABLE IF NOT EXISTS photo_keywords (
     photo INTEGER NOT NULL REFERENCES photos(id),
     keyword INTEGER NOT NULL REFERENCES keywords(id),
     PRIMARY KEY(photo,keyword)
 );
 
-CREATE TABLE folder_mappings (
+CREATE TABLE IF NOT EXISTS folder_mappings (
     folder INTEGER PRIMARY KEY REFERENCES folders(id),
     path TEXT NOT NULL
+);
+
+-- Added after version 1 shipped.
+
+-- Lightroom's develop history per photo: one full settings snapshot per step.
+CREATE TABLE IF NOT EXISTS lightroom_history (
+    photo INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    created REAL,
+    text TEXT NOT NULL,
+    PRIMARY KEY(photo, position)
+);
+
+-- Spots and masks of a photo's edit (experimental), as `LocalEdits` JSON: kept out
+-- of the recipe column so releases before them still read every edit.
+CREATE TABLE IF NOT EXISTS local_edits (
+    photo INTEGER PRIMARY KEY,
+    data TEXT NOT NULL
+);
+
+-- Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
+CREATE TABLE IF NOT EXISTS bitmaps (
+    hash TEXT PRIMARY KEY,
+    data BLOB NOT NULL
+);
+
+-- Facts about the catalog itself, by name.
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );

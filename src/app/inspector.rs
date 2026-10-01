@@ -334,7 +334,7 @@ impl Editor {
             .map(|m| egui::Id::new(("adobe-profiles", &m.make, &m.model)));
         let adobe: Vec<std::path::PathBuf> = match (adobe_key, &self.document.metadata) {
             (Some(key), Some(m)) => ui.ctx().data_mut(|d| {
-                d.get_temp_mut_or_insert_with(key, || adobe_camera_profiles(m))
+                d.get_temp_mut_or_insert_with(key, || crate::camera_profiles::adobe_installed(m))
                     .clone()
             }),
             _ => Vec::new(),
@@ -1437,35 +1437,6 @@ fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     icons::paint_at(painter, Icon::Crop, c, 15., color);
 }
 
-/// Adobe's own profiles for this camera from a local Lightroom / Camera Raw
-/// installation (Adobe Standard plus Camera Matching), skipping ones RAWmakase
-/// already has.
-fn adobe_camera_profiles(m: &crate::raw::Metadata) -> Vec<std::path::PathBuf> {
-    let root = std::path::Path::new(if cfg!(target_os = "macos") {
-        "/Library/Application Support/Adobe/CameraRaw/CameraProfiles"
-    } else if cfg!(windows) {
-        "C:\\ProgramData\\Adobe\\CameraRaw\\CameraProfiles"
-    } else {
-        return Vec::new();
-    });
-    let camera = format!("{} {}", m.make, m.model);
-    let mut paths = vec![
-        root.join("Adobe Standard")
-            .join(format!("{camera} Adobe Standard.dcp")),
-    ];
-    if let Ok(entries) = std::fs::read_dir(root.join("Camera").join(&camera)) {
-        paths.extend(entries.flatten().map(|e| e.path()));
-    }
-    let installed = crate::storage::data_dir().join("camera-profiles");
-    paths
-        .into_iter()
-        .filter(|p| {
-            p.is_file()
-                && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dcp"))
-                && p.file_name().is_some_and(|n| !installed.join(n).exists())
-        })
-        .collect()
-}
 /// A small note aligned with the slider rails.
 fn hint_row(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {

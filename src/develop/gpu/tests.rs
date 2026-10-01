@@ -719,3 +719,79 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     assert!(max < 2e-3 && mean < 2e-5, "max {max}, mean {mean}");
     Ok(())
 }
+
+/// Every shader module, assembled as the device receives it, parses and validates
+/// as WGSL, with the entry points the pipelines ask for. The hardware tests above are
+/// ignored by default, so this is the check that runs in CI.
+#[test]
+fn shaders_are_valid_wgsl() {
+    use wgpu::naga::{
+        front::wgsl,
+        valid::{Capabilities, ValidationFlags, Validator},
+    };
+    let prelude = crate::develop::pipeline::pixel_params::wgsl_prelude();
+    let modules: [(&str, String, &[&str]); 6] = [
+        (
+            "develop.wgsl",
+            prelude.clone() + include_str!("develop.wgsl"),
+            &["develop"],
+        ),
+        (
+            "logs.wgsl",
+            prelude + include_str!("develop.wgsl") + include_str!("logs.wgsl"),
+            &["log_luminance"],
+        ),
+        (
+            "local.wgsl",
+            include_str!("local.wgsl").into(),
+            &[
+                "running_sum",
+                "window",
+                "region_gain",
+                "sample_region",
+                "reduce_rows",
+                "reduce_toned",
+            ],
+        ),
+        (
+            "finish.wgsl",
+            include_str!("finish.wgsl").into(),
+            &[
+                "blur_horizontal",
+                "sharpen",
+                "resize_vertical",
+                "resize_horizontal",
+            ],
+        ),
+        (
+            "present.wgsl",
+            include_str!("present.wgsl").into(),
+            &["blur_horizontal", "sharpen", "present"],
+        ),
+        (
+            "reduce.wgsl",
+            include_str!("reduce.wgsl").into(),
+            &["reduce"],
+        ),
+    ];
+    for (name, source, entries) in modules {
+        let module = wgsl::parse_str(&source)
+            .unwrap_or_else(|e| panic!("{name}:\n{}", e.emit_to_string(&source)));
+        // No optional feature is requested from the device (`Processor::new` and the
+        // UI's device use the defaults), so the shaders must validate without any.
+        Validator::new(ValidationFlags::all(), Capabilities::empty())
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+        let found: Vec<&str> = module
+            .entry_points
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        for entry in entries {
+            assert!(
+                found.contains(entry),
+                "{name} has no entry point {entry}: {found:?}"
+            );
+        }
+    }
+}

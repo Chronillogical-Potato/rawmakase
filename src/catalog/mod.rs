@@ -1,7 +1,11 @@
 //! Independent, versioned SQLite catalogs. Lightroom sources are never opened writable.
-use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
-use anyhow::{Context, Result, ensure};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+//!
+//! `Catalog` owns the connection; `schema.sql` owns every table. The catalog's
+//! operations are grouped by what they change: browsing queries and relinking
+//! here, edits in `edits`, virtual copies in `copies`, adding folders in
+//! `ingest`, and everything Lightroom-specific under `lightroom`.
+use anyhow::{Result, ensure};
+use rusqlite::{Connection, OpenFlags, params};
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -14,59 +18,14 @@ pub struct Catalog {
     db: Connection,
 }
 
+mod copies;
+mod edits;
+mod ingest;
 pub mod lightroom;
 mod models;
 pub use models::{Collection, Folder, Photo, SavedEdit};
-/// Lightroom's develop history per photo: one full settings snapshot per step.
-const LIGHTROOM_HISTORY_TABLE: &str = "CREATE TABLE IF NOT EXISTS lightroom_history(
-    photo INTEGER NOT NULL,
-    position INTEGER NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    created REAL,
-    text TEXT NOT NULL,
-    PRIMARY KEY(photo, position));";
-/// Spots and masks of a photo's edit (experimental), as `LocalEdits` JSON: kept out of
-/// the recipe column so releases before them still read every edit.
-const LOCAL_EDITS_TABLE: &str =
-    "CREATE TABLE IF NOT EXISTS local_edits(photo INTEGER PRIMARY KEY, data TEXT NOT NULL);";
-/// Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
-const BITMAPS_TABLE: &str =
-    "CREATE TABLE IF NOT EXISTS bitmaps(hash TEXT PRIMARY KEY, data BLOB NOT NULL);";
-/// Facts about the catalog itself, by name.
-const META_TABLE: &str =
-    "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);";
-/// Set in `meta` once Lightroom history has been recovered from the stored catalog.
-const HISTORY_BACKFILLED: &str = "lightroom_history_backfilled";
-/// Copies history steps from an attached Lightroom catalog named `lr`.
-pub(crate) const COPY_LIGHTROOM_HISTORY: &str =
-    "INSERT OR IGNORE INTO lightroom_history(photo,position,name,created,text)
-    SELECT image, row_number() OVER (PARTITION BY image ORDER BY dateCreated, id_local),
-           COALESCE(name,''), dateCreated, text
-    FROM lr.Adobe_libraryImageDevelopHistoryStep
-    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos);";
-/// Lightroom stores history snapshots either as text or as a 4-byte
-/// big-endian length followed by a zlib stream.
-fn decode_history_text(bytes: &[u8]) -> Option<String> {
-    if bytes.len() > 6 && bytes[4] == 0x78 {
-        use std::io::Read;
-        let mut text = String::new();
-        flate2::read::ZlibDecoder::new(&bytes[4..])
-            .read_to_string(&mut text)
-            .ok()?;
-        return Some(text);
-    }
-    String::from_utf8(bytes.to_vec()).ok()
-}
-/// One Lightroom history step.
-#[derive(Clone, Debug)]
-pub struct HistoryStep {
-    pub name: String,
-    /// Seconds since 2001-01-01 (Lightroom's epoch).
-    pub created: Option<f64>,
-    pub text: String,
-}
 // Compatibility for existing clients.
-pub use lightroom::{convert_develop, import_lightroom};
+pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {
         ensure!(!path.exists(), "Catalog already exists: {}", path.display());
@@ -94,35 +53,13 @@ impl Catalog {
         );
         db.busy_timeout(Duration::from_secs(5))?;
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
-        // Added after version 1 shipped; additive, so older catalogs gain it on open.
-        db.execute_batch(LIGHTROOM_HISTORY_TABLE)?;
-        db.execute_batch(BITMAPS_TABLE)?;
-        db.execute_batch(LOCAL_EDITS_TABLE)?;
-        db.execute_batch(META_TABLE)?;
+        // The schema is idempotent: a catalog from an earlier release gains the
+        // tables added since.
+        db.execute_batch(include_str!("schema.sql"))?;
         Ok(Self {
             path: path.into(),
             db,
         })
-    }
-    /// Stores `bitmap` once and returns the hash that refers to it.
-    pub fn put_bitmap(&self, bitmap: &crate::storage::bitmaps::Bitmap) -> Result<String> {
-        let hash = bitmap.hash();
-        self.db.execute(
-            "INSERT OR IGNORE INTO bitmaps(hash, data) VALUES (?, ?)",
-            params![hash, bitmap.compress()?],
-        )?;
-        Ok(hash)
-    }
-    #[cfg(test)]
-    pub(crate) fn bitmap(&self, hash: &str) -> Result<Option<crate::storage::bitmaps::Bitmap>> {
-        let data: Option<Vec<u8>> = self
-            .db
-            .query_row("SELECT data FROM bitmaps WHERE hash=?", [hash], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        data.map(|d| crate::storage::bitmaps::Bitmap::decompress(&d))
-            .transpose()
     }
     pub fn photos(&self) -> Result<Vec<Photo>> {
         let mappings = self.folders()?;
@@ -179,7 +116,13 @@ impl Catalog {
                 Ok(F {
                     id: r.get(0)?,
                     root: r.get(1)?,
-                    relative: r.get(2)?,
+                    // Folders added on Windows were stored with its separator;
+                    // the Library's tree and saved sources split on '/'.
+                    relative: if cfg!(windows) {
+                        r.get::<_, String>(2)?.replace('\\', "/")
+                    } else {
+                        r.get(2)?
+                    },
                     base: r.get(3)?,
                     mapped: r.get(4)?,
                     count: r.get::<_, i64>(5)? as usize,
@@ -277,425 +220,6 @@ impl Catalog {
             "Unknown photo"
         );
         Ok(())
-    }
-    pub fn save_edit(
-        &self,
-        id: i64,
-        path: &Path,
-        recipe: &Recipe,
-        export: &ExportOptions,
-    ) -> Result<()> {
-        recipe.validate()?;
-        export.validate()?;
-        let identity = Identity::read(path)?;
-        // Refuse replacing an edit after the underlying source changed.
-        let _ = self.load_edit(id, path)?;
-        let (saved, local) = recipe.split_local();
-        let tx = self.db.unchecked_transaction()?;
-        ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(export)?,serde_json::to_string(&identity)?,id])?==1,"Unknown photo");
-        if local.is_empty() {
-            tx.execute("DELETE FROM local_edits WHERE photo=?", [id])?;
-        } else {
-            tx.execute(
-                "INSERT OR REPLACE INTO local_edits(photo, data) VALUES (?, ?)",
-                params![id, serde_json::to_string(&local)?],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-    /// The photo's spots and masks, saved apart from its recipe.
-    fn local_edits(&self, id: i64) -> Result<crate::develop::LocalEdits> {
-        let data: Option<String> = self
-            .db
-            .query_row("SELECT data FROM local_edits WHERE photo=?", [id], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        let local: crate::develop::LocalEdits = match data {
-            Some(d) => serde_json::from_str(&d)?,
-            None => Default::default(),
-        };
-        local.validate()?;
-        Ok(local)
-    }
-    pub fn load_edit(&self, id: i64, path: &Path) -> Result<Option<SavedEdit>> {
-        let (recipe, export, identity): (Option<String>, Option<String>, Option<String>) =
-            self.db.query_row(
-                "SELECT recipe,export_options,identity FROM photos WHERE id=?",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-        if let Some(recipe) = recipe {
-            let saved: Identity =
-                serde_json::from_str(&identity.context("Missing photo identity")?)?;
-            ensure!(
-                saved == Identity::read(path)?,
-                "Photo changed since this catalog edit was saved; catalog edit protected"
-            );
-            let recipe: Recipe = serde_json::from_str(&recipe)?;
-            let recipe = recipe.with_local(self.local_edits(id)?);
-            recipe.validate()?;
-            let export: ExportOptions =
-                serde_json::from_str(&export.context("Missing export settings")?)?;
-            export.validate()?;
-            Ok(Some(SavedEdit { recipe, export }))
-        } else {
-            Ok(None)
-        }
-    }
-    /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
-    /// develop text, if any.
-    pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
-        let (recipe, lightroom): (Option<String>, Option<String>) = self.db.query_row(
-            "SELECT recipe, lightroom_develop FROM photos WHERE id=?",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let local = self.local_edits(id)?;
-        let recipe = match recipe {
-            Some(text) if !local.is_empty() => {
-                let recipe: Recipe = serde_json::from_str(&text)?;
-                Some(serde_json::to_string(&recipe.with_local(local))?)
-            }
-            other => other,
-        };
-        Ok((recipe, lightroom))
-    }
-    /// Lightroom's history for a photo, oldest step first.
-    pub fn lightroom_history(&self, id: i64) -> Result<Vec<HistoryStep>> {
-        let mut q = self.db.prepare(
-            "SELECT name, created, text FROM lightroom_history WHERE photo=? ORDER BY position",
-        )?;
-        let rows = q
-            .query_map([id], |r| {
-                let text = match r.get_ref(2)? {
-                    rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
-                        t.to_vec()
-                    }
-                    _ => Vec::new(),
-                };
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<f64>>(1)?, text))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|(name, created, bytes)| {
-                Some(HistoryStep {
-                    name,
-                    created,
-                    text: decode_history_text(&bytes)?,
-                })
-            })
-            .collect())
-    }
-    /// Catalogs imported before history was kept still hold the original
-    /// Lightroom catalog; copy its history steps once. Returns steps added.
-    pub fn backfill_lightroom_history(&mut self) -> Result<usize> {
-        // Once is enough: without history to recover, the stored catalog would
-        // otherwise be written out and attached on every open.
-        let done = self
-            .db
-            .query_row(
-                "SELECT 1 FROM meta WHERE key=?",
-                [HISTORY_BACKFILLED],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some();
-        if done {
-            return Ok(0);
-        }
-        let copied = self.copy_lightroom_history()?;
-        self.db.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
-            [HISTORY_BACKFILLED],
-        )?;
-        Ok(copied)
-    }
-    fn copy_lightroom_history(&mut self) -> Result<usize> {
-        let have: i64 = self
-            .db
-            .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
-        if have > 0 {
-            return Ok(0);
-        }
-        let original: Option<Vec<u8>> = self
-            .db
-            .query_row(
-                "SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(original) = original else {
-            return Ok(0);
-        };
-        let snapshot = tempfile::NamedTempFile::new()?;
-        std::fs::write(snapshot.path(), original)?;
-        self.db.execute(
-            "ATTACH DATABASE ? AS lr",
-            [snapshot.path().to_string_lossy()],
-        )?;
-        let result = (|| -> Result<usize> {
-            let exists = self
-                .db
-                .query_row(
-                    "SELECT 1 FROM lr.sqlite_master WHERE type='table' AND name='Adobe_libraryImageDevelopHistoryStep'",
-                    [],
-                    |r| r.get::<_, i32>(0),
-                )
-                .optional()?
-                .is_some();
-            if !exists {
-                return Ok(0);
-            }
-            Ok(self.db.execute(COPY_LIGHTROOM_HISTORY, [])?)
-        })();
-        self.db.execute_batch("DETACH DATABASE lr")?;
-        result
-    }
-    pub fn lightroom_develop(&self, id: i64) -> Result<Option<String>> {
-        Ok(self.db.query_row(
-            "SELECT lightroom_develop FROM photos WHERE id=?",
-            [id],
-            |r| r.get(0),
-        )?)
-    }
-    /// Lightroom's Create Virtual Copy: a new photo of the same file with the
-    /// edit, rating, flag, label and keywords of `id`, named "Copy N" after
-    /// its master's other copies. Returns the copy's id.
-    pub fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
-        let master: i64 = self
-            .db
-            .query_row(
-                "SELECT COALESCE(master_id, id) FROM photos WHERE id=?",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?
-            .context("Unknown photo")?;
-        let name = self.unused_copy_name(master)?;
-        let tx = self.db.transaction()?;
-        tx.execute(
-            "INSERT INTO photos(folder,filename,original_path,captured,rating,flag,label,format,
-                copy_name,master_id,orientation,lightroom_develop,recipe,export_options,identity,edited_at)
-             SELECT folder,filename,original_path,captured,rating,flag,label,format,
-                ?,?,orientation,lightroom_develop,recipe,export_options,identity,edited_at
-             FROM photos WHERE id=?",
-            params![name, master, id],
-        )?;
-        let copy = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO local_edits(photo,data) SELECT ?,data FROM local_edits WHERE photo=?",
-            [copy, id],
-        )?;
-        tx.execute(
-            "INSERT INTO photo_keywords(photo,keyword) SELECT ?,keyword FROM photo_keywords WHERE photo=?",
-            [copy, id],
-        )?;
-        tx.commit()?;
-        Ok(copy)
-    }
-    /// The first "Copy N" none of `master`'s copies is named.
-    fn unused_copy_name(&self, master: i64) -> Result<String> {
-        let names: std::collections::HashSet<String> = self
-            .db
-            .prepare("SELECT copy_name FROM photos WHERE master_id=?")?
-            .query_map([master], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok((1..)
-            .map(|n| format!("Copy {n}"))
-            .find(|name| !names.contains(name))
-            .unwrap())
-    }
-    fn master_of(&self, id: i64) -> Result<Option<i64>> {
-        self.db
-            .query_row("SELECT master_id FROM photos WHERE id=?", [id], |r| {
-                r.get(0)
-            })
-            .optional()?
-            .context("Unknown photo")
-    }
-    /// Lightroom's Set Copy as Master: the copy becomes the master, and the
-    /// former master and the other copies become its copies.
-    pub fn set_copy_as_master(&mut self, id: i64) -> Result<()> {
-        let master = self
-            .master_of(id)?
-            .context("This photo is already the master")?;
-        let name: String =
-            self.db
-                .query_row("SELECT copy_name FROM photos WHERE id=?", [id], |r| {
-                    r.get(0)
-                })?;
-        let name = if name.is_empty() {
-            self.unused_copy_name(master)?
-        } else {
-            name
-        };
-        let tx = self.db.transaction()?;
-        tx.execute(
-            "UPDATE photos SET master_id=?1 WHERE master_id=?2 AND id<>?1",
-            [id, master],
-        )?;
-        tx.execute(
-            "UPDATE photos SET master_id=?, copy_name=? WHERE id=?",
-            params![id, name, master],
-        )?;
-        tx.execute(
-            "UPDATE photos SET master_id=NULL, copy_name='' WHERE id=?",
-            [id],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-    pub fn set_copy_name(&self, id: i64, name: &str) -> Result<()> {
-        ensure!(
-            self.master_of(id)?.is_some(),
-            "Only virtual copies have a copy name"
-        );
-        self.db.execute(
-            "UPDATE photos SET copy_name=? WHERE id=?",
-            params![name.trim(), id],
-        )?;
-        Ok(())
-    }
-    /// Removes a virtual copy, with its edit and metadata, from the catalog.
-    /// The file and the other photos of it are untouched.
-    pub fn remove_virtual_copy(&mut self, id: i64) -> Result<()> {
-        ensure!(
-            self.master_of(id)?.is_some(),
-            "Only virtual copies can be removed"
-        );
-        let tx = self.db.transaction()?;
-        for table in [
-            "local_edits",
-            "lightroom_history",
-            "photo_keywords",
-            "collection_photos",
-        ] {
-            tx.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
-        }
-        tx.execute("DELETE FROM photos WHERE id=?", [id])?;
-        tx.commit()?;
-        Ok(())
-    }
-    pub fn add_folder(&mut self, folder: &Path) -> Result<usize> {
-        let folder = folder.canonicalize()?;
-        let mut files = Vec::new();
-        fn walk(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-            for entry in std::fs::read_dir(p)? {
-                let e = entry?;
-                let t = e.file_type()?;
-                if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
-                    continue;
-                }
-                if t.is_dir() {
-                    walk(&e.path(), files)?
-                } else if crate::storage::is_raw(&e.path())
-                    || e.path().extension().is_some_and(|x| {
-                        matches!(
-                            x.to_string_lossy().to_ascii_lowercase().as_str(),
-                            "jpg" | "jpeg" | "png" | "tif" | "tiff"
-                        )
-                    })
-                {
-                    files.push(e.path());
-                }
-            }
-            Ok(())
-        }
-        walk(&folder, &mut files)?;
-        let existing_paths: std::collections::HashSet<_> =
-            self.photos()?.into_iter().map(|p| p.path).collect();
-        let tx = self.db.transaction()?;
-        let root: i64 = tx
-            .query_row(
-                "SELECT id FROM roots WHERE original_path=?",
-                [folder.to_string_lossy()],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or(0);
-        let root = if root == 0 {
-            tx.execute(
-                "INSERT INTO roots(original_path) VALUES(?)",
-                [folder.to_string_lossy()],
-            )?;
-            tx.last_insert_rowid()
-        } else {
-            root
-        };
-        let mut added = Vec::new();
-        for file in files {
-            if existing_paths.contains(&file) {
-                continue;
-            }
-            if tx
-                .query_row(
-                    "SELECT 1 FROM photos WHERE original_path=?",
-                    [file.to_string_lossy()],
-                    |r| r.get::<_, i32>(0),
-                )
-                .optional()?
-                .is_some()
-            {
-                continue;
-            }
-            let relative = file
-                .parent()
-                .unwrap()
-                .strip_prefix(&folder)?
-                .to_string_lossy();
-            let existing = tx
-                .query_row(
-                    "SELECT id FROM folders WHERE root=? AND relative_path=?",
-                    params![root, relative],
-                    |r| r.get::<_, i64>(0),
-                )
-                .optional()?;
-            let fid = if let Some(id) = existing {
-                id
-            } else {
-                tx.execute(
-                    "INSERT INTO folders(root,relative_path) VALUES(?,?)",
-                    params![root, relative],
-                )?;
-                tx.last_insert_rowid()
-            };
-            tx.execute(
-                "INSERT INTO photos(folder,filename,original_path,format) VALUES(?,?,?,?)",
-                params![
-                    fid,
-                    file.file_name().unwrap().to_string_lossy(),
-                    file.to_string_lossy(),
-                    file.extension()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_ascii_uppercase()
-                ],
-            )?;
-            added.push((tx.last_insert_rowid(), file));
-        }
-        tx.commit()?;
-        for (id, file) in &added {
-            if crate::storage::is_raw(file) {
-                // A sidecar that no longer matches its photo stays unused on disk.
-                let _ = self.import_sidecar(*id, file);
-            }
-        }
-        Ok(added.len())
-    }
-    /// Carries the edit a photo got outside any catalog, in its
-    /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
-    fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
-        let Some((sidecar, bitmaps)) = crate::storage::import(file)? else {
-            return Ok(());
-        };
-        for bitmap in bitmaps {
-            self.put_bitmap(&bitmap)?;
-        }
-        self.save_edit(id, file, &sidecar.recipe, &sidecar.export)
     }
 }
 
