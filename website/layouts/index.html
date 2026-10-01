@@ -1,0 +1,206 @@
+{{- $repo := site.Params.repo -}}
+{{- /* Download links follow the latest GitHub release at build time; params.version is the fallback when the API can't be reached. */ -}}
+{{- $v := site.Params.version -}}
+{{- $api := replace $repo "https://github.com/" "https://api.github.com/repos/" -}}
+{{- $opts := dict "headers" (dict "Accept" "application/vnd.github+json") -}}
+{{- with try (resources.GetRemote (printf "%s/releases/latest" $api) $opts) -}}
+  {{- with .Err -}}
+    {{- warnf "Latest release lookup failed, using params.version %s: %s" site.Params.version . -}}
+  {{- else with .Value -}}
+    {{- with (. | transform.Unmarshal).tag_name -}}{{- $v = strings.TrimPrefix "v" . -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $dl := printf "%s/releases/download/v%s/" $repo $v -}}
+{{- $releases := printf "%s/releases/latest" $repo -}}
+{{- $css := resources.Get "css/main.css" | minify | fingerprint -}}
+{{- $shot := resources.Get "images/screenshot-2026-09-30.png" -}}
+{{- $shotLarge := $shot.Resize "1600x webp q82" -}}
+{{- $shotSmall := $shot.Resize "800x webp q80" -}}
+<!doctype html>
+<html lang="{{ site.LanguageCode }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAWmakase · RAW photo editor for macOS, Linux and Windows</title>
+  <meta name="description" content="{{ site.Params.description }}">
+  <meta name="theme-color" content="#16191c">
+  <meta property="og:title" content="RAWmakase">
+  <meta property="og:description" content="{{ site.Params.description }}">
+  <meta property="og:image" content="{{ $shotLarge.Permalink }}">
+  <link rel="icon" href="{{ "rawmakase.svg" | relURL }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+</head>
+<body>
+  <a class="skip" href="#top">Skip to content</a>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="nav wrap">
+    <a class="brand" href="#top"><img src="{{ "rawmakase.svg" | relURL }}" alt="" width="28" height="28"> RAWmakase</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="{{ $repo }}/releases">Changelog</a>
+      <a href="{{ $repo }}">GitHub</a>
+      <a class="social" href="{{ site.Params.x }}" aria-label="X" title="@p_ch on X" rel="me noopener" target="_blank"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18.9 1.2h3.7l-8 9.2 9.4 12.4h-7.4l-5.8-7.6-6.6 7.6H.5l8.6-9.8L0 1.2h7.6l5.2 6.9 6.1-6.9Zm-1.3 19.4h2L6.5 3.2H4.3l13.3 17.4Z"/></svg></a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <h1 class="reveal" style="--d:0">RAW<span>makase</span></h1>
+        <p class="say reveal" style="--d:0"><i>/raw·muh·KAH·say/</i>, RAW + omakase</p>
+        <p class="tagline reveal" style="--d:1">{{ .Params.tagline }}</p>
+        <p class="lede reveal" style="--d:2">{{ .Params.lede }}</p>
+        <div class="cta reveal" style="--d:3">
+          <a class="btn btn-primary" id="primary-download" href="#download">Download <span class="ver">v{{ $v }}</span></a>
+          <a class="btn btn-ghost" href="{{ $repo }}">View source</a>
+        </div>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <div class="rings"><span></span><span></span><span></span></div>
+        <img src="{{ "rawmakase.svg" | relURL }}" alt="" width="360" height="360">
+      </div>
+    </section>
+
+    <section class="video wrap" aria-label="Video tour">
+      <figure class="frame">
+        <img src="{{ $shotLarge.RelPermalink }}" srcset="{{ $shotSmall.RelPermalink }} 800w, {{ $shotLarge.RelPermalink }} 1600w" sizes="(max-width: 1180px) 100vw, 1120px" width="{{ $shotLarge.Width }}" height="{{ $shotLarge.Height }}" alt="RAWmakase Develop view with presets, the photo and curve and color controls" loading="eager">
+        <div class="play">
+          <span class="disc" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></span>
+          <span class="play-label">Video tour coming soon</span>
+        </div>
+      </figure>
+    </section>
+
+    <section class="feature wrap" id="features">
+      <header class="section-head">
+        <p class="kicker">Lightroom-compatible</p>
+        <h2>Bring your Lightroom work with you.</h2>
+        <p>Years of catalogs, presets and profiles don't have to stay behind. RAWmakase reads them, and the Library and Develop layout will feel familiar from the first minute.</p>
+      </header>
+      <div class="bento">
+        {{- range .Params.compat }}
+        <article class="card">
+          <h3>{{ .name }}</h3>
+          <p>{{ .text }}</p>
+        </article>
+        {{- end }}
+      </div>
+      <p class="aside">Rendering aims for close, not exact, parity with Lightroom.</p>
+    </section>
+
+    <section class="feature free wrap">
+      <header class="section-head">
+        <h2>No subscription. No catch.</h2>
+        <p>RAWmakase is free and open source. There's nothing to renew, and your photos and edits stay with you.</p>
+      </header>
+      <dl class="points">
+        {{- range .Params.free }}
+        <div><dt>{{ .name }}</dt><dd>{{ .text }}</dd></div>
+        {{- end }}
+      </dl>
+    </section>
+
+    <section class="feature wrap">
+      <header class="section-head">
+        <h2>A complete RAW workflow.</h2>
+      </header>
+      <ul class="more">
+        {{- range .Params.more }}
+        <li><h3>{{ .name }}</h3><p>{{ .text }}</p></li>
+        {{- end }}
+      </ul>
+    </section>
+
+    <section class="download wrap" id="download">
+      <header class="section-head">
+        <h2>Take a seat.</h2>
+        <p>Version {{ $v }}, free and open source. Pick the build for your system, or browse <a href="{{ $releases }}">every release on GitHub</a>.</p>
+      </header>
+
+      <div class="platform-grid">
+        <article class="platform" data-os="mac">
+          <h3>macOS <span>15 Sequoia or newer</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-arm64.dmg"><b>Apple Silicon</b><code>rawmakase-v{{ $v }}-macos-arm64.dmg</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-macos-x86_64.dmg"><b>Intel</b><code>rawmakase-v{{ $v }}-macos-x86_64.dmg</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><button type="button" class="copy" data-copy="brew install --cask pch/tap/rawmakase" aria-label="Copy Homebrew install command"><b>Homebrew</b><code>brew install --cask pch/tap/rawmakase</code>{{ partial "icon.html" "copy-simple" }}<span class="copied" aria-live="polite"></span></button></li>
+          </ul>
+          <p class="note">Signed and notarized. Open the DMG and drag RAWmakase into Applications.</p>
+        </article>
+
+        <article class="platform" data-os="linux">
+          <h3>Linux <span>x86_64</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase_{{ $v }}_amd64.deb"><b>Ubuntu 24.04+ or Debian 13+</b><code>rawmakase_{{ $v }}_amd64.deb</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-1.x86_64.rpm"><b>Fedora 43+</b><code>rawmakase-{{ $v }}-1.x86_64.rpm</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-1-x86_64.pkg.tar.zst"><b>Arch Linux</b><code>rawmakase-{{ $v }}-1-x86_64.pkg.tar.zst</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-arch-recipe.tar.gz"><b>Arch PKGBUILD</b><code>rawmakase-{{ $v }}-arch-recipe.tar.gz</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-{{ $v }}-x86_64-linux.tar.gz"><b>Tarball</b><code>rawmakase-{{ $v }}-x86_64-linux.tar.gz</code>{{ partial "icon.html" "download-simple" }}</a></li>
+          </ul>
+          <p class="note">For aarch64, get the arm64 .deb, aarch64 .rpm or tarball from the <a href="{{ $releases }}">release page</a>. Needs a working graphics driver (Vulkan).</p>
+        </article>
+
+        <article class="platform" data-os="windows">
+          <h3>Windows <span>10 or newer, x86_64</span></h3>
+          <ul class="files">
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe"><b>Installer</b><code>rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe</code>{{ partial "icon.html" "download-simple" }}</a></li>
+            <li><a href="{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc.zip"><b>Portable zip</b><code>rawmakase-v{{ $v }}-x86_64-pc-windows-msvc.zip</code>{{ partial "icon.html" "download-simple" }}</a></li>
+          </ul>
+          <p class="note">Installs for your user account, no administrator rights needed. The installer isn't code-signed yet, so if SmartScreen warns, choose More info, then Run anyway.</p>
+        </article>
+      </div>
+
+      <div class="agent">
+        <div class="agent-copy">
+          <h3>Let your agent install it</h3>
+          <p>Point your AI agent to <a href="{{ $repo }}/releases">github.com/pch/rawmakase/releases</a> and tell it to install the latest version for your operating system. Or copy this prompt:</p>
+        </div>
+        <div class="prompt">
+          <p id="agent-prompt">Install the latest release of RAWmakase for my operating system from https://github.com/pch/rawmakase/releases. Pick the right package for my OS and CPU architecture, verify it against the release's checksums, install it, and tell me how to launch it.</p>
+          <button type="button" class="prompt-copy" data-copy="Install the latest release of RAWmakase for my operating system from https://github.com/pch/rawmakase/releases. Pick the right package for my OS and CPU architecture, verify it against the release&#39;s checksums, install it, and tell me how to launch it." aria-label="Copy the prompt">{{ partial "icon.html" "copy-simple" }}<span class="label">Copy prompt</span><span class="copied" aria-live="polite"></span></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot wrap">
+    <div class="foot-top"><div class="brand"><img src="{{ "rawmakase.svg" | relURL }}" alt="" width="24" height="24"> RAWmakase</div><a class="social" href="{{ site.Params.x }}" aria-label="X" title="@p_ch on X" rel="me noopener" target="_blank"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18.9 1.2h3.7l-8 9.2 9.4 12.4h-7.4l-5.8-7.6-6.6 7.6H.5l8.6-9.8L0 1.2h7.6l5.2 6.9 6.1-6.9Zm-1.3 19.4h2L6.5 3.2H4.3l13.3 17.4Z"/></svg></a></div>
+    <ul class="foot-links"><li>MIT licensed</li><li><a href="{{ $repo }}">Source on GitHub</a></li><li>Built on <a href="https://www.libraw.org/">LibRaw</a></li></ul>
+    <p class="fine">RAWmakase is an independent project and is not affiliated with or endorsed by Adobe. Lightroom is a trademark of Adobe Inc.</p>
+  </footer>
+
+  <script>
+    document.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        navigator.clipboard.writeText(b.dataset.copy).then(function () {
+          var l = b.querySelector(".copied"); l.textContent = "Copied";
+          clearTimeout(b._t); b._t = setTimeout(function () { l.textContent = ""; }, 1600);
+        });
+      });
+    });
+    (function () {
+      var ua = navigator.userAgent, os = /Mac/.test(ua) ? "mac" : /Linux|X11/.test(ua) && !/Android/.test(ua) ? "linux" : /Win/.test(ua) ? "windows" : null;
+      var card = os && document.querySelector('.platform[data-os="' + os + '"]');
+      if (!card) return;
+      card.classList.add("yours");
+      var btn = document.getElementById("primary-download");
+      if (os === "mac") {
+        var arm = true;
+        try { var c = document.createElement("canvas").getContext("webgl"); var r = c && c.getParameter(c.getExtension("WEBGL_debug_renderer_info").UNMASKED_RENDERER_WEBGL); if (r && /Intel/.test(r)) arm = false; } catch (e) {}
+        btn.href = "{{ $dl }}rawmakase-v{{ $v }}-macos-" + (arm ? "arm64" : "x86_64") + ".dmg";
+        btn.firstChild.textContent = "Download for macOS ";
+      } else if (os === "linux") {
+        btn.firstChild.textContent = "Download for Linux ";
+      } else if (os === "windows") {
+        btn.href = "{{ $dl }}rawmakase-v{{ $v }}-x86_64-pc-windows-msvc-setup.exe";
+        btn.firstChild.textContent = "Download for Windows ";
+      }
+    })();
+  </script>
+</body>
+</html>

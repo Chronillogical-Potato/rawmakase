@@ -1,0 +1,32 @@
+---
+title: "RAWmakase"
+tagline: "The Lightroom-compatible RAW editor. Free, open source and fast."
+lede: "RAWmakase is a free RAW photo editor for macOS, Linux and Windows, with no subscription and no lock-in. Bring your Lightroom Classic catalog, presets and camera profiles, keep editing with the Library and Develop controls you already know, and let the GPU keep up with you."
+free:
+  - name: "Free"
+    text: "No price, no subscription, no trial. Every feature, for everyone."
+  - name: "Open source"
+    text: "MIT licensed on GitHub. Read the code, file issues, or build it yourself."
+  - name: "Yours to keep"
+    text: "Edits live in a local catalog you own, and your originals are never modified."
+compat:
+  - name: "Catalog import"
+    text: "Open a Lightroom Classic catalog and get your ratings, flags, color labels, keywords and compatible develop settings, with folder relinking. The original catalog and your photos are never written to."
+  - name: "Lightroom presets"
+    text: "Import the XMP presets you already own or bought, and apply them in one click."
+  - name: "Camera profiles"
+    text: "Import DCP and XMP camera profiles, so colors start from the rendering you're used to."
+more:
+  - name: "Develop"
+    text: "White balance, Auto WB and tone, exposure, Shadows and Highlights, Clarity, Dehaze, curves, HSL, color grading, detail, crop, Transform and lens corrections."
+  - name: "Library"
+    text: "Catalogs, folders, collections, ratings, flags, labels, keywords and filters."
+  - name: "Spots & masks"
+    text: "Heal and Clone, plus brush, gradient and range masks. Early, and improving."
+  - name: "Non-destructive"
+    text: "Originals are never modified. Edits live in the catalog and every write is atomic."
+  - name: "Linux first-class"
+    text: "Native .deb, .rpm and Arch packages, built and tested with every release."
+  - name: "Command line"
+    text: "Inspect, render, export and import catalogs without the GUI."
+---
