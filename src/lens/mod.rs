@@ -90,7 +90,9 @@ impl LensCorrection {
     pub fn radial_scale_with(&self, r: f32, amount: f32) -> [f32; 3] {
         self.radial_scale_ca(r, amount, None)
     }
-    /// As `radial_scale_with`, with `chromatic` in place of the lens data's own.
+    /// As `radial_scale_with`, with `chromatic` measured from the decoded image in place
+    /// of the lens data's own. A measurement is a function of the decoded radius, so it
+    /// is evaluated where green samples, after distortion.
     pub fn radial_scale_ca(
         &self,
         r: f32,
@@ -101,9 +103,10 @@ impl LensCorrection {
             .distortion
             .as_ref()
             .map_or(1., |d| 1. + (d.eval(r) - 1.) * amount);
-        match chromatic.or(self.chromatic.as_ref()) {
-            Some([red, blue]) => [g * red.eval(r), g, g * blue.eval(r)],
-            None => [g; 3],
+        match (chromatic, &self.chromatic) {
+            (Some([red, blue]), _) => [g * red.eval(r * g), g, g * blue.eval(r * g)],
+            (None, Some([red, blue])) => [g * red.eval(r), g, g * blue.eval(r)],
+            (None, None) => [g; 3],
         }
     }
     /// Output radii are scaled by this factor so every corrected corner samples inside

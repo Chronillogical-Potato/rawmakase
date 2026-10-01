@@ -785,6 +785,10 @@ impl Preset {
         }
         settings.seen.insert("AutoLateralCA".into());
         if let Some(ca) = number(v, "AutoLateralCA")? {
+            ensure!(
+                ca == 0. || r.engine >= 4,
+                "Remove Chromatic Aberration needs the current process version (Calibration)"
+            );
             r.lens_ca = ca != 0.;
         }
         let t = &mut r.transform;

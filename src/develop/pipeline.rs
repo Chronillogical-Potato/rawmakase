@@ -853,7 +853,9 @@ pub(crate) fn lens_gpu_params(
             .map(|v| v.lens.vignetting.as_ref().unwrap()),
     );
     let m = &warp.map;
-    out[..5].copy_from_slice(&[1., m.center[0], m.center[1], m.half, m.fill]);
+    // 2 marks a measured aberration, evaluated at the distorted radius.
+    let mode = if m.chromatic.is_some() { 2. } else { 1. };
+    out[..5].copy_from_slice(&[mode, m.center[0], m.center[1], m.half, m.fill]);
     out[5] = m.amount;
     out[6..8].copy_from_slice(&distortion);
     out[8..10].copy_from_slice(&red);

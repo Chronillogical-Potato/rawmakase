@@ -414,11 +414,13 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let mut gpu = PreviewRenderer::with_gpu();
     let mut cpu = PreviewRenderer::default();
     let cancel = AtomicBool::new(false);
-    for (spatial, clipping, ca_only) in [
-        (false, false, false),
-        (true, false, false),
-        (true, true, false),
-        (true, false, true),
+    // `ca`: 1 the measured aberration alone, 2 with the built-in distortion.
+    for (spatial, clipping, ca) in [
+        (false, false, 0),
+        (true, false, 0),
+        (true, true, 0),
+        (true, false, 1),
+        (true, false, 2),
     ] {
         let mut recipe = base.clone();
         if spatial {
@@ -440,9 +442,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.noise_luma = 0.4;
             recipe.noise_chroma = 0.5;
         }
-        if ca_only {
-            // The measured aberration alone, with no lens data.
-            recipe.lens_builtin = false;
+        if ca > 0 {
+            recipe.lens_builtin = ca == 2;
             recipe.lens_ca = true;
         }
         for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
@@ -490,7 +491,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .max()
                 .unwrap();
             let label =
-                format!("spatial={spatial} clipping={clipping} ca={ca_only} {max_edge} {region:?}");
+                format!("spatial={spatial} clipping={clipping} ca={ca} {max_edge} {region:?}");
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(
                 "{label}: largest difference {worst}, {changed} of {} values",

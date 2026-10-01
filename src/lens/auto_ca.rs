@@ -91,8 +91,11 @@ fn measure(pixels: &[[f32; 3]], w: usize, h: usize, half: f32) -> Vec<Shift> {
             |a, b| [a[0].max(b[0]), a[1].max(b[1]), a[2].max(b[2])],
         );
     let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
-    let tiles: Vec<[usize; 2]> = (0..(h - 2 * margin) / tile)
-        .flat_map(|ty| (0..(w - 2 * margin) / tile).map(move |tx| [tx, ty]))
+    // A very narrow image has no room for a tile inside the search margin.
+    let rows = h.saturating_sub(2 * margin) / tile;
+    let columns = w.saturating_sub(2 * margin) / tile;
+    let tiles: Vec<[usize; 2]> = (0..rows)
+        .flat_map(|ty| (0..columns).map(move |tx| [tx, ty]))
         .map(|[tx, ty]| [margin + tx * tile, margin + ty * tile])
         .collect();
     let at = |x: usize, y: usize| pixels[y * w + x];
@@ -396,6 +399,12 @@ mod tests {
             assert!((red.eval(r) - 1.0008).abs() < 0.0001, "{}", red.eval(r));
             assert!((blue.eval(r) - 0.9995).abs() < 0.0001, "{}", blue.eval(r));
         }
+    }
+
+    #[test]
+    fn narrow_images_have_no_tiles() {
+        let (w, h) = (30_000, 64);
+        assert!(estimate(&vec![[0.5; 3]; w * h], w as u32, h as u32).is_none());
     }
 
     #[test]
