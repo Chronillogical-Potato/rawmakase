@@ -377,7 +377,10 @@ mod tests {
             for band in &mut r.hsl {
                 band[0] = hue_shift;
             }
-            assert_eq!(crate::develop::pick_fringe(&mut r, purple), Some(0));
+            assert_eq!(
+                crate::develop::pick_fringe(&mut r, &Default::default(), purple),
+                Some(0)
+            );
             r.effects.defringe_ranges[0][0]
         };
         // Every band turned by 0.4 turns hues by 0.05, a tenth of the Hue slider.

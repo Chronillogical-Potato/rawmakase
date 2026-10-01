@@ -494,3 +494,20 @@ fn transform_scales_and_fills_uncovered_area_with_white() {
     r.transform.scale = 2.;
     assert!(r.validate().is_err());
 }
+#[test]
+fn fringe_selector_reaches_the_hue_defringe_tests_through_grading() {
+    // A purple fringe as Defringe sees it, shown greener by legacy colour grading.
+    let hue = 0.85f32;
+    let angle = hue * std::f32::consts::TAU;
+    let lab = [0.6, angle.cos() * 0.08, angle.sin() * 0.08];
+    let mut r = Recipe {
+        engine: 3,
+        ..Default::default()
+    };
+    r.effects.global_grade = [0.4, 0.4, 0.];
+    let lut = CurveSet::new(&r);
+    let shown = finish_color(lab, &r, &lut);
+    let chroma = |lab: [f32; 3]| lab[1].hypot(lab[2]);
+    assert_eq!(pick_fringe(&mut r, &Metadata::default(), shown), Some(0));
+    assert!(chroma(r.effects.defringe_color(lab, hue)) < chroma(lab) * 0.6);
+}

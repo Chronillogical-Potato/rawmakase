@@ -480,8 +480,9 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
-            match self.shown_color(pos, rect, region_rect) {
-                Some(rgb) => match develop::pick_fringe(&mut self.document.recipe, rgb) {
+            let metadata = self.document.full().map(|im| im.metadata.clone());
+            match self.shown_color(pos, rect, region_rect).zip(metadata) {
+                Some((rgb, m)) => match develop::pick_fringe(&mut self.document.recipe, &m, rgb) {
                     Some(_) => self.view.tool = Tool::None,
                     None => {
                         self.status =

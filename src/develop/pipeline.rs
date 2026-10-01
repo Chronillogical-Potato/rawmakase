@@ -299,6 +299,12 @@ fn color_stage(
         // Identity color controls need no hue angle, trigonometry or band weights.
         lab[0] = lab[0].clamp(0., 1.);
     }
+    finish_color(lab, r, lut)
+}
+/// The colour stage after the colour controls and Defringe: legacy and table colour
+/// grading, gamut compression and, before engine 4, the per-channel curves. Returns
+/// encoded sRGB.
+fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f32; 3] {
     let rgb = if r.reference_color {
         let rgb = if lut.grade.is_some() {
             lab_to_srgb(lab)
@@ -355,6 +361,7 @@ fn color_stage(
         }
     })
 }
+
 struct CurveSet {
     exposure_gain: f32,
     /// Engine 4: Contrast, Whites and Blacks as measured Lightroom curves.
@@ -563,37 +570,46 @@ fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
 }
 /// Lightroom's Fringe Color Selector on the shown colour `rgb` (encoded sRGB): the
 /// Purple or Green range is pointed at it (see [`Effects::pick_fringe`]). Defringe
-/// tests the hue before the HSL Hue sliders of engines before 4 turn it, so the shown
-/// hue is turned back first.
+/// tests the hue before the HSL Hue sliders of engines before 4, colour grading and
+/// legacy channel curves change it, so the picked hue is the one those stages turn
+/// closest to the shown hue.
 ///
 /// [`Effects::pick_fringe`]: super::effects::Effects::pick_fringe
-pub fn pick_fringe(r: &mut Recipe, rgb: [f32; 3]) -> Option<usize> {
-    let lab = srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize> {
     let hue_of = |lab: [f32; 3]| {
         lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
     };
-    let shown = hue_of(lab);
-    let turns = !(r.engine >= 4 && r.reference_curves) && r.hsl.iter().any(|band| band[0] != 0.);
-    let hue = if turns {
-        // The hue the HSL rotation (`color_stage`) turns closest to the shown one.
-        let turned = |h: f32| {
-            let shift: f32 = r
+    let lab = srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+    let (shown, chroma) = (hue_of(lab), lab[1].hypot(lab[2]));
+    let effective = r.resolved(m).into_owned();
+    let lut = CurveSet::new(&effective);
+    let turns = !lut.basic_curves && effective.hsl.iter().any(|band| band[0] != 0.);
+    // The shown colour of one Defringe sees at hue `h` and chroma `c`, with the shown
+    // lightness.
+    let rendered = |h: f32, c: f32| {
+        let shift: f32 = if turns {
+            effective
                 .hsl
                 .iter()
                 .zip(hue_weights(h))
                 .map(|(band, w)| band[0] * w)
-                .sum();
-            h + shift / 8.
+                .sum()
+        } else {
+            0.
         };
-        let distance = |h: f32| ((turned(h) - shown + 0.5).rem_euclid(1.) - 0.5).abs();
-        (0..1440)
-            .map(|i| i as f32 / 1440.)
-            .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
-            .unwrap_or(shown)
-    } else {
-        shown
+        let angle = (h + shift / 8.) * std::f32::consts::TAU;
+        let out = finish_color([lab[0], angle.cos() * c, angle.sin() * c], &effective, &lut);
+        srgb_to_lab(out.map(crate::color_math::srgb_decode))
     };
-    r.effects.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
+    let miss = |[h, c]: [f32; 2]| {
+        let p = rendered(h, c);
+        (p[1] - lab[1]).powi(2) + (p[2] - lab[2]).powi(2)
+    };
+    let [hue, chroma] = (0..360)
+        .flat_map(|i| (0..=40).map(move |j| [i as f32 / 360., j as f32 * 0.01]))
+        .min_by(|a, b| miss(*a).total_cmp(&miss(*b)))
+        .unwrap_or([shown, chroma]);
+    r.effects.pick_fringe_hue(hue, chroma)
 }
 pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     let g = Geometry::new(im, r, 0);
