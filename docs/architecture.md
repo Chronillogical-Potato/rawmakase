@@ -132,14 +132,12 @@ The deeper review also fixed concrete correctness issues:
   cannot stall editing. Saves before navigation and close wait for it, then
   save synchronously.
 
-Existing public paths such as `core`, `profile`, `io`, `library`, `worker`,
-`curve`, `effects` and `quality` remain compatibility exports. The old catalog
-import and XMP-library entry points also remain available. Implementations and
-production callers use the new module paths. Do not add new functionality to
-compatibility facades. The application worker protocol itself changed from
-positional tuples to named payloads; callers constructing `worker::Event` values
-must update those constructions. The domain APIs and serialized data formats
-remain compatible.
+The library API is internal: the RAWmakase binary, its examples and its tests are
+its only clients, so modules and functions change freely with them and nothing is
+kept for outside callers. The former aliases (`core`, `profile`, `io`, `library`,
+`worker`, `curve`, `effects`, `quality`, `network`, `preview_cache`) are gone.
+Serialized data formats (recipes, catalog schema, native presets) are the
+compatibility surface; they are versioned and migrated.
 
 This refactor preserves recipe serialization, schema/pipeline versions, rendering
 algorithms, default asset locations and CLI commands. It introduces no new
