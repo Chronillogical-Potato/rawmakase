@@ -56,10 +56,62 @@ mod tests {
         super::migrate_recipe(&mut v).unwrap();
         assert!(v["recipe"].get("engine").is_none());
     }
-    /// Spots and masks never enter the saved recipe, so releases that reject unknown
-    /// recipe fields read it; and fields from newer releases survive a round trip.
+    /// The fields a freshly saved recipe writes, as of schema 6. Releases that read
+    /// schema 6 keep fields they don't know, so adding a field is safe only when it
+    /// is skipped at its default (`skip_serializing_if`) or when every release that
+    /// may still read the file can be shown to tolerate it; either way, changing this
+    /// list is a deliberate compatibility decision, not a side effect.
+    const SAVED_FIELDS: &[&str] = &[
+        "black_point",
+        "blacks",
+        "camera_exposure",
+        "contrast",
+        "crop",
+        "curve",
+        "effects",
+        "engine",
+        "exposure",
+        "flip_x",
+        "flip_y",
+        "grading",
+        "highlights",
+        "hsl",
+        "lens_builtin",
+        "lens_ca",
+        "lens_distortion",
+        "lens_profile",
+        "lens_vignetting",
+        "midtone",
+        "noise_chroma",
+        "noise_luma",
+        "preset_name",
+        "preset_settings",
+        "profile",
+        "profile_tone",
+        "reference_calibration",
+        "reference_color",
+        "reference_curves",
+        "rotation",
+        "saturation",
+        "shadows",
+        "sharpening",
+        "sharpening_detail",
+        "sharpening_masking",
+        "sharpening_radius",
+        "straighten",
+        "temperature",
+        "tint",
+        "transform",
+        "vibrance",
+        "wb",
+        "white_point",
+        "whites",
+        "wide_gamut_curves",
+    ];
+    /// Spots and masks never enter the saved recipe, which writes exactly the known
+    /// fields; and fields from newer releases survive a round trip.
     #[test]
-    fn saved_recipes_stay_readable_by_older_releases() {
+    fn saved_recipes_write_only_the_known_fields() {
         use crate::develop::{Recipe, retouch};
         let mut r = Recipe::default();
         r.retouch.push(retouch::RetouchOp {
@@ -74,13 +126,15 @@ mod tests {
         });
         let (saved, local) = r.split_local();
         let json = serde_json::to_value(&saved).unwrap();
-        let known = serde_json::to_value(Recipe::default()).unwrap();
-        let known = known.as_object().unwrap();
-        assert!(
-            json.as_object()
-                .unwrap()
-                .keys()
-                .all(|k| known.contains_key(k))
+        let written: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            written, SAVED_FIELDS,
+            "a saved recipe's fields changed; see SAVED_FIELDS before updating it"
         );
         let mut v = serde_json::json!({"schema": super::SCHEMA, "pipeline": super::PIPELINE, "recipe": json});
         super::migrate_recipe(&mut v).unwrap();
