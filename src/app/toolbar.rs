@@ -222,6 +222,7 @@ impl Editor {
                         "Export with previous",
                     ),
                     ("Double-click slider".into(), "Reset slider"),
+                    (format!("{cmd}'"), "Create virtual copy"),
                 ],
             ),
             (

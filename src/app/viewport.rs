@@ -180,14 +180,10 @@ impl Editor {
             );
             return;
         }
-        let path = self
+        let thumb = self
             .document
             .catalog_photo
-            .and_then(|id| self.library.as_ref()?.photo(id))
-            .map(|p| p.path.clone());
-        let thumb = path
-            .as_ref()
-            .and_then(|p| self.library.as_ref()?.thumbnail(p));
+            .and_then(|id| self.library.as_ref()?.thumbnail(id));
         if let Some(texture) = thumb {
             let size = texture.size_vec2();
             let k = (area.width() / size.x).min(area.height() / size.y);

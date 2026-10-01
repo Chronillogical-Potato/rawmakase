@@ -91,6 +91,9 @@ pub(super) fn photo_cell(
             Stroke::new(1., Color32::from_black_alpha(160)),
             StrokeKind::Outside,
         );
+        if photo.master.is_some() {
+            copy_badge(painter, image, fill);
+        }
     } else {
         painter.text(
             area.center(),
@@ -115,14 +118,21 @@ pub(super) fn photo_cell(
             theme::gray(if selected { 35 } else { 185 }),
         );
     }
-    if !photo.copy_name.is_empty() {
-        painter.text(
-            Pos2::new(cell.center().x, y),
-            Align2::CENTER_CENTER,
-            "Copy",
-            FontId::proportional(9.),
-            ink,
-        );
+    if photo.master.is_some() {
+        let name = if photo.copy_name.is_empty() {
+            "Copy"
+        } else {
+            &photo.copy_name
+        };
+        let galley = painter.layout_no_wrap(name.into(), FontId::proportional(10.), ink);
+        let space = cell.width() * 0.36;
+        let left = cell.center().x - galley.size().x.min(space) / 2.;
+        painter
+            .with_clip_rect(Rect::from_min_size(
+                Pos2::new(left, y - 7.),
+                Vec2::new(space, 14.),
+            ))
+            .galley(Pos2::new(left, y - galley.size().y / 2.), galley, ink);
     }
     if !available {
         painter.text(
@@ -136,8 +146,9 @@ pub(super) fn photo_cell(
     let action = photo_menu(&response, photo);
     (
         response.on_hover_text(format!(
-            "{}\n{}\n{}\n{}",
+            "{}{}\n{}\n{}\n{}",
             photo.path.display(),
+            copy_suffix(photo),
             photo.captured,
             photo.keywords,
             photo.label
@@ -145,13 +156,46 @@ pub(super) fn photo_cell(
         action,
     )
 }
+/// Lightroom's virtual copy badge: the image's lower left corner folded
+/// over. `background` is what shows behind the fold.
+pub(in crate::app) fn copy_badge(painter: &egui::Painter, image: egui::Rect, background: Color32) {
+    let size = (image.width().min(image.height()) * 0.12).clamp(8., 16.);
+    let corner = image.left_bottom();
+    let up = corner - Vec2::new(0., size);
+    let right = corner + Vec2::new(size, 0.);
+    painter.add(egui::Shape::convex_polygon(
+        vec![corner, right, up],
+        background,
+        egui::Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![up, right, corner + Vec2::new(size, -size)],
+        theme::gray(225),
+        egui::Stroke::new(1., Color32::from_black_alpha(160)),
+    ));
+}
+/// " / Copy 1" for a virtual copy, as Lightroom names it after the file.
+pub(in crate::app) fn copy_suffix(photo: &Photo) -> String {
+    match photo.master {
+        Some(_) if photo.copy_name.is_empty() => " / Copy".into(),
+        Some(_) => format!(" / {}", photo.copy_name),
+        None => String::new(),
+    }
+}
 /// What a thumbnail's context menu asked for.
 pub(in crate::app) enum PhotoAction {
     Develop,
     Reveal,
     CopyPath,
     Edit(crate::app::photo_metadata::Edit),
+    Copy(super::CopyAction),
 }
+/// Create Virtual Copy's shortcut, as Lightroom shows it.
+pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘'"
+} else {
+    "Ctrl+'"
+};
 /// The right-click menu shared by grid cells and the Develop filmstrip.
 pub(in crate::app) fn photo_menu(response: &egui::Response, photo: &Photo) -> Option<PhotoAction> {
     use crate::app::photo_metadata::{Edit, LABELS};
@@ -171,6 +215,34 @@ pub(in crate::app) fn photo_menu(response: &egui::Response, photo: &Photo) -> Op
         if menu_item(ui, "Copy File Path", "", true, false) {
             action = Some(PhotoAction::CopyPath);
             ui.close();
+        }
+        menu_separator(ui);
+        use super::CopyAction;
+        let copy = photo.master.is_some();
+        for (title, shortcut, enabled, choice) in [
+            (
+                "Create Virtual Copy",
+                VIRTUAL_COPY_SHORTCUT,
+                true,
+                CopyAction::Create(photo.id),
+            ),
+            (
+                "Set Copy as Master",
+                "",
+                copy,
+                CopyAction::SetMaster(photo.id),
+            ),
+            (
+                "Remove Virtual Copy…",
+                "",
+                copy,
+                CopyAction::Remove(photo.id),
+            ),
+        ] {
+            if menu_item(ui, title, shortcut, enabled, false) {
+                action = Some(PhotoAction::Copy(choice));
+                ui.close();
+            }
         }
         menu_separator(ui);
         submenu_style(ui);

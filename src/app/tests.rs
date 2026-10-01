@@ -1371,3 +1371,120 @@ fn crop_tool_reads_each_photos_own_aspect() {
     assert!((custom - 0.75).abs() < 1e-6);
     assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
 }
+#[test]
+fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let l = library::Library::load(&catalog, ctx.clone())?;
+    let id = l.photos[0].id;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.library_mode = false;
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    editor.document.recipe.exposure = 0.7;
+    editor.document.save.mark_changed();
+    editor.virtual_copy(library::CopyAction::Create(id));
+    let library = editor.library.as_ref().unwrap();
+    let copy = library.photos.iter().find(|p| p.id != id).unwrap();
+    assert_eq!((copy.master, copy.copy_name.as_str()), (Some(id), "Copy 1"));
+    assert_eq!(library.selected, Some(copy.id));
+    assert_eq!(editor.document.catalog_photo, Some(copy.id));
+    for photo_id in [id, copy.id] {
+        let saved = library.catalog.load_edit(photo_id, &photo)?.unwrap();
+        assert_eq!(saved.recipe.exposure, 0.7);
+    }
+    Ok(())
+}
+#[test]
+fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("image.ARW"), b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let master = l.photos[0].id;
+    let copy = l.create_virtual_copy(master)?;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    // The copy was last open in Develop; the user is back in the Library.
+    editor.document.catalog_photo = Some(copy);
+    editor.library_mode = true;
+    editor.remove_copy = Some(copy);
+    // Return alone never confirms the dialog.
+    let input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| editor.remove_copy_window(ui.ctx()));
+    output.textures_delta.clear();
+    assert_eq!(editor.remove_copy, Some(copy));
+    assert!(editor.library.as_ref().unwrap().photo(copy).is_some());
+    editor.remove_copy = None;
+    editor.remove_virtual_copy(copy);
+    assert!(editor.library_mode);
+    assert_eq!(editor.document.catalog_photo, None);
+    let library = editor.library.as_ref().unwrap();
+    assert!(library.photo(copy).is_none());
+    assert_eq!(library.selected, Some(master));
+    Ok(())
+}
+#[test]
+fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("image.ARW"), b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let copy = l.create_virtual_copy(l.photos[0].id)?;
+    // A copy that is gone from the catalog cannot be renamed.
+    l.catalog.remove_virtual_copy(copy)?;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .set_copy_name_draft(copy, "B&W");
+    assert!(!editor.flush());
+    editor.library.as_mut().unwrap().discard_copy_name();
+    assert!(editor.flush());
+    Ok(())
+}
+#[test]
+fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let copy = l.create_virtual_copy(l.photos[0].id)?;
+    l.set_copy_as_master(copy)?;
+    let path = l.photo(copy).unwrap().path.clone();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    assert_eq!(editor.catalog_photo_at(&path), Some(copy));
+    Ok(())
+}

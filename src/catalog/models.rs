@@ -12,6 +12,8 @@ pub struct Photo {
     pub label: String,
     pub format: String,
     pub copy_name: String,
+    /// The photo this one is a virtual copy of; `None` for a master.
+    pub master: Option<i64>,
     pub keywords: String,
     pub has_lightroom_edits: bool,
 }
