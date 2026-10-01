@@ -86,6 +86,8 @@ static int open_path(Raw& raw, const char* path) {
 }
 extern "C" {
 const char* ora_version() { return LibRaw::version(); }
+// So the Rust side can check its mirror of Metadata has the same layout.
+unsigned ora_metadata_size() { return sizeof(Metadata); }
 void* ora_open(const char* path, Metadata* m, char* err) {
     try {
         auto h = std::make_unique<Handle>();

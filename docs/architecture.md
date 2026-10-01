@@ -106,15 +106,11 @@ inject a temporary file, without changing the process-wide environment.
 
 ## Compatibility
 
-The library paths `core`, `profile`, `io`, `library`, `worker`, `curve`,
-`effects`, `quality`, `network` and `preview_cache` are hidden aliases of the
-modules above, left from before the domain split. They are path aliases only:
-the types behind them have changed since (`worker::Event` moved from tuple
-variants to named payloads), so old code is not guaranteed to compile through
-them. They contain no implementation; do not add functionality to them, and do
-not use them in new code. The compatibility surface is the saved data: recipe
-and preset envelopes are versioned and migrated by `storage::format`; a catalog
-must be exactly version 1 to open (other versions are refused, the file left
+The library API is internal: the RAWmakase binary, its examples and its tests are
+its only clients, so modules and functions change freely with them and nothing is
+kept for outside callers. The compatibility surface is the saved data: recipe and
+preset envelopes are versioned and migrated by `storage::format`; a catalog must
+be exactly version 1 to open (other versions are refused, the file left
 unchanged), and its schema only ever gains tables, applied idempotently on open;
 see [catalogs](catalogs.md#sqlite-format-version-1).
 

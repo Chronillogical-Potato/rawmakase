@@ -1,5 +1,7 @@
 use super::lightroom::develop_fields;
 use super::*;
+use crate::storage::Identity;
+use anyhow::Context;
 #[test]
 #[ignore = "Requires private Lightroom catalog; set RAWMAKASE_LRCAT"]
 fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {

@@ -9,9 +9,9 @@
 //! [`app`] composes these APIs into the desktop editor; [`comparison`] provides
 //! reference-image validation and [`platform`] isolates OS integration.
 //!
-//! The repository's `docs/code-map.md` maps implementation files and runtime flows.
-//! `docs/architecture.md` records ownership and compatibility rules. New code
-//! should use the domain modules below rather than the hidden legacy aliases.
+//! The repository's `docs/code-map.md` maps implementation files and runtime flows,
+//! and `docs/architecture.md` records ownership rules. This library exists for the
+//! RAWmakase binary, its examples and its tests; it is not a stable public API.
 pub mod app;
 pub mod camera_profiles;
 pub mod catalog;
@@ -31,20 +31,3 @@ mod tiff;
 pub mod time;
 pub mod updates;
 pub mod xmp;
-
-// Source-compatible entry points for earlier users of the library. New code uses
-// the domain modules above; these aliases contain no implementation.
-#[doc(hidden)]
-pub mod io;
-#[doc(hidden)]
-pub use app::{library, worker};
-#[doc(hidden)]
-pub use camera_profiles as profile;
-#[doc(hidden)]
-pub use catalog::preview_cache;
-#[doc(hidden)]
-pub use develop as core;
-#[doc(hidden)]
-pub use develop::{curve, effects, quality};
-#[doc(hidden)]
-pub use platform::network;

@@ -1,0 +1,114 @@
+//! The Copy Name of a virtual copy, edited in place in the Metadata panel like
+//! Lightroom's; saved on Return or when focus leaves, and kept when the
+//! selection moves or the save fails.
+use crate::app::theme;
+use crate::catalog::{Catalog, Photo};
+use anyhow::Result;
+use eframe::egui::{self, Vec2};
+
+#[derive(Default)]
+pub(super) struct CopyNames {
+    /// The name being typed, for the photo it belongs to.
+    pub(super) draft: Option<(i64, String)>,
+    /// Saving `draft` failed; it waits for the next commit rather than
+    /// being retried, and discarded, as the selection moves.
+    pub(super) failed: bool,
+}
+impl CopyNames {
+    /// Forgets the draft, e.g. after the catalog was read again: names may
+    /// have changed, and a removed copy's id can be reused.
+    pub(super) fn clear(&mut self) {
+        *self = Self::default();
+    }
+    /// Drops a Copy Name that could not be saved, e.g. closing without saving.
+    pub(super) fn discard(&mut self) {
+        self.clear();
+    }
+    /// Saves a draft still being typed, e.g. when the Library panel goes away
+    /// before the field loses focus. On failure the name stays pending, to be
+    /// saved again or discarded. Returns whether a photo was renamed.
+    pub(super) fn commit(&mut self, catalog: &Catalog, photos: &mut [Photo]) -> Result<bool> {
+        let Some((id, text)) = &self.draft else {
+            return Ok(false);
+        };
+        let (id, name) = (*id, text.trim().to_string());
+        let mut renamed = false;
+        if photos
+            .iter()
+            .any(|p| p.id == id && p.master.is_some() && p.copy_name != name)
+        {
+            let saved = rename(catalog, photos, id, &name);
+            self.failed = saved.is_err();
+            saved?;
+            renamed = true;
+        }
+        self.draft = Some((id, name));
+        self.failed = false;
+        Ok(renamed)
+    }
+    /// The Copy Name row for `photo`. Returns whether a photo was renamed, or
+    /// the error that kept a pending name from being saved.
+    pub(super) fn row(
+        &mut self,
+        ui: &mut egui::Ui,
+        photo: &Photo,
+        catalog: &Catalog,
+        photos: &mut [Photo],
+    ) -> Result<bool> {
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), egui::Sense::hover());
+        ui.painter().text(
+            egui::pos2(rect.left() + 84., rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "Copy Name",
+            egui::FontId::proportional(11.),
+            theme::gray(135),
+        );
+        let mut outcome = Ok(false);
+        if self.draft.as_ref().is_none_or(|(id, _)| *id != photo.id) {
+            // Another copy was selected before the field lost focus: keep its
+            // name. One that cannot be saved stays pending, and this copy's
+            // name is shown but not editable until it is.
+            if !self.failed {
+                outcome = self.commit(catalog, photos);
+            }
+            if !self.failed {
+                self.draft = Some((photo.id, photo.copy_name.clone()));
+            }
+        }
+        let field = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 88., rect.top() + 1.),
+            egui::pos2(rect.right(), rect.bottom() - 1.),
+        );
+        let Some((_, text)) = self.draft.as_mut().filter(|(id, _)| *id == photo.id) else {
+            ui.painter().text(
+                egui::pos2(field.left() + 4., field.center().y),
+                egui::Align2::LEFT_CENTER,
+                &photo.copy_name,
+                egui::FontId::proportional(11.),
+                theme::gray(205),
+            );
+            return outcome;
+        };
+        let response = ui.put(
+            field,
+            egui::TextEdit::singleline(text)
+                .font(egui::FontId::proportional(11.))
+                .text_color(theme::gray(205))
+                .margin(egui::Margin::symmetric(4, 1))
+                .vertical_align(egui::Align::Center),
+        );
+        if response.lost_focus() {
+            return Ok(self.commit(catalog, photos)? || outcome?);
+        }
+        outcome
+    }
+}
+/// Renames copy `id` in the catalog and in `photos`.
+fn rename(catalog: &Catalog, photos: &mut [Photo], id: i64, name: &str) -> Result<()> {
+    catalog.set_copy_name(id, name)?;
+    if let Some(p) = photos.iter_mut().find(|p| p.id == id) {
+        p.copy_name = name.trim().to_string();
+    }
+    Ok(())
+}

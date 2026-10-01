@@ -7,11 +7,6 @@ use crate::{
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 type Matrix = [[f32; 3]; 3];
-const XYZ_TO_RGB: Matrix = [
-    [3.133856, -1.616867, -0.490615],
-    [-0.978769, 1.916142, 0.033454],
-    [0.071945, -0.228991, 1.405243],
-];
 const XYZ_TO_PRO: Matrix = [
     [1.345943, -0.255608, -0.051111],
     [-0.544599, 1.508167, 0.020535],
@@ -311,13 +306,6 @@ impl CameraProfile {
             ((1. / t - 1. / self.kelvin1) / d).clamp(0., 1.)
         }
     }
-    pub fn matrix(&self, t: f32, _m: &Metadata) -> Matrix {
-        let w = self.weight(t);
-        let fm: Matrix = std::array::from_fn(|i| {
-            std::array::from_fn(|j| self.forward1[i][j] * (1. - w) + self.forward2[i][j] * w)
-        });
-        matmul(XYZ_TO_RGB, fm)
-    }
     pub fn camera_matrix(&self, t: f32) -> Matrix {
         let w = self.weight(t);
         matmul(
@@ -506,7 +494,7 @@ mod enhanced;
 mod library;
 pub mod open;
 pub use dcp::from_bytes;
-pub use library::{builtin, import_files, installed, library_dirs, load};
+pub use library::{adobe_installed, builtin, import_files, installed, library_dirs, load};
 #[cfg(test)]
 mod tests;
 
