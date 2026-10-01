@@ -843,7 +843,7 @@ pub(crate) fn lens_gpu_params(
     };
     let lens = warp.map.lens;
     let distortion = push(lens.distortion.as_ref());
-    let [red, blue] = match &lens.chromatic {
+    let [red, blue] = match warp.map.chromatic.or(lens.chromatic.as_ref()) {
         Some([red, blue]) => [push(Some(red)), push(Some(blue))],
         None => [[-1., 0.]; 2],
     };

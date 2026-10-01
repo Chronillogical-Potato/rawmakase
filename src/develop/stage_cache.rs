@@ -215,6 +215,7 @@ impl SampleKey {
                 lens_profile: r.lens_profile,
                 lens_distortion: r.lens_distortion,
                 lens_vignetting: r.lens_vignetting,
+                lens_ca: r.lens_ca,
                 noise_luma: r.noise_luma,
                 noise_chroma: r.noise_chroma,
                 effects: Effects {

@@ -4,6 +4,7 @@
 //! which the renderer evaluates at normalized image radius.
 use serde::{Deserialize, Serialize};
 
+pub mod auto_ca;
 pub mod embedded;
 pub mod lcp;
 
@@ -61,6 +62,14 @@ pub struct LensCorrection {
     /// Additional source radius scale for red and blue relative to green (1 = none).
     pub chromatic: Option<[Radial; 2]>,
 }
+/// No correction, for applying measured chromatic aberration alone.
+pub(crate) static NO_CORRECTION: LensCorrection = LensCorrection {
+    source: String::new(),
+    default_on: false,
+    vignetting: None,
+    distortion: None,
+    chromatic: None,
+};
 impl LensCorrection {
     pub fn is_empty(&self) -> bool {
         self.vignetting.is_none() && self.distortion.is_none() && self.chromatic.is_none()
@@ -79,11 +88,20 @@ impl LensCorrection {
     }
     /// As `radial_scale`, with Lightroom's Distortion amount (1 = 100%).
     pub fn radial_scale_with(&self, r: f32, amount: f32) -> [f32; 3] {
+        self.radial_scale_ca(r, amount, None)
+    }
+    /// As `radial_scale_with`, with `chromatic` in place of the lens data's own.
+    pub fn radial_scale_ca(
+        &self,
+        r: f32,
+        amount: f32,
+        chromatic: Option<&[Radial; 2]>,
+    ) -> [f32; 3] {
         let g = self
             .distortion
             .as_ref()
             .map_or(1., |d| 1. + (d.eval(r) - 1.) * amount);
-        match &self.chromatic {
+        match chromatic.or(self.chromatic.as_ref()) {
             Some([red, blue]) => [g * red.eval(r), g, g * blue.eval(r)],
             None => [g; 3],
         }

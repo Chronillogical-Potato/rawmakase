@@ -783,6 +783,10 @@ impl Preset {
         if let Some(enable) = number(v, "LensProfileEnable")? {
             r.lens_profile = enable != 0.;
         }
+        settings.seen.insert("AutoLateralCA".into());
+        if let Some(ca) = number(v, "AutoLateralCA")? {
+            r.lens_ca = ca != 0.;
+        }
         let t = &mut r.transform;
         settings.assign("PerspectiveVertical", &mut t.vertical, 0.01, -1., 1.)?;
         settings.assign("PerspectiveHorizontal", &mut t.horizontal, 0.01, -1., 1.)?;
@@ -890,7 +894,6 @@ impl Preset {
         for (key, default) in [
             ("HDREditMode", "0"),
             ("CurveRefineSaturation", "100"),
-            ("AutoLateralCA", "0"),
             ("LensManualDistortionAmount", "0"),
             ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),

@@ -36,6 +36,41 @@ Full renders against Lightroom's Adobe Standard exports, encoded sRGB at 1200 px
 
 Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not enable profile corrections by default, and it has not been checked whether it applies Sony's embedded data, so Sony corrections start disabled until a Lightroom reference is available.
 
+## Remove Chromatic Aberration
+
+Lightroom's Remove Chromatic Aberration (`crs:AutoLateralCA`) needs no lens data: it measures lateral CA in the photo. `src/lens/auto_ca.rs` does the same on the decoded image, once per decode, when the recipe's `lens_ca` is set:
+
+1. Tiles of about 1/90 of the long edge are scored by green's edge strength across the radius; tiles near the centre or with clipped pixels are skipped, and the 1200 strongest are kept.
+2. In each tile, red and blue are matched to green along the radius: the best of whole-pixel shifts (up to 6 px on a 6000 px edge) by least-squares fit, a parabola, then Gauss–Newton steps to a fraction of a pixel. Tiles that fit poorly are dropped.
+3. Each channel's shifts are fitted as a radial scale, 1 + k0 + k1 r² + k2 r⁴ (fewer terms with fewer or less spread tiles), with Tukey reweighting. Beyond the radius that 80% of the tiles lie within, the scale is held. Below 0.08 px at the corner (on a 6000 px edge) nothing is corrected.
+
+The measurement replaces the lens data's own lateral CA, keeping its distortion and vignetting, and applies alone when there is no lens data (adapted manual lenses). It does not change the framing. Previews and exports measure the same decoded image; pyramid levels and reduced copies share the measurement through `Metadata::lateral_ca`, so it never comes from a reduced copy. It takes about 0.1 s on a 24 MP photo.
+
+### Validation — 2026-10-01
+
+Measured on the uncorrected decode and compared with the camera's own CA table, as displacement in pixels on a 6000 px long edge at radius 0.4 / 0.7 / 1.0:
+
+| Photos | Red, measured | Red, camera table | Blue, measured | Blue, camera table |
+|---|---|---|---|---|
+| 8 X100F (23mm), range | +0.53…0.78 / +0.66…1.23 / +0.94…1.76 | +0.54 / +0.92 / +1.32 | −0.07…−0.42 / +0.01…−0.50 / +0.02…−0.71 | none |
+| DSC05743, A7 II FE 55mm | +0.13 / +0.17 / +0.18 | +0.18 / +0.15 / 0 | −0.15 / −0.21 / −0.26 | −0.18 / −0.23 / −0.22 |
+| DSC01768, A7 II FE 55mm | +0.13 / +0.16 / +0.21 | +0.18 / +0.23 / 0 | −0.16 / −0.17 / −0.22 | −0.18 / −0.23 / 0 |
+
+Fujifilm's table corrects red only, but all eight X100F photos show blue displaced inwards at radius 0.4, which Remove Chromatic Aberration corrects too.
+
+The same measurement on rendered sRGB output (Adobe Standard, full size) of 13 photos (8 X100F, 3 A7 II, 2 Leica M10 DNGs), against Camera Raw 18.6 renders of the same files, as mean remaining displacement in pixels of red and blue:
+
+| | Radius 0.4 | Radius 0.7 | Worst at 0.7 |
+|---|---:|---:|---:|
+| Camera Raw, off | 0.24 | 0.30 | 0.48 |
+| Camera Raw, on | 0.18 | 0.17 | 0.32 |
+| RAWmakase, off | 0.34 | 0.31 | 0.62 |
+| RAWmakase, on | 0.11 | 0.15 | 0.49 |
+
+Output-space figures are only comparable with each other: the colour matrix mixes channels, so they differ from the camera-space ones above.
+
+Camera Raw renders with the setting off also show Sony's lateral CA corrected, as RAWmakase does only with built-in corrections on; this was seen on two A7 II photos and has not been investigated further.
+
 ## DNG files
 
 A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` reads FixVignetteRadial from OpcodeList2 and WarpRectilinear from OpcodeList3 (radial terms, per plane, when centred) into the same correction model, enabled by default. It also reads the embedded camera profile (offered as the file's own profile, as in Lightroom), BaselineExposure and DefaultCrop. The Lightroom-made DNG of DSCF7853 renders at 0.020 MAE against Lightroom's export with no imported files, against 0.030 before. GainMap opcodes (used by phone DNGs for lens shading) are not applied yet.

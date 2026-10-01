@@ -33,7 +33,7 @@ These use RAWmakase's rendering algorithms. Adobe's proprietary operators are no
 
 ## Compatibility checks
 
-Spot removal (`RetouchAreas`, `RetouchInfo`) and brush, gradient, radial and luminance-range masks convert to RAWmakase's experimental spots and masks ([masking](masking.md)); AI and color-range masks are reported. Unknown active settings, missing DCPs or imported enhanced-profile dependencies, Point Color/Color Variance, automatic lateral chromatic aberration, lens-profile correction and active perspective correction are rejected with a reason. No partially applied recipe is committed on failure. These entries remain visible by default; hover to inspect the reason. A camera-specific Sony preset is not substituted with an unrelated Fuji profile.
+Spot removal (`RetouchAreas`, `RetouchInfo`) and brush, gradient, radial and luminance-range masks convert to RAWmakase's experimental spots and masks ([masking](masking.md)); AI and color-range masks are reported. Unknown active settings, missing DCPs or imported enhanced-profile dependencies, Point Color/Color Variance, lens-profile correction and active perspective correction are rejected with a reason. No partially applied recipe is committed on failure. These entries remain visible by default; hover to inspect the reason. A camera-specific Sony preset is not substituted with an unrelated Fuji profile.
 
 All 921 supplied presets parse. On the supplied cameras, 785 are currently applicable to Sony ILCE-7M2 and 534 to Fujifilm X100F; these sets overlap. Most unavailable entries reference profiles for the other camera or dependencies absent from the archive. Complete Adobe XMP/rendering parity is not implemented.
 

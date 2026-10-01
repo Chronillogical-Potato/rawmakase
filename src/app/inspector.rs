@@ -904,6 +904,11 @@ impl Editor {
             let adobe = metadata.as_ref().and_then(|m| m.profile_lens.as_ref());
             ui.add_enabled_ui(r.engine >= 4, |ui| {
                 control_row(ui, "", |ui| {
+                    ui.checkbox(&mut r.lens_ca, "Remove Chromatic Aberration")
+                        .on_hover_text("Remove red/cyan and blue/yellow fringes toward the edges of the frame, measured from the photo itself.")
+                        .on_disabled_hover_text("Update the process version in Calibration to use lens corrections.");
+                });
+                control_row(ui, "", |ui| {
                     if ui
                         .checkbox(&mut r.lens_profile, "Enable Profile Corrections")
                         .on_hover_text("Correct distortion and vignetting with an Adobe lens profile, or the lens data the camera stored in the RAW.")
@@ -1033,6 +1038,7 @@ impl Editor {
                 r.lens_builtin = m.lens.as_ref().is_none_or(|l| l.default_on);
             }
             let defaults = Recipe::default();
+            r.lens_ca = defaults.lens_ca;
             r.lens_profile = defaults.lens_profile;
             r.lens_distortion = defaults.lens_distortion;
             r.lens_vignetting = defaults.lens_vignetting;
