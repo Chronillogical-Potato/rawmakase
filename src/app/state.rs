@@ -120,6 +120,10 @@ pub(super) struct PreviewState {
     pub(super) last_region: Option<[u32; 4]>,
     pub(super) mode: TextureMode,
     pub(super) pending_mode: TextureMode,
+    /// The crop `texture` was rendered with, when known: until a render for a new
+    /// crop lands, the old one is placed where its crop sits instead of stretched.
+    pub(super) crop: Option<[f32; 4]>,
+    pub(super) pending_crop: [f32; 4],
 }
 impl Default for PreviewState {
     fn default() -> Self {
@@ -137,6 +141,8 @@ impl Default for PreviewState {
             last_region: None,
             mode: TextureMode::Whole,
             pending_mode: TextureMode::Whole,
+            crop: None,
+            pending_crop: [0., 0., 1., 1.],
         }
     }
 }
@@ -246,6 +252,7 @@ impl PreviewState {
         self.last_fit_edge = 0;
         self.last_region = None;
         self.mode = TextureMode::Whole;
+        self.crop = None;
     }
     /// Textures the renderer presented into that the viewport draws.
     pub fn presented(&self) -> Vec<egui::TextureId> {

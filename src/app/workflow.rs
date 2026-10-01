@@ -249,6 +249,7 @@ impl Editor {
             } else {
                 fit
             };
+            self.preview.pending_crop = self.effective_recipe().crop;
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,
                 super::state::TextureMode::Region,

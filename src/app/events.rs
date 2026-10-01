@@ -111,6 +111,8 @@ impl Editor {
                         Some(navigator),
                     );
                     self.preview.mode = super::state::TextureMode::Whole;
+                    // Uncropped, so it is placed by the photo's crop once that is known.
+                    self.preview.crop = Some([0., 0., 1., 1.]);
                     self.preview.status = "Camera preview • developing RAW…".into();
                 }
                 Event::Ready { id, full, status } if id == self.load.id() => {
@@ -165,6 +167,9 @@ impl Editor {
                         self.preview.samples = samples;
                     }
                     self.preview.mode = self.preview.pending_mode;
+                    if !region {
+                        self.preview.crop = Some(self.preview.pending_crop);
+                    }
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
                         if let Some(small) = thumbnail {

@@ -362,7 +362,28 @@ impl Editor {
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
         let painter = ui.painter().with_clip_rect(area);
         if self.preview.texture.is_some() {
-            painter.image(texture.id(), rect, uv, Color32::WHITE);
+            // Opening or leaving the Crop tool changes the crop before the render for
+            // it lands: the old render goes where its crop sits, clipped to the new one.
+            let now = self.effective_recipe().crop;
+            match self.preview.crop {
+                Some(then) if then != now && geometry.is_some() => {
+                    let size = rect.size() / Vec2::new(now[2] - now[0], now[3] - now[1]);
+                    let whole = rect.min - Vec2::new(now[0], now[1]) * size;
+                    let at = Rect::from_min_max(
+                        whole + Vec2::new(then[0], then[1]) * size,
+                        whole + Vec2::new(then[2], then[3]) * size,
+                    );
+                    painter.with_clip_rect(area.intersect(rect)).image(
+                        texture.id(),
+                        at,
+                        uv,
+                        Color32::WHITE,
+                    );
+                }
+                _ => {
+                    painter.image(texture.id(), rect, uv, Color32::WHITE);
+                }
+            }
         }
         if let (Some(region), Some(at)) = (&region_texture, region_rect) {
             painter.image(region.id(), at, uv, Color32::WHITE);
