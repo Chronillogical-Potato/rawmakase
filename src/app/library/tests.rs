@@ -1,4 +1,5 @@
 use super::*;
+use std::{collections::HashMap, path::PathBuf};
 #[test]
 fn develop_workspace_drains_library_preview_results() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -7,11 +8,11 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
     let (tx, rx) = std::sync::mpsc::sync_channel(24);
-    library.thumb_rx = rx;
+    library.cache.thumb_rx = rx;
     for index in 0..24 {
         let path = directory.path().join(format!("{index}.ARW"));
-        library.pending.insert(path.clone());
-        library.preview_progress.queued();
+        library.cache.pending.insert(path.clone());
+        library.cache.progress.queued();
         tx.try_send(previews::PreviewResult {
             path,
             image: Some(image::RgbImage::new(16, 16)),
@@ -24,8 +25,8 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| editor.draw(ui));
     output.textures_delta.clear();
     let library = editor.library.as_ref().unwrap();
-    assert!(library.pending.is_empty());
-    assert_eq!(library.thumbs.len(), 24);
+    assert!(library.cache.pending.is_empty());
+    assert_eq!(library.cache.thumbs.len(), 24);
     assert!(!editor.library_mode);
     Ok(())
 }
@@ -105,7 +106,7 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     library.edit_metadata(ids[0], Edit::ToggleLabel("Red".into()), false)?;
     library.edit_metadata(ids[0], Edit::ToggleLabel("Red".into()), false)?;
     assert_eq!(library.photo(ids[0]).unwrap().label, "");
-    library.flag = 0;
+    library.filters.flag = 0;
     library.filter();
     library.selected = Some(ids[1]);
     assert_eq!(
@@ -117,8 +118,8 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     assert_eq!(library.edit_metadata(ids[2], Edit::Flag(1), true)?, None);
     assert_eq!(library.selected, None);
     assert!(library.visible.is_empty());
-    library.flag = 2;
-    library.label_filter = Some("Purple".into());
+    library.filters.flag = 2;
+    library.filters.label_filter = Some("Purple".into());
     library.filter();
     library.edit_metadata(ids[2], Edit::Label("Purple".into()), false)?;
     assert_eq!(library.visible.len(), 1);
@@ -198,7 +199,7 @@ fn batched_availability_distinguishes_files_directories_and_missing_paths() -> R
     std::fs::create_dir(&directory.path)?;
     rows.push(directory);
     assert_eq!(
-        available_paths(&rows),
+        thumbnails::available_paths(&rows),
         HashSet::from([photos.join("present.ARW").canonicalize()?])
     );
     Ok(())
@@ -244,7 +245,7 @@ fn root_mapping_survives_reopen() -> Result<()> {
     let mut l = Library::load(&db, ctx)?;
     assert_eq!(l.photos[0].path, new.join("image.ARW"));
     l.wait_for_availability();
-    assert!(l.available.contains(&l.photos[0].path));
+    assert!(l.is_available(&l.photos[0].path));
     Ok(())
 }
 
@@ -262,7 +263,7 @@ fn library_opens_before_the_online_check_and_then_marks_missing_photos() -> Resu
     let gone = d.path().canonicalize()?.join("gone.ARW");
     assert!(l.photos.iter().any(|p| p.path == gone));
     assert_eq!(l.available_count(), 2);
-    l.only_missing = true;
+    l.filters.only_missing = true;
     l.filter();
     assert!(l.visible.is_empty());
     l.wait_for_availability();
@@ -290,7 +291,7 @@ fn a_stuck_volume_check_is_not_started_again() {
     let (changed_tx, changed) = mpsc::channel();
     let mounts = || vec![PathBuf::from("/Volumes/Stalled")];
     // A probe that hangs, as `is_dir` can on a stalled mount.
-    assert!(super::spawn_volume_check(
+    assert!(volumes::spawn_volume_check(
         &online,
         &busy,
         mounts(),
@@ -301,7 +302,7 @@ fn a_stuck_volume_check_is_not_started_again() {
         },
     ));
     for _ in 0..3 {
-        assert!(!super::spawn_volume_check(
+        assert!(!volumes::spawn_volume_check(
             &online,
             &busy,
             mounts(),
@@ -326,7 +327,7 @@ fn a_stuck_volume_check_is_not_started_again() {
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         std::thread::yield_now();
     }
-    assert!(super::spawn_volume_check(
+    assert!(volumes::spawn_volume_check(
         &online,
         &busy,
         mounts(),
@@ -346,10 +347,10 @@ fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> 
     let mut library = Library::load(&path, ctx.clone())?;
     let master = library.photos[0].id;
     let (tx, rx) = std::sync::mpsc::channel();
-    library.edit_rx = rx;
+    library.cache.edit_rx = rx;
     let copy = library.create_virtual_copy(master)?;
-    library.edited_requested.insert(copy, 7);
-    library.edit_seen.insert(copy);
+    library.cache.edited_requested.insert(copy, 7);
+    library.cache.edit_seen.insert(copy);
     // A result for an older request is dropped.
     tx.send(previews::EditResult::Ready(
         copy,
@@ -368,9 +369,9 @@ fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> 
     // Removing the copy forgets it, so a new copy given its id renders again,
     // and the removed copy's late result is dropped.
     assert_eq!(library.remove_virtual_copy(copy)?, Some(master));
-    assert!(!library.edited_requested.contains_key(&copy));
-    assert!(!library.edited_order.contains(&copy));
-    assert!(!library.edit_seen.contains(&copy));
+    assert!(!library.cache.edited_requested.contains_key(&copy));
+    assert!(!library.cache.edited_order.contains(&copy));
+    assert!(!library.cache.edit_seen.contains(&copy));
     tx.send(previews::EditResult::Ready(
         copy,
         7,
@@ -390,7 +391,7 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
     let copy = library.create_virtual_copy(library.photos[0].id)?;
-    library.copy_name = Some((copy, " B&W ".into()));
+    library.copy_names.draft = Some((copy, " B&W ".into()));
     library.commit_copy_name()?;
     let saved = library.catalog.photos()?;
     assert_eq!(
@@ -418,16 +419,18 @@ fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
     let master = library.photos[0].id;
     let first = library.create_virtual_copy(master)?;
     let second = library.create_virtual_copy(master)?;
-    library.copy_name = Some((first, "B&W".into()));
+    library.copy_names.draft = Some((first, "B&W".into()));
     // The panel is drawn for the newly selected copy before the field
     // reports losing focus.
     let photo = library.photo(second).unwrap().clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        library.copy_name_row(ui, &photo)
+        let _ = library
+            .copy_names
+            .row(ui, &photo, &library.catalog, &mut library.photos);
     });
     output.textures_delta.clear();
     assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
-    assert_eq!(library.copy_name, Some((second, "Copy 2".into())));
+    assert_eq!(library.copy_names.draft, Some((second, "Copy 2".into())));
     Ok(())
 }
 #[test]
@@ -445,15 +448,17 @@ fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()
     let second = library.create_virtual_copy(master)?;
     // Renaming fails once the copy is gone from the catalog.
     library.catalog.remove_virtual_copy(first)?;
-    library.copy_name = Some((first, "B&W".into()));
+    library.copy_names.draft = Some((first, "B&W".into()));
     let photo = library.photo(second).unwrap().clone();
     for _ in 0..2 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            library.copy_name_row(ui, &photo)
+            let _ = library
+                .copy_names
+                .row(ui, &photo, &library.catalog, &mut library.photos);
         });
         output.textures_delta.clear();
     }
-    assert_eq!(library.copy_name, Some((first, "B&W".into())));
+    assert_eq!(library.copy_names.draft, Some((first, "B&W".into())));
     assert!(library.commit_copy_name().is_err());
     library.discard_copy_name();
     assert!(library.commit_copy_name().is_ok());
@@ -502,44 +507,44 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     library.refresh()?;
     library.wait_for_availability();
     assert_eq!(visible_names(&library), ["a.RAF", "b.RAF", "c.RAF"]);
-    library.reverse = true;
+    library.filters.reverse = true;
     library.filter();
     assert_eq!(visible_names(&library), ["c.RAF", "b.RAF", "a.RAF"]);
-    library.reverse = false;
-    library.rating = 3;
+    library.filters.reverse = false;
+    library.filters.rating = 3;
     library.filter();
     assert_eq!(visible_names(&library), ["a.RAF", "b.RAF"]);
-    library.flag = 1;
+    library.filters.flag = 1;
     library.filter();
     assert_eq!(visible_names(&library), ["a.RAF"]);
-    library.flag = 2;
-    library.rating = 0;
-    library.label_filter = Some("Client".into());
+    library.filters.flag = 2;
+    library.filters.rating = 0;
+    library.filters.label_filter = Some("Client".into());
     library.filter();
     assert_eq!(visible_names(&library), ["c.RAF"]);
-    library.label_filter = None;
-    library.query = "B.r".into();
+    library.filters.label_filter = None;
+    library.filters.query = "B.r".into();
     library.filter();
     assert_eq!(visible_names(&library), ["b.RAF"]);
-    library.query = "client".into();
+    library.filters.query = "client".into();
     library.filter();
     assert_eq!(visible_names(&library), ["c.RAF"]);
-    library.query.clear();
-    library.folder_scope = Some(HashSet::new());
+    library.filters.query.clear();
+    library.filters.folder_scope = Some(HashSet::new());
     library.filter();
     assert!(library.visible.is_empty());
-    library.folder_scope = None;
-    library.only_missing = true;
+    library.filters.folder_scope = None;
+    library.filters.only_missing = true;
     library.filter();
     assert!(library.visible.is_empty());
-    library.only_missing = false;
+    library.filters.only_missing = false;
     // The selection follows the filter out, and comes back through `show`.
     library.selected = Some(c);
-    library.flag = 1;
+    library.filters.flag = 1;
     library.filter();
     assert_eq!(library.selected, None);
     library.show(c);
-    assert_eq!(library.flag, 2);
+    assert_eq!(library.filters.flag, 2);
     assert_eq!(library.selected, Some(c));
     assert_eq!(visible_names(&library).len(), 3);
     // Navigation clamps at both ends of the visible order.
@@ -590,19 +595,21 @@ fn thumbnail_requests_are_not_repeated_while_pending_or_failed() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF"])?;
     let ctx = library.ctx.clone();
     let (tx, rx) = std::sync::mpsc::sync_channel(8);
-    library.thumb_tx = tx;
+    library.cache.thumb_tx = tx;
     let path = library.photos[0].path.clone();
-    library.request_thumbnail(&path, &ctx);
-    library.request_thumbnail(&path, &ctx);
+    library.cache.request_thumbnail(&path, &ctx);
+    library.cache.request_thumbnail(&path, &ctx);
     assert_eq!(rx.try_iter().count(), 1);
-    assert!(library.pending.contains(&path));
-    library.pending.remove(&path);
-    library.failed.insert(path.clone());
-    library.request_thumbnail(&path, &ctx);
+    assert!(library.cache.pending.contains(&path));
+    library.cache.pending.remove(&path);
+    library.cache.failed.insert(path.clone());
+    library.cache.request_thumbnail(&path, &ctx);
     assert_eq!(rx.try_iter().count(), 0);
-    library.failed.clear();
-    library.insert_thumb(&ctx, path.clone(), &image::RgbImage::new(2, 2));
-    library.request_thumbnail(&path, &ctx);
+    library.cache.failed.clear();
+    library
+        .cache
+        .insert_thumb(&ctx, path.clone(), &image::RgbImage::new(2, 2));
+    library.cache.request_thumbnail(&path, &ctx);
     assert_eq!(rx.try_iter().count(), 0);
     assert!(library.texture(&library.photos[0]).is_some());
     Ok(())
@@ -613,20 +620,24 @@ fn preview_textures_keep_the_newest_192() -> Result<()> {
     let ctx = library.ctx.clone();
     let image = image::RgbImage::new(2, 2);
     for n in 0..193 {
-        library.insert_thumb(&ctx, PathBuf::from(format!("{n}.RAF")), &image);
-        library.edited_requested.insert(n, 1);
-        library.insert_edited(&ctx, n, &image);
+        library
+            .cache
+            .insert_thumb(&ctx, PathBuf::from(format!("{n}.RAF")), &image);
+        library.cache.edited_requested.insert(n, 1);
+        library.cache.insert_edited(&ctx, n, &image);
     }
-    assert_eq!(library.thumbs.len(), 192);
-    assert!(!library.thumbs.contains_key(&PathBuf::from("0.RAF")));
-    assert!(library.thumbs.contains_key(&PathBuf::from("192.RAF")));
-    assert_eq!(library.edited.len(), 192);
+    assert_eq!(library.cache.thumbs.len(), 192);
+    assert!(!library.cache.thumbs.contains_key(&PathBuf::from("0.RAF")));
+    assert!(library.cache.thumbs.contains_key(&PathBuf::from("192.RAF")));
+    assert_eq!(library.cache.edited.len(), 192);
     assert!(!library.has_edited_thumbnail(0));
-    assert!(!library.edited_requested.contains_key(&0));
+    assert!(!library.cache.edited_requested.contains_key(&0));
     assert!(library.has_edited_thumbnail(192));
     // Replacing a texture does not count as a new one.
-    library.insert_thumb(&ctx, PathBuf::from("192.RAF"), &image);
-    assert_eq!(library.thumb_order.len(), 192);
+    library
+        .cache
+        .insert_thumb(&ctx, PathBuf::from("192.RAF"), &image);
+    assert_eq!(library.cache.thumb_order.len(), 192);
     Ok(())
 }
 #[test]
@@ -636,15 +647,17 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
     let id = library.photos[0].id;
     let (job_tx, jobs) = std::sync::mpsc::channel();
     let (result_tx, results) = std::sync::mpsc::channel();
-    library.edit_tx = job_tx;
-    library.edit_rx = results;
+    let (thumb_tx, _thumbs) = std::sync::mpsc::sync_channel(8);
+    library.cache.edit_tx = job_tx;
+    library.cache.edit_rx = results;
+    library.cache.thumb_tx = thumb_tx;
     // A photo without an edit asks the catalog once and sends nothing.
     let photo = library.photos[0].clone();
-    library.request_edited(&photo);
-    library.request_edited(&photo);
+    library.request_previews(&photo, &ctx);
+    library.request_previews(&photo, &ctx);
     assert!(jobs.try_recv().is_err());
-    assert_eq!(library.edits_pending, 0);
-    let first = library.edited_requested[&id];
+    assert_eq!(library.cache.edits_pending, 0);
+    let first = library.cache.edited_requested[&id];
     // Develop's render arrives: it is shown, kept, and outranks `first`.
     library.update_edited(&ctx, id, image::RgbImage::new(4, 4), "{}".into());
     assert!(library.has_edited_thumbnail(id));
@@ -652,13 +665,13 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
         jobs.try_recv(),
         Ok(previews::EditJob::Store { .. })
     ));
-    let newest = library.edited_requested[&id];
+    let newest = library.cache.edited_requested[&id];
     assert!(newest > first);
-    library.edits_pending = 1;
+    library.cache.edits_pending = 1;
     result_tx.send(previews::EditResult::Skipped(id, first))?;
     library.poll_previews(&ctx);
-    assert_eq!(library.edited_requested.get(&id), Some(&newest));
-    assert_eq!(library.edits_pending, 0);
+    assert_eq!(library.cache.edited_requested.get(&id), Some(&newest));
+    assert_eq!(library.cache.edits_pending, 0);
     // A cache error is reported without touching the previews.
     result_tx.send(previews::EditResult::CacheError("disk full".into()))?;
     library.poll_previews(&ctx);

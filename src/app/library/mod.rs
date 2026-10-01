@@ -4,11 +4,7 @@ use crate::app::theme;
 use crate::catalog::{Catalog, Collection, Folder, Photo};
 use anyhow::Result;
 use eframe::egui::{self, Color32, Vec2};
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    path::PathBuf,
-    sync::mpsc::{Receiver, SyncSender},
-};
+use std::collections::HashSet;
 
 pub enum Action {
     None,
@@ -33,64 +29,22 @@ pub struct Library {
     folders: Vec<Folder>,
     collections: Vec<Collection>,
     roots: Vec<(i64, String, Option<String>)>,
-    /// Whether each external volume's mount point exists, checked off the UI
-    /// thread so a hung network mount can't stall drawing.
-    /// Per volume mount (the startup disk as "/"): attached, and free/total bytes.
-    volumes_online: std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, VolumeState>>>,
-    volumes_checked: Option<std::time::Instant>,
-    /// A check is still running, perhaps stuck on a stalled mount: start no other.
-    volumes_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    folder_scope: Option<HashSet<i64>>,
+    volumes: volumes::Volumes,
+    /// The source and filter bar; `visible` is their result.
+    filters: filter::Filters,
+    /// The folder shown, as a tree key ("" is All Photographs).
     selected_folder: String,
     expanded: HashSet<String>,
-    collection: Option<i64>,
-    members: HashSet<i64>,
-    query: String,
-    rating: i32,
-    flag: i32,
-    label_filter: Option<String>,
-    only_missing: bool,
-    reverse: bool,
     thumb_size: f32,
     strip_current: Option<i64>,
+    /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
-    available: HashSet<PathBuf>,
-    /// Which originals are online, while that is being found out: listing
-    /// every folder can take seconds on a network share, so the Library opens
-    /// without waiting and treats photos as online until it is known.
-    checking: Option<Receiver<HashSet<PathBuf>>>,
+    availability: availability::Availability,
     ctx: egui::Context,
-    thumbs: HashMap<PathBuf, egui::TextureHandle>,
-    thumb_order: VecDeque<PathBuf>,
-    pending: HashSet<PathBuf>,
-    failed: HashSet<PathBuf>,
-    thumb_tx: SyncSender<PathBuf>,
-    thumb_rx: Receiver<previews::PreviewResult>,
-    /// Edited previews: rendered from each photo's edit on a second worker.
-    edit_tx: std::sync::mpsc::Sender<previews::EditJob>,
-    edit_rx: Receiver<previews::EditResult>,
-    /// Photos with an edited preview requested, by the ticket of the latest
-    /// request; results of earlier requests are dropped.
-    edited_requested: HashMap<i64, u64>,
-    next_ticket: u64,
-    /// Photos asking for an edited preview this frame, and last frame's
-    /// as the worker sees them.
-    edit_seen: HashSet<i64>,
-    edit_wanted: previews::Wanted,
-    /// Edited previews queued and not yet back.
-    edits_pending: usize,
-    /// Previews showing each photo's edit, by photo: virtual copies share a
-    /// file, and so its embedded preview in `thumbs`, but not an edit.
-    edited: HashMap<i64, egui::TextureHandle>,
-    edited_order: VecDeque<i64>,
-    preview_progress: previews::Progress,
+    cache: textures::PreviewTextures,
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
-    /// The Copy Name being typed, for the photo it belongs to.
-    copy_name: Option<(i64, String)>,
-    /// Saving `copy_name` failed; it waits for the next flush rather than
-    /// being retried, and discarded, as the selection moves.
-    copy_name_failed: bool,
+    copy_names: copy_name::CopyNames,
     pub message: String,
 }
 impl Library {
@@ -100,16 +54,6 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
-        let (tx, result_rx) = previews::spawn(
-            crate::catalog::preview_cache::PreviewCache::path(),
-            ctx.clone(),
-        );
-        let edit_wanted = previews::Wanted::default();
-        let (edit_tx, edit_rx) = previews::spawn_edited(
-            crate::catalog::preview_cache::PreviewCache::path(),
-            edit_wanted.clone(),
-            ctx.clone(),
-        );
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -117,45 +61,18 @@ impl Library {
             folders: Vec::new(),
             collections: Vec::new(),
             roots: Vec::new(),
-            volumes_online: Default::default(),
-            volumes_checked: None,
-            volumes_busy: Default::default(),
-            folder_scope: None,
+            volumes: Default::default(),
+            filters: Default::default(),
             selected_folder: String::new(),
             expanded: HashSet::new(),
-            collection: None,
-            members: HashSet::new(),
-            query: String::new(),
-            rating: 0,
-            flag: 2,
-            label_filter: None,
-            only_missing: false,
-            reverse: false,
             thumb_size: 190.,
             strip_current: None,
             visible: Vec::new(),
-            available: HashSet::new(),
-            checking: None,
+            availability: Default::default(),
+            cache: textures::PreviewTextures::new(&ctx),
             ctx,
-            thumbs: HashMap::new(),
-            thumb_order: VecDeque::new(),
-            pending: HashSet::new(),
-            failed: HashSet::new(),
-            thumb_tx: tx,
-            thumb_rx: result_rx,
-            edit_tx,
-            edit_rx,
-            edited_requested: HashMap::new(),
-            next_ticket: 0,
-            edit_seen: HashSet::new(),
-            edit_wanted,
-            edits_pending: 0,
-            edited: HashMap::new(),
-            edited_order: VecDeque::new(),
-            preview_progress: Default::default(),
             copy_request: None,
-            copy_name: None,
-            copy_name_failed: false,
+            copy_names: Default::default(),
             message: String::new(),
         };
         s.refresh()?;
@@ -165,8 +82,8 @@ impl Library {
     }
     pub fn refresh(&mut self) -> Result<()> {
         self.reload()?;
-        self.check_availability();
-        self.failed.clear();
+        self.availability.start(&self.photos, &self.ctx);
+        self.cache.failed.clear();
         self.filter();
         Ok(())
     }
@@ -183,89 +100,27 @@ impl Library {
         }
         self.collections = self.catalog.collections()?;
         self.roots = self.catalog.roots()?;
-        // Names may have changed, and a removed copy's id can be reused. Copy
-        // commands save a name being typed before they run.
-        self.copy_name = None;
-        self.copy_name_failed = false;
+        // Copy commands save a name being typed before they run.
+        self.copy_names.clear();
         self.filter();
         Ok(())
     }
-    /// Finds out which originals are online, in the background.
-    fn check_availability(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let photos = self.photos.clone();
-        let ctx = self.ctx.clone();
-        std::thread::spawn(move || {
-            if tx.send(available_paths(&photos)).is_ok() {
-                ctx.request_repaint();
-            }
-        });
-        self.checking = Some(rx);
-    }
-    /// Takes the result of the online check once it is there.
-    fn poll_availability(&mut self, wait: bool) {
-        let Some(rx) = &self.checking else { return };
-        let result = if wait {
-            rx.recv()
-                .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected)
-        } else {
-            rx.try_recv()
-        };
-        match result {
-            Ok(available) => self.available = available,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            // The check failed: claim nothing is offline.
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.available = self.photos.iter().map(|p| p.path.clone()).collect()
-            }
-        }
-        self.checking = None;
-        self.filter();
-    }
     /// Waits for the online check, for callers that report on it.
     pub fn wait_for_availability(&mut self) {
-        self.poll_availability(true);
+        if self.availability.poll(true, &self.photos) {
+            self.filter();
+        }
     }
     fn is_available(&self, path: &std::path::Path) -> bool {
-        self.checking.is_some() || self.available.contains(path)
+        self.availability.is_available(path)
     }
     pub fn available_count(&self) -> usize {
-        self.photos
-            .iter()
-            .filter(|p| self.is_available(&p.path))
-            .count()
+        self.availability.count(&self.photos)
     }
     fn filter(&mut self) {
-        let q = self.query.to_lowercase();
         self.visible = self
-            .photos
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| {
-                self.folder_scope
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(&p.folder))
-                    && (self.collection.is_none() || self.members.contains(&p.id))
-                    && self
-                        .label_filter
-                        .as_ref()
-                        .is_none_or(|label| &p.label == label)
-                    && p.rating >= self.rating
-                    && (self.flag == 2 || p.flag == self.flag)
-                    && (!self.only_missing || !self.is_available(&p.path))
-                    && (q.is_empty()
-                        || format!(
-                            "{} {} {} {} {}",
-                            p.filename, p.copy_name, p.keywords, p.captured, p.label
-                        )
-                        .to_lowercase()
-                        .contains(&q))
-            })
-            .map(|(i, _)| i)
-            .collect();
-        if self.reverse {
-            self.visible.reverse()
-        }
+            .filters
+            .visible(&self.photos, |path| self.availability.is_available(path));
         if self
             .selected
             .is_some_and(|id| !self.visible.iter().any(|i| self.photos[*i].id == id))
@@ -378,7 +233,7 @@ impl Library {
     pub(super) fn remove_virtual_copy(&mut self, id: i64) -> Result<Option<i64>> {
         let photo = self.photo(id).cloned();
         self.catalog.remove_virtual_copy(id)?;
-        self.forget_previews(id);
+        self.cache.forget(id);
         self.reload()?;
         let master = photo.as_ref().and_then(|p| p.master);
         if let Some(master) = master {
@@ -389,24 +244,13 @@ impl Library {
         }
         Ok(master)
     }
-    fn rename_copy(&mut self, id: i64, name: &str) -> Result<()> {
-        self.catalog.set_copy_name(id, name)?;
-        if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
-            p.copy_name = name.trim().to_string();
-        }
-        self.filter();
-        Ok(())
-    }
     /// Selects `id`, leaving filters that would hide it so it stays in view.
     fn show(&mut self, id: i64) {
         if !self.visible.iter().any(|i| self.photos[*i].id == id) {
-            if !self.members.contains(&id) {
-                self.collection = None;
+            if !self.filters.members.contains(&id) {
+                self.filters.collection = None;
             }
-            self.query.clear();
-            self.rating = 0;
-            self.flag = 2;
-            self.label_filter = None;
+            self.filters.clear_bar();
             self.filter();
         }
         self.selected = Some(id);
@@ -460,21 +304,26 @@ impl Library {
                 });
                 section(ui, "Catalog", false, |ui| {
                     let offline = self.photos.len() - self.available_count();
-                    let all = self.folder_scope.is_none()
-                        && self.collection.is_none()
-                        && !self.only_missing;
+                    let all = self.filters.folder_scope.is_none()
+                        && self.filters.collection.is_none()
+                        && !self.filters.only_missing;
                     if source_row(ui, "All Photographs", self.photos.len(), all).clicked() {
-                        self.folder_scope = None;
+                        self.filters.folder_scope = None;
                         self.selected_folder.clear();
-                        self.collection = None;
-                        self.only_missing = false;
+                        self.filters.collection = None;
+                        self.filters.only_missing = false;
                         self.filter()
                     }
                     if offline > 0
-                        && source_row(ui, "Offline Photographs", offline, self.only_missing)
-                            .clicked()
+                        && source_row(
+                            ui,
+                            "Offline Photographs",
+                            offline,
+                            self.filters.only_missing,
+                        )
+                        .clicked()
                     {
-                        self.only_missing = !self.only_missing;
+                        self.filters.only_missing = !self.filters.only_missing;
                         self.filter()
                     }
                 });
@@ -491,8 +340,8 @@ impl Library {
                             .or_default()
                             .push(root);
                     }
-                    self.check_volumes(ui.ctx(), volumes.keys());
-                    let online = self.volumes_online.lock().unwrap().clone();
+                    self.volumes.check(ui.ctx(), volumes.keys());
+                    let online = self.volumes.snapshot();
                     // The startup disk first, then other drives by name.
                     let mut volumes: Vec<_> = volumes.into_iter().collect();
                     volumes.sort_by_key(|(v, _)| (v.mount.is_some(), v.name.to_lowercase()));
@@ -517,7 +366,9 @@ impl Library {
                             .sum();
                         let key = format!("volume-collapsed:{}", volume.name);
                         let collapsed = self.expanded.contains(&key);
-                        if volume_row(ui, &volume, attached, space, photos, !collapsed).clicked() {
+                        if volumes::volume_row(ui, &volume, attached, space, photos, !collapsed)
+                            .clicked()
+                        {
                             if collapsed {
                                 self.expanded.remove(&key);
                             } else {
@@ -549,8 +400,8 @@ impl Library {
                             ) {
                                 Some(TreeAction::Select(key, ids)) => {
                                     self.selected_folder = key;
-                                    self.folder_scope = Some(ids);
-                                    self.collection = None;
+                                    self.filters.folder_scope = Some(ids);
+                                    self.filters.collection = None;
                                     self.filter();
                                 }
                                 Some(TreeAction::Relink(root, id)) => {
@@ -585,7 +436,6 @@ impl Library {
             });
         action
     }
-    /// Right panel: the selected photo's rating, flag, label and file details.
     /// Right panel: the selected photo's rating, flag, label and file details.
     /// The layout is identical with or without a selection, so nothing moves.
     pub fn info_panel(&mut self, ui: &mut egui::Ui) -> Action {
@@ -640,7 +490,15 @@ impl Library {
                     let field = |f: fn(&Photo) -> &str| photo.as_ref().map_or("", f).to_string();
                     metadata_row(ui, "File Name", &field(|p| &p.filename));
                     match photo.as_ref().filter(|p| p.master.is_some()) {
-                        Some(p) => self.copy_name_row(ui, p),
+                        Some(p) => {
+                            match self.copy_names.row(ui, p, &self.catalog, &mut self.photos) {
+                                Ok(true) => self.filter(),
+                                Ok(false) => {}
+                                Err(e) => {
+                                    self.message = format!("Copy name could not be saved: {e}")
+                                }
+                            }
+                        }
                         None => {
                             metadata_row(ui, "Copy Name", "");
                         }
@@ -675,180 +533,30 @@ impl Library {
             });
         action
     }
-    /// Re-checks every few seconds, on a background thread, whether external
-    /// volumes are attached.
-    fn check_volumes<'a>(
-        &mut self,
-        ctx: &egui::Context,
-        volumes: impl Iterator<Item = &'a crate::platform::volume::Volume>,
-    ) {
-        let due = self
-            .volumes_checked
-            .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3));
-        if !due {
-            return;
-        }
-        self.volumes_checked = Some(std::time::Instant::now());
-        let mounts: Vec<PathBuf> = volumes
-            .map(|v| v.mount.clone().unwrap_or_else(|| PathBuf::from("/")))
-            .collect();
-        ctx.request_repaint_after(std::time::Duration::from_secs(3));
-        let ctx = ctx.clone();
-        spawn_volume_check(
-            &self.volumes_online,
-            &self.volumes_busy,
-            mounts,
-            move || ctx.request_repaint(),
-            |m| {
-                let attached = m.is_dir();
-                let space = attached
-                    .then(|| crate::platform::volume::space(m))
-                    .flatten();
-                (attached, space)
-            },
-        );
-    }
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
-        self.poll_availability(false);
-        while let Ok(result) = self.thumb_rx.try_recv() {
-            self.preview_progress.finish(&result);
-            let previews::PreviewResult {
-                path, image: im, ..
-            } = result;
-            self.pending.remove(&path);
-            match im {
-                Some(im) => self.insert_thumb(ctx, path, &im),
-                None => {
-                    self.failed.insert(path);
-                }
-            }
+        if self.availability.poll(false, &self.photos) {
+            self.filter();
         }
-        while let Ok(result) = self.edit_rx.try_recv() {
-            if let previews::EditResult::CacheError(error) = result {
-                self.preview_progress.cache_failed(error);
-                continue;
-            }
-            self.edits_pending = self.edits_pending.saturating_sub(1);
-            match result {
-                previews::EditResult::Ready(id, ticket, im) => {
-                    if self.edited_requested.get(&id) == Some(&ticket) {
-                        self.insert_edited(ctx, id, &im);
-                    }
-                }
-                previews::EditResult::Skipped(id, ticket) => {
-                    if self.edited_requested.get(&id) == Some(&ticket) {
-                        self.edited_requested.remove(&id);
-                    }
-                }
-                previews::EditResult::Failed | previews::EditResult::CacheError(_) => {}
-            }
-        }
+        self.cache.poll(ctx);
     }
     /// Hands the worker the photos shown last frame. Call once per frame.
     pub(super) fn publish_shown(&mut self) {
-        let shown = std::mem::take(&mut self.edit_seen);
-        *self.edit_wanted.lock().unwrap() = shown;
-    }
-
-    fn insert_thumb(&mut self, ctx: &egui::Context, path: PathBuf, im: &image::RgbImage) {
-        if !self.thumbs.contains_key(&path) {
-            while self.thumbs.len() >= 192 {
-                let Some(old) = self.thumb_order.pop_front() else {
-                    break;
-                };
-                self.thumbs.remove(&old);
-            }
-            self.thumb_order.push_back(path.clone());
-        }
-        self.thumbs.insert(
-            path.clone(),
-            ctx.load_texture(
-                path.display().to_string(),
-                egui::ColorImage::from_rgb(
-                    [im.width() as usize, im.height() as usize],
-                    im.as_raw(),
-                ),
-                egui::TextureOptions::LINEAR,
-            ),
-        );
-    }
-    fn insert_edited(&mut self, ctx: &egui::Context, id: i64, im: &image::RgbImage) {
-        if !self.edited.contains_key(&id) {
-            while self.edited.len() >= 192 {
-                let Some(old) = self.edited_order.pop_front() else {
-                    break;
-                };
-                self.edited.remove(&old);
-                self.edited_requested.remove(&old);
-            }
-            self.edited_order.push_back(id);
-        }
-        self.edited.insert(
-            id,
-            ctx.load_texture(
-                format!("edited-{id}"),
-                egui::ColorImage::from_rgb(
-                    [im.width() as usize, im.height() as usize],
-                    im.as_raw(),
-                ),
-                egui::TextureOptions::LINEAR,
-            ),
-        );
-    }
-    fn ticket(&mut self) -> u64 {
-        self.next_ticket += 1;
-        self.next_ticket
-    }
-    /// Forgets a removed photo's previews, so a later photo given its id
-    /// starts afresh.
-    fn forget_previews(&mut self, id: i64) {
-        self.edited.remove(&id);
-        self.edited_order.retain(|other| *other != id);
-        self.edited_requested.remove(&id);
-        self.edit_seen.remove(&id);
+        self.cache.publish_shown();
     }
     /// The photo's preview: its edit once rendered, else the embedded one.
     fn texture(&self, photo: &Photo) -> Option<&egui::TextureHandle> {
-        self.edited
-            .get(&photo.id)
-            .or_else(|| self.thumbs.get(&photo.path))
+        self.cache.texture(photo)
     }
-    /// Queues the previews a shown photo needs: the embedded one until its
-    /// edited one is in, and the edited one for a saved or Lightroom edit.
+    /// Queues the previews a shown photo needs; its edit comes from the catalog.
     fn request_previews(&mut self, photo: &Photo, ctx: &egui::Context) {
-        if !self.edited.contains_key(&photo.id) {
-            self.request_thumbnail(&photo.path, ctx);
-        }
-        self.request_edited(photo);
-    }
-    /// Queues an edited preview for a photo with a saved or Lightroom edit.
-    fn request_edited(&mut self, photo: &Photo) {
-        self.edit_seen.insert(photo.id);
-        if self.edited_requested.contains_key(&photo.id) {
-            return;
-        }
-        let ticket = self.ticket();
-        self.edited_requested.insert(photo.id, ticket);
-        let Ok((recipe, lightroom)) = self.catalog.edit_texts(photo.id) else {
-            return;
-        };
-        let source = recipe
-            .map(previews::EditSource::Recipe)
-            .or(lightroom.map(previews::EditSource::Lightroom));
-        if let Some(source) = source
-            && self
-                .edit_tx
-                .send(previews::EditJob::Render {
-                    id: photo.id,
-                    ticket,
-                    path: photo.path.clone(),
-                    source,
-                })
-                .is_ok()
-        {
-            self.edits_pending += 1;
-        }
+        let catalog = &self.catalog;
+        self.cache.request(photo, ctx, || {
+            let (recipe, lightroom) = catalog.edit_texts(photo.id).ok()?;
+            recipe
+                .map(previews::EditSource::Recipe)
+                .or(lightroom.map(previews::EditSource::Lightroom))
+        });
     }
     /// Shows Develop's latest render as the photo's thumbnail and caches it
     /// under the edit it was rendered with.
@@ -862,14 +570,7 @@ impl Library {
         let Some(path) = self.photo(id).map(|p| p.path.clone()) else {
             return;
         };
-        let tag = previews::EditSource::Recipe(recipe_json).tag();
-        // Renders still in flight are older than Develop's.
-        let ticket = self.ticket();
-        self.edited_requested.insert(id, ticket);
-        self.insert_edited(ctx, id, &image);
-        let _ = self
-            .edit_tx
-            .send(previews::EditJob::Store { path, tag, image });
+        self.cache.store_edited(ctx, id, path, image, recipe_json);
     }
     /// The folder shown, as a tree key ("" is All Photographs).
     pub(super) fn source_key(&self) -> &str {
@@ -895,8 +596,8 @@ impl Library {
                     .collect();
                 if !ids.is_empty() {
                     self.selected_folder = key.to_string();
-                    self.folder_scope = Some(ids);
-                    self.collection = None;
+                    self.filters.folder_scope = Some(ids);
+                    self.filters.collection = None;
                     // Unfold the path down to the folder.
                     let mut open = format!("root:{root}");
                     self.expanded.insert(open.clone());
@@ -925,17 +626,17 @@ impl Library {
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
     pub(super) fn has_edited_thumbnail(&self, id: i64) -> bool {
-        self.edited.contains_key(&id)
+        self.cache.has_edited(id)
     }
     /// The Library's cached preview for a photo, if one is loaded.
     pub(super) fn thumbnail(&self, id: i64) -> Option<&egui::TextureHandle> {
         self.texture(self.photo(id)?)
     }
     pub(super) fn preview_progress_active(&self) -> bool {
-        self.preview_progress.active() || self.edits_pending > 0
+        self.cache.progress_active()
     }
     pub(super) fn preview_progress(&self, ui: &mut egui::Ui) {
-        self.preview_progress.show(ui, self.edits_pending);
+        self.cache.show_progress(ui);
     }
     fn filter_bar(&mut self, ui: &mut egui::Ui) {
         use crate::app::photo_metadata::{LABELS, label_color};
@@ -951,7 +652,7 @@ impl Library {
                     let compact = ui.available_width() < 640.;
                     changed |= ui
                         .add(
-                            egui::TextEdit::singleline(&mut self.query)
+                            egui::TextEdit::singleline(&mut self.filters.query)
                                 .hint_text("Search")
                                 .font(egui::FontId::proportional(12.))
                                 .desired_width(if compact { 120. } else { 190. })
@@ -967,7 +668,7 @@ impl Library {
                     }
                     changed |= segmented(
                         ui,
-                        &mut self.flag,
+                        &mut self.filters.flag,
                         &[
                             (2, "All"),
                             (1, "Picked"),
@@ -983,7 +684,7 @@ impl Library {
                     for star in 1..=5 {
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(13., 20.), egui::Sense::click());
-                        let lit = self.rating >= star;
+                        let lit = self.filters.rating >= star;
                         ui.painter().text(
                             rect.center(),
                             egui::Align2::CENTER_CENTER,
@@ -1001,7 +702,8 @@ impl Library {
                             .on_hover_text(format!("{star} stars or more · click again to clear"))
                             .clicked()
                         {
-                            self.rating = if self.rating == star { 0 } else { star };
+                            self.filters.rating =
+                                if self.filters.rating == star { 0 } else { star };
                             changed = true;
                         }
                     }
@@ -1010,7 +712,7 @@ impl Library {
                         ui.label(filter_caption("Color"));
                     }
                     for label in LABELS {
-                        let active = self.label_filter.as_deref() == Some(label);
+                        let active = self.filters.label_filter.as_deref() == Some(label);
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(15., 20.), egui::Sense::click());
                         let chip = egui::Rect::from_center_size(rect.center(), Vec2::splat(10.));
@@ -1025,7 +727,8 @@ impl Library {
                             );
                         }
                         if response.on_hover_text(label).clicked() {
-                            self.label_filter = if active { None } else { Some(label.into()) };
+                            self.filters.label_filter =
+                                if active { None } else { Some(label.into()) };
                             changed = true;
                         }
                     }
@@ -1038,7 +741,8 @@ impl Library {
                         egui::ComboBox::from_id_salt("library-label")
                             .width(70.)
                             .selected_text(
-                                self.label_filter
+                                self.filters
+                                    .label_filter
                                     .as_deref()
                                     .filter(|l| custom.iter().any(|c| c == l))
                                     .unwrap_or("Other"),
@@ -1047,7 +751,7 @@ impl Library {
                                 for label in custom {
                                     changed |= ui
                                         .selectable_value(
-                                            &mut self.label_filter,
+                                            &mut self.filters.label_filter,
                                             Some(label.clone()),
                                             label,
                                         )
@@ -1055,10 +759,7 @@ impl Library {
                                 }
                             });
                     }
-                    let active = !self.query.is_empty()
-                        || self.rating > 0
-                        || self.flag != 2
-                        || self.label_filter.is_some();
+                    let active = self.filters.bar_active();
                     if active {
                         ui.add_space(10.);
                         if ui
@@ -1070,10 +771,7 @@ impl Library {
                             .on_hover_text("Clear search, flag, rating and color filters")
                             .clicked()
                         {
-                            self.query.clear();
-                            self.rating = 0;
-                            self.flag = 2;
-                            self.label_filter = None;
+                            self.filters.clear_bar();
                             changed = true;
                         }
                     }
@@ -1094,7 +792,7 @@ impl Library {
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new(if self.reverse {
+                                egui::RichText::new(if self.filters.reverse {
                                     "Capture Time ↓"
                                 } else {
                                     "Capture Time ↑"
@@ -1107,7 +805,7 @@ impl Library {
                         .on_hover_text("Reverse the sort order")
                         .clicked()
                     {
-                        self.reverse = !self.reverse;
+                        self.filters.reverse = !self.filters.reverse;
                         self.filter();
                     }
                     ui.add_space(12.);
@@ -1126,20 +824,9 @@ impl Library {
                 });
             });
     }
-    fn request_thumbnail(&mut self, path: &std::path::Path, ctx: &egui::Context) {
-        if !self.thumbs.contains_key(path)
-            && !self.pending.contains(path)
-            && !self.failed.contains(path)
-            && self.thumb_tx.try_send(path.to_path_buf()).is_ok()
-        {
-            self.pending.insert(path.to_path_buf());
-            self.preview_progress.queued();
-            ctx.request_repaint();
-        }
-    }
     /// The selected source's name, as Lightroom shows it above the filmstrip.
     fn source_name(&self) -> String {
-        if let Some(id) = self.collection {
+        if let Some(id) = self.filters.collection {
             return self
                 .collections
                 .iter()
@@ -1398,91 +1085,22 @@ impl Library {
     }
 }
 impl Library {
-    /// The Copy Name row of a virtual copy, editable in place like
-    /// Lightroom's Metadata panel; saved on Return or when focus leaves.
-    fn copy_name_row(&mut self, ui: &mut egui::Ui, photo: &Photo) {
-        let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), egui::Sense::hover());
-        ui.painter().text(
-            egui::pos2(rect.left() + 84., rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            "Copy Name",
-            egui::FontId::proportional(11.),
-            theme::gray(135),
-        );
-        if self
-            .copy_name
-            .as_ref()
-            .is_none_or(|(id, _)| *id != photo.id)
-        {
-            // Another copy was selected before the field lost focus: keep its
-            // name. One that cannot be saved stays pending, and this copy's
-            // name is shown but not editable until it is.
-            if !self.copy_name_failed
-                && let Err(e) = self.commit_copy_name()
-            {
-                self.message = format!("Copy name could not be saved: {e}");
-            }
-            if !self.copy_name_failed {
-                self.copy_name = Some((photo.id, photo.copy_name.clone()));
-            }
-        }
-        let field = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 88., rect.top() + 1.),
-            egui::pos2(rect.right(), rect.bottom() - 1.),
-        );
-        let Some((_, text)) = self.copy_name.as_mut().filter(|(id, _)| *id == photo.id) else {
-            ui.painter().text(
-                egui::pos2(field.left() + 4., field.center().y),
-                egui::Align2::LEFT_CENTER,
-                &photo.copy_name,
-                egui::FontId::proportional(11.),
-                theme::gray(205),
-            );
-            return;
-        };
-        let response = ui.put(
-            field,
-            egui::TextEdit::singleline(text)
-                .font(egui::FontId::proportional(11.))
-                .text_color(theme::gray(205))
-                .margin(egui::Margin::symmetric(4, 1))
-                .vertical_align(egui::Align::Center),
-        );
-        if response.lost_focus()
-            && let Err(e) = self.commit_copy_name()
-        {
-            self.message = format!("Copy name could not be saved: {e}");
-        }
-    }
     /// Saves a Copy Name still being typed, e.g. when the Library panel
     /// goes away before the field loses focus. On failure the name stays
     /// pending, to be saved again or discarded.
     pub(super) fn commit_copy_name(&mut self) -> Result<()> {
-        let Some((id, text)) = &self.copy_name else {
-            return Ok(());
-        };
-        let (id, name) = (*id, text.trim().to_string());
-        if self
-            .photo(id)
-            .is_some_and(|p| p.master.is_some() && p.copy_name != name)
-        {
-            let saved = self.rename_copy(id, &name);
-            self.copy_name_failed = saved.is_err();
-            saved?;
+        if self.copy_names.commit(&self.catalog, &mut self.photos)? {
+            self.filter();
         }
-        self.copy_name = Some((id, name));
-        self.copy_name_failed = false;
         Ok(())
     }
     #[cfg(test)]
     pub(super) fn set_copy_name_draft(&mut self, id: i64, name: &str) {
-        self.copy_name = Some((id, name.into()));
+        self.copy_names.draft = Some((id, name.into()));
     }
     /// Drops a Copy Name that could not be saved, e.g. closing without saving.
     pub(super) fn discard_copy_name(&mut self) {
-        self.copy_name = None;
-        self.copy_name_failed = false;
+        self.copy_names.discard();
     }
 }
 /// A fixed-height metadata row: caption column, then the truncated value
@@ -1530,129 +1148,6 @@ fn info_text(ui: &mut egui::Ui, text: &str) {
 }
 fn filter_caption(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(11.).color(theme::gray(150))
-}
-type VolumeState = (bool, Option<(u64, u64)>);
-/// Probes `mounts` on a background thread into `online`, calling `changed` when the
-/// result differs, unless the previous check is still running: probing a stalled
-/// mount can hang, and new threads would pile up behind it. Returns whether a check
-/// started.
-fn spawn_volume_check(
-    online: &std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, VolumeState>>>,
-    busy: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    mounts: Vec<PathBuf>,
-    changed: impl FnOnce() + Send + 'static,
-    probe: impl Fn(&std::path::Path) -> VolumeState + Send + 'static,
-) -> bool {
-    use std::sync::atomic::Ordering;
-    if busy.swap(true, Ordering::Acquire) {
-        return false;
-    }
-    /// Clears the flag however the check ends.
-    struct Done(std::sync::Arc<std::sync::atomic::AtomicBool>);
-    impl Drop for Done {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
-        }
-    }
-    let done = Done(busy.clone());
-    let online = online.clone();
-    std::thread::spawn(move || {
-        let _done = done;
-        let state: HashMap<PathBuf, VolumeState> = mounts
-            .into_iter()
-            .map(|m| {
-                let state = probe(&m);
-                (m, state)
-            })
-            .collect();
-        let mut shared = online.lock().unwrap();
-        if *shared != state {
-            *shared = state;
-            changed();
-        }
-    });
-    true
-}
-/// A Lightroom volume header bar: an LED lit green when the drive is
-/// attached, the drive name, free / total space (or Offline), and a
-/// disclosure arrow that folds its folders away.
-fn volume_row(
-    ui: &mut egui::Ui,
-    volume: &crate::platform::volume::Volume,
-    attached: Option<bool>,
-    space: Option<(u64, u64)>,
-    photos: usize,
-    open: bool,
-) -> egui::Response {
-    ui.add_space(4.);
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), egui::Sense::click());
-    let painter = ui.painter();
-    painter.rect_filled(
-        rect,
-        3.,
-        theme::gray(if response.hovered() { 64 } else { 56 }),
-    );
-    let y = rect.center().y;
-    let led = egui::Rect::from_center_size(egui::pos2(rect.left() + 14., y), Vec2::new(5., 11.));
-    if attached == Some(true) {
-        painter.rect_filled(led, 1., Color32::from_rgb(110, 200, 90));
-    } else {
-        painter.rect_filled(led, 1., theme::gray(26));
-        painter.rect_stroke(
-            led,
-            1.,
-            egui::Stroke::new(
-                1.,
-                theme::gray(if attached == Some(false) { 150 } else { 90 }),
-            ),
-            egui::StrokeKind::Inside,
-        );
-    }
-    painter.text(
-        egui::pos2(rect.left() + 26., y),
-        egui::Align2::LEFT_CENTER,
-        &volume.name,
-        egui::FontId::proportional(12.5),
-        theme::gray(225),
-    );
-    let gb = |bytes: u64| bytes as f64 / 1e9;
-    let detail = match (attached, space) {
-        (Some(false), _) => "Offline".to_string(),
-        (_, Some((free, total))) => format!("{:.0} / {:.0} GB", gb(free), gb(total)),
-        _ => String::new(),
-    };
-    painter.text(
-        egui::pos2(rect.right() - 26., y),
-        egui::Align2::RIGHT_CENTER,
-        detail,
-        egui::FontId::proportional(11.),
-        theme::gray(160),
-    );
-    let c = egui::pos2(rect.right() - 13., y);
-    let arrow = if open {
-        vec![
-            c + Vec2::new(-4., -2.),
-            c + Vec2::new(4., -2.),
-            c + Vec2::new(0., 3.),
-        ]
-    } else {
-        vec![
-            c + Vec2::new(3., -4.),
-            c + Vec2::new(3., 4.),
-            c + Vec2::new(-3., 0.),
-        ]
-    };
-    painter.add(egui::Shape::convex_polygon(
-        arrow,
-        theme::gray(200),
-        egui::Stroke::NONE,
-    ));
-    response.on_hover_text(match (&volume.mount, attached) {
-        (None, _) => format!("Startup disk · {photos} photos"),
-        (Some(mount), Some(false)) => format!("{} is not attached", mount.display()),
-        (Some(mount), _) => format!("{} · {photos} photos", mount.display()),
-    })
 }
 /// A quiet full-width "+ label" row, Lightroom's add action in a panel.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
@@ -1709,12 +1204,17 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
 }
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
+mod availability;
 mod cell;
+mod copy_name;
+mod filter;
 mod previews;
+mod textures;
 mod thumbnails;
 mod tree;
+mod volumes;
 use cell::photo_cell;
-use thumbnails::{available_paths, thumbnail};
+use thumbnails::thumbnail;
 use tree::{FolderNode, TreeAction, folder_tree_row};
 #[cfg(test)]
 mod tests;
