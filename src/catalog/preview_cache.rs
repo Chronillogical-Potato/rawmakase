@@ -1,5 +1,4 @@
 //! Disposable Library previews, separate from user catalogs and edit recipes.
-use crate::storage::Identity;
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
@@ -11,6 +10,23 @@ const VERSION: i64 = 1;
 // 2: previews keep their aspect ratio (generation 1 forced 360×240).
 const GENERATION: i64 = 2;
 const LIMIT: i64 = 512 * 1024 * 1024;
+/// What tells a cached preview that its source changed: the file's size and
+/// modification time, from one stat. Unlike `Identity` it reads none of the
+/// file, which on a network share costs a round trip for every photo shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stamp {
+    pub size: u64,
+    pub modified_ns: u128,
+}
+impl Stamp {
+    pub fn read(path: &Path) -> Result<Self> {
+        let m = std::fs::metadata(path)?;
+        Ok(Self {
+            size: m.len(),
+            modified_ns: m.modified()?.duration_since(UNIX_EPOCH)?.as_nanos(),
+        })
+    }
+}
 pub struct PreviewCache {
     db: Connection,
     writes: u32,
@@ -73,18 +89,28 @@ impl PreviewCache {
     /// A preview variant, e.g. rendered with an edit identified by `tag`.
     pub fn load_tagged(&self, path: &Path, tag: &str) -> Result<Option<image::RgbImage>> {
         let key = tagged(path, tag);
-        let row=self.db.query_row("SELECT source_size,modified_ns,prefix_hash,generation,jpeg FROM previews WHERE source_path=?",[&key],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,Vec<u8>>(4)?))).optional()?;
-        let Some((size, modified, hash, generation, jpeg)) = row else {
+        let row = self
+            .db
+            .query_row(
+                "SELECT source_size,modified_ns,generation,jpeg FROM previews WHERE source_path=?",
+                [&key],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, Vec<u8>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((size, modified, generation, jpeg)) = row else {
             return Ok(None);
         };
-        let stale = if path.exists() {
-            let identity = Identity::read(path)?;
-            identity.size as i64 != size
-                || identity.modified_ns.to_string() != modified
-                || identity.prefix_hash != hash
-        } else {
-            false
-        };
+        // An offline original keeps its preview, as in Lightroom.
+        let stale = Stamp::read(path).is_ok_and(|stamp| {
+            stamp.size as i64 != size || stamp.modified_ns.to_string() != modified
+        });
         // Maintenance is best effort, as another connection may hold the database, and
         // never changes the answer: a failed delete still misses, a failed touch hits.
         let forget = || {
@@ -109,19 +135,14 @@ impl PreviewCache {
         );
         Ok(Some(image))
     }
-    pub fn store(
-        &mut self,
-        path: &Path,
-        identity: &Identity,
-        image: &image::RgbImage,
-    ) -> Result<()> {
-        self.store_tagged(path, "", identity, image)
+    pub fn store(&mut self, path: &Path, stamp: &Stamp, image: &image::RgbImage) -> Result<()> {
+        self.store_tagged(path, "", stamp, image)
     }
     pub fn store_tagged(
         &mut self,
         path: &Path,
         tag: &str,
-        identity: &Identity,
+        stamp: &Stamp,
         image: &image::RgbImage,
     ) -> Result<()> {
         ensure!(
@@ -129,7 +150,7 @@ impl PreviewCache {
             "Preview exceeds cache size limit"
         );
         ensure!(
-            Identity::read(path)? == *identity,
+            Stamp::read(path)? == *stamp,
             "Source changed while generating preview"
         );
         let mut jpeg = Vec::new();
@@ -139,7 +160,8 @@ impl PreviewCache {
             image.height(),
             image::ExtendedColorType::Rgb8,
         )?;
-        self.db.execute("INSERT INTO previews VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET source_size=excluded.source_size,modified_ns=excluded.modified_ns,prefix_hash=excluded.prefix_hash,generation=excluded.generation,width=excluded.width,height=excluded.height,jpeg=excluded.jpeg,last_used=excluded.last_used",params![tagged(path, tag),identity.size as i64,identity.modified_ns.to_string(),identity.prefix_hash,GENERATION,image.width(),image.height(),jpeg,now()])?;
+        // prefix_hash, which needed the file's first 64 KB, is no longer checked.
+        self.db.execute("INSERT INTO previews VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET source_size=excluded.source_size,modified_ns=excluded.modified_ns,prefix_hash=excluded.prefix_hash,generation=excluded.generation,width=excluded.width,height=excluded.height,jpeg=excluded.jpeg,last_used=excluded.last_used",params![tagged(path, tag),stamp.size as i64,stamp.modified_ns.to_string(),"",GENERATION,image.width(),image.height(),jpeg,now()])?;
         self.writes += 1;
         if self.writes.is_multiple_of(32) {
             self.prune(LIMIT)?;
@@ -173,7 +195,7 @@ mod tests {
         let db = d.path().join("previews.sqlite3");
         let mut cache = PreviewCache::open(&db)?;
         let im = image::RgbImage::from_pixel(24, 16, image::Rgb([120, 70, 40]));
-        cache.store(&raw, &Identity::read(&raw)?, &im)?;
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
         drop(cache);
         let cache = PreviewCache::open(&db)?;
         assert_eq!(cache.load(&raw)?.unwrap().dimensions(), (24, 16));
@@ -184,16 +206,54 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn same_size_rewrite_is_stale_by_its_modification_time() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let raw = d.path().join("photo.ARW");
+        std::fs::write(&raw, b"original raw")?;
+        let mut cache = PreviewCache::open(&d.path().join("previews.sqlite3"))?;
+        let im = image::RgbImage::new(8, 8);
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
+        let modified = std::fs::metadata(&raw)?.modified()?;
+        std::fs::write(&raw, b"replaced raw")?;
+        std::fs::File::options()
+            .write(true)
+            .open(&raw)?
+            .set_modified(modified + Duration::from_secs(1))?;
+        assert!(cache.load(&raw)?.is_none());
+        Ok(())
+    }
+    /// On a network share every read of a photo is a round trip, so a cached
+    /// preview must come back without opening its original.
+    #[cfg(unix)]
+    #[test]
+    fn cached_previews_never_open_the_original() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir()?;
+        let raw = d.path().join("photo.ARW");
+        std::fs::write(&raw, b"original raw")?;
+        let mut cache = PreviewCache::open(&d.path().join("previews.sqlite3"))?;
+        let im = image::RgbImage::new(8, 8);
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
+        cache.store_tagged(&raw, "edit-1", &Stamp::read(&raw)?, &im)?;
+        std::fs::set_permissions(&raw, std::fs::Permissions::from_mode(0o000))?;
+        // Unless running as root, which ignores permissions.
+        if std::fs::File::open(&raw).is_err() {
+            assert!(cache.load(&raw)?.is_some());
+            assert!(cache.load_tagged(&raw, "edit-1")?.is_some());
+        }
+        Ok(())
+    }
+    #[test]
     fn edited_previews_are_kept_apart_from_the_embedded_one() -> Result<()> {
         let d = tempfile::tempdir()?;
         let raw = d.path().join("photo.ARW");
         std::fs::write(&raw, b"original raw")?;
         let mut cache = PreviewCache::open(&d.path().join("previews.sqlite3"))?;
-        let identity = Identity::read(&raw)?;
+        let stamp = Stamp::read(&raw)?;
         let plain = image::RgbImage::from_pixel(24, 16, image::Rgb([120, 70, 40]));
         let edited = image::RgbImage::from_pixel(16, 16, image::Rgb([20, 70, 140]));
-        cache.store(&raw, &identity, &plain)?;
-        cache.store_tagged(&raw, "edit-1", &identity, &edited)?;
+        cache.store(&raw, &stamp, &plain)?;
+        cache.store_tagged(&raw, "edit-1", &stamp, &edited)?;
         assert_eq!(cache.load(&raw)?.unwrap().dimensions(), (24, 16));
         assert_eq!(
             cache.load_tagged(&raw, "edit-1")?.unwrap().dimensions(),
@@ -210,7 +270,7 @@ mod tests {
         let db = d.path().join("previews.sqlite3");
         let mut cache = PreviewCache::open(&db)?;
         let im = image::RgbImage::from_pixel(24, 16, image::Rgb([120, 70, 40]));
-        cache.store(&raw, &Identity::read(&raw)?, &im)?;
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
         // Another connection holds the write lock: no touch or delete can happen.
         let other = Connection::open(&db)?;
         other.execute_batch("BEGIN IMMEDIATE")?;
@@ -228,10 +288,10 @@ mod tests {
         std::fs::write(&raw, b"fixture")?;
         let mut cache = PreviewCache::open(&d.path().join("cache.db"))?;
         let im = image::RgbImage::new(8, 8);
-        cache.store(&raw, &Identity::read(&raw)?, &im)?;
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
         cache.db.execute("UPDATE previews SET jpeg=X'001122'", [])?;
         assert!(cache.load(&raw)?.is_none());
-        cache.store(&raw, &Identity::read(&raw)?, &im)?;
+        cache.store(&raw, &Stamp::read(&raw)?, &im)?;
         cache.prune(0)?;
         assert!(cache.load(&raw)?.is_none());
         let other = d.path().join("other.db");
