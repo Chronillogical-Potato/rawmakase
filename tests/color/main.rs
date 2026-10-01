@@ -242,11 +242,23 @@ pub struct Comparison {
     pub max: f64,
 }
 
+/// Panics when the two sets are not the same nonempty size: a truncated or empty
+/// reference would otherwise compare as a perfect match.
 pub fn compare(
     reference: &[[u16; 3]],
     candidate: &[[u16; 3]],
     keep: impl Fn(usize) -> bool,
 ) -> Comparison {
+    assert!(!reference.is_empty(), "nothing to compare");
+    assert_eq!(
+        reference.len(),
+        candidate.len(),
+        "reference and candidate have different patch counts"
+    );
+    assert!(
+        (0..reference.len()).any(&keep),
+        "every patch is excluded from the comparison"
+    );
     let delta_e: Vec<f64> = reference
         .iter()
         .zip(candidate)
@@ -444,6 +456,16 @@ fn colors_match_snapshots() {
                 failures.push(format!("{} / {name}: no snapshot", spec.name));
                 continue;
             };
+            if expected.len() != layout.patches.len() || values.len() != layout.patches.len() {
+                failures.push(format!(
+                    "{} / {name}: snapshot has {} patches and the render {}, the layout {}",
+                    spec.name,
+                    expected.len(),
+                    values.len(),
+                    layout.patches.len()
+                ));
+                continue;
+            }
             let c = compare(expected, values, |_| true);
             if c.max > SNAPSHOT_MAX || c.mean > SNAPSHOT_MEAN {
                 let mut worst: Vec<usize> = (0..values.len()).collect();
