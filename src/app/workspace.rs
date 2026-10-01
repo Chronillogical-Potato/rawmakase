@@ -108,6 +108,8 @@ impl Editor {
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);
+        #[cfg(feature = "telemetry")]
+        self.usage_stats_notice(&ctx, modal || self.view.shortcuts);
         self.pending_work(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(

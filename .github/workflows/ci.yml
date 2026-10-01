@@ -71,6 +71,8 @@ jobs:
           printf '%s\n%s\n' "$msrv" "$have" | sort -VC || { echo "rustc $have < MSRV $msrv"; exit 1; }
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
+      - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       - run: cargo test --locked
       - name: Validate desktop entry

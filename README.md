@@ -84,6 +84,10 @@ Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for you
 
 RAWmakase checks GitHub for a newer release after launch and once an hour, and shows a notice when one is out (turn the check off in Preferences). The Apple Silicon DMG and the Windows installer download and install the update themselves; Intel Macs, the Linux tarball, the Windows archive and package-managed installs (Homebrew, DEB, RPM, Arch) are pointed at the release page or their package manager. Settings and catalogs are kept separately from the installed application, so reinstalling over an old version loses nothing.
 
+### Usage stats
+
+After first-run setup, RAWmakase asks once whether to send an anonymous usage report once a week: the version, the system and how it was installed, with no identifier, files or photos. It is off until you agree, the question shows the exact report, and Preferences > General changes the answer. `DO_NOT_TRACK=1` turns it off. See [docs/usage-stats.md](docs/usage-stats.md) and the totals at [stats.rawmakase.com](https://stats.rawmakase.com).
+
 Each new packaged release includes `SHA256SUMS`. After downloading it beside your package, verify downloaded files on Linux with `sha256sum --ignore-missing -c SHA256SUMS`. On macOS, use `shasum -a 256 <downloaded-file>` and compare the result with that file's entry in `SHA256SUMS`.
 
 ### From source (Linux and macOS)
