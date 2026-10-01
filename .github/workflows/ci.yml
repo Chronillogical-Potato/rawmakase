@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'website/**'
       - '.github/workflows/website.yml'
+      - '.github/workflows/codeql.yml'
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'
@@ -13,6 +14,7 @@ on:
     paths-ignore:
       - 'website/**'
       - '.github/workflows/website.yml'
+      - '.github/workflows/codeql.yml'
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'

@@ -25,10 +25,16 @@ That build checks out the current `main` website and refreshes its published
 download links, including when repairing an older release. It does not need
 `WEBSITE_DISPATCH_TOKEN` or a cross-repository event.
 
-Website-only changes skip desktop CI and packaging. Changes to the Website
+Website-only changes skip desktop CI, packaging and CodeQL. Changes to the Website
 workflow also run the lightweight workflow linter. Mixed website/application
 changes retain the applicable application checks. Release-tag validation is
 unchanged.
+
+CodeQL uses the root `codeql.yml` workflow instead of GitHub's automatic default
+setup, which cannot apply these workflow trigger filters. It retains the same
+five languages, default queries and weekly scans of the repository. Switch off
+default setup when activating this workflow so it does not run a second set of
+unfiltered scans or reject the workflow's analysis uploads.
 
 Page copy and features live in `content/_index.md`; the layout is
 `layouts/index.html`. Generated output and Hugo's cache are ignored by Git.
