@@ -1,6 +1,6 @@
 <h1><img src="packaging/icons/rawmakase.svg" width="48" height="48" align="top" alt=""> RAWmakase</h1>
 
-RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from any camera LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from the cameras LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
 ![RAWmakase Develop view with presets, the photo, and curve and color controls](docs/images/screenshot-2026-09-30-full.png)
 
@@ -9,23 +9,23 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Wi
   <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · Windows (x86_64) · <a href="#install">install notes</a></sub>
 </p>
 
-It is a personal project in active development. Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
+It is a personal project in active development. It develops photos from almost every current camera; the exceptions are Sigma's Foveon cameras, monochrome cameras such as the Leica Monochrom, and DNGs that are already demosaiced ("linear" DNGs, such as merged HDR or panorama files). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 ## Features
 
 - **Develop**: white balance and picker, one-click Auto tone and Auto white balance, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders, ratings, flags, color labels, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
-- **Presets and profiles**: Lightroom XMP presets, plus DCP and XMP camera profiles you import yourself.
+- **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself.
 - **Non-destructive**: originals are never modified. Edits live in the catalog, and all writes are atomic.
-- **Fast previews**: a quick draft first, then full quality, with GPU finishing (Metal on macOS, Vulkan on Linux) and CPU fallback.
-- **Command line**: inspect, render, export thumbnails, import catalogs and benchmark without the GUI.
+- **Fast previews**: every change renders at viewport size, with the color and tone stage on the GPU (Metal on macOS, Vulkan on Linux, DirectX 12 or Vulkan on Windows) and a CPU fallback.
+- **Command line**: inspect, render, export thumbnails, import catalogs and profiles, and benchmark without the GUI.
+- **Updates**: the app checks GitHub for new releases; the Apple Silicon and Windows installer builds update themselves, other installs are pointed at the release page.
 
 ## Coming soon
 
 - LUT support
 - AI-powered masks and object removal
-- Built-in open source preset library
 - Agentic features: e.g. culling assistance
 
 ## Install
@@ -82,7 +82,7 @@ Run `rawmakase-v<version>-x86_64-pc-windows-msvc-setup.exe`. It installs for you
 
 ### Updates and verification
 
-To update, download a newer release and repeat the installation steps (replace the app in Applications on macOS). Settings and catalogs are kept separately from the installed application. There is currently no in-app updater or automatic package repository.
+RAWmakase checks GitHub for a newer release after launch and once an hour, and shows a notice when one is out (turn the check off in Preferences). The Apple Silicon DMG and the Windows installer download and install the update themselves; Intel Macs, the Linux tarball, the Windows archive and package-managed installs (Homebrew, DEB, RPM, Arch) are pointed at the release page or their package manager. Settings and catalogs are kept separately from the installed application, so reinstalling over an old version loses nothing.
 
 Each new packaged release includes `SHA256SUMS`. After downloading it beside your package, verify downloaded files on Linux with `sha256sum --ignore-missing -c SHA256SUMS`. On macOS, use `shasum -a 256 <downloaded-file>` and compare the result with that file's entry in `SHA256SUMS`.
 
@@ -131,7 +131,7 @@ Double-click a slider to reset it, or type its value for precision.
 
 ### Camera profiles
 
-RAWmakase does not ship any camera profiles. Without one, it renders with the camera matrix LibRaw provides. For Lightroom-like color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) with **Edit → Import profiles…** or `rawmakase import-profiles`. They are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
+Every camera with a usable color matrix gets two profiles of RAWmakase's own: **RAWmakase Standard** (the camera's color matrix with the DNG default tone curve) and **RAWmakase Color** (a mild look on top of it). A new photo uses a compatible imported Adobe Color, then Adobe Standard, then a DNG's own profile, and RAWmakase Color when it has none of those. No Adobe profiles are bundled. For Lightroom's color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) from the **Profile** menu in Develop, from **Preferences**, or with `rawmakase import-profiles`. On a Mac or PC, the Profile menu also looks in Camera Raw's profile folder and, when it finds profiles filed under the camera's name, offers to import them in one click. Imported profiles are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
 
 ### Command line
 
@@ -145,7 +145,7 @@ rawmakase import-catalog Lightroom.lrcat Photos.rawmakase
 rawmakase help
 ```
 
-`render` applies the photo's saved edits unless `--recipe` or `--xmp` supplies settings, and it needs `--overwrite` to replace an existing file.
+`render` starts from the photo's default look, or from an edit a release before 0.1.8 saved as a sidecar (`photo.dng.rawmakase.json` beside the photo, or in the data directory's `sidecars/` folder, whichever is newer). `--recipe` replaces that starting point with a saved RAWmakase preset; `--xmp` applies an XMP preset on top of it, so settings the XMP leaves out keep the starting point's values. For a render that depends on nothing saved, pass `--recipe`. It does not read edits from a catalog yet, so exporting Develop edits is done from the app. It needs `--overwrite` to replace an existing file.
 
 ### Where data lives
 
@@ -172,10 +172,13 @@ The repository contains no RAW photos, Lightroom catalogs or camera profiles, so
 | `RAWMAKASE_PROFILES` | `--test private_profiles` | A folder of DCP files |
 | `RAWMAKASE_TEST_DCP` | `--lib camera_profiles` | A DCP file (the assertions currently match RawTherapee's `SONY ILCE-7M2.dcp`) |
 | `RAWMAKASE_LRCAT` | `--lib catalog` | A Lightroom catalog |
+| `RAWMAKASE_CORPUS` | `--test color` | The private tier of the [color corpus](tests/corpus/README.md): your own RAWs and their Camera Raw renders |
 
 ```sh
 RAWMAKASE_FIXTURES=~/raw-fixtures cargo test --release --test raw_fixtures -- --ignored --nocapture
 ```
+
+The public part of the color corpus runs with every `cargo test`: synthetic chart DNGs rendered on the CPU and compared with committed snapshots and with Camera Raw's renders of the same charts, so a color change beyond its tolerances (ΔE00 0.5 per patch, 0.1 on a case's mean) is noticed. The GPU preview path is covered by the hardware tests below, not by this suite. When a change is intended, `RAWMAKASE_BLESS=1 cargo test --test color` rewrites the snapshots, and also the charts and the Camera Raw baseline (`tests/corpus/camera-raw/baseline.json`). Read the baseline diff on its own before committing: it records how far renders are from Camera Raw, and accepting a larger distance should be a decision, not a side effect. Commit the files with the reason.
 
 GPU tests are ignored as well; run them with `cargo test --lib gpu -- --ignored` on a machine with a compute adapter.
 

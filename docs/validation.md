@@ -1,4 +1,6 @@
-# Validation record
+# Validation record (engines 2 and 3, September 2026)
+
+This is a dated record of what was checked while engines 2 and 3 were current. Test counts and timings are from that time; today's suite is larger and the current preview path is described in [preview performance](preview-performance.md). Engine 4's measurements against Camera Raw are in [parity gaps](parity-gaps.md) and the per-stage pages it links.
 
 Test machine: Linux x86-64, AMD Ryzen 7 8745HS (8 cores / 16 threads), Rust 1.98.1, LibRaw 0.22.2, Little CMS 2.19. Tests run against private A7 II (`DSC05673.ARW`) and X100F (`DSCF8224.RAF`) fixtures; photos are not included in this project.
 
@@ -54,3 +56,7 @@ XMP validation: all 921 supplied preset/curve files parse; 785 apply to the Sony
 Catalog validation: source-preserving full import of the supplied Lightroom catalog retained 8,112 images, 275 folders and 13 collections. The embedded source archive was byte-compared against the unchanged original. Develop table parsing read 8,111 records; one empty/unsupported record remains preserved. Synthetic tests cover rollback, active journals, future schema rejection, no-overwrite publication, folder relinking, independent virtual copies, ratings/keywords/collections, catalog edit identity protection and sidecar isolation. A headless GUI test exercises Library drawing and database autosave.
 
 Preview/tree validation adds persistent SQLite cache hits, offline previews, source-change invalidation, corrupt entry recovery, cache eviction, unrelated-database protection, nested folder scopes/counts, root-button pointer interaction and successful relinking after reopening.
+
+## Structural refactor — 2026-09-28
+
+The domain split (`app.rs`, `core.rs`, `io.rs` and `catalog.rs` into the modules the [architecture guide](architecture.md) describes) kept recipe serialization, schema/pipeline versions, rendering algorithms, asset locations and CLI commands unchanged, and added no runtime dependency or database migration. The suite went from 86 tests to one that also covers bounded history, gesture coalescing, cancellation, stale and cross-task failures, overwrite confirmation, document changes during a frame, loader-resolved recipes, preset hover invalidation, injected session persistence, malformed migration input and invalid export defaults. Relative-path persistence runs in a child process with its own working directory and data directory. The private-fixture tests were not run for the refactor; automated egui interaction tests were.
