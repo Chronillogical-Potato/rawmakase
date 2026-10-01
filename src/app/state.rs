@@ -162,6 +162,8 @@ pub(super) struct ViewState {
     pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
+    /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
+    pub(super) aspect_read: bool,
     /// Spot removal settings, selection and drag in progress.
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Masking panel state.
@@ -191,6 +193,7 @@ impl Default for ViewState {
             tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
+            aspect_read: false,
             retouch: Default::default(),
             masking: Default::default(),
             monitor: None,
@@ -272,6 +275,7 @@ impl ViewState {
         self.tool = if self.tool == tool { Tool::None } else { tool };
         if matches!(self.tool, Tool::Crop) {
             self.zoom100 = false;
+            self.aspect_read = false;
         }
     }
     pub fn clear_document(&mut self) {

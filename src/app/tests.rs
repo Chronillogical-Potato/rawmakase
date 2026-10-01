@@ -1332,3 +1332,42 @@ fn upright_analysis_yields_to_corrections_applied_meanwhile() {
     );
     assert_eq!(e.document.recipe.upright.corrections, imported);
 }
+
+#[test]
+fn crop_tool_reads_each_photos_own_aspect() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    let open = |editor: &mut Editor, crop: [f32; 4]| {
+        editor.view.tool = state::Tool::None;
+        editor.document.recipe.crop = crop;
+        editor.view.toggle(state::Tool::Crop);
+        let frame = editor.begin_edit_frame();
+        editor.finish_edit_frame(frame, &ctx);
+        assert_eq!(editor.document.recipe.crop, crop, "reading changes no crop");
+        editor.view.aspect
+    };
+    // The last photo's XPan crop does not carry over to an uncropped photo.
+    editor.view.aspect = 65. / 24.;
+    assert_eq!(open(&mut editor, [0., 0., 1., 1.]), -1.);
+    // 300 × 111 is 65 x 24 to within rounding.
+    let xpan = [0., 0.223, 1., 0.777];
+    assert_eq!(open(&mut editor, xpan), 65. / 24.);
+    let custom = open(&mut editor, [0., 0., 0.5, 1.]);
+    assert!((custom - 0.75).abs() < 1e-6);
+    assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
+}

@@ -41,6 +41,44 @@ impl Editor {
             *c = [cx - w / 2., cy - h / 2., cx + w / 2., cy + h / 2.];
         }
     }
+    /// Opening the Crop tool shows the photo's own aspect, as Lightroom does,
+    /// rather than the last photo's: Original when uncropped or at the photo's
+    /// ratio, a preset it matches, or else its exact ratio as Custom.
+    pub(super) fn read_aspect(&mut self) {
+        if !self.view.is(Tool::Crop) || self.view.aspect_read {
+            return;
+        }
+        let Some(im) = self.document.full().cloned() else {
+            return;
+        };
+        self.view.aspect_read = true;
+        let c = self.document.recipe.crop;
+        if c == [0., 0., 1., 1.] {
+            self.view.aspect = -1.;
+            return;
+        }
+        let mut r = self.document.recipe.clone();
+        r.crop = [0., 0., 1., 1.];
+        let g = Geometry::new(&im, &r, 0);
+        let photo = g.oriented_width / g.oriented_height;
+        let crop = (c[2] - c[0]) / (c[3] - c[1]) * photo;
+        // As fit_aspect reads it: presets are long over short for landscape photos.
+        let aspect = if g.oriented_height > g.oriented_width {
+            1. / crop
+        } else {
+            crop
+        };
+        let near = |a: f32, b: f32| (a / b - 1.).abs() < 0.005;
+        self.view.aspect = if near(crop, photo) {
+            -1.
+        } else {
+            super::inspector::ASPECTS
+                .iter()
+                .map(|(a, _)| *a)
+                .find(|a| *a > 0. && near(aspect, *a))
+                .unwrap_or(aspect)
+        };
+    }
     /// Lightroom's Navigator: the whole photo with the zoomed area outlined.
     /// Clicking or dragging in it moves the 100% view there.
     pub(super) fn navigator_ui(&mut self, ui: &mut egui::Ui) {
