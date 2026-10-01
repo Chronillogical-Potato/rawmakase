@@ -29,7 +29,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
 | [src/lib.rs](../src/lib.rs) | Canonical domain exports and hidden compatibility aliases for older library paths. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
-| [src/raw.rs](../src/raw.rs) | Safe Rust ownership around native RAW handles, metadata, decoded camera-space images, oriented embedded thumbnails and ICC conversion. |
+| [src/raw/mod.rs](../src/raw/mod.rs) | RAW files as RAWmakase sees them: metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
+| [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
 | [src/color_math.rs](../src/color_math.rs) | Private shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
@@ -119,12 +120,16 @@ recipes and the installed preset collection; they do not own the renderer.
 | [identity.rs](../src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
 | [sidecar.rs](../src/storage/sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The library API can still write them. |
 | [session.rs](../src/storage/session.rs) | Last-opened path and monitor-profile preferences. |
-| [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, folders, photos, collections, metadata, edits, relinking and folder ingestion. |
+| [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
+| [catalog/edits.rs](../src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
+| [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
+| [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them. |
 | [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
-| [schema.sql](../src/catalog/schema.sql) | Native catalog tables and relationships, including preserved source data. |
+| [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
 | [lightroom/develop.rs](../src/catalog/lightroom/develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
+| [lightroom/history.rs](../src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
 | [export/mod.rs](../src/export/mod.rs) | Export option validation, JPEG/16-bit TIFF encoding, original-file protection, overwrite policy and atomic publication. |
 | [export/metadata.rs](../src/export/metadata.rs) | Selected EXIF/TIFF metadata and descriptions; avoids copying unsafe source offsets and maker notes. |
 
