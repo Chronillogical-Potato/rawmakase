@@ -227,11 +227,11 @@ impl Editor {
                 };
                 // Commands never cross catalogs; reloading this one (after
                 // adding or relinking a folder) keeps them.
-                if self
+                let reloaded = self
                     .library
                     .as_ref()
-                    .is_none_or(|old| old.catalog.path != l.catalog.path)
-                {
+                    .is_some_and(|old| old.catalog.path == l.catalog.path);
+                if !reloaded {
                     self.undo_log.clear();
                 }
                 self.library = Some(l);
@@ -242,9 +242,12 @@ impl Editor {
                     if let Some((source, photo, _)) = &restore {
                         library.restore_source(source, *photo);
                     }
-                    // The Library as it was shown, on launch and whenever the
-                    // catalog is loaded again (a folder added or relinked).
-                    library.apply_layout(&self.saved_layout);
+                    // The Library as it was shown, on launch and when this
+                    // catalog is loaded again (a folder added or relinked);
+                    // another catalog starts with every photo shown.
+                    if restore.is_some() || reloaded {
+                        library.apply_layout(&self.saved_layout);
+                    }
                 }
                 // Develop reopens on its photo, even one the filters now hide.
                 if let Some((_, photo, true)) = restore
