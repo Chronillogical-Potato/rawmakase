@@ -75,7 +75,7 @@ pub(super) struct Loupe {
     view: Vec2,
     /// The zoom before the last click toggled it, and when, for a
     /// double-click to undo.
-    before_click: Option<(bool, f64)>,
+    before_click: Option<(bool, f64, Option<i64>)>,
     pub state: State,
 }
 impl Loupe {
@@ -328,7 +328,8 @@ impl Library {
     }
     /// A click in the Loupe toggled the zoom away from `before`.
     pub(in crate::app) fn loupe_zoom_toggled(&mut self, before: bool) {
-        self.loupe.before_click = Some((before, self.ctx.input(|i| i.time)));
+        let at = self.ctx.input(|i| i.time);
+        self.loupe.before_click = Some((before, at, self.selection.active));
     }
     /// A double-click: back to the grid, as in Lightroom. Returns the zoom
     /// from before its first click, which is undone.
@@ -339,8 +340,8 @@ impl Library {
             .loupe
             .before_click
             .take()
-            .filter(|(_, at)| now - at < 1.)
-            .map(|(on, _)| on);
+            .filter(|(_, at, photo)| now - at < 1. && *photo == self.selection.active)
+            .map(|(on, ..)| on);
         self.close_loupe();
         before
     }

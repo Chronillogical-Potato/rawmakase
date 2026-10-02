@@ -57,7 +57,7 @@ pub(super) struct Regions {
     worker: Latest<Option<RegionJob>>,
     results: Receiver<Done>,
     ticket: u64,
-    requested: Option<(i64, [i32; 2], [u32; 2])>,
+    requested: Option<(i64, [i32; 2], [u32; 2], u32)>,
     cancel: Arc<AtomicBool>,
     pub error: Option<String>,
 }
@@ -129,7 +129,8 @@ impl Regions {
         // Positions in steps of 8 pixels, so a slow drag asks less often.
         let full = self.full.unwrap_or([4096, 4096]);
         let at = [0, 1].map(|i| (center[i] * full[i] as f32 / 8.).round() as i32);
-        let wanted = (photo, at, size);
+        // The scale counts too: the same pixels shrunk or not are another texture.
+        let wanted = (photo, at, size, (scale.min(1.) * 1000.) as u32);
         if self.requested == Some(wanted) {
             return;
         }
