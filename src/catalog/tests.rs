@@ -578,3 +578,28 @@ fn photo_info_formats_as_lightroom_shows_it() {
     assert_eq!(slow(0.5).shutter_text().as_deref(), Some("1/2 sec"));
     assert_eq!(slow(1. / 3.).shutter_text().as_deref(), Some("1/3 sec"));
 }
+#[test]
+fn edit_times_come_from_rawmakase_or_else_lightroom_history() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let c = Catalog::create(&d.path().join("c.rawmakase"))?;
+    c.db.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         INSERT INTO photos(id, folder, filename, original_path) VALUES
+             (1, 1, 'a.RAF', 'a.RAF'), (2, 1, 'b.RAF', 'b.RAF'), (3, 1, 'c.RAF', 'c.RAF');
+         UPDATE photos SET edited_at = '2024-05-01 12:00:00' WHERE id = 1;
+         INSERT INTO lightroom_history(photo, position, created, text) VALUES
+             (2, 0, 0, ''), (2, 1, 86400, '');",
+    )?;
+    let times = c.edit_times()?;
+    assert_eq!(
+        times.get(&1).map(String::as_str),
+        Some("2024-05-01 12:00:00")
+    );
+    // Lightroom's latest step, counted from 2001.
+    assert_eq!(
+        times.get(&2).map(String::as_str),
+        Some("2001-01-02 00:00:00")
+    );
+    assert!(!times.contains_key(&3));
+    Ok(())
+}

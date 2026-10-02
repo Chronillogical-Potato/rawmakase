@@ -54,6 +54,8 @@ pub struct Library {
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
+    /// The frame the Library was last drawn in, to notice it showing again.
+    drawn_pass: u64,
     /// The style the grid was last drawn with, to keep its rows in place
     /// when it changes.
     drawn_style: cell::Style,
@@ -134,6 +136,7 @@ impl Library {
             thumb_size: 190.,
             cell_style: Default::default(),
             drawn_style: Default::default(),
+            drawn_pass: 0,
             cell_info: HashMap::new(),
             strip_current: None,
             visible: Vec::new(),

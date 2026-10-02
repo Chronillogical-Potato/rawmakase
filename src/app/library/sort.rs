@@ -56,12 +56,19 @@ impl Sort {
             _ => Keys::None,
         }
     }
-    /// Sorts `indices` into `photos` by this order; ties keep their order.
-    pub(super) fn sort(self, photos: &[Photo], indices: &mut [usize], keys: &Keys) {
+    /// Sorts `indices` into `photos`, which are in capture order, by this
+    /// order, either way; photos alike in it stay in capture order.
+    pub(super) fn sort(self, photos: &[Photo], indices: &mut [usize], keys: &Keys, reverse: bool) {
         if self == Self::CaptureTime {
+            if reverse {
+                indices.reverse();
+            }
             return;
         }
-        indices.sort_by(|a, b| self.compare(&photos[*a], &photos[*b], keys));
+        indices.sort_by(|a, b| {
+            let order = self.compare(&photos[*a], &photos[*b], keys);
+            if reverse { order.reverse() } else { order }
+        });
     }
     fn compare(self, a: &Photo, b: &Photo, keys: &Keys) -> Ordering {
         match self {

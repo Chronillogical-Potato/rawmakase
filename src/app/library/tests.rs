@@ -1572,9 +1572,11 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
         added.sort();
         added
     });
-    // Reversed, the other way round.
+    // Reversed, the other way round, with photos alike still in capture
+    // order.
     library.filters.reverse = true;
     assert_eq!(order(&mut library, Sort::Rating), [a, b10, b9]);
+    assert_eq!(order(&mut library, Sort::Extension), [b10, b9, a]);
     library.filters.reverse = false;
     // Edit time: photos never edited first, then by when.
     let path = library.photo(b9).unwrap().path.clone();

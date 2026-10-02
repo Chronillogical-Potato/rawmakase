@@ -134,10 +134,7 @@ impl Filters {
             })
             .map(|(i, _)| i)
             .collect();
-        self.sort.sort(photos, &mut visible, keys);
-        if self.reverse {
-            visible.reverse()
-        }
+        self.sort.sort(photos, &mut visible, keys, self.reverse);
         visible
     }
     /// Whether the filter bar lets `p` through; `query` is in lower case.

@@ -110,6 +110,10 @@ impl Library {
                     self.info = None;
                     self.hover_info = None;
                     self.cell_info.clear();
+                    // Sorted by aspect ratio, the new sizes find their places.
+                    if self.filters.sort == super::sort::Sort::AspectRatio {
+                        self.filter();
+                    }
                 }
                 Err(e) => self.message = format!("Photo info could not be saved: {e}"),
             }

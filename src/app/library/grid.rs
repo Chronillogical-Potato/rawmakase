@@ -41,6 +41,13 @@ impl Library {
         zoom: &mut crate::app::navigator::Zoom,
     ) -> Action {
         self.poll_previews(ui.ctx());
+        // Back from Develop, sorted by edit time: edits made there move
+        // their photos.
+        let pass = ui.ctx().cumulative_pass_nr();
+        let returned = std::mem::replace(&mut self.drawn_pass, pass) + 1 < pass;
+        if returned && self.filters.sort == super::sort::Sort::EditTime {
+            self.filter();
+        }
         // Survey keeps every photo's preview it shows; other views the usual
         // number.
         self.cache.shown_at_once = 0;
