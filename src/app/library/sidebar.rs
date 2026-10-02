@@ -9,42 +9,46 @@ use eframe::egui::{self, Color32, Vec2};
 use std::collections::HashSet;
 
 impl Library {
-    pub fn sidebar(&mut self, ui: &mut egui::Ui) -> Action {
+    /// The left panel; without `navigator` when the editor shows its own,
+    /// as for a RAW in the Loupe.
+    pub fn sidebar(&mut self, ui: &mut egui::Ui, navigator: bool) -> Action {
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
             .id_salt("library-sources")
             .show(ui, |ui| {
-                section(ui, "Navigator", false, |ui| {
-                    let texture = self
-                        .selected()
-                        .and_then(|id| self.photo(id))
-                        .and_then(|p| self.texture(p));
-                    let (rect, _) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width(), ui.available_width() * 0.66),
-                        egui::Sense::hover(),
-                    );
-                    ui.painter().rect_filled(rect, 0., theme::gray(22));
-                    if texture.is_none() {
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "No photo selected",
-                            egui::FontId::proportional(11.),
-                            theme::gray(95),
+                if navigator {
+                    section(ui, "Navigator", false, |ui| {
+                        let texture = self
+                            .selected()
+                            .and_then(|id| self.photo(id))
+                            .and_then(|p| self.texture(p));
+                        let (rect, _) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), ui.available_width() * 0.66),
+                            egui::Sense::hover(),
                         );
-                    }
-                    if let Some(texture) = texture {
-                        let size = texture.size_vec2();
-                        let scale = (rect.width() / size.x).min(rect.height() / size.y);
-                        ui.painter().image(
-                            texture.id(),
-                            egui::Rect::from_center_size(rect.center(), size * scale),
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
-                            Color32::WHITE,
-                        );
-                    }
-                });
+                        ui.painter().rect_filled(rect, 0., theme::gray(22));
+                        if texture.is_none() {
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "No photo selected",
+                                egui::FontId::proportional(11.),
+                                theme::gray(95),
+                            );
+                        }
+                        if let Some(texture) = texture {
+                            let size = texture.size_vec2();
+                            let scale = (rect.width() / size.x).min(rect.height() / size.y);
+                            ui.painter().image(
+                                texture.id(),
+                                egui::Rect::from_center_size(rect.center(), size * scale),
+                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
+                                Color32::WHITE,
+                            );
+                        }
+                    });
+                }
                 section(ui, "Catalog", false, |ui| {
                     let offline = self.photos.len() - self.available_count();
                     let all = self.filters.folder_scope.is_none()

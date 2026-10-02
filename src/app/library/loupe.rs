@@ -186,6 +186,12 @@ impl Loupe {
         ));
         self.state = State::Ready(stage);
     }
+    /// Lets go of what the Loupe's own preview holds, unless already idle.
+    fn idle(&mut self) {
+        if self.requested.is_some() || self.texture.is_some() || self.zoom.region.is_some() {
+            self.reset();
+        }
+    }
     /// Forgets the photo shown, e.g. after its edit changed elsewhere.
     pub(super) fn reset(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -299,6 +305,14 @@ impl Library {
         self.loupe.open = self.selection.active.is_some();
         self.scroll_to_active = true;
     }
+    /// The RAW the Loupe shows through Develop's pipeline: the active photo,
+    /// when it is a RAW and online. JPEG, TIFF, PNG and offline photos are
+    /// shown by the Loupe's own preview instead.
+    pub fn loupe_develops(&self) -> Option<i64> {
+        let photo = self.selection.active.and_then(|id| self.photo(id))?;
+        (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
+            .then_some(photo.id)
+    }
     /// The photo's edit, as the Loupe renders it.
     fn edit_of(&self, photo: &Photo) -> Option<EditSource> {
         let (recipe, lightroom) = self.catalog.edit_texts(photo.id).ok()?;
@@ -342,6 +356,11 @@ impl Library {
         let Some(photo) = self.selection.active.and_then(|id| self.photo(id)).cloned() else {
             return Action::None;
         };
+        // An online RAW is drawn by the editor, through Develop's viewport.
+        if self.loupe_develops().is_some() {
+            self.loupe.idle();
+            return Action::None;
+        }
         let (rect, response) =
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0., theme::gray(36));

@@ -145,6 +145,15 @@ impl Editor {
                     })
                 })
             };
+            if self.library_mode
+                && self
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.loupe_develops())
+                    .is_some()
+            {
+                self.zoom_keys(ctx);
+            }
             // Develop has its own keys; the log is the same.
             if self.library_mode {
                 // Consumed, with the modifiers held for the key, so an undo
@@ -380,6 +389,26 @@ impl Editor {
             .show(ui, |_| {});
     }
 
+    /// A RAW in the Library's Loupe: loaded as the document, as Develop
+    /// does, and drawn by Develop's viewport without its tools, so it zooms
+    /// the same way and D shows it in Develop at once.
+    fn loupe_viewport(&mut self, ui: &mut egui::Ui, id: i64) {
+        if self.document.catalog_photo != Some(id) {
+            let Some(path) = self
+                .library
+                .as_ref()
+                .and_then(|l| l.photo(id))
+                .map(|p| p.path.clone())
+            else {
+                return;
+            };
+            if !self.load_raw(path, Some(id)) {
+                return;
+            }
+        }
+        self.view.tool = Tool::None;
+        self.viewport_ui(ui);
+    }
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         egui::Panel::bottom("library-status").show(ui, |ui| {
@@ -416,13 +445,18 @@ impl Editor {
             });
         });
         let mut action = crate::app::library::Action::None;
+        let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         egui::Panel::left("library-sidebar")
             .default_size(260.)
             .min_size(180.)
             .max_size(500.)
             .show(ui, |ui| {
+                // A RAW in the Loupe gets Develop's Navigator and zoom levels.
+                if develops.is_some() {
+                    self.navigator_ui(ui);
+                }
                 if let Some(library) = &mut self.library {
-                    action = library.sidebar(ui);
+                    action = library.sidebar(ui, develops.is_none());
                 } else {
                     ui.heading("Library");
                     ui.label("Create an RAWmakase catalog or import a Lightroom catalog from the Catalog menu.");
@@ -448,6 +482,9 @@ impl Editor {
                     if !matches!(a, crate::app::library::Action::None) {
                         action = a
                     }
+                    if let Some(id) = l.loupe_develops() {
+                        self.loupe_viewport(ui, id);
+                    }
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.label("Your photographs, folders and collections");
@@ -471,9 +508,36 @@ impl Editor {
         }
     }
 
+    /// Develop's zoom keys, shared with the Library's Loupe: Cmd+= and Cmd+-
+    /// step through the zoom levels, Z toggles Fit and the last zoom, F fits.
+    pub(super) fn zoom_keys(&mut self, ctx: &egui::Context) {
+        let zoom_step = ctx.input(|i| {
+            if i.modifiers.command
+                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
+            {
+                1
+            } else if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
+                -1
+            } else {
+                0
+            }
+        });
+        if zoom_step != 0 {
+            self.step_zoom(zoom_step);
+        }
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::Z) && !i.modifiers.any() {
+                self.view.zoom100 = !self.view.zoom100;
+            }
+            if i.key_pressed(egui::Key::F) && !i.modifiers.any() {
+                self.view.zoom100 = false;
+            }
+        });
+    }
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
-            let (mut copy, mut paste, mut reset, mut zoom_step) = (false, false, false, 0);
+            self.zoom_keys(ctx);
+            let (mut copy, mut paste, mut reset) = (false, false, false);
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -520,20 +584,6 @@ impl Editor {
                     && i.key_pressed(egui::Key::Y)
                 {
                     self.redo();
-                }
-                if i.modifiers.command
-                    && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
-                {
-                    zoom_step = 1;
-                }
-                if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
-                    zoom_step = -1;
-                }
-                if i.key_pressed(egui::Key::Z) && !i.modifiers.any() {
-                    self.view.zoom100 = !self.view.zoom100;
-                }
-                if i.key_pressed(egui::Key::F) {
-                    self.view.zoom100 = false;
                 }
                 if (i.key_pressed(egui::Key::C) || i.key_pressed(egui::Key::R))
                     && !i.modifiers.command
@@ -584,9 +634,6 @@ impl Editor {
                     }
                 }
             });
-            if zoom_step != 0 {
-                self.step_zoom(zoom_step);
-            }
             if copy {
                 self.copy_settings();
             }

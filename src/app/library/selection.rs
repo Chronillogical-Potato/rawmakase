@@ -249,17 +249,19 @@ impl Library {
         });
         if self.loupe.open {
             // Cmd+Option+0 is 1:1; Option changes the typed key on macOS.
-            if command && alt && physical.contains(&Key::Num0) {
+            // A RAW zooms in Develop's view, with Develop's keys.
+            let own_zoom = self.loupe_develops().is_none();
+            if own_zoom && command && alt && physical.contains(&Key::Num0) {
                 self.zoom_loupe(Some(true));
             }
-            if z_pressed && !command {
+            if own_zoom && z_pressed && !command {
                 self.zoom_loupe(None);
             }
             // Loupe moves through the photos one at a time.
             for key in keys {
                 match (key, command) {
-                    (Key::Plus | Key::Equals, true) => self.zoom_loupe(Some(true)),
-                    (Key::Minus, true) => self.zoom_loupe(Some(false)),
+                    (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
+                    (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
                     (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
                     (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
                     (Key::Home, false) => self.step(Step::Home, false),
