@@ -469,6 +469,11 @@ pub fn save_in(
         staged = Some((stage(source)?, name.clone()));
         saved.image = Some(name);
     } else if let Some(image) = &watermark.image {
+        // The image it keeps must still be there and readable.
+        if watermark.style == Style::Graphic {
+            decode(&images.join(image))
+                .context("The watermark's image can't be read; choose it again")?;
+        }
         let name = format!("{stem}.{}", extension(Path::new(image)));
         if *image != name && images.join(image).is_file() {
             staged = Some((stage(&images.join(image))?, name.clone()));
@@ -480,10 +485,15 @@ pub fn save_in(
         file.persist(images.join(name)).map_err(|e| e.error)?;
     }
     if let Some(previous) = previous {
-        if file_name(&previous.name) != file_name(&saved.name) {
+        // Compared as the disk does: a rename by case alone is the same file.
+        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+        if !same(&file_name(&previous.name), &file_name(&saved.name)) {
             let _ = std::fs::remove_file(dir.join(file_name(&previous.name)));
         }
-        if let Some(old) = previous.image.filter(|i| Some(i) != saved.image.as_ref()) {
+        if let Some(old) = previous
+            .image
+            .filter(|i| !saved.image.as_ref().is_some_and(|s| same(i, s)))
+        {
             let _ = std::fs::remove_file(images.join(old));
         }
     }

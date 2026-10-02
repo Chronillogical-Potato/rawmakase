@@ -441,7 +441,12 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                         .size(12.)
                         .color(theme::gray(150)),
                 );
-                ui.color_edit_button_rgb(&mut w.color);
+                // The picker in sRGB, as the color is stored and laid over
+                // the photo.
+                let mut srgb = w.color.map(|c| (c.clamp(0., 1.) * 255. + 0.5) as u8);
+                if ui.color_edit_button_srgb(&mut srgb).changed() {
+                    w.color = srgb.map(|c| c as f32 / 255.);
+                }
             });
             ui.checkbox(&mut w.shadow.enabled, "Shadow");
             ui.add_enabled_ui(w.shadow.enabled, |ui| {

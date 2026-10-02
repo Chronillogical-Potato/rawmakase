@@ -361,3 +361,21 @@ fn a_missing_font_style_fails_rather_than_drawing_another() {
     assert!(w.ready().is_ok());
     assert!(fonts::load("No Such Family", "Bold").is_err());
 }
+
+#[test]
+fn renaming_by_case_alone_keeps_the_preset() -> Result<()> {
+    let (dir, w) = graphic(4, 4, false)?;
+    let store = dir.path().join("watermarks");
+    let renamed = save_in(
+        &store,
+        &Watermark {
+            name: "LOGO".into(),
+            ..w.clone()
+        },
+        Some(&w.name),
+        None,
+    )?;
+    assert_eq!(presets_in(&store).len(), 1);
+    assert!(renamed.ready_in(&store.join("images")).is_ok());
+    Ok(())
+}
