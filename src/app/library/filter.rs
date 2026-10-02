@@ -3,6 +3,7 @@
 use crate::catalog::Photo;
 use std::{collections::HashSet, path::Path};
 
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Filters {
     /// Folder ids in the chosen folder and its subfolders; None is All Photographs.
     pub folder_scope: Option<HashSet<i64>>,

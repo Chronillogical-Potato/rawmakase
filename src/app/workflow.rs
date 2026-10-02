@@ -160,20 +160,6 @@ impl Editor {
             self.document.save.mark_changed();
         }
     }
-    pub(super) fn undo(&mut self) {
-        if self.document.history.undo(&mut self.document.recipe) {
-            self.document.save.mark_changed();
-            self.ensure_upright();
-            self.schedule();
-        }
-    }
-    pub(super) fn redo(&mut self) {
-        if self.document.history.redo(&mut self.document.recipe) {
-            self.document.save.mark_changed();
-            self.ensure_upright();
-            self.schedule();
-        }
-    }
     pub(super) fn effective_recipe(&self) -> Recipe {
         let mut r = if self.view.compare {
             let mut r = self

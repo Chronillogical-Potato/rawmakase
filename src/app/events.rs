@@ -225,6 +225,15 @@ impl Editor {
                 } else {
                     l.message.clone()
                 };
+                // Commands never cross catalogs; reloading this one (after
+                // adding or relinking a folder) keeps them.
+                if self
+                    .library
+                    .as_ref()
+                    .is_none_or(|old| old.catalog.path != l.catalog.path)
+                {
+                    self.undo_log.clear();
+                }
                 self.library = Some(l);
                 self.library_mode = true;
                 // On launch, return to the folder, photo and module of last time.

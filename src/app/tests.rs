@@ -1488,3 +1488,146 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     assert_eq!(editor.catalog_photo_at(&path), Some(copy));
     Ok(())
 }
+/// An editor with a catalog of `names`, its Library open.
+fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>)> {
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    for name in names {
+        std::fs::write(photos.join(name), b"fixture")?;
+    }
+    let path = d.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let library = crate::app::library::Library::load(&path, ctx.clone())?;
+    let ids = library.photos.iter().map(|p| p.id).collect();
+    e.library = Some(Box::new(library));
+    Ok((d, e, ids))
+}
+#[test]
+fn undo_brings_back_a_range_rejected_under_the_unflagged_filter() -> anyhow::Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.show_unflagged();
+    library.select(Some(ids[1]));
+    library.select_range_to(ids[3]);
+    library.edit_selection(Edit::Flag(-1), false)?;
+    assert_eq!(library.shown().len(), 2);
+    e.undo();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.shown().len(), 5);
+    assert_eq!(library.selected(), Some(ids[3]));
+    assert_eq!(library.selected_photos(), ids[1..4]);
+    assert!(library.photos.iter().all(|p| p.flag == 0));
+    assert!(e.status.starts_with("Undo 3 photos"));
+    e.redo();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.shown().len(), 2);
+    assert_eq!(library.photos.iter().filter(|p| p.flag == -1).count(), 3);
+    // A write that fails is never logged.
+    let library = e.library.as_mut().unwrap();
+    assert!(library.edit_metadata(9999, Edit::Rating(5), false).is_err());
+    e.sync_undo();
+    assert_eq!(e.undo_log.len(), (1, 0));
+    Ok(())
+}
+#[test]
+fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.library_mode = false;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.path = Some(d.path().join("photos/a.RAF"));
+    let original = e.document.recipe.clone();
+    e.document.recipe.exposure = 1.;
+    e.history(original.clone());
+    e.library
+        .as_mut()
+        .unwrap()
+        .edit_metadata(ids[0], Edit::Flag(1), false)?;
+    e.undo();
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, 0);
+    assert_eq!(e.document.recipe.exposure, 1.);
+    assert!(!e.library_mode);
+    e.undo();
+    assert_eq!(e.document.recipe, original);
+    e.redo();
+    e.redo();
+    assert_eq!(e.document.recipe.exposure, 1.);
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, 1);
+    Ok(())
+}
+#[test]
+fn undoing_a_history_click_returns_to_the_exact_step() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    for exposure in [0.25, 0.5, 1.] {
+        let before = e.document.recipe.clone();
+        e.document.recipe.exposure = exposure;
+        e.history(before);
+    }
+    // A click on the first state jumps three steps back as one command.
+    assert!(e.document.history.jump(0, &mut e.document.recipe));
+    assert_eq!(e.document.recipe.exposure, 0.);
+    e.undo();
+    assert_eq!(e.document.recipe.exposure, 1.);
+    assert_eq!(e.document.history.steps().1, 3);
+    e.redo();
+    assert_eq!(e.document.history.steps().1, 0);
+    // The History panel still lists every step.
+    assert_eq!(e.document.history.steps().0.len(), 3);
+}
+#[test]
+fn a_library_change_is_undone_in_the_library() -> anyhow::Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[1]));
+    library.edit_selection(Edit::Rating(4), false)?;
+    e.sync_undo();
+    // Off to Develop on the other photo.
+    e.library_mode = false;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.path = Some(d.path().join("photos/a.RAF"));
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    e.undo();
+    assert!(e.library_mode);
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
+    assert_eq!(library.selected(), Some(ids[1]));
+    Ok(())
+}
+#[test]
+fn undoing_a_history_click_after_a_new_branch_restores_its_own_state() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let before = e.document.recipe.clone();
+    e.document.recipe.exposure = 0.5;
+    e.history(before);
+    // Click the opened state, then edit: History branches.
+    assert!(e.document.history.jump(0, &mut e.document.recipe));
+    let before = e.document.recipe.clone();
+    e.document.recipe.exposure = 1.;
+    e.history(before);
+    e.undo();
+    assert_eq!(e.document.recipe.exposure, 0.);
+    // The same step count now leads to the other branch; the click's own
+    // state comes back.
+    e.undo();
+    assert_eq!(e.document.recipe.exposure, 0.5);
+}
+#[test]
+fn a_key_that_changes_nothing_is_not_an_undo_step() -> anyhow::Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.edit_metadata(ids[0], Edit::Rating(5), false)?;
+    library.edit_metadata(ids[0], Edit::Rating(5), false)?;
+    e.sync_undo();
+    assert_eq!(e.undo_log.len(), (1, 0));
+    e.undo();
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().rating, 0);
+    Ok(())
+}

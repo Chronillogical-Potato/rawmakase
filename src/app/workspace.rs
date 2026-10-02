@@ -22,10 +22,14 @@ impl Editor {
         if self.library_mode {
             // The Grid applies a key to every selected photo, as Lightroom does.
             match shortcut {
-                Some((edit, advance)) => match library.edit_selection(edit, advance) {
-                    Ok(_) => self.status = library.message.clone(),
-                    Err(e) => self.status = format!("Metadata could not be saved: {e}"),
-                },
+                Some((edit, advance)) => {
+                    match library.edit_selection(edit, advance) {
+                        Ok(_) => self.status = library.message.clone(),
+                        Err(e) => self.status = format!("Metadata could not be saved: {e}"),
+                    }
+                    // Logged now, as a Library change, whatever this frame does next.
+                    self.sync_undo();
+                }
                 None => library.selection_keys(ctx),
             }
             return;
@@ -36,6 +40,8 @@ impl Editor {
         match library.edit_metadata(id, edit, advance) {
             Ok(next) => {
                 self.status = library.message.clone();
+                // Logged now, while this photo is still the one in Develop.
+                self.sync_undo();
                 if let Some(next) = next {
                     self.develop_catalog_photo(next);
                     if self.document.catalog_photo != Some(next)
@@ -108,6 +114,7 @@ impl Editor {
             self.collapsed = collapsed;
             let _ = self.save_session();
         }
+        self.sync_undo();
         let place = self.current_place();
         if self.library.is_some() && place != self.saved_place {
             self.saved_place = place;
@@ -126,6 +133,24 @@ impl Editor {
                     })
                 })
             };
+            // Develop has its own keys; the log is the same.
+            if self.library_mode {
+                // Consumed, with the modifiers held for the key, so an undo
+                // that opens Develop is not run again by Develop's keys.
+                use egui::{Key, Modifiers};
+                let (undo, redo) = ctx.input_mut(|i| {
+                    let undo = i.consume_key(Modifiers::COMMAND, Key::Z);
+                    let redo = i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
+                        || (!cfg!(target_os = "macos")
+                            && i.consume_key(Modifiers::COMMAND, Key::Y));
+                    (undo, redo)
+                });
+                if undo {
+                    self.undo();
+                } else if redo {
+                    self.redo();
+                }
+            }
             if plain(egui::Key::G) && self.flush() {
                 self.library_mode = true;
             }

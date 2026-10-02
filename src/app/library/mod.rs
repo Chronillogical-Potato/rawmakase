@@ -11,6 +11,15 @@ pub enum Action {
     RelinkFolder(i64),
     AddFolder,
 }
+/// Where the Library was: its source, filter bar and selection, for undo to
+/// return to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Place {
+    filters: filter::Filters,
+    folder: String,
+    selection: selection::Selection,
+}
+pub use metadata::{Metadata, MetadataCommand};
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,6 +59,8 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    /// Metadata changes not yet handed to the shared undo log.
+    done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
     capture: Option<capture::Backfill>,
     /// Photos the capture-time backfill tried since the last online check.
@@ -95,6 +106,7 @@ impl Library {
             ctx,
             copy_request: None,
             copy_names: Default::default(),
+            done: Vec::new(),
             capture: None,
             capture_tried: HashSet::new(),
             keep_in_place: None,
@@ -216,122 +228,46 @@ impl Library {
         labels.extend(custom);
         labels
     }
-    /// Sets the rating, flag or label of one photo, as Develop and the
-    /// filmstrip do; see `edit_photos`.
-    pub fn edit_metadata(
-        &mut self,
-        id: i64,
-        edit: crate::app::photo_metadata::Edit,
-        advance: bool,
-    ) -> Result<Option<i64>> {
-        self.edit_photos(&[id], edit, advance)
-    }
-    /// A metadata key in the Grid: Lightroom applies it to every selected
-    /// photo.
-    pub fn edit_selection(
-        &mut self,
-        edit: crate::app::photo_metadata::Edit,
-        advance: bool,
-    ) -> Result<Option<i64>> {
-        self.edit_photos(&self.selected_ids(), edit, advance)
-    }
-    /// Sets the rating, flag or label of `ids` in one transaction. A toggle
-    /// takes its value from the active photo, so all of them end up alike.
-    /// With `advance` (Shift), a single photo is followed by the next one
-    /// shown, which is returned. A photo the filter now hides leaves the
-    /// selection; when the active one goes, the next one shown is selected.
-    pub(super) fn edit_photos(
-        &mut self,
-        ids: &[i64],
-        edit: crate::app::photo_metadata::Edit,
-        advance: bool,
-    ) -> Result<Option<i64>> {
-        let Some(&first) = ids.first() else {
-            return Ok(None);
-        };
-        let lead = self
-            .selection
-            .active
-            .filter(|id| ids.contains(id))
-            .unwrap_or(first);
-        let p = self
-            .photo(lead)
-            .ok_or_else(|| anyhow::anyhow!("Unknown photo"))?;
-        let edit = edit.resolve(p);
-        let changes: Vec<(i64, i32, i32, String)> = ids
-            .iter()
-            .filter_map(|id| self.photo(*id))
-            .map(|p| {
-                let (rating, flag, label) = edit.values(p);
-                (p.id, rating, flag, label)
-            })
-            .collect();
-        let position = self.visible.iter().position(|i| self.photos[*i].id == lead);
-        let following: Vec<_> = position.map_or_else(Vec::new, |at| {
-            self.visible[at + 1..]
-                .iter()
-                .map(|i| self.photos[*i].id)
-                .filter(|id| !ids.contains(id))
-                .collect()
-        });
-        self.catalog.set_metadata_of(&changes)?;
-        for (id, rating, flag, label) in &changes {
-            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
-                p.rating = *rating;
-                p.flag = *flag;
-                p.label = label.clone();
-            }
-        }
-        let (_, rating, flag, label) = &changes[0];
-        let summary = match &edit {
-            crate::app::photo_metadata::Edit::Rating(_) => format!("{rating} stars"),
-            crate::app::photo_metadata::Edit::RatingDelta(_) => "Rating changed".into(),
-            crate::app::photo_metadata::Edit::Label(_)
-            | crate::app::photo_metadata::Edit::ToggleLabel(_) => {
-                if label.is_empty() {
-                    "No label".into()
-                } else {
-                    label.clone()
-                }
-            }
-            _ => flag_name(*flag).into(),
-        };
-        self.message = match self.photo(lead) {
-            Some(p) if changes.len() == 1 => format!(
-                "{} · {} stars · {} · {}",
-                p.filename,
-                p.rating,
-                flag_name(p.flag),
-                if p.label.is_empty() {
-                    "No label"
-                } else {
-                    &p.label
-                }
-            ),
-            _ => format!("{} photos · {summary}", changes.len()),
-        };
+    #[cfg(test)]
+    pub(in crate::app) fn show_unflagged(&mut self) {
+        self.filters.flag = 0;
         self.filter();
-        let next = following
-            .into_iter()
-            .find(|next| self.visible.iter().any(|i| self.photos[*i].id == *next));
-        let still_visible = self.visible.iter().any(|i| self.photos[*i].id == lead);
-        let advance = advance && changes.len() == 1;
-        if advance || !still_visible {
-            let to = next.or_else(|| {
-                if still_visible {
-                    Some(lead)
-                } else {
-                    self.visible.last().map(|i| self.photos[*i].id)
-                }
-            });
-            // Photos still selected and shown stay selected.
-            if self.selection.selected.is_empty() || advance {
-                self.select(to);
-            } else if let Some(to) = to {
-                self.make_active(to);
-            }
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn select_range_to(&mut self, id: i64) {
+        self.click(id, egui::Modifiers::SHIFT);
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn shown(&self) -> Vec<i64> {
+        self.visible.iter().map(|i| self.photos[*i].id).collect()
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
+        self.selected_ids()
+    }
+    pub(in crate::app) fn place(&self) -> Place {
+        Place {
+            filters: self.filters.clone(),
+            folder: self.selected_folder.clone(),
+            selection: self.selection.clone(),
         }
-        Ok(if advance { next } else { None })
+    }
+    /// Returns to `place`, with the photos it had selected that are still
+    /// there, and scrolls to its active photo.
+    pub(in crate::app) fn go_to_place(&mut self, place: &Place) {
+        self.filters = place.filters.clone();
+        self.selected_folder = place.folder.clone();
+        // The source as the catalog has it now, e.g. after a folder gained
+        // subfolders since.
+        if let Some(scope) = self.folder_scope(&place.folder) {
+            self.filters.folder_scope = Some(scope);
+        }
+        if let Some(id) = self.filters.collection {
+            self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
+        }
+        self.selection = place.selection.clone();
+        self.filter();
+        self.scroll_to_active = true;
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
@@ -465,13 +401,6 @@ impl Library {
         self.copy_names.discard();
     }
 }
-fn flag_name(flag: i32) -> &'static str {
-    match flag {
-        1 => "Pick",
-        -1 => "Reject",
-        _ => "Unflagged",
-    }
-}
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
@@ -483,6 +412,7 @@ mod filmstrip;
 mod filter;
 mod grid;
 mod info;
+mod metadata;
 mod previews;
 mod selection;
 mod sidebar;
