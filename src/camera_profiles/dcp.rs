@@ -119,6 +119,28 @@ impl Dcp {
             })
             .unwrap_or_default()
     }
+    /// The colour temperature of a CalibrationIlluminant tag, D65 when absent.
+    fn kelvin(&self, id: u16) -> Result<f32> {
+        let v = self.scalar(id, 21.)?;
+        Ok(match v as u32 {
+            17 => 2856.,
+            21 => 6504.,
+            23 => 5003.,
+            20 => 5503.,
+            22 => 7504.,
+            1 | 9 => 5500.,
+            24 => 3200.,
+            _ => anyhow::bail!("Unsupported calibration illuminant {v}"),
+        })
+    }
+    /// The second illuminant, which defaults to the first.
+    fn kelvin2(&self) -> Result<f32> {
+        if self.tags.contains_key(&50779) {
+            self.kelvin(50779)
+        } else {
+            self.kelvin(50778)
+        }
+    }
     fn matrix(&self, id: u16) -> Result<Matrix> {
         let a = self.numbers(id)?;
         ensure!(a.len() == 9, "Profile must have three color channels");
@@ -166,18 +188,6 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
         d.scalar(50941, 0.)? != 2.,
         "This profile prohibits embedding; recipes embed profiles for reproducibility"
     );
-    let kelvin = |v: f32| -> Result<f32> {
-        Ok(match v as u32 {
-            17 => 2856.,
-            21 => 6504.,
-            23 => 5003.,
-            20 => 5503.,
-            22 => 7504.,
-            1 | 9 => 5500.,
-            24 => 3200.,
-            _ => anyhow::bail!("Unsupported calibration illuminant {v}"),
-        })
-    };
     let f1 = d
         .matrix(50964)
         .context("A forward-matrix DCP is required; matrix-only profiles are not yet supported")?;
@@ -215,8 +225,8 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
         calibration_signature: d.text(50932),
         forward1: f1,
         forward2: f2,
-        kelvin1: kelvin(d.scalar(50778, 21.)?)?,
-        kelvin2: kelvin(d.scalar(50779, d.scalar(50778, 21.)?)?)?,
+        kelvin1: d.kelvin(50778)?,
+        kelvin2: d.kelvin2()?,
         hue1: d.table(50937, 50938, 51107)?,
         hue2: d.table(50937, 50939, 51107)?,
         look: d.table(50981, 50982, 51108)?,
@@ -225,4 +235,25 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
     };
     p.validate()?;
     Ok(p)
+}
+
+/// The colour matrix of a profile at D65, interpolated between its two
+/// calibration illuminants as `CameraProfile` does. A DNG that carries colour
+/// matrices but no forward matrix has no profile `from_bytes` accepts, and this
+/// is what it can still be rendered with. `None` when there is no matrix.
+pub fn d65_color_matrix(b: &[u8]) -> Result<Option<Matrix>> {
+    let d = Dcp::read(b)?;
+    if !d.tags.contains_key(&50721) {
+        return Ok(None);
+    }
+    let a = d.matrix(50721)?;
+    let b = if d.tags.contains_key(&50722) {
+        d.matrix(50722)?
+    } else {
+        a
+    };
+    let w = super::weight(6504., d.kelvin(50778)?, d.kelvin2()?);
+    Ok(Some(std::array::from_fn(|i| {
+        std::array::from_fn(|j| a[i][j] * (1. - w) + b[i][j] * w)
+    })))
 }
