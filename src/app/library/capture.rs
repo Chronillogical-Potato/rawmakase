@@ -80,22 +80,11 @@ impl Library {
                 photo.captured = (*time).clone();
             }
         }
-        let anchor = self.selected().and_then(|id| {
-            self.visible
-                .iter()
-                .position(|i| self.photos[*i].id == id)
-                .map(|at| (id, at))
+        self.resort_in_place(|library| {
+            library.photos.sort_by(|a, b| {
+                (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
+            });
         });
-        // A selected photo scrolled out of view is no anchor: the view stays.
-        let anchor = anchor.filter(|(_, at)| self.grid_shown.contains(at));
-        self.photos.sort_by(|a, b| {
-            (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
-        });
-        self.filter();
-        // Several batches before the grid is drawn again: the first position counts.
-        if self.keep_in_place.is_none() {
-            self.keep_in_place = anchor;
-        }
     }
 }
 

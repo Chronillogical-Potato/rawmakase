@@ -93,9 +93,9 @@ impl Sort {
             Self::Rating => a.rating.cmp(&b.rating),
             Self::Pick => a.flag.cmp(&b.flag),
             Self::LabelColor => label_rank(&a.label).cmp(&label_rank(&b.label)),
-            Self::LabelText => a.label.to_lowercase().cmp(&b.label.to_lowercase()),
+            Self::LabelText => caseless(&a.label, &b.label),
             Self::FileName => natural(&a.filename, &b.filename),
-            Self::Extension => extension(&a.filename).cmp(&extension(&b.filename)),
+            Self::Extension => caseless(extension(&a.filename), extension(&b.filename)),
             Self::AspectRatio => {
                 let aspect = |p: &Photo| match keys {
                     Keys::Aspects(aspects) => aspects.get(&p.id).copied(),
@@ -129,46 +129,53 @@ fn label_rank(label: &str) -> usize {
         None => LABELS.len(),
     }
 }
-fn extension(filename: &str) -> String {
-    std::path::Path::new(filename)
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
+fn extension(filename: &str) -> &str {
+    filename
+        .rsplit_once('.')
+        .map_or("", |(_, extension)| extension)
+}
+/// `a` against `b`, case aside, without allocating: sorting compares often.
+fn caseless(a: &str, b: &str) -> Ordering {
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .cmp(b.chars().flat_map(char::to_lowercase))
 }
 /// File names as people read them: case aside, and runs of digits by value,
-/// so IMG_9 comes before IMG_10.
+/// so IMG_9 comes before IMG_10. Compares in place, without allocating.
 fn natural(a: &str, b: &str) -> Ordering {
-    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
-    loop {
-        match (a.peek().copied(), b.peek().copied()) {
-            (None, None) => return Ordering::Equal,
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let number = |chars: &mut std::iter::Peekable<std::str::Chars>| {
-                    let mut digits = String::new();
-                    while let Some(c) = chars.next_if(char::is_ascii_digit) {
-                        digits.push(c);
-                    }
-                    digits
-                };
-                let (x, y) = (number(&mut a), number(&mut b));
-                let (tx, ty) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
-                let order = tx.len().cmp(&ty.len()).then_with(|| tx.cmp(ty));
-                if order != Ordering::Equal {
-                    return order;
-                }
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i].is_ascii_digit() && b[j].is_ascii_digit() {
+            let ((x, next_i), (y, next_j)) = (digits(a, i), digits(b, j));
+            let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
+            if order != Ordering::Equal {
+                return order;
             }
-            (Some(x), Some(y)) => {
-                let order = x.to_lowercase().cmp(y.to_lowercase());
-                if order != Ordering::Equal {
-                    return order;
-                }
-                a.next();
-                b.next();
+            (i, j) = (next_i, next_j);
+        } else {
+            let order = a[i].to_ascii_lowercase().cmp(&b[j].to_ascii_lowercase());
+            if order != Ordering::Equal {
+                return order;
             }
+            i += 1;
+            j += 1;
         }
     }
+    (a.len() - i).cmp(&(b.len() - j))
+}
+/// The run of digits in `s` from `from`, without its leading zeros, and
+/// where it ends.
+fn digits(s: &[u8], from: usize) -> (&[u8], usize) {
+    let end = s[from..]
+        .iter()
+        .position(|c| !c.is_ascii_digit())
+        .map_or(s.len(), |n| from + n);
+    let start = s[from..end]
+        .iter()
+        .position(|c| *c != b'0')
+        .map_or(end, |n| from + n);
+    (&s[start..end], end)
 }
 
 #[cfg(test)]

@@ -259,6 +259,25 @@ impl Library {
         );
         self.keep_shown_selected();
     }
+    /// Applies `change` and filters again, keeping the selected photo where
+    /// it was on screen: for a re-sort the user did not ask for, such as
+    /// capture times or sizes read in the background.
+    fn resort_in_place(&mut self, change: impl FnOnce(&mut Self)) {
+        let anchor = self.selected().and_then(|id| {
+            self.visible
+                .iter()
+                .position(|i| self.photos[*i].id == id)
+                .map(|at| (id, at))
+        });
+        // A selected photo scrolled out of view is no anchor: the view stays.
+        let anchor = anchor.filter(|(_, at)| self.grid_shown.contains(at));
+        change(self);
+        self.filter();
+        // Several batches before the grid is drawn again: the first position counts.
+        if self.keep_in_place.is_none() {
+            self.keep_in_place = anchor;
+        }
+    }
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
     }
