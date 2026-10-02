@@ -76,7 +76,10 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open || self.export_modal() || self.remove_copy.is_some();
+        let modal = self.preferences.open
+            || self.export_modal()
+            || self.remove_copy.is_some()
+            || self.view.shortcuts;
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);

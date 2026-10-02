@@ -71,6 +71,8 @@ pub struct Library {
     info_reader: Option<background::Reader<Option<Option<crate::catalog::PhotoInfo>>>>,
     /// The Loupe's Info overlay.
     loupe_info: photo_info::Overlay,
+    /// Photo info was asked for while it was being read.
+    info_again: bool,
     /// The active photo's info, as last read from the catalog.
     info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// Photos the capture-time backfill tried since the last online check.
@@ -124,6 +126,7 @@ impl Library {
             capture: None,
             info_reader: None,
             info: None,
+            info_again: false,
             loupe_info: Default::default(),
             capture_tried: HashSet::new(),
             keep_in_place: None,

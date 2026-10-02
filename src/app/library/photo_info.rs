@@ -19,7 +19,9 @@ impl Library {
     }
     /// Reads the info of the photos that have none, unless already reading.
     pub(super) fn start_photo_info(&mut self) {
+        // Asked again while reading (a volume came back): once it is done.
         if self.info_reader.is_some() {
+            self.info_again = true;
             return;
         }
         let Ok(missing) = self.catalog.photos_without_info() else {
@@ -44,6 +46,9 @@ impl Library {
         let (read, done) = reader.poll();
         if done {
             self.info_reader = None;
+            if std::mem::take(&mut self.info_again) {
+                self.start_photo_info();
+            }
         }
         // A file that could not be read is left for the next online check.
         let infos: Vec<_> = read

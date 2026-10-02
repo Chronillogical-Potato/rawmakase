@@ -83,6 +83,11 @@ impl Editor {
         if !self.view.shortcuts {
             return;
         }
+        // Cmd+/ closes it again; other keys stay with the sheet.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash)) {
+            self.view.shortcuts = false;
+            return;
+        }
         // The current module's shortcuts come first.
         let library: [Group; 4] = [
             ("Library grid", &LIBRARY),
