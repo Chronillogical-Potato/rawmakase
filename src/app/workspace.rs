@@ -416,10 +416,19 @@ impl Editor {
             }
             (self.view.zoom100, self.view.zoom_level, self.view.pan) = zoom;
         }
-        // Develop's tools and Before view stay in Develop.
-        if self.view.tool != Tool::None || self.view.compare {
+        // Still the previous photo, e.g. it could not be saved: never show it
+        // under this one's name.
+        if self.document.catalog_photo != Some(id) {
+            ui.centered_and_justified(|ui| {
+                ui.label(egui::RichText::new(&self.status).color(theme::gray(150)));
+            });
+            return;
+        }
+        // Develop's tools, Before view and clipping warning stay in Develop.
+        if self.view.tool != Tool::None || self.view.compare || self.view.clipping {
             self.view.tool = Tool::None;
             self.view.compare = false;
+            self.view.clipping = false;
             self.schedule();
         }
         self.viewport_ui(ui);
@@ -551,6 +560,15 @@ impl Editor {
             });
             if z {
                 self.view.zoom100 = !self.view.zoom100;
+            }
+            // Cmd+Option+0: 1:1. Option changes the typed key on macOS.
+            let actual = i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { physical_key: Some(egui::Key::Num0), pressed: true, modifiers, .. }
+                    if modifiers.command && modifiers.alt)
+            });
+            if actual {
+                self.view.zoom100 = true;
+                self.view.zoom_level = 1.;
             }
             if i.key_pressed(egui::Key::F) && !i.modifiers.any() {
                 self.view.zoom100 = false;
