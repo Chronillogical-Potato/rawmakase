@@ -1257,3 +1257,45 @@ fn compare_shows_the_select_beside_a_candidate() -> Result<()> {
     assert_eq!(library.compare.candidate, None);
     Ok(())
 }
+#[test]
+fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.select(Some(ids[0]));
+    library.open_compare();
+    // Rejecting the select with Shift under an Unflagged filter: it gives
+    // way to the candidate, beside the next photo, without skipping one.
+    library.filters.flags = [0].into();
+    library.filter();
+    library.edit_compared(Edit::Flag(-1), true)?;
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[2]))
+    );
+    // An active candidate promoted to the select stays active.
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.filters.collection = Some(1);
+    library.filters.members = [ids[2], ids[3]].into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    assert_eq!(library.compare.candidate, Some(ids[3]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    assert_eq!(library.selected(), Some(ids[2]));
+    // A source with neither photo seeds Compare from what it shows.
+    library.filters.members = [ids[0], ids[1]].into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[1]));
+    library.filters.collection = None;
+    library.filters.flags.clear();
+    library.filter();
+    // A selection another command makes, such as a new virtual copy, is
+    // followed.
+    library.keep_compared_shown();
+    let copy = library.create_virtual_copy(ids[1])?;
+    assert_eq!(library.keep_compared_shown(), Some(copy));
+    assert_eq!(library.selected(), Some(copy));
+    Ok(())
+}

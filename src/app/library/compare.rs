@@ -34,6 +34,9 @@ pub(super) struct Compare {
     /// None when no other photo is shown.
     pub candidate: Option<i64>,
     pub active: Side,
+    /// The selection as Compare last set it; one changed since, by undo or
+    /// a new virtual copy, is followed.
+    synced: Option<super::selection::Selection>,
 }
 impl Compare {
     fn id(&self, side: Side) -> Option<i64> {
@@ -73,6 +76,14 @@ impl Library {
         else {
             return;
         };
+        self.loupe.open = false;
+        self.loupe.reset();
+        self.compare.open = true;
+        self.seed_compare(select);
+    }
+    /// `select` as the select, beside the next photo selected with it, or
+    /// else the next one shown; the select is active.
+    fn seed_compare(&mut self, select: i64) {
         let others: Vec<i64> = self
             .selected_ids()
             .into_iter()
@@ -93,14 +104,9 @@ impl Library {
             .copied()
             .or_else(|| self.next_candidate(select, None, 1))
             .or_else(|| self.next_candidate(select, None, -1));
-        self.loupe.open = false;
-        self.loupe.reset();
-        self.compare = Compare {
-            open: true,
-            select: Some(select),
-            candidate,
-            active: Side::Select,
-        };
+        self.compare.select = Some(select);
+        self.compare.candidate = candidate;
+        self.compare.active = Side::Select;
         self.sync_compare_selection();
     }
     /// Esc or G: back to the grid, with both photos selected.
@@ -176,6 +182,7 @@ impl Library {
             .collect();
         self.selection.active = active;
         self.selection.anchor = active;
+        self.compare.synced = Some(self.selection.clone());
     }
     /// A rating, flag or label key in Compare: the active photo only. With
     /// Shift, the candidate moves on.
@@ -188,23 +195,39 @@ impl Library {
             return Ok(());
         };
         self.edit_metadata(id, edit, false)?;
-        if advance {
+        // A photo the filter now hides has already given way to the next.
+        let hidden = !self.is_shown(id);
+        self.keep_compared_shown();
+        if advance && !hidden {
             self.step_candidate(1);
         }
         self.sync_compare_selection();
         Ok(())
     }
-    /// Keeps Compare to photos shown: one removed, or hidden by another
-    /// source or filter, gives way to the next one shown, the select to the
-    /// candidate. Returns the select; None when nothing is left to show.
+    fn is_shown(&self, id: i64) -> bool {
+        self.visible.iter().any(|i| self.photos[*i].id == id)
+    }
+    /// Keeps Compare to the selection and the photos shown. A selection
+    /// another command changed (undo, a new virtual copy) is followed. A
+    /// photo removed, or hidden by another source or filter, gives way: the
+    /// candidate to the next photo shown, the select to the candidate, both
+    /// to the photos shown. The active photo stays active wherever it is.
+    /// Returns the select; None when nothing is shown.
     pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
-        let shown =
-            |library: &Self, id: &i64| library.visible.iter().any(|i| library.photos[*i].id == *id);
-        if self.compare.candidate.is_some_and(|id| !shown(self, &id)) {
+        if self.compare.synced.as_ref() != Some(&self.selection)
+            && let Some(active) = self.selection.active.filter(|id| self.is_shown(*id))
+        {
+            self.seed_compare(active);
+        }
+        let active = self.compare.id(self.compare.active);
+        if self.compare.candidate.is_some_and(|id| !self.is_shown(id)) {
             self.compare.candidate = None;
         }
-        if self.compare.select.is_some_and(|id| !shown(self, &id)) {
+        if self.compare.select.is_some_and(|id| !self.is_shown(id)) {
             self.compare.select = self.compare.candidate.take();
+        }
+        if self.compare.select.is_none() {
+            self.compare.select = self.visible.first().map(|i| self.photos[*i].id);
         }
         let select = self.compare.select?;
         if self.compare.candidate.is_none() {
@@ -212,9 +235,11 @@ impl Library {
                 .next_candidate(select, None, 1)
                 .or_else(|| self.next_candidate(select, None, -1));
         }
-        if self.compare.id(self.compare.active).is_none() {
-            self.compare.active = Side::Select;
-        }
+        self.compare.active = if active.is_some() && active == self.compare.candidate {
+            Side::Candidate
+        } else {
+            Side::Select
+        };
         Some(select)
     }
     pub(super) fn compare_keys(&mut self, presses: &[super::selection::Press]) {
