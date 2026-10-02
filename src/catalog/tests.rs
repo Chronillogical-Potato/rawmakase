@@ -287,6 +287,28 @@ fn lightroom_history_text_decodes_plain_and_compressed() {
     );
 }
 #[test]
+fn lightroom_history_text_is_bounded_by_its_declared_length() {
+    use std::io::Write;
+    /// A zlib stream over `len` bytes of zeroes: small input, large output.
+    fn bomb(declared: u32, len: usize) -> Vec<u8> {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&vec![0u8; len]).unwrap();
+        let mut blob = declared.to_be_bytes().to_vec();
+        blob.extend(z.finish().unwrap());
+        blob
+    }
+    let decode = super::lightroom::history::decode_history_text;
+    // A length past the cap is refused without decompressing anything.
+    assert!(decode(&bomb(0xffff_ffff, 64)).is_none());
+    // A declared length inside the cap bounds the read, and a stream that expands
+    // past it is refused rather than read cut short.
+    assert!(decode(&bomb(8, 1 << 20)).is_none());
+    assert_eq!(
+        decode(&bomb(8, 8)).as_deref(),
+        Some("\0".repeat(8).as_str())
+    );
+}
+#[test]
 fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> {
     let text = r#"s = { ProcessVersion = "5.7", Exposure = 0.75, Contrast = 40, Brightness = 50, Clarity = 0 }"#;
     let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
