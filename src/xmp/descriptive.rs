@@ -303,6 +303,26 @@ fn capture(text: &str) -> Option<Capture> {
         Some(_) => return None,
         None => None,
     };
+    // A real day and time, not only their shape.
+    let n = |s: &str| s.parse::<u32>().ok();
+    let (year, month, day) = (n(&date[..4])?, n(&date[5..7])?, n(&date[8..10])?);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    let (hour, minute, second) = (n(&time[..2])?, n(&time[3..5])?, n(&time[6..8])?);
+    if day == 0 || day > days || hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+    if let Some(o) = &offset
+        && (n(&o[1..3])? > 14 || n(&o[4..6])? > 59)
+    {
+        return None;
+    }
     let captured = format!("{date}T{time}");
     // A date the catalog can sort by: never 0000-00-00.
     crate::export::exif::lightroom_time(&captured, None)?;
@@ -337,8 +357,12 @@ fn location(p: &Packet) -> Option<Location> {
         };
         Some(sign * value)
     };
-    let lat = coordinate(p.text(EXIF, "GPSLatitude")?)?;
-    let lon = coordinate(p.text(EXIF, "GPSLongitude")?)?;
+    let (lat, lon) = (p.text(EXIF, "GPSLatitude")?, p.text(EXIF, "GPSLongitude")?);
+    // Both there and empty: the location was removed.
+    if lat.is_empty() && lon.is_empty() {
+        return Some(Location::Cleared);
+    }
+    let (lat, lon) = (coordinate(lat)?, coordinate(lon)?);
     if !(-90.0..=90.).contains(&lat) || !(-180.0..=180.).contains(&lon) {
         return None;
     }

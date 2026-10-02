@@ -107,6 +107,11 @@ impl Editor {
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.read_metadata = Some(ids);
         }
+        if let Some(library) = &mut self.library
+            && library.take_reread_finished()
+        {
+            self.status = library.message.clone();
+        }
         self.remove_copy_window(&ctx);
         self.read_metadata_window(&ctx);
         self.shortcuts_window(&ctx);
@@ -490,12 +495,13 @@ impl Editor {
                     ui.add(egui::Spinner::new().size(11.));
                     ui.small(work);
                 } else {
-                    ui.small(
-                        self.library
-                            .as_ref()
-                            .filter(|l| !l.message.is_empty())
-                            .map_or(self.status.as_str(), |l| l.message.as_str()),
-                    );
+                    let library = self.library.as_ref().filter(|l| !l.message.is_empty());
+                    let shown = ui.small(library.map_or(self.status.as_str(), |l| l.message.as_str()));
+                    // A summary (sidecars that could not be read) lists its
+                    // items on hover.
+                    if let Some(detail) = library.and_then(|l| l.message_detail()) {
+                        shown.on_hover_text(detail);
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = ui
@@ -767,8 +773,8 @@ impl Editor {
                 let detail = self
                     .library
                     .as_ref()
-                    .filter(|l| l.message == self.status && !l.message_detail.is_empty())
-                    .map(|l| l.message_detail.clone());
+                    .filter(|l| l.message == self.status)
+                    .and_then(|l| l.message_detail().map(String::from));
                 ui.small(self.document.save.message().unwrap_or(&self.status))
                     .on_hover_text(detail.unwrap_or_else(|| {
                         if self.view.monitor.is_some() {

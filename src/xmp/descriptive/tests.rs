@@ -210,3 +210,29 @@ fn an_empty_rating_is_none_and_an_impossible_date_is_not_read() -> Result<()> {
     assert_eq!(r.capture.unwrap().captured, "2020-02-02T10:00:00");
     Ok(())
 }
+
+#[test]
+fn impossible_days_and_times_are_not_read_and_empty_gps_clears() -> Result<()> {
+    let packet = |date: &str, gps: &str| {
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/"
+              exif:DateTimeOriginal="{date}" {gps}/></rdf:RDF></x:xmpmeta>"#
+        )
+    };
+    for bad in [
+        "2024-99-99T10:00:00",
+        "2023-02-29T10:00:00",
+        "2024-01-01T27:70:00",
+        "2024-01-01T10:00:00+25:00",
+    ] {
+        assert_eq!(read(&packet(bad, ""))?.capture, None, "{bad}");
+    }
+    assert!(read(&packet("2024-02-29T23:59:59", ""))?.capture.is_some());
+    let cleared = read(&packet(
+        "2024-01-01T10:00:00",
+        r#"exif:GPSLatitude="" exif:GPSLongitude="""#,
+    ))?;
+    assert_eq!(cleared.location, Some(Location::Cleared));
+    Ok(())
+}

@@ -1859,7 +1859,7 @@ fn a_saved_draft_is_not_saved_again_after_undo() -> Result<()> {
     let done = library.take_descriptive_done();
     assert_eq!(done.len(), 1);
     // Undone with the panel hidden: the old draft isn't saved again.
-    library.restore_descriptive(&done[0].before)?;
+    library.restore_descriptive(&done[0].before, &done[0].ratings_before)?;
     library.commit_fields()?;
     assert!(library.take_descriptive_done().is_empty());
     assert_eq!(library.catalog.descriptive(id)?.title, None);

@@ -25,13 +25,17 @@ impl SidecarReport {
     }
     /// "2 sidecars could not be read", or nothing to say.
     pub fn summary(&self) -> Option<String> {
+        let plural = |n: usize| if n == 1 { "sidecar" } else { "sidecars" };
+        let mut parts = Vec::new();
         let n = self.unreadable.len();
-        (n > 0).then(|| {
-            format!(
-                "{n} {} could not be read",
-                if n == 1 { "sidecar" } else { "sidecars" }
-            )
-        })
+        if n > 0 {
+            parts.push(format!("{n} {} could not be read", plural(n)));
+        }
+        let n = self.ignored.len();
+        if n > 0 {
+            parts.push(format!("{n} {} ignored", plural(n)));
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
     }
     /// Each unreadable file and why, and each ignored sidecar, one per line.
     pub fn details(&self) -> String {
@@ -90,8 +94,26 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             if marker[..2] != [0xff, 0xd8] {
                 return Ok(None);
             }
-            while f.read_exact(&mut marker).is_ok() && marker[0] == 0xff && marker[1] != 0xda {
-                let len = u16::from_be_bytes([marker[2], marker[3]]) as usize;
+            let mut byte = [0u8; 1];
+            loop {
+                // A marker: 0xff, any fill bytes of 0xff, then its code.
+                if f.read_exact(&mut byte).is_err() || byte[0] != 0xff {
+                    break;
+                }
+                while byte[0] == 0xff {
+                    if f.read_exact(&mut byte).is_err() {
+                        return Ok(None);
+                    }
+                }
+                if byte[0] == 0xda || byte[0] == 0xd9 {
+                    break;
+                }
+                let mut length = [0u8; 2];
+                if f.read_exact(&mut length).is_err() {
+                    break;
+                }
+                marker = [0xff, byte[0], length[0], length[1]];
+                let len = u16::from_be_bytes(length) as usize;
                 let body = len.saturating_sub(2);
                 if marker[1] == 0xe1 && body > HEADER.len() {
                     let mut data = vec![0u8; body];

@@ -101,7 +101,7 @@ fn folder_import_reads_sidecars_by_digikams_names_and_the_jpegs_own_xmp() -> Res
     assert_eq!(report.unreadable[0].0, folder.join("C.NEF.xmp"));
     assert_eq!(
         report.summary().as_deref(),
-        Some("1 sidecar could not be read")
+        Some("1 sidecar could not be read · 1 sidecar ignored")
     );
     // Adding the folder again reads nothing of photos already there.
     std::fs::write(folder.join("A.NEF.xmp"), xmp(r#"dc:title="Changed""#, ""))?;
@@ -190,5 +190,18 @@ fn a_photo_whose_values_cant_be_written_is_reported_and_the_rest_imported() -> R
     assert_eq!(report.unreadable.len(), 1);
     assert_eq!(title(&cat, a)?, None);
     assert_eq!(title(&cat, b)?, set("Good"));
+    Ok(())
+}
+
+#[test]
+fn jpeg_fill_bytes_before_a_marker_are_skipped() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut jpeg = jpeg_with(&xmp(r#"dc:title="Filled""#, ""))?;
+    // Fill bytes before the XMP segment's marker.
+    jpeg.splice(2..2, [0xff, 0xff, 0xff]);
+    let file = dir.path().join("A.JPG");
+    std::fs::write(&file, jpeg)?;
+    let (read, _) = read_file(&file);
+    assert_eq!(read.unwrap().title, set("Filled"));
     Ok(())
 }

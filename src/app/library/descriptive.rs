@@ -180,6 +180,10 @@ impl Library {
             self.message = "Virtual copies are never read from files".into();
             return Ok(());
         }
+        if self.reread.is_some() {
+            self.message = "Still reading metadata from files; try again when it's done".into();
+            return Ok(());
+        }
         let n = photos.len();
         self.message = format!(
             "Reading metadata from {n} {}…",
@@ -221,6 +225,7 @@ impl Library {
         if let Err(e) = self.finish_reread(reread) {
             self.message = format!("Metadata not read: {e:#}");
         }
+        self.reread_finished = true;
     }
     fn finish_reread(&mut self, reread: Reread) -> Result<()> {
         // Photos removed while their files were read are left out.
@@ -258,8 +263,7 @@ impl Library {
             summary.push_str(" · ");
             summary.push_str(&problems);
         }
-        self.message = summary.clone();
-        self.message_detail = report.details();
+        self.set_message_with_detail(summary.clone(), report.details());
         self.fields.reload();
         if before != after || ratings_before != ratings_after {
             self.descriptive_done.push(DescriptiveCommand {
@@ -294,6 +298,12 @@ impl Library {
             }
         }
         self.sort_keys = None;
+        // A capture time read may move the photo, as the catalog sorts.
+        self.resort_in_place(|library| {
+            library.photos.sort_by(|a, b| {
+                (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
+            });
+        });
         self.refresh_keywords(ids)
     }
     /// The descriptive changes made since the last call, for the undo log.

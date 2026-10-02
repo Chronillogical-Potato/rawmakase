@@ -123,8 +123,7 @@ impl Editor {
                                 if available==0 {l.message.push_str(" No files matched this location; check that the selected folder contains the expected subfolders.");}
                             }
                             if let Some(summary) = report.summary() {
-                                l.message = format!("Folder added · {summary}");
-                                l.message_detail = report.details();
+                                l.set_message_with_detail(format!("Folder added · {summary}"), report.details());
                             }
                             Box::new(l)
                         })
@@ -173,8 +172,16 @@ impl Editor {
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<_> {
-                crate::catalog::Catalog::open(&current)?.add_folder(&folder)?;
-                crate::app::library::Library::load(&current, ctx.clone())
+                let (_, report) =
+                    crate::catalog::Catalog::open(&current)?.add_folder_reporting(&folder)?;
+                let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
+                if let Some(summary) = report.summary() {
+                    library.set_message_with_detail(
+                        format!("Folder added · {summary}"),
+                        report.details(),
+                    );
+                }
+                Ok(library)
             })()
             .map(Box::new)
             .map_err(|e| format!("{e:#}"));
