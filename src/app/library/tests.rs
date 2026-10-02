@@ -1292,10 +1292,11 @@ fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
     library.filters.flags.clear();
     library.filter();
     // A selection another command makes, such as a new virtual copy, is
-    // followed.
-    library.keep_compared_shown();
+    // followed beside the select.
+    let select = library.keep_compared_shown();
     let copy = library.create_virtual_copy(ids[1])?;
-    assert_eq!(library.keep_compared_shown(), Some(copy));
+    assert_eq!(library.keep_compared_shown(), select);
+    assert_eq!(library.compare.candidate, Some(copy));
     assert_eq!(library.selected(), Some(copy));
     Ok(())
 }
@@ -1321,5 +1322,24 @@ fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
     assert_eq!(library.compare.candidate, Some(ids[3]));
     let command = library.take_done().pop().unwrap();
     assert_eq!(command.place_after, library.place());
+    // Undo and redo return to the pairs, select and candidate as they were.
+    library.go_to_place(&command.place_before);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.go_to_place(&command.place_after);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[3]))
+    );
+    // An edit made elsewhere, as from a filmstrip menu, keeps the select.
+    library.edit_photos(&[ids[3]], Edit::Flag(-1), false)?;
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.candidate, Some(ids[2]));
     Ok(())
 }

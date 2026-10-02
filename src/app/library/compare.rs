@@ -37,6 +37,8 @@ pub(super) struct Compare {
     /// The selection as Compare last set it; one changed since, by undo or
     /// a new virtual copy, is followed.
     synced: Option<super::selection::Selection>,
+    /// Edit stamps by photo, with when each was read.
+    stamps: std::collections::HashMap<i64, (u64, f64)>,
 }
 impl Compare {
     fn id(&self, side: Side) -> Option<i64> {
@@ -51,6 +53,8 @@ impl Compare {
 const CAPTION: f32 = 26.;
 /// Space between the photos and around them.
 const MARGIN: f32 = 14.;
+/// Seconds an edit stamp is trusted before it is read again.
+const STAMP_AGE: f64 = 0.5;
 
 impl Library {
     pub fn compare_open(&self) -> bool {
@@ -219,18 +223,17 @@ impl Library {
         self.visible.iter().any(|i| self.photos[*i].id == id)
     }
     /// Keeps Compare to the selection and the photos shown. A selection
-    /// another command changed (undo, a new virtual copy) is followed. A
-    /// photo removed, or hidden by another source or filter, gives way: the
-    /// candidate to the next photo shown, the select to the candidate, both
-    /// to the photos shown. The active photo stays active wherever it is.
-    /// Returns the select; None when nothing is shown.
+    /// another command changed (undo, a menu, a new virtual copy) is
+    /// followed, keeping the select while it is shown. A photo removed, or
+    /// hidden by another source or filter, gives way: the candidate to the
+    /// next photo shown, the select to the candidate, both to the photos
+    /// shown. The active photo stays active wherever it is. Returns the
+    /// select; None when nothing is shown.
     pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
-        if self.compare.synced.as_ref() != Some(&self.selection)
-            && let Some(active) = self.selection.active.filter(|id| self.is_shown(*id))
-        {
-            self.seed_compare(active);
+        if self.compare.synced.as_ref() != Some(&self.selection) {
+            self.follow_selection();
         }
-        let active = self.compare.id(self.compare.active);
+        let (active, side) = (self.compare.id(self.compare.active), self.compare.active);
         if self.compare.candidate.is_some_and(|id| !self.is_shown(id)) {
             self.compare.candidate = None;
         }
@@ -246,12 +249,41 @@ impl Library {
                 .next_candidate(select, None, 1)
                 .or_else(|| self.next_candidate(select, None, -1));
         }
-        self.compare.active = if active.is_some() && active == self.compare.candidate {
+        // The active photo where it is now; one hidden passes its role on.
+        self.compare.active = if active == Some(select) {
+            Side::Select
+        } else if active.is_some() && active == self.compare.candidate {
             Side::Candidate
+        } else if active.is_some_and(|id| !self.is_shown(id)) && self.compare.id(side).is_some() {
+            side
         } else {
             Side::Select
         };
         Some(select)
+    }
+    /// Takes up a selection another command made: the select stays while
+    /// it is shown, beside the active photo or another one selected;
+    /// otherwise Compare starts again from the active photo.
+    fn follow_selection(&mut self) {
+        let Some(active) = self.selection.active.filter(|id| self.is_shown(*id)) else {
+            return;
+        };
+        let Some(select) = self.compare.select.filter(|id| self.is_shown(*id)) else {
+            self.seed_compare(active);
+            return;
+        };
+        if active == select {
+            let other = self
+                .selected_ids()
+                .into_iter()
+                .find(|id| *id != select && self.is_shown(*id));
+            self.compare.candidate = other.or(self.compare.candidate);
+            self.compare.active = Side::Select;
+        } else {
+            self.compare.candidate = Some(active);
+            self.compare.active = Side::Candidate;
+        }
+        self.sync_compare_selection();
     }
     pub(super) fn compare_keys(&mut self, presses: &[super::selection::Press]) {
         use egui::Key;
@@ -427,8 +459,8 @@ impl Library {
             return (stand_in, Some(note.into()));
         }
         let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
+        let stamp = self.edit_stamp(ctx, photo.id);
         let catalog = &self.catalog;
-        let stamp = catalog.edit_stamp(photo.id).unwrap_or_default();
         match self
             .screen
             .get(photo, edge, stamp, || super::edit_source(catalog, photo.id))
@@ -436,6 +468,26 @@ impl Library {
             Shown::Ready(texture) => (Some(texture.clone()), None),
             Shown::Loading => (stand_in, Some("Loading…".into())),
             Shown::Failed(error) => (stand_in, Some(format!("Preview unavailable: {error}"))),
+        }
+    }
+}
+
+impl Library {
+    /// The photo's edit stamp (see `Catalog::edit_stamp`), read again at
+    /// most every `STAMP_AGE` seconds, so an edit saved elsewhere shows soon
+    /// without reading the edit every frame.
+    fn edit_stamp(&mut self, ctx: &egui::Context, id: i64) -> u64 {
+        let now = ctx.input(|i| i.time);
+        match self.compare.stamps.get(&id) {
+            Some((stamp, read)) if now - read < STAMP_AGE => *stamp,
+            _ => {
+                let stamp = self.catalog.edit_stamp(id).unwrap_or_default();
+                self.compare
+                    .stamps
+                    .retain(|_, (_, read)| now - *read < STAMP_AGE);
+                self.compare.stamps.insert(id, (stamp, now));
+                stamp
+            }
         }
     }
 }
