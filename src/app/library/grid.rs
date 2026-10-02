@@ -13,6 +13,8 @@ impl Library {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    self.view_buttons(ui);
+                    ui.add_space(12.);
                     ui.label(filter_caption("Sort"));
                     if ui
                         .add(

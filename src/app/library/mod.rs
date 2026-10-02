@@ -481,6 +481,7 @@ mod sidebar;
 mod textures;
 mod thumbnails;
 mod tree;
+mod view_bar;
 mod volumes;
 mod zoom;
 use thumbnails::thumbnail;

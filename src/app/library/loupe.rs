@@ -370,6 +370,14 @@ impl Library {
                 // In Loupe a metadata change applies to the active photo only.
                 target = self.filmstrip(ui, id).0;
             });
+        egui::Panel::bottom("library-loupe-toolbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::gray(38))
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
+            )
+            .show_separator_line(false)
+            .show(ui, |ui| ui.horizontal(|ui| self.view_buttons(ui)));
         match target {
             Some(super::Pick::Show(id)) => self.select(Some(id)),
             Some(super::Pick::Develop(id)) => return Action::Develop(id),

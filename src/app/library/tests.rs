@@ -1133,20 +1133,20 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     library.step(selection::Step::By(1), false);
     frame(&mut library, &mut zoom);
     assert_eq!(library.loupe.state, loupe::State::Ready);
-    // 100% reads only the view: 1200 by 672 pixels of the 3000 by 2000.
+    // 100% reads only the view: 1200 by 642 pixels of the 3000 by 2000.
     zoom.set(1.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     assert_eq!(library.loupe.regions.full, Some([3000, 2000]));
     let (region, rect) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [1200, 672]);
+    assert_eq!(region.size(), [1200, 642]);
     assert!((rect[0] - 0.3).abs() < 1e-3 && (rect[2] - 0.4).abs() < 1e-3);
     // At 200% half as many image pixels fill the view.
     zoom.set(2.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     let (region, _) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [600, 336]);
+    assert_eq!(region.size(), [600, 321]);
     // Panning past the corner stops at the edge of the photo.
     zoom.pan = [0., 0.];
     frame(&mut library, &mut zoom);

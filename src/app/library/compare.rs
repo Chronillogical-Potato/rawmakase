@@ -287,8 +287,8 @@ impl Library {
             .clicked()
         };
         ui.horizontal(|ui| {
-            ui.label(filter_caption("Compare"));
-            ui.add_space(8.);
+            self.view_buttons(ui);
+            ui.add_space(12.);
             let two = self.compare.candidate.is_some();
             if button(ui, "Swap", "Swap the select and the candidate (Down)", two) {
                 self.swap_compare();
