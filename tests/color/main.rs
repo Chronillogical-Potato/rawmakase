@@ -655,11 +655,10 @@ const PARITY_MEAN_MARGIN: f64 = 0.1;
 const PARITY_P95_MARGIN: f64 = 0.3;
 /// Cases whose committed Camera Raw reference is identical to that chart's
 /// `default`, so the case measures nothing and its baseline pins a distance that
-/// is really RAWmakase's own output. `synthetic-d65` / `curve-red` was rendered
-/// before `ToneCurvePV2012Red` reached cases.json; camera-raw-charts.py reuses an
-/// existing TIFF instead of re-rendering it, so the stale pixels survived every
-/// later run while `about.rendered` moved on. Delete its TIFF, re-render, and drop
-/// the entry here.
+/// is really RAWmakase's own output. `synthetic-d65` / `curve-red` has been so
+/// since the references were first committed: Camera Raw applied no red curve.
+/// Re-render it with `camera-raw-charts.py --charts synthetic-d65 --cases
+/// curve-red` and drop the entry here once it differs.
 const UNMEASURED_REFERENCES: &[(&str, &str)] = &[("synthetic-d65", "curve-red")];
 
 #[derive(Default, Serialize, Deserialize)]
