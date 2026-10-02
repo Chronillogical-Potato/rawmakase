@@ -35,6 +35,8 @@ pub(super) struct Compare {
     /// The selection as Compare last set it; one changed since, by undo or
     /// a new virtual copy, is followed.
     synced: Option<super::selection::Selection>,
+    /// Undo or redo restored a place: its selection is followed as it is.
+    pub restored: bool,
 }
 impl Compare {
     fn id(&self, side: Side) -> Option<i64> {
@@ -63,6 +65,8 @@ impl Library {
         self.loupe.reset();
         self.survey.open = false;
         self.compare.open = true;
+        // A place restored while Compare was closed is no news to it.
+        self.compare.restored = false;
         self.seed_compare(select);
     }
     /// `select` as the select, beside the next photo selected with it, or
@@ -210,7 +214,21 @@ impl Library {
     /// shown. The active photo stays active wherever it is. Returns the
     /// select; None when nothing is shown.
     pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
-        if self.compare.synced.as_ref() != Some(&self.selection) {
+        let active = self.compare.id(self.compare.active);
+        // A filter or source that hid the active photo pruned the selection
+        // and moved it off that photo; that is reconciled below, keeping its
+        // role. Any other change, such as undo restoring a place or a removed
+        // copy's master being selected, is followed.
+        let hidden = active.is_some_and(|id| self.photo(id).is_some() && !self.is_shown(id));
+        let pruned = self
+            .compare
+            .synced
+            .as_ref()
+            .is_some_and(|synced| self.selection.selected.is_subset(&synced.selected));
+        let restored = std::mem::take(&mut self.compare.restored);
+        if self.compare.synced.as_ref() != Some(&self.selection)
+            && (restored || !(hidden && pruned))
+        {
             self.follow_selection();
         }
         let (active, side) = (self.compare.id(self.compare.active), self.compare.active);

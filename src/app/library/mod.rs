@@ -305,6 +305,7 @@ impl Library {
         }
         self.selection = place.selection.clone();
         self.filter();
+        self.compare.restored = true;
         self.scroll_to_active = true;
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.

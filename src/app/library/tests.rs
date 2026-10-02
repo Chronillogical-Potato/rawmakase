@@ -1387,3 +1387,100 @@ fn survey_shows_the_selection_and_rates_the_active_photo() -> Result<()> {
     assert!(!library.survey_open() && !library.edits_active_only());
     Ok(())
 }
+#[test]
+fn a_filter_hiding_the_active_candidate_passes_its_role_on() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    library.catalog.set_metadata(ids[1], 0, -1, "")?;
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    assert_eq!(library.selected(), Some(ids[1]));
+    // The sidebar's filter hides rejects: the next photo takes B's place,
+    // and its role, so the next rating goes to it.
+    library.filters.flags = [0, 1].into();
+    library.filter();
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    assert_eq!(library.compare.active, super::compare::Side::Candidate);
+    Ok(())
+}
+#[test]
+fn compare_follows_a_restored_place_that_hides_its_active_photo() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    for id in [ids[0], ids[1], ids[3]] {
+        library.catalog.set_metadata(id, 1, 0, "")?;
+    }
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(ids[2]));
+    // Undo returns to a filter that hides C, with D selected.
+    let mut place = library.place();
+    place.filters.rating = Some(1);
+    place.selection = Default::default();
+    place.selection.selected = [ids[3]].into();
+    place.selection.active = Some(ids[3]);
+    library.go_to_place(&place);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[3]))
+    );
+    assert_eq!(library.compare.active, super::compare::Side::Candidate);
+    Ok(())
+}
+#[test]
+fn compare_follows_a_restored_place_within_its_pair() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    for id in [ids[0], ids[1]] {
+        library.catalog.set_metadata(id, 1, 0, "")?;
+    }
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(ids[2]));
+    // Undo restores A alone, under a filter that hides C: A is active.
+    let mut place = library.place();
+    place.filters.rating = Some(1);
+    place.selection = Default::default();
+    place.selection.selected = [ids[0]].into();
+    place.selection.active = Some(ids[0]);
+    library.go_to_place(&place);
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    Ok(())
+}
+#[test]
+fn compare_follows_the_master_after_removing_its_copy() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
+    let ids = ids_of(&library);
+    let copy = library.create_virtual_copy(ids[0])?;
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.compare.candidate = Some(copy);
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(copy));
+    library.remove_virtual_copy(copy)?;
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    Ok(())
+}
