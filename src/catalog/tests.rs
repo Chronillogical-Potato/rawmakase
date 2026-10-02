@@ -300,9 +300,10 @@ fn lightroom_history_text_is_bounded_by_its_declared_length() {
     let decode = super::lightroom::history::decode_history_text;
     // A length past the cap is refused without decompressing anything.
     assert!(decode(&bomb(0xffff_ffff, 64)).is_none());
-    // A declared length inside the cap is honoured, so the snapshot is read only
-    // as far as the catalog says it goes instead of expanding unchecked.
-    assert_eq!(decode(&bomb(8, 1 << 20)).as_deref().map(str::len), Some(9));
+    // A declared length inside the cap bounds the read, and a stream that expands
+    // past it is refused rather than read cut short.
+    assert!(decode(&bomb(8, 1 << 20)).is_none());
+    assert_eq!(decode(&bomb(8, 8)).as_deref(), Some("\0".repeat(8).as_str()));
 }
 #[test]
 fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> {

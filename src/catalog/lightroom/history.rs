@@ -24,7 +24,7 @@ pub(in crate::catalog) fn decode_history_text(bytes: &[u8]) -> Option<String> {
     if bytes.len() > 6 && bytes[4] == 0x78 {
         use std::io::Read;
         // The prefix declares the decompressed length, so it bounds the read and
-        // a snapshot that expands past it is read truncated rather than whole.
+        // a snapshot that expands past it is corrupt and refused.
         let expected = u32::from_be_bytes(bytes[..4].try_into().ok()?) as usize;
         if expected > MAX_TEXT_BYTES {
             return None;
@@ -34,7 +34,7 @@ pub(in crate::catalog) fn decode_history_text(bytes: &[u8]) -> Option<String> {
             .take(expected as u64 + 1)
             .read_to_string(&mut text)
             .ok()?;
-        return Some(text);
+        return (text.len() <= expected).then_some(text);
     }
     String::from_utf8(bytes.to_vec()).ok()
 }
