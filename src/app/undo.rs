@@ -52,6 +52,12 @@ impl UndoLog {
         self.undo.clear();
         self.redo.clear();
     }
+    pub(super) fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub(super) fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
     #[cfg(test)]
     pub(super) fn len(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
@@ -167,16 +173,21 @@ impl Editor {
                     Direction::Undo => (&change.before, change.at_before),
                     Direction::Redo => (&change.after, change.at_after),
                 };
-                let open = self.document.history.id() == *history
-                    || (photo.is_some()
-                        && self.document.catalog_photo == *photo
-                        && self.document.path.is_some());
-                if open {
+                // The History that recorded it goes back to the exact state;
+                // the same photo opened again since gets the recipe as a step.
+                let same_history = self.document.history.id() == *history;
+                let reopened = photo.is_some()
+                    && self.document.catalog_photo == *photo
+                    && self.document.path.is_some();
+                if same_history || reopened {
                     self.library_mode = false;
                     let step = Step::new(verb, "");
-                    self.document
-                        .history
-                        .restore(at, target, &mut self.document.recipe, step);
+                    let history = &mut self.document.history;
+                    if same_history {
+                        history.restore(at, target, &mut self.document.recipe, step);
+                    } else {
+                        history.set(target, &mut self.document.recipe, step);
+                    }
                     // Not a change of its own for the log.
                     self.document.history.take_recorded();
                     self.document.save.mark_changed();

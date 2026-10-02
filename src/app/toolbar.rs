@@ -11,6 +11,9 @@ use eframe::egui::{self, Stroke, Vec2};
 impl Editor {
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        // The buttons follow the shared log, which also holds Library changes.
+        self.sync_undo();
+        let (can_undo, can_redo) = (self.undo_log.can_undo(), self.undo_log.can_redo());
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
@@ -28,13 +31,13 @@ impl Editor {
                 ui.visuals_mut().widgets.hovered.bg_fill = theme::gray(52);
                 ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::gray(52);
                 ui.horizontal(|ui| {
-                    if toolbar_action(ui, "", 32., false, self.document.history.can_undo(), 1)
+                    if toolbar_action(ui, "", 32., false, can_undo, 1)
                         .on_hover_text("Undo · Ctrl+Z")
                         .clicked()
                     {
                         self.undo();
                     }
-                    if toolbar_action(ui, "", 32., false, self.document.history.can_redo(), 2)
+                    if toolbar_action(ui, "", 32., false, can_redo, 2)
                         .on_hover_text("Redo · Ctrl+Shift+Z")
                         .clicked()
                     {

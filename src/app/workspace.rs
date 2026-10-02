@@ -36,6 +36,8 @@ impl Editor {
         match library.edit_metadata(id, edit, advance) {
             Ok(next) => {
                 self.status = library.message.clone();
+                // Logged now, while this photo is still the one in Develop.
+                self.sync_undo();
                 if let Some(next) = next {
                     self.develop_catalog_photo(next);
                     if self.document.catalog_photo != Some(next)

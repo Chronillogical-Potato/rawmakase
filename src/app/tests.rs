@@ -1599,3 +1599,35 @@ fn a_library_change_is_undone_in_the_library() -> anyhow::Result<()> {
     assert_eq!(library.selected(), Some(ids[1]));
     Ok(())
 }
+#[test]
+fn undoing_a_history_click_after_a_new_branch_restores_its_own_state() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let before = e.document.recipe.clone();
+    e.document.recipe.exposure = 0.5;
+    e.history(before);
+    // Click the opened state, then edit: History branches.
+    assert!(e.document.history.jump(0, &mut e.document.recipe));
+    let before = e.document.recipe.clone();
+    e.document.recipe.exposure = 1.;
+    e.history(before);
+    e.undo();
+    assert_eq!(e.document.recipe.exposure, 0.);
+    // The same step count now leads to the other branch; the click's own
+    // state comes back.
+    e.undo();
+    assert_eq!(e.document.recipe.exposure, 0.5);
+}
+#[test]
+fn a_key_that_changes_nothing_is_not_an_undo_step() -> anyhow::Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.edit_metadata(ids[0], Edit::Rating(5), false)?;
+    library.edit_metadata(ids[0], Edit::Rating(5), false)?;
+    e.sync_undo();
+    assert_eq!(e.undo_log.len(), (1, 0));
+    e.undo();
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().rating, 0);
+    Ok(())
+}

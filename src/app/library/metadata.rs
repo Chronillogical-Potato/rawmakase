@@ -115,6 +115,11 @@ impl Library {
                 self.make_active(to);
             }
         }
+        // A key that changed nothing (5 on a five-star photo) is no command:
+        // it would only hide the real one before it and clear redo.
+        if before == changes {
+            return Ok(if advance { next } else { None });
+        }
         self.done.push(MetadataCommand {
             sequence: crate::app::undo::sequence(),
             before,
