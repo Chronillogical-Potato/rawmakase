@@ -108,7 +108,7 @@ impl Library {
     /// B, Cmd+B and Cmd+Shift+B, for `ids`.
     pub(super) fn quick_key(&mut self, modifiers: eframe::egui::Modifiers, ids: Vec<i64>) {
         // Option, and Control on a Mac, make other keys.
-        if modifiers.alt || (modifiers.ctrl && !modifiers.command) {
+        if modifiers.alt || (modifiers.ctrl && (modifiers.mac_cmd || !modifiers.command)) {
             return;
         }
         let done = match (modifiers.command, modifiers.shift) {
