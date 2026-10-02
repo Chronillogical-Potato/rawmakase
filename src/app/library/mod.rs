@@ -257,6 +257,14 @@ impl Library {
     pub(in crate::app) fn go_to_place(&mut self, place: &Place) {
         self.filters = place.filters.clone();
         self.selected_folder = place.folder.clone();
+        // The source as the catalog has it now, e.g. after a folder gained
+        // subfolders since.
+        if let Some(scope) = self.folder_scope(&place.folder) {
+            self.filters.folder_scope = Some(scope);
+        }
+        if let Some(id) = self.filters.collection {
+            self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
+        }
         self.selection = place.selection.clone();
         self.filter();
         self.scroll_to_active = true;

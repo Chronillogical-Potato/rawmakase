@@ -221,6 +221,26 @@ impl Library {
     }
     /// Shows a folder saved with `source_key` again, including its subfolders,
     /// and selects `photo` if it is in it.
+    /// The folders a folder key covers now: the folder and its subfolders.
+    /// None for a key that names no folder in the catalog.
+    pub(super) fn folder_scope(&self, key: &str) -> Option<HashSet<i64>> {
+        let rest = key.strip_prefix("root:")?;
+        let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
+        let root = root.parse::<i64>().ok()?;
+        let ids: HashSet<i64> = self
+            .folders
+            .iter()
+            .filter(|f| {
+                let path = f.relative.trim_end_matches('/');
+                f.root == root
+                    && (relative.is_empty()
+                        || path == relative
+                        || path.starts_with(&format!("{relative}/")))
+            })
+            .map(|f| f.id)
+            .collect();
+        (!ids.is_empty()).then_some(ids)
+    }
     pub(in crate::app) fn restore_source(&mut self, key: &str, photo: Option<i64>) {
         if let Some(id) = key
             .strip_prefix("collection:")
@@ -234,30 +254,18 @@ impl Library {
         }
         if let Some(rest) = key.strip_prefix("root:") {
             let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
-            if let Ok(root) = root.parse::<i64>() {
-                let ids: HashSet<i64> = self
-                    .folders
-                    .iter()
-                    .filter(|f| {
-                        let path = f.relative.trim_end_matches('/');
-                        f.root == root
-                            && (relative.is_empty()
-                                || path == relative
-                                || path.starts_with(&format!("{relative}/")))
-                    })
-                    .map(|f| f.id)
-                    .collect();
-                if !ids.is_empty() {
-                    self.selected_folder = key.to_string();
-                    self.filters.folder_scope = Some(ids);
-                    self.filters.collection = None;
-                    // Unfold the path down to the folder.
-                    let mut open = format!("root:{root}");
+            if let Ok(root) = root.parse::<i64>()
+                && let Some(ids) = self.folder_scope(key)
+            {
+                self.selected_folder = key.to_string();
+                self.filters.folder_scope = Some(ids);
+                self.filters.collection = None;
+                // Unfold the path down to the folder.
+                let mut open = format!("root:{root}");
+                self.expanded.insert(open.clone());
+                for part in relative.split('/').filter(|p| !p.is_empty()) {
+                    open = format!("{open}/{part}");
                     self.expanded.insert(open.clone());
-                    for part in relative.split('/').filter(|p| !p.is_empty()) {
-                        open = format!("{open}/{part}");
-                        self.expanded.insert(open.clone());
-                    }
                 }
             }
         }

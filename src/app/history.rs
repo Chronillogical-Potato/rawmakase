@@ -117,12 +117,27 @@ impl History {
         self.replaying = true;
         // History's own states are kept up to date (e.g. by Upright's
         // analysis), so they win over the copy in the log.
-        if at.applied >= self.dropped {
+        // Moves only when that state is still in History, so a miss leaves
+        // History as it was and records the fallback from the state shown.
+        if self.state_at(at.applied) == Some(at.state) {
             self.go_to(at.applied - self.dropped, current);
-        }
-        if self.mark() != at {
+        } else {
             self.set(target, current, step);
         }
+    }
+    /// The state with `applied` steps applied, among the steps History has,
+    /// done and undone.
+    fn state_at(&self, applied: usize) -> Option<u64> {
+        let index = applied.checked_sub(self.dropped)?;
+        if index == 0 {
+            return Some(self.origin);
+        }
+        self.undo
+            .iter()
+            .map(|(_, s)| s)
+            .chain(self.redo.iter().rev().map(|(_, s)| s))
+            .nth(index - 1)
+            .map(|s| s.state)
     }
     /// Sets `target` as a new step named `step`, without handing it to the
     /// shared undo log.
