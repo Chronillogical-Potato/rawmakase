@@ -23,7 +23,7 @@ mod edits;
 mod ingest;
 pub mod lightroom;
 mod models;
-pub use models::{Collection, Folder, Photo, SavedEdit};
+pub use models::{Collection, CollectionKind, Folder, Photo, SavedEdit};
 // Compatibility for existing clients.
 pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
 impl Catalog {
@@ -168,15 +168,31 @@ impl Catalog {
         )?;
         Ok(query
             .query_map([], |row| {
+                let name: String = row.get(1)?;
                 Ok(Collection {
                     id: row.get(0)?,
-                    name: row.get(1)?,
+                    kind: CollectionKind::from_lightroom(&row.get::<_, String>(3)?, &name),
+                    name,
                     parent: row.get(2)?,
-                    smart: row.get::<_, String>(3)?.contains("smart_collection"),
                     count: row.get::<_, i64>(4)? as usize,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
+    }
+    /// Every collection's photos, by collection.
+    pub fn collection_photos(
+        &self,
+    ) -> Result<std::collections::HashMap<i64, std::collections::HashSet<i64>>> {
+        let mut members: std::collections::HashMap<_, std::collections::HashSet<_>> =
+            Default::default();
+        let mut query = self
+            .db
+            .prepare("SELECT collection, photo FROM collection_photos")?;
+        for row in query.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))? {
+            let (collection, photo) = row?;
+            members.entry(collection).or_default().insert(photo);
+        }
+        Ok(members)
     }
     #[cfg(test)]
     pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
