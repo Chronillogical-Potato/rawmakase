@@ -49,7 +49,17 @@ impl Catalog {
     pub fn fill_photo_info(&mut self, infos: &[(i64, Option<PhotoInfo>)]) -> Result<()> {
         let tx = self.db.transaction()?;
         for (id, info) in infos {
-            insert(&tx, *id, &info.clone().unwrap_or_default())?;
+            // Under the photo's master now, in case it became a copy while
+            // being read.
+            let master: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(master_id, id) FROM photos WHERE id = ?",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(*id);
+            insert(&tx, master, &info.clone().unwrap_or_default())?;
         }
         tx.commit()?;
         Ok(())

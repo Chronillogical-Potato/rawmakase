@@ -265,6 +265,12 @@ impl Library {
                                     exists,
                                     width,
                                 );
+                                let response = if response.hovered() {
+                                    let text = self.hover_text(&p);
+                                    response.on_hover_text(text)
+                                } else {
+                                    response
+                                };
                                 if response.clicked() {
                                     self.click(p.id, ui.input(|i| i.modifiers));
                                 } else if response.secondary_clicked() {

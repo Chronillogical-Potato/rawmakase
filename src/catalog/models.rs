@@ -17,6 +17,24 @@ pub struct Photo {
     pub keywords: String,
     pub has_lightroom_edits: bool,
 }
+impl Photo {
+    /// The capture time as Lightroom shows it, "29/06/2016 18:24:27.000";
+    /// empty when there is none.
+    pub fn capture_text(&self) -> String {
+        let c = &self.captured;
+        let part = |range: std::ops::Range<usize>| c.get(range).unwrap_or("");
+        if c.len() < 19 {
+            return c.clone();
+        }
+        format!(
+            "{}/{}/{} {}",
+            part(8..10),
+            part(5..7),
+            part(0..4),
+            part(11..c.len())
+        )
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Folder {
     pub relative: String,

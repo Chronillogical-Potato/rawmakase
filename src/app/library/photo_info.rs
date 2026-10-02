@@ -17,6 +17,32 @@ impl Library {
         }
         self.info.as_ref().and_then(|(_, info)| info.clone())
     }
+    /// A grid cell's hover, as Lightroom's: file name, capture time and
+    /// dimensions. The info is read from the catalog once per hovered photo.
+    pub(super) fn hover_text(&mut self, photo: &crate::catalog::Photo) -> String {
+        if self
+            .hover_info
+            .as_ref()
+            .is_none_or(|(id, _)| *id != photo.id)
+        {
+            let info = self.catalog.photo_info(photo.id).ok().flatten();
+            self.hover_info = Some((photo.id, info));
+        }
+        let info = self.hover_info.as_ref().and_then(|(_, info)| info.as_ref());
+        [
+            Some(format!(
+                "{}{}",
+                photo.filename,
+                super::cell::copy_suffix(photo)
+            )),
+            Some(photo.capture_text()).filter(|t| !t.is_empty()),
+            info.and_then(PhotoInfo::dimensions_text),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
     /// Reads the info of the photos that have none, unless already reading.
     pub(super) fn start_photo_info(&mut self) {
         // Asked again while reading (a volume came back): once it is done.
@@ -98,7 +124,7 @@ impl Library {
         let lines: Vec<String> = match self.loupe_info {
             Overlay::Info1 => vec![
                 Some(name),
-                (!photo.captured.is_empty()).then(|| photo.captured.replace('T', " ")),
+                Some(photo.capture_text()).filter(|t| !t.is_empty()),
                 info.dimensions_text(),
             ],
             _ => vec![

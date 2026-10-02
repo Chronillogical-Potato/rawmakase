@@ -84,7 +84,11 @@ impl Library {
                             folder,
                             photo.as_ref().map(|p| p.path.display().to_string()),
                         ),
-                        ("Capture Time", field(|p| &p.captured), None),
+                        (
+                            "Capture Time",
+                            photo.as_ref().map(Photo::capture_text).unwrap_or_default(),
+                            None,
+                        ),
                         ("Format", field(|p| &p.format), None),
                         ("Dimensions", text(PhotoInfo::dimensions_text), None),
                         ("Exposure", text(PhotoInfo::exposure_text), None),

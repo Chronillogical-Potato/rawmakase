@@ -73,6 +73,8 @@ pub struct Library {
     loupe_info: photo_info::Overlay,
     /// Photo info was asked for while it was being read.
     info_again: bool,
+    /// The hovered grid photo's info, for its tooltip.
+    hover_info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
     info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// Photos the capture-time backfill tried since the last online check.
@@ -127,6 +129,7 @@ impl Library {
             info_reader: None,
             info: None,
             info_again: false,
+            hover_info: None,
             loupe_info: Default::default(),
             capture_tried: HashSet::new(),
             keep_in_place: None,
