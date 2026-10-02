@@ -69,7 +69,6 @@ p, dd { text-wrap: pretty; }
 h1 {
   margin: 0; font: 800 clamp(56px, 9vw, 120px)/0.95 var(--sans); letter-spacing: -0.055em;
 }
-h1 span { color: var(--salmon); }
 .say { margin: 10px 0 0; font: 400 14px/1.4 var(--sans); color: var(--rice-faint); }
 .tagline { margin: 20px 0 0; font: 600 clamp(22px, 2.6vw, 28px)/1.25 var(--sans); letter-spacing: -0.02em; color: var(--rice); max-width: 22em; }
 .lede { margin: 18px 0 0; max-width: 36em; color: var(--rice-dim); }
