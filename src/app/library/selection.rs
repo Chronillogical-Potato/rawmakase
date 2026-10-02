@@ -209,6 +209,20 @@ impl Library {
             return;
         }
         let columns = self.grid_columns.max(1) as isize;
+        // Z toggles once per press: a held key must not flicker the zoom.
+        let z_pressed = ctx.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key {
+                        key: Key::Z,
+                        pressed: true,
+                        repeat: false,
+                        ..
+                    }
+                )
+            })
+        });
         let (command, shift, alt, keys, physical) = ctx.input(|i| {
             let pressed: Vec<(Key, Option<Key>)> = i
                 .events
@@ -238,10 +252,12 @@ impl Library {
             if command && alt && physical.contains(&Key::Num0) {
                 self.zoom_loupe(Some(true));
             }
+            if z_pressed && !command {
+                self.zoom_loupe(None);
+            }
             // Loupe moves through the photos one at a time.
             for key in keys {
                 match (key, command) {
-                    (Key::Z, false) => self.zoom_loupe(None),
                     (Key::Plus | Key::Equals, true) => self.zoom_loupe(Some(true)),
                     (Key::Minus, true) => self.zoom_loupe(Some(false)),
                     (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),

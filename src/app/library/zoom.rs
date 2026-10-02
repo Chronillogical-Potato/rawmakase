@@ -123,6 +123,8 @@ impl Zoom {
     /// Drops the region and lets the worker free the full decode.
     pub(super) fn release(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+        // A region already sent belongs to the old ticket and is dropped.
+        self.ticket += 1;
         self.requested = None;
         self.region = None;
         self.pending = false;
