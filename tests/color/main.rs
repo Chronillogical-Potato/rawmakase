@@ -653,6 +653,13 @@ pub fn summarise(layout: &Layout, reference: &[[u16; 3]], candidate: &[[u16; 3]]
 /// Allowed worsening against the parity baseline before a test fails.
 const PARITY_MEAN_MARGIN: f64 = 0.1;
 const PARITY_P95_MARGIN: f64 = 0.3;
+/// Cases whose committed Camera Raw reference is identical to that chart's
+/// `default`, so the case measures nothing and its baseline pins a distance that
+/// is really RAWmakase's own output. `synthetic-d65` / `curve-red` has been so
+/// since the references were first committed: Camera Raw applied no red curve.
+/// Re-render it with `camera-raw-charts.py --charts synthetic-d65 --cases
+/// curve-red` and drop the entry here once it differs.
+const UNMEASURED_REFERENCES: &[(&str, &str)] = &[("synthetic-d65", "curve-red")];
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Baseline {
@@ -679,6 +686,23 @@ pub fn check_parity(
         .unwrap_or_default();
     let mut failures = Vec::new();
     for (chart, reference) in references {
+        // A reference identical to `default`'s records no Camera Raw behaviour, so
+        // its ΔE00 is RAWmakase compared with itself and the baseline would keep it
+        // there. See UNMEASURED_REFERENCES.
+        if let Some(base) = reference.cases.get("default") {
+            for (name, expected) in &reference.cases {
+                if name != "default"
+                    && expected == base
+                    && !UNMEASURED_REFERENCES.contains(&(chart.as_str(), name.as_str()))
+                {
+                    failures.push(format!(
+                        "{chart} / {name}: the Camera Raw reference is identical to default, so \
+                         this case measures nothing. Re-render it with \
+                         scripts/corpus/camera-raw-charts.py, or list it in UNMEASURED_REFERENCES."
+                    ));
+                }
+            }
+        }
         let current = render_chart(
             chart,
             &layout,
