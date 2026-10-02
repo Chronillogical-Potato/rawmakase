@@ -23,7 +23,7 @@ impl Library {
                             egui::Button::new("Open in Develop")
                                 .min_size(Vec2::new(ui.available_width(), 24.)),
                         )
-                        .on_hover_text("Develop · D, or double-click the photo");
+                        .on_hover_text("Develop · D");
                     if open.clicked()
                         && let Some(p) = &photo
                     {

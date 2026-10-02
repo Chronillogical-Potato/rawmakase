@@ -212,9 +212,24 @@ impl Library {
                 })
                 .collect()
         });
+        if self.loupe.open {
+            // Loupe moves through the photos one at a time.
+            for (key, modifiers) in keys {
+                match (key, modifiers.command) {
+                    (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
+                    (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
+                    (Key::Home, false) => self.step(Step::Home, false),
+                    (Key::End, false) => self.step(Step::End, false),
+                    (Key::Escape, _) => self.close_loupe(),
+                    _ => {}
+                }
+            }
+            return;
+        }
         for (key, modifiers) in keys {
             let (command, shift) = (modifiers.command, modifiers.shift);
             match (key, command) {
+                (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),

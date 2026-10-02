@@ -44,22 +44,33 @@ pub(super) fn thumbnail(path: &std::path::Path) -> Result<image::RgbImage> {
         let mut raw = crate::raw::Raw::open(path)?;
         crate::raw::thumbnail(&mut raw)?
     } else {
-        use image::ImageDecoder;
-        let mut decoder = image::ImageReader::open(path)?
-            .with_guessed_format()?
-            .into_decoder()?;
-        let (w, h) = decoder.dimensions();
-        anyhow::ensure!(
-            (w as u64) * (h as u64) <= 150_000_000,
-            "Image too large for library thumbnail"
-        );
-        let orientation = decoder.orientation()?;
-        let mut image = image::DynamicImage::from_decoder(decoder)?;
-        image.apply_orientation(orientation);
-        image.to_rgb8()
+        raster(path)?
     };
-    let (width, height) = fit(image.width(), image.height(), 640);
-    Ok(image::imageops::thumbnail(&image, width, height))
+    Ok(downscale(&image, 640))
+}
+/// A JPEG, TIFF or PNG decoded and turned upright; refused above 150 MP.
+pub(super) fn raster(path: &std::path::Path) -> Result<image::RgbImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(path)?
+        .with_guessed_format()?
+        .into_decoder()?;
+    let (w, h) = decoder.dimensions();
+    anyhow::ensure!(
+        (w as u64) * (h as u64) <= 150_000_000,
+        "Image too large to preview"
+    );
+    let orientation = decoder.orientation()?;
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok(image.to_rgb8())
+}
+/// `image` within `edge`×`edge`; never enlarged.
+pub(super) fn downscale(image: &image::RgbImage, edge: u32) -> image::RgbImage {
+    let (width, height) = fit(image.width(), image.height(), edge);
+    if (width, height) == image.dimensions() {
+        return image.clone();
+    }
+    image::imageops::thumbnail(image, width, height)
 }
 /// Largest size within `edge`×`edge` that keeps the source aspect ratio.
 pub(super) fn fit(width: u32, height: u32, edge: u32) -> (u32, u32) {

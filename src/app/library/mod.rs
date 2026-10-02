@@ -59,6 +59,7 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    loupe: loupe::Loupe,
     /// Metadata changes not yet handed to the shared undo log.
     done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
@@ -84,6 +85,7 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
+        let loupe = loupe::Loupe::new(&ctx);
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -107,6 +109,7 @@ impl Library {
             copy_request: None,
             copy_names: Default::default(),
             done: Vec::new(),
+            loupe,
             capture: None,
             capture_tried: HashSet::new(),
             keep_in_place: None,
@@ -357,6 +360,8 @@ impl Library {
             return;
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
+        // The Loupe shows the edit as Develop left it.
+        self.loupe.reset();
     }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does
@@ -412,6 +417,7 @@ mod filmstrip;
 mod filter;
 mod grid;
 mod info;
+mod loupe;
 mod metadata;
 mod previews;
 mod selection;
