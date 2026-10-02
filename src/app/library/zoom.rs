@@ -1,15 +1,12 @@
-//! The Loupe at 1:1: one output pixel per screen pixel. Only the part of the
-//! photo in view is rendered at full resolution, as Develop does; the Fit
-//! preview, enlarged, fills in around it while it renders.
+//! The Loupe's own 1:1, for JPEG, TIFF and PNG files (a RAW zooms in
+//! Develop's viewport): one image pixel per screen pixel. Only the part in
+//! view is uploaded; the Fit preview, enlarged, fills in around it.
 //!
-//! Memory is budgeted in three parts. Active: the open photo's full decode,
-//! held by the worker while 1:1 is on and dropped when the photo changes or
-//! the Loupe goes back to Fit. In flight: one region at a time, the latest
-//! asked for. Retained: one region texture, no larger than the view.
-use super::previews::EditSource;
+//! Memory is budgeted in three parts. Active: the photo's full decode, held
+//! by the worker while 1:1 is on and dropped when the photo changes or the
+//! Loupe goes back to Fit. In flight: one region at a time, the latest asked
+//! for. Retained: one region texture, no larger than the view.
 use crate::app::worker::Latest;
-use crate::develop::{Geometry, Recipe};
-use crate::raw::CameraImage;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{
@@ -21,7 +18,6 @@ use std::sync::{
 pub(super) struct RegionJob {
     ticket: u64,
     path: PathBuf,
-    edit: Option<EditSource>,
     /// The view's centre, as a fraction of the photo's width and height.
     center: [f32; 2],
     /// The view, in pixels.
@@ -43,12 +39,7 @@ struct Done {
 /// The photo the worker keeps decoded at full resolution.
 struct Held {
     path: PathBuf,
-    tag: Option<String>,
-    full: Full,
-}
-enum Full {
-    Raw(Arc<CameraImage>, Box<Recipe>),
-    Raster(image::RgbImage),
+    image: image::RgbImage,
 }
 
 pub(super) struct Zoom {
@@ -132,13 +123,7 @@ impl Zoom {
     }
     /// Asks for the part of `photo` around `center` that fills a view of
     /// `size` pixels, unless it is already on its way.
-    pub(super) fn request(
-        &mut self,
-        photo: i64,
-        path: &std::path::Path,
-        edit: Option<EditSource>,
-        size: [u32; 2],
-    ) {
+    pub(super) fn request(&mut self, photo: i64, path: &std::path::Path, size: [u32; 2]) {
         if self.photo != Some(photo) {
             self.photo = Some(photo);
             self.full = None;
@@ -160,7 +145,6 @@ impl Zoom {
         self.worker.submit(Some(RegionJob {
             ticket: self.ticket,
             path: path.into(),
-            edit,
             center: self.center,
             size,
             cancel: self.cancel.clone(),
@@ -204,27 +188,16 @@ impl Zoom {
 /// Renders the part of the photo `job` asks for, decoding it at full
 /// resolution first unless `held` already has it.
 fn region(job: &RegionJob, held: &mut Option<Held>) -> anyhow::Result<Region> {
-    let tag = job.edit.as_ref().map(EditSource::tag);
-    if !held
-        .as_ref()
-        .is_some_and(|h| h.path == job.path && h.tag == tag)
-    {
+    if !held.as_ref().is_some_and(|h| h.path == job.path) {
         // The previous photo's decode goes before the next is made.
         *held = None;
         *held = Some(Held {
             path: job.path.clone(),
-            tag,
-            full: decode(job)?,
+            image: super::thumbnails::raster(&job.path)?,
         });
     }
-    let full = &held.as_ref().unwrap().full;
-    let [width, height] = match full {
-        Full::Raw(image, recipe) => {
-            let g = Geometry::new(image, recipe, 0);
-            [g.width, g.height]
-        }
-        Full::Raster(image) => [image.width(), image.height()],
-    };
+    let image = &held.as_ref().unwrap().image;
+    let (width, height) = image.dimensions();
     let w = job.size[0].clamp(1, width);
     let h = job.size[1].clamp(1, height);
     let x = (job.center[0] * width as f32 - w as f32 / 2.)
@@ -233,16 +206,8 @@ fn region(job: &RegionJob, held: &mut Option<Held>) -> anyhow::Result<Region> {
     let y = (job.center[1] * height as f32 - h as f32 / 2.)
         .round()
         .clamp(0., (height - h) as f32) as u32;
-    let image = match full {
-        Full::Raw(image, recipe) => {
-            let out = crate::develop::render_region(image, recipe, [x, y, w, h])?;
-            image::RgbImage::from_raw(out.width, out.height, out.rgb8())
-                .ok_or_else(|| anyhow::anyhow!("Invalid region size"))?
-        }
-        Full::Raster(image) => image::imageops::crop_imm(image, x, y, w, h).to_image(),
-    };
     Ok(Region {
-        image,
+        image: image::imageops::crop_imm(image, x, y, w, h).to_image(),
         rect: [
             x as f32 / width as f32,
             y as f32 / height as f32,
@@ -251,33 +216,4 @@ fn region(job: &RegionJob, held: &mut Option<Held>) -> anyhow::Result<Region> {
         ],
         full: [width, height],
     })
-}
-/// The photo at full resolution: a RAW from the decode cache when it is
-/// there (it is stored for Develop otherwise), or a raster file decoded.
-fn decode(job: &RegionJob) -> anyhow::Result<Full> {
-    use crate::decode_cache::DecodeCache;
-    if !crate::storage::is_raw(&job.path) {
-        return Ok(Full::Raster(super::thumbnails::raster(&job.path)?));
-    }
-    let raw = crate::raw::Raw::open(&job.path)?;
-    let metadata = raw.metadata.clone();
-    let recipe = EditSource::recipe(job.edit.as_ref(), &raw)?;
-    let key = DecodeCache::key(&job.path).ok();
-    let cached = key
-        .as_ref()
-        .and_then(|key| DecodeCache::default().load(key, &metadata));
-    let image = match cached {
-        Some(image) => image,
-        None => {
-            let image = raw.develop(false, &job.cancel)?;
-            crate::develop::quality::recovered(&image, &job.cancel)?;
-            if let Some(key) = &key
-                && !job.cancel.load(Ordering::Relaxed)
-            {
-                let _ = DecodeCache::default().store(key, &image);
-            }
-            image
-        }
-    };
-    Ok(Full::Raw(Arc::new(image), Box::new(recipe)))
 }

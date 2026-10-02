@@ -372,8 +372,6 @@ impl Library {
             return;
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
-        // The Loupe shows the edit as Develop left it.
-        self.loupe.reset();
     }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does

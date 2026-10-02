@@ -1,11 +1,10 @@
 //! Lightroom's Loupe in the Library: the active photo large, with the
-//! filmstrip below. Its preview is built for the screen in the background:
-//! for an unedited RAW the embedded JPEG first, labelled "Embedded Preview"
-//! as in Lightroom, then the photo developed with its edit or the defaults.
-//! JPEG, TIFF and PNG files are decoded instead. Nothing larger than the
-//! view is ever uploaded. The next photo in the direction of travel is
-//! prepared ahead and kept, within a budget, until it is shown.
-use super::previews::EditSource;
+//! filmstrip below. An online RAW is loaded and drawn by Develop's own
+//! pipeline (see `Editor::loupe_viewport`); this module shows the rest. A
+//! JPEG, TIFF or PNG is decoded in the background and shown no larger than
+//! the view, and the next one in the direction of travel is prepared ahead
+//! and kept, within a budget, until it is shown. An offline photo shows its
+//! cached preview.
 use super::{Action, Library, thumbnails};
 use crate::app::theme;
 use crate::app::worker::Latest;
@@ -24,36 +23,28 @@ const EDGE_STEP: u32 = 512;
 /// Prepared neighbours kept, in bytes; the oldest go first.
 const PREFETCHED_BYTES: usize = 64 << 20;
 
-/// A preview as asked for: photo, file (photo ids can be reused), edit tag
-/// and edge.
-type Key = (i64, PathBuf, Option<String>, u32);
+/// A preview as asked for: photo, file (photo ids can be reused) and edge.
+type Key = (i64, PathBuf, u32);
 
 struct Job {
     ticket: u64,
-    /// A neighbour prepared ahead, kept under this key; only its final
-    /// stage is wanted.
+    /// A neighbour prepared ahead, kept under this key.
     ahead: Option<Key>,
     path: PathBuf,
     /// Longest side, in pixels, of the image wanted.
     edge: u32,
-    edit: Option<EditSource>,
     cancel: Arc<AtomicBool>,
-}
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Stage {
-    Embedded,
-    Rendered,
 }
 struct Done {
     ticket: u64,
     ahead: Option<Key>,
-    result: Result<(Stage, image::RgbImage), String>,
+    result: Result<image::RgbImage, String>,
 }
 /// What the Loupe shows under the photo.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum State {
     Loading,
-    Ready(Stage),
+    Ready,
     Failed(String),
 }
 
@@ -69,10 +60,8 @@ pub(super) struct Loupe {
     prefetched: std::collections::VecDeque<(Key, image::RgbImage)>,
     results: Receiver<Done>,
     ticket: u64,
-    /// What the current ticket asked for: photo, edit and edge.
+    /// What the current ticket asked for.
     requested: Option<Key>,
-    /// The edit of the photo asked for, read from the catalog once.
-    edit: Option<EditSource>,
     cancel: Arc<AtomicBool>,
     texture: Option<egui::TextureHandle>,
     pub state: State,
@@ -94,11 +83,12 @@ impl Loupe {
                     ctx.request_repaint();
                 };
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    prepare(&job, &|stage, image| send(Ok((stage, image))))
+                    thumbnails::raster(&job.path)
+                        .map(|image| thumbnails::downscale(&image, job.edge))
                 }));
                 match prepared {
-                    Ok(Ok(())) => {}
                     _ if job.cancel.load(Ordering::Relaxed) => {}
+                    Ok(Ok(image)) => send(Ok(image)),
                     Ok(Err(e)) => send(Err(format!("{e:#}"))),
                     Err(_) => send(Err("The preview could not be built".into())),
                 }
@@ -115,17 +105,16 @@ impl Loupe {
             results,
             ticket: 0,
             requested: None,
-            edit: None,
             cancel: Default::default(),
             texture: None,
             state: State::Loading,
         }
     }
     /// Asks for `photo` at `edge` pixels, unless that is already on its way.
-    fn request(&mut self, ctx: &egui::Context, photo: &Photo, edit: Option<EditSource>, edge: u32) {
-        let wanted = key(photo, &edit, edge);
+    fn request(&mut self, ctx: &egui::Context, photo: &Photo, edge: u32) {
+        let wanted = key(photo, edge);
         let asked = self.requested.as_ref() == Some(&wanted);
-        if asked && self.state == State::Ready(Stage::Rendered) {
+        if asked && self.state == State::Ready {
             return;
         }
         // Prepared ahead, perhaps finishing after it was asked for again:
@@ -135,15 +124,13 @@ impl Loupe {
             self.cancel.store(true, Ordering::Relaxed);
             self.ticket += 1;
             self.requested = Some(wanted);
-            self.edit = edit;
-            self.show(ctx, Stage::Rendered, &image);
+            self.show(ctx, &image);
             return;
         }
         if asked {
             return;
         }
-        let edge = wanted.3;
-        self.edit = edit.clone();
+        let edge = wanted.2;
         let same_photo = self.requested.as_ref().is_some_and(|r| r.0 == photo.id);
         self.requested = Some(wanted);
         // Moving on cancels the photo being prepared; its result is dropped.
@@ -159,13 +146,12 @@ impl Loupe {
             ahead: None,
             path: photo.path.clone(),
             edge,
-            edit,
             cancel: self.cancel.clone(),
         });
     }
     /// Prepares `photo`, the next one along, unless it is ready or on its way.
-    fn prepare_ahead(&mut self, photo: &Photo, edit: Option<EditSource>, edge: u32) {
-        let wanted = key(photo, &edit, edge);
+    fn prepare_ahead(&mut self, photo: &Photo, edge: u32) {
+        let wanted = key(photo, edge);
         if self.ahead_requested.as_ref() == Some(&wanted)
             || self.prefetched.iter().any(|(k, _)| *k == wanted)
         {
@@ -178,19 +164,18 @@ impl Loupe {
             ticket: 0,
             ahead: Some(wanted.clone()),
             path: photo.path.clone(),
-            edge: wanted.3,
-            edit,
+            edge: wanted.2,
             cancel: self.ahead_cancel.clone(),
         });
     }
-    fn show(&mut self, ctx: &egui::Context, stage: Stage, image: &image::RgbImage) {
+    fn show(&mut self, ctx: &egui::Context, image: &image::RgbImage) {
         let size = [image.width() as usize, image.height() as usize];
         self.texture = Some(ctx.load_texture(
             "library-loupe",
             egui::ColorImage::from_rgb(size, image.as_raw()),
             egui::TextureOptions::LINEAR,
         ));
-        self.state = State::Ready(stage);
+        self.state = State::Ready;
     }
     /// Lets go of what the Loupe's own preview holds, unless already idle.
     fn idle(&mut self) {
@@ -198,7 +183,7 @@ impl Loupe {
             self.reset();
         }
     }
-    /// Forgets the photo shown, e.g. after its edit changed elsewhere.
+    /// Forgets the photo shown and lets go of what is held for it.
     pub(super) fn reset(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
         self.ahead_cancel.store(true, Ordering::Relaxed);
@@ -213,7 +198,7 @@ impl Loupe {
         self.zoom.poll(ctx);
         while let Ok(done) = self.results.try_recv() {
             if let Some(key) = done.ahead {
-                if let Ok((Stage::Rendered, image)) = done.result {
+                if let Ok(image) = done.result {
                     self.prefetched.push_back((key, image));
                     let bytes = |p: &std::collections::VecDeque<(Key, image::RgbImage)>| {
                         p.iter().map(|(_, i)| i.as_raw().len()).sum::<usize>()
@@ -228,9 +213,7 @@ impl Loupe {
                 continue;
             }
             match done.result {
-                // A rendered preview is never replaced by the embedded one.
-                Ok((Stage::Embedded, _)) if self.state == State::Ready(Stage::Rendered) => {}
-                Ok((stage, image)) => self.show(ctx, stage, &image),
+                Ok(image) => self.show(ctx, &image),
                 Err(e) => self.state = State::Failed(e),
             }
         }
@@ -238,8 +221,7 @@ impl Loupe {
     #[cfg(test)]
     pub(super) fn wait(&mut self, ctx: &egui::Context) {
         let started = std::time::Instant::now();
-        while matches!(self.state, State::Loading | State::Ready(Stage::Embedded))
-            && started.elapsed() < std::time::Duration::from_secs(20)
+        while self.state == State::Loading && started.elapsed() < std::time::Duration::from_secs(20)
         {
             std::thread::sleep(std::time::Duration::from_millis(5));
             self.poll(ctx);
@@ -259,45 +241,12 @@ impl Loupe {
     }
 }
 
-fn key(photo: &Photo, edit: &Option<EditSource>, edge: u32) -> Key {
+fn key(photo: &Photo, edge: u32) -> Key {
     (
         photo.id,
         photo.path.clone(),
-        edit.as_ref().map(EditSource::tag),
         edge.div_ceil(EDGE_STEP).max(1) * EDGE_STEP,
     )
-}
-/// Builds the preview for `job`, handing each stage to `out` as it is ready.
-fn prepare(job: &Job, out: &dyn Fn(Stage, image::RgbImage)) -> anyhow::Result<()> {
-    let cancelled = || job.cancel.load(Ordering::Relaxed);
-    if !crate::storage::is_raw(&job.path) {
-        let image = thumbnails::raster(&job.path)?;
-        out(Stage::Rendered, thumbnails::downscale(&image, job.edge));
-        return Ok(());
-    }
-    let mut raw = crate::raw::Raw::open(&job.path)?;
-    // The camera's JPEG shows an unedited photo at once; an edited one waits
-    // for its edit, with its grid preview standing in.
-    if job.edit.is_none()
-        && job.ahead.is_none()
-        && let Ok(embedded) = crate::raw::thumbnail(&mut raw)
-    {
-        out(Stage::Embedded, thumbnails::downscale(&embedded, job.edge));
-    }
-    if cancelled() {
-        return Ok(());
-    }
-    let recipe = EditSource::recipe(job.edit.as_ref(), &raw)?;
-    // The half-size decode has more pixels than a screen needs for Fit.
-    let image = raw.develop(true, &job.cancel)?;
-    if cancelled() {
-        return Ok(());
-    }
-    let rendered = crate::develop::render(&image, &recipe, job.edge)?;
-    let image = image::RgbImage::from_raw(rendered.width, rendered.height, rendered.rgb8())
-        .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))?;
-    out(Stage::Rendered, image);
-    Ok(())
 }
 
 impl Library {
@@ -319,13 +268,6 @@ impl Library {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)
-    }
-    /// The photo's edit, as the Loupe renders it.
-    fn edit_of(&self, photo: &Photo) -> Option<EditSource> {
-        let (recipe, lightroom) = self.catalog.edit_texts(photo.id).ok()?;
-        recipe
-            .map(EditSource::Recipe)
-            .or(lightroom.map(EditSource::Lightroom))
     }
     /// Z, a click, Cmd+= and Cmd+-: 1:1 or Fit, keeping the place in the photo.
     pub(super) fn zoom_loupe(&mut self, on: Option<bool>) {
@@ -373,21 +315,11 @@ impl Library {
         ui.painter().rect_filled(rect, 0., theme::gray(36));
         let ppp = ui.ctx().pixels_per_point();
         let available = self.is_available(&photo.path);
-        let edit = if self
-            .loupe
-            .requested
-            .as_ref()
-            .is_some_and(|r| r.0 == photo.id)
-        {
-            self.loupe.edit.clone()
-        } else {
-            self.edit_of(&photo)
-        };
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
         if available {
-            self.loupe.request(ui.ctx(), &photo, edit.clone(), edge);
+            self.loupe.request(ui.ctx(), &photo, edge);
             // Once this photo is ready, the next one along is prepared.
-            if self.loupe.state == State::Ready(Stage::Rendered)
+            if self.loupe.state == State::Ready
                 && let Some(next) = self
                     .navigate(photo.id, self.loupe_direction)
                     .filter(|n| *n != photo.id)
@@ -396,8 +328,7 @@ impl Library {
                 // A RAW opens through Develop's pipeline, which prefetches it.
                 && !crate::storage::is_raw(&next.path)
             {
-                let next_edit = self.edit_of(&next);
-                self.loupe.prepare_ahead(&next, next_edit, edge);
+                self.loupe.prepare_ahead(&next, edge);
             }
         } else if self.loupe.requested.is_some() {
             self.loupe.reset();
@@ -469,7 +400,7 @@ impl Library {
         };
         if zoom.on && available {
             let size = [(rect.width() * ppp) as u32, (rect.height() * ppp) as u32];
-            zoom.request(photo.id, &photo.path, edit, size);
+            zoom.request(photo.id, &photo.path, size);
         }
         let painter = ui.painter().with_clip_rect(rect);
         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
@@ -506,8 +437,7 @@ impl Library {
                 "Loading 1:1…".into()
             }
             (State::Loading, ..) => "Loading…".into(),
-            (State::Ready(Stage::Embedded), ..) => "Embedded Preview".into(),
-            (State::Ready(Stage::Rendered), ..) => String::new(),
+            (State::Ready, ..) => String::new(),
             (State::Failed(e), ..) => format!("Preview unavailable: {e}"),
         };
         if !note.is_empty() {

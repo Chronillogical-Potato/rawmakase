@@ -995,10 +995,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
     // A 1200 px wide view asks for the next step up, 1536 px; never more.
-    assert_eq!(
-        library.loupe.state,
-        loupe::State::Ready(loupe::Stage::Rendered)
-    );
+    assert_eq!(library.loupe.state, loupe::State::Ready);
     assert_eq!(library.loupe.texture_size(), Some([1536, 1024]));
     // The next photo replaces it; a damaged file says why.
     library.step(selection::Step::By(1), false);
@@ -1075,10 +1072,7 @@ fn loupe_zooms_to_one_to_one_and_prepares_the_next_photo() -> Result<()> {
     library.loupe.wait_ahead(&ctx);
     library.step(selection::Step::By(1), false);
     frame(&mut library);
-    assert_eq!(
-        library.loupe.state,
-        loupe::State::Ready(loupe::Stage::Rendered)
-    );
+    assert_eq!(library.loupe.state, loupe::State::Ready);
     // 1:1 renders only the view: 1200 by 672 pixels of the 3000 by 2000.
     library.zoom_loupe(Some(true));
     frame(&mut library);
