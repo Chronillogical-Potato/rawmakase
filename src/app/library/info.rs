@@ -11,7 +11,7 @@ impl Library {
     pub fn info_panel(&mut self, ui: &mut egui::Ui) -> Action {
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
-        let photo = self.selected.and_then(|id| self.photo(id)).cloned();
+        let photo = self.selected().and_then(|id| self.photo(id)).cloned();
         egui::ScrollArea::vertical()
             .id_salt("library-info")
             .auto_shrink(false)
@@ -42,7 +42,7 @@ impl Library {
                 section(ui, "Metadata", false, |ui| {
                     match &photo {
                         Some(p) => {
-                            self.metadata_controls(ui, p.id);
+                            self.metadata_controls(ui, p.id, true);
                         }
                         None => {
                             ui.allocate_exact_size(
@@ -103,11 +103,18 @@ impl Library {
             });
         action
     }
-    pub fn metadata_controls(&mut self, ui: &mut egui::Ui, id: i64) -> bool {
+    /// Rating, flag and label of `id`; a change applies to the whole
+    /// selection when `whole_selection` (the Grid) and `id` is in it.
+    pub fn metadata_controls(&mut self, ui: &mut egui::Ui, id: i64, whole_selection: bool) -> bool {
         if let Some(photo) = self.photo(id).cloned()
             && let Some(edit) = crate::app::photo_metadata::controls(ui, &photo, &self.labels())
         {
-            if let Err(e) = self.edit_metadata(id, edit, false) {
+            let ids = if whole_selection && self.selection.selected.contains(&id) {
+                self.selected_ids()
+            } else {
+                vec![id]
+            };
+            if let Err(e) = self.edit_photos(&ids, edit, false) {
                 self.message = format!("Metadata could not be saved: {e}");
             }
             return true;

@@ -11,55 +11,41 @@ impl Editor {
         if self.activity.is_busy() {
             return;
         }
-        let id = if self.library_mode {
-            self.library.as_ref().and_then(|l| l.selected)
-        } else {
-            self.document.catalog_photo
-        };
-        let Some(id) = id else {
-            return;
-        };
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
         let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
-        if let Some((edit, advance)) = crate::app::photo_metadata::shortcut(ctx).filter(|(e, _)| {
+        let shortcut = crate::app::photo_metadata::shortcut(ctx).filter(|(e, _)| {
             !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
-        }) {
-            let Some(library) = &mut self.library else {
-                return;
-            };
-            match library.edit_metadata(id, edit, advance) {
-                Ok(next) => {
-                    self.status = library.message.clone();
-                    if !self.library_mode
-                        && let Some(next) = next
+        });
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        if self.library_mode {
+            // The Grid applies a key to every selected photo, as Lightroom does.
+            match shortcut {
+                Some((edit, advance)) => match library.edit_selection(edit, advance) {
+                    Ok(_) => self.status = library.message.clone(),
+                    Err(e) => self.status = format!("Metadata could not be saved: {e}"),
+                },
+                None => library.selection_keys(ctx),
+            }
+            return;
+        }
+        let (Some(id), Some((edit, advance))) = (self.document.catalog_photo, shortcut) else {
+            return;
+        };
+        match library.edit_metadata(id, edit, advance) {
+            Ok(next) => {
+                self.status = library.message.clone();
+                if let Some(next) = next {
+                    self.develop_catalog_photo(next);
+                    if self.document.catalog_photo != Some(next)
+                        && let Some(library) = &mut self.library
                     {
-                        self.develop_catalog_photo(next);
-                        if self.document.catalog_photo != Some(next)
-                            && let Some(library) = &mut self.library
-                        {
-                            library.selected = Some(id);
-                        }
+                        library.make_active(id);
                     }
                 }
-                Err(e) => self.status = format!("Metadata could not be saved: {e}"),
             }
-        } else if self.library_mode && !ctx.text_edit_focused() {
-            let delta = ctx.input(|i| {
-                if i.modifiers.any() {
-                    0
-                } else if i.key_pressed(egui::Key::ArrowRight) {
-                    1
-                } else if i.key_pressed(egui::Key::ArrowLeft) {
-                    -1
-                } else {
-                    0
-                }
-            });
-            if delta != 0
-                && let Some(library) = &mut self.library
-            {
-                library.selected = library.navigate(id, delta);
-            }
+            Err(e) => self.status = format!("Metadata could not be saved: {e}"),
         }
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
@@ -130,7 +116,17 @@ impl Editor {
     }
     fn workspace_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
-            if ctx.input(|i| i.key_pressed(egui::Key::G)) && self.flush() {
+            // Cmd+G and Cmd+D are other commands (Stack, Select None).
+            let plain = |key| {
+                // The modifiers held for that key, not at the end of the frame.
+                ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key && !(modifiers.command || modifiers.ctrl || modifiers.alt))
+                    })
+                })
+            };
+            if plain(egui::Key::G) && self.flush() {
                 self.library_mode = true;
             }
             // Lightroom's Create Virtual Copy, in Library and Develop.
@@ -151,7 +147,7 @@ impl Editor {
             });
             if create {
                 let id = if self.library_mode {
-                    self.library.as_ref().and_then(|l| l.selected)
+                    self.library.as_ref().and_then(|l| l.selected())
                 } else {
                     self.document.catalog_photo
                 };
@@ -159,7 +155,7 @@ impl Editor {
                     self.virtual_copy(crate::app::library::CopyAction::Create(id));
                 }
             }
-            if ctx.input(|i| i.key_pressed(egui::Key::D)) {
+            if plain(egui::Key::D) {
                 if self.library_mode {
                     if let Some(id) = self.library.as_mut().and_then(|l| l.selected_or_first()) {
                         self.develop_catalog_photo(id);

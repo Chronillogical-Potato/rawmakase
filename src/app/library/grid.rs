@@ -203,6 +203,7 @@ impl Library {
             .show(ui, |ui| self.grid_toolbar(ui));
         let columns = ((ui.available_width() / self.thumb_size).floor() as usize).max(1);
         let width = (ui.available_width() / columns as f32).floor().max(80.);
+        self.grid_columns = columns;
         let mut metadata_edit = None;
         let spacing = ui.spacing().item_spacing;
         ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -217,6 +218,21 @@ impl Library {
             scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * width).max(0.));
         }
         egui::Frame::new().fill(theme::gray(44)).show(ui, |ui| {
+            // A key moved the active photo: bring its row into view.
+            if std::mem::take(&mut self.scroll_to_active)
+                && let Some(at) = self
+                    .selection
+                    .active
+                    .and_then(|id| self.visible.iter().position(|i| self.photos[*i].id == id))
+            {
+                let top = (at / columns) as f32 * width;
+                let height = ui.available_height();
+                if top < self.grid_offset {
+                    scroll = scroll.vertical_scroll_offset(top);
+                } else if top + width > self.grid_offset + height {
+                    scroll = scroll.vertical_scroll_offset(top + width - height);
+                }
+            }
             let output = scroll.show_rows(
                 ui,
                 width,
@@ -236,16 +252,19 @@ impl Library {
                                     ui,
                                     &p,
                                     self.texture(&p),
-                                    self.selected == Some(p.id),
+                                    self.mark(p.id),
                                     row * columns + col + 1,
                                     exists,
                                     width,
                                 );
-                                if response.clicked() || response.secondary_clicked() {
-                                    self.selected = Some(p.id);
+                                if response.clicked() {
+                                    self.click(p.id, ui.input(|i| i.modifiers));
+                                } else if response.secondary_clicked() {
+                                    // A menu on a selected photo acts on the selection.
+                                    self.make_active(p.id);
                                 }
                                 if response.double_clicked() {
-                                    self.selected = Some(p.id);
+                                    self.make_active(p.id);
                                     action = Action::Develop(p.id);
                                 }
                                 if let Some(edit) = edit {
@@ -260,18 +279,21 @@ impl Library {
         });
         ui.spacing_mut().item_spacing = spacing;
         if let Some((photo, menu)) = metadata_edit
-            && let Some(id) = self.photo_action(ui.ctx(), &photo, menu)
+            && let Some(id) = self.photo_action(ui.ctx(), &photo, menu, true)
         {
             action = Action::Develop(id);
         }
         action
     }
     /// Carries out a thumbnail menu choice; returns a photo to open in Develop.
+    /// A metadata change covers the selection when `whole_selection` (the
+    /// grid) and the photo is in it, else that photo alone (the filmstrip).
     pub(super) fn photo_action(
         &mut self,
         ctx: &egui::Context,
         photo: &Photo,
         action: cell::PhotoAction,
+        whole_selection: bool,
     ) -> Option<i64> {
         use cell::PhotoAction;
         match action {
@@ -286,7 +308,12 @@ impl Library {
                 self.message = format!("Copied {}", photo.path.display());
             }
             PhotoAction::Edit(edit) => {
-                if let Err(e) = self.edit_metadata(photo.id, edit, false) {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                if let Err(e) = self.edit_photos(&ids, edit, false) {
                     self.message = format!("Metadata could not be saved: {e}");
                 }
             }

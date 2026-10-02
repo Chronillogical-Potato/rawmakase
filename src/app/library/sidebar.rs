@@ -17,7 +17,7 @@ impl Library {
             .show(ui, |ui| {
                 section(ui, "Navigator", false, |ui| {
                     let texture = self
-                        .selected
+                        .selected()
                         .and_then(|id| self.photo(id))
                         .and_then(|p| self.texture(p));
                     let (rect, _) = ui.allocate_exact_size(
@@ -265,7 +265,7 @@ impl Library {
         if let Some(id) = photo
             && self.visible.iter().any(|i| self.photos[*i].id == id)
         {
-            self.selected = Some(id);
+            self.select(Some(id));
         }
     }
     /// The selected source's name, as Lightroom shows it above the filmstrip.

@@ -255,7 +255,7 @@ impl Editor {
         let photo = if develop {
             self.document.catalog_photo
         } else {
-            library.selected
+            library.selected()
         };
         (library.source_key(), photo, develop)
     }

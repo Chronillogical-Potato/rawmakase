@@ -32,6 +32,15 @@ impl Edit {
         }
         (rating, flag, label)
     }
+    /// The same edit with its toggle settled by `lead`, the active photo, so
+    /// every photo of a batch gets the same value.
+    pub fn resolve(self, lead: &Photo) -> Self {
+        match self {
+            Self::TogglePick => Self::Flag(self.values(lead).1),
+            Self::ToggleLabel(_) => Self::Label(self.values(lead).2),
+            edit => edit,
+        }
+    }
 }
 
 pub fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {

@@ -174,7 +174,7 @@ fn catalog_metadata_keys_work_in_both_modules_without_zoom_or_dialog_edits() -> 
     let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
     let mut library = crate::app::library::Library::load(&path, ctx.clone())?;
     let ids: Vec<_> = library.photos.iter().map(|p| p.id).collect();
-    library.selected = Some(ids[0]);
+    library.select(Some(ids[0]));
     e.library = Some(Box::new(library));
     for (library_mode, key, expected_rating, expected_flag) in [
         (true, egui::Key::Num5, 5, 0),
@@ -1394,7 +1394,7 @@ fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::
     let library = editor.library.as_ref().unwrap();
     let copy = library.photos.iter().find(|p| p.id != id).unwrap();
     assert_eq!((copy.master, copy.copy_name.as_str()), (Some(id), "Copy 1"));
-    assert_eq!(library.selected, Some(copy.id));
+    assert_eq!(library.selected(), Some(copy.id));
     assert_eq!(editor.document.catalog_photo, Some(copy.id));
     for photo_id in [id, copy.id] {
         let saved = library.catalog.load_edit(photo_id, &photo)?.unwrap();
@@ -1441,7 +1441,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     assert_eq!(editor.document.catalog_photo, None);
     let library = editor.library.as_ref().unwrap();
     assert!(library.photo(copy).is_none());
-    assert_eq!(library.selected, Some(master));
+    assert_eq!(library.selected(), Some(master));
     Ok(())
 }
 #[test]

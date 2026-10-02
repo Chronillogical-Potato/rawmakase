@@ -23,7 +23,12 @@ pub enum CopyAction {
 pub struct Library {
     pub catalog: Catalog,
     pub photos: Vec<Photo>,
-    pub selected: Option<i64>,
+    /// The active photo and the photos selected with it.
+    selection: selection::Selection,
+    /// Grid columns last frame, for Up and Down.
+    grid_columns: usize,
+    /// Scroll the grid to the active photo, after a key moved it.
+    scroll_to_active: bool,
     folders: Vec<Folder>,
     collections: Vec<Collection>,
     /// Each collection's photos, limited to the ones the Library shows.
@@ -71,7 +76,9 @@ impl Library {
         let mut s = Self {
             catalog,
             photos: Vec::new(),
-            selected: None,
+            selection: Default::default(),
+            grid_columns: 1,
+            scroll_to_active: false,
             folders: Vec::new(),
             collections: Vec::new(),
             collection_photos: HashMap::new(),
@@ -98,7 +105,7 @@ impl Library {
         };
         s.refresh()?;
         // Start with a selection, as Lightroom does, so the side panels are filled.
-        s.selected = s.visible.first().map(|i| s.photos[*i].id);
+        s.select(s.visible.first().map(|i| s.photos[*i].id));
         Ok(s)
     }
     pub fn refresh(&mut self) -> Result<()> {
@@ -182,12 +189,7 @@ impl Library {
         self.visible = self
             .filters
             .visible(&self.photos, |path| self.availability.is_available(path));
-        if self
-            .selected
-            .is_some_and(|id| !self.visible.iter().any(|i| self.photos[*i].id == id))
-        {
-            self.selected = None;
-        }
+        self.keep_shown_selected();
     }
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
@@ -214,56 +216,120 @@ impl Library {
         labels.extend(custom);
         labels
     }
+    /// Sets the rating, flag or label of one photo, as Develop and the
+    /// filmstrip do; see `edit_photos`.
     pub fn edit_metadata(
         &mut self,
         id: i64,
         edit: crate::app::photo_metadata::Edit,
         advance: bool,
     ) -> Result<Option<i64>> {
+        self.edit_photos(&[id], edit, advance)
+    }
+    /// A metadata key in the Grid: Lightroom applies it to every selected
+    /// photo.
+    pub fn edit_selection(
+        &mut self,
+        edit: crate::app::photo_metadata::Edit,
+        advance: bool,
+    ) -> Result<Option<i64>> {
+        self.edit_photos(&self.selected_ids(), edit, advance)
+    }
+    /// Sets the rating, flag or label of `ids` in one transaction. A toggle
+    /// takes its value from the active photo, so all of them end up alike.
+    /// With `advance` (Shift), a single photo is followed by the next one
+    /// shown, which is returned. A photo the filter now hides leaves the
+    /// selection; when the active one goes, the next one shown is selected.
+    pub(super) fn edit_photos(
+        &mut self,
+        ids: &[i64],
+        edit: crate::app::photo_metadata::Edit,
+        advance: bool,
+    ) -> Result<Option<i64>> {
+        let Some(&first) = ids.first() else {
+            return Ok(None);
+        };
+        let lead = self
+            .selection
+            .active
+            .filter(|id| ids.contains(id))
+            .unwrap_or(first);
         let p = self
-            .photo(id)
+            .photo(lead)
             .ok_or_else(|| anyhow::anyhow!("Unknown photo"))?;
-        let (rating, flag, label) = edit.values(p);
-        let position = self.visible.iter().position(|i| self.photos[*i].id == id);
+        let edit = edit.resolve(p);
+        let changes: Vec<(i64, i32, i32, String)> = ids
+            .iter()
+            .filter_map(|id| self.photo(*id))
+            .map(|p| {
+                let (rating, flag, label) = edit.values(p);
+                (p.id, rating, flag, label)
+            })
+            .collect();
+        let position = self.visible.iter().position(|i| self.photos[*i].id == lead);
         let following: Vec<_> = position.map_or_else(Vec::new, |at| {
             self.visible[at + 1..]
                 .iter()
                 .map(|i| self.photos[*i].id)
+                .filter(|id| !ids.contains(id))
                 .collect()
         });
-        self.catalog.set_metadata(id, rating, flag, &label)?;
-        let p = self.photos.iter_mut().find(|p| p.id == id).unwrap();
-        p.rating = rating;
-        p.flag = flag;
-        p.label = label;
-        self.message = format!(
-            "{} · {} stars · {} · {}",
-            p.filename,
-            rating,
-            match flag {
-                1 => "Pick",
-                -1 => "Reject",
-                _ => "Unflagged",
-            },
-            if p.label.is_empty() {
-                "No label"
-            } else {
-                &p.label
+        self.catalog.set_metadata_of(&changes)?;
+        for (id, rating, flag, label) in &changes {
+            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
+                p.rating = *rating;
+                p.flag = *flag;
+                p.label = label.clone();
             }
-        );
+        }
+        let (_, rating, flag, label) = &changes[0];
+        let summary = match &edit {
+            crate::app::photo_metadata::Edit::Rating(_) => format!("{rating} stars"),
+            crate::app::photo_metadata::Edit::RatingDelta(_) => "Rating changed".into(),
+            crate::app::photo_metadata::Edit::Label(_)
+            | crate::app::photo_metadata::Edit::ToggleLabel(_) => {
+                if label.is_empty() {
+                    "No label".into()
+                } else {
+                    label.clone()
+                }
+            }
+            _ => flag_name(*flag).into(),
+        };
+        self.message = match self.photo(lead) {
+            Some(p) if changes.len() == 1 => format!(
+                "{} · {} stars · {} · {}",
+                p.filename,
+                p.rating,
+                flag_name(p.flag),
+                if p.label.is_empty() {
+                    "No label"
+                } else {
+                    &p.label
+                }
+            ),
+            _ => format!("{} photos · {summary}", changes.len()),
+        };
         self.filter();
         let next = following
             .into_iter()
             .find(|next| self.visible.iter().any(|i| self.photos[*i].id == *next));
-        let still_visible = self.visible.iter().any(|i| self.photos[*i].id == id);
+        let still_visible = self.visible.iter().any(|i| self.photos[*i].id == lead);
+        let advance = advance && changes.len() == 1;
         if advance || !still_visible {
-            self.selected = next.or_else(|| {
+            let to = next.or_else(|| {
                 if still_visible {
-                    Some(id)
+                    Some(lead)
                 } else {
                     self.visible.last().map(|i| self.photos[*i].id)
                 }
             });
+            // Photos still selected and shown stay selected.
+            if self.selection.selected.is_empty() || advance {
+                self.select(to);
+            } else if let Some(to) = to {
+                self.make_active(to);
+            }
         }
         Ok(if advance { next } else { None })
     }
@@ -314,7 +380,7 @@ impl Library {
             self.filters.clear_bar();
             self.filter();
         }
-        self.selected = Some(id);
+        self.select(Some(id));
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
@@ -360,10 +426,10 @@ impl Library {
     /// folder or filter (which then becomes selected), as Lightroom does
     /// when switching to Develop.
     pub(super) fn selected_or_first(&mut self) -> Option<i64> {
-        if self.selected.is_none() {
-            self.selected = self.visible.first().map(|i| self.photos[*i].id);
+        if self.selection.active.is_none() {
+            self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
-        self.selected
+        self.selection.active
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
     pub(super) fn has_edited_thumbnail(&self, id: i64) -> bool {
@@ -399,6 +465,13 @@ impl Library {
         self.copy_names.discard();
     }
 }
+fn flag_name(flag: i32) -> &'static str {
+    match flag {
+        1 => "Pick",
+        -1 => "Reject",
+        _ => "Unflagged",
+    }
+}
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
@@ -411,6 +484,7 @@ mod filter;
 mod grid;
 mod info;
 mod previews;
+mod selection;
 mod sidebar;
 mod textures;
 mod thumbnails;
