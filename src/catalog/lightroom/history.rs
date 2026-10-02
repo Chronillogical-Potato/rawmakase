@@ -68,23 +68,11 @@ impl Catalog {
     pub fn backfill_lightroom_history(&mut self) -> Result<usize> {
         // Once is enough: without history to recover, the stored catalog would
         // otherwise be written out and attached on every open.
-        let done = self
-            .db
-            .query_row(
-                "SELECT 1 FROM meta WHERE key=?",
-                [HISTORY_BACKFILLED],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some();
-        if done {
+        if self.meta(HISTORY_BACKFILLED)?.is_some() {
             return Ok(0);
         }
         let copied = self.copy_lightroom_history()?;
-        self.db.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
-            [HISTORY_BACKFILLED],
-        )?;
+        self.set_meta(HISTORY_BACKFILLED, "1")?;
         Ok(copied)
     }
     fn copy_lightroom_history(&mut self) -> Result<usize> {
@@ -94,26 +82,8 @@ impl Catalog {
         if have > 0 {
             return Ok(0);
         }
-        let original: Option<Vec<u8>> = self
-            .db
-            .query_row(
-                "SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(original) = original else {
-            return Ok(0);
-        };
-        let snapshot = tempfile::NamedTempFile::new()?;
-        std::fs::write(snapshot.path(), original)?;
-        self.db.execute(
-            "ATTACH DATABASE ? AS lr",
-            [snapshot.path().to_string_lossy()],
-        )?;
-        let result = (|| -> Result<usize> {
-            let exists = self
-                .db
+        let copied = self.with_stored_lightroom(|db| {
+            let exists = db
                 .query_row(
                     "SELECT 1 FROM lr.sqlite_master WHERE type='table' AND name='Adobe_libraryImageDevelopHistoryStep'",
                     [],
@@ -124,10 +94,9 @@ impl Catalog {
             if !exists {
                 return Ok(0);
             }
-            Ok(self.db.execute(COPY_LIGHTROOM_HISTORY, [])?)
-        })();
-        self.db.execute_batch("DETACH DATABASE lr")?;
-        result
+            Ok(db.execute(COPY_LIGHTROOM_HISTORY, [])?)
+        })?;
+        Ok(copied.unwrap_or(0))
     }
     pub fn lightroom_develop(&self, id: i64) -> Result<Option<String>> {
         Ok(self.db.query_row(

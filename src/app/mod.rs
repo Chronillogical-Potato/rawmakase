@@ -399,6 +399,7 @@ mod autosave;
 mod save_state;
 
 mod editing;
+mod shortcuts;
 mod theme;
 mod toolbar;
 mod updates;

@@ -245,6 +245,10 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
+                // Once per press: a held I must not flicker through them.
+                (Key::I, false) if !press.modifiers.any() && !press.repeat => {
+                    self.loupe_info = self.loupe_info.next()
+                }
                 _ => {}
             }
         }
@@ -256,6 +260,7 @@ impl Library {
 struct Press {
     key: Key,
     modifiers: egui::Modifiers,
+    repeat: bool,
 }
 fn presses(ctx: &egui::Context) -> Vec<Press> {
     ctx.input(|i| {
@@ -266,10 +271,12 @@ fn presses(ctx: &egui::Context) -> Vec<Press> {
                     key,
                     pressed: true,
                     modifiers,
+                    repeat,
                     ..
                 } => Some(Press {
                     key: *key,
                     modifiers: *modifiers,
+                    repeat: *repeat,
                 }),
                 _ => None,
             })

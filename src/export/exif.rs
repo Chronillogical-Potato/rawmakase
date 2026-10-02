@@ -50,6 +50,21 @@ impl Field {
             bytes,
         }
     }
+    /// The first value of a numeric field: SHORT, LONG or (S)RATIONAL.
+    pub fn number(&self) -> Option<f64> {
+        let word = |at: usize| {
+            Some(u32::from_le_bytes(
+                self.bytes.get(at..at + 4)?.try_into().ok()?,
+            ))
+        };
+        match self.kind {
+            3 => Some(u16::from_le_bytes(self.bytes.get(..2)?.try_into().ok()?) as f64),
+            4 => word(0).map(f64::from),
+            5 => Some(word(0)? as f64 / word(4).filter(|d| *d != 0)? as f64),
+            10 => Some(word(0)? as i32 as f64 / (word(4).filter(|d| *d != 0)? as i32) as f64),
+            _ => None,
+        }
+    }
     /// Text of an ASCII field, without the terminator.
     pub fn text(&self) -> Option<String> {
         (self.kind == 2).then(|| {
@@ -116,6 +131,67 @@ pub fn capture_time(path: &Path) -> Option<String> {
             let date = exif.get(date).and_then(Field::text)?;
             lightroom_time(&date, exif.get(subseconds).and_then(Field::text).as_deref())
         })
+}
+
+/// Camera, lens and exposure settings of a JPEG, TIFF or TIFF-based RAW
+/// from its EXIF; `None` when it has none. Dimensions are not read here.
+pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
+    const MAKE: u16 = 0x010f;
+    const MODEL: u16 = 0x0110;
+    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
+    let text = |tag| {
+        exif.get(tag)
+            .and_then(Field::text)
+            .filter(|t| !t.is_empty())
+    };
+    let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
+    // Lightroom shows the model, which usually names the make too.
+    let camera = match (text(MAKE), text(MODEL)) {
+        (Some(make), Some(model)) if !model.starts_with(make.split(' ').next().unwrap_or("")) => {
+            Some(format!("{make} {model}"))
+        }
+        (make, model) => model.or(make),
+    };
+    let info = crate::catalog::PhotoInfo {
+        camera,
+        lens: text(0xa434),
+        focal: number(0x920a),
+        // FNumber and ExposureTime, else their APEX values.
+        aperture: number(0x829d).or_else(|| {
+            let av = exif.get(0x9202).and_then(Field::number)?;
+            Some(2f64.powf(av / 2.))
+        }),
+        exposure: number(0x829a).or_else(|| {
+            let tv = exif.get(0x9201).and_then(Field::number)?;
+            Some(2f64.powf(-tv))
+        }),
+        iso: iso(&exif),
+        dimensions: None,
+    };
+    (info != Default::default()).then_some(info)
+}
+
+/// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
+/// (0x8830) names holds it: standard output sensitivity, recommended
+/// exposure index or ISO speed.
+fn iso(exif: &CameraExif) -> Option<f64> {
+    let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
+    let iso = number(0x8827);
+    if iso.is_some_and(|iso| iso < 65535.) {
+        return iso;
+    }
+    let extended = match number(0x8830).map(|t| t as u32) {
+        Some(1 | 4 | 5 | 7) => 0x8831,
+        Some(2 | 6) => 0x8832,
+        Some(3) => 0x8833,
+        _ => {
+            return [0x8833, 0x8832, 0x8831]
+                .into_iter()
+                .find_map(number)
+                .or(iso);
+        }
+    };
+    number(extended).or(iso)
 }
 
 /// "YYYY:MM:DD HH:MM:SS" and optional subsecond digits as

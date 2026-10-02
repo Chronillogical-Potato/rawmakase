@@ -3,19 +3,8 @@
 //! background, a batch at a time. Photos imported from Lightroom already have
 //! theirs.
 use super::Library;
-use eframe::egui;
 use std::collections::HashMap;
-use std::{
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, TryRecvError, channel},
-    },
-};
-
-/// Photos read between two updates of the catalog.
-const BATCH: usize = 32;
+use std::path::Path;
 
 impl Library {
     /// Once it is known which photos are online, filters again and reads the
@@ -24,6 +13,7 @@ impl Library {
         self.filter();
         self.capture_tried.clear();
         self.start_capture_times();
+        self.start_photo_info();
     }
     pub(super) fn start_capture_times(&mut self) {
         if self.capture.is_some() {
@@ -43,7 +33,7 @@ impl Library {
             .collect();
         if !todo.is_empty() {
             self.capture_tried.extend(todo.iter().map(|(id, _)| *id));
-            self.capture = Some(Backfill::start(todo, &self.ctx));
+            self.capture = Some(super::background::Reader::start(todo, &self.ctx, read));
         }
     }
     /// Saves the capture times read so far and sorts the photos again.
@@ -116,48 +106,6 @@ pub(super) enum Read {
     Unreadable,
 }
 
-pub(super) struct Backfill {
-    rx: Receiver<Vec<(i64, Read)>>,
-    cancel: Arc<AtomicBool>,
-}
-impl Backfill {
-    pub(super) fn start(photos: Vec<(i64, PathBuf)>, ctx: &egui::Context) -> Self {
-        let (tx, rx) = channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancelled = cancel.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            for batch in photos.chunks(BATCH) {
-                if cancelled.load(Ordering::Relaxed) {
-                    return;
-                }
-                let read = batch.iter().map(|(id, path)| (*id, read(path))).collect();
-                if tx.send(read).is_err() {
-                    return;
-                }
-                ctx.request_repaint();
-            }
-        });
-        Self { rx, cancel }
-    }
-    /// The batches read since the last call, and whether the backfill is done.
-    pub(super) fn poll(&self) -> (Vec<(i64, Read)>, bool) {
-        let mut out = Vec::new();
-        loop {
-            match self.rx.try_recv() {
-                Ok(batch) => out.extend(batch),
-                Err(TryRecvError::Empty) => return (out, false),
-                Err(TryRecvError::Disconnected) => return (out, true),
-            }
-        }
-    }
-}
-impl Drop for Backfill {
-    fn drop(&mut self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
-}
-
 /// Whether a capture time can be read from this kind of file at all, so
 /// files that never yield one are not opened on every launch: a PNG rarely
 /// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
@@ -175,11 +123,7 @@ pub(super) fn readable(path: &Path) -> bool {
 }
 
 fn read(path: &Path) -> Read {
-    // A file that cannot be read now (offline, no permission, a network
-    // error) is tried again later rather than taken for undated.
-    use std::io::Read as _;
-    let readable = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut [0; 1]));
-    if readable.is_err() {
+    if !super::background::can_read(path) {
         return Read::Unreadable;
     }
     match crate::export::exif::capture_time(path) {

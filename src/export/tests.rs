@@ -239,3 +239,31 @@ fn capture_time_is_read_from_tiff_and_jpeg_files() -> anyhow::Result<()> {
     assert_eq!(exif::capture_time(&undated), None);
     Ok(())
 }
+#[test]
+fn photo_info_is_read_from_exif() -> anyhow::Result<()> {
+    use exif::Field;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("a.tif");
+    let block = exif::tiff_block(
+        vec![
+            Field::ascii(0x010f, "FUJIFILM"),
+            Field::ascii(0x0110, "X100F"),
+        ],
+        vec![
+            Field::rational(0x829a, 1, 250),
+            Field::rational(0x829d, 28, 10),
+            Field::short(0x8827, 400),
+            Field::rational(0x920a, 23, 1),
+        ],
+        Vec::new(),
+    );
+    let mut bytes = block;
+    bytes.resize(512, 0);
+    std::fs::write(&path, bytes)?;
+    let info = exif::photo_info(&path).unwrap();
+    assert_eq!(info.camera.as_deref(), Some("FUJIFILM X100F"));
+    assert_eq!(info.exposure_text().as_deref(), Some("1/250 sec at f/2.8"));
+    assert_eq!(info.iso_text().as_deref(), Some("ISO 400"));
+    assert_eq!(info.focal_text().as_deref(), Some("23 mm"));
+    Ok(())
+}

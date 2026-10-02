@@ -535,6 +535,7 @@ impl Library {
                 theme::gray(170),
             );
         }
+        self.loupe_overlay(ui.painter(), rect);
         Action::None
     }
 }

@@ -10,6 +10,36 @@ pub use history::HistoryStep;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 
+impl Catalog {
+    /// Runs `f` with the Lightroom catalog this one was imported from
+    /// attached as `lr`; `None` for a catalog that was not imported.
+    pub(in crate::catalog) fn with_stored_lightroom<T>(
+        &mut self,
+        f: impl FnOnce(&Connection) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let original: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(original) = original else {
+            return Ok(None);
+        };
+        let snapshot = tempfile::NamedTempFile::new()?;
+        std::fs::write(snapshot.path(), original)?;
+        self.db.execute(
+            "ATTACH DATABASE ? AS lr",
+            [snapshot.path().to_string_lossy()],
+        )?;
+        let result = f(&self.db);
+        self.db.execute_batch("DETACH DATABASE lr")?;
+        result.map(Some)
+    }
+}
+
 /// Import a closed/exported Lightroom catalog into a new, atomically published file.
 /// Keep a byte-exact archive inside our catalog, including fields we cannot interpret.
 pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
@@ -117,6 +147,12 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     if has("AgLibraryKeyword")? {
         tx.execute_batch("INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent FROM lr.AgLibraryKeyword;")?;
     }
+    super::info::copy_lightroom_info(&tx)?;
+    // Copied here, so opening the new catalog has nothing to backfill.
+    tx.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
+        [super::info::INFO_BACKFILLED],
+    )?;
     if has("AgLibraryKeywordImage")? {
         tx.execute_batch("INSERT OR IGNORE INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords);")?;
     }

@@ -20,6 +20,7 @@ fastframe_icons::icons! {
         Folder => "folder",
         Collection => "images",
         CollectionSet => "box",
+        Keyboard => "keyboard",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",

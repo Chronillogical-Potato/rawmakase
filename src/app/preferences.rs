@@ -151,6 +151,10 @@ impl Editor {
         {
             self.open_preferences(Tab::General);
         }
+        // Lightroom's Cmd+/: the keyboard shortcuts.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash)) {
+            self.view.shortcuts = !self.view.shortcuts;
+        }
     }
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
         if !self.preferences.open {

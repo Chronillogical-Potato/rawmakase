@@ -76,7 +76,10 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open || self.export_modal() || self.remove_copy.is_some();
+        let modal = self.preferences.open
+            || self.export_modal()
+            || self.remove_copy.is_some()
+            || self.view.shortcuts;
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -367,6 +370,20 @@ impl Editor {
                                 self.library_mode = true;
                             }
                             ui.add_space(12.);
+                            let hover = format!(
+                                "Keyboard shortcuts · {}",
+                                super::shortcuts::keys_text("Cmd+/")
+                            );
+                            if super::shortcuts::icon_button(
+                                ui,
+                                super::icons::Icon::Keyboard,
+                                &hover,
+                            )
+                            .clicked()
+                            {
+                                self.view.shortcuts = !self.view.shortcuts;
+                            }
+                            ui.add_space(8.);
                             let shortcut = if cfg!(target_os = "macos") {
                                 "⌘,"
                             } else {
@@ -442,6 +459,7 @@ impl Editor {
         let Some(library) = &mut self.library else {
             return;
         };
+        library.loupe_overlay(ui.painter(), area);
         if self.view.zoom.on != before {
             library.loupe_zoom_toggled(before);
         }

@@ -515,3 +515,61 @@ fn collection_kinds_follow_lightroom_creation_ids() {
         );
     }
 }
+#[test]
+fn lightroom_import_copies_photo_info_from_apex_values() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("info.lrcat");
+    fixture(&source)?;
+    {
+        let db = Connection::open(&source)?;
+        db.execute_batch(
+            "ALTER TABLE Adobe_images ADD COLUMN fileWidth;
+             ALTER TABLE Adobe_images ADD COLUMN fileHeight;
+             UPDATE Adobe_images SET fileWidth=6000, fileHeight=4000;
+             UPDATE Adobe_images SET orientation='BC' WHERE id_local=40;
+             CREATE TABLE AgHarvestedExifMetadata(image, aperture, shutterSpeed, isoSpeedRating,
+                 focalLength, cameraModelRef, lensRef);
+             CREATE TABLE AgInternedExifCameraModel(id_local, value);
+             CREATE TABLE AgInternedExifLens(id_local, value);
+             INSERT INTO AgInternedExifCameraModel VALUES(1,'ILCE-7M2');
+             INSERT INTO AgInternedExifLens VALUES(2,'FE 55mm F1.8 ZA');
+             INSERT INTO AgHarvestedExifMetadata VALUES(40, 2.0, 4.643856, 1000, 55, 1, 2);",
+        )?;
+    }
+    let output = d.path().join("info.rawmakase");
+    import_lightroom(&source, &output)?;
+    let cat = Catalog::open(&output)?;
+    let info = cat.photo_info(40)?.unwrap();
+    assert_eq!(info.camera.as_deref(), Some("ILCE-7M2"));
+    assert_eq!(info.lens.as_deref(), Some("FE 55mm F1.8 ZA"));
+    assert_eq!(info.aperture_text().as_deref(), Some("f/2"));
+    assert_eq!(info.shutter_text().as_deref(), Some("1/25 sec"));
+    assert_eq!(info.exposure_text().as_deref(), Some("1/25 sec at f/2"));
+    assert_eq!(info.focal_text().as_deref(), Some("55 mm"));
+    assert_eq!(info.iso_text().as_deref(), Some("ISO 1000"));
+    // A quarter-turned photo shows taller than it is stored.
+    assert_eq!(info.dimensions_text().as_deref(), Some("4000 × 6000"));
+    // A virtual copy has its master's info.
+    assert_eq!(cat.photo_info(41)?, Some(info));
+    Ok(())
+}
+#[test]
+fn photo_info_formats_as_lightroom_shows_it() {
+    let info = PhotoInfo {
+        aperture: Some(1.7959),
+        exposure: Some(2.5),
+        focal: Some(23.),
+        ..Default::default()
+    };
+    assert_eq!(info.aperture_text().as_deref(), Some("f/1.8"));
+    assert_eq!(info.shutter_text().as_deref(), Some("2.5 sec"));
+    assert_eq!(info.focal_text().as_deref(), Some("23 mm"));
+    assert_eq!(PhotoInfo::default().exposure_text(), None);
+    let slow = |t| PhotoInfo {
+        exposure: Some(t),
+        ..Default::default()
+    };
+    assert_eq!(slow(0.8).shutter_text().as_deref(), Some("0.8 sec"));
+    assert_eq!(slow(0.5).shutter_text().as_deref(), Some("1/2 sec"));
+    assert_eq!(slow(1. / 3.).shutter_text().as_deref(), Some("1/3 sec"));
+}

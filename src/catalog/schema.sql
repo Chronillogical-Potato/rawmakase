@@ -106,6 +106,20 @@ CREATE TABLE IF NOT EXISTS bitmaps (
     data BLOB NOT NULL
 );
 
+-- Camera settings and size of a photo, from the Lightroom catalog it came from
+-- or read from its file; a row of NULLs records a file that had none.
+CREATE TABLE IF NOT EXISTS photo_info (
+    photo INTEGER PRIMARY KEY,
+    camera TEXT,
+    lens TEXT,
+    focal REAL,
+    aperture REAL,
+    exposure REAL,
+    iso REAL,
+    width INTEGER,
+    height INTEGER
+);
+
 -- Facts about the catalog itself, by name.
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

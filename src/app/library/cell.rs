@@ -156,17 +156,7 @@ pub(super) fn photo_cell(
         );
     }
     let action = photo_menu(&response, photo);
-    (
-        response.on_hover_text(format!(
-            "{}{}\n{}\n{}\n{}",
-            photo.path.display(),
-            copy_suffix(photo),
-            photo.captured,
-            photo.keywords,
-            photo.label
-        )),
-        action,
-    )
+    (response, action)
 }
 /// Lightroom's virtual copy badge: the image's lower left corner folded
 /// over. `background` is what shows behind the fold.
