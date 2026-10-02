@@ -334,3 +334,160 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     assert!(!png.exists());
     Ok(())
 }
+
+/// A packet of exactly `len` bytes, its size in a Camera Raw attribute.
+fn packet_of(len: usize) -> String {
+    let make = |pad: &str| {
+        format!(
+            "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+             <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n \
+             <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n  \
+             <rdf:Description rdf:about=\"\"\n    \
+             xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n    \
+             xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n    \
+             xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"\n   \
+             xmp:Rating=\"3\"\n   \
+             crs:Exposure2012=\"+0.40\"\n   \
+             crs:Description=\"{pad}\">\n   \
+             <dc:subject>\n    <rdf:Bag>\n     <rdf:li>Kraków &amp; more</rdf:li>\n    </rdf:Bag>\n   </dc:subject>\n  \
+             </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>"
+        )
+    };
+    let base = make("").len();
+    let packet = make(&"a".repeat(len - base));
+    assert_eq!(packet.len(), len);
+    packet
+}
+
+/// The XMP segments of a JPEG: (header, payload after it).
+fn xmp_segments(jpeg: &[u8]) -> Vec<(&'static [u8], Vec<u8>)> {
+    let headers: [&'static [u8]; 2] = [
+        b"http://ns.adobe.com/xap/1.0/\0",
+        b"http://ns.adobe.com/xmp/extension/\0",
+    ];
+    let mut out = Vec::new();
+    let mut at = 2;
+    while at + 4 <= jpeg.len() && jpeg[at] == 0xff && jpeg[at + 1] != 0xda {
+        let len = u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]) as usize;
+        let body = &jpeg[at + 4..at + 2 + len];
+        if jpeg[at + 1] == 0xe1 {
+            for h in headers {
+                if let Some(rest) = body.strip_prefix(h) {
+                    out.push((h, rest.to_vec()));
+                }
+            }
+        }
+        at += 2 + len;
+    }
+    out
+}
+
+fn jpeg_with(xmp: &str) -> Result<Vec<u8>> {
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut jpeg).encode(
+        &[0u8; 3],
+        1,
+        1,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    encode::insert_xmp(jpeg, xmp)
+}
+
+#[test]
+fn xmp_that_fits_one_segment_is_written_as_it_is() -> Result<()> {
+    let packet = packet_of(65_504);
+    let segments = xmp_segments(&jpeg_with(&packet)?);
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].1, packet.as_bytes());
+    Ok(())
+}
+
+#[test]
+fn larger_xmp_moves_camera_raw_settings_to_extended_segments() -> Result<()> {
+    use md5::{Digest, Md5};
+    let packet = packet_of(65_505);
+    let jpeg = jpeg_with(&packet)?;
+    let segments = xmp_segments(&jpeg);
+    let (standard, extended): (Vec<_>, Vec<_>) = segments
+        .iter()
+        .partition(|(h, _)| h.starts_with(b"http://ns.adobe.com/xap"));
+    let standard = String::from_utf8(standard[0].1.clone())?;
+    assert!(standard.len() <= 65_504);
+    assert!(standard.contains("xmp:Rating=\"3\""));
+    assert!(standard.contains("Kraków &amp; more"));
+    assert!(!standard.contains("crs:Exposure2012"));
+    // Reassembled by offset, the extended part's MD5 is the GUID.
+    let mut whole = Vec::new();
+    let mut guid = Vec::new();
+    for (_, body) in &extended {
+        guid = body[..32].to_vec();
+        let total = u32::from_be_bytes(body[32..36].try_into()?) as usize;
+        let offset = u32::from_be_bytes(body[36..40].try_into()?) as usize;
+        whole.resize(total, 0);
+        whole[offset..offset + body.len() - 40].copy_from_slice(&body[40..]);
+    }
+    let digest: String = Md5::digest(&whole)
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect();
+    assert_eq!(digest.as_bytes(), guid.as_slice());
+    assert!(standard.contains(&format!("xmpNote:HasExtendedXMP=\"{digest}\"")));
+    let extended = String::from_utf8(whole)?;
+    roxmltree::Document::parse(&extended)?;
+    assert!(extended.contains("crs:Exposure2012=\"+0.40\""));
+    Ok(())
+}
+
+/// exiftool, an independent reader, reads the split packet back whole. CI
+/// installs it and sets RAWMAKASE_REQUIRE_EXIFTOOL; elsewhere the test is
+/// skipped without it.
+#[test]
+fn exiftool_reads_extended_xmp_back() -> Result<()> {
+    let found = std::process::Command::new("exiftool").arg("-ver").output();
+    if found.is_err() {
+        assert!(
+            std::env::var_os("RAWMAKASE_REQUIRE_EXIFTOOL").is_none(),
+            "exiftool is required"
+        );
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let r = crate::develop::Recipe {
+        exposure: 0.4,
+        ..Default::default()
+    };
+    // Enough keywords that, after the Camera Raw settings, the subject
+    // moves too.
+    let keywords: Vec<String> = (0..6000).map(|i| format!("keyword {i:05}")).collect();
+    let photo = crate::xmp::write::Photo {
+        rating: 3,
+        keywords: keywords.clone(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let xmp = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(xmp.len() > 65_504);
+    let path = dir.path().join("big.jpg");
+    std::fs::write(&path, jpeg_with(&xmp)?)?;
+    let out = std::process::Command::new("exiftool")
+        // -m: every one of the many keywords, not the first thousand.
+        .args([
+            "-j",
+            "-m",
+            "-XMP-crs:Exposure2012",
+            "-XMP-dc:Subject",
+            "-XMP-xmp:Rating",
+        ])
+        .arg(&path)
+        .output()?;
+    let read: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let read = &read[0];
+    assert_eq!(read["Exposure2012"].as_str(), Some("+0.40"));
+    assert_eq!(read["Rating"].as_i64(), Some(3));
+    assert_eq!(
+        read["Subject"].as_array().map(Vec::len),
+        Some(keywords.len())
+    );
+    Ok(())
+}

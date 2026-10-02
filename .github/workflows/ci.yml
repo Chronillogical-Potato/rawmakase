@@ -55,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          rust git libraw lcms2 pkgconf desktop-file-utils
+          rust git libraw lcms2 pkgconf desktop-file-utils perl-image-exiftool
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
@@ -74,7 +74,10 @@ jobs:
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
       - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
+      # exiftool reads exported metadata back as an independent reader.
       - run: cargo test --locked
+        env:
+          RAWMAKASE_REQUIRE_EXIFTOOL: "1"
       - name: Validate desktop entry
         run: desktop-file-validate packaging/applications/rawmakase.desktop
 
