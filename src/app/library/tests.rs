@@ -1738,3 +1738,39 @@ fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
     assert!(library.fields.keyword_entry.is_empty());
     Ok(())
 }
+#[test]
+fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> {
+    use crate::catalog::{TextField, Value};
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library
+        .catalog
+        .set_text(&ids[..1], TextField::Title, "Only a")?;
+    library.selection.selected = ids.iter().copied().collect();
+    library.selection.active = Some(ids[0]);
+    library.sync_fields();
+    // Typed, then deleted again.
+    library.fields.drafts.title = String::new();
+    library.fields.mark_edited_for_tests(0);
+    library.commit_fields()?;
+    for id in &ids {
+        assert_eq!(
+            library.catalog.descriptive(*id)?.title,
+            Some(Value::Cleared)
+        );
+    }
+    Ok(())
+}
+#[test]
+fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library.selection.selected = ids.iter().copied().collect();
+    library.selection.active = Some(ids[0]);
+    library.sync_fields();
+    library.fields.keyword_entry = "Typed".into();
+    library.visible.reverse();
+    library.sync_fields();
+    assert_eq!(library.fields.keyword_entry, "Typed");
+    Ok(())
+}

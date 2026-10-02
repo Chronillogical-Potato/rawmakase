@@ -58,6 +58,9 @@ pub(super) struct Fields {
     /// "+" added an empty creator entry, to keep after a save reads the
     /// values again.
     add_creator: bool,
+    /// Title, caption and copyright were typed in, even back to how they
+    /// were: emptying a mixed field clears it on every photo.
+    edited: [bool; 3],
 }
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct Drafts {
@@ -70,6 +73,10 @@ impl Fields {
     /// Reads the shown values again before the next frame.
     pub(super) fn reload(&mut self) {
         self.stale = true;
+    }
+    #[cfg(test)]
+    pub(super) fn mark_edited_for_tests(&mut self, field: usize) {
+        self.edited[field] = true;
     }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
@@ -110,11 +117,14 @@ impl Library {
     /// The photos the Metadata panel edits: every one selected in the Grid,
     /// else the active one.
     fn field_targets(&self) -> Vec<i64> {
-        if self.edits_active_only() {
+        let mut ids: Vec<i64> = if self.edits_active_only() {
             self.selection.active.into_iter().collect()
         } else {
             self.selected_ids()
-        }
+        };
+        // The same photos in another order (a re-sort) are the same targets.
+        ids.sort_unstable();
+        ids
     }
     /// Saves what is being typed, for the photos it was typed for. The
     /// drafts are kept on failure.
@@ -123,16 +133,23 @@ impl Library {
         let untouched = self.fields.untouched();
         let drafts = self.fields.drafts.clone();
         let mut edits = Vec::new();
-        for (field, now, was) in [
-            (TextField::Title, &drafts.title, &untouched.title),
-            (TextField::Caption, &drafts.caption, &untouched.caption),
+        let edited = self.fields.edited;
+        for (field, now, was, edited) in [
+            (TextField::Title, &drafts.title, &untouched.title, edited[0]),
+            (
+                TextField::Caption,
+                &drafts.caption,
+                &untouched.caption,
+                edited[1],
+            ),
             (
                 TextField::Copyright,
                 &drafts.copyright,
                 &untouched.copyright,
+                edited[2],
             ),
         ] {
-            if now != was {
+            if now != was || edited {
                 edits.push(DescriptiveEdit::Text(field, now.trim_end().to_string()));
             }
         }
@@ -146,12 +163,12 @@ impl Library {
         let creators = names(&drafts.creators);
         if creators != names(&untouched.creators) {
             edits.push(DescriptiveEdit::Creators(creators));
-            self.fields.add_creator = false;
         }
         let place = self.fields.place.clone();
         for edit in edits {
             self.edit_descriptive_at(&targets, edit, place.clone())?;
         }
+        self.fields.edited = [false; 3];
         self.fields.reload();
         Ok(())
     }
@@ -200,17 +217,16 @@ impl Library {
             _ => Vec::new(),
         }));
         f.location = Shared::of(all.iter().map(|d| d.location.clone()));
-        let mut counts: Vec<(Keyword, usize)> = Vec::new();
+        let mut counts: std::collections::HashMap<i64, (Keyword, usize)> = Default::default();
         for k in keywords.iter().flatten() {
-            match counts.iter_mut().find(|(c, _)| c.id == k.id) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((k.clone(), 1)),
-            }
+            counts.entry(k.id).or_insert_with(|| (k.clone(), 0)).1 += 1;
         }
-        counts.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+        let mut counts: Vec<(Keyword, usize)> = counts.into_values().collect();
+        counts.sort_by(|a, b| a.0.path.cmp(&b.0.path).then(a.0.id.cmp(&b.0.id)));
         let n = keywords.len();
         f.keywords = counts.into_iter().map(|(k, c)| (k, c == n)).collect();
         f.drafts = f.untouched();
+        f.edited = [false; 3];
     }
     /// Title, Caption, Creator, Copyright and Location rows.
     pub(super) fn metadata_fields(&mut self, ui: &mut egui::Ui) {
@@ -219,18 +235,27 @@ impl Library {
         let enabled = !self.fields.targets.is_empty();
         ui.add_enabled_ui(enabled, |ui| {
             let f = &mut self.fields;
-            commit |= text_row(ui, "Title", &mut f.drafts.title, &f.title, false);
-            commit |= text_row(ui, "Caption", &mut f.drafts.caption, &f.caption, true);
+            let title = text_row(ui, "Title", &mut f.drafts.title, &f.title, false);
+            let caption = text_row(ui, "Caption", &mut f.drafts.caption, &f.caption, true);
             let (changed, added) = creator_rows(ui, &mut f.drafts.creators, &f.creators);
             commit |= changed;
+            // A saved entry needs no empty one after it; "+" clicked while
+            // an entry was saved keeps its new one.
+            if changed && !added {
+                f.add_creator = false;
+            }
             f.add_creator |= added;
-            commit |= text_row(
+            let copyright = text_row(
                 ui,
                 "Copyright",
                 &mut f.drafts.copyright,
                 &f.copyright,
                 false,
             );
+            for (i, (left, typed)) in [title, caption, copyright].into_iter().enumerate() {
+                commit |= left;
+                f.edited[i] |= typed;
+            }
         });
         if commit && let Err(e) = self.commit_fields() {
             self.message = format!("Metadata could not be saved: {e}");
@@ -393,15 +418,16 @@ fn edit<'t>(text: &'t mut String, shared: &Shared<String>, multiline: bool) -> e
         .text_color(theme::gray(205))
         .margin(egui::Margin::symmetric(4, 1))
 }
-/// A text row; true when it was left, to save it. The caption is a fixed
-/// three lines that scroll, so the panel never reflows.
+/// A text row. Returns whether it was left, to save it, and whether it was
+/// typed in. The caption is a fixed three lines that scroll, so the panel
+/// never reflows.
 fn text_row(
     ui: &mut egui::Ui,
     key: &str,
     text: &mut String,
     shared: &Shared<String>,
     multiline: bool,
-) -> bool {
+) -> (bool, bool) {
     let height = if multiline { CAPTION } else { ROW };
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), height),
@@ -427,7 +453,7 @@ fn text_row(
             edit(text, shared, false).vertical_align(egui::Align::Center),
         )
     };
-    response.lost_focus()
+    (response.lost_focus(), response.changed())
 }
 /// One row per creator, each removable, and a button to add one. Returns
 /// whether the list changed or an entry was left, to save it, and whether an
