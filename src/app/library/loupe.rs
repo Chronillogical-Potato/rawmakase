@@ -407,7 +407,8 @@ impl Library {
             .interact_pointer_pos()
             .zip(fit)
             .is_some_and(|(pos, fit)| fit.contains(pos));
-        if response.clicked() && !response.double_clicked() && available && (zoom.on || on_photo) {
+        let double = response.double_clicked() || response.triple_clicked();
+        if response.clicked() && !double && available && (zoom.on || on_photo) {
             if let Some((pos, fit)) = response
                 .interact_pointer_pos()
                 .zip(fit)
@@ -423,7 +424,7 @@ impl Library {
         }
         // As in Lightroom, a double-click goes back to the grid; its first
         // click's zoom is undone.
-        if response.double_clicked() {
+        if double {
             if let Some(on) = self.loupe_double_click() {
                 zoom.on = on;
             }

@@ -1677,3 +1677,51 @@ fn loupe_keys_change_only_the_photo_shown_and_auto_advance_moves_on() -> anyhow:
     assert_eq!(library.selected(), Some(ids[1]));
     Ok(())
 }
+#[test]
+fn double_click_in_the_loupe_goes_back_to_the_grid() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    e.library.as_mut().unwrap().open_loupe();
+    let ctx = e.context.clone();
+    let at = Pos2::new(600., 300.);
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let frame = |e: &mut Editor, events: Vec<egui::Event>, time: f64| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| e.draw(ui),
+        );
+        output.textures_delta.clear();
+    };
+    frame(&mut e, vec![egui::Event::PointerMoved(at)], 0.0);
+    frame(&mut e, vec![click(true)], 0.1);
+    frame(&mut e, vec![click(false)], 0.15);
+    frame(&mut e, vec![click(true)], 0.2);
+    frame(&mut e, vec![click(false)], 0.25);
+    frame(&mut e, vec![], 0.3);
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    // A click just before a double-click makes egui count a triple click.
+    e.library.as_mut().unwrap().open_loupe();
+    for (pressed, time) in [
+        (true, 1.0),
+        (false, 1.05),
+        (true, 1.2),
+        (false, 1.25),
+        (true, 1.4),
+        (false, 1.45),
+    ] {
+        frame(&mut e, vec![click(pressed)], time);
+    }
+    frame(&mut e, vec![], 1.5);
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}

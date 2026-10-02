@@ -385,6 +385,7 @@ impl Editor {
         // The second click of a double-click is not another toggle.
         if response.clicked()
             && !response.double_clicked()
+            && !response.triple_clicked()
             && hand
             && !self.view.is(Tool::Crop)
             && let Some(pos) = response.interact_pointer_pos()

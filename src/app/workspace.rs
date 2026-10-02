@@ -447,9 +447,10 @@ impl Editor {
         }
         // As in Lightroom, a double-click goes back to the grid; its first
         // click's zoom is undone.
+        // egui counts a click soon after a double-click as a triple one.
         let double = ui.input(|i| {
-            i.pointer
-                .button_double_clicked(egui::PointerButton::Primary)
+            let button = egui::PointerButton::Primary;
+            (i.pointer.button_double_clicked(button) || i.pointer.button_triple_clicked(button))
                 && i.pointer.interact_pos().is_some_and(|p| area.contains(p))
         });
         if double && let Some(on) = library.loupe_double_click() {
