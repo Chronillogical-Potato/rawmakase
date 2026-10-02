@@ -73,8 +73,9 @@ pub(super) struct Loupe {
     /// The size of the image shown, and of the view in pixels, for its Fit.
     full: Option<(u32, u32)>,
     view: Vec2,
-    /// The zoom before the last click toggled it, for a double-click to undo.
-    before_click: Option<bool>,
+    /// The zoom before the last click toggled it, and when, for a
+    /// double-click to undo.
+    before_click: Option<(bool, f64)>,
     pub state: State,
 }
 impl Loupe {
@@ -278,6 +279,7 @@ impl Library {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
         self.loupe.open = self.selection.active.is_some();
+        self.loupe.before_click = None;
         self.scroll_to_active = true;
     }
     /// The RAW the Loupe shows through Develop's pipeline: the active photo,
@@ -301,10 +303,18 @@ impl Library {
         &self,
     ) -> Option<(crate::app::navigator::Photo, Option<[f32; 4]>)> {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
+        // The Loupe's own preview once it is this photo's; until then the
+        // grid's.
         let texture = self
             .loupe
             .texture
             .as_ref()
+            .filter(|_| {
+                self.loupe
+                    .requested
+                    .as_ref()
+                    .is_some_and(|r| r.0 == photo.id)
+            })
             .filter(|_| self.is_available(&photo.path))
             .or_else(|| self.texture(photo))?;
         let shown = self
@@ -318,16 +328,25 @@ impl Library {
     }
     /// A click in the Loupe toggled the zoom away from `before`.
     pub(in crate::app) fn loupe_zoom_toggled(&mut self, before: bool) {
-        self.loupe.before_click = Some(before);
+        self.loupe.before_click = Some((before, self.ctx.input(|i| i.time)));
     }
     /// A double-click: back to the grid, as in Lightroom. Returns the zoom
     /// from before its first click, which is undone.
     pub(in crate::app) fn loupe_double_click(&mut self) -> Option<bool> {
+        // Only a toggle by this double-click's own first click counts.
+        let now = self.ctx.input(|i| i.time);
+        let before = self
+            .loupe
+            .before_click
+            .take()
+            .filter(|(_, at)| now - at < 1.)
+            .map(|(on, _)| on);
         self.close_loupe();
-        self.loupe.before_click.take()
+        before
     }
     /// G or Esc: back to the grid, at the active photo.
     pub fn close_loupe(&mut self) {
+        self.loupe.before_click = None;
         if self.loupe.open {
             self.loupe.open = false;
             self.loupe.reset();

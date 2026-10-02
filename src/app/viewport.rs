@@ -168,6 +168,16 @@ impl Editor {
     /// Sets a zoom level; 0 means Fit.
     pub(super) fn set_zoom(&mut self, level: f32) {
         self.view.zoom.set(level);
+        // A JPEG, TIFF or PNG in the Loupe zooms on its own; the document
+        // behind it is not rendered again.
+        let raster_loupe = self.library_mode
+            && self
+                .library
+                .as_ref()
+                .is_some_and(|l| l.loupe_open() && l.loupe_develops().is_none());
+        if raster_loupe {
+            return;
+        }
         if self.view.zoom.on && self.view.is(Tool::Crop) {
             self.view.tool = Tool::None;
         }
