@@ -262,6 +262,7 @@ impl Editor {
                 vec![
                     ("G".into(), "Library grid"),
                     ("E".into(), "Library Loupe"),
+                    (format!("{cmd}/"), "These shortcuts"),
                     ("D".into(), "Develop"),
                 ],
             ),
