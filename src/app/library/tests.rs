@@ -936,3 +936,33 @@ fn a_toggle_on_a_selection_follows_the_active_photo() -> Result<()> {
     assert_eq!(library.selected_ids().len(), 3);
     Ok(())
 }
+#[test]
+fn up_and_down_stay_in_their_column_at_the_edges() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let ids = ids_of(&library);
+    library.grid_columns = 4;
+    library.select(Some(ids[3]));
+    library.step(selection::Step::By(-4), false);
+    assert_eq!(library.selected(), Some(ids[3]));
+    library.step(selection::Step::By(4), false);
+    assert_eq!(library.selected(), Some(ids[3]));
+    library.select(Some(ids[0]));
+    library.step(selection::Step::By(4), false);
+    assert_eq!(library.selected(), Some(ids[4]));
+    Ok(())
+}
+#[test]
+fn a_hidden_active_photo_hands_over_to_the_rest_of_the_selection() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    library.edit_metadata(ids[1], crate::app::photo_metadata::Edit::Rating(3), false)?;
+    library.edit_metadata(ids[2], crate::app::photo_metadata::Edit::Rating(3), false)?;
+    library.select_all();
+    library.select(Some(ids[0]));
+    library.select_all();
+    library.filters.rating = 3;
+    library.filter();
+    assert_eq!(library.selected(), Some(ids[1]));
+    assert_eq!(library.selected_ids(), ids[1..]);
+    Ok(())
+}

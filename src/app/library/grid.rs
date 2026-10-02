@@ -264,7 +264,7 @@ impl Library {
                                     self.make_active(p.id);
                                 }
                                 if response.double_clicked() {
-                                    self.select(Some(p.id));
+                                    self.make_active(p.id);
                                     action = Action::Develop(p.id);
                                 }
                                 if let Some(edit) = edit {
@@ -279,18 +279,21 @@ impl Library {
         });
         ui.spacing_mut().item_spacing = spacing;
         if let Some((photo, menu)) = metadata_edit
-            && let Some(id) = self.photo_action(ui.ctx(), &photo, menu)
+            && let Some(id) = self.photo_action(ui.ctx(), &photo, menu, true)
         {
             action = Action::Develop(id);
         }
         action
     }
     /// Carries out a thumbnail menu choice; returns a photo to open in Develop.
+    /// A metadata change covers the selection when `whole_selection` (the
+    /// grid) and the photo is in it, else that photo alone (the filmstrip).
     pub(super) fn photo_action(
         &mut self,
         ctx: &egui::Context,
         photo: &Photo,
         action: cell::PhotoAction,
+        whole_selection: bool,
     ) -> Option<i64> {
         use cell::PhotoAction;
         match action {
@@ -305,7 +308,7 @@ impl Library {
                 self.message = format!("Copied {}", photo.path.display());
             }
             PhotoAction::Edit(edit) => {
-                let ids = if self.selection.selected.contains(&photo.id) {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
                     self.selected_ids()
                 } else {
                     vec![photo.id]

@@ -155,7 +155,14 @@ impl Library {
             (Step::Home, _) => 0,
             (Step::End, _) => last,
             (Step::By(_), None) => 0,
-            (Step::By(delta), Some(at)) => at.saturating_add_signed(delta).min(last),
+            // Up and Down stay put at the first or last row rather than
+            // jumping sideways; Left and Right stop at the ends.
+            (Step::By(delta), Some(at)) => match at.checked_add_signed(delta) {
+                Some(to) if to <= last => to,
+                _ if delta.abs() > 1 => at,
+                Some(_) => last,
+                None => 0,
+            },
         };
         let id = self.photos[self.visible[to]].id;
         if extend && let Some(anchor) = self.selection.anchor.or(self.selection.active) {
@@ -171,8 +178,13 @@ impl Library {
     pub(super) fn keep_shown_selected(&mut self) {
         let shown: HashSet<i64> = self.visible.iter().map(|i| self.photos[*i].id).collect();
         self.selection.selected.retain(|id| shown.contains(id));
+        // The first photo still selected takes over from a hidden active one.
         if self.selection.active.is_some_and(|id| !shown.contains(&id)) {
-            self.selection.active = None;
+            self.selection.active = self
+                .visible
+                .iter()
+                .map(|i| self.photos[*i].id)
+                .find(|id| self.selection.selected.contains(id));
         }
         if self.selection.anchor.is_some_and(|id| !shown.contains(&id)) {
             self.selection.anchor = self.selection.active;

@@ -123,7 +123,7 @@ impl Library {
                         }
                         if let Some(menu) = cell::photo_menu(&response, &p) {
                             let is_edit = matches!(menu, cell::PhotoAction::Edit(_));
-                            if let Some(id) = self.photo_action(ui.ctx(), &p, menu) {
+                            if let Some(id) = self.photo_action(ui.ctx(), &p, menu, false) {
                                 target = Some(id).filter(|id| *id != current);
                             }
                             if is_edit {
