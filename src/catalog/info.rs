@@ -51,15 +51,17 @@ impl Catalog {
         for (id, info) in infos {
             // Under the photo's master now, in case it became a copy while
             // being read.
-            let master: i64 = tx
+            // A photo removed meanwhile has nothing to keep.
+            let master: Option<i64> = tx
                 .query_row(
                     "SELECT COALESCE(master_id, id) FROM photos WHERE id = ?",
                     [id],
                     |r| r.get(0),
                 )
-                .optional()?
-                .unwrap_or(*id);
-            insert(&tx, master, &info.clone().unwrap_or_default())?;
+                .optional()?;
+            if let Some(master) = master {
+                insert(&tx, master, &info.clone().unwrap_or_default())?;
+            }
         }
         tx.commit()?;
         Ok(())

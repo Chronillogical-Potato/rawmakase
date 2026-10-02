@@ -83,7 +83,10 @@ impl Library {
             .collect();
         if !infos.is_empty() {
             match self.catalog.fill_photo_info(&infos) {
-                Ok(()) => self.info = None,
+                Ok(()) => {
+                    self.info = None;
+                    self.hover_info = None;
+                }
                 Err(e) => self.message = format!("Photo info could not be saved: {e}"),
             }
         }
