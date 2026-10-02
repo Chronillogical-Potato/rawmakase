@@ -236,11 +236,16 @@ impl Catalog {
     pub fn restore_metadata(&mut self, snapshots: &[MetadataSnapshot]) -> Result<()> {
         let tx = self.db.transaction()?;
         for s in snapshots {
+            // The time it sorts by goes back only with its capture override:
+            // one filled in from the file since stays.
+            let capture_changed = read(&tx, s.photo)?.capture != s.descriptive.capture;
             write(&tx, s.photo, &s.descriptive)?;
-            tx.execute(
-                "UPDATE photos SET captured=? WHERE id=?",
-                params![s.captured, s.photo],
-            )?;
+            if capture_changed {
+                tx.execute(
+                    "UPDATE photos SET captured=? WHERE id=?",
+                    params![s.captured, s.photo],
+                )?;
+            }
             tx.execute("DELETE FROM photo_keywords WHERE photo=?", [s.photo])?;
             for keyword in &s.keywords {
                 tx.execute(
@@ -274,6 +279,23 @@ impl Catalog {
         let id = keyword_at(&tx, path)?;
         tx.commit()?;
         Ok(id)
+    }
+    /// Adds keywords, by path (top first), to every photo given, making
+    /// them where missing; one transaction.
+    pub fn add_keywords(&mut self, ids: &[i64], paths: &[Vec<String>]) -> Result<()> {
+        let tx = self.db.transaction()?;
+        for path in paths {
+            ensure!(!path.is_empty(), "A keyword needs a name");
+            let keyword = keyword_at(&tx, path)?;
+            for id in ids {
+                tx.execute(
+                    "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
+                    [*id, keyword],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
     /// Adds a keyword to every photo given.
     pub fn add_keyword(&mut self, ids: &[i64], keyword: i64) -> Result<()> {

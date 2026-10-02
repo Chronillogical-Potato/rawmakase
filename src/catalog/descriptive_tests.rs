@@ -111,6 +111,43 @@ fn undoing_a_capture_override_restores_the_sort_key() -> Result<()> {
 }
 
 #[test]
+fn undoing_another_field_keeps_a_time_filled_in_since() -> Result<()> {
+    let (_dir, mut cat, ids) = catalog(1)?;
+    let before = cat.metadata_snapshot(&ids)?;
+    cat.set_text(&ids, TextField::Title, "Title")?;
+    // Read from the file in the background meanwhile.
+    cat.fill_capture_times(&[(ids[0], "2020-01-01T00:00:00.000".into())])?;
+    cat.restore_metadata(&before)?;
+    assert_eq!(cat.photos()?[0].captured, "2020-01-01T00:00:00.000");
+    Ok(())
+}
+
+#[test]
+fn several_keywords_are_added_in_one_go() -> Result<()> {
+    let (_dir, mut cat, ids) = catalog(2)?;
+    cat.add_keywords(
+        &ids,
+        &[vec!["Places".into(), "City".into()], vec!["Event".into()]],
+    )?;
+    for id in &ids {
+        assert_eq!(cat.keywords(*id)?.len(), 2);
+    }
+    // A bad one adds none.
+    assert!(
+        cat.add_keywords(&ids, &[vec!["New".into()], vec![" ".into()]])
+            .is_err()
+    );
+    assert_eq!(cat.keywords(ids[0])?.len(), 2);
+    let made: i64 =
+        cat.db
+            .query_row("SELECT count(*) FROM keywords WHERE name='New'", [], |r| {
+                r.get(0)
+            })?;
+    assert_eq!(made, 0);
+    Ok(())
+}
+
+#[test]
 fn creators_keep_their_order_and_none_clears_the_field() -> Result<()> {
     let (_dir, mut cat, ids) = catalog(1)?;
     let names = vec!["Zoë Example".to_string(), "A. Person, Jr.".to_string()];
