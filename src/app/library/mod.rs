@@ -194,6 +194,8 @@ impl Library {
         if !dated.is_empty() {
             match self.catalog.fill_capture_times(&dated) {
                 Ok(()) => self.apply_capture_times(&dated),
+                // Read again after the next online check, which clears the
+                // photos tried.
                 Err(e) => self.message = format!("Capture times could not be saved: {e}"),
             }
         }
@@ -235,6 +237,10 @@ impl Library {
     /// Checks again which photos are online when an external volume comes
     /// back, so they show and their capture times are read.
     fn volumes_checked(&mut self, online: &HashMap<std::path::PathBuf, volumes::VolumeState>) {
+        // Nothing to compare with until the first check has answered.
+        if online.is_empty() {
+            return;
+        }
         let attached: HashSet<_> = online
             .iter()
             .filter(|(_, (on, _))| *on)

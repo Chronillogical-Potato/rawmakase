@@ -117,11 +117,16 @@ impl Catalog {
     /// photo's virtual copies get its date too.
     pub fn fill_capture_times(&mut self, times: &[(i64, String)]) -> Result<()> {
         let tx = self.db.transaction()?;
-        for (id, captured) in times {
-            tx.execute(
-                "UPDATE photos SET captured=?1 WHERE (id=?2 OR master_id=?2) AND captured=''",
-                params![captured, id],
-            )?;
+        {
+            // Two statements, each on an index, rather than one OR that scans.
+            let mut photo =
+                tx.prepare("UPDATE photos SET captured=?1 WHERE id=?2 AND captured=''")?;
+            let mut copies =
+                tx.prepare("UPDATE photos SET captured=?1 WHERE master_id=?2 AND captured=''")?;
+            for (id, captured) in times {
+                photo.execute(params![captured, id])?;
+                copies.execute(params![captured, id])?;
+            }
         }
         tx.commit()?;
         Ok(())

@@ -48,6 +48,8 @@ CREATE INDEX IF NOT EXISTS photos_folder ON photos(folder);
 
 CREATE INDEX IF NOT EXISTS photos_captured ON photos(captured);
 
+CREATE INDEX IF NOT EXISTS photos_master ON photos(master_id);
+
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
