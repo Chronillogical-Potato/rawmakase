@@ -215,18 +215,18 @@ impl Editor {
     /// The 1:1 region to render when zoomed to 100% or more; below 100% the
     /// whole photo is rendered at the zoomed size instead.
     pub(super) fn region(&self) -> Option<[u32; 4]> {
-        if !self.view.zoom100 || self.view.zoom_level < 1. {
+        if !self.view.zoom.on || self.view.zoom.level < 1. {
             return None;
         }
         let im = self.document.full()?;
         let g = Geometry::new(im, &self.effective_recipe(), 0);
-        let z = self.view.zoom_level;
+        let z = self.view.zoom.level;
         let w = ((self.view.viewport.x / z).ceil() as u32).clamp(1, g.width);
         let h = ((self.view.viewport.y / z).ceil() as u32).clamp(1, g.height);
-        let x = (self.view.pan[0] * g.width as f32 - w as f32 / 2.)
+        let x = (self.view.zoom.pan[0] * g.width as f32 - w as f32 / 2.)
             .round()
             .clamp(0., (g.width - w) as f32) as u32;
-        let y = (self.view.pan[1] * g.height as f32 - h as f32 / 2.)
+        let y = (self.view.zoom.pan[1] * g.height as f32 - h as f32 / 2.)
             .round()
             .clamp(0., (g.height - h) as f32) as u32;
         Some([x, y, w, h])
@@ -244,8 +244,8 @@ impl Editor {
                 [self.view.viewport.x as u32, self.view.viewport.y as u32],
             );
             self.preview.last_fit_edge = fit;
-            let max_edge = if self.view.zoom100 && self.view.zoom_level < 1. {
-                (geometry.width.max(geometry.height) as f32 * self.view.zoom_level).round() as u32
+            let max_edge = if self.view.zoom.on && self.view.zoom.level < 1. {
+                (geometry.width.max(geometry.height) as f32 * self.view.zoom.level).round() as u32
             } else {
                 fit
             };
@@ -264,7 +264,7 @@ impl Editor {
                 region,
                 monitor: self.view.monitor.clone(),
                 clipping: self.view.clipping,
-                navigator: !self.view.zoom100,
+                navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail: region.is_none() && self.shows_library_edit(),
                 samples: self.view.picks_color(),
                 overlay: self.overlay(),
@@ -286,7 +286,9 @@ impl Editor {
             Picture::upload(&mut self.preview.region, ctx, "photo region", image);
             return;
         }
-        if !self.view.zoom100
+        // Zoomed in, a whole render still fills a Navigator that has none,
+        // e.g. after moving on to the next photo at the same zoom.
+        if (!self.view.zoom.on || self.preview.navigator.is_none())
             && let Some(small) = navigator
         {
             let small = egui::ColorImage::from_rgb(
@@ -309,7 +311,7 @@ impl Editor {
             self.preview.region = picture;
             return;
         }
-        if !self.view.zoom100
+        if (!self.view.zoom.on || self.preview.navigator.is_none())
             && let Some((id, size)) = navigator
         {
             self.preview.navigator = Some(Picture::presented(id, size));

@@ -235,23 +235,11 @@ impl Library {
             }
         }
     }
-    /// The Loupe moves one photo at a time. A RAW zooms in Develop's view
-    /// with Develop's keys; other photos with the Loupe's own.
+    /// The Loupe moves one photo at a time; the editor handles its zoom,
+    /// as in Develop.
     fn loupe_keys(&mut self, presses: &[Press]) {
-        let own_zoom = self.loupe_develops().is_none();
         for press in presses {
-            let (command, alt) = (press.modifiers.command, press.modifiers.alt);
-            match (press.key, command) {
-                // A held Z must not flicker between Fit and 1:1.
-                (Key::Z, false) if own_zoom && !press.repeat && !press.modifiers.any() => {
-                    self.zoom_loupe(None)
-                }
-                (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
-                (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
-                // Cmd+Option+0; Option changes the typed key on macOS.
-                _ if own_zoom && command && alt && press.physical == Some(Key::Num0) => {
-                    self.zoom_loupe(Some(true))
-                }
+            match (press.key, press.modifiers.command) {
                 (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
                 (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
                 (Key::Home, false) => self.step(Step::Home, false),
@@ -267,9 +255,7 @@ impl Library {
 /// can arrive in the same frame as Cmd's release.
 struct Press {
     key: Key,
-    physical: Option<Key>,
     modifiers: egui::Modifiers,
-    repeat: bool,
 }
 fn presses(ctx: &egui::Context) -> Vec<Press> {
     ctx.input(|i| {
@@ -278,15 +264,12 @@ fn presses(ctx: &egui::Context) -> Vec<Press> {
             .filter_map(|e| match e {
                 egui::Event::Key {
                     key,
-                    physical_key,
                     pressed: true,
-                    repeat,
                     modifiers,
+                    ..
                 } => Some(Press {
                     key: *key,
-                    physical: *physical_key,
                     modifiers: *modifiers,
-                    repeat: *repeat,
                 }),
                 _ => None,
             })

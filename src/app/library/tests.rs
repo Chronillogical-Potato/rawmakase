@@ -990,7 +990,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
         ..Default::default()
     };
     let mut output = ctx.run_ui(input(), |ui| {
-        library.grid(ui);
+        library.grid(ui, &mut Default::default());
     });
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
@@ -1000,7 +1000,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     // The next photo replaces it; a damaged file says why.
     library.step(selection::Step::By(1), false);
     let mut output = ctx.run_ui(input(), |ui| {
-        library.grid(ui);
+        library.grid(ui, &mut Default::default());
     });
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
@@ -1033,7 +1033,7 @@ fn flag_steps_up_and_down_and_stops_at_the_ends() {
     assert_eq!(Edit::FlagDelta(-1).values(&photo(-1)).1, -1);
 }
 #[test]
-fn loupe_zooms_to_one_to_one_and_prepares_the_next_photo() -> Result<()> {
+fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let folder = directory.path().join("photos");
     std::fs::create_dir(&folder)?;
@@ -1050,7 +1050,8 @@ fn loupe_zooms_to_one_to_one_and_prepares_the_next_photo() -> Result<()> {
     library.wait_for_availability();
     library.select(Some(library.photos[0].id));
     library.open_loupe();
-    let frame = |library: &mut Library| {
+    let mut zoom = crate::app::navigator::Zoom::default();
+    let frame = |library: &mut Library, zoom: &mut crate::app::navigator::Zoom| {
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1060,35 +1061,42 @@ fn loupe_zooms_to_one_to_one_and_prepares_the_next_photo() -> Result<()> {
                 ..Default::default()
             },
             |ui| {
-                library.grid(ui);
+                library.grid(ui, zoom);
             },
         );
         output.textures_delta.clear();
     };
-    frame(&mut library);
+    frame(&mut library, &mut zoom);
     library.loupe.wait(&ctx);
     // The next photo is prepared once this one is shown, and shown at once.
-    frame(&mut library);
+    frame(&mut library, &mut zoom);
     library.loupe.wait_ahead(&ctx);
     library.step(selection::Step::By(1), false);
-    frame(&mut library);
+    frame(&mut library, &mut zoom);
     assert_eq!(library.loupe.state, loupe::State::Ready);
-    // 1:1 renders only the view: 1200 by 672 pixels of the 3000 by 2000.
-    library.zoom_loupe(Some(true));
-    frame(&mut library);
-    library.loupe.zoom.wait(&ctx);
-    assert_eq!(library.loupe.zoom.full, Some([3000, 2000]));
-    let (region, rect) = library.loupe.zoom.region.clone().unwrap();
+    // 100% reads only the view: 1200 by 672 pixels of the 3000 by 2000.
+    zoom.set(1.);
+    frame(&mut library, &mut zoom);
+    library.loupe.regions.wait(&ctx);
+    assert_eq!(library.loupe.regions.full, Some([3000, 2000]));
+    let (region, rect) = library.loupe.regions.region.clone().unwrap();
     assert_eq!(region.size(), [1200, 672]);
     assert!((rect[0] - 0.3).abs() < 1e-3 && (rect[2] - 0.4).abs() < 1e-3);
+    // At 200% half as many image pixels fill the view.
+    zoom.set(2.);
+    frame(&mut library, &mut zoom);
+    library.loupe.regions.wait(&ctx);
+    let (region, _) = library.loupe.regions.region.clone().unwrap();
+    assert_eq!(region.size(), [600, 336]);
     // Panning past the corner stops at the edge of the photo.
-    library.loupe.zoom.center = [0., 0.];
-    frame(&mut library);
-    library.loupe.zoom.wait(&ctx);
-    frame(&mut library);
-    let (_, rect) = library.loupe.zoom.region.clone().unwrap();
+    zoom.pan = [0., 0.];
+    frame(&mut library, &mut zoom);
+    library.loupe.regions.wait(&ctx);
+    frame(&mut library, &mut zoom);
+    let (_, rect) = library.loupe.regions.region.clone().unwrap();
     assert_eq!([rect[0], rect[1]], [0., 0.]);
-    library.zoom_loupe(Some(false));
-    assert!(library.loupe.zoom.region.is_none());
+    zoom.set(0.);
+    frame(&mut library, &mut zoom);
+    assert!(library.loupe.regions.region.is_none());
     Ok(())
 }

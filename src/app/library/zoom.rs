@@ -1,6 +1,7 @@
-//! The Loupe's own 1:1, for JPEG, TIFF and PNG files (a RAW zooms in
-//! Develop's viewport): one image pixel per screen pixel. Only the part in
-//! view is uploaded; the Fit preview, enlarged, fills in around it.
+//! The Loupe's zoomed view of JPEG, TIFF and PNG files (a RAW zooms in
+//! Develop's viewport), at the shared `navigator::Zoom`. Only the part of
+//! the image in view is uploaded; the Fit preview, enlarged, fills in around
+//! it.
 //!
 //! Memory is budgeted in three parts. Active: the photo's full decode, held
 //! by the worker while 1:1 is on and dropped when the photo changes or the
@@ -22,6 +23,9 @@ pub(super) struct RegionJob {
     center: [f32; 2],
     /// The view, in pixels.
     size: [u32; 2],
+    /// Below 1 (zoomed out past 100%), the region is shrunk by it before it
+    /// is uploaded, so the texture stays the size of the view.
+    scale: f32,
     cancel: Arc<AtomicBool>,
 }
 /// A rendered part of the photo at 1:1.
@@ -42,11 +46,8 @@ struct Held {
     image: image::RgbImage,
 }
 
-pub(super) struct Zoom {
-    /// 1:1 rather than Fit.
-    pub on: bool,
-    /// The view's centre, as a fraction of the photo's width and height.
-    pub center: [f32; 2],
+/// The image pixels in view, read from the full decode in the background.
+pub(super) struct Regions {
     /// The photo the region and size below belong to.
     pub photo: Option<i64>,
     pub full: Option<[u32; 2]>,
@@ -56,11 +57,11 @@ pub(super) struct Zoom {
     worker: Latest<Option<RegionJob>>,
     results: Receiver<Done>,
     ticket: u64,
-    requested: Option<(i64, [i32; 2], [u32; 2])>,
+    requested: Option<(i64, [i32; 2], [u32; 2], u32)>,
     cancel: Arc<AtomicBool>,
     pub error: Option<String>,
 }
-impl Zoom {
+impl Regions {
     pub(super) fn new(ctx: &egui::Context) -> Self {
         let (tx, results) = channel();
         let ctx = ctx.clone();
@@ -76,7 +77,7 @@ impl Zoom {
             }
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| region(&job, &mut held)))
-                    .unwrap_or_else(|_| Err(anyhow::anyhow!("The 1:1 view could not be built")));
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("The zoomed view could not be built")));
             if job.cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -87,8 +88,6 @@ impl Zoom {
             ctx.request_repaint();
         });
         Self {
-            on: false,
-            center: [0.5, 0.5],
             photo: None,
             full: None,
             region: None,
@@ -101,16 +100,6 @@ impl Zoom {
             error: None,
         }
     }
-    /// 1:1 at `center` (fractions of the photo), or back to Fit.
-    pub(super) fn set(&mut self, on: bool, center: Option<[f32; 2]>) {
-        self.on = on;
-        if let Some(center) = center {
-            self.center = center.map(|c| c.clamp(0., 1.));
-        }
-        if !on {
-            self.release();
-        }
-    }
     /// Drops the region and lets the worker free the full decode.
     pub(super) fn release(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -121,9 +110,16 @@ impl Zoom {
         self.pending = false;
         self.worker.submit(None);
     }
-    /// Asks for the part of `photo` around `center` that fills a view of
-    /// `size` pixels, unless it is already on its way.
-    pub(super) fn request(&mut self, photo: i64, path: &std::path::Path, size: [u32; 2]) {
+    /// Asks for the `size` image pixels of `photo` around `center` (fractions
+    /// of the photo), unless they are already on their way.
+    pub(super) fn request(
+        &mut self,
+        photo: i64,
+        path: &std::path::Path,
+        center: [f32; 2],
+        size: [u32; 2],
+        scale: f32,
+    ) {
         if self.photo != Some(photo) {
             self.photo = Some(photo);
             self.full = None;
@@ -132,8 +128,9 @@ impl Zoom {
         }
         // Positions in steps of 8 pixels, so a slow drag asks less often.
         let full = self.full.unwrap_or([4096, 4096]);
-        let at = [0, 1].map(|i| (self.center[i] * full[i] as f32 / 8.).round() as i32);
-        let wanted = (photo, at, size);
+        let at = [0, 1].map(|i| (center[i] * full[i] as f32 / 8.).round() as i32);
+        // The scale counts too: the same pixels shrunk or not are another texture.
+        let wanted = (photo, at, size, (scale.min(1.) * 1000.) as u32);
         if self.requested == Some(wanted) {
             return;
         }
@@ -145,8 +142,9 @@ impl Zoom {
         self.worker.submit(Some(RegionJob {
             ticket: self.ticket,
             path: path.into(),
-            center: self.center,
+            center,
             size,
+            scale: scale.min(1.),
             cancel: self.cancel.clone(),
         }));
     }
@@ -206,8 +204,15 @@ fn region(job: &RegionJob, held: &mut Option<Held>) -> anyhow::Result<Region> {
     let y = (job.center[1] * height as f32 - h as f32 / 2.)
         .round()
         .clamp(0., (height - h) as f32) as u32;
+    let crop = image::imageops::crop_imm(image, x, y, w, h).to_image();
+    let image = if job.scale < 1. {
+        let shrink = |side: u32| ((side as f32 * job.scale).round() as u32).max(1);
+        image::imageops::thumbnail(&crop, shrink(w), shrink(h))
+    } else {
+        crop
+    };
     Ok(Region {
-        image: image::imageops::crop_imm(image, x, y, w, h).to_image(),
+        image,
         rect: [
             x as f32 / width as f32,
             y as f32 / height as f32,

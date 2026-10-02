@@ -365,6 +365,7 @@ mod export;
 mod inspector;
 pub mod library;
 mod mask_tool;
+mod navigator;
 mod onboarding;
 mod overlay;
 mod photo_metadata;

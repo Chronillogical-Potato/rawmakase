@@ -239,7 +239,7 @@ impl Editor {
                     (format!("{cmd}D"), "Select none"),
                     ("/".into(), "Deselect the active photo"),
                     ("E / Return / double-click".into(), "Loupe"),
-                    ("Esc".into(), "Back to the grid"),
+                    ("Esc / double-click".into(), "Back to the grid"),
                     ("Z / click".into(), "Loupe 1:1 and Fit; drag to pan"),
                 ],
             ),

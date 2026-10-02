@@ -145,14 +145,11 @@ impl Editor {
                     })
                 })
             };
-            // A menu or popup takes the keys first.
+            // The Loupe zooms with Develop's keys, whatever the photo; a menu
+            // or popup takes the keys first.
             if self.library_mode
                 && !egui::Popup::is_any_open(ctx)
-                && self
-                    .library
-                    .as_ref()
-                    .and_then(|l| l.loupe_develops())
-                    .is_some()
+                && self.library.as_ref().is_some_and(|l| l.loupe_open())
             {
                 self.zoom_keys(ctx);
             }
@@ -412,11 +409,11 @@ impl Editor {
                 return;
             };
             // Moving on keeps the zoom, so the next photo is compared as it was.
-            let zoom = (self.view.zoom100, self.view.zoom_level, self.view.pan);
+            let zoom = (self.view.zoom.on, self.view.zoom.level, self.view.zoom.pan);
             if !self.load_raw(path, Some(id)) {
                 return;
             }
-            (self.view.zoom100, self.view.zoom_level, self.view.pan) = zoom;
+            (self.view.zoom.on, self.view.zoom.level, self.view.zoom.pan) = zoom;
         }
         // Still the previous photo, e.g. it could not be saved: never show it
         // under this one's name.
@@ -439,7 +436,26 @@ impl Editor {
             self.presets.preview = None;
             self.schedule();
         }
+        let area = ui.available_rect_before_wrap();
+        let before = self.view.zoom.on;
         self.viewport_ui(ui);
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        if self.view.zoom.on != before {
+            library.loupe_zoom_toggled(before);
+        }
+        // As in Lightroom, a double-click goes back to the grid; its first
+        // click's zoom is undone.
+        // egui counts a click soon after a double-click as a triple one.
+        let double = ui.input(|i| {
+            let button = egui::PointerButton::Primary;
+            (i.pointer.button_double_clicked(button) || i.pointer.button_triple_clicked(button))
+                && i.pointer.interact_pos().is_some_and(|p| area.contains(p))
+        });
+        if double && let Some(on) = library.loupe_double_click() {
+            self.view.zoom.on = on;
+        }
     }
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -486,12 +502,31 @@ impl Editor {
             .min_size(180.)
             .max_size(500.)
             .show(ui, |ui| {
-                // A RAW in the Loupe gets Develop's Navigator and zoom levels.
+                // In the Loupe, the Navigator controls the zoom: Develop's for
+                // a RAW, the same one for other photos.
+                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
                 if develops.is_some() {
                     self.navigator_ui(ui);
+                } else if loupe {
+                    let (photo, shown) = self
+                        .library
+                        .as_ref()
+                        .and_then(|l| l.loupe_navigator())
+                        .map_or((None, None), |(photo, shown)| (Some(photo), shown));
+                    match crate::app::navigator::navigator(ui, photo, Some(self.view.zoom), shown)
+                    {
+                        Some(crate::app::navigator::Change::Level(level)) => {
+                            self.view.zoom.set(level)
+                        }
+                        Some(crate::app::navigator::Change::Inspect(at)) => {
+                            self.view.zoom.pan = at;
+                            self.view.zoom.on = true;
+                        }
+                        None => {}
+                    }
                 }
                 if let Some(library) = &mut self.library {
-                    action = library.sidebar(ui, develops.is_none());
+                    action = library.sidebar(ui, !loupe);
                 } else {
                     ui.heading("Library");
                     ui.label("Create an RAWmakase catalog or import a Lightroom catalog from the Catalog menu.");
@@ -513,7 +548,7 @@ impl Editor {
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 if let Some(l) = &mut self.library {
-                    let a = l.grid(ui);
+                    let a = l.grid(ui, &mut self.view.zoom);
                     if !matches!(a, crate::app::library::Action::None) {
                         action = a
                     }
@@ -573,8 +608,8 @@ impl Editor {
                 Key::Plus | Key::Equals if modifiers.command => self.step_zoom(1),
                 Key::Minus if modifiers.command => self.step_zoom(-1),
                 // Once per press: a held Z must not flicker the zoom.
-                Key::Z if !modifiers.any() && !repeat => self.view.zoom100 = !self.view.zoom100,
-                Key::F if !modifiers.any() => self.view.zoom100 = false,
+                Key::Z if !modifiers.any() && !repeat => self.view.zoom.on = !self.view.zoom.on,
+                Key::F if !modifiers.any() => self.view.zoom.on = false,
                 _ => {}
             }
         }

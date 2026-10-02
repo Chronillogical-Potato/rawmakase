@@ -168,8 +168,8 @@ pub(super) enum Tool {
     Mask,
 }
 pub(super) struct ViewState {
-    pub(super) zoom100: bool,
-    pub(super) pan: [f32; 2],
+    /// Fit or a zoom level, and where; Develop's and the Library's.
+    pub(super) zoom: super::navigator::Zoom,
     pub(super) viewport: Vec2,
     pub(super) compare: bool,
     pub(super) clipping: bool,
@@ -190,8 +190,6 @@ pub(super) struct ViewState {
     pub(super) mixer_color: bool,
     pub(super) mixer_adjust: usize,
     pub(super) shortcuts: bool,
-    /// Zoom when not in Fit: screen pixels per image pixel (1 = 100%).
-    pub(super) zoom_level: f32,
     pub(super) zoom_key: (bool, f32),
     pub(super) zoom_anim: Option<(f64, egui::Rect)>,
     pub(super) shown_rect: Option<egui::Rect>,
@@ -199,8 +197,7 @@ pub(super) struct ViewState {
 impl Default for ViewState {
     fn default() -> Self {
         Self {
-            zoom100: false,
-            pan: [0.5, 0.5],
+            zoom: Default::default(),
             viewport: Vec2::ZERO,
             compare: false,
             clipping: false,
@@ -218,7 +215,6 @@ impl Default for ViewState {
             mixer_color: false,
             mixer_adjust: 0,
             shortcuts: false,
-            zoom_level: 1.,
             zoom_key: (false, 1.),
             zoom_anim: None,
             shown_rect: None,
@@ -293,12 +289,12 @@ impl ViewState {
     pub fn toggle(&mut self, tool: Tool) {
         self.tool = if self.tool == tool { Tool::None } else { tool };
         if matches!(self.tool, Tool::Crop) {
-            self.zoom100 = false;
+            self.zoom.on = false;
             self.aspect_read = false;
         }
     }
     pub fn clear_document(&mut self) {
-        self.zoom100 = false;
+        self.zoom.on = false;
         self.zoom_anim = None;
         self.shown_rect = None;
         self.tool = Tool::None;

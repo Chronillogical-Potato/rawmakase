@@ -6,6 +6,7 @@
 //! and kept, within a budget, until it is shown. An offline photo shows its
 //! cached preview.
 use super::{Action, Library, thumbnails};
+use crate::app::navigator::Zoom;
 use crate::app::theme;
 use crate::app::worker::Latest;
 use crate::catalog::Photo;
@@ -38,7 +39,12 @@ struct Job {
 struct Done {
     ticket: u64,
     ahead: Option<Key>,
-    result: Result<image::RgbImage, String>,
+    result: Result<Prepared, String>,
+}
+/// A preview for the view, and the size of the image it was made from.
+struct Prepared {
+    image: image::RgbImage,
+    full: (u32, u32),
 }
 /// What the Loupe shows under the photo.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,20 +56,26 @@ pub(super) enum State {
 
 pub(super) struct Loupe {
     pub open: bool,
-    pub zoom: super::zoom::Zoom,
+    pub regions: super::zoom::Regions,
     worker: Latest<Job>,
     /// Prepares the neighbour, on its own so it never holds up the photo shown.
     ahead: Latest<Job>,
     ahead_cancel: Arc<AtomicBool>,
     /// The neighbour asked for last, and those ready, oldest first.
     ahead_requested: Option<Key>,
-    prefetched: std::collections::VecDeque<(Key, image::RgbImage)>,
+    prefetched: std::collections::VecDeque<(Key, Prepared)>,
     results: Receiver<Done>,
     ticket: u64,
     /// What the current ticket asked for.
     requested: Option<Key>,
     cancel: Arc<AtomicBool>,
     texture: Option<egui::TextureHandle>,
+    /// The size of the image shown, and of the view in pixels, for its Fit.
+    full: Option<(u32, u32)>,
+    view: Vec2,
+    /// The zoom before the last click toggled it, and when, for a
+    /// double-click to undo.
+    before_click: Option<(bool, f64, Option<i64>)>,
     pub state: State,
 }
 impl Loupe {
@@ -83,8 +95,10 @@ impl Loupe {
                     ctx.request_repaint();
                 };
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    thumbnails::raster(&job.path)
-                        .map(|image| thumbnails::downscale(&image, job.edge))
+                    thumbnails::raster(&job.path).map(|image| Prepared {
+                        full: image.dimensions(),
+                        image: thumbnails::downscale(&image, job.edge),
+                    })
                 }));
                 match prepared {
                     _ if job.cancel.load(Ordering::Relaxed) => {}
@@ -96,7 +110,7 @@ impl Loupe {
         };
         Self {
             open: false,
-            zoom: super::zoom::Zoom::new(ctx),
+            regions: super::zoom::Regions::new(ctx),
             worker: worker(tx.clone(), ctx.clone()),
             ahead: worker(tx, ctx.clone()),
             ahead_cancel: Default::default(),
@@ -107,6 +121,9 @@ impl Loupe {
             requested: None,
             cancel: Default::default(),
             texture: None,
+            full: None,
+            view: Vec2::ZERO,
+            before_click: None,
             state: State::Loading,
         }
     }
@@ -120,11 +137,11 @@ impl Loupe {
         // Prepared ahead, perhaps finishing after it was asked for again:
         // shown at once.
         if let Some(at) = self.prefetched.iter().position(|(k, _)| *k == wanted) {
-            let (_, image) = self.prefetched.remove(at).unwrap();
+            let (_, prepared) = self.prefetched.remove(at).unwrap();
             self.cancel.store(true, Ordering::Relaxed);
             self.ticket += 1;
             self.requested = Some(wanted);
-            self.show(ctx, &image);
+            self.show(ctx, prepared);
             return;
         }
         if asked {
@@ -139,6 +156,7 @@ impl Loupe {
         self.ticket += 1;
         if !same_photo {
             self.texture = None;
+            self.full = None;
             self.state = State::Loading;
         }
         self.worker.submit(Job {
@@ -168,7 +186,8 @@ impl Loupe {
             cancel: self.ahead_cancel.clone(),
         });
     }
-    fn show(&mut self, ctx: &egui::Context, image: &image::RgbImage) {
+    fn show(&mut self, ctx: &egui::Context, Prepared { image, full }: Prepared) {
+        self.full = Some(full);
         let size = [image.width() as usize, image.height() as usize];
         self.texture = Some(ctx.load_texture(
             "library-loupe",
@@ -179,7 +198,7 @@ impl Loupe {
     }
     /// Lets go of what the Loupe's own preview holds, unless already idle.
     fn idle(&mut self) {
-        if self.requested.is_some() || self.texture.is_some() || self.zoom.region.is_some() {
+        if self.requested.is_some() || self.texture.is_some() || self.regions.region.is_some() {
             self.reset();
         }
     }
@@ -189,19 +208,20 @@ impl Loupe {
         self.ahead_cancel.store(true, Ordering::Relaxed);
         self.ahead_requested = None;
         self.prefetched.clear();
-        self.zoom.release();
+        self.regions.release();
         self.requested = None;
+        self.full = None;
         self.texture = None;
         self.state = State::Loading;
     }
     fn poll(&mut self, ctx: &egui::Context) {
-        self.zoom.poll(ctx);
+        self.regions.poll(ctx);
         while let Ok(done) = self.results.try_recv() {
             if let Some(key) = done.ahead {
                 if let Ok(image) = done.result {
                     self.prefetched.push_back((key, image));
-                    let bytes = |p: &std::collections::VecDeque<(Key, image::RgbImage)>| {
-                        p.iter().map(|(_, i)| i.as_raw().len()).sum::<usize>()
+                    let bytes = |p: &std::collections::VecDeque<(Key, Prepared)>| {
+                        p.iter().map(|(_, p)| p.image.as_raw().len()).sum::<usize>()
                     };
                     while bytes(&self.prefetched) > PREFETCHED_BYTES {
                         self.prefetched.pop_front();
@@ -213,7 +233,7 @@ impl Loupe {
                 continue;
             }
             match done.result {
-                Ok(image) => self.show(ctx, &image),
+                Ok(prepared) => self.show(ctx, prepared),
                 Err(e) => self.state = State::Failed(e),
             }
         }
@@ -259,6 +279,7 @@ impl Library {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
         self.loupe.open = self.selection.active.is_some();
+        self.loupe.before_click = None;
         self.scroll_to_active = true;
     }
     /// The RAW the Loupe shows through Develop's pipeline: the active photo,
@@ -269,13 +290,64 @@ impl Library {
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)
     }
-    /// Z, a click, Cmd+= and Cmd+-: 1:1 or Fit, keeping the place in the photo.
-    pub(super) fn zoom_loupe(&mut self, on: Option<bool>) {
-        let on = on.unwrap_or(!self.loupe.zoom.on);
-        self.loupe.zoom.set(on, None);
+    /// The zoom level at which the photo in the Loupe's own view fits, for
+    /// stepping through the levels from it.
+    pub(in crate::app) fn loupe_fit(&self) -> Option<f32> {
+        let (w, h) = self.loupe.full?;
+        let view = self.loupe.view;
+        Some((view.x / w as f32).min(view.y / h as f32))
+    }
+    /// What the Navigator shows for a photo in the Loupe's own view: its
+    /// preview, and the part in view when zoomed.
+    pub(in crate::app) fn loupe_navigator(
+        &self,
+    ) -> Option<(crate::app::navigator::Photo, Option<[f32; 4]>)> {
+        let photo = self.selection.active.and_then(|id| self.photo(id))?;
+        // The Loupe's own preview once it is this photo's; until then the
+        // grid's.
+        let texture = self
+            .loupe
+            .texture
+            .as_ref()
+            .filter(|_| {
+                self.loupe
+                    .requested
+                    .as_ref()
+                    .is_some_and(|r| r.0 == photo.id)
+            })
+            .filter(|_| self.is_available(&photo.path))
+            .or_else(|| self.texture(photo))?;
+        let shown = self
+            .loupe
+            .regions
+            .region
+            .as_ref()
+            .filter(|_| self.loupe.regions.photo == Some(photo.id))
+            .map(|(_, rect)| *rect);
+        Some(((texture.id(), texture.size_vec2()), shown))
+    }
+    /// A click in the Loupe toggled the zoom away from `before`.
+    pub(in crate::app) fn loupe_zoom_toggled(&mut self, before: bool) {
+        let at = self.ctx.input(|i| i.time);
+        self.loupe.before_click = Some((before, at, self.selection.active));
+    }
+    /// A double-click: back to the grid, as in Lightroom. Returns the zoom
+    /// from before its first click, which is undone.
+    pub(in crate::app) fn loupe_double_click(&mut self) -> Option<bool> {
+        // Only a toggle by this double-click's own first click counts.
+        let now = self.ctx.input(|i| i.time);
+        let before = self
+            .loupe
+            .before_click
+            .take()
+            .filter(|(_, at, photo)| now - at < 1. && *photo == self.selection.active)
+            .map(|(on, ..)| on);
+        self.close_loupe();
+        before
     }
     /// G or Esc: back to the grid, at the active photo.
     pub fn close_loupe(&mut self) {
+        self.loupe.before_click = None;
         if self.loupe.open {
             self.loupe.open = false;
             self.loupe.reset();
@@ -283,7 +355,7 @@ impl Library {
         }
     }
     /// The Loupe in place of the grid, with the filmstrip below.
-    pub(super) fn loupe(&mut self, ui: &mut egui::Ui) -> Action {
+    pub(super) fn loupe(&mut self, ui: &mut egui::Ui, zoom: &mut Zoom) -> Action {
         self.loupe.poll(ui.ctx());
         let Some(id) = self.selection.active else {
             self.close_loupe();
@@ -314,6 +386,8 @@ impl Library {
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0., theme::gray(36));
         let ppp = ui.ctx().pixels_per_point();
+        // The photo fits within the margin, as drawn below.
+        self.loupe.view = rect.shrink(16.).size() * ppp;
         let available = self.is_available(&photo.path);
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
         if available {
@@ -347,69 +421,83 @@ impl Library {
             let scale = (inset.width() / size.x).min(inset.height() / size.y);
             egui::Rect::from_center_size(inset.center(), size * scale)
         });
-        // A click zooms to 1:1 at the point clicked, and back; a drag pans.
-        // The second click of a double-click is not another toggle, so a
-        // double-click zooms in too rather than in and straight back out.
-        // Zooming in starts on the photo, not in the margin around it.
+        // A click zooms in at the point clicked, and back; a drag pans. The
+        // second click of a double-click is not another toggle, and zooming
+        // in starts on the photo, not in the margin around it.
         let on_photo = response
             .interact_pointer_pos()
             .zip(fit)
             .is_some_and(|(pos, fit)| fit.contains(pos));
-        if response.clicked()
-            && !response.double_clicked()
-            && available
-            && (self.loupe.zoom.on || on_photo)
-        {
-            let at = response.interact_pointer_pos().zip(fit).map(|(pos, fit)| {
-                [
-                    (pos.x - fit.left()) / fit.width(),
-                    (pos.y - fit.top()) / fit.height(),
-                ]
-            });
-            let on = !self.loupe.zoom.on;
-            self.loupe.zoom.set(on, if on { at } else { None });
+        let double = response.double_clicked() || response.triple_clicked();
+        if response.clicked() && !double && available && (zoom.on || on_photo) {
+            if let Some((pos, fit)) = response
+                .interact_pointer_pos()
+                .zip(fit)
+                .filter(|_| !zoom.on)
+            {
+                zoom.pan = [
+                    ((pos.x - fit.left()) / fit.width()).clamp(0., 1.),
+                    ((pos.y - fit.top()) / fit.height()).clamp(0., 1.),
+                ];
+            }
+            self.loupe_zoom_toggled(zoom.on);
+            zoom.on = !zoom.on;
         }
-        let zoom = &mut self.loupe.zoom;
-        let full = zoom
+        // As in Lightroom, a double-click goes back to the grid; its first
+        // click's zoom is undone.
+        if double {
+            if let Some(on) = self.loupe_double_click() {
+                zoom.on = on;
+            }
+            return Action::None;
+        }
+        if !zoom.on && self.loupe.regions.region.is_some() {
+            self.loupe.regions.release();
+        }
+        let regions = &mut self.loupe.regions;
+        let full = regions
             .full
-            .filter(|_| zoom.on && available && zoom.photo == Some(photo.id));
+            .filter(|_| zoom.on && available && regions.photo == Some(photo.id));
         let shown = match full {
             Some(full) => {
-                let size = egui::vec2(full[0] as f32, full[1] as f32) / ppp;
+                // `level` screen pixels per image pixel.
+                let size = egui::vec2(full[0] as f32, full[1] as f32) * zoom.level / ppp;
                 if response.dragged() {
                     let delta = response.drag_delta();
-                    zoom.center[0] -= delta.x / size.x;
-                    zoom.center[1] -= delta.y / size.y;
+                    zoom.pan[0] -= delta.x / size.x;
+                    zoom.pan[1] -= delta.y / size.y;
                 }
                 // The photo covers the view where it is larger, and is
                 // centred where it is smaller.
                 for i in 0..2 {
                     let half = rect.size()[i] / 2. / size[i];
-                    zoom.center[i] = if half >= 0.5 {
+                    zoom.pan[i] = if half >= 0.5 {
                         0.5
                     } else {
-                        zoom.center[i].clamp(half, 1. - half)
+                        zoom.pan[i].clamp(half, 1. - half)
                     };
                 }
                 Some(egui::Rect::from_min_size(
-                    rect.center() - egui::vec2(zoom.center[0] * size.x, zoom.center[1] * size.y),
+                    rect.center() - egui::vec2(zoom.pan[0] * size.x, zoom.pan[1] * size.y),
                     size,
                 ))
             }
             None => fit,
         };
         if zoom.on && available {
-            let size = [(rect.width() * ppp) as u32, (rect.height() * ppp) as u32];
-            zoom.request(photo.id, &photo.path, size);
+            // The image pixels that fill the view at this level.
+            let size =
+                [rect.width(), rect.height()].map(|side| (side * ppp / zoom.level).ceil() as u32);
+            regions.request(photo.id, &photo.path, zoom.pan, size, zoom.level);
         }
         let painter = ui.painter().with_clip_rect(rect);
         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
         if let (Some(texture), Some(at)) = (&texture, shown) {
             painter.image(texture.id(), at, uv, Color32::WHITE);
         }
-        // The 1:1 region over the enlarged Fit preview.
+        // The zoomed region over the enlarged Fit preview.
         if let (Some(at), true) = (shown, full.is_some())
-            && let Some((region, [x, y, w, h])) = &zoom.region
+            && let Some((region, [x, y, w, h])) = &regions.region
         {
             let place = egui::Rect::from_min_size(
                 at.min + egui::vec2(x * at.width(), y * at.height()),
@@ -429,13 +517,11 @@ impl Library {
                 "Offline: showing the cached preview. Full detail needs the original.".into()
             }
             (_, false, false) => "Offline, and there is no cached preview".into(),
-            _ if self.loupe.zoom.on && self.loupe.zoom.error.is_some() => format!(
-                "1:1 unavailable: {}",
-                self.loupe.zoom.error.clone().unwrap_or_default()
+            _ if zoom.on && self.loupe.regions.error.is_some() => format!(
+                "Zoom unavailable: {}",
+                self.loupe.regions.error.clone().unwrap_or_default()
             ),
-            _ if self.loupe.zoom.on && (self.loupe.zoom.pending || full.is_none()) => {
-                "Loading 1:1…".into()
-            }
+            _ if zoom.on && (self.loupe.regions.pending || full.is_none()) => "Loading…".into(),
             (State::Loading, ..) => "Loading…".into(),
             (State::Ready, ..) => String::new(),
             (State::Failed(e), ..) => format!("Preview unavailable: {e}"),
