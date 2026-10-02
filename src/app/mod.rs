@@ -257,7 +257,7 @@ impl Editor {
         } else {
             library.selected
         };
-        (library.source_key().to_string(), photo, develop)
+        (library.source_key(), photo, develop)
     }
     fn session_path(&self) -> Option<PathBuf> {
         self.library

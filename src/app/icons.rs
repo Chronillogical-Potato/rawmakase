@@ -18,6 +18,8 @@ fastframe_icons::icons! {
         Flag => "flag",
         Rejected => "flag-off",
         Folder => "folder",
+        Collection => "images",
+        CollectionSet => "box",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",

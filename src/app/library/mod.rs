@@ -1,10 +1,10 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
 use super::widgets::{COMPACT_SEGMENT_HEIGHT, section, segmented};
 use crate::app::theme;
-use crate::catalog::{Catalog, Collection, Folder, Photo};
+use crate::catalog::{Catalog, Collection, CollectionKind, Folder, Photo};
 use anyhow::Result;
 use eframe::egui::{self, Color32, Vec2};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub enum Action {
     None,
@@ -28,6 +28,8 @@ pub struct Library {
     pub selected: Option<i64>,
     folders: Vec<Folder>,
     collections: Vec<Collection>,
+    /// Each collection's photos, limited to the ones the Library shows.
+    collection_photos: HashMap<i64, HashSet<i64>>,
     roots: Vec<(i64, String, Option<String>)>,
     volumes: volumes::Volumes,
     /// The source and filter bar; `visible` is their result.
@@ -60,6 +62,7 @@ impl Library {
             selected: None,
             folders: Vec::new(),
             collections: Vec::new(),
+            collection_photos: HashMap::new(),
             roots: Vec::new(),
             volumes: Default::default(),
             filters: Default::default(),
@@ -99,6 +102,19 @@ impl Library {
             folder.count = self.photos.iter().filter(|p| p.folder == folder.id).count();
         }
         self.collections = self.catalog.collections()?;
+        let ids: HashSet<i64> = self.photos.iter().map(|p| p.id).collect();
+        self.collection_photos = self.catalog.collection_photos()?;
+        for members in self.collection_photos.values_mut() {
+            members.retain(|id| ids.contains(id));
+        }
+        if let Some(id) = self.filters.collection {
+            if self.collections.iter().any(|c| c.id == id) {
+                self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
+            } else {
+                self.filters.collection = None;
+                self.filters.members.clear();
+            }
+        }
         self.roots = self.catalog.roots()?;
         // Copy commands save a name being typed before they run.
         self.copy_names.clear();
@@ -433,6 +449,28 @@ impl Library {
                         action = Action::AddFolder;
                     }
                 });
+                section(ui, "Collections", false, |ui| {
+                    let tree = collections::tree(&self.collections, &self.collection_photos);
+                    for node in &tree {
+                        if let Some(id) = collections::collection_row(
+                            ui,
+                            node,
+                            0,
+                            &mut self.expanded,
+                            self.filters.collection,
+                        ) {
+                            self.select_collection(id);
+                        }
+                    }
+                    if tree.is_empty() {
+                        ui.add_space(4.);
+                        ui.label(
+                            egui::RichText::new("No collections")
+                                .size(11.)
+                                .color(theme::gray(120)),
+                        );
+                    }
+                });
             });
         action
     }
@@ -572,13 +610,36 @@ impl Library {
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
     }
-    /// The folder shown, as a tree key ("" is All Photographs).
-    pub(super) fn source_key(&self) -> &str {
-        &self.selected_folder
+    /// Shows collection `id`'s photos; the filter bar still applies.
+    fn select_collection(&mut self, id: i64) {
+        self.filters.collection = Some(id);
+        self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
+        self.filters.folder_scope = None;
+        self.filters.only_missing = false;
+        self.selected_folder.clear();
+        self.filter();
+    }
+    /// The source shown: a folder tree key ("" is All Photographs) or
+    /// `collection:<id>`.
+    pub(super) fn source_key(&self) -> String {
+        match self.filters.collection {
+            Some(id) => format!("collection:{id}"),
+            None => self.selected_folder.clone(),
+        }
     }
     /// Shows a folder saved with `source_key` again, including its subfolders,
     /// and selects `photo` if it is in it.
     pub(super) fn restore_source(&mut self, key: &str, photo: Option<i64>) {
+        if let Some(id) = key
+            .strip_prefix("collection:")
+            .and_then(|id| id.parse::<i64>().ok())
+            && self
+                .collections
+                .iter()
+                .any(|c| c.id == id && c.kind == CollectionKind::Collection)
+        {
+            self.select_collection(id);
+        }
         if let Some(rest) = key.strip_prefix("root:") {
             let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
             if let Ok(root) = root.parse::<i64>() {
@@ -1206,6 +1267,7 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
 mod cell;
+mod collections;
 mod copy_name;
 mod filter;
 mod previews;

@@ -493,3 +493,25 @@ fn virtual_copies_are_created_promoted_renamed_and_removed() -> Result<()> {
     assert!(cat.load_edit(original.id, &path)?.is_some());
     Ok(())
 }
+#[test]
+fn collection_kinds_follow_lightroom_creation_ids() {
+    use CollectionKind::*;
+    for (id, name, kind) in [
+        ("com.adobe.ag.library.group", "Trips", Set),
+        ("com.adobe.ag.library.collection", "Japan", Collection),
+        (
+            "com.adobe.ag.library.collection",
+            "quick collection",
+            System,
+        ),
+        ("com.adobe.ag.library.smart_collection", "Five Stars", Smart),
+        ("com.adobe.ag.print", "Print", Collection),
+        ("com.adobe.ag.print.unsaved", "Unsaved Print", System),
+    ] {
+        assert_eq!(
+            CollectionKind::from_lightroom(id, name),
+            kind,
+            "{id} {name}"
+        );
+    }
+}

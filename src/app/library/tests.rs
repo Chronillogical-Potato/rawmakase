@@ -679,3 +679,72 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
     assert!(library.has_edited_thumbnail(id));
     Ok(())
 }
+#[test]
+fn collections_panel_shows_imported_collections_and_filters_through_them() -> Result<()> {
+    let (directory, library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let path = library.catalog.path.clone();
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    drop(library);
+    {
+        let db = rusqlite::Connection::open(&path)?;
+        db.execute_batch(
+            "INSERT INTO collections VALUES
+                (2,'quick collection',NULL,'com.adobe.ag.library.collection'),
+                (3,'Smart Collections',NULL,'com.adobe.ag.library.group'),
+                (4,'Five Stars',3,'com.adobe.ag.library.smart_collection'),
+                (5,'Unsaved Print',NULL,'com.adobe.ag.print.unsaved'),
+                (10,'Trips',NULL,'com.adobe.ag.library.group'),
+                (11,'Japan',10,'com.adobe.ag.library.collection'),
+                (12,'Alps',10,'com.adobe.ag.library.collection'),
+                (13,'Empty set',NULL,'com.adobe.ag.library.group'),
+                (14,'Archive',NULL,'com.adobe.ag.library.collection');",
+        )?;
+        for photo in &ids[..2] {
+            db.execute("INSERT INTO collection_photos VALUES(11,?,NULL)", [photo])?;
+            db.execute("INSERT INTO collection_photos VALUES(2,?,NULL)", [photo])?;
+        }
+    }
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let tree = collections::tree(&library.collections, &library.collection_photos);
+    // Sets first, then collections, by name; smart and system ones hidden,
+    // and a set left empty by hiding them is dropped too.
+    let names: Vec<_> = tree.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Empty set", "Trips", "Archive"]);
+    let trips: Vec<_> = tree[1]
+        .children
+        .iter()
+        .map(|n| (n.name.as_str(), n.count))
+        .collect();
+    assert_eq!(trips, [("Alps", 0), ("Japan", 2)]);
+
+    library.select_collection(11);
+    assert_eq!(library.visible.len(), 2);
+    assert_eq!(library.source_name(), "Japan");
+    assert_eq!(library.source_key(), "collection:11");
+    // The filter bar still applies inside a collection.
+    library.catalog.set_metadata(ids[0], 0, 1, "")?;
+    library.reload()?;
+    library.filters.flag = 1;
+    library.filter();
+    assert_eq!(library.visible.len(), 1);
+    library.filters.flag = 2;
+    library.filter();
+
+    // A saved collection comes back with the session; an unknown one doesn't.
+    let mut restored = Library::load(&path, egui::Context::default())?;
+    restored.restore_source("collection:11", Some(ids[1]));
+    assert_eq!(restored.visible.len(), 2);
+    assert_eq!(restored.selected, Some(ids[1]));
+    let mut other = Library::load(&path, egui::Context::default())?;
+    other.restore_source("collection:4", None);
+    assert_eq!(other.filters.collection, None);
+    assert_eq!(other.visible.len(), 3);
+
+    // Choosing a folder clears the collection.
+    let root = library.roots[0].0;
+    library.restore_source(&format!("root:{root}"), None);
+    assert_eq!(library.filters.collection, None);
+    assert_eq!(library.visible.len(), 3);
+    drop(directory);
+    Ok(())
+}
