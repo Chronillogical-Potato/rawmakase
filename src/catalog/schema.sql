@@ -125,3 +125,57 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Descriptive metadata set in RAWmakase or imported, per photo: a virtual copy
+-- keeps its own rows, never its master's. A field with no row is the file's
+-- own. Rows go with their photo, also when a release that does not know these
+-- tables removes it, so a later photo reusing the id inherits nothing.
+
+-- Whether a field (title, caption, creator, copyright) is set or cleared.
+CREATE TABLE IF NOT EXISTS photo_fields (
+    photo INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('set', 'cleared')),
+    PRIMARY KEY(photo, field)
+);
+
+-- The languages of a set title, caption or copyright: "x-default" and any
+-- others imported.
+CREATE TABLE IF NOT EXISTS photo_text (
+    photo INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    lang TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY(photo, field, lang)
+);
+
+-- A set creator's names, in order.
+CREATE TABLE IF NOT EXISTS photo_creators (
+    photo INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    PRIMARY KEY(photo, position)
+);
+
+-- A capture time from elsewhere than the file (a Lightroom catalog, a
+-- sidecar): local "YYYY-MM-DDTHH:MM:SS", the subsecond digits as read, and
+-- the offset ("+02:00") when known. `photos.captured` is the sort key.
+CREATE TABLE IF NOT EXISTS photo_capture (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    captured TEXT NOT NULL,
+    subsec TEXT,
+    offset TEXT
+);
+
+-- A location from elsewhere than the file, or the file's cleared.
+CREATE TABLE IF NOT EXISTS photo_location (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    lat REAL,
+    lon REAL,
+    alt REAL,
+    cleared INTEGER NOT NULL DEFAULT 0
+);
+
+-- Keywords are looked up by parent and name; not unique, as Lightroom
+-- catalogs can hold duplicates.
+CREATE INDEX IF NOT EXISTS keywords_parent_name ON keywords(parent, name);
