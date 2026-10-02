@@ -9,8 +9,9 @@ use crate::app::theme;
 use eframe::egui::{self, Vec2};
 
 /// How the Library shows its photos.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum View {
+    #[default]
     Grid,
     Loupe,
     Compare,
