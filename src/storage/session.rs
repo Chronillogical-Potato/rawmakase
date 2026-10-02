@@ -39,6 +39,32 @@ pub struct Session {
     /// Photo > Auto Advance: a rating, flag or label moves to the next photo.
     #[serde(default)]
     pub auto_advance: bool,
+    /// How the Library showed its photos last time.
+    #[serde(default)]
+    pub library_layout: LibraryLayout,
+}
+
+/// How the Library shows its photos: its view, filter bar, sort and grid,
+/// kept across launches. Names are stable keys, so a layout from another
+/// version reads as far as it is understood and the rest is the default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LibraryLayout {
+    /// "grid", "loupe", "compare" or "survey".
+    pub view: String,
+    pub sort: String,
+    pub reverse: bool,
+    pub cell_style: String,
+    pub thumb_size: Option<f32>,
+    pub query: String,
+    pub flags: Vec<i32>,
+    pub rating: Option<i32>,
+    pub rating_op: String,
+    /// Colour names, "none" for no label and "other" for any other.
+    pub labels: Vec<String>,
+    pub kind: String,
+    /// Cmd+L turned the filter bar off.
+    pub filters_off: bool,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))
