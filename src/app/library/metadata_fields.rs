@@ -131,6 +131,11 @@ impl Library {
     /// Saves what is being typed, for the photos it was typed for. The
     /// drafts are kept on failure.
     pub(super) fn commit_fields(&mut self) -> anyhow::Result<()> {
+        // Saved already, and not read again since (an undo may have
+        // reversed it meanwhile): nothing to save.
+        if self.fields.saved {
+            return Ok(());
+        }
         let targets = self.fields.targets.clone();
         let untouched = self.fields.untouched();
         let drafts = self.fields.drafts.clone();
@@ -167,11 +172,12 @@ impl Library {
             edits.push(DescriptiveEdit::Creators(creators));
         }
         let place = self.fields.place.clone();
+        let saving = !edits.is_empty();
         for edit in edits {
             self.edit_descriptive_at(&targets, edit, place.clone())?;
         }
         self.fields.edited = [false; 4];
-        self.fields.saved = true;
+        self.fields.saved |= saving;
         self.fields.reload();
         Ok(())
     }

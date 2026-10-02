@@ -104,9 +104,8 @@ impl Library {
         };
         made?;
         let after = self.catalog.metadata_snapshot(&ids)?;
-        self.refresh_keywords(&ids)?;
         if before == after {
-            return Ok(());
+            return self.refresh_keywords(&ids);
         }
         let summary = match ids.len() {
             1 => what.to_string(),
@@ -122,7 +121,9 @@ impl Library {
             summary,
         });
         self.fields.reload();
-        Ok(())
+        // Recorded first: a change saved is one undo can reverse, even if
+        // what is shown can't be read again.
+        self.refresh_keywords(&ids)
     }
     /// Puts photos' descriptive metadata back, for undo and redo, without
     /// recording a change of its own.
