@@ -1,4 +1,7 @@
+use super::cell::photo_cell;
+use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::*;
+use eframe::egui::{Color32, Vec2};
 use std::{collections::HashMap, path::PathBuf};
 #[test]
 fn develop_workspace_drains_library_preview_results() -> Result<()> {

@@ -1,5 +1,10 @@
 //! The grid, with the filter bar above it and its toolbar below.
-use super::*;
+use super::cell::{self, photo_cell};
+use super::{Action, Library};
+use crate::app::theme;
+use crate::app::widgets::{COMPACT_SEGMENT_HEIGHT, segmented};
+use crate::catalog::Photo;
+use eframe::egui::{self, Vec2};
 
 impl Library {
     pub(super) fn filter_bar(&mut self, ui: &mut egui::Ui) {

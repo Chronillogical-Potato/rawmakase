@@ -1,9 +1,7 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
-use super::widgets::{COMPACT_SEGMENT_HEIGHT, section, segmented};
-use crate::app::theme;
-use crate::catalog::{Catalog, Collection, CollectionKind, Folder, Photo};
+use crate::catalog::{Catalog, Collection, Folder, Photo};
 use anyhow::Result;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
 pub enum Action {
@@ -418,8 +416,6 @@ mod textures;
 mod thumbnails;
 mod tree;
 mod volumes;
-use cell::photo_cell;
 use thumbnails::thumbnail;
-use tree::{FolderNode, TreeAction, folder_tree_row};
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,12 @@
 //! The Library's left panel: Navigator, Catalog, Folders and Collections, and
 //! the source they choose.
-use super::*;
+use super::tree::{FolderNode, TreeAction, folder_tree_row};
+use super::{Action, Library, collections, volumes};
+use crate::app::theme;
+use crate::app::widgets::section;
+use crate::catalog::CollectionKind;
+use eframe::egui::{self, Color32, Vec2};
+use std::collections::HashSet;
 
 impl Library {
     pub fn sidebar(&mut self, ui: &mut egui::Ui) -> Action {

@@ -1,5 +1,9 @@
 //! The Library's right panel: Quick Develop and the selected photo's metadata.
-use super::*;
+use super::{Action, Library};
+use crate::app::theme;
+use crate::app::widgets::section;
+use crate::catalog::Photo;
+use eframe::egui::{self, Vec2};
 
 impl Library {
     /// Right panel: the selected photo's rating, flag, label and file details.

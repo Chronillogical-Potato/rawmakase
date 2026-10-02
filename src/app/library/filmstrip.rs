@@ -1,6 +1,8 @@
 //! Lightroom's filmstrip, shown below Develop.
 use super::grid::filter_caption;
-use super::*;
+use super::{Library, cell};
+use crate::app::theme;
+use eframe::egui::{self, Color32, Vec2};
 
 impl Library {
     /// Lightroom's filmstrip for Develop: the current source's photos with the
