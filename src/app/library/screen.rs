@@ -31,13 +31,21 @@ type Render = fn(&Path, u32, Option<&EditSource>) -> anyhow::Result<image::RgbIm
 
 struct Job {
     key: Key,
+    /// Matches the result to this request, not to one made before the
+    /// photo's edit changed.
+    ticket: u64,
     edit: Option<EditSource>,
 }
-enum Done {
-    Ready(Key, image::RgbImage),
-    Failed(Key, String),
+struct Done {
+    key: Key,
+    ticket: u64,
+    outcome: Outcome,
+}
+enum Outcome {
+    Ready(image::RgbImage),
+    Failed(String),
     /// No longer shown when its turn came; asked for again if shown.
-    Skipped(Key),
+    Skipped,
 }
 #[derive(Default)]
 struct Queue {
@@ -58,7 +66,9 @@ pub(super) struct ScreenPreviews {
     /// Previews shown this frame and last; the workers skip the rest.
     wanted: Arc<Mutex<HashSet<Key>>>,
     seen: HashSet<Key>,
-    pending: HashSet<Key>,
+    /// Requests on their way, by the ticket of the latest.
+    pending: HashMap<Key, u64>,
+    next_ticket: u64,
     failed: HashMap<Key, String>,
     textures: HashMap<Key, egui::TextureHandle>,
     order: VecDeque<Key>,
@@ -80,7 +90,8 @@ impl ScreenPreviews {
             results,
             wanted,
             seen: HashSet::new(),
-            pending: HashSet::new(),
+            pending: HashMap::new(),
+            next_ticket: 0,
             failed: HashMap::new(),
             textures: HashMap::new(),
             order: VecDeque::new(),
@@ -102,12 +113,15 @@ impl ScreenPreviews {
         self.seen.insert(key.clone());
         if !self.textures.contains_key(&key)
             && !self.failed.contains_key(&key)
-            && self.pending.insert(key.clone())
+            && !self.pending.contains_key(&key)
         {
+            self.next_ticket += 1;
+            self.pending.insert(key.clone(), self.next_ticket);
             self.wanted.lock().unwrap().insert(key.clone());
             let (queue, ready) = &*self.queue;
             queue.lock().unwrap().jobs.push(Job {
                 key: key.clone(),
+                ticket: self.next_ticket,
                 edit: edit(),
             });
             ready.notify_one();
@@ -124,9 +138,19 @@ impl ScreenPreviews {
         }
     }
     pub(super) fn poll(&mut self, ctx: &egui::Context) {
-        while let Ok(done) = self.results.try_recv() {
-            match done {
-                Done::Ready(key, image) if self.pending.remove(&key) => {
+        while let Ok(Done {
+            key,
+            ticket,
+            outcome,
+        }) = self.results.try_recv()
+        {
+            // Asked for before its edit changed: a newer request is coming.
+            if self.pending.get(&key) != Some(&ticket) {
+                continue;
+            }
+            self.pending.remove(&key);
+            match outcome {
+                Outcome::Ready(image) => {
                     let size = [image.width() as usize, image.height() as usize];
                     let texture = ctx.load_texture(
                         "library-screen-preview",
@@ -142,14 +166,10 @@ impl ScreenPreviews {
                     self.order.push_back(key.clone());
                     self.textures.insert(key, texture);
                 }
-                Done::Failed(key, error) if self.pending.remove(&key) => {
+                Outcome::Failed(error) => {
                     self.failed.insert(key, error);
                 }
-                Done::Skipped(key) => {
-                    self.pending.remove(&key);
-                }
-                // Forgotten while it rendered: its edit has changed since.
-                Done::Ready(..) | Done::Failed(..) => {}
+                Outcome::Skipped => {}
             }
         }
     }
@@ -162,7 +182,7 @@ impl ScreenPreviews {
         self.textures.retain(|key, _| key.0 != id);
         self.order.retain(|key| key.0 != id);
         self.failed.retain(|key, _| key.0 != id);
-        self.pending.retain(|key| key.0 != id);
+        self.pending.retain(|key, _| key.0 != id);
     }
     #[cfg(test)]
     pub(super) fn wait(&mut self, ctx: &egui::Context) {
@@ -201,18 +221,23 @@ fn work(
             }
             queue.jobs.pop().unwrap()
         };
-        let Job { key, edit } = job;
-        let done = if !wanted.lock().unwrap().contains(&key) {
-            Done::Skipped(key)
+        let Job { key, ticket, edit } = job;
+        let outcome = if !wanted.lock().unwrap().contains(&key) {
+            Outcome::Skipped
         } else {
             let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 render(&key.1, key.2, edit.as_ref())
             }));
             match rendered {
-                Ok(Ok(image)) => Done::Ready(key, image),
-                Ok(Err(e)) => Done::Failed(key, format!("{e:#}")),
-                Err(_) => Done::Failed(key, "The preview could not be rendered".into()),
+                Ok(Ok(image)) => Outcome::Ready(image),
+                Ok(Err(e)) => Outcome::Failed(format!("{e:#}")),
+                Err(_) => Outcome::Failed("The preview could not be rendered".into()),
             }
+        };
+        let done = Done {
+            key,
+            ticket,
+            outcome,
         };
         if results.send(done).is_err() {
             return;
@@ -308,9 +333,10 @@ mod tests {
         let a = photo(1, Path::new("a"));
         // Queued, then not shown for a frame before a worker takes it.
         let key = (1, PathBuf::from("a"), EDGE_STEP);
-        screen.pending.insert(key.clone());
+        screen.pending.insert(key.clone(), 0);
         screen.queue.0.lock().unwrap().jobs.push(Job {
             key: key.clone(),
+            ticket: 0,
             edit: None,
         });
         screen.queue.1.notify_one();
@@ -319,5 +345,29 @@ mod tests {
         assert!(matches!(screen.get(&a, 100, || None), Shown::Loading));
         screen.wait(&ctx);
         assert!(matches!(screen.get(&a, 100, || None), Shown::Ready(_)));
+    }
+
+    #[test]
+    fn a_render_asked_for_before_an_edit_changed_is_dropped() {
+        let ctx = egui::Context::default();
+        let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
+        let key = (1, PathBuf::from("a"), EDGE_STEP);
+        // The photo was asked for again (ticket 2) after the edit changed,
+        // and the render asked for before it (ticket 1) comes in first.
+        screen.pending.insert(key.clone(), 2);
+        screen.wanted.lock().unwrap().insert(key.clone());
+        screen.queue.0.lock().unwrap().jobs.push(Job {
+            key: key.clone(),
+            ticket: 1,
+            edit: None,
+        });
+        screen.queue.1.notify_one();
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_millis(300) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            screen.poll(&ctx);
+        }
+        assert!(screen.textures.is_empty());
+        assert_eq!(screen.pending.get(&key), Some(&2));
     }
 }

@@ -1232,6 +1232,24 @@ fn compare_shows_the_select_beside_a_candidate() -> Result<()> {
     library.show_grid();
     assert!(!library.compare_open());
     assert_eq!(library.selected_ids().len(), 2);
+    // Photos another source or filter hides give way to ones shown: the
+    // candidate to the next photo, the select to the candidate.
+    library.open_compare();
+    library.compare.candidate = Some(ids[3]);
+    library.filters.query = "c.RAF".into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    assert_eq!(library.compare.candidate, None);
+    library.filters.query.clear();
+    library.filter();
+    library.compare.select = Some(ids[0]);
+    library.compare.candidate = Some(ids[2]);
+    library.filters.query = "c.RAF".into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    library.filters.query.clear();
+    library.filter();
+    library.show_grid();
     // With one photo shown there is nothing to compare it with.
     library.filters.query = "a.RAF".into();
     library.filter();

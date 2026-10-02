@@ -194,9 +194,40 @@ impl Library {
         self.sync_compare_selection();
         Ok(())
     }
+    /// Keeps Compare to photos shown: one removed, or hidden by another
+    /// source or filter, gives way to the next one shown, the select to the
+    /// candidate. Returns the select; None when nothing is left to show.
+    pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
+        let shown =
+            |library: &Self, id: &i64| library.visible.iter().any(|i| library.photos[*i].id == *id);
+        if self.compare.candidate.is_some_and(|id| !shown(self, &id)) {
+            self.compare.candidate = None;
+        }
+        if self.compare.select.is_some_and(|id| !shown(self, &id)) {
+            self.compare.select = self.compare.candidate.take();
+        }
+        let select = self.compare.select?;
+        if self.compare.candidate.is_none() {
+            self.compare.candidate = self
+                .next_candidate(select, None, 1)
+                .or_else(|| self.next_candidate(select, None, -1));
+        }
+        if self.compare.id(self.compare.active).is_none() {
+            self.compare.active = Side::Select;
+        }
+        Some(select)
+    }
     pub(super) fn compare_keys(&mut self, presses: &[super::selection::Press]) {
         use egui::Key;
         for press in presses {
+            // B, Cmd+B and Cmd+Shift+B, for the active photo, once per press.
+            if press.key == Key::B {
+                if !press.repeat {
+                    let ids = self.selection.active.into_iter().collect();
+                    self.quick_key(press.modifiers, ids)
+                }
+                continue;
+            }
             if press.modifiers.command || press.modifiers.alt {
                 continue;
             }
@@ -207,10 +238,6 @@ impl Library {
                 Key::ArrowDown if !press.repeat => self.swap_compare(),
                 Key::Escape => self.close_compare(),
                 Key::E | Key::Enter => self.open_loupe(),
-                Key::B if !press.repeat => {
-                    let ids = self.selection.active.into_iter().collect();
-                    self.quick_key(press.modifiers, ids)
-                }
                 _ => {}
             }
         }
@@ -218,21 +245,10 @@ impl Library {
     /// Compare in place of the grid: the two photos, a toolbar and the
     /// filmstrip.
     pub(super) fn compare(&mut self, ui: &mut egui::Ui) -> Action {
-        // Removed since, e.g. by undo: the next photo stands in.
-        if self
-            .compare
-            .candidate
-            .is_some_and(|id| self.photo(id).is_none())
-        {
-            self.compare.candidate = None;
-        }
-        let Some(select) = self.compare.select.filter(|id| self.photo(*id).is_some()) else {
+        let Some(select) = self.keep_compared_shown() else {
             self.close_compare();
             return Action::None;
         };
-        if self.compare.candidate.is_none() {
-            self.compare.candidate = self.next_candidate(select, None, 1);
-        }
         self.sync_compare_selection();
         let mut target = None;
         egui::Panel::bottom("library-compare-filmstrip")
