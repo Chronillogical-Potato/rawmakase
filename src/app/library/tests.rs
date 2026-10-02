@@ -1422,3 +1422,21 @@ fn compare_follows_a_restored_place_within_its_pair() -> Result<()> {
     assert_eq!(library.compare.active, super::compare::Side::Select);
     Ok(())
 }
+#[test]
+fn compare_follows_the_master_after_removing_its_copy() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
+    let ids = ids_of(&library);
+    let copy = library.create_virtual_copy(ids[0])?;
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.compare.candidate = Some(copy);
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(copy));
+    library.remove_virtual_copy(copy)?;
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    Ok(())
+}

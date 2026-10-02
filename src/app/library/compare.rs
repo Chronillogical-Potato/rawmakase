@@ -85,6 +85,8 @@ impl Library {
         self.loupe.open = false;
         self.loupe.reset();
         self.compare.open = true;
+        // A place restored while Compare was closed is no news to it.
+        self.compare.restored = false;
         self.seed_compare(select);
     }
     /// `select` as the select, beside the next photo selected with it, or
@@ -235,8 +237,9 @@ impl Library {
         let active = self.compare.id(self.compare.active);
         // A filter or source that hid the active photo pruned the selection
         // and moved it off that photo; that is reconciled below, keeping its
-        // role. Any other change, such as undo restoring a place, is followed.
-        let hidden = active.is_some_and(|id| !self.is_shown(id));
+        // role. Any other change, such as undo restoring a place or a removed
+        // copy's master being selected, is followed.
+        let hidden = active.is_some_and(|id| self.photo(id).is_some() && !self.is_shown(id));
         let pruned = self
             .compare
             .synced
