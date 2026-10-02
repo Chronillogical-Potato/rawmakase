@@ -1535,3 +1535,58 @@ fn grid_cells_cycle_through_lightrooms_styles() -> Result<()> {
     }
     Ok(())
 }
+#[test]
+fn photos_sort_in_lightrooms_orders() -> Result<()> {
+    use super::sort::Sort;
+    let (_directory, mut library) = library_of(&["b10.RAF", "a.NEF", "b9.RAF"])?;
+    let id = |library: &Library, name: &str| {
+        library
+            .photos
+            .iter()
+            .find(|p| p.filename == name)
+            .unwrap()
+            .id
+    };
+    let (b10, a, b9) = (
+        id(&library, "b10.RAF"),
+        id(&library, "a.NEF"),
+        id(&library, "b9.RAF"),
+    );
+    library.catalog.set_metadata(b10, 2, 1, "Green")?;
+    library.catalog.set_metadata(a, 5, -1, "")?;
+    library.catalog.set_metadata(b9, 0, 0, "Red")?;
+    library.refresh()?;
+    library.wait_for_availability();
+    let order = |library: &mut Library, sort| {
+        library.filters.sort = sort;
+        library.filter();
+        ids_of(library)
+    };
+    assert_eq!(order(&mut library, Sort::Rating), [b9, b10, a]);
+    assert_eq!(order(&mut library, Sort::Pick), [a, b9, b10]);
+    assert_eq!(order(&mut library, Sort::LabelColor), [b9, b10, a]);
+    assert_eq!(order(&mut library, Sort::FileName), [a, b9, b10]);
+    assert_eq!(order(&mut library, Sort::Extension), [a, b10, b9]);
+    assert_eq!(order(&mut library, Sort::AddedOrder), {
+        let mut added = [b10, a, b9];
+        added.sort();
+        added
+    });
+    // Reversed, the other way round, with photos alike still in capture
+    // order.
+    library.filters.reverse = true;
+    assert_eq!(order(&mut library, Sort::Rating), [a, b10, b9]);
+    assert_eq!(order(&mut library, Sort::Extension), [b10, b9, a]);
+    library.filters.reverse = false;
+    // Edit time: photos never edited first, then by when.
+    let path = library.photo(b9).unwrap().path.clone();
+    library.catalog.save_edit(
+        b9,
+        &path,
+        &crate::develop::Recipe::default(),
+        &Default::default(),
+    )?;
+    library.sort_keys = None;
+    assert_eq!(order(&mut library, Sort::EditTime).last(), Some(&b9));
+    Ok(())
+}

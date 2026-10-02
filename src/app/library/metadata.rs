@@ -98,6 +98,10 @@ impl Library {
             _ => format!("{} photos · {}", changes.len(), summary(&edit, &changes[0])),
         };
         self.filter();
+        // Sorted by what changed, the photo may have moved: keep it in view.
+        if self.filters.sort != super::sort::Sort::CaptureTime {
+            self.scroll_to_active = true;
+        }
         let next = following
             .into_iter()
             .find(|next| self.visible.iter().any(|i| self.photos[*i].id == *next));

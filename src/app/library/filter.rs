@@ -89,6 +89,7 @@ pub(super) struct Filters {
     /// Cmd+L: whether the bar's settings apply.
     pub enabled: bool,
     pub only_missing: bool,
+    pub sort: super::sort::Sort,
     pub reverse: bool,
 }
 impl Default for Filters {
@@ -105,16 +106,19 @@ impl Default for Filters {
             kind: Kind::default(),
             enabled: true,
             only_missing: false,
+            sort: Default::default(),
             reverse: false,
         }
     }
 }
 impl Filters {
-    /// Indices into `photos` of the ones shown, in display order.
+    /// Indices into `photos` of the ones shown, in display order; `keys`
+    /// are what the sort order needs (see `Sort::keys`).
     pub(super) fn visible(
         &self,
         photos: &[Photo],
         available: impl Fn(&Path) -> bool,
+        keys: &super::sort::Keys,
     ) -> Vec<usize> {
         let query = self.query.to_lowercase();
         let mut visible: Vec<usize> = photos
@@ -130,9 +134,7 @@ impl Filters {
             })
             .map(|(i, _)| i)
             .collect();
-        if self.reverse {
-            visible.reverse()
-        }
+        self.sort.sort(photos, &mut visible, keys, self.reverse);
         visible
     }
     /// Whether the filter bar lets `p` through; `query` is in lower case.

@@ -54,6 +54,11 @@ pub struct Library {
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
+    /// The sort order's keys from the catalog (see `Sort::keys`), kept until
+    /// edits or sizes change them.
+    sort_keys: Option<(sort::Sort, sort::Keys)>,
+    /// The frame the Library was last drawn in, to notice it showing again.
+    drawn_pass: u64,
     /// The style the grid was last drawn with, to keep its rows in place
     /// when it changes.
     drawn_style: cell::Style,
@@ -134,6 +139,8 @@ impl Library {
             thumb_size: 190.,
             cell_style: Default::default(),
             drawn_style: Default::default(),
+            drawn_pass: 0,
+            sort_keys: None,
             cell_info: HashMap::new(),
             strip_current: None,
             visible: Vec::new(),
@@ -180,6 +187,7 @@ impl Library {
     /// for changes that add or remove no file, such as virtual copies.
     fn reload(&mut self) -> Result<()> {
         self.cell_info.clear();
+        self.sort_keys = None;
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
         self.photos
@@ -248,10 +256,37 @@ impl Library {
         self.availability.count(&self.photos)
     }
     fn filter(&mut self) {
-        self.visible = self
-            .filters
-            .visible(&self.photos, |path| self.availability.is_available(path));
+        // What the order needs from the catalog, read once until it changes.
+        let sort = self.filters.sort;
+        if self.sort_keys.as_ref().is_none_or(|(of, _)| *of != sort) {
+            self.sort_keys = Some((sort, sort.keys(&self.catalog)));
+        }
+        let keys = &self.sort_keys.as_ref().unwrap().1;
+        self.visible = self.filters.visible(
+            &self.photos,
+            |path| self.availability.is_available(path),
+            keys,
+        );
         self.keep_shown_selected();
+    }
+    /// Applies `change` and filters again, keeping the selected photo where
+    /// it was on screen: for a re-sort the user did not ask for, such as
+    /// capture times or sizes read in the background.
+    fn resort_in_place(&mut self, change: impl FnOnce(&mut Self)) {
+        let anchor = self.selected().and_then(|id| {
+            self.visible
+                .iter()
+                .position(|i| self.photos[*i].id == id)
+                .map(|at| (id, at))
+        });
+        // A selected photo scrolled out of view is no anchor: the view stays.
+        let anchor = anchor.filter(|(_, at)| self.grid_shown.contains(at));
+        change(self);
+        self.filter();
+        // Several batches before the grid is drawn again: the first position counts.
+        if self.keep_in_place.is_none() {
+            self.keep_in_place = anchor;
+        }
     }
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
@@ -494,6 +529,7 @@ mod quick;
 mod screen;
 mod selection;
 mod sidebar;
+mod sort;
 mod stage;
 mod survey;
 mod textures;

@@ -95,6 +95,22 @@ impl Catalog {
     }
     /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
     /// develop text, if any.
+    /// When each edited photo was last edited, as "YYYY-MM-DD HH:MM:SS"
+    /// UTC: in RAWmakase, or else in Lightroom, whose history counts seconds
+    /// from 2001.
+    pub fn edit_times(&self) -> Result<std::collections::HashMap<i64, String>> {
+        let mut query = self.db.prepare(
+            "SELECT p.id, COALESCE(p.edited_at,
+                 (SELECT datetime(MAX(h.created) + 978307200, 'unixepoch')
+                  FROM lightroom_history h WHERE h.photo = p.id))
+             FROM photos p
+             WHERE p.edited_at IS NOT NULL
+                OR EXISTS (SELECT 1 FROM lightroom_history h
+                           WHERE h.photo = p.id AND h.created IS NOT NULL)",
+        )?;
+        let rows = query.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
     /// Changes whenever the photo's edit does: a hash of its recipe, its
     /// spots and masks, and its Lightroom settings. Cheaper than reading
     /// the edit itself, for previews to notice an edit saved elsewhere.
