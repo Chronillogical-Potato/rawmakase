@@ -66,16 +66,20 @@ impl Drop for Backfill {
     }
 }
 
-/// Whether a capture time can be read from this kind of file at all; a PNG
-/// rarely has one, so it is not opened.
+/// Whether a capture time can be read from this kind of file at all, so
+/// files that never yield one are not opened on every launch: a PNG rarely
+/// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
+/// Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
 pub(super) fn readable(path: &Path) -> bool {
-    crate::storage::is_raw(path)
-        || path.extension().is_some_and(|x| {
-            matches!(
-                x.to_string_lossy().to_ascii_lowercase().as_str(),
-                "jpg" | "jpeg" | "tif" | "tiff"
-            )
-        })
+    let extension = path
+        .extension()
+        .map(|x| x.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "jpg" | "jpeg" | "tif" | "tiff" => true,
+        "cr3" | "crw" | "x3f" | "mrw" => false,
+        _ => crate::storage::is_raw(path),
+    }
 }
 
 fn read(path: &Path) -> Read {
