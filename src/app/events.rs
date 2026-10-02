@@ -237,16 +237,20 @@ impl Editor {
                 self.library = Some(l);
                 self.library_mode = true;
                 // On launch, return to the folder, photo and module of last time.
-                if let Some((source, photo, develop)) = self.restore.take()
-                    && let Some(library) = &mut self.library
+                let restore = self.restore.take();
+                if let Some(library) = &mut self.library {
+                    if let Some((source, photo, _)) = &restore {
+                        library.restore_source(source, *photo);
+                    }
+                    // The Library as it was shown, on launch and whenever the
+                    // catalog is loaded again (a folder added or relinked).
+                    library.apply_layout(&self.saved_layout);
+                }
+                // Develop reopens on its photo, even one the filters now hide.
+                if let Some((_, photo, true)) = restore
+                    && let Some(id) = photo.or_else(|| self.library.as_ref()?.selected())
                 {
-                    library.restore_source(&source, photo);
-                    if let Some(layout) = self.restore_layout.take() {
-                        library.apply_layout(&layout);
-                    }
-                    if develop && let Some(id) = library.selected() {
-                        self.develop_catalog_photo(id);
-                    }
+                    self.develop_catalog_photo(id);
                 }
                 self.open_pending_photo();
                 let _ = self.save_session();

@@ -54,9 +54,8 @@ pub struct Editor {
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     /// How the Library showed its photos, as last written to the session;
-    /// returned to once the session's catalog opens.
+    /// returned to whenever the catalog is loaded.
     saved_layout: crate::storage::LibraryLayout,
-    restore_layout: Option<crate::storage::LibraryLayout>,
     status: String,
     /// What a running catalog import or open is doing.
     catalog_work: Option<String>,
@@ -211,7 +210,6 @@ impl Editor {
                 session.develop,
             ),
             saved_layout: session.library_layout.clone(),
-            restore_layout: Some(session.library_layout.clone()),
             pending_photo: None,
             prefetch_cancel: Default::default(),
             status: "Pick a photo in the Library to begin".into(),
