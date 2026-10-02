@@ -367,6 +367,20 @@ impl Editor {
                                 self.library_mode = true;
                             }
                             ui.add_space(12.);
+                            let hover = format!(
+                                "Keyboard shortcuts · {}",
+                                super::shortcuts::keys_text("Cmd+/")
+                            );
+                            if super::shortcuts::icon_button(
+                                ui,
+                                super::icons::Icon::Keyboard,
+                                &hover,
+                            )
+                            .clicked()
+                            {
+                                self.view.shortcuts = !self.view.shortcuts;
+                            }
+                            ui.add_space(8.);
                             let shortcut = if cfg!(target_os = "macos") {
                                 "⌘,"
                             } else {
