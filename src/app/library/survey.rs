@@ -48,8 +48,20 @@ impl Library {
         self.selected_ids()
     }
     /// Left/Up and Right/Down: the photo before or after becomes active.
+    /// The photos surveyed that are shown: all of them, or the `MOST` up to
+    /// and including the active photo.
+    pub(super) fn shown_surveyed(&self) -> Vec<i64> {
+        let ids = self.surveyed();
+        let at = self
+            .selection
+            .active
+            .and_then(|id| ids.iter().position(|i| *i == id))
+            .unwrap_or(0);
+        let start = (at + 1).saturating_sub(MOST);
+        ids.into_iter().skip(start).take(MOST).collect()
+    }
     pub(super) fn step_surveyed(&mut self, by: isize) {
-        let ids: Vec<i64> = self.surveyed().into_iter().take(MOST).collect();
+        let ids = self.surveyed();
         let Some(at) = self
             .selection
             .active
@@ -158,7 +170,7 @@ impl Library {
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
         ui.painter().rect_filled(area, 0., theme::gray(36));
-        let ids: Vec<i64> = self.surveyed().into_iter().take(MOST).collect();
+        let ids = self.shown_surveyed();
         // The previews of every photo shown stay while they are shown.
         self.cache.shown_at_once = ids.len();
         for (id, rect) in ids
@@ -192,7 +204,7 @@ impl Library {
             let count = self.surveyed().len();
             ui.label(filter_caption(&match count {
                 1 => "1 photo".to_string(),
-                n if n > MOST => format!("The first {MOST} of {n} photos selected"),
+                n if n > MOST => format!("{MOST} of {n} photos selected, up to the active one"),
                 n => format!("{n} photos"),
             }));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

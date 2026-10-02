@@ -1484,3 +1484,19 @@ fn compare_follows_the_master_after_removing_its_copy() -> Result<()> {
     assert_eq!(library.compare.active, super::compare::Side::Select);
     Ok(())
 }
+#[test]
+fn a_large_survey_shows_the_photos_up_to_the_active_one() -> Result<()> {
+    let names: Vec<String> = (0..52).map(|i| format!("{i:02}.RAF")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let (_directory, mut library) = library_of(&names)?;
+    let ids = ids_of(&library);
+    library.select_all();
+    library.make_active(ids[50]);
+    library.open_survey();
+    assert_eq!(library.shown_surveyed(), ids[3..51]);
+    library.step_surveyed(1);
+    assert_eq!(library.shown_surveyed(), ids[4..52]);
+    library.make_active(ids[0]);
+    assert_eq!(library.shown_surveyed(), ids[..48]);
+    Ok(())
+}
