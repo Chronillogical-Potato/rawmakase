@@ -21,6 +21,7 @@ pub struct Place {
 }
 pub use filmstrip::Pick;
 pub use metadata::{Metadata, MetadataCommand};
+pub use quick::CollectionCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +66,8 @@ pub struct Library {
     loupe_direction: i32,
     /// Metadata changes not yet handed to the shared undo log.
     done: Vec<MetadataCommand>,
+    /// Collection changes not yet handed to the shared undo log.
+    collection_done: Vec<quick::CollectionCommand>,
     /// Reads capture times for photos added from folders.
     capture: Option<background::Reader<capture::Read>>,
     /// Reads camera settings and sizes for photos added from folders.
@@ -123,6 +126,7 @@ impl Library {
             copy_request: None,
             copy_names: Default::default(),
             done: Vec::new(),
+            collection_done: Vec::new(),
             loupe,
             loupe_direction: 1,
             capture: None,
@@ -449,6 +453,7 @@ mod loupe;
 mod metadata;
 mod photo_info;
 mod previews;
+mod quick;
 mod selection;
 mod sidebar;
 mod textures;

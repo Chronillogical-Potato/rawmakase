@@ -37,6 +37,18 @@ impl Library {
                         self.filters.only_missing = false;
                         self.filter()
                     }
+                    if source_row(
+                        ui,
+                        "Quick Collection",
+                        self.quick_count(),
+                        self.showing_quick(),
+                    )
+                    .on_hover_text("B adds the selected photos · ⌘B shows them")
+                    .clicked()
+                        && let Err(e) = self.show_quick()
+                    {
+                        self.message = format!("Quick Collection unavailable: {e}");
+                    }
                     if offline > 0
                         && source_row(
                             ui,
@@ -257,13 +269,18 @@ impl Library {
         }
     }
     /// The selected source's name, as Lightroom shows it above the filmstrip.
-    pub(super) fn source_name(&self) -> String {
+    pub(in crate::app) fn source_name(&self) -> String {
         if let Some(id) = self.filters.collection {
-            return self
-                .collections
-                .iter()
-                .find(|c| c.id == id)
-                .map_or_else(|| "Collection".into(), |c| c.name.clone());
+            return self.collections.iter().find(|c| c.id == id).map_or_else(
+                || "Collection".into(),
+                |c| {
+                    if c.name == crate::catalog::QUICK_COLLECTION {
+                        "Quick Collection".into()
+                    } else {
+                        c.name.clone()
+                    }
+                },
+            );
         }
         if self.selected_folder.is_empty() {
             return "All Photographs".into();

@@ -52,6 +52,8 @@ pub struct Collection {
     pub kind: CollectionKind,
     pub count: usize,
 }
+/// The name Lightroom gives its Quick Collection.
+pub const QUICK_COLLECTION: &str = "quick collection";
 /// What a Lightroom collection row is, from its `creationId`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionKind {
@@ -70,7 +72,7 @@ impl CollectionKind {
             "com.adobe.ag.library.group" => Self::Set,
             "com.adobe.ag.library.smart_collection" => Self::Smart,
             // Lightroom keeps its Quick Collection as a plain collection by this name.
-            "com.adobe.ag.library.collection" if name == "quick collection" => Self::System,
+            "com.adobe.ag.library.collection" if name == QUICK_COLLECTION => Self::System,
             id if id.ends_with(".unsaved") => Self::System,
             _ => Self::Collection,
         }

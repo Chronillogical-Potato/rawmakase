@@ -1,15 +1,29 @@
 use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Vec2};
+/// How a grid cell shows its photo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Shown {
+    pub mark: super::selection::Mark,
+    /// Its place in the grid, from 1.
+    pub number: usize,
+    pub available: bool,
+    /// In the Quick Collection.
+    pub quick: bool,
+}
 pub(super) fn photo_cell(
     ui: &mut egui::Ui,
     photo: &Photo,
     texture: Option<&egui::TextureHandle>,
-    mark: super::selection::Mark,
-    number: usize,
-    available: bool,
+    shown: Shown,
     width: f32,
 ) -> (egui::Response, Option<PhotoAction>) {
+    let Shown {
+        mark,
+        number,
+        available,
+        quick,
+    } = shown;
     use crate::app::photo_metadata::{flag_icon, label_color};
     use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, StrokeKind};
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(width), Sense::hover());
@@ -105,6 +119,14 @@ pub(super) fn photo_cell(
         );
         if photo.master.is_some() {
             copy_badge(painter, image, fill);
+        }
+        // Lightroom's Quick Collection marker, top right of the cell.
+        if quick {
+            painter.circle_filled(
+                Pos2::new(cell.right() - 9., cell.top() + 9.),
+                3.5,
+                theme::gray(if selected { 40 } else { 225 }),
+            );
         }
     } else {
         painter.text(

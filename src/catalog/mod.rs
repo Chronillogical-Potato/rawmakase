@@ -24,7 +24,9 @@ mod info;
 mod ingest;
 pub mod lightroom;
 mod models;
-pub use models::{Collection, CollectionKind, Folder, Photo, PhotoInfo, SavedEdit};
+pub use models::{
+    Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
+};
 // Compatibility for existing clients.
 pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
 impl Catalog {
@@ -179,6 +181,51 @@ impl Catalog {
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
+    }
+    /// Lightroom's Quick Collection: the one imported with the catalog, or a
+    /// new one made the same way.
+    pub fn quick_collection(&mut self) -> Result<i64> {
+        use rusqlite::OptionalExtension;
+        const KIND: &str = "com.adobe.ag.library.collection";
+        let found = self
+            .db
+            .query_row(
+                "SELECT id FROM collections WHERE name=?1 AND kind=?2 AND parent IS NULL",
+                params![models::QUICK_COLLECTION, KIND],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = found {
+            return Ok(id);
+        }
+        self.db.execute(
+            "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?)",
+            params![models::QUICK_COLLECTION, KIND],
+        )?;
+        Ok(self.db.last_insert_rowid())
+    }
+    /// Adds `add` to and removes `remove` from a collection, in one transaction.
+    pub fn change_collection(
+        &mut self,
+        collection: i64,
+        add: &[i64],
+        remove: &[i64],
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        for photo in add {
+            tx.execute(
+                "INSERT OR IGNORE INTO collection_photos(collection, photo) VALUES (?, ?)",
+                [collection, *photo],
+            )?;
+        }
+        for photo in remove {
+            tx.execute(
+                "DELETE FROM collection_photos WHERE collection=? AND photo=?",
+                [collection, *photo],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
     /// Every collection's photos, by collection.
     pub fn collection_photos(
