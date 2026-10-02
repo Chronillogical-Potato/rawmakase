@@ -143,6 +143,11 @@ impl Editor {
                     Direction::Undo => (&change.before, &change.place_before),
                     Direction::Redo => (&change.after, &change.place_after),
                 };
+                // Leaving the open photo saves it first; if that fails, the
+                // command stays and the save error stays on the status line.
+                if !self.flush() {
+                    return false;
+                }
                 let Some(library) = &mut self.library else {
                     return false;
                 };
@@ -153,9 +158,7 @@ impl Editor {
                 match develop {
                     Some(photo) => self.show_in_develop(*photo),
                     None => {
-                        if !self.library_mode && self.flush() {
-                            self.library_mode = true;
-                        }
+                        self.library_mode = true;
                         if let Some(library) = &mut self.library {
                             library.go_to_place(place);
                         }
