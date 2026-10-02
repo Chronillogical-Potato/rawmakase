@@ -127,7 +127,21 @@ impl Editor {
             self.undo_log.push(command);
         }
     }
+    /// Saves what the Library panels hold, so it is a command before the
+    /// one to reverse is picked.
+    fn save_drafts(&mut self) -> bool {
+        if let Some(library) = &mut self.library
+            && let Err(e) = library.commit_copy_name()
+        {
+            self.status = format!("Not saved: {e}");
+            return false;
+        }
+        true
+    }
     pub(super) fn undo(&mut self) {
+        if !self.save_drafts() {
+            return;
+        }
         self.sync_undo();
         if let Some(command) = self.undo_log.undo.pop_back() {
             if self.apply(&command, Direction::Undo) {
@@ -138,6 +152,9 @@ impl Editor {
         }
     }
     pub(super) fn redo(&mut self) {
+        if !self.save_drafts() {
+            return;
+        }
         self.sync_undo();
         if let Some(command) = self.undo_log.redo.pop() {
             if self.apply(&command, Direction::Redo) {
