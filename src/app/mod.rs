@@ -65,6 +65,9 @@ pub struct Editor {
     undo_log: undo::UndoLog,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
+    /// The RAW the Loupe last started loading, so one that fails is not
+    /// loaded again every frame.
+    loupe_tried: Option<i64>,
 }
 impl Editor {
     pub fn new(
@@ -212,6 +215,7 @@ impl Editor {
             remove_copy: None,
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
+            loupe_tried: None,
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;

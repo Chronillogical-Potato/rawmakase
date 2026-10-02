@@ -393,7 +393,12 @@ impl Editor {
     /// does, and drawn by Develop's viewport without its tools, so it zooms
     /// the same way and D shows it in Develop at once.
     fn loupe_viewport(&mut self, ui: &mut egui::Ui, id: i64) {
-        if self.document.catalog_photo != Some(id) {
+        // A photo that failed to open is tried again the next time the
+        // Loupe shows it, not every frame.
+        let failed = self.document.catalog_photo == Some(id)
+            && self.document.path.is_none()
+            && !self.load.is_running();
+        if self.document.catalog_photo != Some(id) || (failed && self.loupe_tried != Some(id)) {
             let Some(path) = self
                 .library
                 .as_ref()
@@ -402,11 +407,20 @@ impl Editor {
             else {
                 return;
             };
+            // Moving on keeps the zoom, so the next photo is compared as it was.
+            let zoom = (self.view.zoom100, self.view.zoom_level, self.view.pan);
             if !self.load_raw(path, Some(id)) {
                 return;
             }
+            (self.view.zoom100, self.view.zoom_level, self.view.pan) = zoom;
+            self.loupe_tried = Some(id);
         }
-        self.view.tool = Tool::None;
+        // Develop's tools and Before view stay in Develop.
+        if self.view.tool != Tool::None || self.view.compare {
+            self.view.tool = Tool::None;
+            self.view.compare = false;
+            self.schedule();
+        }
         self.viewport_ui(ui);
     }
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
@@ -446,6 +460,9 @@ impl Editor {
         });
         let mut action = crate::app::library::Action::None;
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
+        if develops != self.loupe_tried {
+            self.loupe_tried = None;
+        }
         egui::Panel::left("library-sidebar")
             .default_size(260.)
             .min_size(180.)
@@ -526,7 +543,12 @@ impl Editor {
             self.step_zoom(zoom_step);
         }
         ctx.input(|i| {
-            if i.key_pressed(egui::Key::Z) && !i.modifiers.any() {
+            // Once per press: a held Z must not flicker the zoom.
+            let z = i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key: egui::Key::Z, pressed: true, repeat: false, modifiers, .. }
+                    if !modifiers.any())
+            });
+            if z {
                 self.view.zoom100 = !self.view.zoom100;
             }
             if i.key_pressed(egui::Key::F) && !i.modifiers.any() {
