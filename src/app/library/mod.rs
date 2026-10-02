@@ -521,6 +521,7 @@ mod filter;
 mod filter_bar;
 mod grid;
 mod info;
+mod layout;
 mod loupe;
 mod metadata;
 mod photo_info;
