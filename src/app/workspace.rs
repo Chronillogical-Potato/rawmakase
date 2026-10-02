@@ -393,12 +393,14 @@ impl Editor {
     /// does, and drawn by Develop's viewport without its tools, so it zooms
     /// the same way and D shows it in Develop at once.
     fn loupe_viewport(&mut self, ui: &mut egui::Ui, id: i64) {
-        // A photo that failed to open is tried again the next time the
-        // Loupe shows it, not every frame.
+        // Loaded once each time the Loupe shows the photo: one that failed to
+        // open, or whose predecessor failed to save, is tried again the next
+        // time, not every frame.
         let failed = self.document.catalog_photo == Some(id)
             && self.document.path.is_none()
             && !self.load.is_running();
-        if self.document.catalog_photo != Some(id) || (failed && self.loupe_tried != Some(id)) {
+        if (self.document.catalog_photo != Some(id) || failed) && self.loupe_tried != Some(id) {
+            self.loupe_tried = Some(id);
             let Some(path) = self
                 .library
                 .as_ref()
@@ -413,7 +415,6 @@ impl Editor {
                 return;
             }
             (self.view.zoom100, self.view.zoom_level, self.view.pan) = zoom;
-            self.loupe_tried = Some(id);
         }
         // Develop's tools and Before view stay in Develop.
         if self.view.tool != Tool::None || self.view.compare {

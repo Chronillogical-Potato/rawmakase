@@ -419,7 +419,16 @@ impl Library {
         // A click zooms to 1:1 at the point clicked, and back; a drag pans.
         // The second click of a double-click is not another toggle, so a
         // double-click zooms in too rather than in and straight back out.
-        if response.clicked() && !response.double_clicked() && available {
+        // Zooming in starts on the photo, not in the margin around it.
+        let on_photo = response
+            .interact_pointer_pos()
+            .zip(fit)
+            .is_some_and(|(pos, fit)| fit.contains(pos));
+        if response.clicked()
+            && !response.double_clicked()
+            && available
+            && (self.loupe.zoom.on || on_photo)
+        {
             let at = response.interact_pointer_pos().zip(fit).map(|(pos, fit)| {
                 [
                     (pos.x - fit.left()) / fit.width(),
