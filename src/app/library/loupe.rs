@@ -73,6 +73,8 @@ pub(super) struct Loupe {
     /// The size of the image shown, and of the view in pixels, for its Fit.
     full: Option<(u32, u32)>,
     view: Vec2,
+    /// The zoom before the last click toggled it, for a double-click to undo.
+    before_click: Option<bool>,
     pub state: State,
 }
 impl Loupe {
@@ -120,6 +122,7 @@ impl Loupe {
             texture: None,
             full: None,
             view: Vec2::ZERO,
+            before_click: None,
             state: State::Loading,
         }
     }
@@ -313,6 +316,16 @@ impl Library {
             .map(|(_, rect)| *rect);
         Some(((texture.id(), texture.size_vec2()), shown))
     }
+    /// A click in the Loupe toggled the zoom away from `before`.
+    pub(in crate::app) fn loupe_zoom_toggled(&mut self, before: bool) {
+        self.loupe.before_click = Some(before);
+    }
+    /// A double-click: back to the grid, as in Lightroom. Returns the zoom
+    /// from before its first click, which is undone.
+    pub(in crate::app) fn loupe_double_click(&mut self) -> Option<bool> {
+        self.close_loupe();
+        self.loupe.before_click.take()
+    }
     /// G or Esc: back to the grid, at the active photo.
     pub fn close_loupe(&mut self) {
         if self.loupe.open {
@@ -405,7 +418,16 @@ impl Library {
                     ((pos.y - fit.top()) / fit.height()).clamp(0., 1.),
                 ];
             }
+            self.loupe_zoom_toggled(zoom.on);
             zoom.on = !zoom.on;
+        }
+        // As in Lightroom, a double-click goes back to the grid; its first
+        // click's zoom is undone.
+        if response.double_clicked() {
+            if let Some(on) = self.loupe_double_click() {
+                zoom.on = on;
+            }
+            return Action::None;
         }
         if !zoom.on && self.loupe.regions.region.is_some() {
             self.loupe.regions.release();

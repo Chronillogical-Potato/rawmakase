@@ -436,7 +436,25 @@ impl Editor {
             self.presets.preview = None;
             self.schedule();
         }
+        let area = ui.available_rect_before_wrap();
+        let before = self.view.zoom.on;
         self.viewport_ui(ui);
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        if self.view.zoom.on != before {
+            library.loupe_zoom_toggled(before);
+        }
+        // As in Lightroom, a double-click goes back to the grid; its first
+        // click's zoom is undone.
+        let double = ui.input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+                && i.pointer.interact_pos().is_some_and(|p| area.contains(p))
+        });
+        if double && let Some(on) = library.loupe_double_click() {
+            self.view.zoom.on = on;
+        }
     }
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
