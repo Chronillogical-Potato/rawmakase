@@ -176,3 +176,66 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     assert!(image::open(&tif).is_ok());
     Ok(())
 }
+#[test]
+fn capture_times_take_lightroom_form_with_three_digit_subseconds() {
+    use exif::lightroom_time;
+    let t = |date, sub| lightroom_time(date, sub);
+    assert_eq!(
+        t("2018:08:26 10:39:33", Some("12")).as_deref(),
+        Some("2018-08-26T10:39:33.120")
+    );
+    assert_eq!(
+        t("2018:08:26 10:39:33", Some("1234")).as_deref(),
+        Some("2018-08-26T10:39:33.123")
+    );
+    assert_eq!(
+        t("2018:08:26 10:39:33", None).as_deref(),
+        Some("2018-08-26T10:39:33.000")
+    );
+    assert_eq!(
+        t("2018-08-26T10:39:33", Some(" 5 ")).as_deref(),
+        Some("2018-08-26T10:39:33.500")
+    );
+    for blank in [
+        "",
+        "    :  :     :  :  ",
+        "0000:00:00 00:00:00",
+        "2018:08:26",
+    ] {
+        assert_eq!(t(blank, None), None, "{blank:?}");
+    }
+    // Lightroom's own values, with or without a fraction, sort with these.
+    let mut times = [
+        "2021-06-06T10:00:01",
+        "2021-06-06T10:00:00.500",
+        "2021-06-06T10:00:00.000",
+        "2021-06-06T10:00:00",
+    ];
+    times.sort();
+    assert_eq!(
+        times,
+        [
+            "2021-06-06T10:00:00",
+            "2021-06-06T10:00:00.000",
+            "2021-06-06T10:00:00.500",
+            "2021-06-06T10:00:01",
+        ]
+    );
+}
+#[test]
+fn capture_time_is_read_from_tiff_and_jpeg_files() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    for (jpeg, name) in [(false, "a.tif"), (true, "b.jpg")] {
+        let path = directory.path().join(name);
+        std::fs::write(&path, exif::dated_file(jpeg, "2019:05:04 03:02:01", "7"))?;
+        assert_eq!(
+            exif::capture_time(&path).as_deref(),
+            Some("2019-05-04T03:02:01.700"),
+            "{name}"
+        );
+    }
+    let undated = directory.path().join("c.jpg");
+    std::fs::write(&undated, [0xff, 0xd8, 0xff, 0xd9])?;
+    assert_eq!(exif::capture_time(&undated), None);
+    Ok(())
+}

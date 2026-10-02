@@ -47,6 +47,15 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    /// Reads capture times for photos added from folders.
+    capture: Option<capture::Backfill>,
+    /// Photos the capture-time backfill tried since the last online check.
+    capture_tried: HashSet<i64>,
+    /// A photo to keep in place in the grid after a re-sort, with its
+    /// position before it.
+    keep_in_place: Option<(i64, usize)>,
+    /// The grid's scroll offset last frame.
+    grid_offset: f32,
     pub message: String,
 }
 impl Library {
@@ -76,6 +85,10 @@ impl Library {
             ctx,
             copy_request: None,
             copy_names: Default::default(),
+            capture: None,
+            capture_tried: HashSet::new(),
+            keep_in_place: None,
+            grid_offset: 0.,
             message: String::new(),
         };
         s.refresh()?;
@@ -124,7 +137,90 @@ impl Library {
     /// Waits for the online check, for callers that report on it.
     pub fn wait_for_availability(&mut self) {
         if self.availability.poll(true, &self.photos) {
-            self.filter();
+            self.availability_known();
+        }
+    }
+    /// Once it is known which photos are online, filters again and reads the
+    /// capture times still missing, including ones that were offline before.
+    fn availability_known(&mut self) {
+        self.filter();
+        self.capture_tried.clear();
+        self.start_capture_times();
+    }
+    fn start_capture_times(&mut self) {
+        if self.capture.is_some() {
+            return;
+        }
+        let todo: Vec<_> = self
+            .photos
+            .iter()
+            .filter(|p| {
+                p.captured.is_empty()
+                    && p.master.is_none()
+                    && !self.capture_tried.contains(&p.id)
+                    && capture::readable(&p.path)
+                    && self.is_available(&p.path)
+            })
+            .map(|p| (p.id, p.path.clone()))
+            .collect();
+        if !todo.is_empty() {
+            self.capture_tried.extend(todo.iter().map(|(id, _)| *id));
+            self.capture = Some(capture::Backfill::start(todo, &self.ctx));
+        }
+    }
+    /// Saves the capture times read so far and sorts the photos again.
+    fn poll_capture_times(&mut self) {
+        let Some(backfill) = &self.capture else {
+            return;
+        };
+        let (read, done) = backfill.poll();
+        if done {
+            self.capture = None;
+        }
+        let dated: Vec<(i64, String)> = read
+            .into_iter()
+            .filter_map(|(id, read)| match read {
+                capture::Read::Dated(time) => Some((id, time)),
+                _ => None,
+            })
+            .collect();
+        if !dated.is_empty() {
+            match self.catalog.fill_capture_times(&dated) {
+                Ok(()) => self.apply_capture_times(&dated),
+                Err(e) => self.message = format!("Capture times could not be saved: {e}"),
+            }
+        }
+        if done {
+            // Photos added while it ran.
+            self.start_capture_times();
+        }
+    }
+    /// Re-sorts after capture times were filled in, as the catalog orders
+    /// photos, keeping the selected photo selected and where it was on screen.
+    fn apply_capture_times(&mut self, times: &[(i64, String)]) {
+        let times: HashMap<i64, &String> = times.iter().map(|(id, t)| (*id, t)).collect();
+        for photo in &mut self.photos {
+            if photo.captured.is_empty()
+                && let Some(time) = times
+                    .get(&photo.id)
+                    .or_else(|| photo.master.and_then(|m| times.get(&m)))
+            {
+                photo.captured = (*time).clone();
+            }
+        }
+        let anchor = self.selected.and_then(|id| {
+            self.visible
+                .iter()
+                .position(|i| self.photos[*i].id == id)
+                .map(|at| (id, at))
+        });
+        self.photos.sort_by(|a, b| {
+            (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
+        });
+        self.filter();
+        // Several batches before the grid is drawn again: the first position counts.
+        if self.keep_in_place.is_none() {
+            self.keep_in_place = anchor;
         }
     }
     fn is_available(&self, path: &std::path::Path) -> bool {
@@ -574,8 +670,9 @@ impl Library {
     /// Drain in every workspace so the bounded worker never waits for the grid.
     pub(super) fn poll_previews(&mut self, ctx: &egui::Context) {
         if self.availability.poll(false, &self.photos) {
-            self.filter();
+            self.availability_known();
         }
+        self.poll_capture_times();
         self.cache.poll(ctx);
     }
     /// Hands the worker the photos shown last frame. Call once per frame.
@@ -1065,48 +1162,56 @@ impl Library {
         let mut metadata_edit = None;
         let spacing = ui.spacing().item_spacing;
         ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt("library-grid")
+            .auto_shrink(false);
+        // A re-sort moved the selected photo: scroll by the rows it moved.
+        if let Some((id, before)) = self.keep_in_place.take()
+            && let Some(after) = self.visible.iter().position(|i| self.photos[*i].id == id)
+        {
+            let rows = (after / columns) as f32 - (before / columns) as f32;
+            scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * width).max(0.));
+        }
         egui::Frame::new().fill(theme::gray(44)).show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("library-grid")
-                .auto_shrink(false)
-                .show_rows(
-                    ui,
-                    width,
-                    self.visible.len().div_ceil(columns),
-                    |ui, rows| {
-                        for row in rows {
-                            ui.horizontal(|ui| {
-                                for col in 0..columns {
-                                    let Some(&index) = self.visible.get(row * columns + col) else {
-                                        break;
-                                    };
-                                    let p = self.photos[index].clone();
-                                    let exists = self.is_available(&p.path);
-                                    self.request_previews(&p, ui.ctx());
-                                    let (response, edit) = photo_cell(
-                                        ui,
-                                        &p,
-                                        self.texture(&p),
-                                        self.selected == Some(p.id),
-                                        row * columns + col + 1,
-                                        exists,
-                                        width,
-                                    );
-                                    if response.clicked() || response.secondary_clicked() {
-                                        self.selected = Some(p.id);
-                                    }
-                                    if response.double_clicked() {
-                                        self.selected = Some(p.id);
-                                        action = Action::Develop(p.id);
-                                    }
-                                    if let Some(edit) = edit {
-                                        metadata_edit = Some((p.clone(), edit));
-                                    }
+            let output = scroll.show_rows(
+                ui,
+                width,
+                self.visible.len().div_ceil(columns),
+                |ui, rows| {
+                    for row in rows {
+                        ui.horizontal(|ui| {
+                            for col in 0..columns {
+                                let Some(&index) = self.visible.get(row * columns + col) else {
+                                    break;
+                                };
+                                let p = self.photos[index].clone();
+                                let exists = self.is_available(&p.path);
+                                self.request_previews(&p, ui.ctx());
+                                let (response, edit) = photo_cell(
+                                    ui,
+                                    &p,
+                                    self.texture(&p),
+                                    self.selected == Some(p.id),
+                                    row * columns + col + 1,
+                                    exists,
+                                    width,
+                                );
+                                if response.clicked() || response.secondary_clicked() {
+                                    self.selected = Some(p.id);
                                 }
-                            });
-                        }
-                    },
-                );
+                                if response.double_clicked() {
+                                    self.selected = Some(p.id);
+                                    action = Action::Develop(p.id);
+                                }
+                                if let Some(edit) = edit {
+                                    metadata_edit = Some((p.clone(), edit));
+                                }
+                            }
+                        });
+                    }
+                },
+            );
+            self.grid_offset = output.state.offset.y;
         });
         ui.spacing_mut().item_spacing = spacing;
         if let Some((photo, menu)) = metadata_edit
@@ -1266,6 +1371,7 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
+mod capture;
 mod cell;
 mod collections;
 mod copy_name;

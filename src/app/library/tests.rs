@@ -748,3 +748,58 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
     drop(directory);
     Ok(())
 }
+#[test]
+fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> {
+    use crate::export::exif::dated_file;
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    // File names sort the other way round from capture times.
+    std::fs::write(
+        folder.join("a.tif"),
+        dated_file(false, "2024:03:02 10:00:02", ""),
+    )?;
+    std::fs::write(
+        folder.join("b.jpg"),
+        dated_file(true, "2024:03:02 10:00:01", "9"),
+    )?;
+    std::fs::write(
+        folder.join("c.jpg"),
+        dated_file(true, "2024:03:02 10:00:01", "1"),
+    )?;
+    std::fs::write(folder.join("z.ARW"), b"synthetic raw")?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    assert_eq!(
+        visible_names(&library),
+        ["a.tif", "b.jpg", "c.jpg", "z.ARW"]
+    );
+    let a = library.photos[0].id;
+    library.selected = Some(a);
+    library.wait_for_availability();
+    let started = std::time::Instant::now();
+    while library.capture.is_some() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        library.poll_capture_times();
+        std::thread::yield_now();
+    }
+    // The undated file sorts first, and subseconds order the same second.
+    assert_eq!(
+        visible_names(&library),
+        ["z.ARW", "c.jpg", "b.jpg", "a.tif"]
+    );
+    assert_eq!(library.photos[1].captured, "2024-03-02T10:00:01.100");
+    // The selection stays, and the grid follows it from where it was.
+    assert_eq!(library.selected, Some(a));
+    assert_eq!(library.keep_in_place, Some((a, 0)));
+    // Saved in the catalog; the undated file isn't read again this session.
+    let reopened = Library::load(&path, egui::Context::default())?;
+    assert_eq!(
+        visible_names(&reopened),
+        ["z.ARW", "c.jpg", "b.jpg", "a.tif"]
+    );
+    library.start_capture_times();
+    assert!(library.capture.is_none());
+    Ok(())
+}
