@@ -1637,13 +1637,17 @@ fn press(e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers) {
     let mut output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
-            events: vec![egui::Event::Key {
-                key,
-                physical_key: Some(key),
-                pressed: true,
-                repeat: false,
-                modifiers,
-            }],
+            // Pressed and released, as a real key is, so the next press of
+            // the same key is not a repeat.
+            events: [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                })
+                .into(),
             ..Default::default()
         },
         |ui| e.draw(ui),

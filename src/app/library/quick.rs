@@ -22,7 +22,7 @@ pub struct CollectionCommand {
 
 impl Library {
     /// The Quick Collection, once there is one.
-    fn quick(&self) -> Option<i64> {
+    pub(super) fn quick(&self) -> Option<i64> {
         self.collections
             .iter()
             .find(|c| {

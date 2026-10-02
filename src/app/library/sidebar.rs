@@ -237,10 +237,9 @@ impl Library {
         if let Some(id) = key
             .strip_prefix("collection:")
             .and_then(|id| id.parse::<i64>().ok())
-            && self
-                .collections
-                .iter()
-                .any(|c| c.id == id && c.kind == CollectionKind::Collection)
+            && self.collections.iter().any(|c| {
+                c.id == id && (c.kind == CollectionKind::Collection || self.quick() == Some(id))
+            })
         {
             self.select_collection(id);
         }

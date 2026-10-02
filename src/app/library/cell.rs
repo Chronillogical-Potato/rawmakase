@@ -120,14 +120,6 @@ pub(super) fn photo_cell(
         if photo.master.is_some() {
             copy_badge(painter, image, fill);
         }
-        // Lightroom's Quick Collection marker, top right of the cell.
-        if quick {
-            painter.circle_filled(
-                Pos2::new(cell.right() - 9., cell.top() + 9.),
-                3.5,
-                theme::gray(if selected { 40 } else { 225 }),
-            );
-        }
     } else {
         painter.text(
             area.center(),
@@ -135,6 +127,14 @@ pub(super) fn photo_cell(
             if available { &photo.format } else { "Offline" },
             FontId::proportional(11.),
             ink,
+        );
+    }
+    // Lightroom's Quick Collection marker, top right of the cell.
+    if quick {
+        painter.circle_filled(
+            Pos2::new(cell.right() - 9., cell.top() + 9.),
+            3.5,
+            theme::gray(if selected { 40 } else { 225 }),
         );
     }
     let y = cell.bottom() - footer / 2. - 1.;

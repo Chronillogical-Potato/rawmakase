@@ -222,8 +222,10 @@ impl Library {
             let shift = press.modifiers.shift;
             match (press.key, press.modifiers.command) {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
-                // The grid applies B to every selected photo.
-                (Key::B, _) => self.quick_key(press.modifiers, self.selected_ids()),
+                // The grid applies B to every selected photo, once per press.
+                (Key::B, _) if !press.repeat => {
+                    self.quick_key(press.modifiers, self.selected_ids())
+                }
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),
@@ -247,8 +249,8 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
-                // The Loupe applies B to the photo shown.
-                (Key::B, _) => {
+                // The Loupe applies B to the photo shown, once per press.
+                (Key::B, _) if !press.repeat => {
                     let ids = self.selection.active.into_iter().collect();
                     self.quick_key(press.modifiers, ids)
                 }
