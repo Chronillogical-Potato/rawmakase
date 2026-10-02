@@ -129,10 +129,11 @@ pub(super) fn photo_cell(
             ink,
         );
     }
-    // Lightroom's Quick Collection marker, top right of the cell.
+    // Lightroom's Quick Collection marker, in the footer's right corner,
+    // clear of the file name.
     if quick {
         painter.circle_filled(
-            Pos2::new(cell.right() - 9., cell.top() + 9.),
+            Pos2::new(cell.right() - 10., cell.bottom() - footer / 2. - 1.),
             3.5,
             theme::gray(if selected { 40 } else { 225 }),
         );
