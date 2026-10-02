@@ -240,6 +240,7 @@ impl Editor {
                     ("/".into(), "Deselect the active photo"),
                     ("E / Return / double-click".into(), "Loupe"),
                     ("Esc".into(), "Back to the grid"),
+                    ("Z / click".into(), "Loupe 1:1 and Fit; drag to pan"),
                 ],
             ),
             (

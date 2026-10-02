@@ -174,6 +174,9 @@ impl Library {
             },
         };
         let id = self.photos[self.visible[to]].id;
+        if let Step::By(delta) = step {
+            self.loupe_direction = if delta < 0 { -1 } else { 1 };
+        }
         if extend && let Some(anchor) = self.selection.anchor.or(self.selection.active) {
             self.selection.selected = self.range(anchor, id).into_iter().collect();
             self.selection.anchor = Some(anchor);
@@ -199,46 +202,25 @@ impl Library {
             self.selection.anchor = self.selection.active;
         }
     }
-    /// The Grid's selection keys: Cmd+A, Cmd+D, `/`, arrows, Home and End.
+    /// The Grid's selection keys: Cmd+A, Cmd+D, `/`, arrows, Home and End;
+    /// in the Loupe, moving and its own zoom.
     pub(in crate::app) fn selection_keys(&mut self, ctx: &egui::Context) {
         // A menu or popup takes the keys first, Escape above all.
         if ctx.text_edit_focused() || egui::Popup::is_any_open(ctx) {
             return;
         }
-        let columns = self.grid_columns.max(1) as isize;
-        // Each key with the modifiers held for it: a quick Cmd+D can arrive in
-        // the same frame as Cmd's release.
-        let keys: Vec<(Key, egui::Modifiers)> = ctx.input(|i| {
-            i.events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Key {
-                        key,
-                        pressed: true,
-                        modifiers,
-                        ..
-                    } => Some((*key, *modifiers)),
-                    _ => None,
-                })
-                .collect()
-        });
+        let presses = presses(ctx);
         if self.loupe.open {
-            // Loupe moves through the photos one at a time.
-            for (key, modifiers) in keys {
-                match (key, modifiers.command) {
-                    (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
-                    (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
-                    (Key::Home, false) => self.step(Step::Home, false),
-                    (Key::End, false) => self.step(Step::End, false),
-                    (Key::Escape, _) => self.close_loupe(),
-                    _ => {}
-                }
-            }
-            return;
+            self.loupe_keys(&presses);
+        } else {
+            self.grid_keys(&presses);
         }
-        for (key, modifiers) in keys {
-            let (command, shift) = (modifiers.command, modifiers.shift);
-            match (key, command) {
+    }
+    fn grid_keys(&mut self, presses: &[Press]) {
+        let columns = self.grid_columns.max(1) as isize;
+        for press in presses {
+            let shift = press.modifiers.shift;
+            match (press.key, press.modifiers.command) {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
@@ -253,4 +235,61 @@ impl Library {
             }
         }
     }
+    /// The Loupe moves one photo at a time. A RAW zooms in Develop's view
+    /// with Develop's keys; other photos with the Loupe's own.
+    fn loupe_keys(&mut self, presses: &[Press]) {
+        let own_zoom = self.loupe_develops().is_none();
+        for press in presses {
+            let (command, alt) = (press.modifiers.command, press.modifiers.alt);
+            match (press.key, command) {
+                // A held Z must not flicker between Fit and 1:1.
+                (Key::Z, false) if own_zoom && !press.repeat && !press.modifiers.any() => {
+                    self.zoom_loupe(None)
+                }
+                (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
+                (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
+                // Cmd+Option+0; Option changes the typed key on macOS.
+                _ if own_zoom && command && alt && press.physical == Some(Key::Num0) => {
+                    self.zoom_loupe(Some(true))
+                }
+                (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
+                (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
+                (Key::Home, false) => self.step(Step::Home, false),
+                (Key::End, false) => self.step(Step::End, false),
+                (Key::Escape, _) => self.close_loupe(),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// A key pressed this frame, with the modifiers held for it: a quick Cmd+D
+/// can arrive in the same frame as Cmd's release.
+struct Press {
+    key: Key,
+    physical: Option<Key>,
+    modifiers: egui::Modifiers,
+    repeat: bool,
+}
+fn presses(ctx: &egui::Context) -> Vec<Press> {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed: true,
+                    repeat,
+                    modifiers,
+                } => Some(Press {
+                    key: *key,
+                    physical: *physical_key,
+                    modifiers: *modifiers,
+                    repeat: *repeat,
+                }),
+                _ => None,
+            })
+            .collect()
+    })
 }

@@ -28,11 +28,19 @@ impl Editor {
         }
     }
     pub(super) fn open_raw(&mut self, path: PathBuf, photo: Option<i64>) {
+        if self.load_raw(path, photo) {
+            self.library_mode = false;
+        }
+    }
+    /// Starts loading a RAW as the document, staying in the module shown:
+    /// the Library's Loupe shows it through the same pipeline as Develop.
+    /// False when work in progress or an unsaved edit prevents it.
+    pub(super) fn load_raw(&mut self, path: PathBuf, photo: Option<i64>) -> bool {
         if self.activity.is_busy() {
-            return;
+            return false;
         }
         if !self.flush() {
-            return;
+            return false;
         }
         // Moving on cancels the previous photo's prefetch.
         self.prefetch_cancel
@@ -45,7 +53,6 @@ impl Editor {
                 cancel: self.prefetch_cancel.clone(),
             });
         self.document.reset(photo);
-        self.library_mode = false;
         let (id, cancel) = self.load.start();
         self.preview.clear_document();
         self.presets.clear_document();
@@ -57,6 +64,7 @@ impl Editor {
             cancel,
             prefetch,
         });
+        true
     }
     /// The photo to decode ahead of time while `id` is shown: the next one in
     /// the filmstrip, or the previous one after stepping back.

@@ -61,6 +61,8 @@ pub struct Library {
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
     loupe: loupe::Loupe,
+    /// Which way the Loupe last moved, so the photo after is prepared ahead.
+    loupe_direction: i32,
     /// Metadata changes not yet handed to the shared undo log.
     done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
@@ -111,6 +113,7 @@ impl Library {
             copy_names: Default::default(),
             done: Vec::new(),
             loupe,
+            loupe_direction: 1,
             capture: None,
             capture_tried: HashSet::new(),
             keep_in_place: None,
@@ -369,8 +372,6 @@ impl Library {
             return;
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
-        // The Loupe shows the edit as Develop left it.
-        self.loupe.reset();
     }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does
@@ -435,6 +436,7 @@ mod textures;
 mod thumbnails;
 mod tree;
 mod volumes;
+mod zoom;
 use thumbnails::thumbnail;
 #[cfg(test)]
 mod tests;

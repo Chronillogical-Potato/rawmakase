@@ -995,10 +995,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
     // A 1200 px wide view asks for the next step up, 1536 px; never more.
-    assert_eq!(
-        library.loupe.state,
-        loupe::State::Ready(loupe::Stage::Rendered)
-    );
+    assert_eq!(library.loupe.state, loupe::State::Ready);
     assert_eq!(library.loupe.texture_size(), Some([1536, 1024]));
     // The next photo replaces it; a damaged file says why.
     library.step(selection::Step::By(1), false);
@@ -1034,4 +1031,64 @@ fn flag_steps_up_and_down_and_stops_at_the_ends() {
     assert_eq!(Edit::FlagDelta(1).values(&photo(0)).1, 1);
     assert_eq!(Edit::FlagDelta(1).values(&photo(1)).1, 1);
     assert_eq!(Edit::FlagDelta(-1).values(&photo(-1)).1, -1);
+}
+#[test]
+fn loupe_zooms_to_one_to_one_and_prepares_the_next_photo() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in ["a.jpg", "b.jpg"] {
+        image::RgbImage::from_fn(3000, 2000, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+        })
+        .save(folder.join(name))?;
+    }
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    library.select(Some(library.photos[0].id));
+    library.open_loupe();
+    let frame = |library: &mut Library| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                library.grid(ui);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    frame(&mut library);
+    library.loupe.wait(&ctx);
+    // The next photo is prepared once this one is shown, and shown at once.
+    frame(&mut library);
+    library.loupe.wait_ahead(&ctx);
+    library.step(selection::Step::By(1), false);
+    frame(&mut library);
+    assert_eq!(library.loupe.state, loupe::State::Ready);
+    // 1:1 renders only the view: 1200 by 672 pixels of the 3000 by 2000.
+    library.zoom_loupe(Some(true));
+    frame(&mut library);
+    library.loupe.zoom.wait(&ctx);
+    assert_eq!(library.loupe.zoom.full, Some([3000, 2000]));
+    let (region, rect) = library.loupe.zoom.region.clone().unwrap();
+    assert_eq!(region.size(), [1200, 672]);
+    assert!((rect[0] - 0.3).abs() < 1e-3 && (rect[2] - 0.4).abs() < 1e-3);
+    // Panning past the corner stops at the edge of the photo.
+    library.loupe.zoom.center = [0., 0.];
+    frame(&mut library);
+    library.loupe.zoom.wait(&ctx);
+    frame(&mut library);
+    let (_, rect) = library.loupe.zoom.region.clone().unwrap();
+    assert_eq!([rect[0], rect[1]], [0., 0.]);
+    library.zoom_loupe(Some(false));
+    assert!(library.loupe.zoom.region.is_none());
+    Ok(())
 }

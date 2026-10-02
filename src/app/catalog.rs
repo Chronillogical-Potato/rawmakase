@@ -221,6 +221,16 @@ impl Editor {
             );
             return;
         }
+        // Already open, e.g. in the Loupe: Develop shows it as it is.
+        if self.document.catalog_photo == Some(id)
+            && (self.document.full().is_some() || self.load.is_running())
+        {
+            if let Some(l) = &mut self.library {
+                l.make_active(id)
+            }
+            self.library_mode = false;
+            return;
+        }
         if self.activity.is_busy() || !self.flush() {
             return;
         }
