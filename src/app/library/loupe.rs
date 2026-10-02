@@ -279,6 +279,7 @@ impl Library {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
         self.loupe.open = self.selection.active.is_some();
+        self.compare.open &= !self.loupe.open;
         self.loupe.before_click = None;
         self.scroll_to_active = true;
     }
@@ -369,6 +370,14 @@ impl Library {
                 // In Loupe a metadata change applies to the active photo only.
                 target = self.filmstrip(ui, id).0;
             });
+        egui::Panel::bottom("library-loupe-toolbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::gray(38))
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
+            )
+            .show_separator_line(false)
+            .show(ui, |ui| ui.horizontal(|ui| self.view_buttons(ui)));
         match target {
             Some(super::Pick::Show(id)) => self.select(Some(id)),
             Some(super::Pick::Develop(id)) => return Action::Develop(id),

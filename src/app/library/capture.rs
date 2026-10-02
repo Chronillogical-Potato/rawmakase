@@ -11,6 +11,8 @@ impl Library {
     /// capture times still missing, including ones that were offline before.
     pub(super) fn availability_known(&mut self) {
         self.filter();
+        // An original back online renders where it failed before.
+        self.screen.retry_failed();
         self.capture_tried.clear();
         self.start_capture_times();
         self.start_photo_info();

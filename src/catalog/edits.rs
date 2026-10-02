@@ -95,6 +95,22 @@ impl Catalog {
     }
     /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
     /// develop text, if any.
+    /// Changes whenever the photo's edit does: a hash of its recipe, its
+    /// spots and masks, and its Lightroom settings. Cheaper than reading
+    /// the edit itself, for previews to notice an edit saved elsewhere.
+    pub fn edit_stamp(&self, id: i64) -> Result<u64> {
+        use std::hash::{Hash, Hasher};
+        let texts: [Option<String>; 3] = self
+            .db
+            .prepare_cached(
+                "SELECT recipe, lightroom_develop, \
+                 (SELECT data FROM local_edits WHERE photo=photos.id) FROM photos WHERE id=?",
+            )?
+            .query_row([id], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?]))?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        texts.hash(&mut hasher);
+        Ok(hasher.finish())
+    }
     pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
         let (recipe, lightroom): (Option<String>, Option<String>) = self.db.query_row(
             "SELECT recipe, lightroom_develop FROM photos WHERE id=?",

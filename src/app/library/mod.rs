@@ -62,6 +62,9 @@ pub struct Library {
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
     loupe: loupe::Loupe,
+    compare: compare::Compare,
+    /// Photos rendered at the size Compare shows them.
+    screen: screen::ScreenPreviews,
     /// Which way the Loupe last moved, so the photo after is prepared ahead.
     loupe_direction: i32,
     /// Metadata changes not yet handed to the shared undo log.
@@ -103,6 +106,7 @@ impl Library {
         let _ = catalog.backfill_lightroom_history();
         let _ = catalog.backfill_lightroom_info();
         let loupe = loupe::Loupe::new(&ctx);
+        let screen = screen::ScreenPreviews::new(&ctx);
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -128,6 +132,8 @@ impl Library {
             done: Vec::new(),
             collection_done: Vec::new(),
             loupe,
+            compare: Default::default(),
+            screen,
             loupe_direction: 1,
             capture: None,
             info_reader: None,
@@ -151,6 +157,7 @@ impl Library {
         self.reload()?;
         self.availability.start(&self.photos, &self.ctx);
         self.cache.failed.clear();
+        self.screen.retry_failed();
         self.filter();
         Ok(())
     }
@@ -324,6 +331,7 @@ impl Library {
         let photo = self.photo(id).cloned();
         self.catalog.remove_virtual_copy(id)?;
         self.cache.forget(id);
+        self.screen.forget(id);
         self.reload()?;
         let master = photo.as_ref().and_then(|p| p.master);
         if let Some(master) = master {
@@ -364,10 +372,12 @@ impl Library {
         self.poll_capture_times();
         self.poll_photo_info();
         self.cache.poll(ctx);
+        self.screen.poll(ctx);
     }
     /// Hands the worker the photos shown last frame. Call once per frame.
     pub(super) fn publish_shown(&mut self) {
         self.cache.publish_shown();
+        self.screen.publish_shown();
     }
     /// The photo's preview: its edit once rendered, else the embedded one.
     fn texture(&self, photo: &Photo) -> Option<&egui::TextureHandle> {
@@ -376,12 +386,8 @@ impl Library {
     /// Queues the previews a shown photo needs; its edit comes from the catalog.
     fn request_previews(&mut self, photo: &Photo, ctx: &egui::Context) {
         let catalog = &self.catalog;
-        self.cache.request(photo, ctx, || {
-            let (recipe, lightroom) = catalog.edit_texts(photo.id).ok()?;
-            recipe
-                .map(previews::EditSource::Recipe)
-                .or(lightroom.map(previews::EditSource::Lightroom))
-        });
+        self.cache
+            .request(photo, ctx, || edit_source(catalog, photo.id));
     }
     /// Shows Develop's latest render as the photo's thumbnail and caches it
     /// under the edit it was rendered with.
@@ -440,6 +446,15 @@ impl Library {
         self.copy_names.discard();
     }
 }
+/// The edit a photo's previews are rendered with: its RAWmakase recipe, or
+/// else its Lightroom settings.
+fn edit_source(catalog: &Catalog, id: i64) -> Option<previews::EditSource> {
+    let (recipe, lightroom) = catalog.edit_texts(id).ok()?;
+    recipe
+        .map(previews::EditSource::Recipe)
+        .or(lightroom.map(previews::EditSource::Lightroom))
+}
+
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
@@ -447,6 +462,7 @@ mod background;
 mod capture;
 mod cell;
 mod collections;
+mod compare;
 mod copy_name;
 mod filmstrip;
 mod filter;
@@ -458,11 +474,13 @@ mod metadata;
 mod photo_info;
 mod previews;
 mod quick;
+mod screen;
 mod selection;
 mod sidebar;
 mod textures;
 mod thumbnails;
 mod tree;
+mod view_bar;
 mod volumes;
 mod zoom;
 use thumbnails::thumbnail;

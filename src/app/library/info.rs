@@ -43,8 +43,9 @@ impl Library {
                 section(ui, "Metadata", false, |ui| {
                     match &photo {
                         Some(p) => {
-                            // In Loupe, as for its keys, only the photo shown changes.
-                            self.metadata_controls(ui, p.id, !self.loupe.open);
+                            // In Loupe and Compare, as for their keys, only the
+                            // active photo changes.
+                            self.metadata_controls(ui, p.id, !self.edits_active_only());
                         }
                         None => {
                             ui.allocate_exact_size(
@@ -129,7 +130,13 @@ impl Library {
             } else {
                 vec![id]
             };
-            if let Err(e) = self.edit_photos(&ids, edit, false) {
+            // Compare's active photo goes through Compare, which keeps its pair.
+            let done = if self.compare.open && self.selection.active == Some(id) {
+                self.edit_compared(edit, false)
+            } else {
+                self.edit_photos(&ids, edit, false).map(|_| ())
+            };
+            if let Err(e) = done {
                 self.message = format!("Metadata could not be saved: {e}");
             }
             return true;

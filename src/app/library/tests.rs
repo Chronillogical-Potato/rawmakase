@@ -1133,20 +1133,20 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     library.step(selection::Step::By(1), false);
     frame(&mut library, &mut zoom);
     assert_eq!(library.loupe.state, loupe::State::Ready);
-    // 100% reads only the view: 1200 by 672 pixels of the 3000 by 2000.
+    // 100% reads only the view: 1200 by 642 pixels of the 3000 by 2000.
     zoom.set(1.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     assert_eq!(library.loupe.regions.full, Some([3000, 2000]));
     let (region, rect) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [1200, 672]);
+    assert_eq!(region.size(), [1200, 642]);
     assert!((rect[0] - 0.3).abs() < 1e-3 && (rect[2] - 0.4).abs() < 1e-3);
     // At 200% half as many image pixels fill the view.
     zoom.set(2.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     let (region, _) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [600, 336]);
+    assert_eq!(region.size(), [600, 321]);
     // Panning past the corner stops at the edge of the photo.
     zoom.pan = [0., 0.];
     frame(&mut library, &mut zoom);
@@ -1181,5 +1181,165 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     assert_eq!(info.dimensions_text().as_deref(), Some("300 × 200"));
     // Kept: nothing is left to read on the next open.
     assert!(library.catalog.photos_without_info()?.is_empty());
+    Ok(())
+}
+#[test]
+fn compare_shows_the_select_beside_a_candidate() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    // The active photo beside the next one selected with it.
+    library.click(ids[1], egui::Modifiers::NONE);
+    library.click(ids[3], egui::Modifiers::COMMAND);
+    library.click(ids[1], egui::Modifiers::NONE);
+    library.open_compare();
+    assert!(library.compare_open() && library.edits_active_only());
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[3]))
+    );
+    // Arrows move the candidate past the select, and stop at the ends.
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[2]));
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[0]));
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[0]));
+    assert_eq!(library.selected(), Some(ids[0]));
+    assert_eq!(library.selected_ids(), [ids[0], ids[1]]);
+    // Rating keys go to the active photo; Shift moves the candidate on.
+    library.edit_compared(Edit::Rating(4), true)?;
+    assert_eq!(library.photo(ids[0]).unwrap().rating, 4);
+    assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
+    assert_eq!(library.compare.candidate, Some(ids[2]));
+    // Down swaps, keeping the active photo; Up makes the candidate the select.
+    library.swap_compare();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[2]), Some(ids[1]))
+    );
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.make_select();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[2]))
+    );
+    // E opens the active photo in the Loupe; C from there compares again.
+    library.open_loupe();
+    assert!(library.loupe_open() && !library.compare_open());
+    library.open_compare();
+    assert!(!library.loupe_open() && library.compare_open());
+    library.show_grid();
+    assert!(!library.compare_open());
+    assert_eq!(library.selected_ids().len(), 2);
+    // Photos another source or filter hides give way to ones shown: the
+    // candidate to the next photo, the select to the candidate.
+    library.open_compare();
+    library.compare.candidate = Some(ids[3]);
+    library.filters.query = "c.RAF".into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    assert_eq!(library.compare.candidate, None);
+    library.filters.query.clear();
+    library.filter();
+    library.compare.select = Some(ids[0]);
+    library.compare.candidate = Some(ids[2]);
+    library.filters.query = "c.RAF".into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    library.filters.query.clear();
+    library.filter();
+    library.show_grid();
+    // With one photo shown there is nothing to compare it with.
+    library.filters.query = "a.RAF".into();
+    library.filter();
+    library.open_compare();
+    assert_eq!(library.compare.candidate, None);
+    Ok(())
+}
+#[test]
+fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.select(Some(ids[0]));
+    library.open_compare();
+    // Rejecting the select with Shift under an Unflagged filter: it gives
+    // way to the candidate, beside the next photo, without skipping one.
+    library.filters.flags = [0].into();
+    library.filter();
+    library.edit_compared(Edit::Flag(-1), true)?;
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[2]))
+    );
+    // An active candidate promoted to the select stays active.
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.filters.collection = Some(1);
+    library.filters.members = [ids[2], ids[3]].into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[2]));
+    assert_eq!(library.compare.candidate, Some(ids[3]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    assert_eq!(library.selected(), Some(ids[2]));
+    // A source with neither photo seeds Compare from what it shows.
+    library.filters.members = [ids[0], ids[1]].into();
+    library.filter();
+    assert_eq!(library.keep_compared_shown(), Some(ids[1]));
+    library.filters.collection = None;
+    library.filters.flags.clear();
+    library.filter();
+    // A selection another command makes, such as a new virtual copy, is
+    // followed beside the select.
+    let select = library.keep_compared_shown();
+    let copy = library.create_virtual_copy(ids[1])?;
+    assert_eq!(library.keep_compared_shown(), select);
+    assert_eq!(library.compare.candidate, Some(copy));
+    assert_eq!(library.selected(), Some(copy));
+    Ok(())
+}
+#[test]
+fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.filters.flags = [0].into();
+    library.filter();
+    // B, the active candidate, is rejected and hidden: A stays the select.
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    library.edit_compared(Edit::Flag(-1), false)?;
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    // Shift on a shown candidate: the undo log has the pair it moved to.
+    library.edit_compared(Edit::Rating(3), true)?;
+    assert_eq!(library.compare.candidate, Some(ids[3]));
+    let command = library.take_done().pop().unwrap();
+    assert_eq!(command.place_after, library.place());
+    // Undo and redo return to the pairs, select and candidate as they were.
+    library.go_to_place(&command.place_before);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.go_to_place(&command.place_after);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[3]))
+    );
+    // An edit made elsewhere, as from a filmstrip menu, keeps the select.
+    library.edit_photos(&[ids[3]], Edit::Flag(-1), false)?;
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.candidate, Some(ids[2]));
     Ok(())
 }

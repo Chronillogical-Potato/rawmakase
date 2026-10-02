@@ -25,13 +25,15 @@ impl Editor {
         };
         if self.library_mode {
             // The Grid applies a key to every selected photo, as Lightroom
-            // does; Loupe to the photo it shows.
-            let result = |library: &mut crate::app::library::Library, edit, advance| match library
-                .selected()
-                .filter(|_| library.loupe_open())
-            {
-                Some(id) => library.edit_metadata(id, edit, advance),
-                None => library.edit_selection(edit, advance),
+            // does; the Loupe to the photo it shows, Compare to the active one.
+            let result = |library: &mut crate::app::library::Library, edit, advance| {
+                if library.compare_open() {
+                    return library.edit_compared(edit, advance).map(|()| None);
+                }
+                match library.selected().filter(|_| library.loupe_open()) {
+                    Some(id) => library.edit_metadata(id, edit, advance),
+                    None => library.edit_selection(edit, advance),
+                }
             };
             match shortcut {
                 Some((edit, advance)) => {
@@ -177,7 +179,7 @@ impl Editor {
             if plain(egui::Key::G) && self.flush() {
                 self.library_mode = true;
                 if let Some(library) = &mut self.library {
-                    library.close_loupe();
+                    library.show_grid();
                 }
             }
             // E from Develop: the photo in the Library's Loupe.

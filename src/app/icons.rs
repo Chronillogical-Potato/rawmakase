@@ -21,6 +21,8 @@ fastframe_icons::icons! {
         Collection => "images",
         CollectionSet => "box",
         Keyboard => "keyboard",
+        GridView => "layout-grid",
+        LoupeView => "square",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",
