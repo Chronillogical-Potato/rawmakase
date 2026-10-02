@@ -18,6 +18,13 @@ fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<i64>)> {
     Ok((dir, cat, ids))
 }
 
+/// Sets a photo's descriptive overrides as a whole.
+fn put(cat: &mut Catalog, id: i64, descriptive: Descriptive) -> Result<()> {
+    let mut snapshot = cat.metadata_snapshot(&[id])?.remove(0);
+    snapshot.descriptive = descriptive;
+    cat.restore_metadata(&[snapshot])
+}
+
 fn set(text: &str) -> Option<Value<LangAlt>> {
     Some(Value::Set(LangAlt::new(text)))
 }
@@ -27,17 +34,17 @@ fn editing_the_default_language_keeps_the_others_and_clearing_drops_all() -> Res
     let (_dir, mut cat, ids) = catalog(1)?;
     let id = ids[0];
     assert_eq!(cat.descriptive(id)?, Descriptive::default());
-    cat.restore_metadata(&[MetadataSnapshot {
-        photo: id,
-        descriptive: Descriptive {
+    put(
+        &mut cat,
+        id,
+        Descriptive {
             title: Some(Value::Set(LangAlt(vec![
                 (DEFAULT_LANG.into(), "Harbour".into()),
                 ("pl-PL".into(), "Port".into()),
             ]))),
             ..Default::default()
         },
-        keywords: vec![],
-    }])?;
+    )?;
     cat.set_text(&ids, TextField::Title, "Old harbour")?;
     assert_eq!(
         cat.descriptive(id)?.title,
@@ -61,6 +68,49 @@ fn editing_the_default_language_keeps_the_others_and_clearing_drops_all() -> Res
 }
 
 #[test]
+fn languages_keep_their_order_without_a_default() -> Result<()> {
+    let (_dir, mut cat, ids) = catalog(1)?;
+    let langs = LangAlt(vec![
+        ("fr".into(), "Bonjour".into()),
+        ("en".into(), "Hello".into()),
+    ]);
+    put(
+        &mut cat,
+        ids[0],
+        Descriptive {
+            caption: Some(Value::Set(langs.clone())),
+            ..Default::default()
+        },
+    )?;
+    let read = cat.descriptive(ids[0])?.caption;
+    assert_eq!(read, Some(Value::Set(langs)));
+    let Some(Value::Set(read)) = read else {
+        unreachable!()
+    };
+    assert_eq!(read.default_text(), Some("Bonjour"));
+    Ok(())
+}
+
+#[test]
+fn undoing_a_capture_override_restores_the_sort_key() -> Result<()> {
+    let (_dir, mut cat, ids) = catalog(1)?;
+    cat.fill_capture_times(&[(ids[0], "2020-01-01T00:00:00.000".into())])?;
+    let before = cat.metadata_snapshot(&ids)?;
+    cat.set_capture(
+        ids[0],
+        &Capture {
+            captured: "2024-05-01T12:30:15".into(),
+            subsec: None,
+            offset: None,
+        },
+    )?;
+    cat.restore_metadata(&before)?;
+    assert_eq!(cat.photos()?[0].captured, "2020-01-01T00:00:00.000");
+    assert_eq!(cat.descriptive(ids[0])?.capture, None);
+    Ok(())
+}
+
+#[test]
 fn creators_keep_their_order_and_none_clears_the_field() -> Result<()> {
     let (_dir, mut cat, ids) = catalog(1)?;
     let names = vec!["Zoë Example".to_string(), "A. Person, Jr.".to_string()];
@@ -75,17 +125,17 @@ fn creators_keep_their_order_and_none_clears_the_field() -> Result<()> {
 fn batch_edit_then_undo_restores_each_photos_prior_state() -> Result<()> {
     let (_dir, mut cat, ids) = catalog(3)?;
     // No row, set with two languages, cleared.
-    cat.restore_metadata(&[MetadataSnapshot {
-        photo: ids[1],
-        descriptive: Descriptive {
+    put(
+        &mut cat,
+        ids[1],
+        Descriptive {
             caption: Some(Value::Set(LangAlt(vec![
                 (DEFAULT_LANG.into(), "Dusk".into()),
                 ("de".into(), "Abend".into()),
             ]))),
             ..Default::default()
         },
-        keywords: vec![],
-    }])?;
+    )?;
     cat.set_text(&ids[2..], TextField::Caption, "")?;
     let city = cat.keyword_at(&["Places".into(), "City".into()])?;
     cat.add_keyword(&ids[..1], city)?;
@@ -128,18 +178,15 @@ fn virtual_copies_get_their_own_rows_and_lose_only_theirs() -> Result<()> {
             offset: Some("+02:00".into()),
         },
     )?;
-    cat.restore_metadata(&[MetadataSnapshot {
-        photo: master,
-        descriptive: Descriptive {
-            location: Some(Location::At {
-                lat: 52.2297,
-                lon: 21.0122,
-                alt: Some(100.5),
-            }),
-            ..cat.descriptive(master)?
-        },
-        keywords: vec![],
-    }])?;
+    let located = Descriptive {
+        location: Some(Location::At {
+            lat: 52.2297,
+            lon: 21.0122,
+            alt: Some(100.5),
+        }),
+        ..cat.descriptive(master)?
+    };
+    put(&mut cat, master, located)?;
     let copy = cat.create_virtual_copy(master)?;
     assert_eq!(cat.descriptive(copy)?, cat.descriptive(master)?);
     // Independent after that, both ways.

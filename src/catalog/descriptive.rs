@@ -123,6 +123,9 @@ pub struct MetadataSnapshot {
     pub photo: i64,
     pub descriptive: Descriptive,
     pub keywords: Vec<i64>,
+    /// The capture time it sorts by (`photos.captured`), which a capture
+    /// override changes.
+    pub captured: String,
 }
 
 /// A keyword name as stored and compared: NFC, case kept.
@@ -218,6 +221,12 @@ impl Catalog {
                         .prepare_cached("SELECT keyword FROM photo_keywords WHERE photo=?")?
                         .query_map([id], |r| r.get(0))?
                         .collect::<rusqlite::Result<_>>()?,
+                    captured: self
+                        .db
+                        .prepare_cached("SELECT captured FROM photos WHERE id=?")?
+                        .query_row([id], |r| r.get(0))
+                        .optional()?
+                        .context("Unknown photo")?,
                 })
             })
             .collect()
@@ -228,6 +237,10 @@ impl Catalog {
         let tx = self.db.transaction()?;
         for s in snapshots {
             write(&tx, s.photo, &s.descriptive)?;
+            tx.execute(
+                "UPDATE photos SET captured=? WHERE id=?",
+                params![s.captured, s.photo],
+            )?;
             tx.execute("DELETE FROM photo_keywords WHERE photo=?", [s.photo])?;
             for keyword in &s.keywords {
                 tx.execute(
@@ -348,14 +361,12 @@ fn read(db: &Connection, id: i64) -> Result<Descriptive> {
     for field in TextField::ALL {
         *d.text_mut(field) = match states.get(field.key()).map(String::as_str) {
             Some("set") => {
-                let mut langs: Vec<(String, String)> = db
+                let langs: Vec<(String, String)> = db
                     .prepare_cached(
-                        "SELECT lang, value FROM photo_text WHERE photo=? AND field=? ORDER BY lang",
+                        "SELECT lang, value FROM photo_text WHERE photo=? AND field=? ORDER BY position",
                     )?
                     .query_map(params![id, field.key()], |r| Ok((r.get(0)?, r.get(1)?)))?
                     .collect::<rusqlite::Result<_>>()?;
-                // x-default first.
-                langs.sort_by_key(|(lang, _)| lang != DEFAULT_LANG);
                 Some(Value::Set(LangAlt(langs)))
             }
             Some(_) => Some(Value::Cleared),
@@ -420,10 +431,11 @@ fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
             Some(Value::Cleared) => state(db, field.key(), false)?,
             Some(Value::Set(langs)) => {
                 state(db, field.key(), true)?;
-                for (lang, value) in &langs.0 {
+                for (position, (lang, value)) in langs.0.iter().enumerate() {
                     db.execute(
-                        "INSERT OR REPLACE INTO photo_text(photo, field, lang, value) VALUES (?, ?, ?, ?)",
-                        params![id, field.key(), lang, value],
+                        "INSERT OR REPLACE INTO photo_text(photo, field, lang, position, value)
+                         VALUES (?, ?, ?, ?, ?)",
+                        params![id, field.key(), lang, position as i64, value],
                     )?;
                 }
             }
@@ -473,7 +485,7 @@ fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
 pub(super) fn copy_rows(db: &Connection, photo: i64, copy: i64) -> Result<()> {
     for (table, columns) in [
         ("photo_fields", "field, state"),
-        ("photo_text", "field, lang, value"),
+        ("photo_text", "field, lang, position, value"),
         ("photo_creators", "position, name"),
         ("photo_capture", "captured, subsec, offset"),
         ("photo_location", "lat, lon, alt, cleared"),

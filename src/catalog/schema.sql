@@ -140,11 +140,13 @@ CREATE TABLE IF NOT EXISTS photo_fields (
 );
 
 -- The languages of a set title, caption or copyright: "x-default" and any
--- others imported.
+-- others imported, in their order (the first is the default when there is
+-- no "x-default").
 CREATE TABLE IF NOT EXISTS photo_text (
     photo INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
     field TEXT NOT NULL,
     lang TEXT NOT NULL,
+    position INTEGER NOT NULL,
     value TEXT NOT NULL,
     PRIMARY KEY(photo, field, lang)
 );
