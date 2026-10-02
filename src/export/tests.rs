@@ -267,3 +267,70 @@ fn photo_info_is_read_from_exif() -> anyhow::Result<()> {
     assert_eq!(info.focal_text().as_deref(), Some("23 mm"));
     Ok(())
 }
+#[test]
+fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.ARW");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 8,
+        height: 1,
+        pixels: vec![[0.5; 3]; 8],
+    };
+    let m = Metadata::default();
+    let options = ExportOptions::default();
+    // Each of these is a refusal, so succeeding at all is the failure.
+    let message = |r: anyhow::Result<()>| match r {
+        Ok(()) => panic!("export unexpectedly succeeded"),
+        Err(e) => e.to_string(),
+    };
+
+    // A RAW destination is refused outright, whatever the overwrite flag: these
+    // are the pixels being developed, not somewhere to write.
+    let raw_target = dir.path().join("out.ARW");
+    assert_eq!(
+        message(export(&raw_target, &source, &image, &m, &options, true)),
+        "An export cannot overwrite a RAW file"
+    );
+    assert!(!raw_target.exists());
+
+    // The source photo itself is never a destination. A RAW source trips the
+    // check above first, so this uses a source without a RAW extension: the two
+    // guards overlap and this is the one behind.
+    let plain = dir.path().join("source.bin");
+    fs::write(&plain, b"plain")?;
+    for overwrite in [false, true] {
+        let e = message(export(&plain, &plain, &image, &m, &options, overwrite));
+        assert!(e.contains("Cannot overwrite source"), "{e}");
+    }
+    assert_eq!(fs::read(&plain)?, b"plain");
+
+    // An existing destination needs the overwrite flag, and without it the file
+    // is left exactly as it was.
+    let target = dir.path().join("out.jpg");
+    fs::write(&target, b"previous")?;
+    assert_eq!(
+        message(export(&target, &source, &image, &m, &options, false)),
+        "Destination already exists"
+    );
+    assert_eq!(fs::read(&target)?, b"previous");
+
+    // With it, the file is replaced and no temporary is left behind.
+    export(&target, &source, &image, &m, &options, true)?;
+    assert_ne!(fs::read(&target)?, b"previous");
+    let mut left: Vec<String> = fs::read_dir(dir.path())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["out.jpg", "source.ARW", "source.bin"]);
+
+    // An extension the encoder does not write is refused before anything is created.
+    let png = dir.path().join("out.png");
+    assert_eq!(
+        message(export(&png, &source, &image, &m, &options, false)),
+        "Export extension must be .jpg, .jpeg, .tif or .tiff"
+    );
+    assert!(!png.exists());
+    Ok(())
+}

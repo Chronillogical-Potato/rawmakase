@@ -12,6 +12,7 @@ fn fixture(path: &Path) -> Result<()> {
         CREATE TABLE AgLibraryCollectionImage(collection INTEGER,image INTEGER,positionInCollection TEXT);
         CREATE TABLE AgLibraryKeyword(id_local INTEGER,name TEXT,parent INTEGER);
         CREATE TABLE AgLibraryKeywordImage(image INTEGER,tag INTEGER);
+        CREATE TABLE Adobe_libraryImageDevelopHistoryStep(image INTEGER,id_local INTEGER,dateCreated REAL,name TEXT,text BLOB);
         CREATE TABLE ProprietaryData(blob BLOB);
         INSERT INTO ProprietaryData VALUES(X'001122FF');
         INSERT INTO AgLibraryRootFolder VALUES(10,'/Volumes/Photos/');
@@ -601,5 +602,121 @@ fn edit_times_come_from_rawmakase_or_else_lightroom_history() -> Result<()> {
         Some("2001-01-02 00:00:00")
     );
     assert!(!times.contains_key(&3));
+    Ok(())
+}
+
+/// A develop-history snapshot as Lightroom stores it: a 4-byte big-endian
+/// length and a zlib stream.
+fn compressed(text: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(text.as_bytes()).unwrap();
+    let mut blob = (text.len() as u32).to_be_bytes().to_vec();
+    blob.extend(z.finish().unwrap());
+    blob
+}
+#[test]
+fn imported_develop_history_is_copied_in_date_order_and_decoded() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("history.lrcat");
+    fixture(&source)?;
+    let db = Connection::open(&source)?;
+    // dateCreated deliberately disagrees with id_local throughout, so the copy
+    // has to order by date rather than pass the rows on in table order.
+    for (image, id, created, name, text) in [
+        (
+            40,
+            1,
+            400.,
+            "zlib",
+            Some(compressed("s = { Exposure2012 = 0.5 }")),
+        ),
+        (
+            40,
+            2,
+            100.,
+            "plain",
+            Some(b"s = { Contrast = 25 }".to_vec()),
+        ),
+        (40, 3, 300., "no text", None),
+        (
+            41,
+            4,
+            200.,
+            "other photo",
+            Some(b"s = { Highlights = 10 }".to_vec()),
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO Adobe_libraryImageDevelopHistoryStep VALUES (?,?,?,?,?)",
+            rusqlite::params![image, id, created, name, text],
+        )?;
+    }
+    drop(db);
+
+    let dest = d.path().join("history.rawmakase");
+    import_lightroom(&source, &dest)?;
+    let cat = Catalog::open(&dest)?;
+    let steps = cat.lightroom_history(40)?;
+    // Ordered by dateCreated, the step with no text dropped, the zlib snapshot
+    // decoded to the develop settings it holds.
+    assert_eq!(
+        steps.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        ["plain", "zlib"]
+    );
+    assert_eq!(steps[1].text, "s = { Exposure2012 = 0.5 }");
+    assert_eq!(
+        cat.lightroom_history(41)?[0].text,
+        "s = { Highlights = 10 }"
+    );
+    Ok(())
+}
+#[test]
+fn reopening_a_catalog_adds_the_tables_a_newer_release_needs() -> Result<()> {
+    use crate::storage::bitmaps::Bitmap;
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"schema fixture")?;
+    let dest = d.path().join("schema.rawmakase");
+    let mut cat = Catalog::create(&dest)?;
+    cat.add_folder(&photos)?;
+    let id = cat.photos()?[0].id;
+    drop(cat);
+
+    // An older catalog, missing tables this release writes. Dropping a table
+    // takes its rows with it, so what matters below is that the table comes back
+    // with the shape the code expects, not that old rows survive.
+    {
+        let db = Connection::open(&dest)?;
+        db.execute_batch(
+            "DROP TABLE local_edits; DROP TABLE bitmaps; DROP TABLE lightroom_history;",
+        )?;
+    }
+
+    // Opening runs the schema again, which is what has to fill them in.
+    let cat = Catalog::open(&dest)?;
+    let present: Vec<String> = cat
+        .db
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN
+         ('local_edits','bitmaps','lightroom_history') ORDER BY name",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    assert_eq!(present, ["bitmaps", "lightroom_history", "local_edits"]);
+
+    // And they work: a bitmap and an edit both round trip through the new tables.
+    let bitmap = Bitmap {
+        width: 1,
+        height: 1,
+        channels: 1,
+        depth: 1,
+        data: vec![7],
+    };
+    assert_eq!(cat.bitmap(&cat.put_bitmap(&bitmap)?)?, Some(bitmap));
+    cat.save_edit(id, &photo, &Recipe::default(), &ExportOptions::default())?;
+    assert!(cat.load_edit(id, &photo)?.is_some());
     Ok(())
 }
