@@ -67,13 +67,17 @@ fn fit_and_fill_size_the_mark_to_the_photo() -> Result<()> {
     w.size = Size::Fit;
     let p = w.ready_in(&images)?.place(200, 100).unwrap();
     assert_eq!((p.width, p.height), (160, 40));
-    // Fill: as large as fits both ways; a tall photo limits the width.
+    // Fit stays within the photo; Fill covers it, cut at its edges.
     let (dir, mut w) = graphic(10, 40, false)?;
     let images = dir.path().join("watermarks/images");
     w.inset = [0., 0.];
-    w.size = Size::Fill;
+    w.size = Size::Fit;
     let p = w.ready_in(&images)?.place(200, 100).unwrap();
     assert_eq!((p.width, p.height), (25, 100));
+    w.size = Size::Fill;
+    let p = w.ready_in(&images)?.place(200, 100).unwrap();
+    // Twice the photo at most: 200 high, so 50 wide.
+    assert_eq!((p.width, p.height), (50, 200));
     Ok(())
 }
 
@@ -243,6 +247,8 @@ fn names_that_make_the_same_file_and_unreadable_images_are_refused() -> Result<(
     // A new one, or a rename, onto an existing name is refused too.
     assert!(save_in(&store, &named("Logo"), None, None).is_err());
     assert!(save_in(&store, &named("Logo"), Some("A/B"), None).is_err());
+    assert!(save_in(&store, &named("logo"), None, None).is_err());
+    assert!(save_in(&store, &named(SIMPLE_COPYRIGHT), None, None).is_err());
     let broken = dir.path().join("broken.png");
     std::fs::write(&broken, b"not a png")?;
     assert!(save_in(&store, &w, Some(&w.name), Some(&broken)).is_err());

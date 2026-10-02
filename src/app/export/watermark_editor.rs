@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 const WIDTH: f32 = 920.;
 const HEIGHT: f32 = 620.;
 const PANEL: f32 = 300.;
+const LOADING: &str = "Loading fonts…";
 
 /// The editor's state while it is open.
 pub(super) struct WatermarkEditor {
@@ -178,7 +179,9 @@ impl Editor {
                 {
                     self.status = format!("Watermark not deleted: {e:#}");
                 }
+                // A deleted watermark is never swapped for another.
                 if self.exports.draft.watermark_name == original {
+                    self.exports.draft.watermark = false;
                     self.exports.draft.watermark_name = watermark::SIMPLE_COPYRIGHT.into();
                 }
                 self.exports.watermarks = watermark::presets();
@@ -225,7 +228,9 @@ fn draw_preview(
     );
     if state.preview.as_ref().is_none_or(|(k, _)| *k != key) {
         let mark = mark_texture(ui.ctx(), state, shown);
-        state.preview = Some((key, mark));
+        // Tried again next frame while fonts are still being listed.
+        let loading = mark.is_none() && state.message == LOADING;
+        state.preview = (!loading).then_some((key, mark));
     }
     if let Some((_, Some((texture, rect)))) = &state.preview {
         ui.painter().image(
@@ -251,6 +256,16 @@ fn mark_texture(
     );
     let ready = match &state.loaded {
         Some((key, ready)) if *key == assets => ready.with(&w),
+        // An installed font is found once the fonts are listed, off this
+        // thread; drawn after that.
+        _ if w.style == Style::Text
+            && w.family != watermark::fonts::INTER
+            && watermark::fonts::families_if_listed().is_none() =>
+        {
+            state.message = LOADING.into();
+            ui_repaint(ctx);
+            return None;
+        }
         _ => {
             // An image not saved yet is previewed from where it was chosen.
             let loaded = match (&state.source, w.style) {
@@ -506,4 +521,9 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             w.rotation = (w.rotation + 3) % 4;
         }
     });
+}
+
+/// Asks for another frame soon, while something loads elsewhere.
+fn ui_repaint(ctx: &egui::Context) {
+    ctx.request_repaint_after(std::time::Duration::from_millis(250));
 }

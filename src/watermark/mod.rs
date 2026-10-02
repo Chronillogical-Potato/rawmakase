@@ -28,7 +28,8 @@ pub enum Align {
     Right,
 }
 /// How large the mark is: a fraction of the photo's width, as wide as the
-/// photo, or as large as fits it both ways. Insets are taken off first.
+/// photo (never taller than it), or covering it both ways, cut at its
+/// edges. Insets are taken off first.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Size {
     Proportional(f32),
@@ -225,8 +226,14 @@ impl Ready {
                     let mw = room.0.min(room.1 * aspect);
                     (mw, mw / aspect)
                 }
+                // Covers the photo both ways, cut at its edges; at most twice
+                // its size, so a thin mark can't grow without bound.
                 Size::Fill => {
-                    let mw = room.0.min(room.1 * aspect);
+                    let mw = room
+                        .0
+                        .max(room.1 * aspect)
+                        .min(2. * room.0)
+                        .min(2. * room.1 * aspect);
                     (mw, mw / aspect)
                 }
             }
@@ -411,12 +418,17 @@ pub fn save_in(
     source: Option<&Path>,
 ) -> Result<Watermark> {
     ensure!(!watermark.name.trim().is_empty(), "Name the watermark");
+    ensure!(
+        watermark.name != SIMPLE_COPYRIGHT,
+        "That name is reserved; choose another"
+    );
     let presets = presets_in(dir);
     // Another preset of this name, or of one that makes the same file,
     // would be overwritten.
     if let Some(other) = presets.iter().find(|p| {
         Some(p.name.as_str()) != replacing
-            && (p.name == watermark.name || file_name(&p.name) == file_name(&watermark.name))
+            // Case too: most Mac and Windows disks don't tell names apart by it.
+            && file_name(&p.name).to_lowercase() == file_name(&watermark.name).to_lowercase()
     }) {
         anyhow::bail!(
             "A watermark named \"{}\" exists; choose another name",
@@ -443,25 +455,30 @@ pub fn save_in(
         .to_string();
     let mut saved = watermark.clone();
     // The image, copied beside and moved into place, named after its preset.
-    let place = |from: &Path, name: &str| -> Result<()> {
+    // The image is copied beside first; it replaces the live one only once
+    // the preset is written.
+    let stage = |from: &Path| -> Result<tempfile::NamedTempFile> {
         let staged = tempfile::NamedTempFile::new_in(&images)?;
         std::fs::copy(from, staged.path())?;
         staged.as_file().sync_all()?;
-        staged.persist(images.join(name)).map_err(|e| e.error)?;
-        Ok(())
+        Ok(staged)
     };
+    let mut staged = None;
     if let Some(source) = source {
         let name = format!("{stem}.{}", extension(source));
-        place(source, &name)?;
+        staged = Some((stage(source)?, name.clone()));
         saved.image = Some(name);
     } else if let Some(image) = &watermark.image {
         let name = format!("{stem}.{}", extension(Path::new(image)));
         if *image != name && images.join(image).is_file() {
-            place(&images.join(image), &name)?;
+            staged = Some((stage(&images.join(image))?, name.clone()));
             saved.image = Some(name);
         }
     }
     crate::storage::atomic_json(&dir.join(file_name(&saved.name)), &saved)?;
+    if let Some((file, name)) = staged {
+        file.persist(images.join(name)).map_err(|e| e.error)?;
+    }
     if let Some(previous) = previous {
         if file_name(&previous.name) != file_name(&saved.name) {
             let _ = std::fs::remove_file(dir.join(file_name(&previous.name)));
