@@ -82,7 +82,9 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         captured: Some("2018:08:26 10:39:33".into()),
         now: "2026-09-27T06:12:22Z".into(),
         rating: 3,
-        keywords: vec![vec!["coffee & books".into()]],
+        keywords: vec![crate::xmp::write::KeywordPath::all(vec![
+            "coffee & books".into(),
+        ])],
         settings: true,
         format: "image/jpeg".into(),
         ..Default::default()
@@ -344,7 +346,10 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
         caption: vec![("x-default".into(), "Two\nlines".into())],
         rights: vec![("x-default".into(), "© Example".into())],
         creators: vec!["Zoë".into(), "A & B".into()],
-        keywords: vec![vec!["Places".into(), "Kraków".into()]],
+        keywords: vec![crate::xmp::write::KeywordPath::all(vec![
+            "Places".into(),
+            "Kraków".into(),
+        ])],
         created: Some("2024-05-01T12:30:15.120456+02:00".into()),
         captured: Some("2020:01:01 00:00:00".into()),
         format: "image/jpeg".into(),

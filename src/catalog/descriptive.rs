@@ -114,6 +114,10 @@ pub struct Keyword {
     pub id: i64,
     pub name: String,
     pub path: Vec<String>,
+    /// Which names of `path` an export writes, by Lightroom's Include on
+    /// Export and Export Containing Keywords; none when the keyword itself
+    /// is not exported.
+    pub exported: Vec<bool>,
 }
 
 /// A photo's descriptive metadata and keywords as they were, absent rows
@@ -354,23 +358,41 @@ pub(super) fn keyword_at(db: &Connection, path: &[String]) -> Result<i64> {
 
 fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
     let mut path = Vec::new();
+    // Include on Export of each, from the keyword up.
+    let mut include = Vec::new();
+    let mut parents = true;
     let mut next = Some(id);
     while let Some(k) = next {
         // A cycle in a damaged catalog would never end.
         ensure!(path.len() < 256, "Keyword hierarchy too deep");
-        let (name, parent): (String, Option<i64>) = db
-            .prepare_cached("SELECT name, parent FROM keywords WHERE id=?")?
-            .query_row([k], |r| Ok((r.get(0)?, r.get(1)?)))
+        let (name, parent, included, with_parents): (String, Option<i64>, bool, bool) = db
+            .prepare_cached(
+                "SELECT k.name, k.parent, COALESCE(e.include, 1), COALESCE(e.parents, 1)
+                 FROM keywords k LEFT JOIN keyword_export e ON e.keyword = k.id WHERE k.id=?",
+            )?
+            .query_row([k], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .optional()?
             .context("Unknown keyword")?;
+        if path.is_empty() {
+            parents = with_parents;
+        }
         path.push(name);
+        include.push(included);
         next = parent;
     }
+    let own = include[0];
+    let mut exported: Vec<bool> = include
+        .iter()
+        .enumerate()
+        .map(|(i, included)| own && *included && (i == 0 || parents))
+        .collect();
     path.reverse();
+    exported.reverse();
     Ok(Keyword {
         id,
         name: path.last().cloned().unwrap_or_default(),
         path,
+        exported,
     })
 }
 

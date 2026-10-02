@@ -87,7 +87,13 @@ impl Editor {
                     let keywords = library.catalog.keywords(p.id)?;
                     Ok(Values {
                         descriptive,
-                        keywords: keywords.into_iter().map(|k| k.path).collect(),
+                        keywords: keywords
+                            .into_iter()
+                            .map(|k| crate::xmp::write::KeywordPath {
+                                path: k.path,
+                                exported: k.exported,
+                            })
+                            .collect(),
                         rating: p.rating,
                         label: p.label.clone(),
                     })

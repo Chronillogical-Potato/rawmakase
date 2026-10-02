@@ -10,6 +10,7 @@ use super::{
     settings::ExportSettings,
 };
 use crate::catalog::{Capture, Descriptive, LangAlt, Location, Value};
+use crate::xmp::write::KeywordPath;
 
 const CAPTION: u16 = 0x010e;
 const ARTIST: u16 = 0x013b;
@@ -91,8 +92,7 @@ impl Policy {
 #[derive(Clone, Debug, Default)]
 pub struct Values {
     pub descriptive: Descriptive,
-    /// Keyword paths, top first.
-    pub keywords: Vec<Vec<String>>,
+    pub keywords: Vec<KeywordPath>,
     pub rating: i32,
     pub label: String,
 }
@@ -110,7 +110,7 @@ pub struct XmpFields {
     pub created: Option<String>,
     pub rating: i32,
     pub label: String,
-    pub keywords: Vec<Vec<String>>,
+    pub keywords: Vec<KeywordPath>,
     pub title: Vec<(String, String)>,
     pub caption: Vec<(String, String)>,
     pub rights: Vec<(String, String)>,

@@ -4,6 +4,22 @@
 use crate::{develop::Recipe, develop::curve::ToneCurve, raw::Metadata};
 use std::fmt::Write;
 
+/// A keyword's path, top first, and which of its names an export writes.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeywordPath {
+    pub path: Vec<String>,
+    pub exported: Vec<bool>,
+}
+impl KeywordPath {
+    /// A path whose names all export.
+    pub fn all(path: Vec<String>) -> Self {
+        Self {
+            exported: vec![true; path.len()],
+            path,
+        }
+    }
+}
+
 /// Facts about the photo that go in the packet beside its settings.
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
@@ -18,8 +34,7 @@ pub struct Photo {
     pub now: String,
     pub rating: i32,
     pub label: String,
-    /// Each keyword's path, top first.
-    pub keywords: Vec<Vec<String>>,
+    pub keywords: Vec<KeywordPath>,
     /// Languages of each, as (language, text), `x-default` first.
     pub title: Vec<(String, String)>,
     pub caption: Vec<(String, String)>,
@@ -418,22 +433,34 @@ fn list(out: &mut String, name: &str, kind: &str, items: &[String]) {
 }
 /// dc:subject, every keyword and its ancestors once, and
 /// lr:hierarchicalSubject, each keyword's path joined with "|" (a top-level
-/// keyword as a one-name path, as Lightroom writes it). "|" always separates
-/// there, so a path with a name containing it is left out of the hierarchy.
-pub fn keyword_lists(paths: &[Vec<String>]) -> (Vec<String>, Vec<String>) {
+/// keyword as a one-name path, as Lightroom writes it). Names Lightroom's
+/// keyword options leave out of exports are left out of both: a keyword
+/// whose parents do not all export goes in the hierarchy alone. "|" always
+/// separates there, so a path with a name containing it is left out of it.
+pub fn keyword_lists(keywords: &[KeywordPath]) -> (Vec<String>, Vec<String>) {
     let mut subject: Vec<String> = Vec::new();
     let mut hierarchical: Vec<String> = Vec::new();
-    for path in paths {
-        let path: Vec<&str> = path
+    for keyword in keywords {
+        let names: Vec<(&str, bool)> = keyword
+            .path
             .iter()
-            .map(|n| n.trim())
-            .filter(|n| !n.is_empty())
+            .zip(keyword.exported.iter().chain(std::iter::repeat(&true)))
+            .map(|(n, e)| (n.trim(), *e))
+            .filter(|(n, _)| !n.is_empty())
             .collect();
-        for name in &path {
-            if !subject.iter().any(|s| s == name) {
+        if !names.last().is_some_and(|(_, e)| *e) {
+            continue;
+        }
+        for (name, exported) in &names {
+            if *exported && !subject.iter().any(|s| s == name) {
                 subject.push(name.to_string());
             }
         }
+        let path: Vec<&str> = if names.iter().all(|(_, e)| *e) {
+            names.iter().map(|(n, _)| *n).collect()
+        } else {
+            names.last().map(|(n, _)| *n).into_iter().collect()
+        };
         if !path.is_empty() && path.iter().all(|n| !n.contains('|')) {
             let joined = path.join("|");
             if !hierarchical.contains(&joined) {

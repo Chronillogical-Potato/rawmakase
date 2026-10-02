@@ -181,3 +181,12 @@ CREATE TABLE IF NOT EXISTS photo_location (
 -- Keywords are looked up by parent and name; not unique, as Lightroom
 -- catalogs can hold duplicates.
 CREATE INDEX IF NOT EXISTS keywords_parent_name ON keywords(parent, name);
+
+-- Lightroom's export options of a keyword, where one is off: Include on
+-- Export (`include`) and Export Containing Keywords (`parents`). A keyword
+-- with no row exports with its parents.
+CREATE TABLE IF NOT EXISTS keyword_export (
+    keyword INTEGER PRIMARY KEY REFERENCES keywords(id) ON DELETE CASCADE,
+    include INTEGER NOT NULL,
+    parents INTEGER NOT NULL
+);

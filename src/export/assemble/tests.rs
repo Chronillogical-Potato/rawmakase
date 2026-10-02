@@ -34,7 +34,10 @@ fn values(rating: i32, keywords: &[&str]) -> Values {
     Values {
         rating,
         label: "Red".into(),
-        keywords: keywords.iter().map(|k| vec![k.to_string()]).collect(),
+        keywords: keywords
+            .iter()
+            .map(|k| KeywordPath::all(vec![k.to_string()]))
+            .collect(),
         ..Default::default()
     }
 }
@@ -265,14 +268,17 @@ fn a_catalog_location_replaces_or_clears_the_files() {
 
 #[test]
 fn keywords_export_with_their_parents_and_paths() {
-    let paths = vec![
+    let paths: Vec<KeywordPath> = [
         vec!["Places".to_string(), "Poland".into(), "Kraków".into()],
         vec!["Places".to_string()],
         vec!["Smith, John".to_string()],
         vec!["AC/DC".to_string()],
         vec!["Flat|Name".to_string()],
         vec!["Flat|Name".to_string(), "Child".into()],
-    ];
+    ]
+    .into_iter()
+    .map(KeywordPath::all)
+    .collect();
     let (subject, hierarchical) = crate::xmp::write::keyword_lists(&paths);
     assert_eq!(
         subject,
@@ -310,4 +316,22 @@ fn unreadable_exif_falls_back_to_librarys_capture_settings_with_overrides() {
     assert_eq!(text(&a, 0x010f).as_deref(), Some("Make"));
     assert!(a.exif.get(0x829a).is_some());
     assert_eq!(text(&a, COPYRIGHT).as_deref(), Some("© Catalog"));
+}
+
+#[test]
+fn keywords_lightroom_keeps_out_of_exports_stay_out() {
+    let keyword = |path: &[&str], exported: &[bool]| KeywordPath {
+        path: path.iter().map(|n| n.to_string()).collect(),
+        exported: exported.to_vec(),
+    };
+    let (subject, hierarchical) = crate::xmp::write::keyword_lists(&[
+        // A private container: the child exports alone.
+        keyword(&["Private", "Clients", "Acme"], &[false, true, true]),
+        // Export Containing Keywords off.
+        keyword(&["Places", "Home"], &[false, true]),
+        // Include on Export off.
+        keyword(&["Hidden"], &[false]),
+    ]);
+    assert_eq!(subject, ["Clients", "Acme", "Home"]);
+    assert_eq!(hierarchical, ["Acme", "Home"]);
 }

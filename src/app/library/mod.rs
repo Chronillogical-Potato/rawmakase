@@ -120,6 +120,7 @@ impl Library {
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
         let _ = catalog.backfill_lightroom_info();
+        let _ = catalog.backfill_keyword_export();
         let loupe = loupe::Loupe::new(&ctx);
         let screen = screen::ScreenPreviews::new(&ctx);
         let mut s = Self {
