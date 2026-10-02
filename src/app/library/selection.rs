@@ -174,6 +174,9 @@ impl Library {
             },
         };
         let id = self.photos[self.visible[to]].id;
+        if let Step::By(delta) = step {
+            self.loupe_direction = if delta < 0 { -1 } else { 1 };
+        }
         if extend && let Some(anchor) = self.selection.anchor.or(self.selection.active) {
             self.selection.selected = self.range(anchor, id).into_iter().collect();
             self.selection.anchor = Some(anchor);
@@ -206,26 +209,41 @@ impl Library {
             return;
         }
         let columns = self.grid_columns.max(1) as isize;
-        // Each key with the modifiers held for it: a quick Cmd+D can arrive in
-        // the same frame as Cmd's release.
-        let keys: Vec<(Key, egui::Modifiers)> = ctx.input(|i| {
-            i.events
+        let (command, shift, alt, keys, physical) = ctx.input(|i| {
+            let pressed: Vec<(Key, Option<Key>)> = i
+                .events
                 .iter()
                 .filter_map(|e| match e {
                     egui::Event::Key {
                         key,
+                        physical_key,
                         pressed: true,
-                        modifiers,
                         ..
-                    } => Some((*key, *modifiers)),
+                    } => Some((*key, *physical_key)),
                     _ => None,
                 })
-                .collect()
+                .collect();
+            let keys: Vec<Key> = pressed.iter().map(|(k, _)| *k).collect();
+            let physical: Vec<Key> = pressed.iter().filter_map(|(_, p)| *p).collect();
+            (
+                i.modifiers.command,
+                i.modifiers.shift,
+                i.modifiers.alt,
+                keys,
+                physical,
+            )
         });
         if self.loupe.open {
+            // Cmd+Option+0 is 1:1; Option changes the typed key on macOS.
+            if command && alt && physical.contains(&Key::Num0) {
+                self.zoom_loupe(Some(true));
+            }
             // Loupe moves through the photos one at a time.
-            for (key, modifiers) in keys {
-                match (key, modifiers.command) {
+            for key in keys {
+                match (key, command) {
+                    (Key::Z, false) => self.zoom_loupe(None),
+                    (Key::Plus | Key::Equals, true) => self.zoom_loupe(Some(true)),
+                    (Key::Minus, true) => self.zoom_loupe(Some(false)),
                     (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
                     (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
                     (Key::Home, false) => self.step(Step::Home, false),
