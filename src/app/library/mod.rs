@@ -320,6 +320,14 @@ impl Library {
             self.filters.clear_bar();
             self.filter();
         }
+        // Outside the folder shown, or no longer offline: All Photographs.
+        if !self.visible.iter().any(|i| self.photos[*i].id == id) {
+            self.filters.folder_scope = None;
+            self.filters.collection = None;
+            self.filters.only_missing = false;
+            self.selected_folder.clear();
+            self.filter();
+        }
         self.select(Some(id));
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
