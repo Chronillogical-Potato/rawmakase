@@ -66,6 +66,16 @@ impl Library {
         ids: &[i64],
         edit: DescriptiveEdit,
     ) -> Result<()> {
+        self.edit_descriptive_at(ids, edit, None)
+    }
+    /// `edit_descriptive`, for an edit that belongs to `place`, where it was
+    /// typed, rather than where the Library is now; undo returns there.
+    pub(super) fn edit_descriptive_at(
+        &mut self,
+        ids: &[i64],
+        edit: DescriptiveEdit,
+        place: Option<Place>,
+    ) -> Result<()> {
         let ids: Vec<i64> = ids
             .iter()
             .copied()
@@ -74,7 +84,7 @@ impl Library {
         if ids.is_empty() {
             return Ok(());
         }
-        let place_before = self.place();
+        let place_before = place.clone().unwrap_or_else(|| self.place());
         let before = self.catalog.metadata_snapshot(&ids)?;
         let what = match &edit {
             DescriptiveEdit::Text(TextField::Title, _) => "Title",
@@ -89,18 +99,10 @@ impl Library {
             DescriptiveEdit::Text(field, text) => self.catalog.set_text(&ids, field, &text),
             DescriptiveEdit::Creators(names) => self.catalog.set_creators(&ids, &names),
             DescriptiveEdit::ClearLocation => self.catalog.clear_location(&ids),
-            DescriptiveEdit::AddKeywords(paths) => paths.iter().try_for_each(|path| {
-                let keyword = self.catalog.keyword_at(path)?;
-                self.catalog.add_keyword(&ids, keyword)
-            }),
+            DescriptiveEdit::AddKeywords(paths) => self.catalog.add_keywords(&ids, &paths),
             DescriptiveEdit::RemoveKeyword(keyword) => self.catalog.remove_keyword(&ids, keyword),
         };
-        if let Err(e) = made {
-            // Several keywords are several transactions: none is kept.
-            let _ = self.catalog.restore_metadata(&before);
-            self.refresh_keywords(&ids)?;
-            return Err(e);
-        }
+        made?;
         let after = self.catalog.metadata_snapshot(&ids)?;
         self.refresh_keywords(&ids)?;
         if before == after {
@@ -116,7 +118,7 @@ impl Library {
             before,
             after,
             place_before,
-            place_after: self.place(),
+            place_after: place.unwrap_or_else(|| self.place()),
             summary,
         });
         self.fields.reload();
@@ -144,7 +146,8 @@ impl Library {
     pub(in crate::app) fn take_descriptive_done(&mut self) -> Vec<DescriptiveCommand> {
         std::mem::take(&mut self.descriptive_done)
     }
-    /// The keywords shown for `ids`, read again from the catalog.
+    /// The keywords shown for `ids`, read again from the catalog, and the
+    /// photos shown, which a text filter may pick by them.
     fn refresh_keywords(&mut self, ids: &[i64]) -> Result<()> {
         for id in ids {
             let names: Vec<String> = self
@@ -157,6 +160,7 @@ impl Library {
                 p.keywords = names.join(", ");
             }
         }
+        self.filter();
         Ok(())
     }
 }

@@ -3,8 +3,8 @@
 //! Return or when focus leaves, for every photo the panel shows. A field whose
 //! photos differ shows "< mixed >"; typing replaces it on all of them, leaving
 //! it alone changes nothing.
-use super::Library;
 use super::descriptive::{DescriptiveEdit, parse_keywords};
+use super::{Library, Place};
 use crate::app::theme;
 use crate::catalog::{Descriptive, Keyword, Location, TextField, Value};
 use eframe::egui::{self, Vec2};
@@ -51,7 +51,13 @@ pub(super) struct Fields {
     keywords: Vec<(Keyword, bool)>,
     /// Text as typed, from the value shown when typing started.
     pub(super) drafts: Drafts,
-    keyword_entry: String,
+    pub(super) keyword_entry: String,
+    /// Where the Library was when the values were read, for undo to return
+    /// to after a draft is saved elsewhere.
+    place: Option<Place>,
+    /// "+" added an empty creator entry, to keep after a save reads the
+    /// values again.
+    add_creator: bool,
 }
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct Drafts {
@@ -79,7 +85,13 @@ impl Fields {
             caption: text(&self.caption),
             copyright: text(&self.copyright),
             creators: match &self.creators {
-                Shared::Same(names) if !names.is_empty() => names.clone(),
+                Shared::Same(names) if !names.is_empty() => {
+                    let mut names = names.clone();
+                    if self.add_creator {
+                        names.push(String::new());
+                    }
+                    names
+                }
                 _ => vec![String::new()],
             },
         }
@@ -134,9 +146,11 @@ impl Library {
         let creators = names(&drafts.creators);
         if creators != names(&untouched.creators) {
             edits.push(DescriptiveEdit::Creators(creators));
+            self.fields.add_creator = false;
         }
+        let place = self.fields.place.clone();
         for edit in edits {
-            self.edit_descriptive(&targets, edit)?;
+            self.edit_descriptive_at(&targets, edit, place.clone())?;
         }
         self.fields.reload();
         Ok(())
@@ -148,10 +162,12 @@ impl Library {
         if targets == self.fields.targets && !self.fields.stale {
             return;
         }
-        if targets != self.fields.targets
-            && let Err(e) = self.commit_fields()
-        {
+        let moved = targets != self.fields.targets;
+        if moved && let Err(e) = self.commit_fields() {
+            // The drafts stay with the photos they were typed for, to be
+            // saved again or discarded.
             self.message = format!("Metadata could not be saved: {e}");
+            return;
         }
         let read = self.catalog.descriptive_of(&targets);
         let keywords: anyhow::Result<Vec<Vec<Keyword>>> = targets
@@ -166,7 +182,14 @@ impl Library {
             }
         };
         let all: Vec<&Descriptive> = targets.iter().filter_map(|id| read.get(id)).collect();
+        let place = self.place();
         let f = &mut self.fields;
+        if moved {
+            // What was typed for other photos never goes to these.
+            f.keyword_entry.clear();
+            f.add_creator = false;
+            f.place = Some(place);
+        }
         f.targets = targets;
         f.stale = false;
         f.title = Shared::of(all.iter().map(|d| text_of(d, TextField::Title)));
@@ -198,7 +221,9 @@ impl Library {
             let f = &mut self.fields;
             commit |= text_row(ui, "Title", &mut f.drafts.title, &f.title, false);
             commit |= text_row(ui, "Caption", &mut f.drafts.caption, &f.caption, true);
-            commit |= creator_rows(ui, &mut f.drafts.creators, &f.creators);
+            let (changed, added) = creator_rows(ui, &mut f.drafts.creators, &f.creators);
+            commit |= changed;
+            f.add_creator |= added;
             commit |= text_row(
                 ui,
                 "Copyright",
@@ -404,9 +429,14 @@ fn text_row(
     };
     response.lost_focus()
 }
-/// One row per creator, each removable, and a button to add one; true when
-/// the list changed or an entry was left, to save it.
-fn creator_rows(ui: &mut egui::Ui, names: &mut Vec<String>, shared: &Shared<Vec<String>>) -> bool {
+/// One row per creator, each removable, and a button to add one. Returns
+/// whether the list changed or an entry was left, to save it, and whether an
+/// entry was added.
+fn creator_rows(
+    ui: &mut egui::Ui,
+    names: &mut Vec<String>,
+    shared: &Shared<Vec<String>>,
+) -> (bool, bool) {
     let mut commit = false;
     let mut remove = None;
     let count = names.len();
@@ -461,12 +491,15 @@ fn creator_rows(ui: &mut egui::Ui, names: &mut Vec<String>, shared: &Shared<Vec<
     }
     match remove {
         // "+" adds an empty entry to type in, saved when it is left.
-        Some(usize::MAX) => names.push(String::new()),
+        Some(usize::MAX) => {
+            names.push(String::new());
+            return (commit, true);
+        }
         Some(i) => {
             names.remove(i);
             commit = true;
         }
         None => {}
     }
-    commit
+    (commit, false)
 }

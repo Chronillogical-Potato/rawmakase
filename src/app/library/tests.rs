@@ -1707,3 +1707,34 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     assert!(library.catalog.keywords(ids[0])?.is_empty());
     Ok(())
 }
+#[test]
+fn a_draft_that_fails_to_save_stays_with_its_photos() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library.selection.selected = [ids[0]].into();
+    library.selection.active = Some(ids[0]);
+    library.sync_fields();
+    library.fields.drafts.title = "For a".into();
+    // A write that fails, as on a full disk.
+    library.catalog.fail_metadata_writes()?;
+    library.selection.selected = [ids[1]].into();
+    library.selection.active = Some(ids[1]);
+    library.sync_fields();
+    assert_eq!(library.fields.targets, vec![ids[0]]);
+    assert_eq!(library.fields.drafts.title, "For a");
+    Ok(())
+}
+#[test]
+fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library.selection.selected = [ids[0]].into();
+    library.selection.active = Some(ids[0]);
+    library.sync_fields();
+    library.fields.keyword_entry = "Typed for a".into();
+    library.selection.selected = [ids[1]].into();
+    library.selection.active = Some(ids[1]);
+    library.sync_fields();
+    assert!(library.fields.keyword_entry.is_empty());
+    Ok(())
+}
