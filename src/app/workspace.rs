@@ -145,7 +145,9 @@ impl Editor {
                     })
                 })
             };
+            // A menu or popup takes the keys first.
             if self.library_mode
+                && !egui::Popup::is_any_open(ctx)
                 && self
                     .library
                     .as_ref()
@@ -424,11 +426,17 @@ impl Editor {
             });
             return;
         }
-        // Develop's tools, Before view and clipping warning stay in Develop.
-        if self.view.tool != Tool::None || self.view.compare || self.view.clipping {
+        // Develop's tools, Before view, clipping warning and preset preview
+        // stay in Develop.
+        if self.view.tool != Tool::None
+            || self.view.compare
+            || self.view.clipping
+            || self.presets.preview.is_some()
+        {
             self.view.tool = Tool::None;
             self.view.compare = false;
             self.view.clipping = false;
+            self.presets.preview = None;
             self.schedule();
         }
         self.viewport_ui(ui);

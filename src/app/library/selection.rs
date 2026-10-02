@@ -243,7 +243,9 @@ impl Library {
             let (command, alt) = (press.modifiers.command, press.modifiers.alt);
             match (press.key, command) {
                 // A held Z must not flicker between Fit and 1:1.
-                (Key::Z, false) if own_zoom && !press.repeat => self.zoom_loupe(None),
+                (Key::Z, false) if own_zoom && !press.repeat && !press.modifiers.any() => {
+                    self.zoom_loupe(None)
+                }
                 (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
                 (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
                 // Cmd+Option+0; Option changes the typed key on macOS.
