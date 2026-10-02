@@ -1625,3 +1625,85 @@ fn the_library_layout_is_kept_and_returned_to() -> Result<()> {
     assert_eq!(restored.cell_style, cell::Style::Compact);
     Ok(())
 }
+#[test]
+fn typed_keywords_follow_lightroom_and_refuse_the_separator() -> Result<()> {
+    use super::descriptive::parse_keywords;
+    assert_eq!(
+        parse_keywords("Kraków < Poland < Places, Smith ,")?,
+        vec![
+            vec!["Places".to_string(), "Poland".into(), "Kraków".into()],
+            vec!["Smith".to_string()],
+        ]
+    );
+    assert!(parse_keywords("a|b").is_err());
+    assert!(parse_keywords("Child < ").is_err());
+    Ok(())
+}
+#[test]
+fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> Result<()> {
+    use crate::catalog::{LangAlt, TextField, Value};
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library
+        .catalog
+        .set_text(&ids[..1], TextField::Title, "Only a")?;
+    library.selection.selected = ids.iter().copied().collect();
+    library.selection.active = Some(ids[0]);
+    library.sync_fields();
+    assert_eq!(library.fields.drafts.title, "");
+    // Leaving the field without typing.
+    library.commit_fields()?;
+    assert!(library.take_descriptive_done().is_empty());
+    assert_eq!(library.catalog.descriptive(ids[1])?.title, None);
+    // Typing then moving the selection saves it for the photos it was typed for.
+    library.fields.drafts.title = "Both".into();
+    library.selection.selected = [ids[1]].into();
+    library.selection.active = Some(ids[1]);
+    library.sync_fields();
+    for id in &ids {
+        assert_eq!(
+            library.catalog.descriptive(*id)?.title,
+            Some(Value::Set(LangAlt::new("Both")))
+        );
+    }
+    assert_eq!(library.take_descriptive_done().len(), 1);
+    assert_eq!(library.fields.targets, vec![ids[1]]);
+    Ok(())
+}
+#[test]
+fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
+    use super::descriptive::DescriptiveEdit;
+    use crate::catalog::{TextField, Value};
+    let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
+    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    library
+        .catalog
+        .set_text(&ids[1..], TextField::Copyright, "")?;
+    library.edit_descriptive(
+        &ids,
+        DescriptiveEdit::AddKeywords(vec![vec!["Places".into(), "City".into()]]),
+    )?;
+    library.edit_descriptive(
+        &ids,
+        DescriptiveEdit::Text(TextField::Copyright, "© Example".into()),
+    )?;
+    library.edit_descriptive(&ids, DescriptiveEdit::Creators(vec![]))?;
+    let done = library.take_descriptive_done();
+    assert_eq!(done.len(), 3);
+    assert!(library.photos.iter().all(|p| p.keywords == "City"));
+    for command in done.iter().rev() {
+        library.restore_descriptive(&command.before)?;
+    }
+    assert_eq!(library.catalog.descriptive(ids[0])?, Default::default());
+    assert_eq!(
+        library.catalog.descriptive(ids[1])?.copyright,
+        Some(Value::Cleared)
+    );
+    assert!(library.photos.iter().all(|p| p.keywords.is_empty()));
+    // Removing a keyword only some photos have, from all of them.
+    let city = library.catalog.keyword_at(&["City".into()])?;
+    library.catalog.add_keyword(&ids[..1], city)?;
+    library.edit_descriptive(&ids, DescriptiveEdit::RemoveKeyword(city))?;
+    assert!(library.catalog.keywords(ids[0])?.is_empty());
+    Ok(())
+}

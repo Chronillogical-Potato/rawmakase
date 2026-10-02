@@ -79,6 +79,7 @@ impl Library {
                             metadata_row(ui, "Copy Name", "");
                         }
                     }
+                    self.metadata_fields(ui);
                     for (key, value, hover) in [
                         (
                             "Folder",
@@ -107,14 +108,7 @@ impl Library {
                     }
                 });
                 section(ui, "Keywording", false, |ui| {
-                    info_text(
-                        ui,
-                        match &photo {
-                            Some(p) if !p.keywords.is_empty() => &p.keywords,
-                            Some(_) => "No keywords",
-                            None => "",
-                        },
-                    );
+                    self.keyword_fields(ui);
                 });
             });
         action
