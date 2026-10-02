@@ -1183,3 +1183,59 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     assert!(library.catalog.photos_without_info()?.is_empty());
     Ok(())
 }
+#[test]
+fn compare_shows_the_select_beside_a_candidate() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    // The active photo beside the next one selected with it.
+    library.click(ids[1], egui::Modifiers::NONE);
+    library.click(ids[3], egui::Modifiers::COMMAND);
+    library.click(ids[1], egui::Modifiers::NONE);
+    library.open_compare();
+    assert!(library.compare_open() && library.edits_active_only());
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[3]))
+    );
+    // Arrows move the candidate past the select, and stop at the ends.
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[2]));
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[0]));
+    library.step_candidate(-1);
+    assert_eq!(library.compare.candidate, Some(ids[0]));
+    assert_eq!(library.selected(), Some(ids[0]));
+    assert_eq!(library.selected_ids(), [ids[0], ids[1]]);
+    // Rating keys go to the active photo; Shift moves the candidate on.
+    library.edit_compared(Edit::Rating(4), true)?;
+    assert_eq!(library.photo(ids[0]).unwrap().rating, 4);
+    assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
+    assert_eq!(library.compare.candidate, Some(ids[2]));
+    // Down swaps, keeping the active photo; Up makes the candidate the select.
+    library.swap_compare();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[2]), Some(ids[1]))
+    );
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.make_select();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[2]))
+    );
+    // E opens the active photo in the Loupe; C from there compares again.
+    library.open_loupe();
+    assert!(library.loupe_open() && !library.compare_open());
+    library.open_compare();
+    assert!(!library.loupe_open() && library.compare_open());
+    library.show_grid();
+    assert!(!library.compare_open());
+    assert_eq!(library.selected_ids().len(), 2);
+    // With one photo shown there is nothing to compare it with.
+    library.filters.query = "a.RAF".into();
+    library.filter();
+    library.open_compare();
+    assert_eq!(library.compare.candidate, None);
+    Ok(())
+}

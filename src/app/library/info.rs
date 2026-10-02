@@ -43,8 +43,9 @@ impl Library {
                 section(ui, "Metadata", false, |ui| {
                     match &photo {
                         Some(p) => {
-                            // In Loupe, as for its keys, only the photo shown changes.
-                            self.metadata_controls(ui, p.id, !self.loupe.open);
+                            // In Loupe and Compare, as for their keys, only the
+                            // active photo changes.
+                            self.metadata_controls(ui, p.id, !self.edits_active_only());
                         }
                         None => {
                             ui.allocate_exact_size(

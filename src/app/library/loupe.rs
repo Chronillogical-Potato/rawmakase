@@ -279,6 +279,7 @@ impl Library {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
         self.loupe.open = self.selection.active.is_some();
+        self.compare.open &= !self.loupe.open;
         self.loupe.before_click = None;
         self.scroll_to_active = true;
     }

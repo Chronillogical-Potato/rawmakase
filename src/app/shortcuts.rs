@@ -33,6 +33,14 @@ const LOUPE: [Shortcut; 7] = [
     ("drag", "Pan"),
     ("I", "Cycle photo info"),
 ];
+const COMPARE: [Shortcut; 6] = [
+    ("C", "Compare the active photo with the next"),
+    ("Left / Right", "Change the candidate"),
+    ("Up", "Make the candidate the select"),
+    ("Down", "Swap select and candidate"),
+    ("click", "Make a photo active for rating keys"),
+    ("G / Esc", "Back to the grid"),
+];
 const RATING: [Shortcut; 8] = [
     ("0 / 1 / 2 / 3 / 4 / 5", "Star rating"),
     ("[ / ]", "Lower / raise the rating"),
@@ -94,20 +102,24 @@ impl Editor {
             self.view.shortcuts = false;
             return;
         }
-        // The current module's shortcuts come first.
-        let library: [Group; 5] = [
+        let views: [Group; 3] = [
             ("Library grid", &LIBRARY),
             ("Loupe", &LOUPE),
-            ("Quick Collection", &QUICK),
+            ("Compare", &COMPARE),
+        ];
+        let common: [Group; 3] = [
             ("Rating, flags and labels", &RATING),
+            ("Quick Collection", &QUICK),
             ("Everywhere", &GENERAL),
         ];
         let develop: [Group; 1] = [("Develop", &DEVELOP)];
-        let (left, right): (&[Group], &[Group]) = if self.library_mode {
-            (&library, &develop)
+        // The current module's shortcuts come first, in the left column.
+        let (left, right): (Vec<Group>, Vec<Group>) = if self.library_mode {
+            (views.to_vec(), [&common[..], &develop].concat())
         } else {
-            (&develop, &library)
+            ([&develop[..], &common].concat(), views.to_vec())
         };
+        let (left, right) = (left.as_slice(), right.as_slice());
         let response = egui::Modal::new(egui::Id::new("keyboard-shortcuts"))
             .backdrop_color(Color32::from_black_alpha(140))
             .frame(modal_frame().inner_margin(egui::Margin::symmetric(28, 22)))

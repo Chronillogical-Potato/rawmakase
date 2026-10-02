@@ -222,7 +222,9 @@ impl Library {
         if ctx.text_edit_focused() {
             return;
         }
-        if self.loupe.open {
+        if self.compare.open {
+            self.compare_keys(&presses);
+        } else if self.loupe.open {
             self.loupe_keys(&presses);
         } else {
             self.grid_keys(&presses);
@@ -234,6 +236,7 @@ impl Library {
             let shift = press.modifiers.shift;
             match (press.key, press.modifiers.command) {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
+                (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 // The grid applies B to every selected photo, once per press.
                 (Key::B, _) if !press.repeat => {
                     self.quick_key(press.modifiers, self.selected_ids())
@@ -261,6 +264,7 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
+                (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 // The Loupe applies B to the photo shown, once per press.
                 (Key::B, _) if !press.repeat => {
                     let ids = self.selection.active.into_iter().collect();
@@ -278,10 +282,10 @@ impl Library {
 
 /// A key pressed this frame, with the modifiers held for it: a quick Cmd+D
 /// can arrive in the same frame as Cmd's release.
-struct Press {
-    key: Key,
-    modifiers: egui::Modifiers,
-    repeat: bool,
+pub(super) struct Press {
+    pub key: Key,
+    pub modifiers: egui::Modifiers,
+    pub repeat: bool,
 }
 fn presses(ctx: &egui::Context) -> Vec<Press> {
     ctx.input(|i| {

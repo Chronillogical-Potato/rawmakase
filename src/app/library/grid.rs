@@ -56,6 +56,9 @@ impl Library {
         zoom: &mut crate::app::navigator::Zoom,
     ) -> Action {
         self.poll_previews(ui.ctx());
+        if self.compare.open {
+            return self.compare(ui);
+        }
         if self.loupe.open {
             return self.loupe(ui, zoom);
         }
