@@ -423,6 +423,7 @@ fn import_presets(
             staged.write_all(text.as_bytes())?;
             staged.as_file().sync_all()?;
             staged.persist_noclobber(&target).map_err(|e| e.error)?;
+            crate::storage::sync_dir(&dir)?;
             Ok(())
         })();
         match written {

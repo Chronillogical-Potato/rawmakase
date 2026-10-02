@@ -81,16 +81,7 @@ pub fn load_favorites() -> BTreeSet<String> {
         .unwrap_or_default()
 }
 pub fn save_favorites(favorites: &BTreeSet<String>) -> Result<()> {
-    use std::io::Write;
-    let path = favorite_path();
-    let dir = path.parent().unwrap();
-    std::fs::create_dir_all(dir)?;
-    let mut file = tempfile::NamedTempFile::new_in(dir)?;
-    serde_json::to_writer(&mut file, favorites)?;
-    file.flush()?;
-    file.as_file().sync_all()?;
-    file.persist(path).map_err(|e| e.error)?;
-    Ok(())
+    crate::storage::atomic_json(&favorite_path(), favorites)
 }
 pub fn import_file(path: &Path) -> Result<PathBuf> {
     let text = std::fs::read_to_string(path)?;
@@ -107,7 +98,9 @@ pub fn import_file(path: &Path) -> Result<PathBuf> {
         use std::io::Write;
         let mut f = tempfile::NamedTempFile::new_in(&dir)?;
         f.write_all(text.as_bytes())?;
+        f.as_file().sync_all()?;
         f.persist_noclobber(&target).map_err(|e| e.error)?;
+        crate::storage::sync_dir(&dir)?;
     }
     Ok(target)
 }

@@ -387,6 +387,7 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
             f.write_all(&bytes)?;
             f.as_file().sync_all()?;
             f.persist_noclobber(&target).map_err(|e| e.error)?;
+            crate::storage::sync_dir(destination)?;
         }
         imported.push(target);
     }
