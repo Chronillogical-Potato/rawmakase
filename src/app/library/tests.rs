@@ -1819,3 +1819,31 @@ fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
     assert_eq!(library.fields.keyword_entry, "Typed");
     Ok(())
 }
+#[test]
+fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Result<()> {
+    use crate::catalog::{LangAlt, Value};
+    let (_dir, mut library) = library_of(&["a.ARW"])?;
+    let id = library.photos[0].id;
+    library.selection.selected = [id].into();
+    library.selection.active = Some(id);
+    library.sync_fields();
+    library.fields.drafts.title = "Typed".into();
+    // A keyword added meanwhile reads the values again.
+    library.edit_descriptive(
+        &[id],
+        super::descriptive::DescriptiveEdit::AddKeywords(vec![vec!["K".into()]]),
+    )?;
+    library.sync_fields();
+    assert_eq!(
+        library.catalog.descriptive(id)?.title,
+        Some(Value::Set(LangAlt::new("Typed")))
+    );
+    assert_eq!(library.fields.drafts.title, "Typed");
+    // Read again without typing, nothing more is saved.
+    let done = library.take_descriptive_done().len();
+    library.fields.reload();
+    library.sync_fields();
+    assert!(library.take_descriptive_done().is_empty());
+    assert_eq!(done, 2);
+    Ok(())
+}

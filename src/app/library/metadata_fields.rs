@@ -58,9 +58,11 @@ pub(super) struct Fields {
     /// "+" added an empty creator entry, to keep after a save reads the
     /// values again.
     add_creator: bool,
-    /// Title, caption and copyright were typed in, even back to how they
-    /// were: emptying a mixed field clears it on every photo.
-    edited: [bool; 3],
+    /// Title, caption, copyright and creator were typed in, even back to how
+    /// they were: emptying a mixed field clears it on every photo.
+    edited: [bool; 4],
+    /// The drafts were saved and the values not read again yet.
+    saved: bool,
 }
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct Drafts {
@@ -161,14 +163,15 @@ impl Library {
         };
         // An entry added and left empty changes nothing.
         let creators = names(&drafts.creators);
-        if creators != names(&untouched.creators) {
+        if creators != names(&untouched.creators) || edited[3] {
             edits.push(DescriptiveEdit::Creators(creators));
         }
         let place = self.fields.place.clone();
         for edit in edits {
             self.edit_descriptive_at(&targets, edit, place.clone())?;
         }
-        self.fields.edited = [false; 3];
+        self.fields.edited = [false; 4];
+        self.fields.saved = true;
         self.fields.reload();
         Ok(())
     }
@@ -180,7 +183,13 @@ impl Library {
             return;
         }
         let moved = targets != self.fields.targets;
-        if moved && let Err(e) = self.commit_fields() {
+        // Drafts not shown (a collapsed section) are saved before the values
+        // are read again, never dropped.
+        let f = &self.fields;
+        let pending = !f.saved && (f.drafts != f.untouched() || f.edited.iter().any(|e| *e));
+        if (moved || pending)
+            && let Err(e) = self.commit_fields()
+        {
             // The drafts stay with the photos they were typed for, to be
             // saved again or discarded.
             self.message = format!("Metadata could not be saved: {e}");
@@ -226,7 +235,8 @@ impl Library {
         let n = keywords.len();
         f.keywords = counts.into_iter().map(|(k, c)| (k, c == n)).collect();
         f.drafts = f.untouched();
-        f.edited = [false; 3];
+        f.edited = [false; 4];
+        f.saved = false;
     }
     /// Title, Caption, Creator, Copyright and Location rows.
     pub(super) fn metadata_fields(&mut self, ui: &mut egui::Ui) {
@@ -237,7 +247,8 @@ impl Library {
             let f = &mut self.fields;
             let title = text_row(ui, "Title", &mut f.drafts.title, &f.title, false);
             let caption = text_row(ui, "Caption", &mut f.drafts.caption, &f.caption, true);
-            let (changed, added) = creator_rows(ui, &mut f.drafts.creators, &f.creators);
+            let (changed, added, typed) = creator_rows(ui, &mut f.drafts.creators, &f.creators);
+            f.edited[3] |= typed;
             commit |= changed;
             // A saved entry needs no empty one after it; "+" clicked while
             // an entry was saved keeps its new one.
@@ -456,14 +467,15 @@ fn text_row(
     (response.lost_focus(), response.changed())
 }
 /// One row per creator, each removable, and a button to add one. Returns
-/// whether the list changed or an entry was left, to save it, and whether an
-/// entry was added.
+/// whether the list changed or an entry was left, to save it, whether an
+/// entry was added, and whether one was typed in.
 fn creator_rows(
     ui: &mut egui::Ui,
     names: &mut Vec<String>,
     shared: &Shared<Vec<String>>,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     let mut commit = false;
+    let mut typed = false;
     let mut remove = None;
     let count = names.len();
     for (i, name) in names.iter_mut().enumerate() {
@@ -494,6 +506,7 @@ fn creator_rows(
                 .vertical_align(egui::Align::Center),
         );
         commit |= response.lost_focus();
+        typed |= response.changed();
         let last = i + 1 == count;
         let (label, tip) = if last {
             ("+", "Add a creator")
@@ -519,7 +532,7 @@ fn creator_rows(
         // "+" adds an empty entry to type in, saved when it is left.
         Some(usize::MAX) => {
             names.push(String::new());
-            return (commit, true);
+            return (commit, true, typed);
         }
         Some(i) => {
             names.remove(i);
@@ -527,5 +540,5 @@ fn creator_rows(
         }
         None => {}
     }
-    (commit, false)
+    (commit, false, typed)
 }
