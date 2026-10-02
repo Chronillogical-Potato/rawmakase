@@ -1,7 +1,7 @@
 use super::Editor;
 use super::icons::{self, Icon};
+use super::navigator;
 use super::state::{TextureMode, Tool};
-use super::widgets::{section, segmented};
 use crate::app::theme;
 use crate::develop::{self, Geometry};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -80,87 +80,32 @@ impl Editor {
         };
     }
     /// Lightroom's Navigator: the whole photo with the zoomed area outlined.
-    /// Clicking or dragging in it moves the 100% view there.
+    /// Clicking or dragging in it moves the zoomed view there.
     pub(super) fn navigator_ui(&mut self, ui: &mut egui::Ui) {
-        ui.spacing_mut().item_spacing.y = 0.;
-        section(ui, "Navigator", false, |ui| {
-            // 0 stands for Fit.
-            let mut zoom = if self.view.zoom100 {
-                self.view.zoom_level
-            } else {
-                0.
-            };
-            let w = ui.available_width();
-            if segmented(
-                ui,
-                &mut zoom,
-                &[
-                    (0., "Fit"),
-                    (0.5, "50%"),
-                    (1., "100%"),
-                    (2., "200%"),
-                    (4., "400%"),
-                ],
-                w,
-            ) {
-                self.set_zoom(zoom);
-            }
-            ui.add_space(6.);
-            let (rect, response) = ui.allocate_exact_size(
-                Vec2::new(ui.available_width(), ui.available_width() * 0.66),
-                Sense::click_and_drag(),
-            );
-            ui.painter().rect_filled(rect, 0., theme::photo_backdrop());
-            let Some(texture) = &self.preview.navigator else {
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "No photo open",
-                    egui::FontId::proportional(11.),
-                    theme::gray(95),
-                );
-                return;
-            };
-            let size = texture.size_vec2();
-            let scale = (rect.width() / size.x).min(rect.height() / size.y);
-            let image = Rect::from_center_size(rect.center(), size * scale);
-            ui.painter().image(
-                texture.id(),
-                image,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)),
-                Color32::WHITE,
-            );
-            if let (Some([x, y, w, h]), Some(im)) = (self.region(), self.document.full()) {
+        let shown = self
+            .region()
+            .zip(self.document.full())
+            .map(|([x, y, w, h], im)| {
                 let g = Geometry::new(im, &self.effective_recipe(), 0);
-                let to = |px: u32, py: u32| {
-                    Pos2::new(
-                        image.left() + px as f32 / g.width as f32 * image.width(),
-                        image.top() + py as f32 / g.height as f32 * image.height(),
-                    )
-                };
-                ui.painter().rect_stroke(
-                    Rect::from_min_max(to(x, y), to(x + w, y + h)),
-                    0.,
-                    Stroke::new(1.5, Color32::WHITE),
-                    egui::StrokeKind::Outside,
-                );
-            }
-            if (response.clicked() || response.dragged())
-                && let Some(p) = response.interact_pointer_pos()
-            {
-                self.view.pan = [
-                    ((p.x - image.left()) / image.width()).clamp(0., 1.),
-                    ((p.y - image.top()) / image.height()).clamp(0., 1.),
-                ];
-                self.view.zoom100 = true;
+                let (gw, gh) = (g.width as f32, g.height as f32);
+                [x as f32 / gw, y as f32 / gh, w as f32 / gw, h as f32 / gh]
+            });
+        let photo = self
+            .preview
+            .navigator
+            .as_ref()
+            .map(|p| (p.id(), p.size_vec2()));
+        match navigator::navigator(ui, photo, Some(self.view.zoom), shown) {
+            Some(navigator::Change::Level(level)) => self.set_zoom(level),
+            Some(navigator::Change::Inspect(at)) => {
+                self.view.zoom.pan = at;
+                self.view.zoom.on = true;
                 if self.view.is(Tool::Crop) {
                     self.view.tool = Tool::None;
                 }
             }
-            response
-                .on_hover_cursor(egui::CursorIcon::Crosshair)
-                .on_hover_text("Click or drag to inspect that area at 100%");
-        });
+            None => {}
+        }
     }
     /// Before the first image arrives: the Library preview of the photo being
     /// opened with a spinner, or a hint when nothing is open.
@@ -213,14 +158,9 @@ impl Editor {
     }
     /// Sets a zoom level; 0 means Fit.
     pub(super) fn set_zoom(&mut self, level: f32) {
-        if level <= 0. {
-            self.view.zoom100 = false;
-        } else {
-            self.view.zoom100 = true;
-            self.view.zoom_level = level;
-            if self.view.is(Tool::Crop) {
-                self.view.tool = Tool::None;
-            }
+        self.view.zoom.set(level);
+        if self.view.zoom.on && self.view.is(Tool::Crop) {
+            self.view.tool = Tool::None;
         }
         self.schedule();
     }
@@ -232,8 +172,8 @@ impl Editor {
             let g = Geometry::new(im, &self.effective_recipe(), 0);
             (self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32)
         });
-        let current = if self.view.zoom100 {
-            self.view.zoom_level
+        let current = if self.view.zoom.on {
+            self.view.zoom.level
         } else {
             fit
         };
@@ -252,15 +192,15 @@ impl Editor {
         }
     }
     /// Screen rectangle of the whole photo for the current zoom: fitted in Fit,
-    /// otherwise `zoom_level` screen pixels per image pixel around `pan`,
+    /// otherwise `zoom.level` screen pixels per image pixel around `zoom.pan`,
     /// centered when smaller than the viewport.
     fn photo_rect(&self, area: Rect, g: &Geometry, ppp: f32) -> Rect {
         let (w, h) = (g.width as f32, g.height as f32);
-        if !self.view.zoom100 {
+        if !self.view.zoom.on {
             let k = (area.width() / w).min(area.height() / h);
             return Rect::from_center_size(area.center(), Vec2::new(w, h) * k);
         }
-        let size = Vec2::new(w, h) * (self.view.zoom_level / ppp);
+        let size = Vec2::new(w, h) * (self.view.zoom.level / ppp);
         let place = |pan: f32, lo: f32, len: f32, size: f32| {
             if size <= len {
                 lo + (len - size) / 2.
@@ -269,8 +209,8 @@ impl Editor {
             }
         };
         let min = Pos2::new(
-            place(self.view.pan[0], area.left(), area.width(), size.x),
-            place(self.view.pan[1], area.top(), area.height(), size.y),
+            place(self.view.zoom.pan[0], area.left(), area.width(), size.x),
+            place(self.view.zoom.pan[1], area.top(), area.height(), size.y),
         );
         Rect::from_min_size(min, size)
     }
@@ -280,7 +220,7 @@ impl Editor {
         ui.painter().rect_filled(area, 0., theme::photo_backdrop());
         let ppp = ui.ctx().pixels_per_point();
         self.view.viewport = available * ppp;
-        if !self.view.zoom100
+        if !self.view.zoom.on
             && let Some(im) = self.document.full().cloned()
         {
             let g = Geometry::new(&im, &self.effective_recipe(), 0);
@@ -318,7 +258,7 @@ impl Editor {
                 Rect::from_center_size(area.center(), size * k)
             }
         };
-        let key = (self.view.zoom100, self.view.zoom_level);
+        let key = (self.view.zoom.on, self.view.zoom.level);
         if key != self.view.zoom_key {
             self.view.zoom_key = key;
             self.schedule();
@@ -404,13 +344,13 @@ impl Editor {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
         let picking = self.view.picks_color() && !space && !self.view.compare;
         let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
-        if self.view.zoom100 && hand && response.dragged() {
+        if self.view.zoom.on && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
-            self.view.pan[0] = (self.view.pan[0] - delta.x / rect.width()).clamp(0., 1.);
-            self.view.pan[1] = (self.view.pan[1] - delta.y / rect.height()).clamp(0., 1.);
+            self.view.zoom.pan[0] = (self.view.zoom.pan[0] - delta.x / rect.width()).clamp(0., 1.);
+            self.view.zoom.pan[1] = (self.view.zoom.pan[1] - delta.y / rect.height()).clamp(0., 1.);
         }
         if response.hovered() && hand && !self.view.is(Tool::Crop) {
-            ui.ctx().set_cursor_icon(if self.view.zoom100 {
+            ui.ctx().set_cursor_icon(if self.view.zoom.on {
                 egui::CursorIcon::Grab
             } else {
                 egui::CursorIcon::ZoomIn
@@ -429,17 +369,17 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
-            if !self.view.zoom100
+            if !self.view.zoom.on
                 && let Some(g) = &geometry
             {
                 let point = (pos - rect.min) / rect.size();
-                let k = self.view.zoom_level / ppp;
+                let k = self.view.zoom.level / ppp;
                 let size = Vec2::new(g.width as f32 * k, g.height as f32 * k);
                 let origin = pos - point * size;
                 let pan = (area.center() - origin) / size;
-                self.view.pan = [pan.x.clamp(0., 1.), pan.y.clamp(0., 1.)];
+                self.view.zoom.pan = [pan.x.clamp(0., 1.), pan.y.clamp(0., 1.)];
             }
-            self.view.zoom100 = !self.view.zoom100;
+            self.view.zoom.on = !self.view.zoom.on;
             self.schedule();
         }
         if self.view.picks_color() {
@@ -500,7 +440,7 @@ impl Editor {
                 None => self.status = "Wait for the preview to update, then pick again".into(),
             }
         }
-        if self.view.is(Tool::Crop) && !self.view.zoom100 && self.document.full().is_some() {
+        if self.view.is(Tool::Crop) && !self.view.zoom.on && self.document.full().is_some() {
             let c = self.document.recipe.crop;
             let cr = Rect::from_min_max(
                 Pos2::new(
@@ -628,7 +568,7 @@ impl Editor {
                 self.view.crop_drag = None;
             }
         }
-        if self.view.zoom100 && self.region() != self.preview.last_region {
+        if self.view.zoom.on && self.region() != self.preview.last_region {
             self.schedule();
         }
     }

@@ -306,7 +306,7 @@ impl Editor {
         self.library.is_some()
             && self.document.catalog_photo.is_some()
             && self.document.path.is_some()
-            && !self.view.zoom100
+            && !self.view.zoom.on
             && !self.view.compare
             && !self.view.is(super::state::Tool::Crop)
             && self.presets.preview.is_none()

@@ -193,10 +193,15 @@ impl Library {
                 });
             });
     }
-    pub fn grid(&mut self, ui: &mut egui::Ui) -> Action {
+    /// The grid, or the Loupe in its place at the shared `zoom`.
+    pub(in crate::app) fn grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        zoom: &mut crate::app::navigator::Zoom,
+    ) -> Action {
         self.poll_previews(ui.ctx());
         if self.loupe.open {
-            return self.loupe(ui);
+            return self.loupe(ui, zoom);
         }
         let mut action = Action::None;
         self.filter_bar(ui);

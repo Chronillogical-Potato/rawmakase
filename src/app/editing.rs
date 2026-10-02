@@ -17,7 +17,7 @@ impl Editor {
             self.view.is(super::state::Tool::Crop),
             self.view.clipping,
             self.view.compare,
-            self.view.zoom100,
+            self.view.zoom.on,
         ]
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {

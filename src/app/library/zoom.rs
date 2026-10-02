@@ -1,6 +1,7 @@
-//! The Loupe's own 1:1, for JPEG, TIFF and PNG files (a RAW zooms in
-//! Develop's viewport): one image pixel per screen pixel. Only the part in
-//! view is uploaded; the Fit preview, enlarged, fills in around it.
+//! The Loupe's zoomed view of JPEG, TIFF and PNG files (a RAW zooms in
+//! Develop's viewport), at the shared `navigator::Zoom`. Only the part of
+//! the image in view is uploaded; the Fit preview, enlarged, fills in around
+//! it.
 //!
 //! Memory is budgeted in three parts. Active: the photo's full decode, held
 //! by the worker while 1:1 is on and dropped when the photo changes or the
@@ -42,11 +43,8 @@ struct Held {
     image: image::RgbImage,
 }
 
-pub(super) struct Zoom {
-    /// 1:1 rather than Fit.
-    pub on: bool,
-    /// The view's centre, as a fraction of the photo's width and height.
-    pub center: [f32; 2],
+/// The image pixels in view, read from the full decode in the background.
+pub(super) struct Regions {
     /// The photo the region and size below belong to.
     pub photo: Option<i64>,
     pub full: Option<[u32; 2]>,
@@ -60,7 +58,7 @@ pub(super) struct Zoom {
     cancel: Arc<AtomicBool>,
     pub error: Option<String>,
 }
-impl Zoom {
+impl Regions {
     pub(super) fn new(ctx: &egui::Context) -> Self {
         let (tx, results) = channel();
         let ctx = ctx.clone();
@@ -76,7 +74,7 @@ impl Zoom {
             }
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| region(&job, &mut held)))
-                    .unwrap_or_else(|_| Err(anyhow::anyhow!("The 1:1 view could not be built")));
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("The zoomed view could not be built")));
             if job.cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -87,8 +85,6 @@ impl Zoom {
             ctx.request_repaint();
         });
         Self {
-            on: false,
-            center: [0.5, 0.5],
             photo: None,
             full: None,
             region: None,
@@ -101,16 +97,6 @@ impl Zoom {
             error: None,
         }
     }
-    /// 1:1 at `center` (fractions of the photo), or back to Fit.
-    pub(super) fn set(&mut self, on: bool, center: Option<[f32; 2]>) {
-        self.on = on;
-        if let Some(center) = center {
-            self.center = center.map(|c| c.clamp(0., 1.));
-        }
-        if !on {
-            self.release();
-        }
-    }
     /// Drops the region and lets the worker free the full decode.
     pub(super) fn release(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -121,9 +107,15 @@ impl Zoom {
         self.pending = false;
         self.worker.submit(None);
     }
-    /// Asks for the part of `photo` around `center` that fills a view of
-    /// `size` pixels, unless it is already on its way.
-    pub(super) fn request(&mut self, photo: i64, path: &std::path::Path, size: [u32; 2]) {
+    /// Asks for the `size` image pixels of `photo` around `center` (fractions
+    /// of the photo), unless they are already on their way.
+    pub(super) fn request(
+        &mut self,
+        photo: i64,
+        path: &std::path::Path,
+        center: [f32; 2],
+        size: [u32; 2],
+    ) {
         if self.photo != Some(photo) {
             self.photo = Some(photo);
             self.full = None;
@@ -132,7 +124,7 @@ impl Zoom {
         }
         // Positions in steps of 8 pixels, so a slow drag asks less often.
         let full = self.full.unwrap_or([4096, 4096]);
-        let at = [0, 1].map(|i| (self.center[i] * full[i] as f32 / 8.).round() as i32);
+        let at = [0, 1].map(|i| (center[i] * full[i] as f32 / 8.).round() as i32);
         let wanted = (photo, at, size);
         if self.requested == Some(wanted) {
             return;
@@ -145,7 +137,7 @@ impl Zoom {
         self.worker.submit(Some(RegionJob {
             ticket: self.ticket,
             path: path.into(),
-            center: self.center,
+            center,
             size,
             cancel: self.cancel.clone(),
         }));

@@ -6,6 +6,7 @@
 //! and kept, within a budget, until it is shown. An offline photo shows its
 //! cached preview.
 use super::{Action, Library, thumbnails};
+use crate::app::navigator::Zoom;
 use crate::app::theme;
 use crate::app::worker::Latest;
 use crate::catalog::Photo;
@@ -50,7 +51,7 @@ pub(super) enum State {
 
 pub(super) struct Loupe {
     pub open: bool,
-    pub zoom: super::zoom::Zoom,
+    pub regions: super::zoom::Regions,
     worker: Latest<Job>,
     /// Prepares the neighbour, on its own so it never holds up the photo shown.
     ahead: Latest<Job>,
@@ -96,7 +97,7 @@ impl Loupe {
         };
         Self {
             open: false,
-            zoom: super::zoom::Zoom::new(ctx),
+            regions: super::zoom::Regions::new(ctx),
             worker: worker(tx.clone(), ctx.clone()),
             ahead: worker(tx, ctx.clone()),
             ahead_cancel: Default::default(),
@@ -179,7 +180,7 @@ impl Loupe {
     }
     /// Lets go of what the Loupe's own preview holds, unless already idle.
     fn idle(&mut self) {
-        if self.requested.is_some() || self.texture.is_some() || self.zoom.region.is_some() {
+        if self.requested.is_some() || self.texture.is_some() || self.regions.region.is_some() {
             self.reset();
         }
     }
@@ -189,13 +190,13 @@ impl Loupe {
         self.ahead_cancel.store(true, Ordering::Relaxed);
         self.ahead_requested = None;
         self.prefetched.clear();
-        self.zoom.release();
+        self.regions.release();
         self.requested = None;
         self.texture = None;
         self.state = State::Loading;
     }
     fn poll(&mut self, ctx: &egui::Context) {
-        self.zoom.poll(ctx);
+        self.regions.poll(ctx);
         while let Ok(done) = self.results.try_recv() {
             if let Some(key) = done.ahead {
                 if let Ok(image) = done.result {
@@ -269,10 +270,26 @@ impl Library {
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)
     }
-    /// Z, a click, Cmd+= and Cmd+-: 1:1 or Fit, keeping the place in the photo.
-    pub(super) fn zoom_loupe(&mut self, on: Option<bool>) {
-        let on = on.unwrap_or(!self.loupe.zoom.on);
-        self.loupe.zoom.set(on, None);
+    /// What the Navigator shows for a photo in the Loupe's own view: its
+    /// preview, and the part in view when zoomed.
+    pub(in crate::app) fn loupe_navigator(
+        &self,
+    ) -> Option<(crate::app::navigator::Photo, Option<[f32; 4]>)> {
+        let photo = self.selection.active.and_then(|id| self.photo(id))?;
+        let texture = self
+            .loupe
+            .texture
+            .as_ref()
+            .filter(|_| self.is_available(&photo.path))
+            .or_else(|| self.texture(photo))?;
+        let shown = self
+            .loupe
+            .regions
+            .region
+            .as_ref()
+            .filter(|_| self.loupe.regions.photo == Some(photo.id))
+            .map(|(_, rect)| *rect);
+        Some(((texture.id(), texture.size_vec2()), shown))
     }
     /// G or Esc: back to the grid, at the active photo.
     pub fn close_loupe(&mut self) {
@@ -283,7 +300,7 @@ impl Library {
         }
     }
     /// The Loupe in place of the grid, with the filmstrip below.
-    pub(super) fn loupe(&mut self, ui: &mut egui::Ui) -> Action {
+    pub(super) fn loupe(&mut self, ui: &mut egui::Ui, zoom: &mut Zoom) -> Action {
         self.loupe.poll(ui.ctx());
         let Some(id) = self.selection.active else {
             self.close_loupe();
@@ -347,69 +364,73 @@ impl Library {
             let scale = (inset.width() / size.x).min(inset.height() / size.y);
             egui::Rect::from_center_size(inset.center(), size * scale)
         });
-        // A click zooms to 1:1 at the point clicked, and back; a drag pans.
-        // The second click of a double-click is not another toggle, so a
-        // double-click zooms in too rather than in and straight back out.
-        // Zooming in starts on the photo, not in the margin around it.
+        // A click zooms in at the point clicked, and back; a drag pans. The
+        // second click of a double-click is not another toggle, and zooming
+        // in starts on the photo, not in the margin around it.
         let on_photo = response
             .interact_pointer_pos()
             .zip(fit)
             .is_some_and(|(pos, fit)| fit.contains(pos));
-        if response.clicked()
-            && !response.double_clicked()
-            && available
-            && (self.loupe.zoom.on || on_photo)
-        {
-            let at = response.interact_pointer_pos().zip(fit).map(|(pos, fit)| {
-                [
-                    (pos.x - fit.left()) / fit.width(),
-                    (pos.y - fit.top()) / fit.height(),
-                ]
-            });
-            let on = !self.loupe.zoom.on;
-            self.loupe.zoom.set(on, if on { at } else { None });
+        if response.clicked() && !response.double_clicked() && available && (zoom.on || on_photo) {
+            if let Some((pos, fit)) = response
+                .interact_pointer_pos()
+                .zip(fit)
+                .filter(|_| !zoom.on)
+            {
+                zoom.pan = [
+                    ((pos.x - fit.left()) / fit.width()).clamp(0., 1.),
+                    ((pos.y - fit.top()) / fit.height()).clamp(0., 1.),
+                ];
+            }
+            zoom.on = !zoom.on;
         }
-        let zoom = &mut self.loupe.zoom;
-        let full = zoom
+        if !zoom.on && self.loupe.regions.region.is_some() {
+            self.loupe.regions.release();
+        }
+        let regions = &mut self.loupe.regions;
+        let full = regions
             .full
-            .filter(|_| zoom.on && available && zoom.photo == Some(photo.id));
+            .filter(|_| zoom.on && available && regions.photo == Some(photo.id));
         let shown = match full {
             Some(full) => {
-                let size = egui::vec2(full[0] as f32, full[1] as f32) / ppp;
+                // `level` screen pixels per image pixel.
+                let size = egui::vec2(full[0] as f32, full[1] as f32) * zoom.level / ppp;
                 if response.dragged() {
                     let delta = response.drag_delta();
-                    zoom.center[0] -= delta.x / size.x;
-                    zoom.center[1] -= delta.y / size.y;
+                    zoom.pan[0] -= delta.x / size.x;
+                    zoom.pan[1] -= delta.y / size.y;
                 }
                 // The photo covers the view where it is larger, and is
                 // centred where it is smaller.
                 for i in 0..2 {
                     let half = rect.size()[i] / 2. / size[i];
-                    zoom.center[i] = if half >= 0.5 {
+                    zoom.pan[i] = if half >= 0.5 {
                         0.5
                     } else {
-                        zoom.center[i].clamp(half, 1. - half)
+                        zoom.pan[i].clamp(half, 1. - half)
                     };
                 }
                 Some(egui::Rect::from_min_size(
-                    rect.center() - egui::vec2(zoom.center[0] * size.x, zoom.center[1] * size.y),
+                    rect.center() - egui::vec2(zoom.pan[0] * size.x, zoom.pan[1] * size.y),
                     size,
                 ))
             }
             None => fit,
         };
         if zoom.on && available {
-            let size = [(rect.width() * ppp) as u32, (rect.height() * ppp) as u32];
-            zoom.request(photo.id, &photo.path, size);
+            // The image pixels that fill the view at this level.
+            let size =
+                [rect.width(), rect.height()].map(|side| (side * ppp / zoom.level).ceil() as u32);
+            regions.request(photo.id, &photo.path, zoom.pan, size);
         }
         let painter = ui.painter().with_clip_rect(rect);
         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
         if let (Some(texture), Some(at)) = (&texture, shown) {
             painter.image(texture.id(), at, uv, Color32::WHITE);
         }
-        // The 1:1 region over the enlarged Fit preview.
+        // The zoomed region over the enlarged Fit preview.
         if let (Some(at), true) = (shown, full.is_some())
-            && let Some((region, [x, y, w, h])) = &zoom.region
+            && let Some((region, [x, y, w, h])) = &regions.region
         {
             let place = egui::Rect::from_min_size(
                 at.min + egui::vec2(x * at.width(), y * at.height()),
@@ -429,13 +450,11 @@ impl Library {
                 "Offline: showing the cached preview. Full detail needs the original.".into()
             }
             (_, false, false) => "Offline, and there is no cached preview".into(),
-            _ if self.loupe.zoom.on && self.loupe.zoom.error.is_some() => format!(
-                "1:1 unavailable: {}",
-                self.loupe.zoom.error.clone().unwrap_or_default()
+            _ if zoom.on && self.loupe.regions.error.is_some() => format!(
+                "Zoom unavailable: {}",
+                self.loupe.regions.error.clone().unwrap_or_default()
             ),
-            _ if self.loupe.zoom.on && (self.loupe.zoom.pending || full.is_none()) => {
-                "Loading 1:1…".into()
-            }
+            _ if zoom.on && (self.loupe.regions.pending || full.is_none()) => "Loading…".into(),
             (State::Loading, ..) => "Loading…".into(),
             (State::Ready, ..) => String::new(),
             (State::Failed(e), ..) => format!("Preview unavailable: {e}"),

@@ -204,7 +204,7 @@ fn catalog_metadata_keys_work_in_both_modules_without_zoom_or_dialog_edits() -> 
         let id = ids[usize::from(!library_mode)];
         let photo = e.library.as_ref().unwrap().photo(id).unwrap();
         assert_eq!((photo.rating, photo.flag), (expected_rating, expected_flag));
-        assert!(!e.view.zoom100);
+        assert!(!e.view.zoom.on);
     }
     assert!(e.activity.begin_dialog());
     let mut output = ctx.run_ui(
@@ -253,7 +253,7 @@ fn keyboard_fit_and_physical_pixel_region() {
         };
         let mut output = ctx.run_ui(input, |ui| e.draw(ui));
         output.textures_delta.clear();
-        assert_eq!(e.view.zoom100, expected);
+        assert_eq!(e.view.zoom.on, expected);
     }
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
@@ -270,7 +270,7 @@ fn keyboard_fit_and_physical_pixel_region() {
         scale_clipped: 0,
     });
     e.document.set_image(image);
-    e.view.zoom100 = true;
+    e.view.zoom.on = true;
     e.view.viewport = Vec2::new(4., 2.);
     assert_eq!(e.region(), Some([4, 3, 4, 2]));
 }
@@ -313,8 +313,8 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
         );
         output.textures_delta.clear();
         (
-            editor.view.zoom100,
-            editor.view.pan,
+            editor.view.zoom.on,
+            editor.view.zoom.pan,
             editor.document.recipe.clone(),
         )
     };
@@ -699,7 +699,7 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
         output.textures_delta.clear();
         (
             editor.document.recipe.retouch.clone(),
-            editor.view.zoom100,
+            editor.view.zoom.on,
             editor.view.retouch.selected,
         )
     };
@@ -841,7 +841,7 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
         (from[1] - 0.2).abs() < 0.02 && (to[1] - 0.8).abs() < 0.02,
         "{from:?} {to:?}"
     );
-    assert!(!editor.view.zoom100);
+    assert!(!editor.view.zoom.on);
     // Dragging its end handle moves only that end.
     drag(
         &mut editor,
