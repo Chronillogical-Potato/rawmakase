@@ -124,8 +124,15 @@ impl Editor {
         }
         self.sync_undo();
         let place = self.current_place();
-        if self.library.is_some() && place != self.saved_place {
+        let layout = self.library.as_ref().map(|l| l.layout());
+        // Kept once a drag, e.g. of the thumbnail size, ends.
+        let dragging = ctx.input(|i| i.pointer.any_down());
+        let layout_changed = !dragging && layout.as_ref().is_some_and(|l| *l != self.saved_layout);
+        if self.library.is_some() && (place != self.saved_place || layout_changed) {
             self.saved_place = place;
+            if let Some(layout) = layout {
+                self.saved_layout = layout;
+            }
             let _ = self.save_session();
         }
     }

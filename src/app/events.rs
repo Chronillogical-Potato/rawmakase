@@ -241,6 +241,9 @@ impl Editor {
                     && let Some(library) = &mut self.library
                 {
                     library.restore_source(&source, photo);
+                    if let Some(layout) = self.restore_layout.take() {
+                        library.apply_layout(&layout);
+                    }
                     if develop && let Some(id) = library.selected() {
                         self.develop_catalog_photo(id);
                     }
