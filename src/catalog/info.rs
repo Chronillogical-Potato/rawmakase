@@ -10,6 +10,20 @@ pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 
 impl Catalog {
     /// A photo's info; a virtual copy has its master's.
+    /// Each photo's width over height, as shown, where it is known; a
+    /// virtual copy has its master's.
+    pub fn aspect_ratios(&self) -> Result<std::collections::HashMap<i64, f32>> {
+        let mut query = self.db.prepare(
+            "SELECT p.id, i.width, i.height FROM photos p
+             JOIN photo_info i ON i.photo = COALESCE(p.master_id, p.id)
+             WHERE i.width > 0 AND i.height > 0",
+        )?;
+        let rows = query.query_map([], |r| {
+            let (width, height): (f64, f64) = (r.get(1)?, r.get(2)?);
+            Ok((r.get(0)?, (width / height) as f32))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
     pub fn photo_info(&self, id: i64) -> Result<Option<PhotoInfo>> {
         Ok(self
             .db

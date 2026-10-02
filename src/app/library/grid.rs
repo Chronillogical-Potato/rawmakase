@@ -15,26 +15,7 @@ impl Library {
                 ui.horizontal(|ui| {
                     self.view_buttons(ui);
                     ui.add_space(12.);
-                    ui.label(filter_caption("Sort"));
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(if self.filters.reverse {
-                                    "Capture Time ↓"
-                                } else {
-                                    "Capture Time ↑"
-                                })
-                                .size(11.),
-                            )
-                            .small()
-                            .frame(false),
-                        )
-                        .on_hover_text("Reverse the sort order")
-                        .clicked()
-                    {
-                        self.filters.reverse = !self.filters.reverse;
-                        self.filter();
-                    }
+                    self.sort_menu(ui);
                     ui.add_space(12.);
                     self.cell_style_menu(ui);
                     ui.add_space(12.);
@@ -219,6 +200,45 @@ impl Library {
     }
 }
 impl Library {
+    /// Lightroom's Sort: the order from a menu, its direction from the arrow.
+    fn sort_menu(&mut self, ui: &mut egui::Ui) {
+        ui.label(filter_caption("Sort"));
+        let mut changed = false;
+        ui.menu_button(
+            egui::RichText::new(self.filters.sort.name()).size(11.),
+            |ui| {
+                for sort in super::sort::Sort::ALL {
+                    if ui
+                        .selectable_label(self.filters.sort == sort, sort.name())
+                        .clicked()
+                    {
+                        self.filters.sort = sort;
+                        changed = true;
+                        ui.close();
+                    }
+                }
+            },
+        )
+        .response
+        .on_hover_text("Sort the photos by");
+        let arrow = if self.filters.reverse { "↓" } else { "↑" };
+        if ui
+            .add(
+                egui::Button::new(egui::RichText::new(arrow).size(11.))
+                    .small()
+                    .frame(false),
+            )
+            .on_hover_text("Reverse the sort order")
+            .clicked()
+        {
+            self.filters.reverse = !self.filters.reverse;
+            changed = true;
+        }
+        if changed {
+            self.filter();
+            self.scroll_to_active = true;
+        }
+    }
     /// The grid cell style, from a menu as well as J.
     fn cell_style_menu(&mut self, ui: &mut egui::Ui) {
         let keys = crate::app::shortcuts::keys_text("J");

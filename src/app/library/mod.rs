@@ -248,9 +248,12 @@ impl Library {
         self.availability.count(&self.photos)
     }
     fn filter(&mut self) {
-        self.visible = self
-            .filters
-            .visible(&self.photos, |path| self.availability.is_available(path));
+        let keys = self.filters.sort.keys(&self.catalog);
+        self.visible = self.filters.visible(
+            &self.photos,
+            |path| self.availability.is_available(path),
+            &keys,
+        );
         self.keep_shown_selected();
     }
     pub fn photo(&self, id: i64) -> Option<&Photo> {
@@ -494,6 +497,7 @@ mod quick;
 mod screen;
 mod selection;
 mod sidebar;
+mod sort;
 mod stage;
 mod survey;
 mod textures;
