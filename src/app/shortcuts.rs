@@ -42,6 +42,11 @@ const RATING: [Shortcut; 8] = [
     ("Shift+key", "Apply and go to the next photo"),
     ("Cmd+Z / Cmd+Shift+Z", "Undo / redo, anywhere"),
 ];
+const QUICK: [Shortcut; 3] = [
+    ("B", "Add to or take out of it"),
+    ("Cmd+B", "Show it"),
+    ("Cmd+Shift+B", "Clear it"),
+];
 const GENERAL: [Shortcut; 5] = [
     ("G", "Library"),
     ("D", "Develop"),
@@ -89,9 +94,10 @@ impl Editor {
             return;
         }
         // The current module's shortcuts come first.
-        let library: [Group; 4] = [
+        let library: [Group; 5] = [
             ("Library grid", &LIBRARY),
             ("Loupe", &LOUPE),
+            ("Quick Collection", &QUICK),
             ("Rating, flags and labels", &RATING),
             ("Everywhere", &GENERAL),
         ];

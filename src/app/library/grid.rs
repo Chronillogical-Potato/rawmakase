@@ -256,15 +256,14 @@ impl Library {
                                 let p = self.photos[index].clone();
                                 let exists = self.is_available(&p.path);
                                 self.request_previews(&p, ui.ctx());
-                                let (response, edit) = photo_cell(
-                                    ui,
-                                    &p,
-                                    self.texture(&p),
-                                    self.mark(p.id),
-                                    row * columns + col + 1,
-                                    exists,
-                                    width,
-                                );
+                                let shown = cell::Shown {
+                                    mark: self.mark(p.id),
+                                    number: row * columns + col + 1,
+                                    available: exists,
+                                    quick: self.in_quick(p.id),
+                                };
+                                let (response, edit) =
+                                    photo_cell(ui, &p, self.texture(&p), shown, width);
                                 let response = if response.hovered() {
                                     let text = self.hover_text(&p);
                                     response.on_hover_text(text)

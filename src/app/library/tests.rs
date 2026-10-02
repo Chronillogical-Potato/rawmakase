@@ -60,15 +60,13 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
         );
         for width in [80., 190., 260.] {
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                photo_cell(
-                    ui,
-                    &photo,
-                    Some(&texture),
-                    selection::Mark::None,
-                    1,
-                    true,
-                    width,
-                );
+                let shown = cell::Shown {
+                    mark: selection::Mark::None,
+                    number: 1,
+                    available: true,
+                    quick: false,
+                };
+                photo_cell(ui, &photo, Some(&texture), shown, width);
             });
             let mesh = output
                 .shapes

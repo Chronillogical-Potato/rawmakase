@@ -5,7 +5,7 @@
 //! It lives in memory and is cleared when another catalog opens.
 use super::Editor;
 use super::history::{Recorded, Step};
-use super::library::MetadataCommand;
+use super::library::{CollectionCommand, MetadataCommand};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -26,6 +26,9 @@ pub(super) enum Command {
         change: Box<MetadataCommand>,
         develop: Option<i64>,
     },
+    /// Photos added to or taken out of a collection, e.g. the Quick
+    /// Collection; undone in the Library.
+    Collection(Box<CollectionCommand>),
     /// A Develop step or History click on `photo` (`None`: a file outside
     /// the catalog), in the History identified by `history`.
     Develop {
@@ -103,6 +106,12 @@ impl Editor {
                     },
                 )
             }));
+            commands.extend(
+                library
+                    .take_collection_done()
+                    .into_iter()
+                    .map(|change| (change.sequence, Command::Collection(Box::new(change)))),
+            );
         }
         commands.sort_by_key(|(sequence, _)| *sequence);
         for (_, command) in commands {
@@ -169,6 +178,27 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     library.message = self.status.clone();
                 }
+                true
+            }
+            Command::Collection(change) => {
+                let (add, remove, place) = match direction {
+                    Direction::Undo => (&change.removed, &change.added, &change.place_before),
+                    Direction::Redo => (&change.added, &change.removed, &change.place_after),
+                };
+                if !self.flush() {
+                    return false;
+                }
+                let Some(library) = &mut self.library else {
+                    return false;
+                };
+                if let Err(e) = library.change_collection(change.collection, add, remove) {
+                    self.status = format!("{verb} failed: {e}");
+                    return false;
+                }
+                self.library_mode = true;
+                library.go_to_place(place);
+                self.status = format!("{verb} {}", change.summary);
+                library.message = self.status.clone();
                 true
             }
             Command::Develop {

@@ -1637,13 +1637,17 @@ fn press(e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers) {
     let mut output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
-            events: vec![egui::Event::Key {
-                key,
-                physical_key: Some(key),
-                pressed: true,
-                repeat: false,
-                modifiers,
-            }],
+            // Pressed and released, as a real key is, so the next press of
+            // the same key is not a repeat.
+            events: [true, false]
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                })
+                .into(),
             ..Default::default()
         },
         |ui| e.draw(ui),
@@ -1723,5 +1727,39 @@ fn double_click_in_the_loupe_goes_back_to_the_grid() -> anyhow::Result<()> {
     }
     frame(&mut e, vec![], 1.5);
     assert!(!e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
+fn quick_collection_toggles_shows_clears_and_undoes() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[0]));
+    library.select_range_to(ids[1]);
+    press(&mut e, egui::Key::B, egui::Modifiers::NONE);
+    press(&mut e, egui::Key::B, egui::Modifiers::COMMAND);
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.shown(), ids[..2]);
+    assert_eq!(library.source_name(), "Quick Collection");
+    // B again on photos all in it takes them out.
+    press(&mut e, egui::Key::B, egui::Modifiers::NONE);
+    assert!(e.library.as_ref().unwrap().shown().is_empty());
+    e.undo();
+    assert_eq!(e.library.as_ref().unwrap().shown(), ids[..2]);
+    press(
+        &mut e,
+        egui::Key::B,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    );
+    assert!(e.library.as_ref().unwrap().shown().is_empty());
+    e.undo();
+    assert_eq!(e.library.as_ref().unwrap().shown(), ids[..2]);
+    // Kept in the catalog.
+    let reopened = crate::catalog::Catalog::open(&e.library.as_ref().unwrap().catalog.path)?;
+    let quick = reopened
+        .collections()?
+        .into_iter()
+        .find(|c| c.name == crate::catalog::QUICK_COLLECTION)
+        .unwrap();
+    assert_eq!(reopened.collection_photos()?[&quick.id].len(), 2);
     Ok(())
 }

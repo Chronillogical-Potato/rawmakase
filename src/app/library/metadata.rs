@@ -140,6 +140,13 @@ impl Library {
     /// Sets rating, flag and label for undo and redo, in one transaction,
     /// without recording a change of its own.
     pub(in crate::app) fn set_metadata(&mut self, values: &[Metadata]) -> Result<()> {
+        // A photo removed since (a virtual copy) is left out.
+        let values: Vec<Metadata> = values
+            .iter()
+            .filter(|(id, ..)| self.photo(*id).is_some())
+            .cloned()
+            .collect();
+        let values = values.as_slice();
         self.catalog.set_metadata_of(values)?;
         for (id, rating, flag, label) in values {
             if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
