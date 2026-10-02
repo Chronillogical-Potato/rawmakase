@@ -25,6 +25,8 @@ impl Editor {
         if had_preview {
             self.schedule();
         }
+        // The list depends on which presets fit this photo.
+        self.presets.revision += 1;
         let Some(m) = &self.document.metadata else {
             self.presets.issues.clear();
             self.presets.substitutes.clear();
@@ -95,9 +97,7 @@ impl Editor {
                             }
                             if ui
                                 .add(egui::Button::new("Import Folder…").frame(false))
-                                .on_hover_text(
-                                    "Import every preset in a folder and its subfolders",
-                                )
+                                .on_hover_text("Import every preset in a folder and its subfolders")
                                 .clicked()
                             {
                                 import = Some(FileDialog::ImportFolder(ImportKind::Presets));
@@ -151,38 +151,7 @@ impl Editor {
                         .on_hover_text(library.errors.join("\n"));
                     }
                     ui.add_space(2.);
-                    let query = self.presets.filter.to_lowercase();
-                    // Built-in groups first, in Lightroom's order, then imported
-                    // groups by name. A built-in and an imported group of the same
-                    // name stay apart.
-                    let mut groups: std::collections::BTreeMap<
-                        (bool, usize, String),
-                        Vec<usize>,
-                    > = Default::default();
-                    for (i, p) in library.presets.iter().enumerate() {
-                        let issue = self.presets.issues.get(i).and_then(Option::as_ref);
-                        if self.presets.compatible_only && issue.is_some() {
-                            continue;
-                        }
-                        if self.presets.favorites_only && !self.presets.favorites.contains(&p.id) {
-                            continue;
-                        }
-                        if !crate::presets::display_name(&format!("{} {}", p.group, p.name))
-                            .to_lowercase()
-                            .contains(&query)
-                        {
-                            continue;
-                        }
-                        let rank = if p.builtin {
-                            crate::presets::builtin::group_rank(&p.group)
-                        } else {
-                            0
-                        };
-                        groups
-                            .entry((!p.builtin, rank, p.group.clone()))
-                            .or_default()
-                            .push(i);
-                    }
+                    let groups = self.preset_list();
                     if groups.is_empty() && !library.presets.is_empty() {
                         ui.weak("No presets match these filters.");
                         if ui.small_button("Clear filters").clicked() {
@@ -192,12 +161,17 @@ impl Editor {
                         }
                     }
                     ui.spacing_mut().item_spacing.y = 0.;
-                    let force_open = !query.is_empty() || self.presets.favorites_only;
-                    for ((imported, _, group), indices) in groups {
-                        let id = ui.make_persistent_id(("preset-group", imported, &group));
+                    let force_open = !self.presets.filter.is_empty() || self.presets.favorites_only;
+                    for PresetGroup {
+                        imported,
+                        name: group,
+                        presets,
+                    } in groups.iter()
+                    {
+                        let id = ui.make_persistent_id(("preset-group", imported, group));
                         let open = force_open
                             || ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
-                        if list_row(ui, &group, Some(indices.len()), 0, Some(open), false, true)
+                        if list_row(ui, group, Some(presets.len()), 0, Some(open), false, true)
                             .clicked()
                             && !force_open
                         {
@@ -206,7 +180,8 @@ impl Editor {
                         if !open {
                             continue;
                         }
-                        for i in indices {
+                        for (i, name) in presets {
+                            let i = *i;
                             let p = &library.presets[i];
                             let issue = self.presets.issues.get(i).and_then(Option::as_ref);
                             // Incompatible presets are grayed out but still apply
@@ -215,13 +190,17 @@ impl Editor {
                             let favorite = self.presets.favorites.contains(&p.id);
                             let response = list_row(
                                 ui,
-                                &crate::presets::display_name(&p.name),
+                                name,
                                 None,
                                 1,
                                 None,
                                 self.presets.selected == p.id,
                                 enabled && issue.is_none(),
                             );
+                            // Off screen in the scrolled list: nothing more to draw.
+                            if !ui.is_rect_visible(response.rect) {
+                                continue;
+                            }
                             // Favorite star on the right, shown on hover or when set.
                             let star = egui::Rect::from_center_size(
                                 egui::pos2(response.rect.right() - 12., response.rect.center().y),
@@ -257,6 +236,7 @@ impl Editor {
                                 } else {
                                     self.presets.favorites.insert(p.id.clone());
                                 }
+                                self.presets.revision += 1;
                                 if let Err(e) =
                                     crate::presets::save_favorites(&self.presets.favorites)
                                 {
@@ -270,24 +250,12 @@ impl Editor {
                             if response.hovered() && enabled {
                                 hovered = Some(i);
                             }
-                            let detail = match issue {
-                                Some(issue) => format!(
-                                    "{}\nNot fully compatible: {issue}\nClick to apply the supported settings",
-                                    p.name
-                                ),
-                                None => format!(
-                                    "{}\nClick to apply · hover to preview\n{}",
-                                    p.name,
-                                    p.notes.join("\n")
-                                ),
-                            };
-                            let detail = match self.presets.substitutes.get(i).and_then(Option::as_ref) {
-                                Some((asked, used)) => format!(
-                                    "{detail}\nMade for {asked}; renders with {used} because {asked} isn't imported for this camera"
-                                ),
-                                None => detail,
-                            };
-                            response.on_hover_text(detail);
+                            // Built only while it shows.
+                            let substitute =
+                                self.presets.substitutes.get(i).and_then(Option::as_ref);
+                            response.on_hover_ui(|ui| {
+                                ui.label(preset_detail(p, issue, substitute));
+                            });
                         }
                     }
                 });
@@ -363,6 +331,119 @@ impl Editor {
     }
 }
 
+/// The preset list as shown: its groups in order, each with its presets'
+/// indices and display names. Building it means formatting and matching
+/// every preset, so it is kept until the search, the filters, the library,
+/// the favorites or the photo's compatibility change.
+pub(super) struct PresetList {
+    library: Arc<crate::presets::Library>,
+    filter: String,
+    favorites_only: bool,
+    compatible_only: bool,
+    revision: u64,
+    groups: Arc<Vec<PresetGroup>>,
+}
+pub(super) struct PresetGroup {
+    imported: bool,
+    pub(super) name: String,
+    pub(super) presets: Vec<(usize, String)>,
+}
+
+impl PresetList {
+    /// Whether this list is still the one to show; compares without
+    /// allocating, as it runs every frame.
+    fn shows(&self, browser: &super::state::PresetBrowser) -> bool {
+        Arc::ptr_eq(&self.library, &browser.library)
+            && self.filter == browser.filter
+            && self.favorites_only == browser.favorites_only
+            && self.compatible_only == browser.compatible_only
+            && self.revision == browser.revision
+    }
+    fn build(browser: &super::state::PresetBrowser) -> Self {
+        let query = browser.filter.to_lowercase();
+        // Built-in groups first, in Lightroom's order, then imported groups
+        // by name. A built-in and an imported group of the same name stay
+        // apart.
+        let mut groups: std::collections::BTreeMap<(bool, usize, String), Vec<(usize, String)>> =
+            Default::default();
+        for (i, p) in browser.library.presets.iter().enumerate() {
+            let issue = browser.issues.get(i).and_then(Option::as_ref);
+            if (browser.compatible_only && issue.is_some())
+                || (browser.favorites_only && !browser.favorites.contains(&p.id))
+                || !crate::presets::display_name(&format!("{} {}", p.group, p.name))
+                    .to_lowercase()
+                    .contains(&query)
+            {
+                continue;
+            }
+            let rank = if p.builtin {
+                crate::presets::builtin::group_rank(&p.group)
+            } else {
+                0
+            };
+            groups
+                .entry((!p.builtin, rank, p.group.clone()))
+                .or_default()
+                .push((i, crate::presets::display_name(&p.name)));
+        }
+        Self {
+            library: browser.library.clone(),
+            filter: browser.filter.clone(),
+            favorites_only: browser.favorites_only,
+            compatible_only: browser.compatible_only,
+            revision: browser.revision,
+            groups: Arc::new(
+                groups
+                    .into_iter()
+                    .map(|((imported, _, name), presets)| PresetGroup {
+                        imported,
+                        name,
+                        presets,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl Editor {
+    /// The preset list for the current search and filters; see `PresetList`.
+    pub(super) fn preset_list(&mut self) -> Arc<Vec<PresetGroup>> {
+        let list = match self.presets.list.take() {
+            Some(list) if list.shows(&self.presets) => list,
+            _ => PresetList::build(&self.presets),
+        };
+        let groups = list.groups.clone();
+        self.presets.list = Some(list);
+        groups
+    }
+}
+
+/// A preset's tooltip: its name, then whether it fits this photo and how.
+fn preset_detail(
+    p: &crate::xmp::Preset,
+    issue: Option<&String>,
+    substitute: Option<&(String, String)>,
+) -> String {
+    let detail = match issue {
+        Some(issue) => format!(
+            "{}\nNot fully compatible: {issue}\nClick to apply the supported settings",
+            p.name
+        ),
+        None => format!(
+            "{}\nClick to apply · hover to preview\n{}",
+            p.name,
+            p.notes.join("\n")
+        ),
+    };
+    match substitute {
+        Some((asked, used)) => format!(
+            "{detail}\nMade for {asked}; renders with {used} because {asked} isn't imported for this camera"
+        ),
+        None => detail,
+    }
+}
+
 /// A Lightroom-style list row for preset folders and presets: fixed height,
 /// indent, optional disclosure triangle and right-aligned count.
 fn list_row(
@@ -377,6 +458,10 @@ fn list_row(
     use egui::{Align2, FontId, Pos2};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
+    // Scrolled out of view: keep its place but skip laying out its text.
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
     if selected || (enabled && response.hovered()) {
         ui.painter().rect_filled(
             rect,

@@ -1763,3 +1763,62 @@ fn quick_collection_toggles_shows_clears_and_undoes() -> anyhow::Result<()> {
     assert_eq!(reopened.collection_photos()?[&quick.id].len(), 2);
     Ok(())
 }
+
+#[test]
+fn the_preset_list_is_kept_until_what_it_shows_changes() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let preset = |id: &str, group: &str, name: &str| crate::xmp::Preset {
+        id: id.into(),
+        name: name.into(),
+        group: group.into(),
+        path: Default::default(),
+        settings: Default::default(),
+        curves: Default::default(),
+        look: String::new(),
+        blockers: Vec::new(),
+        notes: Vec::new(),
+        photo_settings: false,
+        local: Default::default(),
+        builtin: false,
+    };
+    editor.presets.library = std::sync::Arc::new(crate::presets::Library {
+        presets: vec![
+            preset("a", "Film", "Warm⁺"),
+            preset("b", "Film", "Cool"),
+            preset("c", "Mono", "Grain"),
+        ],
+        errors: Vec::new(),
+    });
+    let names = |editor: &mut Editor| -> Vec<(String, Vec<String>)> {
+        editor
+            .preset_list()
+            .iter()
+            .map(|g| {
+                (
+                    g.name.clone(),
+                    g.presets.iter().map(|(_, n)| n.clone()).collect(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        names(&mut editor),
+        [
+            ("Film".into(), vec!["Warm+".into(), "Cool".into()]),
+            ("Mono".into(), vec!["Grain".into()])
+        ]
+    );
+    // Kept while nothing it depends on changes.
+    let first = editor.preset_list();
+    assert!(std::sync::Arc::ptr_eq(&first, &editor.preset_list()));
+    // Rebuilt for a search, and for a favorite.
+    editor.presets.filter = "WARM+".into();
+    assert_eq!(names(&mut editor), [("Film".into(), vec!["Warm+".into()])]);
+    editor.presets.filter.clear();
+    editor.presets.favorites_only = true;
+    assert!(names(&mut editor).is_empty());
+    editor.presets.favorites.insert("c".into());
+    editor.presets.revision += 1;
+    assert_eq!(names(&mut editor), [("Mono".into(), vec!["Grain".into()])]);
+}
