@@ -168,9 +168,17 @@ impl Editor {
     /// below the first level larger than the fitted size.
     pub(super) fn step_zoom(&mut self, direction: i32) {
         const LEVELS: [f32; 6] = [0.25, 0.5, 1., 2., 3., 4.];
-        let fit = self.document.full().map_or(0., |im| {
-            let g = Geometry::new(im, &self.effective_recipe(), 0);
-            (self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32)
+        // A JPEG, TIFF or PNG in the Loupe fits by its own size.
+        let raster_fit = self
+            .library
+            .as_ref()
+            .filter(|l| self.library_mode && l.loupe_open() && l.loupe_develops().is_none())
+            .map(|l| l.loupe_fit().unwrap_or(1.));
+        let fit = raster_fit.unwrap_or_else(|| {
+            self.document.full().map_or(0., |im| {
+                let g = Geometry::new(im, &self.effective_recipe(), 0);
+                (self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32)
+            })
         });
         let current = if self.view.zoom.on {
             self.view.zoom.level

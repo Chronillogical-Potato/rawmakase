@@ -39,7 +39,12 @@ struct Job {
 struct Done {
     ticket: u64,
     ahead: Option<Key>,
-    result: Result<image::RgbImage, String>,
+    result: Result<Prepared, String>,
+}
+/// A preview for the view, and the size of the image it was made from.
+struct Prepared {
+    image: image::RgbImage,
+    full: (u32, u32),
 }
 /// What the Loupe shows under the photo.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,13 +63,16 @@ pub(super) struct Loupe {
     ahead_cancel: Arc<AtomicBool>,
     /// The neighbour asked for last, and those ready, oldest first.
     ahead_requested: Option<Key>,
-    prefetched: std::collections::VecDeque<(Key, image::RgbImage)>,
+    prefetched: std::collections::VecDeque<(Key, Prepared)>,
     results: Receiver<Done>,
     ticket: u64,
     /// What the current ticket asked for.
     requested: Option<Key>,
     cancel: Arc<AtomicBool>,
     texture: Option<egui::TextureHandle>,
+    /// The size of the image shown, and of the view in pixels, for its Fit.
+    full: Option<(u32, u32)>,
+    view: Vec2,
     pub state: State,
 }
 impl Loupe {
@@ -84,8 +92,10 @@ impl Loupe {
                     ctx.request_repaint();
                 };
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    thumbnails::raster(&job.path)
-                        .map(|image| thumbnails::downscale(&image, job.edge))
+                    thumbnails::raster(&job.path).map(|image| Prepared {
+                        full: image.dimensions(),
+                        image: thumbnails::downscale(&image, job.edge),
+                    })
                 }));
                 match prepared {
                     _ if job.cancel.load(Ordering::Relaxed) => {}
@@ -108,6 +118,8 @@ impl Loupe {
             requested: None,
             cancel: Default::default(),
             texture: None,
+            full: None,
+            view: Vec2::ZERO,
             state: State::Loading,
         }
     }
@@ -121,11 +133,11 @@ impl Loupe {
         // Prepared ahead, perhaps finishing after it was asked for again:
         // shown at once.
         if let Some(at) = self.prefetched.iter().position(|(k, _)| *k == wanted) {
-            let (_, image) = self.prefetched.remove(at).unwrap();
+            let (_, prepared) = self.prefetched.remove(at).unwrap();
             self.cancel.store(true, Ordering::Relaxed);
             self.ticket += 1;
             self.requested = Some(wanted);
-            self.show(ctx, &image);
+            self.show(ctx, prepared);
             return;
         }
         if asked {
@@ -140,6 +152,7 @@ impl Loupe {
         self.ticket += 1;
         if !same_photo {
             self.texture = None;
+            self.full = None;
             self.state = State::Loading;
         }
         self.worker.submit(Job {
@@ -169,7 +182,8 @@ impl Loupe {
             cancel: self.ahead_cancel.clone(),
         });
     }
-    fn show(&mut self, ctx: &egui::Context, image: &image::RgbImage) {
+    fn show(&mut self, ctx: &egui::Context, Prepared { image, full }: Prepared) {
+        self.full = Some(full);
         let size = [image.width() as usize, image.height() as usize];
         self.texture = Some(ctx.load_texture(
             "library-loupe",
@@ -192,6 +206,7 @@ impl Loupe {
         self.prefetched.clear();
         self.regions.release();
         self.requested = None;
+        self.full = None;
         self.texture = None;
         self.state = State::Loading;
     }
@@ -201,8 +216,8 @@ impl Loupe {
             if let Some(key) = done.ahead {
                 if let Ok(image) = done.result {
                     self.prefetched.push_back((key, image));
-                    let bytes = |p: &std::collections::VecDeque<(Key, image::RgbImage)>| {
-                        p.iter().map(|(_, i)| i.as_raw().len()).sum::<usize>()
+                    let bytes = |p: &std::collections::VecDeque<(Key, Prepared)>| {
+                        p.iter().map(|(_, p)| p.image.as_raw().len()).sum::<usize>()
                     };
                     while bytes(&self.prefetched) > PREFETCHED_BYTES {
                         self.prefetched.pop_front();
@@ -214,7 +229,7 @@ impl Loupe {
                 continue;
             }
             match done.result {
-                Ok(image) => self.show(ctx, &image),
+                Ok(prepared) => self.show(ctx, prepared),
                 Err(e) => self.state = State::Failed(e),
             }
         }
@@ -269,6 +284,13 @@ impl Library {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)
+    }
+    /// The zoom level at which the photo in the Loupe's own view fits, for
+    /// stepping through the levels from it.
+    pub(in crate::app) fn loupe_fit(&self) -> Option<f32> {
+        let (w, h) = self.loupe.full?;
+        let view = self.loupe.view;
+        Some((view.x / w as f32).min(view.y / h as f32))
     }
     /// What the Navigator shows for a photo in the Loupe's own view: its
     /// preview, and the part in view when zoomed.
@@ -331,6 +353,7 @@ impl Library {
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0., theme::gray(36));
         let ppp = ui.ctx().pixels_per_point();
+        self.loupe.view = rect.size() * ppp;
         let available = self.is_available(&photo.path);
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
         if available {

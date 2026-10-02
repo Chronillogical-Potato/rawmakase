@@ -264,7 +264,7 @@ impl Editor {
                 region,
                 monitor: self.view.monitor.clone(),
                 clipping: self.view.clipping,
-                navigator: !self.view.zoom.on,
+                navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail: region.is_none() && self.shows_library_edit(),
                 samples: self.view.picks_color(),
                 overlay: self.overlay(),
@@ -286,7 +286,9 @@ impl Editor {
             Picture::upload(&mut self.preview.region, ctx, "photo region", image);
             return;
         }
-        if !self.view.zoom.on
+        // Zoomed in, a whole render still fills a Navigator that has none,
+        // e.g. after moving on to the next photo at the same zoom.
+        if (!self.view.zoom.on || self.preview.navigator.is_none())
             && let Some(small) = navigator
         {
             let small = egui::ColorImage::from_rgb(
@@ -309,7 +311,7 @@ impl Editor {
             self.preview.region = picture;
             return;
         }
-        if !self.view.zoom.on
+        if (!self.view.zoom.on || self.preview.navigator.is_none())
             && let Some((id, size)) = navigator
         {
             self.preview.navigator = Some(Picture::presented(id, size));
