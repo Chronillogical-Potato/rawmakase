@@ -66,8 +66,16 @@ impl Sort {
             return;
         }
         indices.sort_by(|a, b| {
-            let order = self.compare(&photos[*a], &photos[*b], keys);
-            if reverse { order.reverse() } else { order }
+            let (a, b) = (&photos[*a], &photos[*b]);
+            let order = self.compare(a, b, keys);
+            // Photos of unknown shape stay last either way.
+            let unknown = |p: &Photo| matches!(keys, Keys::Aspects(k) if !k.contains_key(&p.id));
+            let last = self == Self::AspectRatio && (unknown(a) || unknown(b));
+            if reverse && !last {
+                order.reverse()
+            } else {
+                order
+            }
         });
     }
     fn compare(self, a: &Photo, b: &Photo, keys: &Keys) -> Ordering {

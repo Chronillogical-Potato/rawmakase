@@ -47,6 +47,7 @@ impl Library {
         let returned = std::mem::replace(&mut self.drawn_pass, pass) + 1 < pass;
         if returned && self.filters.sort == super::sort::Sort::EditTime {
             self.filter();
+            self.scroll_to_active = true;
         }
         // Survey keeps every photo's preview it shows; other views the usual
         // number.
