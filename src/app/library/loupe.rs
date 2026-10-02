@@ -185,15 +185,7 @@ fn prepare(job: &Job, out: &dyn Fn(Stage, image::RgbImage)) -> anyhow::Result<()
     if cancelled() {
         return Ok(());
     }
-    let metadata = raw.metadata.clone();
-    let (profiles, _) = crate::camera_profiles::installed(&metadata);
-    let recipe = match &job.edit {
-        Some(EditSource::Recipe(json)) => serde_json::from_str(json)?,
-        Some(EditSource::Lightroom(text)) => {
-            crate::catalog::convert_develop(text, &metadata, &profiles, None)?.0
-        }
-        None => crate::develop::Recipe::with_profiles(&metadata, &profiles),
-    };
+    let recipe = EditSource::recipe(job.edit.as_ref(), &raw)?;
     // The half-size decode has more pixels than a screen needs for Fit.
     let image = raw.develop(true, &job.cancel)?;
     if cancelled() {
