@@ -385,7 +385,8 @@ impl Library {
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0., theme::gray(36));
         let ppp = ui.ctx().pixels_per_point();
-        self.loupe.view = rect.size() * ppp;
+        // The photo fits within the margin, as drawn below.
+        self.loupe.view = rect.shrink(16.).size() * ppp;
         let available = self.is_available(&photo.path);
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
         if available {

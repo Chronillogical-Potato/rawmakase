@@ -228,6 +228,10 @@ impl Editor {
             if let Some(l) = &mut self.library {
                 l.make_active(id)
             }
+            // Zoomed in meanwhile (the zoom is shared): Crop cannot stay open.
+            if self.view.zoom.on && self.view.is(super::state::Tool::Crop) {
+                self.view.tool = super::state::Tool::None;
+            }
             self.library_mode = false;
             return;
         }
