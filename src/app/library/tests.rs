@@ -1367,3 +1367,32 @@ fn a_filter_hiding_the_active_candidate_passes_its_role_on() -> Result<()> {
     assert_eq!(library.compare.active, super::compare::Side::Candidate);
     Ok(())
 }
+#[test]
+fn compare_follows_a_restored_place_that_hides_its_active_photo() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    for id in [ids[0], ids[1], ids[3]] {
+        library.catalog.set_metadata(id, 1, 0, "")?;
+    }
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(ids[2]));
+    // Undo returns to a filter that hides C, with D selected.
+    let mut place = library.place();
+    place.filters.rating = Some(1);
+    place.selection = Default::default();
+    place.selection.selected = [ids[3]].into();
+    place.selection.active = Some(ids[3]);
+    library.go_to_place(&place);
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[3]))
+    );
+    assert_eq!(library.compare.active, super::compare::Side::Candidate);
+    Ok(())
+}

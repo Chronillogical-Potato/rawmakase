@@ -231,10 +231,16 @@ impl Library {
     /// select; None when nothing is shown.
     pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
         let active = self.compare.id(self.compare.active);
-        // A filter or source that hid the active photo moved the selection
-        // off it; that is reconciled below, keeping its role, not followed.
+        // A filter or source that hid the active photo pruned the selection
+        // and moved it off that photo; that is reconciled below, keeping its
+        // role. Any other change, such as undo restoring a place, is followed.
         let hidden = active.is_some_and(|id| !self.is_shown(id));
-        if self.compare.synced.as_ref() != Some(&self.selection) && !hidden {
+        let pruned = self
+            .compare
+            .synced
+            .as_ref()
+            .is_some_and(|synced| self.selection.selected.is_subset(&synced.selected));
+        if self.compare.synced.as_ref() != Some(&self.selection) && !(hidden && pruned) {
             self.follow_selection();
         }
         let (active, side) = (self.compare.id(self.compare.active), self.compare.active);
