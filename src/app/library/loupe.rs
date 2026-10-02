@@ -444,7 +444,7 @@ impl Library {
             // The image pixels that fill the view at this level.
             let size =
                 [rect.width(), rect.height()].map(|side| (side * ppp / zoom.level).ceil() as u32);
-            regions.request(photo.id, &photo.path, zoom.pan, size);
+            regions.request(photo.id, &photo.path, zoom.pan, size, zoom.level);
         }
         let painter = ui.painter().with_clip_rect(rect);
         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));

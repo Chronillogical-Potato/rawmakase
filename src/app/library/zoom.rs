@@ -23,6 +23,9 @@ pub(super) struct RegionJob {
     center: [f32; 2],
     /// The view, in pixels.
     size: [u32; 2],
+    /// Below 1 (zoomed out past 100%), the region is shrunk by it before it
+    /// is uploaded, so the texture stays the size of the view.
+    scale: f32,
     cancel: Arc<AtomicBool>,
 }
 /// A rendered part of the photo at 1:1.
@@ -115,6 +118,7 @@ impl Regions {
         path: &std::path::Path,
         center: [f32; 2],
         size: [u32; 2],
+        scale: f32,
     ) {
         if self.photo != Some(photo) {
             self.photo = Some(photo);
@@ -139,6 +143,7 @@ impl Regions {
             path: path.into(),
             center,
             size,
+            scale: scale.min(1.),
             cancel: self.cancel.clone(),
         }));
     }
@@ -198,8 +203,15 @@ fn region(job: &RegionJob, held: &mut Option<Held>) -> anyhow::Result<Region> {
     let y = (job.center[1] * height as f32 - h as f32 / 2.)
         .round()
         .clamp(0., (height - h) as f32) as u32;
+    let crop = image::imageops::crop_imm(image, x, y, w, h).to_image();
+    let image = if job.scale < 1. {
+        let shrink = |side: u32| ((side as f32 * job.scale).round() as u32).max(1);
+        image::imageops::thumbnail(&crop, shrink(w), shrink(h))
+    } else {
+        crop
+    };
     Ok(Region {
-        image: image::imageops::crop_imm(image, x, y, w, h).to_image(),
+        image,
         rect: [
             x as f32 / width as f32,
             y as f32 / height as f32,

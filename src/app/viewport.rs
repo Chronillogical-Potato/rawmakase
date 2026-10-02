@@ -90,11 +90,20 @@ impl Editor {
                 let (gw, gh) = (g.width as f32, g.height as f32);
                 [x as f32 / gw, y as f32 / gh, w as f32 / gw, h as f32 / gh]
             });
+        // Until a whole render makes one (none while zoomed in), the
+        // Library's preview stands in.
         let photo = self
             .preview
             .navigator
             .as_ref()
-            .map(|p| (p.id(), p.size_vec2()));
+            .map(|p| (p.id(), p.size_vec2()))
+            .or_else(|| {
+                let texture = self
+                    .library
+                    .as_ref()?
+                    .thumbnail(self.document.catalog_photo?)?;
+                Some((texture.id(), texture.size_vec2()))
+            });
         match navigator::navigator(ui, photo, Some(self.view.zoom), shown) {
             Some(navigator::Change::Level(level)) => self.set_zoom(level),
             Some(navigator::Change::Inspect(at)) => {
@@ -173,8 +182,12 @@ impl Editor {
             .library
             .as_ref()
             .filter(|l| self.library_mode && l.loupe_open() && l.loupe_develops().is_none())
-            .map(|l| l.loupe_fit().unwrap_or(1.));
-        let fit = raster_fit.unwrap_or_else(|| {
+            .map(|l| l.loupe_fit());
+        // Not known until the image is decoded: no step until then.
+        if raster_fit == Some(None) {
+            return;
+        }
+        let fit = raster_fit.flatten().unwrap_or_else(|| {
             self.document.full().map_or(0., |im| {
                 let g = Geometry::new(im, &self.effective_recipe(), 0);
                 (self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32)
