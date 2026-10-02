@@ -131,13 +131,15 @@ impl Editor {
             };
             // Develop has its own keys; the log is the same.
             if self.library_mode {
-                let (undo, redo) = ctx.input(|i| {
-                    let z = i.modifiers.command && i.key_pressed(egui::Key::Z);
-                    let y = !cfg!(target_os = "macos")
-                        && i.modifiers.command
-                        && !i.modifiers.shift
-                        && i.key_pressed(egui::Key::Y);
-                    (z && !i.modifiers.shift, (z && i.modifiers.shift) || y)
+                // Consumed, with the modifiers held for the key, so an undo
+                // that opens Develop is not run again by Develop's keys.
+                use egui::{Key, Modifiers};
+                let (undo, redo) = ctx.input_mut(|i| {
+                    let undo = i.consume_key(Modifiers::COMMAND, Key::Z);
+                    let redo = i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
+                        || (!cfg!(target_os = "macos")
+                            && i.consume_key(Modifiers::COMMAND, Key::Y));
+                    (undo, redo)
                 });
                 if undo {
                     self.undo();

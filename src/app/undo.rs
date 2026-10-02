@@ -204,6 +204,11 @@ impl Editor {
                     self.status = format!("{verb}: that photo is no longer open");
                     return true;
                 };
+                // The open photo is saved first, so a failure leaves both
+                // photos and the command as they were.
+                if !self.flush() {
+                    return false;
+                }
                 let Some(library) = &self.library else {
                     return false;
                 };
