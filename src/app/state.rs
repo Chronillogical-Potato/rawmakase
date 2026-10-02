@@ -310,6 +310,7 @@ impl ViewState {
 }
 impl PresetBrowser {
     pub fn clear_document(&mut self) {
+        self.revision += 1;
         self.issues.clear();
         self.substitutes.clear();
         self.selected.clear();

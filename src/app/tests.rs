@@ -1821,4 +1821,12 @@ fn the_preset_list_is_kept_until_what_it_shows_changes() {
     editor.presets.favorites.insert("c".into());
     editor.presets.revision += 1;
     assert_eq!(names(&mut editor), [("Mono".into(), vec!["Grain".into()])]);
+    // Rebuilt when another photo's compatibility replaces this one's.
+    editor.presets.favorites_only = false;
+    editor.presets.compatible_only = true;
+    editor.presets.issues = vec![Some("no".into()), None, Some("no".into())];
+    editor.presets.revision += 1;
+    assert_eq!(names(&mut editor), [("Film".into(), vec!["Cool".into()])]);
+    editor.presets.clear_document();
+    assert_eq!(names(&mut editor).len(), 2);
 }
