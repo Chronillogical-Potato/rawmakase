@@ -238,6 +238,8 @@ impl Editor {
                     (format!("{cmd}A"), "Select all"),
                     (format!("{cmd}D"), "Select none"),
                     ("/".into(), "Deselect the active photo"),
+                    ("E / Return / double-click".into(), "Loupe"),
+                    ("Esc".into(), "Back to the grid"),
                 ],
             ),
             (
@@ -248,13 +250,19 @@ impl Editor {
                     ("6 – 9".into(), "Red, yellow, green, blue label"),
                     ("P / X / U".into(), "Pick / reject / unflag"),
                     ("`".into(), "Toggle pick"),
+                    (format!("{cmd}Up / Down"), "Raise / lower the flag"),
                     ("Shift + key".into(), "Apply and go to next photo"),
                     ("In the grid".into(), "Applies to every selected photo"),
+                    ("Auto Advance".into(), "Every key moves on (status bar)"),
                 ],
             ),
             (
                 "Modules",
-                vec![("G".into(), "Library"), ("D".into(), "Develop")],
+                vec![
+                    ("G".into(), "Library grid"),
+                    ("E".into(), "Library Loupe"),
+                    ("D".into(), "Develop"),
+                ],
             ),
         ];
         let mut open = self.view.shortcuts;

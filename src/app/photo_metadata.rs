@@ -9,6 +9,8 @@ pub enum Edit {
     Rating(i32),
     RatingDelta(i32),
     Flag(i32),
+    /// Cmd+Up and Cmd+Down: reject, unflagged, pick, one step at a time.
+    FlagDelta(i32),
     TogglePick,
     ToggleLabel(String),
     Label(String),
@@ -20,6 +22,7 @@ impl Edit {
             Self::Rating(v) => rating = *v,
             Self::RatingDelta(v) => rating = (rating + v).clamp(0, 5),
             Self::Flag(v) => flag = *v,
+            Self::FlagDelta(v) => flag = (flag + v).clamp(-1, 1),
             Self::TogglePick => flag = if flag == 1 { 0 } else { 1 },
             Self::ToggleLabel(v) => {
                 label = if label == *v {
@@ -59,6 +62,13 @@ pub fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {
             else {
                 return None;
             };
+            if modifiers.command && !modifiers.shift && !modifiers.alt {
+                return match key {
+                    Key::ArrowUp => Some((Edit::FlagDelta(1), false)),
+                    Key::ArrowDown => Some((Edit::FlagDelta(-1), false)),
+                    _ => None,
+                };
+            }
             if modifiers.command || modifiers.ctrl || modifiers.alt || modifiers.mac_cmd {
                 return None;
             }

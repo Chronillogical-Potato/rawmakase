@@ -63,6 +63,9 @@ impl Library {
                 (p.id, rating, flag, label)
             })
             .collect();
+        // Only a change to the active photo moves the selection: one made to
+        // another (a filmstrip menu) leaves the photo shown where it is.
+        let was_active = self.selection.active == Some(lead);
         let position = self.visible.iter().position(|i| self.photos[*i].id == lead);
         let following: Vec<_> = position.map_or_else(Vec::new, |at| {
             self.visible[at + 1..]
@@ -100,7 +103,7 @@ impl Library {
             .find(|next| self.visible.iter().any(|i| self.photos[*i].id == *next));
         let still_visible = self.visible.iter().any(|i| self.photos[*i].id == lead);
         let advance = advance && changes.len() == 1;
-        if advance || !still_visible {
+        if was_active && (advance || !still_visible) {
             let to = next.or_else(|| {
                 if still_visible {
                     Some(lead)

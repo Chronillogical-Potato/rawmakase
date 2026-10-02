@@ -13,17 +13,29 @@ impl Editor {
         }
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
         let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
-        let shortcut = crate::app::photo_metadata::shortcut(ctx).filter(|(e, _)| {
-            !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
-        });
+        let auto_advance = self.auto_advance;
+        let shortcut = crate::app::photo_metadata::shortcut(ctx)
+            .filter(|(e, _)| {
+                !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
+            })
+            // Photo > Auto Advance: every key moves on, as Shift does.
+            .map(|(edit, shift)| (edit, shift || auto_advance));
         let Some(library) = &mut self.library else {
             return;
         };
         if self.library_mode {
-            // The Grid applies a key to every selected photo, as Lightroom does.
+            // The Grid applies a key to every selected photo, as Lightroom
+            // does; Loupe to the photo it shows.
+            let result = |library: &mut crate::app::library::Library, edit, advance| match library
+                .selected()
+                .filter(|_| library.loupe_open())
+            {
+                Some(id) => library.edit_metadata(id, edit, advance),
+                None => library.edit_selection(edit, advance),
+            };
             match shortcut {
                 Some((edit, advance)) => {
-                    match library.edit_selection(edit, advance) {
+                    match result(library, edit, advance) {
                         Ok(_) => self.status = library.message.clone(),
                         Err(e) => self.status = format!("Metadata could not be saved: {e}"),
                     }
@@ -153,6 +165,19 @@ impl Editor {
             }
             if plain(egui::Key::G) && self.flush() {
                 self.library_mode = true;
+                if let Some(library) = &mut self.library {
+                    library.close_loupe();
+                }
+            }
+            // E from Develop: the photo in the Library's Loupe.
+            if !self.library_mode
+                && plain(egui::Key::E)
+                && self.flush()
+                && let (Some(library), Some(id)) = (&mut self.library, self.document.catalog_photo)
+            {
+                self.library_mode = true;
+                library.reveal(id);
+                library.open_loupe();
             }
             // Lightroom's Create Virtual Copy, in Library and Develop.
             // Only the first key-down: a held key must not make copy after copy.
@@ -370,7 +395,24 @@ impl Editor {
                             .map_or(self.status.as_str(), |l| l.message.as_str()),
                     );
                 }
-                self.preview_progress(ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let toggle = ui
+                        .checkbox(
+                            &mut self.auto_advance,
+                            egui::RichText::new("Auto Advance").small(),
+                        )
+                        .on_hover_text(
+                            "Photo > Auto Advance: a rating, flag or label moves on to the next photo",
+                        );
+                    if toggle.changed() {
+                        let _ = self.save_session();
+                    }
+                    if let Some(library) = &self.library
+                        && library.preview_progress_active()
+                    {
+                        library.preview_progress(ui);
+                    }
+                });
             });
         });
         let mut action = crate::app::library::Action::None;
@@ -630,7 +672,11 @@ impl Editor {
                         self.status = library.message.clone();
                     }
                 });
-            if let Some(id) = target
+            // In Develop both a click and Open in Develop show the photo.
+            if let Some(
+                crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
+            ) = target
+                && id != current
                 && !self.activity.is_busy()
             {
                 self.develop_catalog_photo(id);

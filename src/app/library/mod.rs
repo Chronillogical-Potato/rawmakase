@@ -19,6 +19,7 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+pub use filmstrip::Pick;
 pub use metadata::{Metadata, MetadataCommand};
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
@@ -59,6 +60,7 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    loupe: loupe::Loupe,
     /// Metadata changes not yet handed to the shared undo log.
     done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
@@ -84,6 +86,7 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
+        let loupe = loupe::Loupe::new(&ctx);
         let mut s = Self {
             catalog,
             photos: Vec::new(),
@@ -107,6 +110,7 @@ impl Library {
             copy_request: None,
             copy_names: Default::default(),
             done: Vec::new(),
+            loupe,
             capture: None,
             capture_tried: HashSet::new(),
             keep_in_place: None,
@@ -316,6 +320,14 @@ impl Library {
             self.filters.clear_bar();
             self.filter();
         }
+        // Outside the folder shown, or no longer offline: All Photographs.
+        if !self.visible.iter().any(|i| self.photos[*i].id == id) {
+            self.filters.folder_scope = None;
+            self.filters.collection = None;
+            self.filters.only_missing = false;
+            self.selected_folder.clear();
+            self.filter();
+        }
         self.select(Some(id));
     }
     /// Drain in every workspace so the bounded worker never waits for the grid.
@@ -357,6 +369,8 @@ impl Library {
             return;
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
+        // The Loupe shows the edit as Develop left it.
+        self.loupe.reset();
     }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does
@@ -412,6 +426,7 @@ mod filmstrip;
 mod filter;
 mod grid;
 mod info;
+mod loupe;
 mod metadata;
 mod previews;
 mod selection;

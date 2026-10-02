@@ -195,6 +195,9 @@ impl Library {
     }
     pub fn grid(&mut self, ui: &mut egui::Ui) -> Action {
         self.poll_previews(ui.ctx());
+        if self.loupe.open {
+            return self.loupe(ui);
+        }
         let mut action = Action::None;
         self.filter_bar(ui);
         egui::Panel::bottom("library-grid-toolbar")
@@ -263,9 +266,10 @@ impl Library {
                                     // A menu on a selected photo acts on the selection.
                                     self.make_active(p.id);
                                 }
+                                // As in Lightroom, a double-click opens the Loupe.
                                 if response.double_clicked() {
                                     self.make_active(p.id);
-                                    action = Action::Develop(p.id);
+                                    self.open_loupe();
                                 }
                                 if let Some(edit) = edit {
                                     metadata_edit = Some((p.clone(), edit));

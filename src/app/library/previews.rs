@@ -88,6 +88,22 @@ pub(super) enum EditSource {
     Lightroom(String),
 }
 impl EditSource {
+    /// The recipe a photo is rendered with: its edit, or the defaults
+    /// Develop would open it with.
+    pub fn recipe(
+        edit: Option<&Self>,
+        raw: &crate::raw::Raw,
+    ) -> anyhow::Result<crate::develop::Recipe> {
+        let m = &raw.metadata;
+        let (profiles, _) = crate::camera_profiles::installed(m);
+        Ok(match edit {
+            Some(Self::Recipe(json)) => serde_json::from_str(json)?,
+            Some(Self::Lightroom(text)) => {
+                crate::catalog::convert_develop(text, m, &profiles, None)?.0
+            }
+            None => crate::develop::Recipe::with_profiles(m, &profiles),
+        })
+    }
     /// Identifies this edit in the preview cache.
     pub fn tag(&self) -> String {
         use std::hash::{Hash, Hasher};
@@ -237,14 +253,7 @@ fn spawn_edited_with(
 /// half-size decode.
 fn render_edited(path: &Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
     let raw = crate::raw::Raw::open(path)?;
-    let m = raw.metadata.clone();
-    let (profiles, _) = crate::camera_profiles::installed(&m);
-    let recipe = match source {
-        EditSource::Recipe(json) => serde_json::from_str(json)?,
-        EditSource::Lightroom(text) => {
-            crate::catalog::convert_develop(text, &m, &profiles, None)?.0
-        }
-    };
+    let recipe = EditSource::recipe(Some(source), &raw)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let image = raw.develop(true, &cancel)?;
     let out = crate::develop::render(&image, &recipe, 640)?;

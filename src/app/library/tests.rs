@@ -966,3 +966,72 @@ fn a_hidden_active_photo_hands_over_to_the_rest_of_the_selection() -> Result<()>
     assert_eq!(library.selected_ids(), ids[1..]);
     Ok(())
 }
+#[test]
+fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::from_pixel(3000, 2000, image::Rgb([200, 120, 40]))
+        .save(folder.join("a.jpg"))?;
+    std::fs::write(folder.join("b.jpg"), b"not a jpeg")?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    library.select(Some(library.photos[0].id));
+    library.open_loupe();
+    assert!(library.loupe_open());
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200., 800.),
+        )),
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input(), |ui| {
+        library.grid(ui);
+    });
+    output.textures_delta.clear();
+    library.loupe.wait(&ctx);
+    // A 1200 px wide view asks for the next step up, 1536 px; never more.
+    assert_eq!(
+        library.loupe.state,
+        loupe::State::Ready(loupe::Stage::Rendered)
+    );
+    assert_eq!(library.loupe.texture_size(), Some([1536, 1024]));
+    // The next photo replaces it; a damaged file says why.
+    library.step(selection::Step::By(1), false);
+    let mut output = ctx.run_ui(input(), |ui| {
+        library.grid(ui);
+    });
+    output.textures_delta.clear();
+    library.loupe.wait(&ctx);
+    assert!(matches!(library.loupe.state, loupe::State::Failed(_)));
+    library.close_loupe();
+    assert!(!library.loupe_open());
+    Ok(())
+}
+#[test]
+fn flag_steps_up_and_down_and_stops_at_the_ends() {
+    use crate::app::photo_metadata::Edit;
+    let photo = |flag| Photo {
+        id: 1,
+        folder: 1,
+        path: "a.RAF".into(),
+        filename: "a.RAF".into(),
+        captured: String::new(),
+        rating: 0,
+        flag,
+        label: String::new(),
+        format: "RAF".into(),
+        copy_name: String::new(),
+        master: None,
+        keywords: String::new(),
+        has_lightroom_edits: false,
+    };
+    assert_eq!(Edit::FlagDelta(1).values(&photo(-1)).1, 0);
+    assert_eq!(Edit::FlagDelta(1).values(&photo(0)).1, 1);
+    assert_eq!(Edit::FlagDelta(1).values(&photo(1)).1, 1);
+    assert_eq!(Edit::FlagDelta(-1).values(&photo(-1)).1, -1);
+}

@@ -42,6 +42,15 @@ impl Library {
             anchor: id,
         };
     }
+    /// Makes `id` active and in view: kept in the selection when it is shown,
+    /// else selected alone with the filters that hide it cleared.
+    pub fn reveal(&mut self, id: i64) {
+        if self.visible.iter().any(|i| self.photos[*i].id == id) {
+            self.make_active(id);
+        } else {
+            self.show(id);
+        }
+    }
     /// Makes `id` active, keeping the selection when it is part of it.
     pub fn make_active(&mut self, id: i64) {
         if self.selection.selected.contains(&id) {
@@ -192,7 +201,8 @@ impl Library {
     }
     /// The Grid's selection keys: Cmd+A, Cmd+D, `/`, arrows, Home and End.
     pub(in crate::app) fn selection_keys(&mut self, ctx: &egui::Context) {
-        if ctx.text_edit_focused() {
+        // A menu or popup takes the keys first, Escape above all.
+        if ctx.text_edit_focused() || egui::Popup::is_any_open(ctx) {
             return;
         }
         let columns = self.grid_columns.max(1) as isize;
@@ -212,9 +222,24 @@ impl Library {
                 })
                 .collect()
         });
+        if self.loupe.open {
+            // Loupe moves through the photos one at a time.
+            for (key, modifiers) in keys {
+                match (key, modifiers.command) {
+                    (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
+                    (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
+                    (Key::Home, false) => self.step(Step::Home, false),
+                    (Key::End, false) => self.step(Step::End, false),
+                    (Key::Escape, _) => self.close_loupe(),
+                    _ => {}
+                }
+            }
+            return;
+        }
         for (key, modifiers) in keys {
             let (command, shift) = (modifiers.command, modifiers.shift);
             match (key, command) {
+                (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),

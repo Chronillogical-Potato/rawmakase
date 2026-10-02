@@ -36,6 +36,9 @@ pub struct Session {
     /// an Omarchy desktop, and RAWmakase's greys elsewhere.
     #[serde(default)]
     pub theme_chosen: bool,
+    /// Photo > Auto Advance: a rating, flag or label moves to the next photo.
+    #[serde(default)]
+    pub auto_advance: bool,
 }
 pub fn load_session() -> Session {
     File::open(data_dir().join("session.json"))

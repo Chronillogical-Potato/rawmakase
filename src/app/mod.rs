@@ -63,6 +63,8 @@ pub struct Editor {
     remove_copy: Option<i64>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
+    /// Photo > Auto Advance, saved in the session.
+    auto_advance: bool,
 }
 impl Editor {
     pub fn new(
@@ -209,6 +211,7 @@ impl Editor {
             close_confirm: false,
             remove_copy: None,
             undo_log: Default::default(),
+            auto_advance: session.auto_advance,
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;
@@ -244,6 +247,7 @@ impl Editor {
                     skipped_version: self.updates.skipped.clone(),
                     theme: self.themes.chosen().flatten(),
                     theme_chosen: self.themes.chosen().is_some(),
+                    auto_advance: self.auto_advance,
                 },
             )?;
         }

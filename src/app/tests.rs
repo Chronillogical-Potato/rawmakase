@@ -1503,6 +1503,7 @@ fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Edi
     let library = crate::app::library::Library::load(&path, ctx.clone())?;
     let ids = library.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
+    e.library_mode = true;
     Ok((d, e, ids))
 }
 #[test]
@@ -1629,5 +1630,50 @@ fn a_key_that_changes_nothing_is_not_an_undo_step() -> anyhow::Result<()> {
     assert_eq!(e.undo_log.len(), (1, 0));
     e.undo();
     assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().rating, 0);
+    Ok(())
+}
+fn press(e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers) {
+    let ctx = e.context.clone();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        },
+        |ui| e.draw(ui),
+    );
+    output.textures_delta.clear();
+}
+#[test]
+fn loupe_keys_change_only_the_photo_shown_and_auto_advance_moves_on() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[0]));
+    library.select_range_to(ids[1]);
+    press(&mut e, egui::Key::E, egui::Modifiers::NONE);
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    // Cmd+Up picks the photo shown, not the rest of the selection.
+    press(&mut e, egui::Key::ArrowUp, egui::Modifiers::COMMAND);
+    let library = e.library.as_ref().unwrap();
+    let flags: Vec<_> = ids
+        .iter()
+        .map(|id| library.photo(*id).unwrap().flag)
+        .collect();
+    assert_eq!(flags, [0, 1, 0]);
+    press(&mut e, egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    // With Auto Advance a key moves on as Shift would.
+    e.auto_advance = true;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    press(&mut e, egui::Key::Num3, egui::Modifiers::NONE);
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.photo(ids[0]).unwrap().rating, 3);
+    assert_eq!(library.selected(), Some(ids[1]));
     Ok(())
 }
