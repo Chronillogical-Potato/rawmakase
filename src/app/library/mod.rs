@@ -58,8 +58,9 @@ pub struct Library {
     grid_offset: f32,
     /// Positions in `visible` the grid drew last frame; all until it is drawn.
     grid_shown: std::ops::Range<usize>,
-    /// External volumes attached at the last check, to notice one returning.
-    attached: HashSet<std::path::PathBuf>,
+    /// External volumes attached at the last check, to notice one returning;
+    /// None before the first check.
+    attached: Option<HashSet<std::path::PathBuf>>,
     pub message: String,
 }
 impl Library {
@@ -94,7 +95,7 @@ impl Library {
             keep_in_place: None,
             grid_offset: 0.,
             grid_shown: 0..usize::MAX,
-            attached: HashSet::new(),
+            attached: None,
             message: String::new(),
         };
         s.refresh()?;
@@ -239,11 +240,11 @@ impl Library {
             .filter(|(_, (on, _))| *on)
             .map(|(mount, _)| mount.clone())
             .collect();
-        let returned = online
-            .iter()
-            .any(|(mount, (on, _))| *on && !self.attached.contains(mount))
-            && !self.attached.is_empty();
-        self.attached = attached;
+        let returned = self
+            .attached
+            .as_ref()
+            .is_some_and(|before| attached.iter().any(|mount| !before.contains(mount)));
+        self.attached = Some(attached);
         if returned {
             self.availability.start(&self.photos, &self.ctx);
         }
