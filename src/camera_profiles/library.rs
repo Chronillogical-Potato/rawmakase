@@ -239,6 +239,7 @@ fn import_into(
             staged.write_all(&bytes)?;
             staged.as_file().sync_all()?;
             staged.persist_noclobber(&target).map_err(|e| e.error)?;
+            crate::storage::sync_dir(destination)?;
         }
         imported.push(target);
     }
