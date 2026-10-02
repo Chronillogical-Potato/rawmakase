@@ -56,6 +56,10 @@ pub struct Library {
     keep_in_place: Option<(i64, usize)>,
     /// The grid's scroll offset last frame.
     grid_offset: f32,
+    /// Positions in `visible` the grid drew last frame; all until it is drawn.
+    grid_shown: std::ops::Range<usize>,
+    /// External volumes attached at the last check, to notice one returning.
+    attached: HashSet<std::path::PathBuf>,
     pub message: String,
 }
 impl Library {
@@ -89,6 +93,8 @@ impl Library {
             capture_tried: HashSet::new(),
             keep_in_place: None,
             grid_offset: 0.,
+            grid_shown: 0..usize::MAX,
+            attached: HashSet::new(),
             message: String::new(),
         };
         s.refresh()?;
@@ -214,6 +220,8 @@ impl Library {
                 .position(|i| self.photos[*i].id == id)
                 .map(|at| (id, at))
         });
+        // A selected photo scrolled out of view is no anchor: the view stays.
+        let anchor = anchor.filter(|(_, at)| self.grid_shown.contains(at));
         self.photos.sort_by(|a, b| {
             (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
         });
@@ -221,6 +229,23 @@ impl Library {
         // Several batches before the grid is drawn again: the first position counts.
         if self.keep_in_place.is_none() {
             self.keep_in_place = anchor;
+        }
+    }
+    /// Checks again which photos are online when an external volume comes
+    /// back, so they show and their capture times are read.
+    fn volumes_checked(&mut self, online: &HashMap<std::path::PathBuf, volumes::VolumeState>) {
+        let attached: HashSet<_> = online
+            .iter()
+            .filter(|(_, (on, _))| *on)
+            .map(|(mount, _)| mount.clone())
+            .collect();
+        let returned = online
+            .iter()
+            .any(|(mount, (on, _))| *on && !self.attached.contains(mount))
+            && !self.attached.is_empty();
+        self.attached = attached;
+        if returned {
+            self.availability.start(&self.photos, &self.ctx);
         }
     }
     fn is_available(&self, path: &std::path::Path) -> bool {
@@ -454,6 +479,7 @@ impl Library {
                     }
                     self.volumes.check(ui.ctx(), volumes.keys());
                     let online = self.volumes.snapshot();
+                    self.volumes_checked(&online);
                     // The startup disk first, then other drives by name.
                     let mut volumes: Vec<_> = volumes.into_iter().collect();
                     volumes.sort_by_key(|(v, _)| (v.mount.is_some(), v.name.to_lowercase()));
@@ -1178,6 +1204,7 @@ impl Library {
                 width,
                 self.visible.len().div_ceil(columns),
                 |ui, rows| {
+                    self.grid_shown = rows.start * columns..rows.end * columns;
                     for row in rows {
                         ui.horizontal(|ui| {
                             for col in 0..columns {

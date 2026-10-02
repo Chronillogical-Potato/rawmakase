@@ -79,7 +79,11 @@ pub(super) fn readable(path: &Path) -> bool {
 }
 
 fn read(path: &Path) -> Read {
-    if std::fs::metadata(path).is_err() {
+    // A file that cannot be read now (offline, no permission, a network
+    // error) is tried again later rather than taken for undated.
+    use std::io::Read as _;
+    let readable = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut [0; 1]));
+    if readable.is_err() {
         return Read::Unreadable;
     }
     match crate::export::exif::capture_time(path) {
