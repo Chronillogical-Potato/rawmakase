@@ -397,7 +397,7 @@ impl Editor {
         // open, or whose predecessor failed to save, is tried again the next
         // time, not every frame.
         let failed = self.document.catalog_photo == Some(id)
-            && self.document.path.is_none()
+            && self.document.full().is_none()
             && !self.load.is_running();
         if (self.document.catalog_photo != Some(id) || failed) && self.loupe_tried != Some(id) {
             self.loupe_tried = Some(id);
@@ -538,42 +538,38 @@ impl Editor {
     /// Develop's zoom keys, shared with the Library's Loupe: Cmd+= and Cmd+-
     /// step through the zoom levels, Z toggles Fit and the last zoom, F fits.
     pub(super) fn zoom_keys(&mut self, ctx: &egui::Context) {
-        let zoom_step = ctx.input(|i| {
-            if i.modifiers.command
-                && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
-            {
-                1
-            } else if i.modifiers.command && i.key_pressed(egui::Key::Minus) {
-                -1
-            } else {
-                0
-            }
+        use egui::Key;
+        // Each key with the modifiers held for it, which a quick shortcut
+        // can release in the same frame.
+        let presses: Vec<(Key, Option<Key>, egui::Modifiers, bool)> = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed: true,
+                        repeat,
+                        modifiers,
+                    } => Some((*key, *physical_key, *modifiers, *repeat)),
+                    _ => None,
+                })
+                .collect()
         });
-        if zoom_step != 0 {
-            self.step_zoom(zoom_step);
+        for (key, physical, modifiers, repeat) in presses {
+            match key {
+                // Cmd+Option+0: 1:1. Option changes the typed key on macOS.
+                _ if physical == Some(Key::Num0) && modifiers.command && modifiers.alt => {
+                    self.set_zoom(1.)
+                }
+                Key::Plus | Key::Equals if modifiers.command => self.step_zoom(1),
+                Key::Minus if modifiers.command => self.step_zoom(-1),
+                // Once per press: a held Z must not flicker the zoom.
+                Key::Z if !modifiers.any() && !repeat => self.view.zoom100 = !self.view.zoom100,
+                Key::F if !modifiers.any() => self.view.zoom100 = false,
+                _ => {}
+            }
         }
-        ctx.input(|i| {
-            // Once per press: a held Z must not flicker the zoom.
-            let z = i.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { key: egui::Key::Z, pressed: true, repeat: false, modifiers, .. }
-                    if !modifiers.any())
-            });
-            if z {
-                self.view.zoom100 = !self.view.zoom100;
-            }
-            // Cmd+Option+0: 1:1. Option changes the typed key on macOS.
-            let actual = i.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { physical_key: Some(egui::Key::Num0), pressed: true, modifiers, .. }
-                    if modifiers.command && modifiers.alt)
-            });
-            if actual {
-                self.view.zoom100 = true;
-                self.view.zoom_level = 1.;
-            }
-            if i.key_pressed(egui::Key::F) && !i.modifiers.any() {
-                self.view.zoom100 = false;
-            }
-        });
     }
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
