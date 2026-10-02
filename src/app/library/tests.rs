@@ -1847,3 +1847,21 @@ fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Resu
     assert_eq!(done, 2);
     Ok(())
 }
+#[test]
+fn a_saved_draft_is_not_saved_again_after_undo() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.ARW"])?;
+    let id = library.photos[0].id;
+    library.selection.selected = [id].into();
+    library.selection.active = Some(id);
+    library.sync_fields();
+    library.fields.drafts.title = "Typed".into();
+    library.commit_fields()?;
+    let done = library.take_descriptive_done();
+    assert_eq!(done.len(), 1);
+    // Undone with the panel hidden: the old draft isn't saved again.
+    library.restore_descriptive(&done[0].before)?;
+    library.commit_fields()?;
+    assert!(library.take_descriptive_done().is_empty());
+    assert_eq!(library.catalog.descriptive(id)?.title, None);
+    Ok(())
+}
