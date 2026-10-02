@@ -245,6 +245,9 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
+                (Key::I, false) if !press.modifiers.any() => {
+                    self.loupe_info = self.loupe_info.next()
+                }
                 _ => {}
             }
         }

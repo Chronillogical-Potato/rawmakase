@@ -121,15 +121,17 @@ impl Editor {
             .metadata
             .as_ref()
             .map_or_else(String::new, |m| {
-                let shutter = if m.shutter > 0. && m.shutter < 1. {
-                    format!("1/{:.0} sec", 1. / m.shutter)
-                } else {
-                    format!("{} sec", m.shutter)
-                };
-                format!(
-                    "ISO {}     {} mm     f/{}     {shutter}",
-                    m.iso, m.focal, m.aperture
-                )
+                let info = crate::catalog::PhotoInfo::from_metadata(m);
+                [
+                    info.iso_text(),
+                    info.focal_text(),
+                    info.aperture_text(),
+                    info.shutter_text(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("     ")
             });
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))

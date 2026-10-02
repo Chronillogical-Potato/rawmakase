@@ -2,7 +2,7 @@
 use super::{Action, Library};
 use crate::app::theme;
 use crate::app::widgets::section;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoInfo};
 use eframe::egui::{self, Vec2};
 
 impl Library {
@@ -12,6 +12,7 @@ impl Library {
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
         let photo = self.selected().and_then(|id| self.photo(id)).cloned();
+        let info = self.active_info();
         egui::ScrollArea::vertical()
             .id_salt("library-info")
             .auto_shrink(false)
@@ -59,6 +60,9 @@ impl Library {
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
                     let field = |f: fn(&Photo) -> &str| photo.as_ref().map_or("", f).to_string();
+                    // Camera settings and size, as Lightroom's EXIF metadata shows them.
+                    let info = info.clone().unwrap_or_default();
+                    let text = |f: fn(&PhotoInfo) -> Option<String>| f(&info).unwrap_or_default();
                     metadata_row(ui, "File Name", &field(|p| &p.filename));
                     match photo.as_ref().filter(|p| p.master.is_some()) {
                         Some(p) => {
@@ -82,6 +86,12 @@ impl Library {
                         ),
                         ("Capture Time", field(|p| &p.captured), None),
                         ("Format", field(|p| &p.format), None),
+                        ("Dimensions", text(PhotoInfo::dimensions_text), None),
+                        ("Exposure", text(PhotoInfo::exposure_text), None),
+                        ("Focal Length", text(PhotoInfo::focal_text), None),
+                        ("ISO Speed", text(PhotoInfo::iso_text), None),
+                        ("Camera", text(|i| i.camera.clone()), None),
+                        ("Lens", text(|i| i.lens.clone()), None),
                     ] {
                         let response = metadata_row(ui, key, &value);
                         if let Some(hover) = hover {

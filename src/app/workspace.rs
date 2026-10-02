@@ -442,6 +442,7 @@ impl Editor {
         let Some(library) = &mut self.library else {
             return;
         };
+        library.loupe_overlay(ui.painter(), area);
         if self.view.zoom.on != before {
             library.loupe_zoom_toggled(before);
         }

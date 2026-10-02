@@ -1100,3 +1100,27 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     assert!(library.loupe.regions.region.is_none());
     Ok(())
 }
+#[test]
+fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(300, 200).save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let id = library.photos[0].id;
+    library.wait_for_availability();
+    let started = std::time::Instant::now();
+    while library.info_reader.is_some() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        library.poll_photo_info();
+        std::thread::yield_now();
+    }
+    library.select(Some(id));
+    let info = library.active_info().unwrap();
+    assert_eq!(info.dimensions_text().as_deref(), Some("300 × 200"));
+    // Kept: nothing is left to read on the next open.
+    assert!(library.catalog.photos_without_info()?.is_empty());
+    Ok(())
+}

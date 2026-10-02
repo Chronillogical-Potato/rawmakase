@@ -66,7 +66,13 @@ pub struct Library {
     /// Metadata changes not yet handed to the shared undo log.
     done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
-    capture: Option<capture::Backfill>,
+    capture: Option<background::Reader<capture::Read>>,
+    /// Reads camera settings and sizes for photos added from folders.
+    info_reader: Option<background::Reader<Option<Option<crate::catalog::PhotoInfo>>>>,
+    /// The Loupe's Info overlay.
+    loupe_info: photo_info::Overlay,
+    /// The active photo's info, as last read from the catalog.
+    info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// Photos the capture-time backfill tried since the last online check.
     capture_tried: HashSet<i64>,
     /// A photo to keep in place in the grid after a re-sort, with its
@@ -88,6 +94,7 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
+        let _ = catalog.backfill_lightroom_info();
         let loupe = loupe::Loupe::new(&ctx);
         let mut s = Self {
             catalog,
@@ -115,6 +122,9 @@ impl Library {
             loupe,
             loupe_direction: 1,
             capture: None,
+            info_reader: None,
+            info: None,
+            loupe_info: Default::default(),
             capture_tried: HashSet::new(),
             keep_in_place: None,
             grid_offset: 0.,
@@ -339,6 +349,7 @@ impl Library {
             self.availability_known();
         }
         self.poll_capture_times();
+        self.poll_photo_info();
         self.cache.poll(ctx);
     }
     /// Hands the worker the photos shown last frame. Call once per frame.
@@ -419,6 +430,7 @@ impl Library {
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod availability;
+mod background;
 mod capture;
 mod cell;
 mod collections;
@@ -429,6 +441,7 @@ mod grid;
 mod info;
 mod loupe;
 mod metadata;
+mod photo_info;
 mod previews;
 mod selection;
 mod sidebar;

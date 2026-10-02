@@ -20,10 +20,11 @@ pub struct Catalog {
 
 mod copies;
 mod edits;
+mod info;
 mod ingest;
 pub mod lightroom;
 mod models;
-pub use models::{Collection, CollectionKind, Folder, Photo, SavedEdit};
+pub use models::{Collection, CollectionKind, Folder, Photo, PhotoInfo, SavedEdit};
 // Compatibility for existing clients.
 pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
 impl Catalog {
@@ -223,6 +224,21 @@ impl Catalog {
     pub fn relink_folder(&self, id: i64, path: &Path) -> Result<()> {
         ensure!(path.is_dir(), "Choose an existing folder");
         self.db.execute("INSERT INTO folder_mappings(folder,path) VALUES(?,?) ON CONFLICT(folder) DO UPDATE SET path=excluded.path",params![id,path.to_string_lossy()])?;
+        Ok(())
+    }
+    /// A fact about the catalog itself, from the `meta` table.
+    fn meta(&self, key: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .db
+            .query_row("SELECT value FROM meta WHERE key=?", [key], |r| r.get(0))
+            .optional()?)
+    }
+    fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.db.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+            params![key, value],
+        )?;
         Ok(())
     }
     pub fn set_metadata(&mut self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
