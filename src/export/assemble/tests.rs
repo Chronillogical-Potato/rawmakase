@@ -335,3 +335,18 @@ fn keywords_lightroom_keeps_out_of_exports_stay_out() {
     assert_eq!(subject, ["Clients", "Acme", "Home"]);
     assert_eq!(hierarchical, ["Acme", "Home"]);
 }
+
+#[test]
+fn text_too_long_for_exif_goes_in_the_xmp_only() {
+    let mut v = values(0, &[]);
+    let long = "x".repeat(super::super::exif::MAX_VALUE + 1);
+    v.descriptive.caption = Some(Value::Set(LangAlt::new(&long)));
+    let a = assemble(
+        Policy::of(&settings(Include::All)),
+        Some(&camera()),
+        None,
+        &v,
+    );
+    assert_eq!(text(&a, CAPTION), None);
+    assert_eq!(a.xmp.unwrap().caption, LangAlt::new(&long).0);
+}

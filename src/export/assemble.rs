@@ -274,12 +274,18 @@ fn main_tag(
     if cleared {
         return None;
     }
-    let catalog = set.filter(|v| !v.is_empty()).map(|v| Field::ascii(tag, &v));
+    let set = set.filter(|v| !v.is_empty());
+    // Text this long goes in the XMP only: the EXIF must fit one JPEG
+    // segment with everything else. Never the file's in its place.
+    let catalog = || match &set {
+        Some(v) if v.len() > super::exif::MAX_VALUE => None,
+        Some(v) => Some(Field::ascii(tag, v)),
+        None => file.clone(),
+    };
     match (policy.custom, policy.camera, group) {
         (true, false, _) => None,
-        (true, true, true) => catalog.or(file),
+        (true, true, true) | (false, _, true) => catalog(),
         (true, true, false) => file,
-        (false, _, true) => catalog.or(file),
         (false, _, false) => None,
     }
 }

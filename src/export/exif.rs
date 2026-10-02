@@ -109,7 +109,7 @@ const MAIN: [u16; 5] = [0x010e, 0x010f, 0x0110, 0x013b, 0x8298];
 const SKIP: [u16; 4] = [0xa002, 0xa003, 0xa005, 0x927c];
 /// A value this long is not capture metadata (and would crowd the 64 KB JPEG
 /// segment the EXIF must fit in).
-const MAX_VALUE: usize = 4096;
+pub(super) const MAX_VALUE: usize = 4096;
 
 /// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
 /// a JPEG or TIFF, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
