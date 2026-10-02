@@ -177,6 +177,11 @@ impl ScreenPreviews {
     pub(super) fn publish_shown(&mut self) {
         *self.wanted.lock().unwrap() = std::mem::take(&mut self.seen);
     }
+    /// Lets previews that failed be asked for again, e.g. once their
+    /// originals are back online.
+    pub(super) fn retry_failed(&mut self) {
+        self.failed.clear();
+    }
     /// Forgets `id`'s previews, as its edit has changed or it was removed.
     pub(super) fn forget(&mut self, id: i64) {
         self.textures.retain(|key, _| key.0 != id);
@@ -369,5 +374,17 @@ mod tests {
         }
         assert!(screen.textures.is_empty());
         assert_eq!(screen.pending.get(&key), Some(&2));
+    }
+
+    #[test]
+    fn a_failed_preview_is_asked_for_again_once_retried() {
+        let ctx = egui::Context::default();
+        let mut screen = ScreenPreviews::with(&ctx, |_, _, _| anyhow::bail!("offline"));
+        let a = photo(1, Path::new("a"));
+        let _ = screen.get(&a, 100, || None);
+        screen.wait(&ctx);
+        assert!(matches!(screen.get(&a, 100, || None), Shown::Failed(_)));
+        screen.retry_failed();
+        assert!(matches!(screen.get(&a, 100, || None), Shown::Loading));
     }
 }

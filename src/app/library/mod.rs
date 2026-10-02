@@ -157,6 +157,7 @@ impl Library {
         self.reload()?;
         self.availability.start(&self.photos, &self.ctx);
         self.cache.failed.clear();
+        self.screen.retry_failed();
         self.filter();
         Ok(())
     }

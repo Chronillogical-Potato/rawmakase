@@ -194,7 +194,11 @@ impl Library {
         let Some(id) = self.compare.id(self.compare.active) else {
             return Ok(());
         };
+        let recorded = self.done.len();
         self.edit_metadata(id, edit, false)?;
+        // The selection the edit left is Compare's own to reconcile, not
+        // another command's to follow.
+        self.compare.synced = Some(self.selection.clone());
         // A photo the filter now hides has already given way to the next.
         let hidden = !self.is_shown(id);
         self.keep_compared_shown();
@@ -202,6 +206,13 @@ impl Library {
             self.step_candidate(1);
         }
         self.sync_compare_selection();
+        // Redo returns to the pair the edit left.
+        let place = self.place();
+        if self.done.len() > recorded
+            && let Some(command) = self.done.last_mut()
+        {
+            command.place_after = place;
+        }
         Ok(())
     }
     fn is_shown(&self, id: i64) -> bool {

@@ -1299,3 +1299,27 @@ fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
     assert_eq!(library.selected(), Some(copy));
     Ok(())
 }
+#[test]
+fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.filters.flags = [0].into();
+    library.filter();
+    // B, the active candidate, is rejected and hidden: A stays the select.
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    library.edit_compared(Edit::Flag(-1), false)?;
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    // Shift on a shown candidate: the undo log has the pair it moved to.
+    library.edit_compared(Edit::Rating(3), true)?;
+    assert_eq!(library.compare.candidate, Some(ids[3]));
+    let command = library.take_done().pop().unwrap();
+    assert_eq!(command.place_after, library.place());
+    Ok(())
+}
