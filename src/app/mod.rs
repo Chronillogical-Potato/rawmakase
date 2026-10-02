@@ -53,6 +53,9 @@ pub struct Editor {
     prefetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
+    /// How the Library showed its photos, as last written to the session;
+    /// returned to whenever the catalog is loaded.
+    saved_layout: crate::storage::LibraryLayout,
     status: String,
     /// What a running catalog import or open is doing.
     catalog_work: Option<String>,
@@ -206,6 +209,7 @@ impl Editor {
                 session.selected_photo,
                 session.develop,
             ),
+            saved_layout: session.library_layout.clone(),
             pending_photo: None,
             prefetch_cancel: Default::default(),
             status: "Pick a photo in the Library to begin".into(),
@@ -252,6 +256,7 @@ impl Editor {
                     theme: self.themes.chosen().flatten(),
                     theme_chosen: self.themes.chosen().is_some(),
                     auto_advance: self.auto_advance,
+                    library_layout: self.saved_layout.clone(),
                 },
             )?;
         }
