@@ -91,13 +91,23 @@ fn location<'a>(font: &Font, face: &skrifa::FontRef<'a>) -> skrifa::instance::Lo
 /// The size of `text`'s block at `px`.
 /// The size of `text`'s ink at `px`, as `text` draws it without a shadow.
 pub(super) fn measure(font: &Font, text: &str, px: f32) -> Option<(f32, f32)> {
-    let drawn = self::text(font, text, px, Align::Left, [1.; 3], &Shadow::default())?;
+    let drawn = self::text(
+        font,
+        text,
+        px,
+        Align::Left,
+        [1.; 3],
+        &Shadow::default(),
+        (f32::MAX, f32::MAX),
+    )?;
     let inked = drawn.rgba.iter().any(|p| p[3] > 0.);
     inked.then_some((drawn.width as f32, drawn.height as f32))
 }
 
 /// `text` in `color` at `px`, with its shadow; the block's own size plus
 /// room for the shadow.
+/// Never drawn larger than `limit` (the photo's size): the ink fits the
+/// photo, and a shadow past it couldn't be seen.
 pub(super) fn text(
     font: &Font,
     text: &str,
@@ -105,6 +115,7 @@ pub(super) fn text(
     align: Align,
     color: [f32; 3],
     shadow: &Shadow,
+    limit: (f32, f32),
 ) -> Option<Text> {
     let l = layout(font, text, px, align).ok()?;
     let face = font.face().ok()?;
@@ -124,9 +135,11 @@ pub(super) fn text(
     // Room for outlines that reach past their advances (italics, swashes)
     // and for the shadow; trimmed to the ink afterwards.
     let pad = (0.25 * px + dx.abs().max(dy.abs()) + 3. * blur).ceil() + 2.;
+    let fit = |ink: f32, limit: f32| pad.min(((limit - ink) / 2.).max(2.)).ceil();
+    let (pad_x, pad_y) = (fit(l.width, limit.0), fit(l.height, limit.1));
     let (w, h) = (
-        (l.width + 2. * pad).ceil() as usize,
-        (l.height + 2. * pad).ceil() as usize,
+        (l.width + 2. * pad_x).ceil() as usize,
+        (l.height + 2. * pad_y).ceil() as usize,
     );
     let mut raster = Raster::new(w, h);
     for (gid, x, baseline) in &l.glyphs {
@@ -135,7 +148,7 @@ pub(super) fn text(
         };
         let mut pen = Pen {
             raster: &mut raster,
-            origin: (x + pad, baseline + pad),
+            origin: (x + pad_x, baseline + pad_y),
             start: (0., 0.),
             at: (0., 0.),
         };

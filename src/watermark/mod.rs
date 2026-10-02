@@ -131,9 +131,10 @@ pub struct Placed {
 
 /// A watermark with what it needs loaded: its image decoded or its font
 /// read, so an export can fail before rendering when either is missing.
+#[derive(Clone)]
 pub struct Ready {
     watermark: Watermark,
-    image: Option<image::Rgba32FImage>,
+    image: Option<std::sync::Arc<image::Rgba32FImage>>,
     font: Option<fonts::Font>,
 }
 
@@ -165,10 +166,9 @@ impl Watermark {
                     "Watermark image not found: {name}"
                 );
                 (
-                    Some(
-                        decode(&path)
-                            .with_context(|| format!("Watermark image not readable: {name}"))?,
-                    ),
+                    Some(std::sync::Arc::new(decode(&path).with_context(|| {
+                        format!("Watermark image not readable: {name}")
+                    })?)),
                     None,
                 )
             }
@@ -194,6 +194,14 @@ impl Watermark {
 }
 
 impl Ready {
+    /// The same image or font with other settings: a preview changing its
+    /// size or opacity doesn't read them again.
+    pub fn with(&self, watermark: &Watermark) -> Self {
+        Self {
+            watermark: watermark.clone(),
+            ..self.clone()
+        }
+    }
     /// The mark for a photo `width` × `height`, placed.
     pub fn place(&self, width: u32, height: u32) -> Option<Placed> {
         let w = &self.watermark;
@@ -212,7 +220,11 @@ impl Ready {
                     let mw = (pw * p.clamp(0.01, 1.)).min(room.0).min(room.1 * aspect);
                     (mw, mw / aspect)
                 }
-                Size::Fit => (room.0, room.0 / aspect),
+                // As wide as the photo, unless that makes it taller.
+                Size::Fit => {
+                    let mw = room.0.min(room.1 * aspect);
+                    (mw, mw / aspect)
+                }
                 Size::Fill => {
                     let mw = room.0.min(room.1 * aspect);
                     (mw, mw / aspect)
@@ -227,8 +239,12 @@ impl Ready {
                 let (tw, th) = fit(aspect(iw, ih));
                 let (sw, sh) = if turned { (th, tw) } else { (tw, th) };
                 let (sw, sh) = (sw.round().max(1.) as u32, sh.round().max(1.) as u32);
-                let scaled =
-                    image::imageops::resize(image, sw, sh, image::imageops::FilterType::Lanczos3);
+                let scaled = image::imageops::resize(
+                    image.as_ref(),
+                    sw,
+                    sh,
+                    image::imageops::FilterType::Lanczos3,
+                );
                 (mw, mh) = (sw as usize, sh as usize);
                 // Back to straight alpha from the premultiplied scaling.
                 rgba = scaled
@@ -259,7 +275,8 @@ impl Ready {
                     tw
                 };
                 let px = 100. * target / reference.0.max(1e-3);
-                let text = raster::text(font, &w.text, px, w.align, w.color, &w.shadow)?;
+                let limit = if turned { (ph, pw) } else { (pw, ph) };
+                let text = raster::text(font, &w.text, px, w.align, w.color, &w.shadow, limit)?;
                 (mw, mh, rgba) = (text.width, text.height, text.rgba);
             }
             (None, None) => return None,
@@ -382,48 +399,85 @@ fn file_name(name: &str) -> String {
         .collect();
     format!("{}.json", safe.trim())
 }
-/// Saves `watermark` under its name in `dir`. A graphic preset takes its own
-/// copy of `source`, the image chosen for it, when given.
-pub fn save_in(dir: &Path, watermark: &Watermark, source: Option<&Path>) -> Result<Watermark> {
+/// Saves `watermark` as a new preset, or (`replacing`) in place of the
+/// preset of that name, which it renames when its name differs. A graphic
+/// one takes its own copy of `source`, the image chosen for it, or keeps
+/// the image it has under its own name. Everything is checked before any
+/// file changes, and the old files go only once the new ones are written.
+pub fn save_in(
+    dir: &Path,
+    watermark: &Watermark,
+    replacing: Option<&str>,
+    source: Option<&Path>,
+) -> Result<Watermark> {
     ensure!(!watermark.name.trim().is_empty(), "Name the watermark");
-    std::fs::create_dir_all(dir.join("images"))?;
-    // Names that make the same file would overwrite each other.
-    if let Some(other) = presets_in(dir)
-        .into_iter()
-        .find(|p| p.name != watermark.name && file_name(&p.name) == file_name(&watermark.name))
-    {
+    let presets = presets_in(dir);
+    // Another preset of this name, or of one that makes the same file,
+    // would be overwritten.
+    if let Some(other) = presets.iter().find(|p| {
+        Some(p.name.as_str()) != replacing
+            && (p.name == watermark.name || file_name(&p.name) == file_name(&watermark.name))
+    }) {
         anyhow::bail!(
-            "The name is too close to \"{}\"; choose another",
+            "A watermark named \"{}\" exists; choose another name",
             other.name
         );
     }
-    let mut saved = watermark.clone();
-    if let Some(source) = source {
-        let extension = source
-            .extension()
+    let previous = replacing.and_then(|r| presets.iter().find(|p| p.name == r).cloned());
+    let extension = |path: &Path| {
+        path.extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    };
+    if let Some(source) = source {
         ensure!(
-            matches!(extension.as_str(), "png" | "jpg" | "jpeg"),
+            matches!(extension(source).as_str(), "png" | "jpg" | "jpeg"),
             "Choose a PNG or JPEG image"
         );
         decode(source).context("The image can't be read")?;
-        let stem = file_name(&watermark.name);
-        let name = format!("{}.{extension}", stem.trim_end_matches(".json"));
-        // Copied beside, then moved over the old one, so a failed copy
-        // leaves the preset's image as it was.
-        let images = dir.join("images");
+    }
+    let images = dir.join("images");
+    std::fs::create_dir_all(&images)?;
+    let stem = file_name(&watermark.name)
+        .trim_end_matches(".json")
+        .to_string();
+    let mut saved = watermark.clone();
+    // The image, copied beside and moved into place, named after its preset.
+    let place = |from: &Path, name: &str| -> Result<()> {
         let staged = tempfile::NamedTempFile::new_in(&images)?;
-        std::fs::copy(source, staged.path())?;
+        std::fs::copy(from, staged.path())?;
         staged.as_file().sync_all()?;
-        staged.persist(images.join(&name)).map_err(|e| e.error)?;
+        staged.persist(images.join(name)).map_err(|e| e.error)?;
+        Ok(())
+    };
+    if let Some(source) = source {
+        let name = format!("{stem}.{}", extension(source));
+        place(source, &name)?;
         saved.image = Some(name);
+    } else if let Some(image) = &watermark.image {
+        let name = format!("{stem}.{}", extension(Path::new(image)));
+        if *image != name && images.join(image).is_file() {
+            place(&images.join(image), &name)?;
+            saved.image = Some(name);
+        }
     }
     crate::storage::atomic_json(&dir.join(file_name(&saved.name)), &saved)?;
+    if let Some(previous) = previous {
+        if file_name(&previous.name) != file_name(&saved.name) {
+            let _ = std::fs::remove_file(dir.join(file_name(&previous.name)));
+        }
+        if let Some(old) = previous.image.filter(|i| Some(i) != saved.image.as_ref()) {
+            let _ = std::fs::remove_file(images.join(old));
+        }
+    }
     Ok(saved)
 }
-pub fn save(watermark: &Watermark, source: Option<&Path>) -> Result<Watermark> {
-    save_in(&dir(), watermark, source)
+pub fn save(
+    watermark: &Watermark,
+    replacing: Option<&str>,
+    source: Option<&Path>,
+) -> Result<Watermark> {
+    save_in(&dir(), watermark, replacing, source)
 }
 /// Deletes a preset and the image it owns.
 pub fn delete_in(dir: &Path, watermark: &Watermark) -> Result<()> {
@@ -442,49 +496,5 @@ pub fn delete_in(dir: &Path, watermark: &Watermark) -> Result<()> {
 pub fn delete(watermark: &Watermark) -> Result<()> {
     delete_in(&dir(), watermark)
 }
-/// Renames: `watermark` is saved under its new name, keeping its image, and
-/// the preset named `old` goes.
-/// A graphic one's image moves to the new name, or `source` replaces it.
-pub fn rename_in(
-    dir: &Path,
-    old: &str,
-    watermark: &Watermark,
-    source: Option<&Path>,
-) -> Result<Watermark> {
-    let previous = presets_in(dir).into_iter().find(|p| p.name == old);
-    let mut renamed = watermark.clone();
-    if source.is_none()
-        && let Some(image) = &watermark.image
-    {
-        // The image is named after its preset; it takes the new name, so a
-        // later preset of the old name can't share it.
-        let extension = Path::new(image)
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let name = format!(
-            "{}.{extension}",
-            file_name(&watermark.name).trim_end_matches(".json")
-        );
-        let images = dir.join("images");
-        if *image != name && images.join(image).is_file() {
-            std::fs::rename(images.join(image), images.join(&name))?;
-        }
-        renamed.image = Some(name);
-    }
-    let saved = save_in(dir, &renamed, source)?;
-    if let Some(previous) = previous.filter(|p| p.name != saved.name) {
-        // Its image went with the rename, or is replaced by `source`.
-        let gone = Watermark {
-            image: previous
-                .image
-                .filter(|i| source.is_some() && Some(i) != saved.image.as_ref()),
-            ..previous
-        };
-        delete_in(dir, &gone)?;
-    }
-    Ok(saved)
-}
-
 #[cfg(test)]
 mod tests;

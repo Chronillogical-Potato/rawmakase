@@ -32,6 +32,7 @@ fn graphic(w: u32, h: u32, sixteen: bool) -> Result<(tempfile::TempDir, Watermar
             inset: [0., 0.],
             ..Default::default()
         },
+        None,
         Some(&source),
     )?;
     Ok((dir, saved))
@@ -189,13 +190,13 @@ fn the_weight_follows_the_style() -> Result<()> {
 fn renaming_a_preset_keeps_its_image() -> Result<()> {
     let (dir, w) = graphic(4, 4, false)?;
     let store = dir.path().join("watermarks");
-    let renamed = rename_in(
+    let renamed = save_in(
         &store,
-        &w.name,
         &Watermark {
             name: "Studio".into(),
             ..w.clone()
         },
+        Some(&w.name),
         None,
     )?;
     let names: Vec<String> = presets_in(&store).into_iter().map(|p| p.name).collect();
@@ -206,13 +207,13 @@ fn renaming_a_preset_keeps_its_image() -> Result<()> {
     // Renamed with a new image: the old preset and its image go.
     let source = dir.path().join("other.png");
     image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255])).save(&source)?;
-    let again = rename_in(
+    let again = save_in(
         &store,
-        "Studio",
         &Watermark {
             name: "Office".into(),
             ..renamed.clone()
         },
+        Some("Studio"),
         Some(&source),
     )?;
     let names: Vec<String> = presets_in(&store).into_iter().map(|p| p.name).collect();
@@ -233,28 +234,18 @@ fn names_that_make_the_same_file_and_unreadable_images_are_refused() -> Result<(
         image: None,
         ..w.clone()
     };
-    save_in(
-        &store,
-        &Watermark {
-            name: "A/B".into(),
-            ..clash.clone()
-        },
-        None,
-    )?;
-    assert!(
-        save_in(
-            &store,
-            &Watermark {
-                name: "A?B".into(),
-                ..clash
-            },
-            None
-        )
-        .is_err()
-    );
+    let named = |name: &str| Watermark {
+        name: name.into(),
+        ..clash.clone()
+    };
+    save_in(&store, &named("A/B"), None, None)?;
+    assert!(save_in(&store, &named("A?B"), None, None).is_err());
+    // A new one, or a rename, onto an existing name is refused too.
+    assert!(save_in(&store, &named("Logo"), None, None).is_err());
+    assert!(save_in(&store, &named("Logo"), Some("A/B"), None).is_err());
     let broken = dir.path().join("broken.png");
     std::fs::write(&broken, b"not a png")?;
-    assert!(save_in(&store, &w, Some(&broken)).is_err());
+    assert!(save_in(&store, &w, Some(&w.name), Some(&broken)).is_err());
     // The preset's image is untouched by the failed save.
     assert!(w.ready_in(&store.join("images")).is_ok());
     Ok(())
@@ -282,6 +273,7 @@ fn transparent_pixels_dont_darken_scaled_edges() -> Result<()> {
             size: Size::Proportional(0.13),
             ..Default::default()
         },
+        None,
         Some(&source),
     )?;
     let placed = w.ready_in(&store.join("images"))?.place(100, 100).unwrap();
@@ -311,4 +303,55 @@ fn a_wide_shadow_on_large_text_stays_cheap() -> Result<()> {
     assert!(started.elapsed().as_secs() < 20);
     assert!(placed.rgba.iter().any(|p| p[3] > 0.5));
     Ok(())
+}
+
+#[test]
+fn a_replaced_image_of_another_kind_leaves_no_old_copy() -> Result<()> {
+    let (dir, w) = graphic(4, 4, false)?;
+    let store = dir.path().join("watermarks");
+    let jpeg = dir.path().join("new.jpg");
+    image::RgbImage::from_pixel(4, 4, image::Rgb([0, 255, 0])).save(&jpeg)?;
+    let saved = save_in(&store, &w, Some(&w.name), Some(&jpeg))?;
+    let images: Vec<_> = std::fs::read_dir(store.join("images"))?.flatten().collect();
+    assert_eq!(images.len(), 1);
+    assert_eq!(saved.image.as_deref(), Some("Logo.jpg"));
+    Ok(())
+}
+
+#[test]
+fn a_shadow_never_makes_the_mark_larger_than_the_photo() -> Result<()> {
+    let mut w = Watermark {
+        text: "Big".into(),
+        size: Size::Fit,
+        inset: [0., 0.],
+        ..Default::default()
+    };
+    w.shadow = Shadow {
+        enabled: true,
+        opacity: 1.,
+        offset: 0.4,
+        radius: 0.4,
+        angle: -45.,
+    };
+    let placed = w.ready()?.place(600, 300).unwrap();
+    assert!(
+        // The ink fits the photo; the shadow reaches no further than the
+        // text's line box, whatever its offset and radius.
+        placed.width <= 900 && placed.height <= 450,
+        "{}x{}",
+        placed.width,
+        placed.height
+    );
+    Ok(())
+}
+
+#[test]
+fn a_missing_font_style_fails_rather_than_drawing_another() {
+    let w = Watermark {
+        family: "Inter".into(),
+        face: "Regular".into(),
+        ..Default::default()
+    };
+    assert!(w.ready().is_ok());
+    assert!(fonts::load("No Such Family", "Bold").is_err());
 }

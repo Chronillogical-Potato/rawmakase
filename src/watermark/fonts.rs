@@ -42,23 +42,35 @@ impl Font {
     }
 }
 
+/// Inter, with its styles.
+pub fn inter() -> Family {
+    Family {
+        name: INTER.into(),
+        faces: INTER_FACES
+            .iter()
+            .map(|(name, _)| Face {
+                name: (*name).into(),
+                path: PathBuf::new(),
+                index: 0,
+            })
+            .collect(),
+    }
+}
+
+static FAMILIES: OnceLock<Vec<Family>> = OnceLock::new();
+
+/// The families once listed, for an interface that must not wait for the
+/// listing; `None` until then.
+pub fn families_if_listed() -> Option<&'static [Family]> {
+    FAMILIES.get().map(Vec::as_slice)
+}
+
 /// Every family: Inter first, then the installed ones by name. Installed
 /// fonts are listed once, on first use; reading their names only touches
 /// each file's header and name table.
 pub fn families() -> &'static [Family] {
-    static FAMILIES: OnceLock<Vec<Family>> = OnceLock::new();
     FAMILIES.get_or_init(|| {
-        let mut families = vec![Family {
-            name: INTER.into(),
-            faces: INTER_FACES
-                .iter()
-                .map(|(name, _)| Face {
-                    name: (*name).into(),
-                    path: PathBuf::new(),
-                    index: 0,
-                })
-                .collect(),
-        }];
+        let mut families = vec![inter()];
         families.extend(installed());
         families
     })
@@ -174,7 +186,7 @@ pub fn load(family: &str, face: &str) -> Result<Font> {
     let Some(found) = families()
         .iter()
         .find(|f| f.name == family)
-        .and_then(|f| f.faces.iter().find(|x| x.name == face).or(f.faces.first()))
+        .and_then(|f| f.faces.iter().find(|x| x.name == face))
     else {
         bail!("Watermark font not found: {family} {face}");
     };

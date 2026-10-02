@@ -25,6 +25,9 @@ pub(super) struct WatermarkEditor {
     picked: Arc<Mutex<Option<PathBuf>>>,
     /// The mark as last drawn for the preview, and what it was drawn from.
     preview: Option<(String, Option<(egui::TextureHandle, egui::Rect)>)>,
+    /// The image or font the preview draws with, kept while only the
+    /// settings change, and what it was loaded for.
+    loaded: Option<(String, watermark::Ready)>,
     message: String,
 }
 impl WatermarkEditor {
@@ -40,6 +43,7 @@ impl WatermarkEditor {
             source: None,
             picked: Default::default(),
             preview: None,
+            loaded: None,
             message: String::new(),
         }
     }
@@ -144,15 +148,11 @@ impl Editor {
                     self.exports.watermark_editor = Some(state);
                     return;
                 }
-                let saved = match &state.original {
-                    Some(old) if *old != state.watermark.name => watermark::rename_in(
-                        &watermark::dir(),
-                        old,
-                        &state.watermark,
-                        source.as_deref(),
-                    ),
-                    _ => watermark::save(&state.watermark, source.as_deref()),
-                };
+                let saved = watermark::save(
+                    &state.watermark,
+                    state.original.as_deref(),
+                    source.as_deref(),
+                );
                 match saved {
                     Ok(saved) => {
                         self.exports.draft.watermark = true;
@@ -245,20 +245,32 @@ fn mark_texture(
     shown: egui::Rect,
 ) -> Option<(egui::TextureHandle, egui::Rect)> {
     let mut w = state.watermark.clone();
-    // An image not saved yet is previewed from where it was chosen.
-    let ready = match (&state.source, w.style) {
-        (Some(source), Style::Graphic) => {
-            let dir = source.parent()?.to_path_buf();
-            w.image = source.file_name().map(|n| n.to_string_lossy().into_owned());
-            w.ready_in(&dir)
-        }
-        _ => w.ready(),
-    };
-    let ready = match ready {
-        Ok(r) => r,
-        Err(e) => {
-            state.message = format!("{e:#}");
-            return None;
+    let assets = format!(
+        "{:?}|{:?}|{:?}|{}|{}",
+        w.style, state.source, w.image, w.family, w.face
+    );
+    let ready = match &state.loaded {
+        Some((key, ready)) if *key == assets => ready.with(&w),
+        _ => {
+            // An image not saved yet is previewed from where it was chosen.
+            let loaded = match (&state.source, w.style) {
+                (Some(source), Style::Graphic) => {
+                    let dir = source.parent()?.to_path_buf();
+                    w.image = source.file_name().map(|n| n.to_string_lossy().into_owned());
+                    w.ready_in(&dir)
+                }
+                _ => w.ready(),
+            };
+            match loaded {
+                Ok(r) => {
+                    state.loaded = Some((assets, r.clone()));
+                    r
+                }
+                Err(e) => {
+                    state.message = format!("{e:#}");
+                    return None;
+                }
+            }
         }
     };
     state.message.clear();
@@ -353,7 +365,13 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     .desired_width(f32::INFINITY),
             );
             heading(ui, "Text Options");
-            let families = watermark::fonts::families();
+            // Installed fonts are still being listed at first: Inter until then.
+            let listed = watermark::fonts::families_if_listed();
+            if listed.is_none() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+            let inter = [watermark::fonts::inter()];
+            let families: &[watermark::fonts::Family] = listed.unwrap_or(&inter);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Font")
