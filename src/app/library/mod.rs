@@ -257,7 +257,7 @@ impl Library {
     }
     #[cfg(test)]
     pub(in crate::app) fn show_unflagged(&mut self) {
-        self.filters.flag = 0;
+        self.filters.flags = [0].into();
         self.filter();
     }
     #[cfg(test)]
@@ -447,6 +447,7 @@ mod collections;
 mod copy_name;
 mod filmstrip;
 mod filter;
+mod filter_bar;
 mod grid;
 mod info;
 mod loupe;

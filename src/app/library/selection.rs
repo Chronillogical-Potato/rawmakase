@@ -210,6 +210,13 @@ impl Library {
             return;
         }
         let presses = presses(ctx);
+        // Cmd+L turns the filter bar off and on, in the grid and the Loupe.
+        for press in &presses {
+            let plain_command = press.modifiers.command && !press.modifiers.shift;
+            if press.key == Key::L && plain_command && !press.repeat {
+                self.toggle_filters()
+            }
+        }
         if self.loupe.open {
             self.loupe_keys(&presses);
         } else {

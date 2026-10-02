@@ -1,4 +1,5 @@
 use super::cell::photo_cell;
+use super::filter::{Kind, Label, RatingOp};
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::*;
 use eframe::egui::{Color32, Vec2};
@@ -115,7 +116,7 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     library.edit_metadata(ids[0], Edit::ToggleLabel("Red".into()), false)?;
     library.edit_metadata(ids[0], Edit::ToggleLabel("Red".into()), false)?;
     assert_eq!(library.photo(ids[0]).unwrap().label, "");
-    library.filters.flag = 0;
+    library.filters.flags = [0].into();
     library.filter();
     library.select(Some(ids[1]));
     assert_eq!(
@@ -127,8 +128,8 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     assert_eq!(library.edit_metadata(ids[2], Edit::Flag(1), true)?, None);
     assert_eq!(library.selected(), None);
     assert!(library.visible.is_empty());
-    library.filters.flag = 2;
-    library.filters.label_filter = Some("Purple".into());
+    library.filters.flags.clear();
+    library.filters.labels = [Label::Color("Purple".into())].into();
     library.filter();
     library.edit_metadata(ids[2], Edit::Label("Purple".into()), false)?;
     assert_eq!(library.visible.len(), 1);
@@ -520,18 +521,18 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     library.filter();
     assert_eq!(visible_names(&library), ["c.RAF", "b.RAF", "a.RAF"]);
     library.filters.reverse = false;
-    library.filters.rating = 3;
+    library.filters.rating = Some(3);
     library.filter();
     assert_eq!(visible_names(&library), ["a.RAF", "b.RAF"]);
-    library.filters.flag = 1;
+    library.filters.flags = [1].into();
     library.filter();
     assert_eq!(visible_names(&library), ["a.RAF"]);
-    library.filters.flag = 2;
-    library.filters.rating = 0;
-    library.filters.label_filter = Some("Client".into());
+    library.filters.flags.clear();
+    library.filters.rating = None;
+    library.filters.labels = [Label::Color("Client".into())].into();
     library.filter();
     assert_eq!(visible_names(&library), ["c.RAF"]);
-    library.filters.label_filter = None;
+    library.filters.labels.clear();
     library.filters.query = "B.r".into();
     library.filter();
     assert_eq!(visible_names(&library), ["b.RAF"]);
@@ -549,11 +550,11 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     library.filters.only_missing = false;
     // The selection follows the filter out, and comes back through `show`.
     library.select(Some(c));
-    library.filters.flag = 1;
+    library.filters.flags = [1].into();
     library.filter();
     assert_eq!(library.selected(), None);
     library.show(c);
-    assert_eq!(library.filters.flag, 2);
+    assert!(library.filters.flags.is_empty());
     assert_eq!(library.selected(), Some(c));
     assert_eq!(visible_names(&library).len(), 3);
     // Navigation clamps at both ends of the visible order.
@@ -561,6 +562,61 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     assert_eq!(library.navigate(a, 2), Some(c));
     assert_eq!(library.navigate(c, 5), Some(c));
     assert_eq!(library.navigate(999, 1), None);
+    Ok(())
+}
+#[test]
+fn attribute_filters_match_lightroom() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.catalog.set_metadata(ids[0], 3, 1, "Red")?;
+    library.catalog.set_metadata(ids[1], 5, 0, "")?;
+    library.catalog.set_metadata(ids[2], 0, -1, "Client")?;
+    library.catalog.set_metadata(ids[3], 1, 0, "Blue")?;
+    library.refresh()?;
+    library.wait_for_availability();
+    let copy = library.create_virtual_copy(ids[1])?;
+    library.filter();
+    // Flags combine: everything but rejects.
+    library.filters.flags = [1, 0].into();
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[0], ids[1], copy, ids[3]]);
+    library.filters.flags.clear();
+    // The rating compares with ≥, ≤ or =; Unrated is = 0.
+    library.filters.rating = Some(3);
+    library.filters.rating_op = RatingOp::AtMost;
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[0], ids[2], ids[3]]);
+    library.filters.rating_op = RatingOp::Exactly;
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[0]]);
+    library.filters.rating = Some(0);
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[2]]);
+    library.filters.rating = None;
+    // Labels combine, with No label and Other for custom labels.
+    library.filters.labels = [Label::Color("Red".into()), Label::Other].into();
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[0], ids[2]]);
+    library.filters.labels = [Label::None].into();
+    library.filter();
+    assert_eq!(ids_of(&library), [ids[1], copy]);
+    library.filters.labels.clear();
+    // Masters or virtual copies.
+    library.filters.kind = Kind::Copies;
+    library.filter();
+    assert_eq!(ids_of(&library), [copy]);
+    library.filters.kind = Kind::Masters;
+    library.filter();
+    assert_eq!(ids_of(&library).len(), 4);
+    // Cmd+L turns the bar off and on without losing it; Clear resets it.
+    library.toggle_filters();
+    assert!(!library.filters.enabled && library.filters.bar_set());
+    assert_eq!(ids_of(&library).len(), 5);
+    library.toggle_filters();
+    assert_eq!(ids_of(&library).len(), 4);
+    library.toggle_filters();
+    library.filters.clear_bar();
+    assert!(library.filters.enabled && !library.filters.bar_set());
     Ok(())
 }
 #[test]
@@ -733,10 +789,10 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
     // The filter bar still applies inside a collection.
     library.catalog.set_metadata(ids[0], 0, 1, "")?;
     library.reload()?;
-    library.filters.flag = 1;
+    library.filters.flags = [1].into();
     library.filter();
     assert_eq!(library.visible.len(), 1);
-    library.filters.flag = 2;
+    library.filters.flags.clear();
     library.filter();
 
     // A saved collection comes back with the session; an unknown one doesn't.
@@ -896,7 +952,7 @@ fn grid_keys_move_extend_and_clear_the_selection() -> Result<()> {
 fn a_rejected_range_leaves_the_unflagged_view_in_one_write() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
     let ids = ids_of(&library);
-    library.filters.flag = 0;
+    library.filters.flags = [0].into();
     library.filter();
     library.click(ids[1], egui::Modifiers::NONE);
     library.click(ids[3], egui::Modifiers::SHIFT);
@@ -958,7 +1014,7 @@ fn a_hidden_active_photo_hands_over_to_the_rest_of_the_selection() -> Result<()>
     library.select_all();
     library.select(Some(ids[0]));
     library.select_all();
-    library.filters.rating = 3;
+    library.filters.rating = Some(3);
     library.filter();
     assert_eq!(library.selected(), Some(ids[1]));
     assert_eq!(library.selected_ids(), ids[1..]);
