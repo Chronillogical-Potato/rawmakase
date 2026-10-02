@@ -22,28 +22,30 @@ impl Library {
             .inner_margin(egui::Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
+                // Each control wraps as a whole onto another row when the
+                // window is narrow.
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.;
                     ui.spacing_mut().interact_size.y = TOGGLE_HEIGHT;
                     let compact = ui.available_width() < 640.;
-                    ui.scope(|ui| {
-                        if !self.filters.enabled {
-                            // Off with Cmd+L: kept, but shown as not applying.
-                            ui.multiply_opacity(0.45);
-                        }
-                        changed |= self.search_field(ui, compact);
-                        ui.add_space(10.);
-                        changed |= self.flag_filter(ui, compact);
-                        ui.add_space(10.);
-                        changed |= self.rating_filter(ui, compact);
-                        ui.add_space(10.);
-                        changed |= self.label_filter(ui, compact);
-                        if self.has_copies() || self.filters.kind != Kind::All {
-                            ui.add_space(10.);
-                            changed |= self.kind_filter(ui, compact);
-                        }
-                    });
+                    let opacity = ui.opacity();
+                    if !self.filters.enabled {
+                        // Off with Cmd+L: kept, but shown as not applying.
+                        ui.multiply_opacity(0.45);
+                    }
+                    changed |= ui.horizontal(|ui| self.search_field(ui, compact)).inner;
                     ui.add_space(10.);
+                    changed |= ui.horizontal(|ui| self.flag_filter(ui, compact)).inner;
+                    ui.add_space(10.);
+                    changed |= ui.horizontal(|ui| self.rating_filter(ui, compact)).inner;
+                    ui.add_space(10.);
+                    changed |= ui.horizontal(|ui| self.label_filter(ui, compact)).inner;
+                    if self.has_copies() || self.filters.kind != Kind::All {
+                        ui.add_space(10.);
+                        changed |= ui.horizontal(|ui| self.kind_filter(ui, compact)).inner;
+                    }
+                    ui.add_space(10.);
+                    ui.set_opacity(opacity);
                     changed |= self.filters_switch(ui);
                 });
             });

@@ -206,16 +206,21 @@ impl Library {
     /// in the Loupe, moving and its own zoom.
     pub(in crate::app) fn selection_keys(&mut self, ctx: &egui::Context) {
         // A menu or popup takes the keys first, Escape above all.
-        if ctx.text_edit_focused() || egui::Popup::is_any_open(ctx) {
+        if egui::Popup::is_any_open(ctx) {
             return;
         }
         let presses = presses(ctx);
-        // Cmd+L turns the filter bar off and on, in the grid and the Loupe.
+        // Cmd+L turns the filter bar off and on, in the grid and the Loupe,
+        // and from the Search field too.
         for press in &presses {
-            let plain_command = press.modifiers.command && !press.modifiers.shift;
-            if press.key == Key::L && plain_command && !press.repeat {
+            let cmd_l =
+                press.key == Key::L && press.modifiers.matches_exact(egui::Modifiers::COMMAND);
+            if cmd_l && !press.repeat {
                 self.toggle_filters()
             }
+        }
+        if ctx.text_edit_focused() {
+            return;
         }
         if self.loupe.open {
             self.loupe_keys(&presses);

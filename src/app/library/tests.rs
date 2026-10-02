@@ -612,9 +612,14 @@ fn attribute_filters_match_lightroom() -> Result<()> {
     library.toggle_filters();
     assert!(!library.filters.enabled && library.filters.bar_set());
     assert_eq!(ids_of(&library).len(), 5);
+    // Revealing a photo keeps filters that are off: they hide nothing.
+    library.filters.collection = Some(999);
+    library.filter();
+    library.show(ids[0]);
+    assert_eq!(library.filters.collection, None);
+    assert_eq!(library.filters.kind, Kind::Masters);
     library.toggle_filters();
     assert_eq!(ids_of(&library).len(), 4);
-    library.toggle_filters();
     library.filters.clear_bar();
     assert!(library.filters.enabled && !library.filters.bar_set());
     Ok(())
