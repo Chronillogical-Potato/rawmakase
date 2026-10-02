@@ -227,6 +227,8 @@ impl Editor {
                 };
                 self.library = Some(l);
                 self.library_mode = true;
+                // Commands never cross catalogs.
+                self.undo_log.clear();
                 // On launch, return to the folder, photo and module of last time.
                 if let Some((source, photo, develop)) = self.restore.take()
                     && let Some(library) = &mut self.library

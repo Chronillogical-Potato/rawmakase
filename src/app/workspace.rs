@@ -108,6 +108,7 @@ impl Editor {
             self.collapsed = collapsed;
             let _ = self.save_session();
         }
+        self.sync_undo();
         let place = self.current_place();
         if self.library.is_some() && place != self.saved_place {
             self.saved_place = place;
@@ -126,6 +127,22 @@ impl Editor {
                     })
                 })
             };
+            // Develop has its own keys; the log is the same.
+            if self.library_mode {
+                let (undo, redo) = ctx.input(|i| {
+                    let z = i.modifiers.command && i.key_pressed(egui::Key::Z);
+                    let y = !cfg!(target_os = "macos")
+                        && i.modifiers.command
+                        && !i.modifiers.shift
+                        && i.key_pressed(egui::Key::Y);
+                    (z && !i.modifiers.shift, (z && i.modifiers.shift) || y)
+                });
+                if undo {
+                    self.undo();
+                } else if redo {
+                    self.redo();
+                }
+            }
             if plain(egui::Key::G) && self.flush() {
                 self.library_mode = true;
             }

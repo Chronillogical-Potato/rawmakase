@@ -61,6 +61,8 @@ pub struct Editor {
     close_confirm: bool,
     /// The virtual copy waiting for the user to confirm its removal.
     remove_copy: Option<i64>,
+    /// Cmd+Z across Library and Develop.
+    undo_log: undo::UndoLog,
 }
 impl Editor {
     pub fn new(
@@ -206,6 +208,7 @@ impl Editor {
             importing: None,
             close_confirm: false,
             remove_copy: None,
+            undo_log: Default::default(),
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;
@@ -364,6 +367,7 @@ mod retouch_tool;
 mod stats;
 #[cfg(test)]
 mod tests;
+mod undo;
 mod upright;
 mod viewport;
 mod widgets;

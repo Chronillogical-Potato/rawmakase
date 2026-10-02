@@ -20,8 +20,28 @@ impl Step {
     }
 }
 
-#[derive(Default)]
+/// A change to the recipe for the shared undo log: a recorded step or a
+/// click in the History panel, with the History positions around it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Recorded {
+    /// Orders it among Library commands made in the same frame.
+    pub(super) sequence: u64,
+    pub(super) before: Recipe,
+    pub(super) after: Recipe,
+    /// Steps applied before and after, counted from the first step ever
+    /// recorded, so they hold when old steps are dropped.
+    pub(super) at_before: usize,
+    pub(super) at_after: usize,
+}
+
 pub(super) struct History {
+    /// Tells this photo's History apart from earlier ones, e.g. after the
+    /// photo was opened again.
+    id: u64,
+    /// Steps dropped from the front to stay within the limit.
+    dropped: usize,
+    /// Changes not yet handed to the shared undo log.
+    recorded: Vec<Recorded>,
     /// States before each step, oldest first, with the step that left them.
     undo: VecDeque<(Recipe, Step)>,
     /// States after each undone step, the next one last.
@@ -31,7 +51,64 @@ pub(super) struct History {
     /// The name for the next recorded step; otherwise it is derived.
     label: Option<Step>,
 }
+impl Default for History {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            dropped: 0,
+            recorded: Vec::new(),
+            undo: VecDeque::new(),
+            redo: Vec::new(),
+            gesture: None,
+            replaying: false,
+            label: None,
+        }
+    }
+}
 impl History {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+    /// Steps applied, counted from the first step ever recorded.
+    pub fn position(&self) -> usize {
+        self.dropped + self.undo.len()
+    }
+    /// The changes made since the last call, for the shared undo log.
+    pub fn take_recorded(&mut self) -> Vec<Recorded> {
+        std::mem::take(&mut self.recorded)
+    }
+    /// A click on a History step: `go_to`, recorded as one change.
+    pub fn jump(&mut self, applied: usize, current: &mut Recipe) -> bool {
+        let (before, at_before) = (current.clone(), self.position());
+        if !self.go_to(applied, current) {
+            return false;
+        }
+        self.recorded.push(Recorded {
+            sequence: super::undo::sequence(),
+            before,
+            after: current.clone(),
+            at_before,
+            at_after: self.position(),
+        });
+        true
+    }
+    /// Undo or redo from the shared log: back to `at` steps applied when they
+    /// are still here; otherwise `target` is set as a new step named `step`.
+    pub fn restore(&mut self, at: usize, target: &Recipe, current: &mut Recipe, step: Step) {
+        // Not an edit of the user's for `observe` to record.
+        self.replaying = true;
+        // History's own states are kept up to date (e.g. by Upright's
+        // analysis), so they win over the copy in the log.
+        if at >= self.dropped {
+            self.go_to(at - self.dropped, current);
+        }
+        if self.position() != at {
+            let before = std::mem::replace(current, target.clone());
+            self.label(step);
+            self.push(before, current);
+        }
+    }
     /// Names the step being made, e.g. by the slider being dragged.
     pub fn label(&mut self, step: Step) {
         self.label = Some(step);
@@ -80,6 +157,22 @@ impl History {
     }
 
     pub fn record(&mut self, before: Recipe, after: &Recipe) -> bool {
+        let at_before = self.position();
+        let recorded = before.clone();
+        if !self.push(before, after) {
+            return false;
+        }
+        self.recorded.push(Recorded {
+            sequence: super::undo::sequence(),
+            before: recorded,
+            after: after.clone(),
+            at_before,
+            at_after: self.position(),
+        });
+        true
+    }
+    /// Adds a step without handing it to the shared undo log.
+    fn push(&mut self, before: Recipe, after: &Recipe) -> bool {
         let label = self.label.take();
         if before == *after {
             return false;
@@ -87,6 +180,7 @@ impl History {
         let step = label.unwrap_or_else(|| describe(&before, after));
         if self.undo.len() == LIMIT {
             self.undo.pop_front();
+            self.dropped += 1;
         }
         self.undo.push_back((before, step));
         self.redo.clear();

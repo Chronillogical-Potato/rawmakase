@@ -11,6 +11,28 @@ pub enum Action {
     RelinkFolder(i64),
     AddFolder,
 }
+/// Where the Library was: its source, filter bar and selection, for undo to
+/// return to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Place {
+    filters: filter::Filters,
+    folder: String,
+    selection: selection::Selection,
+}
+/// Rating, flag and label of a photo.
+pub type Metadata = (i64, i32, i32, String);
+/// A metadata change made through the Library, for the shared undo log.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataCommand {
+    /// Orders it among Develop steps made in the same frame.
+    pub sequence: u64,
+    pub before: Vec<Metadata>,
+    pub after: Vec<Metadata>,
+    pub place_before: Place,
+    pub place_after: Place,
+    /// What changed, as the status line said it.
+    pub summary: String,
+}
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,6 +72,8 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    /// Metadata changes not yet handed to the shared undo log.
+    done: Vec<MetadataCommand>,
     /// Reads capture times for photos added from folders.
     capture: Option<capture::Backfill>,
     /// Photos the capture-time backfill tried since the last online check.
@@ -95,6 +119,7 @@ impl Library {
             ctx,
             copy_request: None,
             copy_names: Default::default(),
+            done: Vec::new(),
             capture: None,
             capture_tried: HashSet::new(),
             keep_in_place: None,
@@ -249,6 +274,7 @@ impl Library {
         let Some(&first) = ids.first() else {
             return Ok(None);
         };
+        let place_before = self.place();
         let lead = self
             .selection
             .active
@@ -274,6 +300,11 @@ impl Library {
                 .filter(|id| !ids.contains(id))
                 .collect()
         });
+        let before: Vec<Metadata> = changes
+            .iter()
+            .filter_map(|(id, ..)| self.photo(*id))
+            .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
+            .collect();
         self.catalog.set_metadata_of(&changes)?;
         for (id, rating, flag, label) in &changes {
             if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
@@ -331,7 +362,66 @@ impl Library {
                 self.make_active(to);
             }
         }
+        self.done.push(MetadataCommand {
+            sequence: crate::app::undo::sequence(),
+            before,
+            after: changes,
+            place_before,
+            place_after: self.place(),
+            summary: self.message.clone(),
+        });
         Ok(if advance { next } else { None })
+    }
+    /// The metadata changes made since the last call, for the shared undo log.
+    pub(in crate::app) fn take_done(&mut self) -> Vec<MetadataCommand> {
+        std::mem::take(&mut self.done)
+    }
+    /// Sets rating, flag and label for undo and redo, in one transaction,
+    /// without recording a change of its own.
+    pub(in crate::app) fn set_metadata(&mut self, values: &[Metadata]) -> Result<()> {
+        self.catalog.set_metadata_of(values)?;
+        for (id, rating, flag, label) in values {
+            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
+                p.rating = *rating;
+                p.flag = *flag;
+                p.label = label.clone();
+            }
+        }
+        self.filter();
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn show_unflagged(&mut self) {
+        self.filters.flag = 0;
+        self.filter();
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn select_range_to(&mut self, id: i64) {
+        self.click(id, egui::Modifiers::SHIFT);
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn shown(&self) -> Vec<i64> {
+        self.visible.iter().map(|i| self.photos[*i].id).collect()
+    }
+    #[cfg(test)]
+    pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
+        self.selected_ids()
+    }
+    pub(in crate::app) fn place(&self) -> Place {
+        Place {
+            filters: self.filters.clone(),
+            folder: self.selected_folder.clone(),
+            selection: self.selection.clone(),
+        }
+    }
+    /// Returns to `place`, with the photos it had selected that are still
+    /// there, and scrolls to its active photo.
+    pub(in crate::app) fn go_to_place(&mut self, place: &Place) {
+        self.filters = place.filters.clone();
+        self.selected_folder = place.folder.clone();
+        self.selection = place.selection.clone();
+        self.filter();
+        self.scroll_to_active = true;
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {

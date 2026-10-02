@@ -499,7 +499,7 @@ impl Editor {
         });
         if let Some(n) = go_to {
             let current = &mut self.document.recipe;
-            if self.document.history.go_to(n, current) {
+            if self.document.history.jump(n, current) {
                 self.ensure_upright();
             }
         }
