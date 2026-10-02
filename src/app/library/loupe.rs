@@ -389,7 +389,9 @@ impl Library {
             egui::Rect::from_center_size(inset.center(), size * scale)
         });
         // A click zooms to 1:1 at the point clicked, and back; a drag pans.
-        if response.clicked() && available {
+        // The second click of a double-click is not another toggle, so a
+        // double-click zooms in too rather than in and straight back out.
+        if response.clicked() && !response.double_clicked() && available {
             let at = response.interact_pointer_pos().zip(fit).map(|(pos, fit)| {
                 [
                     (pos.x - fit.left()) / fit.width(),
