@@ -1,5 +1,6 @@
 //! Atomic JPEG and 16-bit TIFF export with sRGB ICC, the camera's EXIF and the
 //! edit as Camera Raw XMP, as Lightroom embeds them.
+pub mod assemble;
 mod encode;
 pub mod exif;
 pub mod job;
@@ -12,7 +13,7 @@ use crate::{
 };
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-pub use settings::{Destination, Existing, ExportSettings, Format};
+pub use settings::{Destination, Existing, ExportSettings, Format, Include};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 
@@ -54,6 +55,8 @@ pub struct Embed {
     pub capture: bool,
     /// Keep the camera's GPS position.
     pub location: bool,
+    /// Make and model from LibRaw where the camera's EXIF has none.
+    pub camera_fallback: bool,
     /// An XMP packet, e.g. the edit as Camera Raw settings.
     pub xmp: Option<String>,
     /// Pixels per inch recorded in the file.
@@ -65,6 +68,7 @@ impl Default for Embed {
             camera: None,
             capture: true,
             location: true,
+            camera_fallback: true,
             xmp: None,
             ppi: 240,
         }

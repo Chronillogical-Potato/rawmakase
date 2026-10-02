@@ -11,11 +11,23 @@ pub struct Photo {
     pub raw_name: String,
     /// Capture time as EXIF writes it, "2018:08:26 10:39:33".
     pub captured: Option<String>,
+    /// Capture time as XMP writes it, with subseconds and offset when known;
+    /// wins over `captured`.
+    pub created: Option<String>,
     /// Export time in UTC, "2026-09-27T06:12:22Z".
     pub now: String,
     pub rating: i32,
     pub label: String,
-    pub keywords: Vec<String>,
+    /// Each keyword's path, top first.
+    pub keywords: Vec<Vec<String>>,
+    /// Languages of each, as (language, text), `x-default` first.
+    pub title: Vec<(String, String)>,
+    pub caption: Vec<(String, String)>,
+    pub rights: Vec<(String, String)>,
+    /// In order.
+    pub creators: Vec<String>,
+    /// The lens name (aux:Lens), part of the camera info.
+    pub lens: bool,
     /// Include the develop settings, not only the descriptive metadata.
     pub settings: bool,
     /// "image/jpeg" or "image/tiff".
@@ -376,6 +388,62 @@ fn curve(out: &mut String, name: &str, c: &ToneCurve) {
     let _ = write!(out, "    </rdf:Seq>\n   </crs:{name}>\n");
 }
 
+/// A language alternative (dc:title, dc:description, dc:rights); nothing
+/// when it has no text.
+fn lang_alt(out: &mut String, name: &str, langs: &[(String, String)]) {
+    if langs.is_empty() {
+        return;
+    }
+    let _ = write!(out, "   <{name}>\n    <rdf:Alt>\n");
+    for (lang, text) in langs {
+        let _ = writeln!(
+            out,
+            "     <rdf:li xml:lang=\"{}\">{}</rdf:li>",
+            escape(lang),
+            escape(text)
+        );
+    }
+    let _ = write!(out, "    </rdf:Alt>\n   </{name}>\n");
+}
+/// An unordered (Bag) or ordered (Seq) list; nothing when empty.
+fn list(out: &mut String, name: &str, kind: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    let _ = write!(out, "   <{name}>\n    <rdf:{kind}>\n");
+    for item in items {
+        let _ = writeln!(out, "     <rdf:li>{}</rdf:li>", escape(item));
+    }
+    let _ = write!(out, "    </rdf:{kind}>\n   </{name}>\n");
+}
+/// dc:subject, every keyword and its ancestors once, and
+/// lr:hierarchicalSubject, each keyword's path joined with "|" (a top-level
+/// keyword as a one-name path, as Lightroom writes it). "|" always separates
+/// there, so a path with a name containing it is left out of the hierarchy.
+pub fn keyword_lists(paths: &[Vec<String>]) -> (Vec<String>, Vec<String>) {
+    let mut subject: Vec<String> = Vec::new();
+    let mut hierarchical: Vec<String> = Vec::new();
+    for path in paths {
+        let path: Vec<&str> = path
+            .iter()
+            .map(|n| n.trim())
+            .filter(|n| !n.is_empty())
+            .collect();
+        for name in &path {
+            if !subject.iter().any(|s| s == name) {
+                subject.push(name.to_string());
+            }
+        }
+        if !path.is_empty() && path.iter().all(|n| !n.contains('|')) {
+            let joined = path.join("|");
+            if !hierarchical.contains(&joined) {
+                hierarchical.push(joined);
+            }
+        }
+    }
+    (subject, hierarchical)
+}
+
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     let tool = format!("RAWmakase {}", env!("CARGO_PKG_VERSION"));
@@ -384,7 +452,11 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
         ("xmp:ModifyDate".into(), photo.now.clone()),
         ("xmp:MetadataDate".into(), photo.now.clone()),
     ];
-    if let Some(date) = photo.captured.as_deref().and_then(xmp_date) {
+    let created = photo
+        .created
+        .clone()
+        .or_else(|| photo.captured.as_deref().and_then(xmp_date));
+    if let Some(date) = created {
         attributes.push(("xmp:CreateDate".into(), date.clone()));
         attributes.push(("photoshop:DateCreated".into(), date));
     }
@@ -394,7 +466,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     if !photo.label.is_empty() {
         attributes.push(("xmp:Label".into(), photo.label.clone()));
     }
-    if !m.lens_model.is_empty() {
+    if photo.lens && !m.lens_model.is_empty() {
         attributes.push(("aux:Lens".into(), m.lens_model.clone()));
     }
     if !photo.raw_name.is_empty() {
@@ -423,25 +495,20 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
          xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\"\n    \
          xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\"\n    \
          xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n    \
+         xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"\n    \
          xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"",
     );
     for (key, value) in &attributes {
         let _ = write!(out, "\n   {key}=\"{}\"", escape(value));
     }
     out.push_str(">\n");
-    let keywords: Vec<_> = photo
-        .keywords
-        .iter()
-        .map(|k| k.trim())
-        .filter(|k| !k.is_empty())
-        .collect();
-    if !keywords.is_empty() {
-        out.push_str("   <dc:subject>\n    <rdf:Bag>\n");
-        for k in keywords {
-            let _ = writeln!(out, "     <rdf:li>{}</rdf:li>", escape(k));
-        }
-        out.push_str("    </rdf:Bag>\n   </dc:subject>\n");
-    }
+    lang_alt(&mut out, "dc:title", &photo.title);
+    lang_alt(&mut out, "dc:description", &photo.caption);
+    lang_alt(&mut out, "dc:rights", &photo.rights);
+    list(&mut out, "dc:creator", "Seq", &photo.creators);
+    let (subject, hierarchical) = keyword_lists(&photo.keywords);
+    list(&mut out, "dc:subject", "Bag", &subject);
+    list(&mut out, "lr:hierarchicalSubject", "Bag", &hierarchical);
     if photo.settings {
         curve(&mut out, "ToneCurvePV2012", &r.curve);
         for (i, name) in ["Red", "Green", "Blue"].iter().enumerate() {

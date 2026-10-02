@@ -8,6 +8,7 @@ use super::{Editor, worker::Event};
 use crate::app::theme;
 use crate::export::{
     Existing, ExportSettings,
+    assemble::Values,
     job::{self, Photo},
     settings::unique,
 };
@@ -80,20 +81,33 @@ impl Editor {
             .document
             .catalog_photo
             .and_then(|id| self.library.as_ref()?.photo(id));
+        let values = match (catalog, self.library.as_ref()) {
+            (Some(p), Some(library)) => {
+                let read = library.catalog.descriptive(p.id).and_then(|descriptive| {
+                    let keywords = library.catalog.keywords(p.id)?;
+                    Ok(Values {
+                        descriptive,
+                        keywords: keywords.into_iter().map(|k| k.path).collect(),
+                        rating: p.rating,
+                        label: p.label.clone(),
+                    })
+                });
+                read.map_err(|e| format!("Metadata could not be read for export: {e}"))
+            }
+            _ => Ok(Values::default()),
+        };
+        let values = match values {
+            Ok(values) => values,
+            Err(e) => {
+                self.status = e;
+                return None;
+            }
+        };
         let photo = Some(Photo {
             image: self.document.full()?.clone(),
             source: self.document.path.clone()?,
             recipe: self.document.recipe.clone(),
-            rating: catalog.map_or(0, |p| p.rating),
-            label: catalog.map(|p| p.label.clone()).unwrap_or_default(),
-            keywords: catalog
-                .map(|p| {
-                    p.keywords
-                        .split(',')
-                        .map(|k| k.trim().to_string())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            values,
         });
         if photo.is_none() {
             self.status = "Open a photo to export it".into();
