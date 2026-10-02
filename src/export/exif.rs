@@ -156,8 +156,15 @@ pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
         camera,
         lens: text(0xa434),
         focal: number(0x920a),
-        aperture: number(0x829d),
-        exposure: number(0x829a),
+        // FNumber and ExposureTime, else their APEX values.
+        aperture: number(0x829d).or_else(|| {
+            let av = exif.get(0x9202).and_then(Field::number)?;
+            Some(2f64.powf(av / 2.))
+        }),
+        exposure: number(0x829a).or_else(|| {
+            let tv = exif.get(0x9201).and_then(Field::number)?;
+            Some(2f64.powf(-tv))
+        }),
         iso: iso(&exif),
         dimensions: None,
     };
