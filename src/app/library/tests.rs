@@ -1586,6 +1586,7 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
         &crate::develop::Recipe::default(),
         &Default::default(),
     )?;
+    library.sort_keys = None;
     assert_eq!(order(&mut library, Sort::EditTime).last(), Some(&b9));
     Ok(())
 }

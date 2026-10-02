@@ -54,6 +54,9 @@ pub struct Library {
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
+    /// The sort order's keys from the catalog (see `Sort::keys`), kept until
+    /// edits or sizes change them.
+    sort_keys: Option<(sort::Sort, sort::Keys)>,
     /// The frame the Library was last drawn in, to notice it showing again.
     drawn_pass: u64,
     /// The style the grid was last drawn with, to keep its rows in place
@@ -137,6 +140,7 @@ impl Library {
             cell_style: Default::default(),
             drawn_style: Default::default(),
             drawn_pass: 0,
+            sort_keys: None,
             cell_info: HashMap::new(),
             strip_current: None,
             visible: Vec::new(),
@@ -183,6 +187,7 @@ impl Library {
     /// for changes that add or remove no file, such as virtual copies.
     fn reload(&mut self) -> Result<()> {
         self.cell_info.clear();
+        self.sort_keys = None;
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
         self.photos
@@ -251,11 +256,16 @@ impl Library {
         self.availability.count(&self.photos)
     }
     fn filter(&mut self) {
-        let keys = self.filters.sort.keys(&self.catalog);
+        // What the order needs from the catalog, read once until it changes.
+        let sort = self.filters.sort;
+        if self.sort_keys.as_ref().is_none_or(|(of, _)| *of != sort) {
+            self.sort_keys = Some((sort, sort.keys(&self.catalog)));
+        }
+        let keys = &self.sort_keys.as_ref().unwrap().1;
         self.visible = self.filters.visible(
             &self.photos,
             |path| self.availability.is_available(path),
-            &keys,
+            keys,
         );
         self.keep_shown_selected();
     }

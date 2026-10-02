@@ -46,6 +46,7 @@ impl Library {
         let pass = ui.ctx().cumulative_pass_nr();
         let returned = std::mem::replace(&mut self.drawn_pass, pass) + 1 < pass;
         if returned && self.filters.sort == super::sort::Sort::EditTime {
+            self.sort_keys = None;
             self.filter();
             self.scroll_to_active = true;
         }
