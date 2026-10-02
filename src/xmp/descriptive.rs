@@ -172,6 +172,7 @@ pub fn read(text: &str) -> Result<Read> {
             } else {
                 r.parse::<f64>()
                     .ok()
+                    .filter(|r| r.is_finite())
                     .map(|r| (r.round() as i32).clamp(0, 5))
             }
         }),
@@ -351,9 +352,10 @@ fn location(p: &Packet) -> Option<Location> {
             .split(',')
             .map(|n| n.trim().parse().ok())
             .collect::<Option<_>>()?;
+        let minutes_ok = |m: f64| (0. ..60.).contains(&m);
         let value = match parts[..] {
-            [d, m] => d + m / 60.,
-            [d, m, s] => d + m / 60. + s / 3600.,
+            [d, m] if d >= 0. && minutes_ok(m) => d + m / 60.,
+            [d, m, s] if d >= 0. && minutes_ok(m) && minutes_ok(s) => d + m / 60. + s / 3600.,
             _ => return None,
         };
         Some(sign * value)

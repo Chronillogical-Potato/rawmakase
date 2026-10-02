@@ -229,11 +229,12 @@ impl Library {
         self.reread_finished = true;
     }
     fn finish_reread(&mut self, reread: Reread) -> Result<()> {
-        // Photos removed while their files were read are left out.
+        // Photos removed, or made copies, while their files were read are
+        // left out: copies are never read.
         let read: Vec<_> = reread
             .read
             .into_iter()
-            .filter(|(id, ..)| self.photo(*id).is_some())
+            .filter(|(id, ..)| self.photo(*id).is_some_and(|p| p.master.is_none()))
             .collect();
         let ids: Vec<i64> = reread
             .paths

@@ -108,6 +108,10 @@ fn embedded(file: &Path) -> Result<Option<String>> {
                 if byte[0] == 0xda || byte[0] == 0xd9 {
                     break;
                 }
+                // Markers without a length: TEM and the restarts.
+                if byte[0] == 0x01 || (0xd0..=0xd7).contains(&byte[0]) {
+                    continue;
+                }
                 let mut length = [0u8; 2];
                 if f.read_exact(&mut length).is_err() {
                     break;
@@ -178,9 +182,14 @@ pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {
     let first = found.next();
     report.ignored.extend(found);
     let sidecar = first.and_then(|path| {
-        match std::fs::read(&path)
-            .context("not readable")
-            .and_then(|bytes| descriptive::read(&decode(&bytes)?))
+        // Larger than any sidecar: not read into memory.
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        match (if size > 16_000_000 {
+            Err(anyhow::anyhow!("too large for a sidecar"))
+        } else {
+            std::fs::read(&path).context("not readable")
+        })
+        .and_then(|bytes| descriptive::read(&decode(&bytes)?))
         {
             Ok(read) => Some(read),
             Err(e) => {
