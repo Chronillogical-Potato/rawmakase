@@ -197,3 +197,16 @@ fn a_sidecar_value_wins_and_its_empty_ones_suppress_the_files() {
     assert_eq!(r.caption, Some(Value::Cleared));
     assert_eq!(r.copyright, Some(Value::Set(LangAlt::new("© Embedded"))));
 }
+
+#[test]
+fn an_empty_rating_is_none_and_an_impossible_date_is_not_read() -> Result<()> {
+    let text = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+      <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+        xmlns:exif="http://ns.adobe.com/exif/1.0/" xmp:Rating=""
+        exif:DateTimeOriginal="0000-00-00T00:00:00" xmp:CreateDate="2020-02-02T10:00"/>
+      </rdf:RDF></x:xmpmeta>"#;
+    let r = read(text)?;
+    assert_eq!(r.rating, Some(0));
+    assert_eq!(r.capture.unwrap().captured, "2020-02-02T10:00:00");
+    Ok(())
+}

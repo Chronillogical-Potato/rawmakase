@@ -26,6 +26,7 @@ mod ingest;
 pub mod lightroom;
 mod models;
 mod sidecar;
+pub use crate::xmp::descriptive::Read as FileMetadata;
 pub use descriptive::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
     Value, keyword_name,

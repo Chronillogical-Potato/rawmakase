@@ -140,3 +140,55 @@ fn read_metadata_from_files_overwrites_what_the_file_has_and_skips_copies() -> R
     assert!(cat.keywords(copy)?.is_empty());
     Ok(())
 }
+
+#[test]
+fn utf16_sidecars_are_read() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("A.NEF");
+    std::fs::write(&file, b"synthetic raw")?;
+    let text = xmp(r#"dc:title="Zażółć""#, "");
+    let mut bytes = vec![0xff, 0xfe];
+    bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+    std::fs::write(dir.path().join("A.NEF.xmp"), bytes)?;
+    let (read, report) = read_file(&file);
+    assert_eq!(report, SidecarReport::default());
+    assert_eq!(read.unwrap().title, set("Zażółć"));
+    Ok(())
+}
+
+#[test]
+fn a_photo_whose_values_cant_be_written_is_reported_and_the_rest_imported() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("A.NEF"), b"synthetic raw a")?;
+    std::fs::write(folder.join("B.NEF"), b"synthetic raw b")?;
+    cat.add_folder(&folder)?;
+    let (a, b) = (id_of(&cat, "A.NEF")?, id_of(&cat, "B.NEF")?);
+    let bad = crate::xmp::descriptive::Read {
+        // Not a date the catalog can sort by.
+        capture: Some(crate::catalog::Capture {
+            captured: "garbage".into(),
+            subsec: None,
+            offset: None,
+        }),
+        title: set("Bad"),
+        ..Default::default()
+    };
+    let good = crate::xmp::descriptive::Read {
+        title: set("Good"),
+        ..Default::default()
+    };
+    let report = cat.apply_file_metadata(
+        &[
+            (a, folder.join("A.NEF.xmp"), bad),
+            (b, folder.join("B.NEF.xmp"), good),
+        ],
+        false,
+    )?;
+    assert_eq!(report.unreadable.len(), 1);
+    assert_eq!(title(&cat, a)?, None);
+    assert_eq!(title(&cat, b)?, set("Good"));
+    Ok(())
+}

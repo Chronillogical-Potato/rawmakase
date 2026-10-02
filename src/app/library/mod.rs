@@ -120,6 +120,8 @@ pub struct Library {
     pub message_detail: String,
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<i64>>,
+    /// Read Metadata from Files while it reads.
+    reread: Option<descriptive::Reread>,
 }
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
@@ -183,6 +185,7 @@ impl Library {
             message: String::new(),
             message_detail: String::new(),
             read_request: None,
+            reread: None,
         };
         s.refresh()?;
         // Start with a selection, as Lightroom does, so the side panels are filled.
@@ -444,6 +447,7 @@ impl Library {
         }
         self.poll_capture_times();
         self.poll_photo_info();
+        self.poll_reread();
         self.cache.poll(ctx);
         self.screen.poll(ctx);
     }

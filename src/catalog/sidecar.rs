@@ -121,6 +121,32 @@ fn embedded(file: &Path) -> Result<Option<String>> {
     }
 }
 
+/// A sidecar's text: UTF-8, or UTF-16 by its byte order mark, as XML allows.
+fn decode(bytes: &[u8]) -> Result<String> {
+    let utf16 = |big: bool| -> Result<String> {
+        let units: Vec<u16> = bytes[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| {
+                if big {
+                    u16::from_be_bytes(*c)
+                } else {
+                    u16::from_le_bytes(*c)
+                }
+            })
+            .collect();
+        Ok(String::from_utf16(&units)?)
+    };
+    match bytes {
+        [0xfe, 0xff, ..] => utf16(true),
+        [0xff, 0xfe, ..] => utf16(false),
+        _ => Ok(
+            std::str::from_utf8(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes))?.to_string(),
+        ),
+    }
+}
+
 /// The metadata of `file`'s sidecar and, for a JPEG or TIFF, its own XMP:
 /// field by field the sidecar's where it has one, an explicitly empty value
 /// included, else the file's. `None` when neither has any.
@@ -130,9 +156,9 @@ pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {
     let first = found.next();
     report.ignored.extend(found);
     let sidecar = first.and_then(|path| {
-        match std::fs::read_to_string(&path)
+        match std::fs::read(&path)
             .context("not readable")
-            .and_then(|t| descriptive::read(&t))
+            .and_then(|bytes| descriptive::read(&decode(&bytes)?))
         {
             Ok(read) => Some(read),
             Err(e) => {
@@ -212,17 +238,34 @@ impl Catalog {
             .map(|p| (p.id, p.path))
             .collect();
         let mut report = SidecarReport::default();
-        let reads: Vec<(i64, Read)> = photos
-            .iter()
+        let reads: Vec<(i64, PathBuf, Read)> = photos
+            .into_iter()
             .filter_map(|(id, path)| {
-                let (read, found) = read_file(path);
+                let (read, found) = read_file(&path);
                 report.add(found);
-                read.map(|r| (*id, r))
+                read.map(|r| (id, path, r))
             })
             .collect();
-        let tx = self.db.transaction()?;
-        for (id, read) in &reads {
-            apply(&tx, *id, read, true)?;
+        report.add(self.apply_file_metadata(&reads, true)?);
+        Ok(report)
+    }
+    /// Writes what was read from files, in one transaction: with
+    /// `overwrite` every field a file has, else only fields a photo has no
+    /// value for. A photo whose values can't be written (an impossible
+    /// date) is left as it was and reported with its file.
+    pub fn apply_file_metadata(
+        &mut self,
+        reads: &[(i64, PathBuf, Read)],
+        overwrite: bool,
+    ) -> Result<SidecarReport> {
+        let mut report = SidecarReport::default();
+        let mut tx = self.db.transaction()?;
+        for (id, path, read) in reads {
+            let sp = tx.savepoint()?;
+            match apply(&sp, *id, read, overwrite) {
+                Ok(()) => sp.commit()?,
+                Err(e) => report.unreadable.push((path.clone(), format!("{e:#}"))),
+            }
         }
         tx.commit()?;
         Ok(report)
@@ -233,19 +276,15 @@ impl Catalog {
         added: &[(i64, PathBuf)],
     ) -> Result<SidecarReport> {
         let mut report = SidecarReport::default();
-        let reads: Vec<(i64, Read)> = added
+        let reads: Vec<(i64, PathBuf, Read)> = added
             .iter()
             .filter_map(|(id, path)| {
                 let (read, found) = read_file(path);
                 report.add(found);
-                read.map(|r| (*id, r))
+                read.map(|r| (*id, path.clone(), r))
             })
             .collect();
-        let tx = self.db.transaction()?;
-        for (id, read) in &reads {
-            apply(&tx, *id, read, false)?;
-        }
-        tx.commit()?;
+        report.add(self.apply_file_metadata(&reads, false)?);
         Ok(report)
     }
 }

@@ -428,10 +428,8 @@ impl Editor {
         let Some(library) = &mut self.library else {
             return;
         };
-        self.status = match library.read_metadata_from_files(&ids) {
-            Ok(()) => library.message.clone(),
-            Err(e) => format!("Metadata not read: {e:#}"),
-        };
+        library.read_metadata_from_files(&ids).ok();
+        self.status = library.message.clone();
     }
     /// Removes virtual copy `id` once confirmed.
     pub(super) fn remove_virtual_copy(&mut self, id: i64) {

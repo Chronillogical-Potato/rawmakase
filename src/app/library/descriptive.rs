@@ -7,6 +7,18 @@ use super::{Library, Place};
 use crate::catalog::{MetadataSnapshot, TextField};
 use anyhow::{Result, ensure};
 
+/// Read Metadata from Files while its files are being read.
+pub(super) struct Reread {
+    reader: super::background::Reader<(
+        Option<crate::catalog::FileMetadata>,
+        crate::catalog::SidecarReport,
+    )>,
+    paths: std::collections::HashMap<i64, std::path::PathBuf>,
+    read: Vec<(i64, std::path::PathBuf, crate::catalog::FileMetadata)>,
+    report: crate::catalog::SidecarReport,
+    place: Place,
+}
+
 /// A descriptive metadata change, for the shared undo log.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DescriptiveCommand {
@@ -153,29 +165,86 @@ impl Library {
         self.fields.reload();
         Ok(())
     }
-    /// Lightroom's Read Metadata from Files, for the masters among `ids`,
-    /// as one command: what the files have replaces the catalog's values,
-    /// edits included.
+    /// Lightroom's Read Metadata from Files, for the masters among `ids`:
+    /// the files are read in the background, then what they have replaces
+    /// the catalog's values, edits included, as one command.
     pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[i64]) -> Result<()> {
-        let ids: Vec<i64> = ids
+        let photos: Vec<(i64, std::path::PathBuf)> = ids
             .iter()
-            .copied()
-            .filter(|id| self.photo(*id).is_some_and(|p| p.master.is_none()))
+            .filter_map(|id| self.photo(*id))
+            .filter(|p| p.master.is_none())
+            .map(|p| (p.id, p.path.clone()))
             .collect();
-        if ids.is_empty() {
+        if photos.is_empty() {
             self.message = "Virtual copies are never read from files".into();
             return Ok(());
         }
+        let n = photos.len();
+        self.message = format!(
+            "Reading metadata from {n} {}…",
+            if n == 1 { "file" } else { "files" }
+        );
+        self.reread = Some(Reread {
+            paths: photos.iter().cloned().collect(),
+            reader: super::background::Reader::start(
+                photos,
+                &self.ctx,
+                crate::catalog::read_file_metadata,
+            ),
+            read: Vec::new(),
+            report: Default::default(),
+            place: self.place(),
+        });
+        Ok(())
+    }
+    /// Takes in what the files read so far had, and once all are read,
+    /// writes it as one command.
+    pub(super) fn poll_reread(&mut self) {
+        let Some(reread) = &mut self.reread else {
+            return;
+        };
+        let (batch, done) = reread.reader.poll();
+        for (id, (read, report)) in batch {
+            reread.report.unreadable.extend(report.unreadable);
+            reread.report.ignored.extend(report.ignored);
+            if let Some(read) = read
+                && let Some(path) = reread.paths.get(&id)
+            {
+                reread.read.push((id, path.clone(), read));
+            }
+        }
+        if !done {
+            return;
+        }
+        let reread = self.reread.take().unwrap();
+        if let Err(e) = self.finish_reread(reread) {
+            self.message = format!("Metadata not read: {e:#}");
+        }
+    }
+    fn finish_reread(&mut self, reread: Reread) -> Result<()> {
+        // Photos removed while their files were read are left out.
+        let read: Vec<_> = reread
+            .read
+            .into_iter()
+            .filter(|(id, ..)| self.photo(*id).is_some())
+            .collect();
+        let ids: Vec<i64> = reread
+            .paths
+            .keys()
+            .copied()
+            .filter(|id| self.photo(*id).is_some())
+            .collect();
         let ratings = |library: &Self| -> Vec<super::Metadata> {
             ids.iter()
                 .filter_map(|id| library.photo(*id))
                 .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
                 .collect()
         };
-        let place = self.place();
         let before = self.catalog.metadata_snapshot(&ids)?;
         let ratings_before = ratings(self);
-        let report = self.catalog.read_metadata_from_files(&ids)?;
+        let mut report = reread.report;
+        let written = self.catalog.apply_file_metadata(&read, true)?;
+        report.unreadable.extend(written.unreadable);
         self.refresh_photos(&ids)?;
         let after = self.catalog.metadata_snapshot(&ids)?;
         let ratings_after = ratings(self);
@@ -196,8 +265,8 @@ impl Library {
                 sequence: crate::app::undo::sequence(),
                 before,
                 after,
-                place_before: place.clone(),
-                place_after: place,
+                place_before: reread.place.clone(),
+                place_after: reread.place,
                 ratings_before,
                 ratings_after,
                 summary,

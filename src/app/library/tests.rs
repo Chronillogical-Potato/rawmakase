@@ -1757,6 +1757,11 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
         </rdf:RDF></x:xmpmeta>"#,
     )?;
     library.read_metadata_from_files(&[id])?;
+    // Read in the background, then written.
+    while library.reread.is_some() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        library.poll_reread();
+    }
     assert_eq!(
         library.catalog.descriptive(id)?.title,
         Some(Value::Set(LangAlt::new("From the file")))

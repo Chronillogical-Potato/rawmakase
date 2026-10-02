@@ -165,10 +165,16 @@ pub fn read(text: &str) -> Result<Read> {
             }
         }),
         keywords: keywords(&p),
-        rating: p
-            .text(XMP, "Rating")
-            .and_then(|r| r.parse::<f64>().ok())
-            .map(|r| (r.round() as i32).clamp(0, 5)),
+        // An empty rating is no rating, not a missing one.
+        rating: p.text(XMP, "Rating").and_then(|r| {
+            if r.is_empty() {
+                Some(0)
+            } else {
+                r.parse::<f64>()
+                    .ok()
+                    .map(|r| (r.round() as i32).clamp(0, 5))
+            }
+        }),
         label: p.text(XMP, "Label").or_else(|| {
             p.text(DIGIKAM, "ColorLabel")
                 .and_then(|c| digikam_label(&c))
@@ -297,8 +303,11 @@ fn capture(text: &str) -> Option<Capture> {
         Some(_) => return None,
         None => None,
     };
+    let captured = format!("{date}T{time}");
+    // A date the catalog can sort by: never 0000-00-00.
+    crate::export::exif::lightroom_time(&captured, None)?;
     Some(Capture {
-        captured: format!("{date}T{time}"),
+        captured,
         subsec: subsec
             .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
             .map(String::from),
