@@ -151,9 +151,11 @@ fn read(path: &Path) -> Option<Option<PhotoInfo>> {
         return None;
     }
     Some(if crate::storage::is_raw(path) {
-        crate::raw::Raw::open(path)
-            .ok()
-            .map(|raw| PhotoInfo::from_metadata(&raw.metadata))
+        // A RAW LibRaw cannot open now (still copying, a network error) is
+        // tried again later.
+        Some(PhotoInfo::from_metadata(
+            &crate::raw::Raw::open(path).ok()?.metadata,
+        ))
     } else {
         let mut info = crate::export::exif::photo_info(path).unwrap_or_default();
         info.dimensions = raster_dimensions(path);

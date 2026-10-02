@@ -60,8 +60,14 @@ impl Catalog {
         if self.meta(INFO_BACKFILLED)?.is_some() {
             return Ok(0);
         }
+        // One transaction: a row at a time would flush the journal for each.
         let copied = self
-            .with_stored_lightroom(copy_lightroom_info)?
+            .with_stored_lightroom(|db| {
+                let tx = db.unchecked_transaction()?;
+                let copied = copy_lightroom_info(&tx)?;
+                tx.commit()?;
+                Ok(copied)
+            })?
             .unwrap_or(0);
         self.set_meta(INFO_BACKFILLED, "1")?;
         Ok(copied)
@@ -119,8 +125,8 @@ pub(super) fn copy_lightroom_info(db: &Connection) -> Result<usize> {
         .query_map([], |r| {
             let (width, height): (Option<f64>, Option<f64>) = (r.get(7)?, r.get(8)?);
             let orientation: Option<String> = r.get(9)?;
-            // BC and DA are turned a quarter: the photo shows taller than stored.
-            let turned = matches!(orientation.as_deref(), Some("BC" | "DA"));
+            // Quarter turns, mirrored or not: the photo shows taller than stored.
+            let turned = matches!(orientation.as_deref(), Some("BC" | "DA" | "AD" | "CB"));
             let dimensions = width.zip(height).map(|(w, h)| {
                 let (w, h) = (w as u32, h as u32);
                 if turned { (h, w) } else { (w, h) }

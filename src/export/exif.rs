@@ -158,7 +158,11 @@ pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
         focal: number(0x920a),
         aperture: number(0x829d),
         exposure: number(0x829a),
-        iso: number(0x8827),
+        // 65535 means more than fits; the EXIF 2.3 tags then hold it.
+        iso: number(0x8827)
+            .filter(|iso| *iso < 65535.)
+            .or_else(|| [0x8833, 0x8832, 0x8831].into_iter().find_map(number))
+            .or(number(0x8827)),
         dimensions: None,
     };
     (info != Default::default()).then_some(info)
