@@ -246,11 +246,15 @@ impl Library {
             .filter(|(_, (on, _))| *on)
             .map(|(mount, _)| mount.clone())
             .collect();
-        // The first answer may come after the online check (the sidebar
-        // starts it), so offline photos then are checked again too.
+        // The first answer may come during or after the online check (the
+        // sidebar starts the volume check), so that check is made again
+        // unless it finished with every photo online.
         let returned = match &self.attached {
             Some(before) => attached.iter().any(|mount| !before.contains(mount)),
-            None => self.photos.iter().any(|p| !self.is_available(&p.path)),
+            None => {
+                self.availability.checking()
+                    || self.photos.iter().any(|p| !self.is_available(&p.path))
+            }
         };
         self.attached = Some(attached);
         if returned {
