@@ -227,23 +227,33 @@ impl Editor {
                 };
                 // Commands never cross catalogs; reloading this one (after
                 // adding or relinking a folder) keeps them.
-                if self
+                let reloaded = self
                     .library
                     .as_ref()
-                    .is_none_or(|old| old.catalog.path != l.catalog.path)
-                {
+                    .is_some_and(|old| old.catalog.path == l.catalog.path);
+                if !reloaded {
                     self.undo_log.clear();
                 }
                 self.library = Some(l);
                 self.library_mode = true;
                 // On launch, return to the folder, photo and module of last time.
-                if let Some((source, photo, develop)) = self.restore.take()
-                    && let Some(library) = &mut self.library
-                {
-                    library.restore_source(&source, photo);
-                    if develop && let Some(id) = library.selected() {
-                        self.develop_catalog_photo(id);
+                let restore = self.restore.take();
+                if let Some(library) = &mut self.library {
+                    if let Some((source, photo, _)) = &restore {
+                        library.restore_source(source, *photo);
                     }
+                    // The Library as it was shown, on launch and when this
+                    // catalog is loaded again (a folder added or relinked);
+                    // another catalog starts with every photo shown.
+                    if restore.is_some() || reloaded {
+                        library.apply_layout(&self.saved_layout);
+                    }
+                }
+                // Develop reopens on its photo, even one the filters now hide.
+                if let Some((_, photo, true)) = restore
+                    && let Some(id) = photo.or_else(|| self.library.as_ref()?.selected())
+                {
+                    self.develop_catalog_photo(id);
                 }
                 self.open_pending_photo();
                 let _ = self.save_session();

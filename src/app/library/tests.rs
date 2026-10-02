@@ -1590,3 +1590,38 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
     assert_eq!(order(&mut library, Sort::EditTime).last(), Some(&b9));
     Ok(())
 }
+#[test]
+fn the_library_layout_is_kept_and_returned_to() -> Result<()> {
+    use super::filter::{Kind, Label, RatingOp};
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    library.filters.sort = super::sort::Sort::FileName;
+    library.filters.reverse = true;
+    library.filters.flags = [0, 1].into();
+    library.filters.rating = Some(2);
+    library.filters.rating_op = RatingOp::AtMost;
+    library.filters.labels = [Label::Color("Red".into()), Label::None].into();
+    library.filters.kind = Kind::Masters;
+    library.filters.enabled = false;
+    library.cell_style = cell::Style::Expanded;
+    library.thumb_size = 240.;
+    library.filter();
+    library.select(Some(ids[1]));
+    library.open_survey();
+    let layout = library.layout();
+    // Through the session file and back.
+    let saved: crate::storage::LibraryLayout =
+        serde_json::from_str(&serde_json::to_string(&layout)?)?;
+    let (_other, mut restored) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    restored.select(Some(ids_of(&restored)[1]));
+    restored.apply_layout(&saved);
+    assert_eq!(restored.layout(), layout);
+    assert!(restored.survey_open());
+    // A layout from another version keeps what it can.
+    let partial: crate::storage::LibraryLayout =
+        serde_json::from_str(r#"{"sort": "rating", "view": "lightbox", "cell_style": "?"}"#)?;
+    restored.apply_layout(&partial);
+    assert_eq!(restored.filters.sort, super::sort::Sort::Rating);
+    assert_eq!(restored.cell_style, cell::Style::Compact);
+    Ok(())
+}
