@@ -85,7 +85,7 @@ Known limitations, not yet addressed:
 - **Presets are not used.** The plan included about 40 of Piotr's Lightroom presets as realistic combinations; only 12 hand-picked pairs and one combined look exist.
 - **Parity numbers are not in docs/parity-gaps.md.** The report printed by `camera_raw_parity_does_not_regress` should feed that document instead of ad-hoc scorecard runs.
 - **Known RAWmakase gaps the tests expose** (tests record them as the baseline, or fail on purpose):
-  - Matrix-only DNGs (`synthetic-d65-matrix-only`) are about ΔE00 13 from Camera Raw: LibRaw leaves `cam_xyz` empty for DNGs, so the camera-matrix default profile and ACR tone curve are not used.
+  - Matrix-only DNGs (`synthetic-d65-matrix-only`) now render from the file's own colour matrix and sit about ΔE00 1.1 from Camera Raw, close to the fully-profiled `synthetic-d65` chart.
   - A DNG's embedded profile is rejected when it has no ProfileName ("Invalid profile identity").
   - Three-channel `LinearRaw` DNGs are rejected, which is why charts are mosaics.
   - Nikon Z6III: LibRaw reports model "Z6_3" but Adobe's DCP is named for the "Nikon Z 6 3", so Adobe Standard is not matched (`adobe_profile_parity` fails for `nikon-z6-3-d65`).

@@ -493,7 +493,7 @@ mod dcp;
 mod enhanced;
 mod library;
 pub mod open;
-pub use dcp::from_bytes;
+pub use dcp::{color_matrix_only, from_bytes};
 pub use library::{adobe_installed, builtin, import_files, installed, library_dirs, load};
 #[cfg(test)]
 mod tests;

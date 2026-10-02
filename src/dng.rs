@@ -14,6 +14,10 @@ pub struct Dng {
     /// Left, top, width, height, relative to the active area.
     pub crop: Option<[u32; 4]>,
     pub profile: Option<CameraProfile>,
+    /// The file's colour matrix, XYZ to camera, when it has one but no profile
+    /// to read it from. LibRaw reports no matrix for a DNG at all, so without
+    /// this a DNG carrying only colour matrices has no described colour.
+    pub color_matrix: Option<[[f32; 3]; 3]>,
     pub lens: Option<LensCorrection>,
 }
 
@@ -39,13 +43,26 @@ pub fn read(path: &Path) -> Option<Dng> {
     let mut t = Tiff::open(File::open(path).ok()?, 0)?;
     let ifd0 = t.ifd(t.first)?;
     ifd0.get(&50706)?; // DNGVersion
+    let tags = profile_tags(&mut t, &ifd0);
+    // A profile needs a forward matrix; one written as colour matrices alone
+    // still describes the camera's colour, so keep that when it is all there is.
+    let profile = tags
+        .as_deref()
+        .and_then(|b| crate::camera_profiles::from_bytes(b).ok());
+    let color_matrix = if profile.is_some() {
+        None
+    } else {
+        tags.as_deref()
+            .and_then(|b| crate::camera_profiles::color_matrix_only(b).ok().flatten())
+    };
     let mut dng = Dng {
         baseline_exposure: ifd0
             .get(&50730)
             .and_then(|e| t.numbers(e))
             .and_then(|v| v.first().copied())
             .filter(|v| v.is_finite() && v.abs() <= 5.),
-        profile: profile(&mut t, &ifd0),
+        profile,
+        color_matrix,
         ..Default::default()
     };
     // The full-resolution raw image is the SubIFD (or IFD0) with NewSubfileType 0.
@@ -95,7 +112,9 @@ pub fn read(path: &Path) -> Option<Dng> {
 }
 
 /// Rewrites the profile tags as a standalone DCP so the regular parser validates them.
-fn profile(t: &mut Tiff, ifd0: &BTreeMap<u16, Entry>) -> Option<CameraProfile> {
+/// Returns the bytes rather than a profile, since the matrix is readable from
+/// them even when the profile itself is not.
+fn profile_tags(t: &mut Tiff, ifd0: &BTreeMap<u16, Entry>) -> Option<Vec<u8>> {
     let mut entries = Vec::new();
     for tag in PROFILE_TAGS {
         if let Some(e) = ifd0.get(tag) {
@@ -130,7 +149,7 @@ fn profile(t: &mut Tiff, ifd0: &BTreeMap<u16, Entry>) -> Option<CameraProfile> {
     }
     out.extend(u32b(0));
     out.extend(data);
-    crate::camera_profiles::from_bytes(&out).ok()
+    Some(out)
 }
 
 /// Parameters of the first opcode with `id` in a big-endian DNG opcode list.

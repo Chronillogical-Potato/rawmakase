@@ -147,6 +147,17 @@ impl Raw {
                 .profile
                 .filter(|p| p.ensure_camera(&metadata).is_ok())
                 .map(std::sync::Arc::new);
+            // LibRaw leaves its XYZ-to-camera matrix empty for every DNG, so a DNG
+            // written with colour matrices but no profile would have no colour at
+            // all and render without one. Take the matrix from the file instead.
+            // It is the same matrix in the same direction, so nothing downstream
+            // has to know it came from here.
+            if metadata.embedded_profile.is_none()
+                && let Some(matrix) = dng.color_matrix
+                && matrix.iter().flatten().any(|v| *v != 0.)
+            {
+                metadata.cam_xyz = matrix;
+            }
             if dng.lens.is_some() {
                 metadata.lens = dng.lens;
             }

@@ -457,8 +457,8 @@
     },
     "synthetic-d65-matrix-only": {
       "default": [
-        13.025,
-        17.924
+        1.118,
+        2.57
       ]
     },
     "synthetic-f2": {

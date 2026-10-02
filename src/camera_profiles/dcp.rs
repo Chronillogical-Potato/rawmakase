@@ -226,3 +226,16 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
     p.validate()?;
     Ok(p)
 }
+
+/// The colour matrix of a profile that carries no forward matrix, in the same
+/// XYZ-to-camera direction `color1` uses. `from_bytes` needs a forward matrix,
+/// so it rejects these, but the matrix is all a DNG needs to be rendered: some
+/// third-party converters write colour matrices alone. Returns `None` when the
+/// bytes carry no matrix at all.
+pub fn color_matrix_only(b: &[u8]) -> Result<Option<Matrix>> {
+    let d = Dcp::read(b)?;
+    if !d.tags.contains_key(&50721) {
+        return Ok(None);
+    }
+    Ok(Some(d.matrix(50721)?))
+}
