@@ -8,6 +8,9 @@ use super::{Action, Library, Pick};
 use crate::app::theme;
 use eframe::egui::{self, Rect, Vec2};
 
+/// Photos shown at most, keeping previews and memory bounded however many
+/// are selected; Lightroom's tiles are too small to judge long before this.
+const MOST: usize = 48;
 /// The shape photos are assumed to have until their previews are in: 3:2.
 const ASPECT: f32 = 1.5;
 
@@ -46,7 +49,7 @@ impl Library {
     }
     /// Left/Up and Right/Down: the photo before or after becomes active.
     pub(super) fn step_surveyed(&mut self, by: isize) {
-        let ids = self.surveyed();
+        let ids: Vec<i64> = self.surveyed().into_iter().take(MOST).collect();
         let Some(at) = self
             .selection
             .active
@@ -155,8 +158,8 @@ impl Library {
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
         ui.painter().rect_filled(area, 0., theme::gray(36));
-        let ids = self.surveyed();
-        // The previews of every photo surveyed stay while they are shown.
+        let ids: Vec<i64> = self.surveyed().into_iter().take(MOST).collect();
+        // The previews of every photo shown stay while they are shown.
         self.cache.shown_at_once = ids.len();
         for (id, rect) in ids
             .iter()
@@ -189,6 +192,7 @@ impl Library {
             let count = self.surveyed().len();
             ui.label(filter_caption(&match count {
                 1 => "1 photo".to_string(),
+                n if n > MOST => format!("The first {MOST} of {n} photos selected"),
                 n => format!("{n} photos"),
             }));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

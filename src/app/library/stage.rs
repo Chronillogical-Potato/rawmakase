@@ -13,8 +13,8 @@ use std::collections::HashMap;
 const CAPTION: f32 = 26.;
 /// Space between the photos and around them.
 pub(super) const MARGIN: f32 = 14.;
-/// Below this many pixels the grid's previews, which show the edit, are
-/// sharp enough, and no screen preview is rendered.
+/// Below this many pixels the grid's previews are sharp enough, and no
+/// screen preview is rendered where they show the photo as rendered.
 const GRID_EDGE: u32 = 640;
 /// Seconds an edit stamp is trusted before it is read again.
 const STAMP_AGE: f64 = 0.5;
@@ -93,7 +93,10 @@ impl Library {
             return (stand_in, Some(note.into()));
         }
         let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
-        if edge <= GRID_EDGE && stand_in.is_some() {
+        // The grid's preview will do when it already shows the photo as
+        // rendered: a JPEG, TIFF or PNG, or a photo with its edit rendered.
+        let rendered = self.cache.has_edited(photo.id) || !crate::storage::is_raw(&photo.path);
+        if edge <= GRID_EDGE && rendered && stand_in.is_some() {
             return (stand_in, None);
         }
         let stamp = self.edit_stamp(ctx, photo.id);
