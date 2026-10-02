@@ -1776,6 +1776,9 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
         (library.photos[0].rating, library.photos[0].label.as_str()),
         (1, "Blue")
     );
+    Ok(())
+}
+#[test]
 fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> {
     use crate::catalog::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
