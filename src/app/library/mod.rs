@@ -246,10 +246,12 @@ impl Library {
             .filter(|(_, (on, _))| *on)
             .map(|(mount, _)| mount.clone())
             .collect();
-        let returned = self
-            .attached
-            .as_ref()
-            .is_some_and(|before| attached.iter().any(|mount| !before.contains(mount)));
+        // The first answer may come after the online check (the sidebar
+        // starts it), so offline photos then are checked again too.
+        let returned = match &self.attached {
+            Some(before) => attached.iter().any(|mount| !before.contains(mount)),
+            None => self.photos.iter().any(|p| !self.is_available(&p.path)),
+        };
         self.attached = Some(attached);
         if returned {
             self.availability.start(&self.photos, &self.ctx);
