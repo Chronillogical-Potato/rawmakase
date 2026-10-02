@@ -84,7 +84,7 @@ impl Sort {
             Self::AddedOrder => a.id.cmp(&b.id),
             Self::EditTime => {
                 let time = |p: &Photo| match keys {
-                    Keys::EditTimes(times) => times.get(&p.id).cloned(),
+                    Keys::EditTimes(times) => times.get(&p.id).map(String::as_str),
                     _ => None,
                 };
                 // Photos never edited come first, as the oldest.
@@ -142,8 +142,8 @@ fn caseless(a: &str, b: &str) -> Ordering {
 }
 /// File names as people read them: case aside, and runs of digits by value,
 /// so IMG_9 comes before IMG_10. Compares in place, without allocating.
-fn natural(a: &str, b: &str) -> Ordering {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
+fn natural(text_a: &str, text_b: &str) -> Ordering {
+    let (a, b) = (text_a.as_bytes(), text_b.as_bytes());
     let (mut i, mut j) = (0, 0);
     while i < a.len() && j < b.len() {
         if a[i].is_ascii_digit() && b[j].is_ascii_digit() {
@@ -154,12 +154,16 @@ fn natural(a: &str, b: &str) -> Ordering {
             }
             (i, j) = (next_i, next_j);
         } else {
-            let order = a[i].to_ascii_lowercase().cmp(&b[j].to_ascii_lowercase());
+            // One character each, case aside; `i` and `j` stay on character
+            // boundaries, as digits are one byte.
+            let (x, y) = (text_a[i..].chars().next(), text_b[j..].chars().next());
+            let (Some(x), Some(y)) = (x, y) else { break };
+            let order = x.to_lowercase().cmp(y.to_lowercase());
             if order != Ordering::Equal {
                 return order;
             }
-            i += 1;
-            j += 1;
+            i += x.len_utf8();
+            j += y.len_utf8();
         }
     }
     (a.len() - i).cmp(&(b.len() - j))
@@ -184,6 +188,8 @@ mod tests {
 
     #[test]
     fn file_names_sort_as_people_read_them() {
+        assert_eq!(natural("Ärger.jpg", "ärger.jpg"), Ordering::Equal);
+        assert_eq!(natural("Øst.jpg", "zebra.jpg"), Ordering::Greater);
         let mut names = [
             "img_10.jpg",
             "IMG_9.jpg",
