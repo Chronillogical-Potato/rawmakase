@@ -235,6 +235,10 @@ pub(super) struct PresetBrowser {
     pub(super) selected: String,
     pub(super) preview: Option<Recipe>,
     pub(super) hover: Option<(usize, Instant)>,
+    /// The list as last shown, kept until what it is built from changes.
+    pub(super) list: Option<super::presets::PresetList>,
+    /// Counts changes to `favorites` and `issues`, which the list depends on.
+    pub(super) revision: u64,
 }
 
 impl Document {
@@ -306,6 +310,7 @@ impl ViewState {
 }
 impl PresetBrowser {
     pub fn clear_document(&mut self) {
+        self.revision += 1;
         self.issues.clear();
         self.substitutes.clear();
         self.selected.clear();
