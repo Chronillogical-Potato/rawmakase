@@ -81,6 +81,8 @@ impl Library {
         let columns = ((ui.available_width() / self.thumb_size).floor() as usize).max(1);
         let width = (ui.available_width() / columns as f32).floor().max(80.);
         let height = self.cell_style.height(width);
+        // A new cell style keeps the same row at the top of the view.
+        let drawn = std::mem::replace(&mut self.drawn_style, self.cell_style);
         self.grid_columns = columns;
         let mut metadata_edit = None;
         let spacing = ui.spacing().item_spacing;
@@ -89,6 +91,10 @@ impl Library {
             .id_salt("library-grid")
             .auto_shrink(false);
         // A re-sort moved the selected photo: scroll by the rows it moved.
+        if drawn != self.cell_style {
+            let row = self.grid_offset / drawn.height(width);
+            scroll = scroll.vertical_scroll_offset(row * height);
+        }
         if let Some((id, before)) = self.keep_in_place.take()
             && let Some(after) = self.visible.iter().position(|i| self.photos[*i].id == id)
         {

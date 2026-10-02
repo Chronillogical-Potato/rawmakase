@@ -54,6 +54,9 @@ pub struct Library {
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
+    /// The style the grid was last drawn with, to keep its rows in place
+    /// when it changes.
+    drawn_style: cell::Style,
     /// Grid cells' photo info, read once per photo while expanded cells
     /// show it.
     cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
@@ -130,6 +133,7 @@ impl Library {
             expanded: HashSet::new(),
             thumb_size: 190.,
             cell_style: Default::default(),
+            drawn_style: Default::default(),
             cell_info: HashMap::new(),
             strip_current: None,
             visible: Vec::new(),
