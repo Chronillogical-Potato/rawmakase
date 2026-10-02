@@ -653,6 +653,14 @@ pub fn summarise(layout: &Layout, reference: &[[u16; 3]], candidate: &[[u16; 3]]
 /// Allowed worsening against the parity baseline before a test fails.
 const PARITY_MEAN_MARGIN: f64 = 0.1;
 const PARITY_P95_MARGIN: f64 = 0.3;
+/// Cases whose committed Camera Raw reference is identical to that chart's
+/// `default`, so the case measures nothing and its baseline pins a distance that
+/// is really RAWmakase's own output. `synthetic-d65` / `curve-red` was rendered
+/// before `ToneCurvePV2012Red` reached cases.json; camera-raw-charts.py reuses an
+/// existing TIFF instead of re-rendering it, so the stale pixels survived every
+/// later run while `about.rendered` moved on. Delete its TIFF, re-render, and drop
+/// the entry here.
+const UNMEASURED_REFERENCES: &[(&str, &str)] = &[("synthetic-d65", "curve-red")];
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Baseline {
@@ -679,6 +687,23 @@ pub fn check_parity(
         .unwrap_or_default();
     let mut failures = Vec::new();
     for (chart, reference) in references {
+        // A reference identical to `default`'s records no Camera Raw behaviour, so
+        // its ΔE00 is RAWmakase compared with itself and the baseline would keep it
+        // there. See UNMEASURED_REFERENCES.
+        if let Some(base) = reference.cases.get("default") {
+            for (name, expected) in &reference.cases {
+                if name != "default"
+                    && expected == base
+                    && !UNMEASURED_REFERENCES.contains(&(chart.as_str(), name.as_str()))
+                {
+                    failures.push(format!(
+                        "{chart} / {name}: the Camera Raw reference is identical to default, so \
+                         this case measures nothing. Re-render it with \
+                         scripts/corpus/camera-raw-charts.py, or list it in UNMEASURED_REFERENCES."
+                    ));
+                }
+            }
+        }
         let current = render_chart(
             chart,
             &layout,
