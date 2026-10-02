@@ -19,6 +19,7 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+pub use filmstrip::Pick;
 pub use metadata::{Metadata, MetadataCommand};
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.

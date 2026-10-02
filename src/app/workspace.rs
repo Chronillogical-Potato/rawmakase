@@ -176,7 +176,7 @@ impl Editor {
                 && let (Some(library), Some(id)) = (&mut self.library, self.document.catalog_photo)
             {
                 self.library_mode = true;
-                library.make_active(id);
+                library.reveal(id);
                 library.open_loupe();
             }
             // Lightroom's Create Virtual Copy, in Library and Develop.
@@ -672,7 +672,11 @@ impl Editor {
                         self.status = library.message.clone();
                     }
                 });
-            if let Some(id) = target
+            // In Develop both a click and Open in Develop show the photo.
+            if let Some(
+                crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
+            ) = target
+                && id != current
                 && !self.activity.is_busy()
             {
                 self.develop_catalog_photo(id);

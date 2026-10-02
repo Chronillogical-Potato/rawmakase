@@ -233,8 +233,10 @@ impl Library {
                 // In Loupe a metadata change applies to the active photo only.
                 target = self.filmstrip(ui, id).0;
             });
-        if let Some(target) = target {
-            self.select(Some(target));
+        match target {
+            Some(super::Pick::Show(id)) => self.select(Some(id)),
+            Some(super::Pick::Develop(id)) => return Action::Develop(id),
+            None => {}
         }
         let Some(photo) = self.selection.active.and_then(|id| self.photo(id)).cloned() else {
             return Action::None;

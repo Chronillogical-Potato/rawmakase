@@ -1,13 +1,20 @@
-//! Lightroom's filmstrip, shown below Develop.
+//! Lightroom's filmstrip, shown below Develop and the Loupe.
 use super::grid::filter_caption;
 use super::{Library, cell};
 use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
 
+/// A photo chosen in the filmstrip: clicked, or opened from its menu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pick {
+    Show(i64),
+    Develop(i64),
+}
+
 impl Library {
-    /// Lightroom's filmstrip for Develop: the current source's photos with the
-    /// open one highlighted. Returns a photo to open and whether metadata changed.
-    pub fn filmstrip(&mut self, ui: &mut egui::Ui, current: i64) -> (Option<i64>, bool) {
+    /// Lightroom's filmstrip: the current source's photos with the one shown
+    /// highlighted. Returns a photo chosen and whether metadata changed.
+    pub fn filmstrip(&mut self, ui: &mut egui::Ui, current: i64) -> (Option<Pick>, bool) {
         let mut target = None;
         let mut changed = false;
         let photo = self.photo(current).cloned();
@@ -124,7 +131,7 @@ impl Library {
                         if let Some(menu) = cell::photo_menu(&response, &p) {
                             let is_edit = matches!(menu, cell::PhotoAction::Edit(_));
                             if let Some(id) = self.photo_action(ui.ctx(), &p, menu, false) {
-                                target = Some(id).filter(|id| *id != current);
+                                target = Some(Pick::Develop(id));
                             }
                             if is_edit {
                                 // Filters may have changed the visible list.
@@ -139,7 +146,7 @@ impl Library {
                             && !active
                             && !context
                         {
-                            target = Some(p.id);
+                            target = Some(Pick::Show(p.id));
                         }
                     }
                 });

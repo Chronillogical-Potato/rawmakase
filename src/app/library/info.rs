@@ -42,7 +42,8 @@ impl Library {
                 section(ui, "Metadata", false, |ui| {
                     match &photo {
                         Some(p) => {
-                            self.metadata_controls(ui, p.id, true);
+                            // In Loupe, as for its keys, only the photo shown changes.
+                            self.metadata_controls(ui, p.id, !self.loupe.open);
                         }
                         None => {
                             ui.allocate_exact_size(
