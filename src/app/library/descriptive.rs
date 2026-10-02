@@ -170,10 +170,11 @@ impl Library {
     /// the files are read in the background, then what they have replaces
     /// the catalog's values, edits included, as one command.
     pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[i64]) -> Result<()> {
-        let photos: Vec<(i64, std::path::PathBuf)> = ids
+        let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
+        let photos: Vec<(i64, std::path::PathBuf)> = self
+            .photos
             .iter()
-            .filter_map(|id| self.photo(*id))
-            .filter(|p| p.master.is_none())
+            .filter(|p| wanted.contains(&p.id) && p.master.is_none())
             .map(|p| (p.id, p.path.clone()))
             .collect();
         if photos.is_empty() {

@@ -216,7 +216,8 @@ fn keywords(p: &Packet) -> Option<Vec<Vec<String>>> {
                     .filter(|n| !n.is_empty())
                     .collect::<Vec<_>>()
             })
-            .filter(|path| !path.is_empty())
+            // A hierarchy deeper than the catalog reads back is left out.
+            .filter(|path| !path.is_empty() && path.len() < 256)
             .collect()
     };
     let hierarchical = p
@@ -319,7 +320,7 @@ fn capture(text: &str) -> Option<Capture> {
         return None;
     }
     if let Some(o) = &offset
-        && (n(&o[1..3])? > 14 || n(&o[4..6])? > 59)
+        && (n(&o[1..3])? * 60 + n(&o[4..6])? > 14 * 60 || n(&o[4..6])? > 59)
     {
         return None;
     }
