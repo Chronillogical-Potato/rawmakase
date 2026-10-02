@@ -13,6 +13,9 @@ use std::collections::HashMap;
 const CAPTION: f32 = 26.;
 /// Space between the photos and around them.
 pub(super) const MARGIN: f32 = 14.;
+/// Below this many pixels the grid's previews, which show the edit, are
+/// sharp enough, and no screen preview is rendered.
+const GRID_EDGE: u32 = 640;
 /// Seconds an edit stamp is trusted before it is read again.
 const STAMP_AGE: f64 = 0.5;
 
@@ -32,7 +35,13 @@ impl Library {
         role: Option<&str>,
         active: bool,
     ) -> Option<Rect> {
-        let image_area = Rect::from_min_max(rect.min, rect.max - Vec2::new(0., CAPTION));
+        // A tile too small for a caption shows the photo alone.
+        let captioned = rect.height() > CAPTION * 3.;
+        let image_area = if captioned {
+            Rect::from_min_max(rect.min, rect.max - Vec2::new(0., CAPTION))
+        } else {
+            rect
+        };
         let (texture, note) = self.stage_preview(ui.ctx(), photo, image_area);
         let shown = texture.map(|texture| {
             let size = texture.size_vec2();
@@ -59,9 +68,11 @@ impl Library {
                 theme::gray(170),
             );
         }
-        let caption = Rect::from_min_max(rect.left_bottom() - Vec2::new(0., CAPTION), rect.max);
-        let painter = ui.painter().with_clip_rect(caption);
-        caption_strip(&painter, caption, role, photo, active);
+        if captioned {
+            let caption = Rect::from_min_max(rect.left_bottom() - Vec2::new(0., CAPTION), rect.max);
+            let painter = ui.painter().with_clip_rect(caption);
+            caption_strip(&painter, caption, role, photo, active);
+        }
         shown
     }
     /// The photo's screen preview, or the grid's until it is ready, and a
@@ -82,6 +93,9 @@ impl Library {
             return (stand_in, Some(note.into()));
         }
         let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
+        if edge <= GRID_EDGE && stand_in.is_some() {
+            return (stand_in, None);
+        }
         let stamp = self.edit_stamp(ctx, photo.id);
         let catalog = &self.catalog;
         match self
