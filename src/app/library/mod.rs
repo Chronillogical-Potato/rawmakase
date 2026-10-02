@@ -257,7 +257,7 @@ impl Library {
     }
     #[cfg(test)]
     pub(in crate::app) fn show_unflagged(&mut self) {
-        self.filters.flag = 0;
+        self.filters.flags = [0].into();
         self.filter();
     }
     #[cfg(test)]
@@ -340,7 +340,10 @@ impl Library {
             if !self.filters.members.contains(&id) {
                 self.filters.collection = None;
             }
-            self.filters.clear_bar();
+            // Filters turned off with Cmd+L hide nothing, and are kept.
+            if self.filters.enabled {
+                self.filters.clear_bar();
+            }
             self.filter();
         }
         // Outside the folder shown, or no longer offline: All Photographs.
@@ -447,6 +450,7 @@ mod collections;
 mod copy_name;
 mod filmstrip;
 mod filter;
+mod filter_bar;
 mod grid;
 mod info;
 mod loupe;
