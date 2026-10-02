@@ -5,7 +5,7 @@ pub(super) fn photo_cell(
     ui: &mut egui::Ui,
     photo: &Photo,
     texture: Option<&egui::TextureHandle>,
-    selected: bool,
+    mark: super::selection::Mark,
     number: usize,
     available: bool,
     width: f32,
@@ -23,8 +23,13 @@ pub(super) fn photo_cell(
     // Lightroom grid: dark cells separated by thin gutters, a light surround
     // for the selection, and the color label tinting the cell.
     let cell = rect.shrink(1.);
-    let base = if selected {
+    let selected = mark != super::selection::Mark::None;
+    let active = mark == super::selection::Mark::Active;
+    // The active photo is lighter than the rest of the selection.
+    let base = if active {
         theme::gray(150)
+    } else if selected {
+        theme::gray(112)
     } else if response.hovered() {
         theme::gray(66)
     } else {
@@ -38,7 +43,14 @@ pub(super) fn photo_cell(
     painter.rect_stroke(
         cell,
         1.,
-        Stroke::new(1., theme::gray(if selected { 205 } else { 40 })),
+        Stroke::new(
+            1.,
+            theme::gray(match mark {
+                super::selection::Mark::Active => 205,
+                super::selection::Mark::Selected => 150,
+                super::selection::Mark::None => 40,
+            }),
+        ),
         StrokeKind::Inside,
     );
     let ink = theme::gray(if selected { 60 } else { 125 });

@@ -225,7 +225,7 @@ impl Editor {
             return;
         }
         if let Some(l) = &mut self.library {
-            l.selected = Some(id)
+            l.make_active(id)
         }
         self.open_raw(p.path, Some(id));
     }

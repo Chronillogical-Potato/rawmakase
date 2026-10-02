@@ -55,7 +55,7 @@ fn lightroom_metadata_preserves_all_labels_flags_and_unrated_photos() -> Result<
     let original = std::fs::read(&source)?;
     let destination = d.path().join("metadata.rawmakase");
     import_lightroom(&source, &destination)?;
-    let cat = Catalog::open(&destination)?;
+    let mut cat = Catalog::open(&destination)?;
     let photos = cat.photos()?;
     let unrated = photos.iter().find(|p| p.id == 40).unwrap();
     assert_eq!(
@@ -108,7 +108,7 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     import_lightroom(&source, &output)?;
     assert_eq!(identity, Identity::read(&source)?);
     assert_eq!(bytes, std::fs::read(&source)?);
-    let cat = Catalog::open(&output)?;
+    let mut cat = Catalog::open(&output)?;
     let archive: Vec<u8> = cat
         .db
         .query_row("SELECT original_catalog FROM sources", [], |r| r.get(0))?;

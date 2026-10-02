@@ -37,7 +37,7 @@ impl Library {
                     }
                     if photo.is_some() {
                         ui.add_space((ui.available_width() - 250.).max(8.));
-                        changed = self.metadata_controls(ui, current);
+                        changed = self.metadata_controls(ui, current, false);
                     }
                 });
             });

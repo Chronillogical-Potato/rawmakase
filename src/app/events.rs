@@ -232,7 +232,7 @@ impl Editor {
                     && let Some(library) = &mut self.library
                 {
                     library.restore_source(&source, photo);
-                    if develop && let Some(id) = library.selected {
+                    if develop && let Some(id) = library.selected() {
                         self.develop_catalog_photo(id);
                     }
                 }

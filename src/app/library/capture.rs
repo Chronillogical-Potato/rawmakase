@@ -88,7 +88,7 @@ impl Library {
                 photo.captured = (*time).clone();
             }
         }
-        let anchor = self.selected.and_then(|id| {
+        let anchor = self.selected().and_then(|id| {
             self.visible
                 .iter()
                 .position(|i| self.photos[*i].id == id)

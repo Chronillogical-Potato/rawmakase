@@ -187,7 +187,7 @@ impl Editor {
         } else {
             ("Ctrl+", "Shift+")
         };
-        let groups: [(&str, Vec<(String, &str)>); 3] = [
+        let groups: [(&str, Vec<(String, &str)>); 4] = [
             (
                 "Develop",
                 vec![
@@ -226,6 +226,18 @@ impl Editor {
                 ],
             ),
             (
+                "Library grid",
+                vec![
+                    ("Arrow keys".into(), "Move the active photo"),
+                    ("Home / End".into(), "First / last photo"),
+                    (format!("{shift}arrow / click"), "Extend the selection"),
+                    (format!("{cmd}click"), "Add or remove a photo"),
+                    (format!("{cmd}A"), "Select all"),
+                    (format!("{cmd}D"), "Select none"),
+                    ("/".into(), "Deselect the active photo"),
+                ],
+            ),
+            (
                 "Rating and flags",
                 vec![
                     ("0 – 5".into(), "Set star rating"),
@@ -234,6 +246,7 @@ impl Editor {
                     ("P / X / U".into(), "Pick / reject / unflag"),
                     ("`".into(), "Toggle pick"),
                     ("Shift + key".into(), "Apply and go to next photo"),
+                    ("In the grid".into(), "Applies to every selected photo"),
                 ],
             ),
             (

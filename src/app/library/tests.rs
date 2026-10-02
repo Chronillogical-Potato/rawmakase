@@ -60,7 +60,15 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
         );
         for width in [80., 190., 260.] {
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                photo_cell(ui, &photo, Some(&texture), false, 1, true, width);
+                photo_cell(
+                    ui,
+                    &photo,
+                    Some(&texture),
+                    selection::Mark::None,
+                    1,
+                    true,
+                    width,
+                );
             });
             let mesh = output
                 .shapes
@@ -98,7 +106,7 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     drop(catalog);
     let mut library = Library::load(&path, egui::Context::default())?;
     let ids: Vec<_> = library.photos.iter().map(|p| p.id).collect();
-    library.selected = Some(ids[0]);
+    library.select(Some(ids[0]));
     library.edit_metadata(ids[0], Edit::Rating(5), false)?;
     library.edit_metadata(ids[0], Edit::Flag(1), false)?;
     library.edit_metadata(ids[0], Edit::Label("Client approved".into()), false)?;
@@ -111,15 +119,15 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     assert_eq!(library.photo(ids[0]).unwrap().label, "");
     library.filters.flag = 0;
     library.filter();
-    library.selected = Some(ids[1]);
+    library.select(Some(ids[1]));
     assert_eq!(
         library.edit_metadata(ids[1], Edit::Flag(-1), true)?,
         Some(ids[2])
     );
-    assert_eq!(library.selected, Some(ids[2]));
+    assert_eq!(library.selected(), Some(ids[2]));
     assert_eq!(library.visible.len(), 1);
     assert_eq!(library.edit_metadata(ids[2], Edit::Flag(1), true)?, None);
-    assert_eq!(library.selected, None);
+    assert_eq!(library.selected(), None);
     assert!(library.visible.is_empty());
     library.filters.flag = 2;
     library.filters.label_filter = Some("Purple".into());
@@ -542,13 +550,13 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     assert!(library.visible.is_empty());
     library.filters.only_missing = false;
     // The selection follows the filter out, and comes back through `show`.
-    library.selected = Some(c);
+    library.select(Some(c));
     library.filters.flag = 1;
     library.filter();
-    assert_eq!(library.selected, None);
+    assert_eq!(library.selected(), None);
     library.show(c);
     assert_eq!(library.filters.flag, 2);
-    assert_eq!(library.selected, Some(c));
+    assert_eq!(library.selected(), Some(c));
     assert_eq!(visible_names(&library).len(), 3);
     // Navigation clamps at both ends of the visible order.
     assert_eq!(library.navigate(a, -1), Some(a));
@@ -581,7 +589,7 @@ fn restore_source_scopes_to_the_folder_and_its_subfolders() -> Result<()> {
     library.restore_source(&key, Some(in_day2));
     assert_eq!(library.source_key(), key);
     assert_eq!(library.visible.len(), 2);
-    assert_eq!(library.selected, Some(in_day2));
+    assert_eq!(library.selected(), Some(in_day2));
     assert!(library.expanded.contains(&format!("root:{root_id}")));
     assert!(library.expanded.contains(&key));
     assert_eq!(library.source_name(), "trip");
@@ -737,7 +745,7 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
     let mut restored = Library::load(&path, egui::Context::default())?;
     restored.restore_source("collection:11", Some(ids[1]));
     assert_eq!(restored.visible.len(), 2);
-    assert_eq!(restored.selected, Some(ids[1]));
+    assert_eq!(restored.selected(), Some(ids[1]));
     let mut other = Library::load(&path, egui::Context::default())?;
     other.restore_source("collection:4", None);
     assert_eq!(other.filters.collection, None);
@@ -779,7 +787,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
         ["a.tif", "b.jpg", "c.jpg", "z.ARW"]
     );
     let a = library.photos[0].id;
-    library.selected = Some(a);
+    library.select(Some(a));
     library.wait_for_availability();
     let started = std::time::Instant::now();
     while library.capture.is_some() {
@@ -794,7 +802,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
     );
     assert_eq!(library.photos[1].captured, "2024-03-02T10:00:01.100");
     // The selection stays, and the grid follows it from where it was.
-    assert_eq!(library.selected, Some(a));
+    assert_eq!(library.selected(), Some(a));
     assert_eq!(library.keep_in_place, Some((a, 0)));
     // Saved in the catalog; the undated file isn't read again this session.
     let reopened = Library::load(&path, egui::Context::default())?;
@@ -804,5 +812,127 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
     );
     library.start_capture_times();
     assert!(library.capture.is_none());
+    Ok(())
+}
+fn ids_of(library: &Library) -> Vec<i64> {
+    library
+        .visible
+        .iter()
+        .map(|i| library.photos[*i].id)
+        .collect()
+}
+fn selected_names(library: &Library) -> Vec<&str> {
+    library
+        .selected_ids()
+        .into_iter()
+        .map(|id| library.photo(id).unwrap().filename.as_str())
+        .collect()
+}
+#[test]
+fn clicks_select_like_lightroom_grid() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let [a, b, c, d, e] = ids_of(&library)[..] else {
+        unreachable!()
+    };
+    let none = egui::Modifiers::NONE;
+    let command = egui::Modifiers::COMMAND;
+    let shift = egui::Modifiers::SHIFT;
+    library.click(b, none);
+    library.click(d, shift);
+    assert_eq!(selected_names(&library), ["b.RAF", "c.RAF", "d.RAF"]);
+    assert_eq!(library.selected(), Some(d));
+    // Cmd toggles one photo; Cmd+Shift adds a range from the anchor.
+    library.click(a, command);
+    assert_eq!(
+        selected_names(&library),
+        ["a.RAF", "b.RAF", "c.RAF", "d.RAF"]
+    );
+    assert_eq!(library.selected(), Some(a));
+    library.click(c, command);
+    assert_eq!(selected_names(&library), ["a.RAF", "b.RAF", "d.RAF"]);
+    assert_eq!(library.selected(), Some(a));
+    library.click(e, command | shift);
+    assert_eq!(selected_names(&library).len(), 5);
+    // A plain click inside the selection only makes that photo active;
+    // outside it, it selects the photo alone.
+    library.click(b, none);
+    assert_eq!(library.selected_ids().len(), 5);
+    assert_eq!(library.selected(), Some(b));
+    library.click(c, command);
+    assert_eq!(library.mark(b), selection::Mark::Active);
+    assert_eq!(library.mark(a), selection::Mark::Selected);
+    assert_eq!(library.mark(c), selection::Mark::None);
+    library.click(c, none);
+    assert_eq!(selected_names(&library), ["c.RAF"]);
+    Ok(())
+}
+#[test]
+fn grid_keys_move_extend_and_clear_the_selection() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let ids = ids_of(&library);
+    library.grid_columns = 2;
+    library.select(Some(ids[0]));
+    library.step(selection::Step::By(2), false);
+    assert_eq!(library.selected(), Some(ids[2]));
+    assert!(library.scroll_to_active);
+    library.step(selection::Step::By(1), true);
+    library.step(selection::Step::End, true);
+    assert_eq!(selected_names(&library), ["c.RAF", "d.RAF", "e.RAF"]);
+    assert_eq!(library.selected(), Some(ids[4]));
+    // `/` drops the active photo; the next selected one takes over.
+    library.deselect_active();
+    assert_eq!(selected_names(&library), ["c.RAF", "d.RAF"]);
+    assert_eq!(library.selected(), Some(ids[3]));
+    library.select_all();
+    assert_eq!(library.selected_ids(), ids);
+    library.step(selection::Step::Home, false);
+    assert_eq!(selected_names(&library), ["a.RAF"]);
+    library.select(None);
+    assert!(library.selected_ids().is_empty());
+    // From nothing, a step starts at the first photo.
+    library.step(selection::Step::By(1), false);
+    assert_eq!(library.selected(), Some(ids[0]));
+    Ok(())
+}
+#[test]
+fn a_rejected_range_leaves_the_unflagged_view_in_one_write() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let ids = ids_of(&library);
+    library.filters.flag = 0;
+    library.filter();
+    library.click(ids[1], egui::Modifiers::NONE);
+    library.click(ids[3], egui::Modifiers::SHIFT);
+    library.edit_selection(crate::app::photo_metadata::Edit::Flag(-1), false)?;
+    assert_eq!(visible_names(&library), ["a.RAF", "e.RAF"]);
+    assert_eq!(library.selected(), Some(ids[4]));
+    assert_eq!(library.message, "3 photos · Reject");
+    let saved = library.catalog.photos()?;
+    assert_eq!(saved.iter().filter(|p| p.flag == -1).count(), 3);
+    // One failing photo saves none of the batch.
+    assert!(
+        library
+            .catalog
+            .set_metadata_of(&[(ids[0], 5, 0, String::new()), (9999, 5, 0, String::new())])
+            .is_err()
+    );
+    assert!(library.catalog.photos()?.iter().all(|p| p.rating == 0));
+    Ok(())
+}
+#[test]
+fn a_toggle_on_a_selection_follows_the_active_photo() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    library.edit_metadata(ids[0], Edit::Flag(1), false)?;
+    library.select(Some(ids[0]));
+    library.select_all();
+    // The active photo is picked, so the toggle unflags all three.
+    library.edit_selection(Edit::TogglePick, false)?;
+    assert!(library.photos.iter().all(|p| p.flag == 0));
+    library.edit_selection(Edit::ToggleLabel("Red".into()), false)?;
+    assert!(library.photos.iter().all(|p| p.label == "Red"));
+    // Shift does not advance a multi-photo selection.
+    assert_eq!(library.edit_selection(Edit::Rating(3), true)?, None);
+    assert_eq!(library.selected_ids().len(), 3);
     Ok(())
 }

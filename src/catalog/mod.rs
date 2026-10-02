@@ -225,16 +225,25 @@ impl Catalog {
         self.db.execute("INSERT INTO folder_mappings(folder,path) VALUES(?,?) ON CONFLICT(folder) DO UPDATE SET path=excluded.path",params![id,path.to_string_lossy()])?;
         Ok(())
     }
-    pub fn set_metadata(&self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
-        ensure!((0..=5).contains(&rating), "Rating must be between 0 and 5");
-        ensure!((-1..=1).contains(&flag), "Invalid pick/reject flag");
-        ensure!(
-            self.db.execute(
-                "UPDATE photos SET rating=?,flag=?,label=? WHERE id=?",
-                params![rating, flag, label, id]
-            )? == 1,
-            "Unknown photo"
-        );
+    pub fn set_metadata(&mut self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
+        self.set_metadata_of(&[(id, rating, flag, label.into())])
+    }
+    /// Sets rating, flag and label of several photos in one transaction:
+    /// all of them are saved, or none.
+    pub fn set_metadata_of(&mut self, changes: &[(i64, i32, i32, String)]) -> Result<()> {
+        let tx = self.db.transaction()?;
+        for (id, rating, flag, label) in changes {
+            ensure!((0..=5).contains(rating), "Rating must be between 0 and 5");
+            ensure!((-1..=1).contains(flag), "Invalid pick/reject flag");
+            ensure!(
+                tx.execute(
+                    "UPDATE photos SET rating=?,flag=?,label=? WHERE id=?",
+                    params![rating, flag, label, id]
+                )? == 1,
+                "Unknown photo"
+            );
+        }
+        tx.commit()?;
         Ok(())
     }
 }
