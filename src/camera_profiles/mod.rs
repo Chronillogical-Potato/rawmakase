@@ -53,6 +53,16 @@ pub struct CameraProfile {
     tone: Vec<[f32; 2]>,
     exposure: f32,
 }
+/// How far `t` sits from the first calibration illuminant towards the second,
+/// interpolated in inverse temperature as the DNG specification does.
+fn weight(t: f32, kelvin1: f32, kelvin2: f32) -> f32 {
+    let d = 1. / kelvin2 - 1. / kelvin1;
+    if d.abs() < 1e-8 {
+        0.
+    } else {
+        ((1. / t - 1. / kelvin1) / d).clamp(0., 1.)
+    }
+}
 fn decode(v: f32) -> f32 {
     if v <= 0.04045 {
         v / 12.92
@@ -299,12 +309,7 @@ impl CameraProfile {
         Some(crate::camera_profiles::temperature::from_xy(xy))
     }
     fn weight(&self, t: f32) -> f32 {
-        let d = 1. / self.kelvin2 - 1. / self.kelvin1;
-        if d.abs() < 1e-8 {
-            0.
-        } else {
-            ((1. / t - 1. / self.kelvin1) / d).clamp(0., 1.)
-        }
+        weight(t, self.kelvin1, self.kelvin2)
     }
     pub fn camera_matrix(&self, t: f32) -> Matrix {
         let w = self.weight(t);
@@ -493,7 +498,7 @@ mod dcp;
 mod enhanced;
 mod library;
 pub mod open;
-pub use dcp::{color_matrix_only, from_bytes};
+pub use dcp::{d65_color_matrix, from_bytes};
 pub use library::{adobe_installed, builtin, import_files, installed, library_dirs, load};
 #[cfg(test)]
 mod tests;

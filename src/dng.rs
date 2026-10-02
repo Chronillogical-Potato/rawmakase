@@ -14,9 +14,8 @@ pub struct Dng {
     /// Left, top, width, height, relative to the active area.
     pub crop: Option<[u32; 4]>,
     pub profile: Option<CameraProfile>,
-    /// The file's colour matrix, XYZ to camera, when it has one but no profile
-    /// to read it from. LibRaw reports no matrix for a DNG at all, so without
-    /// this a DNG carrying only colour matrices has no described colour.
+    /// The file's D65 colour matrix, XYZ to camera, when it has colour matrices
+    /// but no profile to read them from.
     pub color_matrix: Option<[[f32; 3]; 3]>,
     pub lens: Option<LensCorrection>,
 }
@@ -53,7 +52,7 @@ pub fn read(path: &Path) -> Option<Dng> {
         None
     } else {
         tags.as_deref()
-            .and_then(|b| crate::camera_profiles::color_matrix_only(b).ok().flatten())
+            .and_then(|b| crate::camera_profiles::d65_color_matrix(b).ok().flatten())
     };
     let mut dng = Dng {
         baseline_exposure: ifd0
