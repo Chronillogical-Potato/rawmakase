@@ -222,7 +222,9 @@ impl Library {
         if ctx.text_edit_focused() {
             return;
         }
-        if self.compare.open {
+        if self.survey.open {
+            self.survey_keys(&presses);
+        } else if self.compare.open {
             self.compare_keys(&presses);
         } else if self.loupe.open {
             self.loupe_keys(&presses);
@@ -237,6 +239,7 @@ impl Library {
             match (press.key, press.modifiers.command) {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
+                (Key::N, false) if !press.modifiers.any() => self.open_survey(),
                 // The grid applies B to every selected photo, once per press.
                 (Key::B, _) if !press.repeat => {
                     self.quick_key(press.modifiers, self.selected_ids())
@@ -265,6 +268,7 @@ impl Library {
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
+                (Key::N, false) if !press.modifiers.any() => self.open_survey(),
                 // The Loupe applies B to the photo shown, once per press.
                 (Key::B, _) if !press.repeat => {
                     let ids = self.selection.active.into_iter().collect();

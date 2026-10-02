@@ -58,8 +58,14 @@ impl Library {
         zoom: &mut crate::app::navigator::Zoom,
     ) -> Action {
         self.poll_previews(ui.ctx());
+        // Survey keeps every photo's preview it shows; other views the usual
+        // number.
+        self.cache.shown_at_once = 0;
         if self.compare.open {
             return self.compare(ui);
+        }
+        if self.survey.open {
+            return self.survey(ui);
         }
         if self.loupe.open {
             return self.loupe(ui, zoom);

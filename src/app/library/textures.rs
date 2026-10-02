@@ -39,6 +39,9 @@ pub(super) struct PreviewTextures {
     pub(super) edited: HashMap<i64, egui::TextureHandle>,
     pub(super) edited_order: VecDeque<i64>,
     pub(super) progress: Progress,
+    /// Photos one view shows at once, e.g. a large survey; never fewer
+    /// textures are kept, so none is dropped while it is shown.
+    pub(super) shown_at_once: usize,
 }
 impl PreviewTextures {
     /// Starts both preview workers on the shared disk cache.
@@ -64,6 +67,7 @@ impl PreviewTextures {
             edited: HashMap::new(),
             edited_order: VecDeque::new(),
             progress: Progress::default(),
+            shown_at_once: 0,
         }
     }
     /// Takes every finished preview. Drain in every workspace so the bounded
@@ -115,7 +119,7 @@ impl PreviewTextures {
         im: &image::RgbImage,
     ) {
         if !self.thumbs.contains_key(&path) {
-            while self.thumbs.len() >= KEPT {
+            while self.thumbs.len() >= KEPT.max(self.shown_at_once) {
                 let Some(old) = self.thumb_order.pop_front() else {
                     break;
                 };
@@ -128,7 +132,7 @@ impl PreviewTextures {
     }
     pub(super) fn insert_edited(&mut self, ctx: &egui::Context, id: i64, im: &image::RgbImage) {
         if !self.edited.contains_key(&id) {
-            while self.edited.len() >= KEPT {
+            while self.edited.len() >= KEPT.max(self.shown_at_once) {
                 let Some(old) = self.edited_order.pop_front() else {
                     break;
                 };

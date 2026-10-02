@@ -1344,6 +1344,50 @@ fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
     Ok(())
 }
 #[test]
+fn survey_shows_the_selection_and_rates_the_active_photo() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.click(ids[0], egui::Modifiers::NONE);
+    library.click(ids[2], egui::Modifiers::SHIFT);
+    library.open_survey();
+    assert!(library.survey_open() && library.edits_active_only());
+    assert_eq!(library.surveyed(), ids[..3]);
+    // Arrows move the active photo among the photos surveyed, and stop.
+    library.step_surveyed(-1);
+    assert_eq!(library.selected(), Some(ids[1]));
+    library.step_surveyed(-5);
+    assert_eq!(library.selected(), Some(ids[0]));
+    // Keys rate the active photo alone; Shift moves on.
+    library.edit_shown(Edit::Rating(2), true)?;
+    assert_eq!(library.photo(ids[0]).unwrap().rating, 2);
+    assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
+    assert_eq!(library.selected(), Some(ids[1]));
+    // A reject the filter hides leaves the survey; the next photo is active.
+    library.filters.flags = [0].into();
+    library.filter();
+    library.edit_shown(Edit::Flag(-1), false)?;
+    assert_eq!(library.surveyed(), [ids[0], ids[2]]);
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.filters.flags.clear();
+    library.filter();
+    // Taking a photo out keeps at least one.
+    library.drop_surveyed(ids[2]);
+    assert_eq!(library.surveyed(), [ids[0]]);
+    library.drop_surveyed(ids[0]);
+    assert_eq!(library.surveyed(), [ids[0]]);
+    // The other views close Survey, and G returns to the grid.
+    library.open_compare();
+    assert!(!library.survey_open() && library.compare_open());
+    library.open_survey();
+    library.open_loupe();
+    assert!(!library.survey_open() && library.loupe_open());
+    library.open_survey();
+    library.show_grid();
+    assert!(!library.survey_open() && !library.edits_active_only());
+    Ok(())
+}
+#[test]
 fn a_filter_hiding_the_active_candidate_passes_its_role_on() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     let ids = ids_of(&library);
@@ -1438,5 +1482,21 @@ fn compare_follows_the_master_after_removing_its_copy() -> Result<()> {
     library.keep_compared_shown();
     assert_eq!(library.compare.select, Some(ids[0]));
     assert_eq!(library.compare.active, super::compare::Side::Select);
+    Ok(())
+}
+#[test]
+fn a_large_survey_shows_the_photos_up_to_the_active_one() -> Result<()> {
+    let names: Vec<String> = (0..52).map(|i| format!("{i:02}.RAF")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let (_directory, mut library) = library_of(&names)?;
+    let ids = ids_of(&library);
+    library.select_all();
+    library.make_active(ids[50]);
+    library.open_survey();
+    assert_eq!(library.shown_surveyed(), ids[3..51]);
+    library.step_surveyed(1);
+    assert_eq!(library.shown_surveyed(), ids[4..52]);
+    library.make_active(ids[0]);
+    assert_eq!(library.shown_surveyed(), ids[..48]);
     Ok(())
 }

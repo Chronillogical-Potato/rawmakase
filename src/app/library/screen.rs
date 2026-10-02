@@ -21,7 +21,7 @@ use std::{
 /// Previews are rendered in steps of this many pixels, so resizing the
 /// window a little does not render them again.
 const EDGE_STEP: u32 = 512;
-/// Textures kept: two comparisons' worth.
+/// Textures kept besides the ones shown: two comparisons' worth.
 const KEPT: usize = 4;
 const THREADS: usize = 2;
 
@@ -161,10 +161,18 @@ impl ScreenPreviews {
                         egui::ColorImage::from_rgb(size, image.as_raw()),
                         egui::TextureOptions::LINEAR,
                     );
-                    while self.textures.len() >= KEPT {
-                        let Some(old) = self.order.pop_front() else {
+                    // The oldest go first, but never one still shown, so a
+                    // survey of many photos is not rendered over and over.
+                    let shown = self.wanted.lock().unwrap().clone();
+                    while self.textures.len() >= KEPT + shown.len() {
+                        let Some(at) = self
+                            .order
+                            .iter()
+                            .position(|k| !shown.contains(k) && !self.seen.contains(k))
+                        else {
                             break;
                         };
+                        let old = self.order.remove(at).unwrap();
                         self.textures.remove(&old);
                     }
                     self.order.push_back(key.clone());
@@ -392,5 +400,24 @@ mod tests {
         assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Failed(_)));
         screen.retry_failed();
         assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Loading));
+    }
+
+    #[test]
+    fn previews_shown_together_are_all_kept() {
+        let ctx = egui::Context::default();
+        let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
+        let photos: Vec<Photo> = (1..=KEPT as i64 + 3)
+            .map(|id| photo(id, Path::new("a")))
+            .collect();
+        // One frame shows them all, as a survey of seven does.
+        for p in &photos {
+            let _ = screen.get(p, 100, 0, || None);
+        }
+        screen.wait(&ctx);
+        assert!(
+            photos
+                .iter()
+                .all(|p| matches!(screen.get(p, 100, 0, || None), Shown::Ready(_)))
+        );
     }
 }

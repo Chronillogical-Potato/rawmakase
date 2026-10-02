@@ -23,6 +23,7 @@ fastframe_icons::icons! {
         Keyboard => "keyboard",
         GridView => "layout-grid",
         LoupeView => "square",
+        SurveyView => "layout-dashboard",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",
