@@ -147,6 +147,13 @@ impl Library {
         add: &[i64],
         remove: &[i64],
     ) -> Result<()> {
+        // A photo removed since (a virtual copy) is left out.
+        let add: Vec<i64> = add
+            .iter()
+            .copied()
+            .filter(|id| self.photo(*id).is_some())
+            .collect();
+        let add = add.as_slice();
         self.catalog.change_collection(collection, add, remove)?;
         let members = self.collection_photos.entry(collection).or_default();
         members.extend(add);
