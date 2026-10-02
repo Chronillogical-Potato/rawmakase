@@ -1343,3 +1343,27 @@ fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
     assert_eq!(library.compare.candidate, Some(ids[2]));
     Ok(())
 }
+#[test]
+fn a_filter_hiding_the_active_candidate_passes_its_role_on() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    library.catalog.set_metadata(ids[1], 0, -1, "")?;
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.step_candidate(-1);
+    assert_eq!(library.selected(), Some(ids[1]));
+    // The sidebar's filter hides rejects: the next photo takes B's place,
+    // and its role, so the next rating goes to it.
+    library.filters.flags = [0, 1].into();
+    library.filter();
+    library.keep_compared_shown();
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[0]), Some(ids[2]))
+    );
+    assert_eq!(library.compare.active, super::compare::Side::Candidate);
+    Ok(())
+}

@@ -230,7 +230,11 @@ impl Library {
     /// shown. The active photo stays active wherever it is. Returns the
     /// select; None when nothing is shown.
     pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
-        if self.compare.synced.as_ref() != Some(&self.selection) {
+        let active = self.compare.id(self.compare.active);
+        // A filter or source that hid the active photo moved the selection
+        // off it; that is reconciled below, keeping its role, not followed.
+        let hidden = active.is_some_and(|id| !self.is_shown(id));
+        if self.compare.synced.as_ref() != Some(&self.selection) && !hidden {
             self.follow_selection();
         }
         let (active, side) = (self.compare.id(self.compare.active), self.compare.active);
