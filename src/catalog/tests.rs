@@ -303,7 +303,10 @@ fn lightroom_history_text_is_bounded_by_its_declared_length() {
     // A declared length inside the cap bounds the read, and a stream that expands
     // past it is refused rather than read cut short.
     assert!(decode(&bomb(8, 1 << 20)).is_none());
-    assert_eq!(decode(&bomb(8, 8)).as_deref(), Some("\0".repeat(8).as_str()));
+    assert_eq!(
+        decode(&bomb(8, 8)).as_deref(),
+        Some("\0".repeat(8).as_str())
+    );
 }
 #[test]
 fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> {
