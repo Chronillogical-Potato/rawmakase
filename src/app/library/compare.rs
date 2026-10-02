@@ -39,6 +39,8 @@ pub(super) struct Compare {
     synced: Option<super::selection::Selection>,
     /// Edit stamps by photo, with when each was read.
     stamps: std::collections::HashMap<i64, (u64, f64)>,
+    /// Undo or redo restored a place: its selection is followed as it is.
+    pub restored: bool,
 }
 impl Compare {
     fn id(&self, side: Side) -> Option<i64> {
@@ -240,7 +242,10 @@ impl Library {
             .synced
             .as_ref()
             .is_some_and(|synced| self.selection.selected.is_subset(&synced.selected));
-        if self.compare.synced.as_ref() != Some(&self.selection) && !(hidden && pruned) {
+        let restored = std::mem::take(&mut self.compare.restored);
+        if self.compare.synced.as_ref() != Some(&self.selection)
+            && (restored || !(hidden && pruned))
+        {
             self.follow_selection();
         }
         let (active, side) = (self.compare.id(self.compare.active), self.compare.active);

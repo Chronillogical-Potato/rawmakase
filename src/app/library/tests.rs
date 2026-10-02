@@ -1396,3 +1396,29 @@ fn compare_follows_a_restored_place_that_hides_its_active_photo() -> Result<()> 
     assert_eq!(library.compare.active, super::compare::Side::Candidate);
     Ok(())
 }
+#[test]
+fn compare_follows_a_restored_place_within_its_pair() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let ids = ids_of(&library);
+    for id in [ids[0], ids[1]] {
+        library.catalog.set_metadata(id, 1, 0, "")?;
+    }
+    library.refresh()?;
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_compare();
+    library.step_candidate(1);
+    library.keep_compared_shown();
+    assert_eq!(library.selected(), Some(ids[2]));
+    // Undo restores A alone, under a filter that hides C: A is active.
+    let mut place = library.place();
+    place.filters.rating = Some(1);
+    place.selection = Default::default();
+    place.selection.selected = [ids[0]].into();
+    place.selection.active = Some(ids[0]);
+    library.go_to_place(&place);
+    library.keep_compared_shown();
+    assert_eq!(library.compare.select, Some(ids[0]));
+    assert_eq!(library.compare.active, super::compare::Side::Select);
+    Ok(())
+}
