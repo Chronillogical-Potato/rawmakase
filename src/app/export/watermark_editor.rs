@@ -144,10 +144,13 @@ impl Editor {
                     self.exports.watermark_editor = Some(state);
                     return;
                 }
-                let saved = match (&state.original, &source) {
-                    (Some(old), None) if *old != state.watermark.name => {
-                        watermark::rename_in(&watermark::dir(), old, &state.watermark)
-                    }
+                let saved = match &state.original {
+                    Some(old) if *old != state.watermark.name => watermark::rename_in(
+                        &watermark::dir(),
+                        old,
+                        &state.watermark,
+                        source.as_deref(),
+                    ),
                     _ => watermark::save(&state.watermark, source.as_deref()),
                 };
                 match saved {

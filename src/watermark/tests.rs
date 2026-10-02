@@ -196,9 +196,119 @@ fn renaming_a_preset_keeps_its_image() -> Result<()> {
             name: "Studio".into(),
             ..w.clone()
         },
+        None,
     )?;
     let names: Vec<String> = presets_in(&store).into_iter().map(|p| p.name).collect();
     assert_eq!(names, ["Studio"]);
     assert!(renamed.ready_in(&store.join("images")).is_ok());
+    // A new preset of the old name doesn't share the renamed one's image.
+    assert_ne!(renamed.image, w.image);
+    // Renamed with a new image: the old preset and its image go.
+    let source = dir.path().join("other.png");
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255])).save(&source)?;
+    let again = rename_in(
+        &store,
+        "Studio",
+        &Watermark {
+            name: "Office".into(),
+            ..renamed.clone()
+        },
+        Some(&source),
+    )?;
+    let names: Vec<String> = presets_in(&store).into_iter().map(|p| p.name).collect();
+    assert_eq!(names, ["Office"]);
+    let images: Vec<_> = std::fs::read_dir(store.join("images"))?.flatten().collect();
+    assert_eq!(images.len(), 1);
+    assert!(again.ready_in(&store.join("images")).is_ok());
+    Ok(())
+}
+
+#[test]
+fn names_that_make_the_same_file_and_unreadable_images_are_refused() -> Result<()> {
+    let (dir, w) = graphic(4, 4, false)?;
+    let store = dir.path().join("watermarks");
+    let clash = Watermark {
+        name: "Logo?".into(),
+        style: Style::Text,
+        image: None,
+        ..w.clone()
+    };
+    save_in(
+        &store,
+        &Watermark {
+            name: "A/B".into(),
+            ..clash.clone()
+        },
+        None,
+    )?;
+    assert!(
+        save_in(
+            &store,
+            &Watermark {
+                name: "A?B".into(),
+                ..clash
+            },
+            None
+        )
+        .is_err()
+    );
+    let broken = dir.path().join("broken.png");
+    std::fs::write(&broken, b"not a png")?;
+    assert!(save_in(&store, &w, Some(&broken)).is_err());
+    // The preset's image is untouched by the failed save.
+    assert!(w.ready_in(&store.join("images")).is_ok());
+    Ok(())
+}
+
+#[test]
+fn transparent_pixels_dont_darken_scaled_edges() -> Result<()> {
+    // White where opaque, black (and transparent) elsewhere.
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("edge.png");
+    image::ImageBuffer::from_fn(40, 40, |x, _| {
+        if x < 20 {
+            image::Rgba([0u8, 0, 0, 0])
+        } else {
+            image::Rgba([255u8, 255, 255, 255])
+        }
+    })
+    .save(&source)?;
+    let store = dir.path().join("watermarks");
+    let w = save_in(
+        &store,
+        &Watermark {
+            name: "Edge".into(),
+            style: Style::Graphic,
+            size: Size::Proportional(0.13),
+            ..Default::default()
+        },
+        Some(&source),
+    )?;
+    let placed = w.ready_in(&store.join("images"))?.place(100, 100).unwrap();
+    // Every visible pixel stays white.
+    for p in placed.rgba.iter().filter(|p| p[3] > 0.01) {
+        assert!(p[0] > 0.99, "{p:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_wide_shadow_on_large_text_stays_cheap() -> Result<()> {
+    let mut w = Watermark {
+        text: "Wide".into(),
+        size: Size::Proportional(1.),
+        ..Default::default()
+    };
+    w.shadow = Shadow {
+        enabled: true,
+        opacity: 1.,
+        offset: 0.4,
+        radius: 0.4,
+        angle: -45.,
+    };
+    let started = std::time::Instant::now();
+    let placed = w.ready()?.place(3000, 1000).unwrap();
+    assert!(started.elapsed().as_secs() < 20);
+    assert!(placed.rgba.iter().any(|p| p[3] > 0.5));
     Ok(())
 }

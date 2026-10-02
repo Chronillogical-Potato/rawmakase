@@ -164,11 +164,13 @@ impl Watermark {
                     !name.is_empty() && path.is_file(),
                     "Watermark image not found: {name}"
                 );
-                let decoded = image::ImageReader::open(&path)?
-                    .with_guessed_format()?
-                    .decode()
-                    .with_context(|| format!("Watermark image not readable: {name}"))?;
-                (Some(decoded.into_rgba32f()), None)
+                (
+                    Some(
+                        decode(&path)
+                            .with_context(|| format!("Watermark image not readable: {name}"))?,
+                    ),
+                    None,
+                )
             }
             Style::Text => (None, Some(fonts::load(&self.family, &self.face)?)),
         };
@@ -228,15 +230,20 @@ impl Ready {
                 let scaled =
                     image::imageops::resize(image, sw, sh, image::imageops::FilterType::Lanczos3);
                 (mw, mh) = (sw as usize, sh as usize);
+                // Back to straight alpha from the premultiplied scaling.
                 rgba = scaled
                     .pixels()
                     .map(|p| {
                         let [r, g, b, a] = p.0;
+                        let a = a.clamp(0., 1.);
+                        if a <= 0. {
+                            return [0.; 4];
+                        }
                         [
-                            r.clamp(0., 1.),
-                            g.clamp(0., 1.),
-                            b.clamp(0., 1.),
-                            a.clamp(0., 1.),
+                            (r / a).clamp(0., 1.),
+                            (g / a).clamp(0., 1.),
+                            (b / a).clamp(0., 1.),
+                            a,
                         ]
                     })
                     .collect();
@@ -326,6 +333,26 @@ fn rotate(rgba: &[[f32; 4]], w: usize, h: usize) -> (Vec<[f32; 4]>, usize, usize
     (out, h, w)
 }
 
+/// An image as shown: its orientation applied, as premultiplied RGBA so
+/// scaling never bleeds the color of transparent pixels into the edges.
+fn decode(path: &Path) -> Result<image::Rgba32FImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(path)?
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    let mut rgba = image.into_rgba32f();
+    for p in rgba.pixels_mut() {
+        let a = p.0[3].clamp(0., 1.);
+        for c in &mut p.0[..3] {
+            *c *= a;
+        }
+    }
+    Ok(rgba)
+}
+
 /// Saved presets, by name.
 pub fn presets() -> Vec<Watermark> {
     presets_in(&dir())
@@ -360,6 +387,16 @@ fn file_name(name: &str) -> String {
 pub fn save_in(dir: &Path, watermark: &Watermark, source: Option<&Path>) -> Result<Watermark> {
     ensure!(!watermark.name.trim().is_empty(), "Name the watermark");
     std::fs::create_dir_all(dir.join("images"))?;
+    // Names that make the same file would overwrite each other.
+    if let Some(other) = presets_in(dir)
+        .into_iter()
+        .find(|p| p.name != watermark.name && file_name(&p.name) == file_name(&watermark.name))
+    {
+        anyhow::bail!(
+            "The name is too close to \"{}\"; choose another",
+            other.name
+        );
+    }
     let mut saved = watermark.clone();
     if let Some(source) = source {
         let extension = source
@@ -370,9 +407,16 @@ pub fn save_in(dir: &Path, watermark: &Watermark, source: Option<&Path>) -> Resu
             matches!(extension.as_str(), "png" | "jpg" | "jpeg"),
             "Choose a PNG or JPEG image"
         );
+        decode(source).context("The image can't be read")?;
         let stem = file_name(&watermark.name);
         let name = format!("{}.{extension}", stem.trim_end_matches(".json"));
-        std::fs::copy(source, dir.join("images").join(&name))?;
+        // Copied beside, then moved over the old one, so a failed copy
+        // leaves the preset's image as it was.
+        let images = dir.join("images");
+        let staged = tempfile::NamedTempFile::new_in(&images)?;
+        std::fs::copy(source, staged.path())?;
+        staged.as_file().sync_all()?;
+        staged.persist(images.join(&name)).map_err(|e| e.error)?;
         saved.image = Some(name);
     }
     crate::storage::atomic_json(&dir.join(file_name(&saved.name)), &saved)?;
@@ -400,11 +444,44 @@ pub fn delete(watermark: &Watermark) -> Result<()> {
 }
 /// Renames: `watermark` is saved under its new name, keeping its image, and
 /// the preset named `old` goes.
-pub fn rename_in(dir: &Path, old: &str, watermark: &Watermark) -> Result<Watermark> {
-    let saved = save_in(dir, watermark, None)?;
-    let old_path = dir.join(file_name(old));
-    if old != saved.name && old_path.exists() {
-        std::fs::remove_file(old_path)?;
+/// A graphic one's image moves to the new name, or `source` replaces it.
+pub fn rename_in(
+    dir: &Path,
+    old: &str,
+    watermark: &Watermark,
+    source: Option<&Path>,
+) -> Result<Watermark> {
+    let previous = presets_in(dir).into_iter().find(|p| p.name == old);
+    let mut renamed = watermark.clone();
+    if source.is_none()
+        && let Some(image) = &watermark.image
+    {
+        // The image is named after its preset; it takes the new name, so a
+        // later preset of the old name can't share it.
+        let extension = Path::new(image)
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let name = format!(
+            "{}.{extension}",
+            file_name(&watermark.name).trim_end_matches(".json")
+        );
+        let images = dir.join("images");
+        if *image != name && images.join(image).is_file() {
+            std::fs::rename(images.join(image), images.join(&name))?;
+        }
+        renamed.image = Some(name);
+    }
+    let saved = save_in(dir, &renamed, source)?;
+    if let Some(previous) = previous.filter(|p| p.name != saved.name) {
+        // Its image went with the rename, or is replaced by `source`.
+        let gone = Watermark {
+            image: previous
+                .image
+                .filter(|i| source.is_some() && Some(i) != saved.image.as_ref()),
+            ..previous
+        };
+        delete_in(dir, &gone)?;
     }
     Ok(saved)
 }

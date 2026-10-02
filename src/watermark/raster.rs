@@ -89,9 +89,11 @@ fn location<'a>(font: &Font, face: &skrifa::FontRef<'a>) -> skrifa::instance::Lo
 }
 
 /// The size of `text`'s block at `px`.
+/// The size of `text`'s ink at `px`, as `text` draws it without a shadow.
 pub(super) fn measure(font: &Font, text: &str, px: f32) -> Option<(f32, f32)> {
-    let l = layout(font, text, px, Align::Left).ok()?;
-    (l.width > 0. && l.height > 0.).then_some((l.width, l.height))
+    let drawn = self::text(font, text, px, Align::Left, [1.; 3], &Shadow::default())?;
+    let inked = drawn.rgba.iter().any(|p| p[3] > 0.);
+    inked.then_some((drawn.width as f32, drawn.height as f32))
 }
 
 /// `text` in `color` at `px`, with its shadow; the block's own size plus
@@ -119,7 +121,9 @@ pub(super) fn text(
     } else {
         (0., 0., 0.)
     };
-    let pad = (dx.abs().max(dy.abs()) + 3. * blur).ceil() + 2.;
+    // Room for outlines that reach past their advances (italics, swashes)
+    // and for the shadow; trimmed to the ink afterwards.
+    let pad = (0.25 * px + dx.abs().max(dy.abs()) + 3. * blur).ceil() + 2.;
     let (w, h) = (
         (l.width + 2. * pad).ceil() as usize,
         (l.height + 2. * pad).ceil() as usize,
@@ -140,10 +144,9 @@ pub(super) fn text(
         pen.close();
     }
     let coverage = raster.coverage();
-    let shadow_alpha = shadow.enabled.then(|| {
-        let shifted = shift(&coverage, w, h, dx, dy);
-        blurred(&shifted, w, h, blur)
-    });
+    let shadow_alpha = shadow
+        .enabled
+        .then(|| shadow_of(&coverage, w, h, dx, dy, blur));
     let rgba = coverage
         .iter()
         .enumerate()
@@ -160,11 +163,84 @@ pub(super) fn text(
             [mix(color[0]), mix(color[1]), mix(color[2]), alpha]
         })
         .collect();
-    Some(Text {
-        width: w,
-        height: h,
-        rgba,
-    })
+    Some(trimmed(rgba, w, h))
+}
+
+/// The mark cut down to its ink, with a pixel to spare.
+fn trimmed(rgba: Vec<[f32; 4]>, w: usize, h: usize) -> Text {
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if rgba[y * w + x][3] > 0. {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+    }
+    if x0 > x1 {
+        return Text {
+            width: w,
+            height: h,
+            rgba,
+        };
+    }
+    let (x0, y0) = (x0.saturating_sub(1), y0.saturating_sub(1));
+    let (x1, y1) = ((x1 + 1).min(w - 1), (y1 + 1).min(h - 1));
+    let (cw, ch) = (x1 - x0 + 1, y1 - y0 + 1);
+    let mut out = Vec::with_capacity(cw * ch);
+    for y in y0..=y1 {
+        out.extend_from_slice(&rgba[y * w + x0..=y * w + x1]);
+    }
+    Text {
+        width: cw,
+        height: ch,
+        rgba: out,
+    }
+}
+
+/// The shadow's coverage: shifted and blurred, at a reduced size when the
+/// blur is wide, so a large shadow costs what a small one does.
+fn shadow_of(coverage: &[f32], w: usize, h: usize, dx: f32, dy: f32, blur: f32) -> Vec<f32> {
+    let k = ((blur / 8.).ceil() as usize).max(1);
+    if k == 1 {
+        return blurred(&shift(coverage, w, h, dx, dy), w, h, blur);
+    }
+    let (sw, sh) = (w.div_ceil(k), h.div_ceil(k));
+    let mut small = vec![0.; sw * sh];
+    for y in 0..h {
+        for x in 0..w {
+            small[(y / k) * sw + x / k] += coverage[y * w + x];
+        }
+    }
+    let area = (k * k) as f32;
+    for v in &mut small {
+        *v /= area;
+    }
+    let k_f = k as f32;
+    let small = blurred(
+        &shift(&small, sw, sh, dx / k_f, dy / k_f),
+        sw,
+        sh,
+        blur / k_f,
+    );
+    // Back to full size, bilinearly.
+    let at = |x: f32, y: f32| -> f32 {
+        let (x, y) = (x.clamp(0., (sw - 1) as f32), y.clamp(0., (sh - 1) as f32));
+        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(sh - 1));
+        let (tx, ty) = (x - x0 as f32, y - y0 as f32);
+        let row = |yy: usize| small[yy * sw + x0] * (1. - tx) + small[yy * sw + x1] * tx;
+        row(y0) * (1. - ty) + row(y1) * ty
+    };
+    let mut out = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            out.push(at(
+                (x as f32 + 0.5) / k_f - 0.5,
+                (y as f32 + 0.5) / k_f - 0.5,
+            ));
+        }
+    }
+    out
 }
 
 /// Moves coverage by a fraction of pixels, bilinearly.
