@@ -6,7 +6,7 @@ use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
 /// Set in `meta` once photo info has been copied from the stored catalog.
-const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
+pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 
 impl Catalog {
     /// A photo's info; a virtual copy has its master's.

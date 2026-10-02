@@ -158,7 +158,9 @@ fn read(path: &Path) -> Option<Option<PhotoInfo>> {
         ))
     } else {
         let mut info = crate::export::exif::photo_info(path).unwrap_or_default();
-        info.dimensions = raster_dimensions(path);
+        // A header that cannot be read yet (a file still being copied) is
+        // tried again later.
+        info.dimensions = Some(raster_dimensions(path)?);
         (info != PhotoInfo::default()).then_some(info)
     })
 }

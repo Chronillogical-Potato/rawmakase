@@ -87,7 +87,7 @@ impl Catalog {
         )?;
         // Photo info is kept by master; the new one takes it over.
         tx.execute(
-            "INSERT OR IGNORE INTO photo_info
+            "INSERT OR REPLACE INTO photo_info
              SELECT ?1, camera, lens, focal, aperture, exposure, iso, width, height
              FROM photo_info WHERE photo=?2",
             [id, master],
@@ -123,6 +123,7 @@ impl Catalog {
             "lightroom_history",
             "photo_keywords",
             "collection_photos",
+            "photo_info",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
         }

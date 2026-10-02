@@ -158,14 +158,33 @@ pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
         focal: number(0x920a),
         aperture: number(0x829d),
         exposure: number(0x829a),
-        // 65535 means more than fits; the EXIF 2.3 tags then hold it.
-        iso: number(0x8827)
-            .filter(|iso| *iso < 65535.)
-            .or_else(|| [0x8833, 0x8832, 0x8831].into_iter().find_map(number))
-            .or(number(0x8827)),
+        iso: iso(&exif),
         dimensions: None,
     };
     (info != Default::default()).then_some(info)
+}
+
+/// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
+/// (0x8830) names holds it: standard output sensitivity, recommended
+/// exposure index or ISO speed.
+fn iso(exif: &CameraExif) -> Option<f64> {
+    let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
+    let iso = number(0x8827);
+    if iso.is_some_and(|iso| iso < 65535.) {
+        return iso;
+    }
+    let extended = match number(0x8830).map(|t| t as u32) {
+        Some(1 | 4 | 5 | 7) => 0x8831,
+        Some(2 | 6) => 0x8832,
+        Some(3) => 0x8833,
+        _ => {
+            return [0x8833, 0x8832, 0x8831]
+                .into_iter()
+                .find_map(number)
+                .or(iso);
+        }
+    };
+    number(extended).or(iso)
 }
 
 /// "YYYY:MM:DD HH:MM:SS" and optional subsecond digits as

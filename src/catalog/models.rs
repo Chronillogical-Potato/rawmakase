@@ -80,10 +80,16 @@ impl PhotoInfo {
         let positive = |v: f32| (v > 0.).then_some(v as f64);
         let text = |t: &str| (!t.trim().is_empty()).then(|| t.trim().to_string());
         // LibRaw's flip 5 and 6 are quarter turns.
-        let (w, h) = if matches!(m.flip, 5 | 6) {
-            (m.height, m.width)
+        // The camera's default crop is the frame shown, when it has one.
+        let (w, h) = if m.crop_width > 0 && m.crop_height > 0 {
+            (m.crop_width, m.crop_height)
         } else {
             (m.width, m.height)
+        };
+        let (w, h) = if matches!(m.flip, 5 | 6) {
+            (h, w)
+        } else {
+            (w, h)
         };
         Self {
             camera: text(&m.model).or_else(|| text(&m.make)),
@@ -98,8 +104,10 @@ impl PhotoInfo {
     /// "1/250 sec", or "2 sec" for long exposures.
     pub fn shutter_text(&self) -> Option<String> {
         let t = self.exposure.filter(|t| *t > 0.)?;
-        Some(if t < 1. {
-            format!("1/{:.0} sec", 1. / t)
+        // A fraction only where it is one: 1/250, but 0.8 sec.
+        let r = 1. / t;
+        Some(if t < 1. && r >= 1.5 && (r - r.round()).abs() < 0.03 * r {
+            format!("1/{:.0} sec", r)
         } else {
             format!("{} sec", trim(t, 1))
         })

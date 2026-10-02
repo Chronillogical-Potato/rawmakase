@@ -565,4 +565,11 @@ fn photo_info_formats_as_lightroom_shows_it() {
     assert_eq!(info.shutter_text().as_deref(), Some("2.5 sec"));
     assert_eq!(info.focal_text().as_deref(), Some("23 mm"));
     assert_eq!(PhotoInfo::default().exposure_text(), None);
+    let slow = |t| PhotoInfo {
+        exposure: Some(t),
+        ..Default::default()
+    };
+    assert_eq!(slow(0.8).shutter_text().as_deref(), Some("0.8 sec"));
+    assert_eq!(slow(0.5).shutter_text().as_deref(), Some("1/2 sec"));
+    assert_eq!(slow(1. / 3.).shutter_text().as_deref(), Some("1/3 sec"));
 }
