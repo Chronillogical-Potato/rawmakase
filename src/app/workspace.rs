@@ -22,10 +22,14 @@ impl Editor {
         if self.library_mode {
             // The Grid applies a key to every selected photo, as Lightroom does.
             match shortcut {
-                Some((edit, advance)) => match library.edit_selection(edit, advance) {
-                    Ok(_) => self.status = library.message.clone(),
-                    Err(e) => self.status = format!("Metadata could not be saved: {e}"),
-                },
+                Some((edit, advance)) => {
+                    match library.edit_selection(edit, advance) {
+                        Ok(_) => self.status = library.message.clone(),
+                        Err(e) => self.status = format!("Metadata could not be saved: {e}"),
+                    }
+                    // Logged now, as a Library change, whatever this frame does next.
+                    self.sync_undo();
+                }
                 None => library.selection_keys(ctx),
             }
             return;

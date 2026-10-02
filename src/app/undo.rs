@@ -165,6 +165,10 @@ impl Editor {
                     }
                 }
                 self.status = format!("{verb} {}", change.summary);
+                // The Library's status line shows its own message first.
+                if let Some(library) = &mut self.library {
+                    library.message = self.status.clone();
+                }
                 true
             }
             Command::Develop {
