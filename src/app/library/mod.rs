@@ -116,6 +116,10 @@ pub struct Library {
     /// None before the first check.
     attached: Option<HashSet<std::path::PathBuf>>,
     pub message: String,
+    /// What `message` sums up, one item per line, shown on hover.
+    pub message_detail: String,
+    /// Photos to Read Metadata from Files for, once confirmed.
+    read_request: Option<Vec<i64>>,
 }
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
@@ -125,6 +129,7 @@ impl Library {
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
         let _ = catalog.backfill_lightroom_info();
+        let _ = catalog.backfill_lightroom_metadata();
         let loupe = loupe::Loupe::new(&ctx);
         let screen = screen::ScreenPreviews::new(&ctx);
         let mut s = Self {
@@ -176,6 +181,8 @@ impl Library {
             grid_shown: 0..usize::MAX,
             attached: None,
             message: String::new(),
+            message_detail: String::new(),
+            read_request: None,
         };
         s.refresh()?;
         // Start with a selection, as Lightroom does, so the side panels are filled.
@@ -365,6 +372,11 @@ impl Library {
         self.scroll_to_active = true;
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
+    /// Photos Read Metadata from Files was chosen for, for the editor to
+    /// confirm.
+    pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<i64>> {
+        self.read_request.take()
+    }
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }

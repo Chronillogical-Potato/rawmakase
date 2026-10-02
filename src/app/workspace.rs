@@ -72,6 +72,7 @@ impl Editor {
         let modal = self.preferences.open
             || self.export_modal()
             || self.remove_copy.is_some()
+            || self.read_metadata.is_some()
             || self.view.shortcuts;
         if !modal {
             self.metadata_shortcuts(&ctx);
@@ -103,7 +104,11 @@ impl Editor {
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
             self.virtual_copy(request);
         }
+        if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
+            self.read_metadata = Some(ids);
+        }
         self.remove_copy_window(&ctx);
+        self.read_metadata_window(&ctx);
         self.shortcuts_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
@@ -757,12 +762,21 @@ impl Editor {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
+                // A Library summary (sidecars that could not be read) lists
+                // its items on hover while it is shown.
+                let detail = self
+                    .library
+                    .as_ref()
+                    .filter(|l| l.message == self.status && !l.message_detail.is_empty())
+                    .map(|l| l.message_detail.clone());
                 ui.small(self.document.save.message().unwrap_or(&self.status))
-                    .on_hover_text(if self.view.monitor.is_some() {
-                        "Display: custom ICC (disable compositor ICC conversion)"
-                    } else {
-                        "Display: sRGB (compositor may manage the monitor)"
-                    });
+                    .on_hover_text(detail.unwrap_or_else(|| {
+                        if self.view.monitor.is_some() {
+                            "Display: custom ICC (disable compositor ICC conversion)".into()
+                        } else {
+                            "Display: sRGB (compositor may manage the monitor)".into()
+                        }
+                    }));
                 if !self.preview.status.is_empty() {
                     ui.separator();
                     ui.small(&self.preview.status);

@@ -1692,7 +1692,7 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     assert_eq!(done.len(), 3);
     assert!(library.photos.iter().all(|p| p.keywords == "City"));
     for command in done.iter().rev() {
-        library.restore_descriptive(&command.before)?;
+        library.restore_descriptive(&command.before, &command.ratings_before)?;
     }
     assert_eq!(library.catalog.descriptive(ids[0])?, Default::default());
     assert_eq!(
@@ -1736,5 +1736,45 @@ fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
     library.selection.active = Some(ids[1]);
     library.sync_fields();
     assert!(library.fields.keyword_entry.is_empty());
+    Ok(())
+}
+#[test]
+fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
+    use crate::catalog::{LangAlt, TextField, Value};
+    let (dir, mut library) = library_of(&["a.ARW"])?;
+    let id = library.photos[0].id;
+    library
+        .catalog
+        .set_text(&[id], TextField::Title, "My edit")?;
+    library.catalog.set_metadata(id, 1, 0, "Blue")?;
+    library.photos[0].rating = 1;
+    library.photos[0].label = "Blue".into();
+    std::fs::write(
+        dir.path().join("photos/a.ARW.xmp"),
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
+          xmlns:xmp="http://ns.adobe.com/xap/1.0/" dc:title="From the file" xmp:Rating="5" xmp:Label="Red"/>
+        </rdf:RDF></x:xmpmeta>"#,
+    )?;
+    library.read_metadata_from_files(&[id])?;
+    assert_eq!(
+        library.catalog.descriptive(id)?.title,
+        Some(Value::Set(LangAlt::new("From the file")))
+    );
+    assert_eq!(
+        (library.photos[0].rating, library.photos[0].label.as_str()),
+        (5, "Red")
+    );
+    let done = library.take_descriptive_done();
+    assert_eq!(done.len(), 1);
+    library.restore_descriptive(&done[0].before, &done[0].ratings_before)?;
+    assert_eq!(
+        library.catalog.descriptive(id)?.title,
+        Some(Value::Set(LangAlt::new("My edit")))
+    );
+    assert_eq!(
+        (library.photos[0].rating, library.photos[0].label.as_str()),
+        (1, "Blue")
+    );
     Ok(())
 }

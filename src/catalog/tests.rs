@@ -742,3 +742,44 @@ fn reopening_a_catalog_adds_the_tables_a_newer_release_needs() -> Result<()> {
     assert!(cat.load_edit(id, &photo)?.is_some());
     Ok(())
 }
+#[test]
+fn lightroom_import_reads_each_photos_descriptive_metadata() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("descriptive.lrcat");
+    fixture(&source)?;
+    {
+        let db = Connection::open(&source)?;
+        db.execute(
+            "CREATE TABLE Adobe_AdditionalMetadata(id_local INTEGER, image INTEGER, xmp TEXT)",
+            [],
+        )?;
+        let packet = |title: &str| {
+            format!(
+                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+                <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
+                  xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:exif="http://ns.adobe.com/exif/1.0/"
+                  exif:DateTimeOriginal="2021-06-06T10:00:00.25+01:00" xmp:Rating="1">
+                  <dc:title><rdf:Alt><rdf:li xml:lang="x-default">{title}</rdf:li></rdf:Alt></dc:title>
+                  <dc:creator><rdf:Seq><rdf:li>Example</rdf:li></rdf:Seq></dc:creator>
+                </rdf:Description></rdf:RDF></x:xmpmeta>"#
+            )
+        };
+        db.execute(
+            "INSERT INTO Adobe_AdditionalMetadata VALUES(1, 40, ?), (2, 41, ?)",
+            params![packet("Master"), packet("Copy")],
+        )?;
+    }
+    let destination = d.path().join("descriptive.rawmakase");
+    import_lightroom(&source, &destination)?;
+    let cat = Catalog::open(&destination)?;
+    let title = |id| -> Result<_> { Ok(cat.descriptive(id)?.title) };
+    assert_eq!(title(40)?, Some(Value::Set(LangAlt::new("Master"))));
+    assert_eq!(title(41)?, Some(Value::Set(LangAlt::new("Copy"))));
+    let master = cat.descriptive(40)?;
+    assert_eq!(master.creator, Some(Value::Set(vec!["Example".into()])));
+    assert_eq!(master.capture.unwrap().offset.as_deref(), Some("+01:00"));
+    // Rating stays Lightroom's own column's.
+    let photos = cat.photos()?;
+    assert_eq!(photos.iter().find(|p| p.id == 40).unwrap().rating, 4);
+    Ok(())
+}

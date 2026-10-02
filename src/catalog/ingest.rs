@@ -7,6 +7,13 @@ use std::path::{Path, PathBuf};
 
 impl Catalog {
     pub fn add_folder(&mut self, folder: &Path) -> Result<usize> {
+        Ok(self.add_folder_reporting(folder)?.0)
+    }
+    /// Adds a folder's new photos with the metadata of their XMP sidecars and
+    /// of the XMP inside JPEGs and TIFFs. Photos already in the catalog are
+    /// left alone; Read Metadata from Files reads theirs. Returns the photos
+    /// added and what reading the sidecars found.
+    pub fn add_folder_reporting(&mut self, folder: &Path) -> Result<(usize, super::SidecarReport)> {
         let folder = folder.canonicalize()?;
         let mut files = Vec::new();
         fn walk(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -110,7 +117,8 @@ impl Catalog {
                 let _ = self.import_sidecar(*id, file);
             }
         }
-        Ok(added.len())
+        let report = self.import_file_metadata(&added)?;
+        Ok((added.len(), report))
     }
     /// Records capture times read from the photos' files, in one transaction.
     /// Only empty dates are filled, never one Lightroom or the user set, and a

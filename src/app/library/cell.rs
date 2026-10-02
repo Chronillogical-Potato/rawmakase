@@ -319,6 +319,8 @@ pub(in crate::app) enum PhotoAction {
     CopyPath,
     Edit(crate::app::photo_metadata::Edit),
     Copy(super::CopyAction),
+    /// Read Metadata from Files.
+    ReadMetadata,
 }
 /// Create Virtual Copy's shortcut, as Lightroom shows it.
 pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
@@ -373,6 +375,11 @@ pub(in crate::app) fn photo_menu(response: &egui::Response, photo: &Photo) -> Op
                 action = Some(PhotoAction::Copy(choice));
                 ui.close();
             }
+        }
+        menu_separator(ui);
+        if menu_item(ui, "Read Metadata from Files…", "", true, false) {
+            action = Some(PhotoAction::ReadMetadata);
+            ui.close();
         }
         menu_separator(ui);
         submenu_style(ui);

@@ -34,6 +34,8 @@ impl Editor {
         let ctx = ctx.clone();
         let current = self.library.as_ref().map(|l| l.catalog.path.clone());
         std::thread::spawn(move || {
+            // Sidecars of the folder added that could not be read.
+            let mut report = crate::catalog::SidecarReport::default();
             let result = (|| -> anyhow::Result<Option<PathBuf>> {
                 Ok(match kind {
                     CatalogDialog::Create => {
@@ -94,7 +96,7 @@ impl Editor {
                         let mut cat = crate::catalog::Catalog::open(&current)?;
                         match action {
                             FolderAction::Add => {
-                                cat.add_folder(&path)?;
+                                report = cat.add_folder_reporting(&path)?.1;
                             }
                             FolderAction::RelinkRoot(id) => cat.relink_root(id, &path)?,
                             FolderAction::RelinkFolder(id) => cat.relink_folder(id, &path)?,
@@ -119,6 +121,10 @@ impl Editor {
                                 let available=l.available_count();
                                 l.message=format!("Folder relinked. {available} of {} photos are available.",l.photos.len());
                                 if available==0 {l.message.push_str(" No files matched this location; check that the selected folder contains the expected subfolders.");}
+                            }
+                            if let Some(summary) = report.summary() {
+                                l.message = format!("Folder added · {summary}");
+                                l.message_detail = report.details();
                             }
                             Box::new(l)
                         })
@@ -368,6 +374,64 @@ impl Editor {
         if remove {
             self.remove_virtual_copy(id);
         }
+    }
+    /// Asks before Read Metadata from Files, as Lightroom does: it replaces
+    /// the catalog's values, edits included.
+    pub(super) fn read_metadata_window(&mut self, ctx: &egui::Context) {
+        use super::widgets::{modal_frame, primary_button};
+        let Some(ids) = self.read_metadata.clone() else {
+            return;
+        };
+        let mut choice = None;
+        let response = egui::Modal::new(egui::Id::new("read-metadata"))
+            .frame(modal_frame().inner_margin(24))
+            .show(ctx, |ui| {
+                ui.set_width(420.);
+                let n = ids.len();
+                ui.label(
+                    egui::RichText::new(if n == 1 {
+                        "Read metadata from the file?".to_string()
+                    } else {
+                        format!("Read metadata from {n} files?")
+                    })
+                    .size(15.)
+                    .color(super::theme::gray(236)),
+                );
+                ui.add_space(6.);
+                ui.label(
+                    egui::RichText::new(
+                        "Replaces title, caption, keywords and other metadata in the \
+                         catalog with the values in the files, including your edits. \
+                         Fields the files don't have are kept. Virtual copies are not read.",
+                    )
+                    .size(12.)
+                    .color(super::theme::gray(150)),
+                );
+                ui.add_space(20.);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
+                    if ui.button("Cancel").clicked() {
+                        choice = Some(false);
+                    }
+                    if primary_button(ui, "Read").clicked() {
+                        choice = Some(true);
+                    }
+                });
+            });
+        let Some(read) = choice.or(response.should_close().then_some(false)) else {
+            return;
+        };
+        self.read_metadata = None;
+        if !read || self.activity.is_busy() || !self.flush() {
+            return;
+        }
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        self.status = match library.read_metadata_from_files(&ids) {
+            Ok(()) => library.message.clone(),
+            Err(e) => format!("Metadata not read: {e:#}"),
+        };
     }
     /// Removes virtual copy `id` once confirmed.
     pub(super) fn remove_virtual_copy(&mut self, id: i64) {

@@ -148,10 +148,15 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
         tx.execute_batch("INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent FROM lr.AgLibraryKeyword;")?;
     }
     super::info::copy_lightroom_info(&tx)?;
+    super::sidecar::copy_lightroom_metadata(&tx)?;
     // Copied here, so opening the new catalog has nothing to backfill.
     tx.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
         [super::info::INFO_BACKFILLED],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
+        [super::sidecar::METADATA_BACKFILLED],
     )?;
     if has("AgLibraryKeywordImage")? {
         tx.execute_batch("INSERT OR IGNORE INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords);")?;

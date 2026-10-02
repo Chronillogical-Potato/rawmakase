@@ -211,9 +211,11 @@ impl Editor {
                 true
             }
             Command::Descriptive(change) => {
-                let (values, place) = match direction {
-                    Direction::Undo => (&change.before, &change.place_before),
-                    Direction::Redo => (&change.after, &change.place_after),
+                let (values, ratings, place) = match direction {
+                    Direction::Undo => {
+                        (&change.before, &change.ratings_before, &change.place_before)
+                    }
+                    Direction::Redo => (&change.after, &change.ratings_after, &change.place_after),
                 };
                 if !self.flush() {
                     return false;
@@ -221,7 +223,7 @@ impl Editor {
                 let Some(library) = &mut self.library else {
                     return false;
                 };
-                if let Err(e) = library.restore_descriptive(values) {
+                if let Err(e) = library.restore_descriptive(values, ratings) {
                     self.status = format!("{verb} failed: {e}");
                     return false;
                 }

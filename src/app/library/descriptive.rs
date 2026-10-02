@@ -16,6 +16,10 @@ pub struct DescriptiveCommand {
     pub after: Vec<MetadataSnapshot>,
     pub place_before: Place,
     pub place_after: Place,
+    /// Rating, flag and label, for a change that set them too (Read
+    /// Metadata from Files); empty otherwise.
+    pub ratings_before: Vec<super::Metadata>,
+    pub ratings_after: Vec<super::Metadata>,
     /// What changed, as the status line said it.
     pub summary: String,
 }
@@ -119,16 +123,20 @@ impl Library {
             after,
             place_before,
             place_after: place.unwrap_or_else(|| self.place()),
+            ratings_before: Vec::new(),
+            ratings_after: Vec::new(),
             summary,
         });
         self.fields.reload();
         Ok(())
     }
-    /// Puts photos' descriptive metadata back, for undo and redo, without
+    /// Puts photos' descriptive metadata back, with their rating, flag and
+    /// label where the command set them, for undo and redo, without
     /// recording a change of its own.
     pub(in crate::app) fn restore_descriptive(
         &mut self,
         values: &[MetadataSnapshot],
+        ratings: &[super::Metadata],
     ) -> Result<()> {
         // A photo removed since (a virtual copy) is left out.
         let values: Vec<MetadataSnapshot> = values
@@ -137,10 +145,86 @@ impl Library {
             .cloned()
             .collect();
         self.catalog.restore_metadata(&values)?;
+        if !ratings.is_empty() {
+            self.set_metadata(ratings)?;
+        }
         let ids: Vec<i64> = values.iter().map(|s| s.photo).collect();
-        self.refresh_keywords(&ids)?;
+        self.refresh_photos(&ids)?;
         self.fields.reload();
         Ok(())
+    }
+    /// Lightroom's Read Metadata from Files, for the masters among `ids`,
+    /// as one command: what the files have replaces the catalog's values,
+    /// edits included.
+    pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[i64]) -> Result<()> {
+        let ids: Vec<i64> = ids
+            .iter()
+            .copied()
+            .filter(|id| self.photo(*id).is_some_and(|p| p.master.is_none()))
+            .collect();
+        if ids.is_empty() {
+            self.message = "Virtual copies are never read from files".into();
+            return Ok(());
+        }
+        let ratings = |library: &Self| -> Vec<super::Metadata> {
+            ids.iter()
+                .filter_map(|id| library.photo(*id))
+                .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
+                .collect()
+        };
+        let place = self.place();
+        let before = self.catalog.metadata_snapshot(&ids)?;
+        let ratings_before = ratings(self);
+        let report = self.catalog.read_metadata_from_files(&ids)?;
+        self.refresh_photos(&ids)?;
+        let after = self.catalog.metadata_snapshot(&ids)?;
+        let ratings_after = ratings(self);
+        let n = ids.len();
+        let mut summary = format!(
+            "Read metadata from {n} {}",
+            if n == 1 { "file" } else { "files" }
+        );
+        if let Some(problems) = report.summary() {
+            summary.push_str(" · ");
+            summary.push_str(&problems);
+        }
+        self.message = summary.clone();
+        self.message_detail = report.details();
+        self.fields.reload();
+        if before != after || ratings_before != ratings_after {
+            self.descriptive_done.push(DescriptiveCommand {
+                sequence: crate::app::undo::sequence(),
+                before,
+                after,
+                place_before: place.clone(),
+                place_after: place,
+                ratings_before,
+                ratings_after,
+                summary,
+            });
+        }
+        Ok(())
+    }
+    /// Rating, flag, label, capture time and keywords of `ids`, read again
+    /// from the catalog, and the photos shown.
+    fn refresh_photos(&mut self, ids: &[i64]) -> Result<()> {
+        let fresh: std::collections::HashMap<i64, crate::catalog::Photo> = self
+            .catalog
+            .photos()?
+            .into_iter()
+            .filter(|p| ids.contains(&p.id))
+            .map(|p| (p.id, p))
+            .collect();
+        for p in &mut self.photos {
+            if let Some(f) = fresh.get(&p.id) {
+                p.rating = f.rating;
+                p.flag = f.flag;
+                p.label = f.label.clone();
+                p.captured = f.captured.clone();
+            }
+        }
+        self.sort_keys = None;
+        self.refresh_keywords(ids)
     }
     /// The descriptive changes made since the last call, for the undo log.
     pub(in crate::app) fn take_descriptive_done(&mut self) -> Vec<DescriptiveCommand> {

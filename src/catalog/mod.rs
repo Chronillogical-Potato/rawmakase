@@ -25,6 +25,7 @@ mod info;
 mod ingest;
 pub mod lightroom;
 mod models;
+mod sidecar;
 pub use descriptive::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
     Value, keyword_name,
@@ -32,6 +33,7 @@ pub use descriptive::{
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };
+pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
 // Compatibility for existing clients.
 pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
 impl Catalog {

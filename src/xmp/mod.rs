@@ -1,5 +1,6 @@
 //! Namespace-aware Adobe settings parsing and application to a develop recipe.
 mod apply;
+pub mod descriptive;
 pub mod local;
 mod parse;
 pub mod write;
