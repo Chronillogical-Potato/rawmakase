@@ -130,9 +130,10 @@ impl Library {
             } else {
                 vec![id]
             };
-            // Compare's active photo goes through Compare, which keeps its pair.
-            let done = if self.compare.open && self.selection.active == Some(id) {
-                self.edit_compared(edit, false)
+            // The active photo goes as its keys do, so Compare keeps its
+            // pair and Survey its photos.
+            let done = if self.edits_active_only() && self.selection.active == Some(id) {
+                self.edit_shown(edit, false)
             } else {
                 self.edit_photos(&ids, edit, false).map(|_| ())
             };

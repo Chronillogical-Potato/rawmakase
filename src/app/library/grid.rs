@@ -61,6 +61,9 @@ impl Library {
         if self.compare.open {
             return self.compare(ui);
         }
+        if self.survey.open {
+            return self.survey(ui);
+        }
         if self.loupe.open {
             return self.loupe(ui, zoom);
         }

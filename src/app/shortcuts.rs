@@ -41,6 +41,13 @@ const COMPARE: [Shortcut; 6] = [
     ("click", "Make a photo active for rating keys"),
     ("G / Esc", "Back to the grid"),
 ];
+const SURVEY: [Shortcut; 5] = [
+    ("N", "Survey the selected photos"),
+    ("Arrows", "Move the active photo"),
+    ("click", "Make a photo active for rating keys"),
+    ("Cmd+click", "Take a photo out"),
+    ("G / Esc", "Back to the grid"),
+];
 const RATING: [Shortcut; 8] = [
     ("0 / 1 / 2 / 3 / 4 / 5", "Star rating"),
     ("[ / ]", "Lower / raise the rating"),
@@ -102,10 +109,11 @@ impl Editor {
             self.view.shortcuts = false;
             return;
         }
-        let views: [Group; 3] = [
+        let views: [Group; 4] = [
             ("Library grid", &LIBRARY),
             ("Loupe", &LOUPE),
             ("Compare", &COMPARE),
+            ("Survey", &SURVEY),
         ];
         let common: [Group; 3] = [
             ("Rating, flags and labels", &RATING),

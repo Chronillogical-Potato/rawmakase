@@ -2,14 +2,12 @@
 //! the better of two. Left and Right move the candidate along the photos
 //! shown, Up makes it the select, Down swaps the two. A click makes a photo
 //! active: rating, flag and label keys go to it, and the panels show it.
-//! Both are shown at the size of their half, with their edits (see `screen`).
+//! Both are shown at the size of their half, with their edits (see `stage`).
 use super::grid::filter_caption;
-use super::screen::Shown;
+use super::stage::MARGIN;
 use super::{Action, Library, Pick};
-use crate::app::photo_metadata::{flag_icon, label_color};
 use crate::app::theme;
-use crate::catalog::Photo;
-use eframe::egui::{self, Color32, Rect, Vec2};
+use eframe::egui::{self, Rect, Vec2};
 
 /// One of the two photos.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -37,8 +35,6 @@ pub(super) struct Compare {
     /// The selection as Compare last set it; one changed since, by undo or
     /// a new virtual copy, is followed.
     synced: Option<super::selection::Selection>,
-    /// Edit stamps by photo, with when each was read.
-    stamps: std::collections::HashMap<i64, (u64, f64)>,
 }
 impl Compare {
     fn id(&self, side: Side) -> Option<i64> {
@@ -49,26 +45,9 @@ impl Compare {
     }
 }
 
-/// The strip under each photo: its role, name, rating, flag and label.
-const CAPTION: f32 = 26.;
-/// Space between the photos and around them.
-const MARGIN: f32 = 14.;
-/// Seconds an edit stamp is trusted before it is read again.
-const STAMP_AGE: f64 = 0.5;
-
 impl Library {
     pub fn compare_open(&self) -> bool {
         self.compare.open
-    }
-    /// Whether rating, flag and label keys go to the active photo alone, as
-    /// in the Loupe and Compare, rather than to every photo selected.
-    pub fn edits_active_only(&self) -> bool {
-        self.loupe.open || self.compare.open
-    }
-    /// G: the grid, from the Loupe or Compare.
-    pub fn show_grid(&mut self) {
-        self.close_loupe();
-        self.close_compare();
     }
     /// C: the active photo as the select, beside the next photo selected
     /// with it, or else the next one shown.
@@ -82,6 +61,7 @@ impl Library {
         };
         self.loupe.open = false;
         self.loupe.reset();
+        self.survey.open = false;
         self.compare.open = true;
         self.seed_compare(select);
     }
@@ -306,6 +286,7 @@ impl Library {
                 Key::ArrowDown if !press.repeat => self.swap_compare(),
                 Key::Escape => self.close_compare(),
                 Key::E | Key::Enter => self.open_loupe(),
+                Key::N if !press.modifiers.any() => self.open_survey(),
                 _ => {}
             }
         }
@@ -412,120 +393,6 @@ impl Library {
             self.activate(side);
         }
         let active = self.compare.active == side;
-        let image_area = Rect::from_min_max(rect.min, rect.max - Vec2::new(0., CAPTION));
-        let (texture, note) = self.compare_preview(ui.ctx(), &photo, image_area);
-        if let Some(texture) = texture {
-            let size = texture.size_vec2();
-            let scale = (image_area.width() / size.x).min(image_area.height() / size.y);
-            let at = Rect::from_center_size(image_area.center(), size * scale);
-            let uv = Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
-            ui.painter().image(texture.id(), at, uv, Color32::WHITE);
-            if active {
-                ui.painter().rect_stroke(
-                    at.expand(3.),
-                    1.,
-                    egui::Stroke::new(1.5, theme::gray(225)),
-                    egui::StrokeKind::Outside,
-                );
-            }
-        }
-        if let Some(note) = note {
-            ui.painter().text(
-                image_area.center_bottom() - Vec2::new(0., 8.),
-                egui::Align2::CENTER_BOTTOM,
-                note,
-                egui::FontId::proportional(11.),
-                theme::gray(170),
-            );
-        }
-        let caption = Rect::from_min_max(rect.left_bottom() - Vec2::new(0., CAPTION), rect.max);
-        caption_strip(ui.painter(), caption, side, &photo, active);
-    }
-    /// The photo's screen preview, or the grid's until it is ready, and a
-    /// note on what is shown.
-    fn compare_preview(
-        &mut self,
-        ctx: &egui::Context,
-        photo: &Photo,
-        area: Rect,
-    ) -> (Option<egui::TextureHandle>, Option<String>) {
-        self.request_previews(photo, ctx);
-        let stand_in = self.texture(photo).cloned();
-        if !self.is_available(&photo.path) {
-            let note = match stand_in {
-                Some(_) => "Offline: showing the cached preview",
-                None => "Offline, and there is no cached preview",
-            };
-            return (stand_in, Some(note.into()));
-        }
-        let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
-        let stamp = self.edit_stamp(ctx, photo.id);
-        let catalog = &self.catalog;
-        match self
-            .screen
-            .get(photo, edge, stamp, || super::edit_source(catalog, photo.id))
-        {
-            Shown::Ready(texture) => (Some(texture.clone()), None),
-            Shown::Loading => (stand_in, Some("Loading…".into())),
-            Shown::Failed(error) => (stand_in, Some(format!("Preview unavailable: {error}"))),
-        }
-    }
-}
-
-impl Library {
-    /// The photo's edit stamp (see `Catalog::edit_stamp`), read again at
-    /// most every `STAMP_AGE` seconds, so an edit saved elsewhere shows soon
-    /// without reading the edit every frame.
-    fn edit_stamp(&mut self, ctx: &egui::Context, id: i64) -> u64 {
-        let now = ctx.input(|i| i.time);
-        match self.compare.stamps.get(&id) {
-            Some((stamp, read)) if now - read < STAMP_AGE => *stamp,
-            _ => {
-                let stamp = self.catalog.edit_stamp(id).unwrap_or_default();
-                self.compare
-                    .stamps
-                    .retain(|_, (_, read)| now - *read < STAMP_AGE);
-                self.compare.stamps.insert(id, (stamp, now));
-                stamp
-            }
-        }
-    }
-}
-
-/// "SELECT  DSCF0001.RAF  ★★★  ⚑  ■" under a photo.
-fn caption_strip(painter: &egui::Painter, rect: Rect, side: Side, photo: &Photo, active: bool) {
-    let y = rect.center().y;
-    let role = painter.text(
-        egui::pos2(rect.left(), y),
-        egui::Align2::LEFT_CENTER,
-        side.name().to_uppercase(),
-        egui::FontId::proportional(10.5),
-        theme::gray(if active { 200 } else { 125 }),
-    );
-    let name = painter.text(
-        egui::pos2(role.right() + 10., y),
-        egui::Align2::LEFT_CENTER,
-        format!("{}{}", photo.filename, super::cell::copy_suffix(photo)),
-        egui::FontId::proportional(12.),
-        theme::gray(if active { 235 } else { 175 }),
-    );
-    let mut x = name.right() + 12.;
-    if photo.rating > 0 {
-        let stars = painter.text(
-            egui::pos2(x, y),
-            egui::Align2::LEFT_CENTER,
-            "★".repeat(photo.rating.clamp(0, 5) as usize),
-            egui::FontId::proportional(11.),
-            theme::gray(210),
-        );
-        x = stars.right() + 10.;
-    }
-    if photo.flag != 0 {
-        flag_icon(painter, egui::pos2(x + 6., y), photo.flag, true);
-        x += 20.;
-    }
-    if let Some(color) = label_color(&photo.label) {
-        let chip = Rect::from_center_size(egui::pos2(x + 5., y), Vec2::splat(10.));
-        painter.rect_filled(chip, 1., color);
+        self.stage_photo(ui, rect, &photo, Some(side.name()), active);
     }
 }

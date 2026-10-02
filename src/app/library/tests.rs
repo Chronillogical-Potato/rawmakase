@@ -1343,3 +1343,47 @@ fn a_compare_edit_keeps_the_select_and_records_where_it_left() -> Result<()> {
     assert_eq!(library.compare.candidate, Some(ids[2]));
     Ok(())
 }
+#[test]
+fn survey_shows_the_selection_and_rates_the_active_photo() -> Result<()> {
+    use crate::app::photo_metadata::Edit;
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    library.click(ids[0], egui::Modifiers::NONE);
+    library.click(ids[2], egui::Modifiers::SHIFT);
+    library.open_survey();
+    assert!(library.survey_open() && library.edits_active_only());
+    assert_eq!(library.surveyed(), ids[..3]);
+    // Arrows move the active photo among the photos surveyed, and stop.
+    library.step_surveyed(-1);
+    assert_eq!(library.selected(), Some(ids[1]));
+    library.step_surveyed(-5);
+    assert_eq!(library.selected(), Some(ids[0]));
+    // Keys rate the active photo alone; Shift moves on.
+    library.edit_shown(Edit::Rating(2), true)?;
+    assert_eq!(library.photo(ids[0]).unwrap().rating, 2);
+    assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
+    assert_eq!(library.selected(), Some(ids[1]));
+    // A reject the filter hides leaves the survey; the next photo is active.
+    library.filters.flags = [0].into();
+    library.filter();
+    library.edit_shown(Edit::Flag(-1), false)?;
+    assert_eq!(library.surveyed(), [ids[0], ids[2]]);
+    assert_eq!(library.selected(), Some(ids[2]));
+    library.filters.flags.clear();
+    library.filter();
+    // Taking a photo out keeps at least one.
+    library.drop_surveyed(ids[2]);
+    assert_eq!(library.surveyed(), [ids[0]]);
+    library.drop_surveyed(ids[0]);
+    assert_eq!(library.surveyed(), [ids[0]]);
+    // The other views close Survey, and G returns to the grid.
+    library.open_compare();
+    assert!(!library.survey_open() && library.compare_open());
+    library.open_survey();
+    library.open_loupe();
+    assert!(!library.survey_open() && library.loupe_open());
+    library.open_survey();
+    library.show_grid();
+    assert!(!library.survey_open() && !library.edits_active_only());
+    Ok(())
+}

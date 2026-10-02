@@ -24,20 +24,11 @@ impl Editor {
             return;
         };
         if self.library_mode {
-            // The Grid applies a key to every selected photo, as Lightroom
-            // does; the Loupe to the photo it shows, Compare to the active one.
-            let result = |library: &mut crate::app::library::Library, edit, advance| {
-                if library.compare_open() {
-                    return library.edit_compared(edit, advance).map(|()| None);
-                }
-                match library.selected().filter(|_| library.loupe_open()) {
-                    Some(id) => library.edit_metadata(id, edit, advance),
-                    None => library.edit_selection(edit, advance),
-                }
-            };
             match shortcut {
                 Some((edit, advance)) => {
-                    match result(library, edit, advance) {
+                    // As Lightroom applies it: to the grid's selection, or
+                    // the photo a Loupe, Compare or Survey has active.
+                    match library.edit_shown(edit, advance) {
                         Ok(_) => self.status = library.message.clone(),
                         Err(e) => self.status = format!("Metadata could not be saved: {e}"),
                     }

@@ -63,8 +63,10 @@ pub struct Library {
     copy_names: copy_name::CopyNames,
     loupe: loupe::Loupe,
     compare: compare::Compare,
-    /// Photos rendered at the size Compare shows them.
+    survey: survey::Survey,
+    /// Photos rendered at the size Compare and Survey show them.
     screen: screen::ScreenPreviews,
+    stamps: stage::Stamps,
     /// Which way the Loupe last moved, so the photo after is prepared ahead.
     loupe_direction: i32,
     /// Metadata changes not yet handed to the shared undo log.
@@ -133,7 +135,9 @@ impl Library {
             collection_done: Vec::new(),
             loupe,
             compare: Default::default(),
+            survey: Default::default(),
             screen,
+            stamps: Default::default(),
             loupe_direction: 1,
             capture: None,
             info_reader: None,
@@ -477,10 +481,12 @@ mod quick;
 mod screen;
 mod selection;
 mod sidebar;
+mod stage;
+mod survey;
 mod textures;
 mod thumbnails;
 mod tree;
-mod view_bar;
+mod views;
 mod volumes;
 mod zoom;
 use thumbnails::thumbnail;
