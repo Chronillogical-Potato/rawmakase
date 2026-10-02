@@ -196,20 +196,24 @@ impl Library {
             return;
         }
         let columns = self.grid_columns.max(1) as isize;
-        let (command, shift, keys) = ctx.input(|i| {
-            let keys: Vec<Key> = i
-                .events
+        // Each key with the modifiers held for it: a quick Cmd+D can arrive in
+        // the same frame as Cmd's release.
+        let keys: Vec<(Key, egui::Modifiers)> = ctx.input(|i| {
+            i.events
                 .iter()
                 .filter_map(|e| match e {
                     egui::Event::Key {
-                        key, pressed: true, ..
-                    } => Some(*key),
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => Some((*key, *modifiers)),
                     _ => None,
                 })
-                .collect();
-            (i.modifiers.command, i.modifiers.shift, keys)
+                .collect()
         });
-        for key in keys {
+        for (key, modifiers) in keys {
+            let (command, shift) = (modifiers.command, modifiers.shift);
             match (key, command) {
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),

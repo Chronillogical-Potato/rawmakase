@@ -118,9 +118,12 @@ impl Editor {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             // Cmd+G and Cmd+D are other commands (Stack, Select None).
             let plain = |key| {
+                // The modifiers held for that key, not at the end of the frame.
                 ctx.input(|i| {
-                    i.key_pressed(key)
-                        && !(i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt)
+                    i.events.iter().any(|e| {
+                        matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key && !(modifiers.command || modifiers.ctrl || modifiers.alt))
+                    })
                 })
             };
             if plain(egui::Key::G) && self.flush() {
