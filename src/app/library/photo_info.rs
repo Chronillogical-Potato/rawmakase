@@ -43,6 +43,29 @@ impl Library {
         .collect::<Vec<_>>()
         .join("\n")
     }
+    /// An expanded grid cell's details: dimensions and capture date, e.g.
+    /// "6000 × 4000 · 29/06/2016". The info is read once per photo.
+    pub(super) fn cell_details(&mut self, photo: &crate::catalog::Photo) -> String {
+        let catalog = &self.catalog;
+        let info = self
+            .cell_info
+            .entry(photo.id)
+            .or_insert_with(|| catalog.photo_info(photo.id).ok().flatten());
+        let date = photo
+            .capture_text()
+            .get(..10)
+            .unwrap_or_default()
+            .to_string();
+        [
+            info.as_ref().and_then(PhotoInfo::dimensions_text),
+            Some(date).filter(|d| !d.is_empty()),
+            Some(photo.format.clone()).filter(|f| !f.is_empty()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
     /// Reads the info of the photos that have none, unless already reading.
     pub(super) fn start_photo_info(&mut self) {
         // Asked again while reading (a volume came back): once it is done.
@@ -86,6 +109,7 @@ impl Library {
                 Ok(()) => {
                     self.info = None;
                     self.hover_info = None;
+                    self.cell_info.clear();
                 }
                 Err(e) => self.message = format!("Photo info could not be saved: {e}"),
             }

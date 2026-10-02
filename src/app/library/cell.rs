@@ -1,8 +1,47 @@
 use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Vec2};
+
+/// Lightroom's grid cell styles, cycled with J: compact cells with their
+/// number, name, flag and rating; expanded cells, which add a line of file
+/// details; or the photos alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Style {
+    #[default]
+    Compact,
+    Expanded,
+    Plain,
+}
+impl Style {
+    pub(super) const ALL: [Self; 3] = [Self::Compact, Self::Expanded, Self::Plain];
+    pub(super) fn next(self) -> Self {
+        match self {
+            Self::Compact => Self::Expanded,
+            Self::Expanded => Self::Plain,
+            Self::Plain => Self::Compact,
+        }
+    }
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact Cells",
+            Self::Expanded => "Expanded Cells",
+            Self::Plain => "Photos Only",
+        }
+    }
+    /// A cell's height for its `width`: expanded cells are taller by their
+    /// details line.
+    pub(super) fn height(self, width: f32) -> f32 {
+        match self {
+            Self::Expanded => width + DETAILS,
+            Self::Compact | Self::Plain => width,
+        }
+    }
+}
+/// The height of an expanded cell's details line.
+const DETAILS: f32 = 16.;
+
 /// How a grid cell shows its photo.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Shown {
     pub mark: super::selection::Mark,
     /// Its place in the grid, from 1.
@@ -10,6 +49,9 @@ pub(super) struct Shown {
     pub available: bool,
     /// In the Quick Collection.
     pub quick: bool,
+    pub style: Style,
+    /// File details for an expanded cell, e.g. "6000 × 4000 · 29/06/2016".
+    pub details: String,
 }
 pub(super) fn photo_cell(
     ui: &mut egui::Ui,
@@ -23,10 +65,13 @@ pub(super) fn photo_cell(
         number,
         available,
         quick,
+        style,
+        details,
     } = shown;
-    use crate::app::photo_metadata::{flag_icon, label_color};
+    use crate::app::photo_metadata::label_color;
     use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, StrokeKind};
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(width), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, style.height(width)), Sense::hover());
+    let extras = style != Style::Plain;
     // Selection reveals metadata in the side panel. A stable ID keeps the
     // first right-click menu open when that changes the surrounding widget tree.
     let response = ui.interact(
@@ -68,15 +113,40 @@ pub(super) fn photo_cell(
         StrokeKind::Inside,
     );
     let ink = theme::gray(if selected { 60 } else { 125 });
-    let header = (width * 0.13).clamp(16., 26.);
-    painter.text(
-        cell.left_top() + Vec2::new(6., 3.),
-        Align2::LEFT_TOP,
-        number.to_string(),
-        FontId::proportional(header * 0.95),
-        theme::gray(if selected { 120 } else { 78 }),
-    );
-    if width >= 140. {
+    let header = if extras {
+        (width * 0.13).clamp(16., 26.)
+    } else {
+        4.
+    };
+    if extras {
+        painter.text(
+            cell.left_top() + Vec2::new(6., 3.),
+            Align2::LEFT_TOP,
+            number.to_string(),
+            FontId::proportional(header * 0.95),
+            theme::gray(if selected { 120 } else { 78 }),
+        );
+    }
+    // An expanded cell's details, under its number and name.
+    let header = if style == Style::Expanded {
+        let at = Pos2::new(cell.left() + 7., cell.top() + header + 2.);
+        painter
+            .with_clip_rect(Rect::from_min_size(
+                at,
+                Vec2::new(cell.width() - 14., DETAILS),
+            ))
+            .text(
+                at,
+                Align2::LEFT_TOP,
+                details,
+                FontId::proportional(10.),
+                ink,
+            );
+        header + DETAILS
+    } else {
+        header
+    };
+    if extras && width >= 140. {
         let name = painter.layout_no_wrap(photo.filename.clone(), FontId::proportional(10.), ink);
         let space = (cell.width() * 0.62).min(name.size().x);
         painter
@@ -90,7 +160,7 @@ pub(super) fn photo_cell(
                 ink,
             );
     }
-    let footer = 20.;
+    let footer = if extras { 20. } else { 4. };
     let margin = (width * 0.08).max(8.);
     let area = Rect::from_min_max(
         Pos2::new(cell.left() + margin, cell.top() + header + 4.),
@@ -129,6 +199,43 @@ pub(super) fn photo_cell(
             ink,
         );
     }
+    if extras {
+        let badges = Badges {
+            quick,
+            selected,
+            available,
+            ink,
+        };
+        footer_badges(painter, cell, footer, photo, badges);
+    }
+    let action = photo_menu(&response, photo);
+    (response, action)
+}
+/// What a cell's footer shows besides the photo's own flag and rating.
+struct Badges {
+    quick: bool,
+    selected: bool,
+    available: bool,
+    /// The colour of the cell's text.
+    ink: Color32,
+}
+/// The footer of a cell with extras: flag, stars, copy name, the Quick
+/// Collection marker and the offline mark.
+fn footer_badges(
+    painter: &egui::Painter,
+    cell: egui::Rect,
+    footer: f32,
+    photo: &Photo,
+    badges: Badges,
+) {
+    use crate::app::photo_metadata::flag_icon;
+    use egui::{Align2, FontId, Pos2, Rect};
+    let Badges {
+        quick,
+        selected,
+        available,
+        ink,
+    } = badges;
     // Lightroom's Quick Collection marker, in the footer's right corner,
     // clear of the file name.
     if quick {
@@ -178,8 +285,6 @@ pub(super) fn photo_cell(
             Color32::from_rgb(210, 150, 60),
         );
     }
-    let action = photo_menu(&response, photo);
-    (response, action)
 }
 /// Lightroom's virtual copy badge: the image's lower left corner folded
 /// over. `background` is what shows behind the fold.
