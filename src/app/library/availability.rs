@@ -51,6 +51,10 @@ impl Availability {
         self.checking = None;
         true
     }
+    /// Whether a check is still running.
+    pub(super) fn checking(&self) -> bool {
+        self.checking.is_some()
+    }
     pub(super) fn is_available(&self, path: &Path) -> bool {
         self.checking.is_some() || self.available.contains(path)
     }

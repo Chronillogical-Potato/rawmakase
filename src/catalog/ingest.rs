@@ -112,6 +112,25 @@ impl Catalog {
         }
         Ok(added.len())
     }
+    /// Records capture times read from the photos' files, in one transaction.
+    /// Only empty dates are filled, never one Lightroom or the user set, and a
+    /// photo's virtual copies get its date too.
+    pub fn fill_capture_times(&mut self, times: &[(i64, String)]) -> Result<()> {
+        let tx = self.db.transaction()?;
+        {
+            // Two statements, each on an index, rather than one OR that scans.
+            let mut photo =
+                tx.prepare("UPDATE photos SET captured=?1 WHERE id=?2 AND captured=''")?;
+            let mut copies =
+                tx.prepare("UPDATE photos SET captured=?1 WHERE master_id=?2 AND captured=''")?;
+            for (id, captured) in times {
+                photo.execute(params![captured, id])?;
+                copies.execute(params![captured, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
     fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {

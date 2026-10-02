@@ -96,10 +96,70 @@ const SKIP: [u16; 4] = [0xa002, 0xa003, 0xa005, 0x927c];
 /// segment the EXIF must fit in).
 const MAX_VALUE: usize = 4096;
 
-/// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…)
-/// or of a Fujifilm RAF, whose EXIF lives in its preview JPEG. `None` when the
-/// file has none that can be read, e.g. a CR3.
+/// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
+/// a JPEG or TIFF, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
+/// `None` when the file has none that can be read, e.g. a CR3.
 pub fn read(path: &Path) -> Option<CameraExif> {
+    directories(path, |tag| MAIN.contains(&tag))
+}
+
+/// When the photo was taken, in the form Lightroom stores it: the camera's
+/// local time with no zone and three-digit subseconds,
+/// "2018-08-26T10:39:33.120". Falls back from DateTimeOriginal to
+/// DateTimeDigitized, then DateTime, each with its own subseconds.
+pub fn capture_time(path: &Path) -> Option<String> {
+    const DATE_TIME: u16 = 0x0132;
+    let exif = directories(path, |tag| tag == DATE_TIME)?;
+    [(0x9003, 0x9291), (0x9004, 0x9292), (DATE_TIME, 0x9290)]
+        .into_iter()
+        .find_map(|(date, subseconds)| {
+            let date = exif.get(date).and_then(Field::text)?;
+            lightroom_time(&date, exif.get(subseconds).and_then(Field::text).as_deref())
+        })
+}
+
+/// "YYYY:MM:DD HH:MM:SS" and optional subsecond digits as
+/// "YYYY-MM-DDTHH:MM:SS.fff"; `None` for a blank or zeroed date.
+pub(crate) fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
+    let digits: Vec<u8> = date.bytes().filter(u8::is_ascii_digit).collect();
+    let shape = date.trim().len() >= 19
+        && date
+            .trim()
+            .bytes()
+            .take(19)
+            .enumerate()
+            .all(|(i, b)| match i {
+                4 | 7 => matches!(b, b':' | b'-'),
+                10 => matches!(b, b' ' | b'T'),
+                13 | 16 => b == b':',
+                _ => b.is_ascii_digit(),
+            });
+    if !shape || digits[..8].iter().all(|d| *d == b'0') {
+        return None;
+    }
+    let d = |range: std::ops::Range<usize>| std::str::from_utf8(&digits[range]).unwrap_or("");
+    let mut fraction: String = subseconds
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .take(3)
+        .collect();
+    while fraction.len() < 3 {
+        fraction.push('0');
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}.{fraction}",
+        d(0..4),
+        d(4..6),
+        d(6..8),
+        d(8..10),
+        d(10..12),
+        d(12..14)
+    ))
+}
+
+fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
     let mut f = File::open(path).ok()?;
     let mut head = [0u8; 108];
     f.read_exact(&mut head).ok()?;
@@ -107,13 +167,16 @@ pub fn read(path: &Path) -> Option<CameraExif> {
         let jpeg = u32::from_be_bytes(head[84..88].try_into().ok()?) as u64;
         let length = u32::from_be_bytes(head[88..92].try_into().ok()?) as usize;
         jpeg + exif_in_jpeg(&mut File::open(path).ok()?, jpeg, length)?
+    } else if head.starts_with(&[0xff, 0xd8]) {
+        let length = f.metadata().ok()?.len().min(1 << 16) as usize;
+        exif_in_jpeg(&mut File::open(path).ok()?, 0, length)?
     } else {
         0
     };
     let mut t = Tiff::open(File::open(path).ok()?, base)?;
     let main = t.ifd(t.first)?;
     let mut out = CameraExif {
-        main: fields(&mut t, &main, |tag| MAIN.contains(&tag)),
+        main: fields(&mut t, &main, keep_main),
         ..Default::default()
     };
     if let Some(ifd) = main
@@ -245,5 +308,29 @@ pub(super) fn tiff_block(mut main: Vec<Field>, exif: Vec<Field>, gps: Vec<Field>
     if has_gps {
         out.extend(directory(gps, gps_at));
     }
+    out
+}
+
+/// A small TIFF, or a JPEG when `jpeg`, taken at `original` with these
+/// subseconds, for tests.
+#[cfg(test)]
+pub(crate) fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
+    let mut exif = vec![Field::ascii(0x9003, original)];
+    if !subseconds.is_empty() {
+        exif.push(Field::ascii(0x9291, subseconds));
+    }
+    let block = tiff_block(vec![Field::ascii(0x010f, "Test")], exif, Vec::new());
+    let mut out = if jpeg {
+        let mut out = vec![0xff, 0xd8, 0xff, 0xe1];
+        out.extend(((block.len() + 8) as u16).to_be_bytes());
+        out.extend(b"Exif\0\0");
+        out.extend(block);
+        out.extend([0xff, 0xd9]);
+        out
+    } else {
+        block
+    };
+    // Real files are never shorter than the header the reader starts with.
+    out.resize(out.len().max(512), 0);
     out
 }
