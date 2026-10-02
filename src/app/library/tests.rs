@@ -66,6 +66,8 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
                     number: 1,
                     available: true,
                     quick: false,
+                    style: cell::Style::Compact,
+                    details: String::new(),
                 };
                 photo_cell(ui, &photo, Some(&texture), shown, width);
             });
@@ -1498,5 +1500,38 @@ fn a_large_survey_shows_the_photos_up_to_the_active_one() -> Result<()> {
     assert_eq!(library.shown_surveyed(), ids[4..52]);
     library.make_active(ids[0]);
     assert_eq!(library.shown_surveyed(), ids[..48]);
+    Ok(())
+}
+#[test]
+fn grid_cells_cycle_through_lightrooms_styles() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(300, 200).save(folder.join("a.png"))?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    library.wait_for_availability();
+    let started = std::time::Instant::now();
+    while library.info_reader.is_some() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        library.poll_photo_info();
+    }
+    // Expanded cells add a line of details: dimensions and format.
+    let photo = library.photos[0].clone();
+    assert_eq!(library.cell_details(&photo), "300 × 200 · PNG");
+    assert_eq!(cell::Style::Expanded.height(200.), 216.);
+    assert_eq!(cell::Style::Plain.height(200.), 200.);
+    // J cycles Compact, Expanded and Photos Only.
+    let mut style = cell::Style::default();
+    for expected in [
+        cell::Style::Expanded,
+        cell::Style::Plain,
+        cell::Style::Compact,
+    ] {
+        style = style.next();
+        assert_eq!(style, expected);
+    }
     Ok(())
 }

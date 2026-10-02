@@ -240,6 +240,9 @@ impl Library {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 (Key::N, false) if !press.modifiers.any() => self.open_survey(),
+                (Key::J, false) if !press.modifiers.any() && !press.repeat => {
+                    self.cell_style = self.cell_style.next()
+                }
                 // The grid applies B to every selected photo, once per press.
                 (Key::B, _) if !press.repeat => {
                     self.quick_key(press.modifiers, self.selected_ids())

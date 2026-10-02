@@ -52,6 +52,11 @@ pub struct Library {
     selected_folder: String,
     expanded: HashSet<String>,
     thumb_size: f32,
+    /// How grid cells show their photos (J).
+    cell_style: cell::Style,
+    /// Grid cells' photo info, read once per photo while expanded cells
+    /// show it.
+    cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
     strip_current: Option<i64>,
     /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
@@ -124,6 +129,8 @@ impl Library {
             selected_folder: String::new(),
             expanded: HashSet::new(),
             thumb_size: 190.,
+            cell_style: Default::default(),
+            cell_info: HashMap::new(),
             strip_current: None,
             visible: Vec::new(),
             availability: Default::default(),
@@ -168,6 +175,7 @@ impl Library {
     /// Reads the catalog again without checking which files are online,
     /// for changes that add or remove no file, such as virtual copies.
     fn reload(&mut self) -> Result<()> {
+        self.cell_info.clear();
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
         self.photos

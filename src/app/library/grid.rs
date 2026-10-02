@@ -36,6 +36,8 @@ impl Library {
                         self.filter();
                     }
                     ui.add_space(12.);
+                    self.cell_style_menu(ui);
+                    ui.add_space(12.);
                     ui.small(if self.visible.len() == self.photos.len() {
                         format!("{} photos", self.photos.len())
                     } else {
@@ -78,6 +80,7 @@ impl Library {
             .show(ui, |ui| self.grid_toolbar(ui));
         let columns = ((ui.available_width() / self.thumb_size).floor() as usize).max(1);
         let width = (ui.available_width() / columns as f32).floor().max(80.);
+        let height = self.cell_style.height(width);
         self.grid_columns = columns;
         let mut metadata_edit = None;
         let spacing = ui.spacing().item_spacing;
@@ -90,7 +93,7 @@ impl Library {
             && let Some(after) = self.visible.iter().position(|i| self.photos[*i].id == id)
         {
             let rows = (after / columns) as f32 - (before / columns) as f32;
-            scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * width).max(0.));
+            scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * height).max(0.));
         }
         egui::Frame::new().fill(theme::gray(44)).show(ui, |ui| {
             // A key moved the active photo: bring its row into view.
@@ -100,17 +103,17 @@ impl Library {
                     .active
                     .and_then(|id| self.visible.iter().position(|i| self.photos[*i].id == id))
             {
-                let top = (at / columns) as f32 * width;
-                let height = ui.available_height();
+                let top = (at / columns) as f32 * height;
+                let view = ui.available_height();
                 if top < self.grid_offset {
                     scroll = scroll.vertical_scroll_offset(top);
-                } else if top + width > self.grid_offset + height {
-                    scroll = scroll.vertical_scroll_offset(top + width - height);
+                } else if top + height > self.grid_offset + view {
+                    scroll = scroll.vertical_scroll_offset(top + height - view);
                 }
             }
             let output = scroll.show_rows(
                 ui,
-                width,
+                height,
                 self.visible.len().div_ceil(columns),
                 |ui, rows| {
                     self.grid_shown = rows.start * columns..rows.end * columns;
@@ -128,6 +131,12 @@ impl Library {
                                     number: row * columns + col + 1,
                                     available: exists,
                                     quick: self.in_quick(p.id),
+                                    style: self.cell_style,
+                                    details: if self.cell_style == cell::Style::Expanded {
+                                        self.cell_details(&p)
+                                    } else {
+                                        String::new()
+                                    },
                                 };
                                 let (response, edit) =
                                     photo_cell(ui, &p, self.texture(&p), shown, width);
@@ -201,6 +210,30 @@ impl Library {
             PhotoAction::Copy(copy) => self.copy_request = Some(copy),
         }
         None
+    }
+}
+impl Library {
+    /// The grid cell style, from a menu as well as J.
+    fn cell_style_menu(&mut self, ui: &mut egui::Ui) {
+        let keys = crate::app::shortcuts::keys_text("J");
+        ui.menu_button(
+            egui::RichText::new(self.cell_style.name())
+                .size(11.)
+                .color(theme::gray(150)),
+            |ui| {
+                for style in cell::Style::ALL {
+                    if ui
+                        .selectable_label(self.cell_style == style, style.name())
+                        .clicked()
+                    {
+                        self.cell_style = style;
+                        ui.close();
+                    }
+                }
+            },
+        )
+        .response
+        .on_hover_text(format!("How grid cells show their photos ({keys} cycles)"));
     }
 }
 pub(super) fn filter_caption(text: &str) -> egui::RichText {
