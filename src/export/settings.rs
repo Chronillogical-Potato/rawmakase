@@ -63,6 +63,10 @@ pub struct ExportSettings {
     pub develop: bool,
     /// Rating, color label and keywords (XMP).
     pub descriptive: bool,
+    /// Lightroom's Watermarking: whether to, and which: a preset's name or
+    /// the Simple Copyright Watermark.
+    pub watermark: bool,
+    pub watermark_name: String,
 }
 impl Default for ExportSettings {
     fn default() -> Self {
@@ -84,6 +88,8 @@ impl Default for ExportSettings {
             location: true,
             develop: true,
             descriptive: true,
+            watermark: false,
+            watermark_name: crate::watermark::SIMPLE_COPYRIGHT.into(),
         }
     }
 }

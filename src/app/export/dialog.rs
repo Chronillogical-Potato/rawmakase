@@ -32,6 +32,7 @@ impl Editor {
         if self.exports.dialog {
             self.export_dialog(ctx);
         }
+        self.watermark_editor(ctx);
     }
 
     fn export_dialog(&mut self, ctx: &egui::Context) {
@@ -235,6 +236,62 @@ impl Editor {
             );
         });
 
+        section(ui, "Watermarking");
+        let presets = self.exports.watermarks.clone();
+        let simple = crate::watermark::SIMPLE_COPYRIGHT;
+        let mut edit = None;
+        form_row(ui, "", |ui| {
+            ui.checkbox(&mut s.watermark, "Watermark:");
+            let label = if s.watermark_name == simple {
+                "Simple Copyright Watermark".to_string()
+            } else {
+                s.watermark_name.clone()
+            };
+            ui.add_enabled_ui(s.watermark, |ui| {
+                egui::ComboBox::from_id_salt("export-watermark")
+                    .width(260.)
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut s.watermark_name,
+                            simple.to_string(),
+                            "Simple Copyright Watermark",
+                        );
+                        for w in &presets {
+                            ui.selectable_value(&mut s.watermark_name, w.name.clone(), &w.name);
+                        }
+                        ui.separator();
+                        if ui.selectable_label(false, "Edit Watermarks…").clicked() {
+                            edit = Some(
+                                presets
+                                    .iter()
+                                    .find(|w| w.name == s.watermark_name)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                            );
+                        }
+                    });
+            });
+            // A preset whose image went missing is flagged here, and the
+            // export would stop before rendering.
+            let missing = s.watermark
+                && presets
+                    .iter()
+                    .find(|w| w.name == s.watermark_name)
+                    .is_some_and(crate::watermark::Watermark::image_missing);
+            if missing {
+                ui.label(
+                    egui::RichText::new("Watermark image not found")
+                        .size(12.)
+                        .color(Color32::from_rgb(230, 120, 100)),
+                );
+            }
+        });
+        if let Some(w) = edit {
+            self.exports.watermark_editor = Some(super::watermark_editor::WatermarkEditor::new(w));
+            return;
+        }
+        let s = &mut self.exports.draft;
         section(ui, "Metadata");
         form_row(ui, "", |ui| {
             ui.checkbox(&mut s.capture, "Camera and capture info (EXIF)");
