@@ -428,9 +428,10 @@ impl Library {
         }
         let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
         let catalog = &self.catalog;
+        let stamp = catalog.edit_stamp(photo.id).unwrap_or_default();
         match self
             .screen
-            .get(photo, edge, || super::edit_source(catalog, photo.id))
+            .get(photo, edge, stamp, || super::edit_source(catalog, photo.id))
         {
             Shown::Ready(texture) => (Some(texture.clone()), None),
             Shown::Loading => (stand_in, Some("Loading…".into())),

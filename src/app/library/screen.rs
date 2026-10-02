@@ -25,14 +25,15 @@ const EDGE_STEP: u32 = 512;
 const KEPT: usize = 4;
 const THREADS: usize = 2;
 
-/// A preview as asked for: photo, file (photo ids can be reused) and edge.
-type Key = (i64, PathBuf, u32);
+/// A preview as asked for: photo, file (photo ids can be reused), edge and
+/// the edit's stamp, so an edit saved anywhere renders it again.
+type Key = (i64, PathBuf, u32, u64);
 type Render = fn(&Path, u32, Option<&EditSource>) -> anyhow::Result<image::RgbImage>;
 
 struct Job {
     key: Key,
-    /// Matches the result to this request, not to one made before the
-    /// photo's edit changed.
+    /// Matches the result to this request, not to an earlier one for the
+    /// same key, such as one made before a retry.
     ticket: u64,
     edit: Option<EditSource>,
 }
@@ -97,18 +98,21 @@ impl ScreenPreviews {
             order: VecDeque::new(),
         }
     }
-    /// `photo` at `edge` pixels, asked for unless it is ready, failed or on
-    /// its way; `edit` is looked up only when it is asked for.
+    /// `photo` at `edge` pixels with the edit `stamp` identifies (see
+    /// `Catalog::edit_stamp`), asked for unless it is ready, failed or on its
+    /// way; `edit` is looked up only when it is asked for.
     pub(super) fn get(
         &mut self,
         photo: &Photo,
         edge: u32,
+        stamp: u64,
         edit: impl FnOnce() -> Option<EditSource>,
     ) -> Shown<'_> {
         let key = (
             photo.id,
             photo.path.clone(),
             edge.div_ceil(EDGE_STEP).max(1) * EDGE_STEP,
+            stamp,
         );
         self.seen.insert(key.clone());
         if !self.textures.contains_key(&key)
@@ -181,8 +185,10 @@ impl ScreenPreviews {
     /// originals are back online.
     pub(super) fn retry_failed(&mut self) {
         self.failed.clear();
+        // Renders on their way may fail as these did: asked for afresh.
+        self.pending.clear();
     }
-    /// Forgets `id`'s previews, as its edit has changed or it was removed.
+    /// Forgets `id`'s previews, as it was removed.
     pub(super) fn forget(&mut self, id: i64) {
         self.textures.retain(|key, _| key.0 != id);
         self.order.retain(|key| key.0 != id);
@@ -287,16 +293,16 @@ mod tests {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::new(&ctx);
         let a = photo(1, &path);
-        assert!(matches!(screen.get(&a, 900, || None), Shown::Loading));
+        assert!(matches!(screen.get(&a, 900, 0, || None), Shown::Loading));
         screen.wait(&ctx);
         // Rendered at the next step up from the size asked for.
-        match screen.get(&a, 900, || None) {
+        match screen.get(&a, 900, 0, || None) {
             Shown::Ready(texture) => assert_eq!(texture.size(), [1024, 683]),
             _ => panic!("not rendered"),
         }
         // Forgetting the photo renders it again.
         screen.forget(1);
-        assert!(matches!(screen.get(&a, 900, || None), Shown::Loading));
+        assert!(matches!(screen.get(&a, 900, 0, || None), Shown::Loading));
         Ok(())
     }
 
@@ -314,19 +320,19 @@ mod tests {
         let photos = [(1, "panics"), (2, "fails"), (3, "works")]
             .map(|(id, path)| photo(id, Path::new(path)));
         for p in &photos {
-            let _ = screen.get(p, 100, || None);
+            let _ = screen.get(p, 100, 0, || None);
         }
         screen.wait(&ctx);
         assert!(matches!(
-            screen.get(&photos[0], 100, || None),
+            screen.get(&photos[0], 100, 0, || None),
             Shown::Failed("The preview could not be rendered")
         ));
         assert!(matches!(
-            screen.get(&photos[1], 100, || None),
+            screen.get(&photos[1], 100, 0, || None),
             Shown::Failed("no such photo")
         ));
         assert!(matches!(
-            screen.get(&photos[2], 100, || None),
+            screen.get(&photos[2], 100, 0, || None),
             Shown::Ready(_)
         ));
     }
@@ -337,7 +343,7 @@ mod tests {
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
         let a = photo(1, Path::new("a"));
         // Queued, then not shown for a frame before a worker takes it.
-        let key = (1, PathBuf::from("a"), EDGE_STEP);
+        let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
         screen.pending.insert(key.clone(), 0);
         screen.queue.0.lock().unwrap().jobs.push(Job {
             key: key.clone(),
@@ -347,16 +353,16 @@ mod tests {
         screen.queue.1.notify_one();
         screen.wait(&ctx);
         assert!(screen.textures.is_empty());
-        assert!(matches!(screen.get(&a, 100, || None), Shown::Loading));
+        assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Loading));
         screen.wait(&ctx);
-        assert!(matches!(screen.get(&a, 100, || None), Shown::Ready(_)));
+        assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Ready(_)));
     }
 
     #[test]
     fn a_render_asked_for_before_an_edit_changed_is_dropped() {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
-        let key = (1, PathBuf::from("a"), EDGE_STEP);
+        let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
         // The photo was asked for again (ticket 2) after the edit changed,
         // and the render asked for before it (ticket 1) comes in first.
         screen.pending.insert(key.clone(), 2);
@@ -381,10 +387,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| anyhow::bail!("offline"));
         let a = photo(1, Path::new("a"));
-        let _ = screen.get(&a, 100, || None);
+        let _ = screen.get(&a, 100, 0, || None);
         screen.wait(&ctx);
-        assert!(matches!(screen.get(&a, 100, || None), Shown::Failed(_)));
+        assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Failed(_)));
         screen.retry_failed();
-        assert!(matches!(screen.get(&a, 100, || None), Shown::Loading));
+        assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Loading));
     }
 }

@@ -345,7 +345,11 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
         },
         ..Default::default()
     });
+    let unedited = c.edit_stamp(id)?;
     c.save_edit(id, &photo, &r, &ExportOptions::default())?;
+    // The stamp follows the edit, masks included.
+    let edited = c.edit_stamp(id)?;
+    assert_ne!(edited, unedited);
     let column: String =
         c.db.query_row("SELECT recipe FROM photos WHERE id=?", [id], |row| {
             row.get(0)
@@ -356,6 +360,7 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
     assert_eq!(serde_json::from_str::<Recipe>(&text.unwrap())?, r);
     c.save_edit(id, &photo, &Recipe::default(), &ExportOptions::default())?;
     assert!(c.load_edit(id, &photo)?.unwrap().recipe.masks.is_empty());
+    assert_ne!(c.edit_stamp(id)?, edited);
     Ok(())
 }
 #[test]

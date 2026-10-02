@@ -402,8 +402,6 @@ impl Library {
             return;
         };
         self.cache.store_edited(ctx, id, path, image, recipe_json);
-        // Its edit has changed: Compare renders it again.
-        self.screen.forget(id);
     }
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does

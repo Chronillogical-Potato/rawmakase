@@ -130,7 +130,13 @@ impl Library {
             } else {
                 vec![id]
             };
-            if let Err(e) = self.edit_photos(&ids, edit, false) {
+            // Compare's active photo goes through Compare, which keeps its pair.
+            let done = if self.compare.open && self.selection.active == Some(id) {
+                self.edit_compared(edit, false)
+            } else {
+                self.edit_photos(&ids, edit, false).map(|_| ())
+            };
+            if let Err(e) = done {
                 self.message = format!("Metadata could not be saved: {e}");
             }
             return true;
