@@ -24,8 +24,9 @@ const EDGE_STEP: u32 = 512;
 /// Prepared neighbours kept, in bytes; the oldest go first.
 const PREFETCHED_BYTES: usize = 64 << 20;
 
-/// A preview as asked for: photo, edit tag and edge.
-type Key = (i64, Option<String>, u32);
+/// A preview as asked for: photo, file (photo ids can be reused), edit tag
+/// and edge.
+type Key = (i64, PathBuf, Option<String>, u32);
 
 struct Job {
     ticket: u64,
@@ -123,10 +124,12 @@ impl Loupe {
     /// Asks for `photo` at `edge` pixels, unless that is already on its way.
     fn request(&mut self, ctx: &egui::Context, photo: &Photo, edit: Option<EditSource>, edge: u32) {
         let wanted = key(photo, &edit, edge);
-        if self.requested.as_ref() == Some(&wanted) {
+        let asked = self.requested.as_ref() == Some(&wanted);
+        if asked && self.state == State::Ready(Stage::Rendered) {
             return;
         }
-        // Prepared ahead: shown at once.
+        // Prepared ahead, perhaps finishing after it was asked for again:
+        // shown at once.
         if let Some(at) = self.prefetched.iter().position(|(k, _)| *k == wanted) {
             let (_, image) = self.prefetched.remove(at).unwrap();
             self.cancel.store(true, Ordering::Relaxed);
@@ -136,7 +139,10 @@ impl Loupe {
             self.show(ctx, Stage::Rendered, &image);
             return;
         }
-        let edge = wanted.2;
+        if asked {
+            return;
+        }
+        let edge = wanted.3;
         self.edit = edit.clone();
         let same_photo = self.requested.as_ref().is_some_and(|r| r.0 == photo.id);
         self.requested = Some(wanted);
@@ -172,7 +178,7 @@ impl Loupe {
             ticket: 0,
             ahead: Some(wanted.clone()),
             path: photo.path.clone(),
-            edge: wanted.2,
+            edge: wanted.3,
             edit,
             cancel: self.ahead_cancel.clone(),
         });
@@ -256,6 +262,7 @@ impl Loupe {
 fn key(photo: &Photo, edit: &Option<EditSource>, edge: u32) -> Key {
     (
         photo.id,
+        photo.path.clone(),
         edit.as_ref().map(EditSource::tag),
         edge.div_ceil(EDGE_STEP).max(1) * EDGE_STEP,
     )
@@ -386,6 +393,8 @@ impl Library {
                     .filter(|n| *n != photo.id)
                     .and_then(|n| self.photo(n).cloned())
                 && self.is_available(&next.path)
+                // A RAW opens through Develop's pipeline, which prefetches it.
+                && !crate::storage::is_raw(&next.path)
             {
                 let next_edit = self.edit_of(&next);
                 self.loupe.prepare_ahead(&next, next_edit, edge);

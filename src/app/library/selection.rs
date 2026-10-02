@@ -202,79 +202,25 @@ impl Library {
             self.selection.anchor = self.selection.active;
         }
     }
-    /// The Grid's selection keys: Cmd+A, Cmd+D, `/`, arrows, Home and End.
+    /// The Grid's selection keys: Cmd+A, Cmd+D, `/`, arrows, Home and End;
+    /// in the Loupe, moving and its own zoom.
     pub(in crate::app) fn selection_keys(&mut self, ctx: &egui::Context) {
         // A menu or popup takes the keys first, Escape above all.
         if ctx.text_edit_focused() || egui::Popup::is_any_open(ctx) {
             return;
         }
-        let columns = self.grid_columns.max(1) as isize;
-        // Z toggles once per press: a held key must not flicker the zoom.
-        let z_pressed = ctx.input(|i| {
-            i.events.iter().any(|e| {
-                matches!(
-                    e,
-                    egui::Event::Key {
-                        key: Key::Z,
-                        pressed: true,
-                        repeat: false,
-                        ..
-                    }
-                )
-            })
-        });
-        let (command, shift, alt, keys, physical) = ctx.input(|i| {
-            let pressed: Vec<(Key, Option<Key>)> = i
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Key {
-                        key,
-                        physical_key,
-                        pressed: true,
-                        ..
-                    } => Some((*key, *physical_key)),
-                    _ => None,
-                })
-                .collect();
-            let keys: Vec<Key> = pressed.iter().map(|(k, _)| *k).collect();
-            let physical: Vec<Key> = pressed.iter().filter_map(|(_, p)| *p).collect();
-            (
-                i.modifiers.command,
-                i.modifiers.shift,
-                i.modifiers.alt,
-                keys,
-                physical,
-            )
-        });
+        let presses = presses(ctx);
         if self.loupe.open {
-            // Cmd+Option+0 is 1:1; Option changes the typed key on macOS.
-            // A RAW zooms in Develop's view, with Develop's keys.
-            let own_zoom = self.loupe_develops().is_none();
-            if own_zoom && command && alt && physical.contains(&Key::Num0) {
-                self.zoom_loupe(Some(true));
-            }
-            if own_zoom && z_pressed && !command {
-                self.zoom_loupe(None);
-            }
-            // Loupe moves through the photos one at a time.
-            for key in keys {
-                match (key, command) {
-                    (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
-                    (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
-                    (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
-                    (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
-                    (Key::Home, false) => self.step(Step::Home, false),
-                    (Key::End, false) => self.step(Step::End, false),
-                    (Key::Escape, _) => self.close_loupe(),
-                    _ => {}
-                }
-            }
-            return;
+            self.loupe_keys(&presses);
+        } else {
+            self.grid_keys(&presses);
         }
-        for (key, modifiers) in keys {
-            let (command, shift) = (modifiers.command, modifiers.shift);
-            match (key, command) {
+    }
+    fn grid_keys(&mut self, presses: &[Press]) {
+        let columns = self.grid_columns.max(1) as isize;
+        for press in presses {
+            let shift = press.modifiers.shift;
+            match (press.key, press.modifiers.command) {
                 (Key::E | Key::Enter, false) => self.open_loupe(),
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
@@ -289,4 +235,59 @@ impl Library {
             }
         }
     }
+    /// The Loupe moves one photo at a time. A RAW zooms in Develop's view
+    /// with Develop's keys; other photos with the Loupe's own.
+    fn loupe_keys(&mut self, presses: &[Press]) {
+        let own_zoom = self.loupe_develops().is_none();
+        for press in presses {
+            let (command, alt) = (press.modifiers.command, press.modifiers.alt);
+            match (press.key, command) {
+                // A held Z must not flicker between Fit and 1:1.
+                (Key::Z, false) if own_zoom && !press.repeat => self.zoom_loupe(None),
+                (Key::Plus | Key::Equals, true) if own_zoom => self.zoom_loupe(Some(true)),
+                (Key::Minus, true) if own_zoom => self.zoom_loupe(Some(false)),
+                // Cmd+Option+0; Option changes the typed key on macOS.
+                _ if own_zoom && command && alt && press.physical == Some(Key::Num0) => {
+                    self.zoom_loupe(Some(true))
+                }
+                (Key::ArrowLeft | Key::ArrowUp, false) => self.step(Step::By(-1), false),
+                (Key::ArrowRight | Key::ArrowDown, false) => self.step(Step::By(1), false),
+                (Key::Home, false) => self.step(Step::Home, false),
+                (Key::End, false) => self.step(Step::End, false),
+                (Key::Escape, _) => self.close_loupe(),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// A key pressed this frame, with the modifiers held for it: a quick Cmd+D
+/// can arrive in the same frame as Cmd's release.
+struct Press {
+    key: Key,
+    physical: Option<Key>,
+    modifiers: egui::Modifiers,
+    repeat: bool,
+}
+fn presses(ctx: &egui::Context) -> Vec<Press> {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed: true,
+                    repeat,
+                    modifiers,
+                } => Some(Press {
+                    key: *key,
+                    physical: *physical_key,
+                    modifiers: *modifiers,
+                    repeat: *repeat,
+                }),
+                _ => None,
+            })
+            .collect()
+    })
 }
