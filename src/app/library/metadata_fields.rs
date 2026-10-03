@@ -483,6 +483,10 @@ fn creator_rows(
     let mut commit = false;
     let mut typed = false;
     let mut remove = None;
+    // Always a row, so the panel keeps its shape with nothing selected.
+    if names.is_empty() {
+        names.push(String::new());
+    }
     let count = names.len();
     for (i, name) in names.iter_mut().enumerate() {
         let (rect, _) =

@@ -135,6 +135,9 @@ impl Library {
         let _ = catalog.backfill_lightroom_history();
         let _ = catalog.backfill_lightroom_info();
         let _ = catalog.backfill_lightroom_metadata();
+        // Unlike those, a failure here could export keywords Lightroom keeps
+        // out, so it is said; it is tried again on the next open.
+        let keyword_options = catalog.backfill_keyword_export().err();
         let loupe = loupe::Loupe::new(&ctx);
         let screen = screen::ScreenPreviews::new(&ctx);
         let mut s = Self {
@@ -192,6 +195,12 @@ impl Library {
             reread_finished: false,
         };
         s.refresh()?;
+        if let Some(e) = keyword_options {
+            s.message = format!(
+                "Lightroom's keyword export options could not be read: {e:#}. \
+                 Exports include every keyword's parents until they are."
+            );
+        }
         // Start with a selection, as Lightroom does, so the side panels are filled.
         s.select(s.visible.first().map(|i| s.photos[*i].id));
         Ok(s)

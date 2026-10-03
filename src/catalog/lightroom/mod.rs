@@ -10,7 +10,29 @@ pub use history::HistoryStep;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 
+/// Set in `meta` once keyword export options have been copied from the
+/// stored catalog.
+const KEYWORD_EXPORT_BACKFILLED: &str = "lightroom_keyword_export_backfilled";
+
 impl Catalog {
+    /// Catalogs imported before keyword export options were kept still hold
+    /// the original Lightroom catalog; copy them once, so an export leaves
+    /// out the keywords Lightroom would.
+    pub fn backfill_keyword_export(&mut self) -> Result<usize> {
+        if self.meta(KEYWORD_EXPORT_BACKFILLED)?.is_some() {
+            return Ok(0);
+        }
+        let copied = self
+            .with_stored_lightroom(|db| {
+                let tx = db.unchecked_transaction()?;
+                let copied = copy_keyword_export(&tx)?;
+                tx.commit()?;
+                Ok(copied)
+            })?
+            .unwrap_or(0);
+        self.set_meta(KEYWORD_EXPORT_BACKFILLED, "1")?;
+        Ok(copied)
+    }
     /// Runs `f` with the Lightroom catalog this one was imported from
     /// attached as `lr`; `None` for a catalog that was not imported.
     pub(in crate::catalog) fn with_stored_lightroom<T>(
@@ -38,6 +60,27 @@ impl Catalog {
         self.db.execute_batch("DETACH DATABASE lr")?;
         result.map(Some)
     }
+}
+
+/// Copies Lightroom's Include on Export and Export Containing Keywords of
+/// the keywords that have either off, from a catalog attached as `lr`.
+pub(super) fn copy_keyword_export(db: &Connection) -> Result<usize> {
+    let columns: Vec<String> = db
+        .prepare("SELECT name FROM pragma_table_info('AgLibraryKeyword', 'lr')")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let has = |c: &str| columns.iter().any(|n| n == c);
+    if !has("includeOnExport") || !has("includeParents") {
+        return Ok(0);
+    }
+    Ok(db.execute(
+        "INSERT OR REPLACE INTO keyword_export(keyword, include, parents)
+         SELECT id_local, COALESCE(includeOnExport, 1) <> 0, COALESCE(includeParents, 1) <> 0
+         FROM lr.AgLibraryKeyword
+         WHERE (includeOnExport = 0 OR includeParents = 0)
+           AND id_local IN (SELECT id FROM keywords)",
+        [],
+    )?)
 }
 
 /// Import a closed/exported Lightroom catalog into a new, atomically published file.
@@ -146,6 +189,7 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     }
     if has("AgLibraryKeyword")? {
         tx.execute_batch("INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent FROM lr.AgLibraryKeyword;")?;
+        copy_keyword_export(&tx)?;
     }
     super::info::copy_lightroom_info(&tx)?;
     super::sidecar::copy_lightroom_metadata(&tx)?;
@@ -157,6 +201,10 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     tx.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
         [super::sidecar::METADATA_BACKFILLED],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
+        [KEYWORD_EXPORT_BACKFILLED],
     )?;
     if has("AgLibraryKeywordImage")? {
         tx.execute_batch("INSERT OR IGNORE INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords);")?;
