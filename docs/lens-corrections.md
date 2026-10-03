@@ -7,7 +7,7 @@ Many cameras store per-shot lens corrections in the RAW file. Lightroom applies 
 | Camera | Tables read | Default |
 |---|---|---|
 | Fujifilm RAF | FujiIFD 0xF00B distortion, 0xF00F lateral CA, 0xF010 vignetting | On |
-| Sony ARW | raw SubIFD 0x7032 vignetting, 0x7035 lateral CA, 0x7037 distortion | Off (not yet compared with Lightroom) |
+| Sony ARW | raw SubIFD 0x7032 vignetting, 0x7035 lateral CA, 0x7037 distortion | Off; follows Enable Profile Corrections ([below](#sony-built-in-corrections)) |
 
 Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
@@ -15,11 +15,11 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 2. Vignetting gain in linear camera space, evaluated at the source pixel. Shadows, Highlights, Clarity and Texture measure local luminance after this gain.
 3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor.
 
-The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on`. Recipes saved before engine 4 have no field and never apply it.
+The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm and DNG, not Sony). Recipes saved before engine 4 have no field and never apply it.
 
 ### Fujifilm vignetting strength
 
-Applied at full strength, the Fujifilm table leaves corners about 0.08 EV brighter than Lightroom on three X100F photos, while the centre matches. Raising the gain to the power 0.85 brings corners within ±0.03 EV. The Sony and LCP paths match at full strength. The X100F Lightroom reference scorecard goes from 0.0148 to 0.0120 mean MAE.
+Applied at full strength, the Fujifilm table leaves corners about 0.08 EV brighter than Lightroom on three X100F photos, while the centre matches. Raising the gain to the power 0.85 brings corners within ±0.03 EV. The LCP path matches at full strength ([below](#adobe-lcp-profiles)); Sony's built-in table has not been compared. The X100F Lightroom reference scorecard goes from 0.0148 to 0.0120 mean MAE.
 
 ### Validation — 2026-09-26
 
@@ -35,6 +35,12 @@ Full renders against Lightroom's Adobe Standard exports, encoded sRGB at 1200 px
 | DSCF7845 corner MAE | 0.0546 | 0.0241 |
 
 Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not enable profile corrections by default, and it has not been checked whether it applies Sony's embedded data, so Sony corrections start disabled until a Lightroom reference is available.
+
+### Sony built-in corrections
+
+Status 2026-10-03. Available, not measured. Sony's tables are read and render, but no Lightroom or Camera Raw render has been compared with them alone, and it is still unknown whether Lightroom applies Sony's stored data or only Adobe's own profiles. What is measured for Sony is the [imported Adobe profile](#adobe-lcp-profiles) path, and one unexplained observation under [Remove Chromatic Aberration](#validation--2026-10-01).
+
+So the correction is off by default (`default_on` is false), and in the Lens Corrections panel it follows Enable Profile Corrections: ticking the box turns it on, unticking turns it off, and the Profile row names "Sony built-in" when no imported Adobe profile matches. An imported Adobe profile replaces it whenever one matches. A Lightroom edit or preset with `crs:LensProfileEnable` set turns on only the Adobe profile, not Sony's data, so without an imported profile it leaves a Sony photo uncorrected.
 
 ## Remove Chromatic Aberration
 
@@ -70,6 +76,7 @@ The same measurement on rendered sRGB output (Adobe Standard, full size) of 13 p
 Output-space figures are only comparable with each other: the colour matrix mixes channels, so they differ from the camera-space ones above.
 
 Camera Raw renders with the setting off also show Sony's lateral CA corrected, as RAWmakase does only with built-in corrections on; this was seen on two A7 II photos and has not been investigated further.
+
 ## Defringe
 
 Lightroom's Defringe (`crs:DefringePurpleAmount`, `…GreenAmount` and their Hue ranges) reduces the chroma of hues inside the Purple and Green ranges. `Effects::defringe_color` does it per pixel in Oklab, after the colour controls:
@@ -87,7 +94,7 @@ A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` r
 
 ## Adobe LCP profiles
 
-Lightroom's Enable Profile Corrections uses an Adobe lens profile. RAWmakase reads the same `.lcp` files when the user imports them (`rawmakase import-lens-profiles FILE…`, or the app's import command); they are copied to `lens-profiles` in the data directory and never read from a Lightroom installation. `src/lens/lcp.rs` matches the photo's lens model, preferring raw profiles, and interpolates the model in focal length and aperture, taking the farthest focus distance. It converts distortion, vignetting and chromatic models to the correction above. When the profile sets PreferMetadataDistort, the camera's own distortion is kept, as Lightroom does.
+Lightroom's Enable Profile Corrections uses an Adobe lens profile. RAWmakase reads the same `.lcp` files when the user imports them (`rawmakase import-lens-profiles FILE…`, or the app's import command); they are copied to `lens-profiles` in the data directory and never read from a Lightroom installation. `src/lens/lcp.rs` matches the photo's lens model, preferring raw profiles and profiles made on the photo's camera make, then on a make sharing the lens mount, as Adobe profiles some third-party lenses on one body only, and interpolates the model in focal length and aperture, taking the farthest focus distance. It converts distortion, vignetting and chromatic models to the correction above. When the profile sets PreferMetadataDistort, the camera's own distortion is kept, as Lightroom does.
 
 `Recipe::lens_profile` enables it, from `crs:LensProfileEnable`. `lens_distortion` and `lens_vignetting` are the profile's Distortion and Vignetting amounts (`crs:LensProfileDistortionScale` / `VignettingScale`, 0–200%). With a matching imported profile, the profile replaces the built-in correction. Without one, the built-in correction applies when `lens_builtin` is set.
 

@@ -1,10 +1,10 @@
 # Remaining Lightroom parity gaps
 
-Status: 2026-09-26, engine 4. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`. For scale: Lightroom X100F references now average 0.0090, Sony A7 II Camera Raw references 0.0065. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
+Status: 2026-09-26, engine 4; lens, profile and catalog notes updated 2026-10-03. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`. For scale: Lightroom X100F references now average 0.0090, Sony A7 II Camera Raw references 0.0065. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
 
 ## Measured and matched (for reference)
 
-These controls were fitted to Camera Raw renders and match within the default-render error, or close to it: default look without Adobe files (DNG ColorMatrix + ACR tone curve), exposure, black point, Contrast, Blacks, Whites (negative), Shadows, Highlights, Dehaze (±40), color mixer, Saturation, Vibrance, color grading at default Blending/Balance, Transform sliders, built-in Fujifilm/Sony and DNG lens corrections, imported Adobe lens profiles, DNG embedded profile/exposure/crop, and Fujifilm default crop.
+These controls were fitted to Camera Raw renders and match within the default-render error, or close to it: default look without Adobe files (DNG ColorMatrix + ACR tone curve), exposure, black point, Contrast, Blacks, Whites (negative), Shadows, Highlights, Dehaze (±40), color mixer, Saturation, Vibrance, color grading at default Blending/Balance, Transform sliders, built-in Fujifilm and DNG lens corrections, imported Adobe lens profiles (on Sony A7 II photos), DNG embedded profile/exposure/crop, and Fujifilm default crop.
 
 ## Tone
 
@@ -30,7 +30,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## RAW processing and profiles
 
 - **Demosaic, highlight reconstruction, noise reduction and sharpening** are not Adobe's algorithms. At 100% the detail error is about 0.007 on X100F. X-Trans uses 1-pass Markesteijn, which measures the same as 3-pass.
-- **DCP support** is a bounded subset. Triple-illuminant, HDR and other unsupported profile structures are rejected. Enhanced XMP looks (Adobe Color etc.) are supported; creative RGB-table profiles, adaptive/AI profiles and profile Amount other than 100 are not.
+- **DCP support** is a bounded subset. Triple-illuminant, HDR and other unsupported profile structures are rejected. Enhanced XMP looks (Adobe Color etc.) are supported; creative RGB-table profiles and adaptive/AI profiles are not. A look's Profile Amount renders only at 0% or 100%: other Amounts render at the nearer of the two and are reported, and presets with one are listed as unavailable.
 - **RAWmakase Color** is our own look and is not meant to match Adobe Color exactly. It hasn't yet been compared with Camera Raw renders; built-in presets made with Adobe Standard render with RAWmakase Standard (the camera matrix) when Adobe Standard isn't imported.
 - **White balance** at extreme values, and the exact order of profile, WB and calibration, are not verified.
 - **Other cameras** (Canon, Nikon, Panasonic, …) render through the same generic path but have not been compared with Lightroom, for lack of sample files.
@@ -38,7 +38,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## Lens corrections
 
 - **Fujifilm built-in vignetting** is applied at 85% log strength to match Lightroom (fitted on three X100F photos).
-- **Sony built-in corrections** are read but off by default: Lightroom uses them only with profile corrections on. With an imported Adobe profile, Sony matches Camera Raw within ±0.02 EV in the corners.
+- **Sony built-in corrections** are available but not measured against Lightroom, and whether Lightroom uses Sony's stored data at all has not been checked. They are off by default and follow Enable Profile Corrections in the Lens Corrections panel. A Lightroom edit or preset with profile corrections on turns on only an imported Adobe profile, so without one a Sony photo it applies to gets no lens correction. With an imported Adobe profile, Sony matches Camera Raw within ±0.02 EV in the corners ([lens corrections](lens-corrections.md#sony-built-in-corrections)).
 - **LCP** interpolation uses the farthest focus distance, since focus distance is not read from the files. Tangential distortion terms and off-centre optical centres are ignored.
 - **DNG GainMap opcodes** (phone lens shading) are not applied.
 - **Remove Chromatic Aberration** measures lateral CA radially from the image centre; Camera Raw's own estimate is not reproduced exactly, and off-centre (decentred) CA is not corrected ([lens corrections](lens-corrections.md#remove-chromatic-aberration)).
@@ -63,7 +63,9 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Catalog and interaction
 
-- The RAWmakase catalog is separate from Lightroom's, with no write-back or sync. Custom color-label text is kept, but custom labels display white. Multi-photo metadata edits and metadata undo are missing.
+- The RAWmakase catalog is separate from Lightroom's, with no write-back or sync. Custom color-label text is kept, but custom labels display white.
+- Rating, flag and label changes, collection changes (such as the Quick Collection), and title, caption, creator, copyright, location and keyword edits apply to every photo selected in the Grid. Each is one step that Cmd+Z undoes and Cmd+Shift+Z redoes, in one undo sequence shared with Develop, as in Lightroom. That sequence is kept in memory only (up to 100 steps) and is cleared when another catalog opens.
+- Develop settings change one photo at a time: Copy and Paste Settings work on the open photo, and there is no Sync Settings or Auto Sync for a selection.
 - Unsupported develop settings are kept and reported, but not rendered.
 
 ## Validation still needed
