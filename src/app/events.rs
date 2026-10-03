@@ -216,6 +216,10 @@ impl Editor {
         match result {
             Ok(l) => {
                 self.load.invalidate();
+                // The photo being left is Previous, as when moving between photos.
+                if let Some(settings) = self.current_settings() {
+                    self.previous_settings = Some(settings);
+                }
                 self.document.reset(None);
                 self.preview.clear_document();
                 self.presets.clear_document();

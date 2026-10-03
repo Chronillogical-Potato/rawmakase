@@ -449,13 +449,25 @@ pub fn transfer(
         // The same Temperature and Tint mean different gains on another camera.
         recipe.update_wb(m);
         recipe.auto_white_balance = None;
-    } else if selection.contains(SettingGroup::TreatmentAndProfile) {
-        // A new profile maps the same gains to other Temperature and Tint values.
+    } else if selection.contains(SettingGroup::TreatmentAndProfile)
+        || recipe.engine.min(4) != to.engine.min(4)
+    {
+        // A new profile, or a process version that brings the default camera profile,
+        // maps the same gains to other Temperature and Tint values.
         recipe.sync_white_balance_controls(m);
     }
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
-    let lens = |r: &Recipe| (r.lens_builtin, r.lens_profile, r.lens_distortion);
+    let lens = |r: &Recipe| {
+        (
+            r.lens_builtin,
+            r.lens_profile,
+            r.lens_distortion,
+            r.panels.state(Panel::LensCorrections),
+            // Lens corrections render from process version 4.
+            r.engine >= 4,
+        )
+    };
     if lens(&recipe) != lens(to) {
         recipe.upright.corrections.clear();
         if recipe.upright.mode == super::UprightMode::Guided {

@@ -214,6 +214,14 @@ fn each_group_transfers_exactly_its_settings() {
             }
             _ => {}
         }
+        if group == SettingGroup::ProcessVersion {
+            // Crossing process version 4 brings the default camera profile, which shows
+            // the same gains as other Temperature and Tint values.
+            expected.extend(["camera_exposure", "temperature", "tint", "wb"].map(String::from));
+            assert!(moved.is_subset(&expected), "{group:?}: {moved:?}");
+            assert!(moved.contains("engine"));
+            continue;
+        }
         if group == SettingGroup::TreatmentAndProfile {
             // Only what the profile maps differently moves with it.
             assert!(moved.is_subset(&expected), "{group:?}: {moved:?}");
@@ -410,4 +418,41 @@ fn a_profile_resolves_to_the_targets_own_file_of_that_name() {
         },
     );
     assert!(Arc::ptr_eq(out.recipe.profile.as_ref().unwrap(), &own));
+}
+
+#[test]
+fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
+    let m = camera("Fujifilm", "X100F");
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let mut to = Recipe::default();
+    to.upright.mode = UprightMode::Level;
+    to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    let mut source = to.clone();
+    source.upright.corrections.clear();
+    source.panels.set(Panel::LensCorrections, PanelState::Off);
+    let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
+    assert!(out.recipe.upright.corrections.is_empty());
+    // A pasted process version without a profile resyncs Temperature and Tint to the
+    // gains it keeps.
+    let old = Recipe {
+        engine: 3,
+        ..Default::default()
+    };
+    let mut to = Recipe {
+        temperature: 4500.,
+        ..Default::default()
+    };
+    to.update_wb(&m);
+    let mut selection = GroupSelection::none();
+    selection.set(SettingGroup::ProcessVersion, GroupInclusion::Included);
+    let out = transfer(from(&old, &m), &to, &selection, target).recipe;
+    let mut expected = out.clone();
+    expected.sync_white_balance_controls(&m);
+    assert_eq!(
+        (out.temperature, out.tint),
+        (expected.temperature, expected.tint)
+    );
 }
