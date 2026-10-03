@@ -45,6 +45,17 @@ pub struct Synced {
     pub after: Recipe,
     /// The History saved with `after`, which Redo writes back.
     pub history: SavedHistory,
+    /// The file as the Sync read it: Redo refuses a file changed since.
+    pub identity: crate::storage::Identity,
+}
+impl Synced {
+    /// The edit one side of the Sync leaves.
+    pub(super) fn recipe(&self, side: SyncSide) -> &Recipe {
+        match side {
+            SyncSide::Before => self.before.recipe(),
+            SyncSide::After => &self.after,
+        }
+    }
 }
 
 /// A photo's edit before a Sync.
@@ -232,6 +243,7 @@ fn prepare(
                 before,
                 after,
                 history: history.saved(&current),
+                identity: crate::storage::Identity::read(&target.path)?,
             },
             name: target.name.clone(),
             export,
@@ -284,11 +296,20 @@ pub(super) fn restore(
             // Redo brings back the History the Sync saved, which Undo may have cleared.
             (SyncSide::After, _) => (&e.after, HistoryUpdate::Replace(&e.history)),
         };
-        let export = catalog
+        let saved = catalog
             .load_edit(e.id, &path)
-            .map_err(SyncRestoreError::Write)?
-            .map(|saved| saved.export)
-            .unwrap_or_default();
+            .map_err(SyncRestoreError::Write)?;
+        // Without an edit there is no stored identity to protect the file: compare
+        // with the one the Sync read before writing its settings again.
+        if saved.is_none()
+            && crate::storage::Identity::read(&path).map_err(SyncRestoreError::Write)? != e.identity
+        {
+            return Err(SyncRestoreError::Write(anyhow::anyhow!(
+                "{} changed since the Sync",
+                path.display()
+            )));
+        }
+        let export = saved.map(|saved| saved.export).unwrap_or_default();
         saves.push((e.id, path, recipe, export, history));
     }
     let saves: Vec<EditToSave> = saves
@@ -537,6 +558,14 @@ mod tests {
         // Settings the photos already have change nothing.
         let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..2]);
         assert!(again.synced.is_empty() && again.failed.is_empty());
+        // A file changed while it had no edit is not given the old settings again.
+        restore(&c, &result.synced, SyncSide::Before, path)?;
+        let changed = &photos[1].1;
+        let mut bytes = std::fs::read(changed)?;
+        bytes.extend_from_slice(b"changed");
+        std::fs::write(changed, bytes)?;
+        assert!(restore(&c, &result.synced, SyncSide::After, path).is_err());
+        assert!(c.load_edit(photos[2].0, &photos[2].1)?.is_none());
         Ok(())
     }
 
