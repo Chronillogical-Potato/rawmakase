@@ -39,6 +39,36 @@ pub enum Format {
     Jpeg,
     Tiff,
 }
+impl Format {
+    /// The extension an export is named with.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Format::Jpeg => "jpg",
+            Format::Tiff => "tif",
+        }
+    }
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Format::Jpeg => "image/jpeg",
+            Format::Tiff => "image/tiff",
+        }
+    }
+    /// The format `path`'s extension names, in any case: .jpg, .jpeg, .tif
+    /// or .tiff.
+    pub fn from_path(path: &Path) -> Option<Format> {
+        match path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str()
+        {
+            "jpg" | "jpeg" => Some(Format::Jpeg),
+            "tif" | "tiff" => Some(Format::Tiff),
+            _ => None,
+        }
+    }
+}
 
 /// Lightroom's Metadata "Include" choice, or Custom: the four switches
 /// earlier releases had, which settings saved by them become.
@@ -212,10 +242,7 @@ impl ExportSettings {
         } else {
             stem.to_string()
         };
-        let extension = match self.format {
-            Format::Jpeg => "jpg",
-            Format::Tiff => "tif",
-        };
+        let extension = self.format.extension();
         if self.uppercase {
             format!("{name}.{}", extension.to_uppercase())
         } else {
@@ -238,10 +265,7 @@ impl ExportSettings {
         }
     }
     pub fn mime_type(&self) -> &'static str {
-        match self.format {
-            Format::Jpeg => "image/jpeg",
-            Format::Tiff => "image/tiff",
-        }
+        self.format.mime_type()
     }
 }
 

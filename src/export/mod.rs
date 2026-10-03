@@ -114,14 +114,8 @@ pub fn export_with(
     let mut temp = NamedTempFile::new_in(parent)?;
     let profile = raw::srgb_profile()?;
     let directories = metadata::directories(m, embed, image.width, image.height);
-    match path
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_lowercase()
-        .as_str()
-    {
-        "jpg" | "jpeg" => encode::jpeg(
+    match Format::from_path(path) {
+        Some(Format::Jpeg) => encode::jpeg(
             &mut temp,
             image,
             options.quality,
@@ -129,8 +123,8 @@ pub fn export_with(
             directories,
             embed,
         )?,
-        "tif" | "tiff" => encode::tiff(&mut temp, image, profile, &directories, embed)?,
-        _ => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
+        Some(Format::Tiff) => encode::tiff(&mut temp, image, profile, &directories, embed)?,
+        None => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
     }
     temp.as_file().sync_all()?;
     if overwrite {
