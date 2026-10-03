@@ -3,6 +3,7 @@
 //! transaction and is handed to the shared undo log once saved.
 use super::{Library, Place};
 use crate::app::photo_metadata::Edit;
+use crate::catalog::Photo;
 use anyhow::Result;
 
 /// Rating, flag and label of a photo.
@@ -74,19 +75,8 @@ impl Library {
                 .filter(|id| !ids.contains(id))
                 .collect()
         });
-        let before: Vec<Metadata> = changes
-            .iter()
-            .filter_map(|(id, ..)| self.photo(*id))
-            .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
-            .collect();
-        self.catalog.set_metadata_of(&changes)?;
-        for (id, rating, flag, label) in &changes {
-            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
-                p.rating = *rating;
-                p.flag = *flag;
-                p.label = label.clone();
-            }
-        }
+        let before = ratings_of(changes.iter().filter_map(|(id, ..)| self.photo(*id)));
+        self.write_ratings(&changes)?;
         self.message = match self.photo(lead) {
             Some(p) if changes.len() == 1 => format!(
                 "{} · {} stars · {} · {}",
@@ -150,7 +140,12 @@ impl Library {
             .filter(|(id, ..)| self.photo(*id).is_some())
             .cloned()
             .collect();
-        let values = values.as_slice();
+        self.write_ratings(&values)?;
+        self.filter();
+        Ok(())
+    }
+    /// Sets rating, flag and label in the catalog, then as shown.
+    fn write_ratings(&mut self, values: &[Metadata]) -> Result<()> {
         self.catalog.set_metadata_of(values)?;
         for (id, rating, flag, label) in values {
             if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
@@ -159,9 +154,15 @@ impl Library {
                 p.label = label.clone();
             }
         }
-        self.filter();
         Ok(())
     }
+}
+/// Rating, flag and label of each photo given.
+pub(super) fn ratings_of<'a>(photos: impl IntoIterator<Item = &'a Photo>) -> Vec<Metadata> {
+    photos
+        .into_iter()
+        .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
+        .collect()
 }
 /// What a batch change set, as the status line says it.
 fn summary(edit: &Edit, (_, rating, flag, label): &Metadata) -> String {

@@ -37,6 +37,36 @@ pub struct DescriptiveCommand {
     pub summary: String,
 }
 
+impl DescriptiveCommand {
+    /// A change made now, from `before` to `after`, that sets no ratings.
+    fn new(
+        before: Vec<MetadataSnapshot>,
+        after: Vec<MetadataSnapshot>,
+        place_before: Place,
+        place_after: Place,
+        summary: String,
+    ) -> Self {
+        Self {
+            sequence: crate::app::undo::sequence(),
+            before,
+            after,
+            place_before,
+            place_after,
+            ratings_before: Vec::new(),
+            ratings_after: Vec::new(),
+            summary,
+        }
+    }
+    /// The change, setting rating, flag and label too.
+    fn with_ratings(self, before: Vec<super::Metadata>, after: Vec<super::Metadata>) -> Self {
+        Self {
+            ratings_before: before,
+            ratings_after: after,
+            ..self
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum DescriptiveEdit {
     /// The default language's text; empty clears the field.
@@ -129,16 +159,13 @@ impl Library {
             n => format!("{n} photos · {what}"),
         };
         self.message = summary.clone();
-        self.descriptive_done.push(DescriptiveCommand {
-            sequence: crate::app::undo::sequence(),
+        self.descriptive_done.push(DescriptiveCommand::new(
             before,
             after,
             place_before,
-            place_after: place.unwrap_or_else(|| self.place()),
-            ratings_before: Vec::new(),
-            ratings_after: Vec::new(),
+            place.unwrap_or_else(|| self.place()),
             summary,
-        });
+        ));
         self.fields.reload();
         // Recorded first: a change saved is one undo can reverse, even if
         // what is shown can't be read again.
@@ -241,24 +268,14 @@ impl Library {
             .filter(|id| self.photo(*id).is_some())
             .collect();
         let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
-        let ratings = |library: &Self| -> Vec<super::Metadata> {
-            let mut found: Vec<super::Metadata> = library
-                .photos
-                .iter()
-                .filter(|p| wanted.contains(&p.id))
-                .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
-                .collect();
-            found.sort_by_key(|m| m.0);
-            found
-        };
         let before = self.catalog.metadata_snapshot(&ids)?;
-        let ratings_before = ratings(self);
+        let ratings_before = self.ratings_by_id(&wanted);
         let mut report = reread.report;
         let written = self.catalog.apply_file_metadata(&read, true)?;
         report.unreadable.extend(written.unreadable);
         self.refresh_photos(&ids)?;
         let after = self.catalog.metadata_snapshot(&ids)?;
-        let ratings_after = ratings(self);
+        let ratings_after = self.ratings_by_id(&wanted);
         let n = ids.len();
         let mut summary = format!("Read metadata from {}", plural(n, "file", "files"));
         if let Some(problems) = report.summary() {
@@ -268,18 +285,19 @@ impl Library {
         self.set_message_with_detail(summary.clone(), report.details());
         self.fields.reload();
         if before != after || ratings_before != ratings_after {
-            self.descriptive_done.push(DescriptiveCommand {
-                sequence: crate::app::undo::sequence(),
-                before,
-                after,
-                place_before: reread.place.clone(),
-                place_after: reread.place,
-                ratings_before,
-                ratings_after,
-                summary,
-            });
+            self.descriptive_done.push(
+                DescriptiveCommand::new(before, after, reread.place.clone(), reread.place, summary)
+                    .with_ratings(ratings_before, ratings_after),
+            );
         }
         Ok(())
+    }
+    /// Rating, flag and label of the photos in `wanted`, by id.
+    fn ratings_by_id(&self, wanted: &std::collections::HashSet<i64>) -> Vec<super::Metadata> {
+        let mut found =
+            super::metadata::ratings_of(self.photos.iter().filter(|p| wanted.contains(&p.id)));
+        found.sort_by_key(|m| m.0);
+        found
     }
     /// Rating, flag, label, capture time and keywords of `ids`, read again
     /// from the catalog, and the photos shown.
