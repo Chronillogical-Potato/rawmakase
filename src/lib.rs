@@ -32,4 +32,5 @@ pub mod storage;
 mod tiff;
 pub mod time;
 pub mod updates;
+pub mod watermark;
 pub mod xmp;

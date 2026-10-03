@@ -105,6 +105,10 @@ pub struct ExportSettings {
     pub include: Include,
     /// Lightroom's Remove Location Info, for the modes other than Custom.
     pub remove_location: bool,
+    /// Lightroom's Watermarking: whether to, and which: a preset's name or
+    /// the Simple Copyright Watermark.
+    pub watermark: bool,
+    pub watermark_name: String,
 }
 impl Default for ExportSettings {
     fn default() -> Self {
@@ -128,6 +132,8 @@ impl Default for ExportSettings {
             descriptive: true,
             include: Include::Custom,
             remove_location: false,
+            watermark: false,
+            watermark_name: crate::watermark::SIMPLE_COPYRIGHT.into(),
         }
     }
 }

@@ -27,7 +27,14 @@ pub struct Photo {
     pub recipe: Recipe,
     /// Its catalog metadata: rating, label, keywords and descriptive fields.
     pub values: Values,
+    /// The watermark chosen in the Export dialog, a preset or the Simple
+    /// Copyright Watermark.
+    pub watermark: Option<crate::watermark::Watermark>,
 }
+
+/// What an export has to say besides "Exported", such as a Simple
+/// Copyright Watermark left out for want of a copyright.
+pub type Notice = Option<String>;
 
 /// Exports `photo` to `target`, reporting progress from 0 to 1. Stops between
 /// stages once `cancel` is set.
@@ -38,17 +45,48 @@ pub fn run(
     overwrite: bool,
     cancel: &AtomicBool,
     progress: impl Fn(f32),
-) -> Result<()> {
+) -> Result<Notice> {
     let cancelled = || -> Result<()> {
         ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
         Ok(())
     };
     progress(0.05);
+    // Loaded first: a missing image or font fails the export before it
+    // renders.
+    let mut notice = None;
+    let watermark = match &photo.watermark {
+        Some(w) if w.name == crate::watermark::SIMPLE_COPYRIGHT => {
+            // The photo's copyright: the catalog's, else the file's.
+            use crate::catalog::Value;
+            let copyright = match &photo.values.descriptive.copyright {
+                Some(Value::Set(langs)) => langs.default_text().map(str::to_string),
+                Some(Value::Cleared) => None,
+                None => exif::read(&photo.source)
+                    .and_then(|e| e.get(0x8298).and_then(exif::Field::text)),
+            }
+            .filter(|c| !c.is_empty());
+            match copyright {
+                Some(text) => Some(crate::watermark::Watermark::simple_copyright(&text).ready()?),
+                None => {
+                    notice =
+                        Some("no copyright in the file for the Simple Copyright Watermark".into());
+                    None
+                }
+            }
+        }
+        Some(w) => Some(w.ready()?),
+        None => None,
+    };
     let image = full_size(photo.image.clone(), &photo.source, cancel)?;
     cancelled()?;
     progress(0.4);
     let options = settings.options();
-    let rendered = crate::develop::render(&image, &photo.recipe, options.max_edge)?;
+    let mut rendered = crate::develop::render(&image, &photo.recipe, options.max_edge)?;
+    if let Some(w) = &watermark
+        && !w.apply(&mut rendered)
+    {
+        notice = Some("the watermark's text has no characters its font can draw".into());
+    }
     cancelled()?;
     progress(0.85);
     let policy = Policy::of(settings);
@@ -90,7 +128,7 @@ pub fn run(
         overwrite,
     )?;
     progress(1.);
-    Ok(())
+    Ok(notice)
 }
 
 /// The full-resolution image: the open one, the decode cache's, or a new decode.

@@ -3,6 +3,7 @@
 //! export runs on its own thread and the top bar shows its progress while you
 //! keep editing.
 mod dialog;
+mod watermark_editor;
 
 use super::{Editor, worker::Event};
 use crate::app::theme;
@@ -47,6 +48,11 @@ pub(super) struct Exports {
     picking: Arc<AtomicBool>,
     jobs: Vec<Job>,
     conflict: Option<Conflict>,
+    /// The Watermark Editor, over the dialog.
+    watermark_editor: Option<watermark_editor::WatermarkEditor>,
+    /// Saved watermarks, read when the dialog opens and after the editor
+    /// saves one.
+    watermarks: Vec<crate::watermark::Watermark>,
 }
 
 impl Editor {
@@ -54,6 +60,7 @@ impl Editor {
     pub(super) fn open_export_dialog(&mut self) {
         if self.export_photo().is_some() {
             self.exports.draft = ExportSettings::load().unwrap_or_default();
+            self.exports.watermarks = crate::watermark::presets();
             self.exports.dialog = true;
         }
     }
@@ -66,7 +73,9 @@ impl Editor {
     }
     /// The Export dialog or its existing-file question is showing.
     pub(super) fn export_modal(&self) -> bool {
-        self.exports.dialog || self.exports.conflict.is_some()
+        self.exports.dialog
+            || self.exports.conflict.is_some()
+            || self.exports.watermark_editor.is_some()
     }
     pub(super) fn exporting(&self) -> bool {
         self.exports
@@ -114,6 +123,7 @@ impl Editor {
             source: self.document.path.clone()?,
             recipe: self.document.recipe.clone(),
             values,
+            watermark: None,
         });
         if photo.is_none() {
             self.status = "Open a photo to export it".into();
@@ -125,9 +135,18 @@ impl Editor {
         if let Err(e) = settings.save() {
             self.status = format!("Export settings not saved: {e:#}");
         }
-        let Some(photo) = self.export_photo() else {
+        let Some(mut photo) = self.export_photo() else {
             return;
         };
+        if settings.watermark {
+            match watermark_for(&settings.watermark_name) {
+                Some(w) => photo.watermark = Some(w),
+                None => {
+                    self.status = format!("Watermark not found: {}", settings.watermark_name);
+                    return;
+                }
+            }
+        }
         let Some(target) = settings.target(&photo.source) else {
             self.status = "Choose a folder to export to".into();
             return;
@@ -174,7 +193,8 @@ impl Editor {
                 ctx.request_repaint();
             });
             let status = match result {
-                Ok(()) => format!("Exported {}", target.display()),
+                Ok(None) => format!("Exported {}", target.display()),
+                Ok(Some(notice)) => format!("Exported {} · {notice}", target.display()),
                 Err(_) if cancel.load(Ordering::Relaxed) => "Export cancelled".into(),
                 Err(e) => format!("Export failed: {e:#}"),
             };
@@ -244,4 +264,17 @@ impl Editor {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(200));
     }
+}
+
+/// The watermark named in the Export dialog: a saved preset, or the Simple
+/// Copyright Watermark, whose text comes from each photo at export.
+fn watermark_for(name: &str) -> Option<crate::watermark::Watermark> {
+    use crate::watermark::{SIMPLE_COPYRIGHT, Watermark, presets};
+    if name == SIMPLE_COPYRIGHT {
+        return Some(Watermark {
+            name: SIMPLE_COPYRIGHT.into(),
+            ..Default::default()
+        });
+    }
+    presets().into_iter().find(|w| w.name == name)
 }
