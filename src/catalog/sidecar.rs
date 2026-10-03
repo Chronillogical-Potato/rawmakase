@@ -3,8 +3,6 @@
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
 use super::Catalog;
-#[cfg(test)]
-use super::{LangAlt, TextField, Value};
 use crate::xmp::descriptive::{self, Read};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
