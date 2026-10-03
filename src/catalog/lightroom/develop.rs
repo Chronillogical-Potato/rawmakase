@@ -233,6 +233,16 @@ pub fn convert_develop(
                 .filter(|k| k.starts_with("Upright")),
         )
         .collect();
+    // Auto black & white is judged with the mix Lightroom resolved for it.
+    let gray_mix: Vec<&str> = std::iter::once("AutoGrayscaleMix")
+        .chain(
+            preset
+                .settings
+                .keys()
+                .map(String::as_str)
+                .filter(|k| k.starts_with("GrayMixer")),
+        )
+        .collect();
     for keys in [
         vec!["WhiteBalance", "Temperature", "Tint"],
         vec![
@@ -248,6 +258,7 @@ pub fn convert_develop(
             "ParametricHighlightSplit",
         ],
         upright,
+        gray_mix,
     ] {
         let mut p = preset.clone();
         p.settings.retain(|k, _| keys.contains(&k.as_str()));

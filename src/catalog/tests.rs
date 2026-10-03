@@ -255,6 +255,23 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
     assert_eq!(r.effects.gray_mix, Recipe::default().effects.gray_mix);
     assert_eq!(w.len(), 1, "{w:?}");
     assert!(w[0].contains("Auto black & white mix"), "{w:?}");
+    // With a monochrome default profile, Auto is still judged with its stored mix.
+    let m = crate::raw::Metadata {
+        model: "Synthetic".into(),
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut profile = crate::camera_profiles::CameraProfile::camera_matrix_default(&m)
+        .unwrap()
+        .with_test_tables();
+    profile.name = "Adobe Color".into();
+    profile.camera = "Synthetic".into();
+    profile.enhanced.as_mut().unwrap().monochrome = true;
+    let profiles = [std::sync::Arc::new(profile)];
+    let text = r#"s = { AutoGrayscaleMix = true, GrayMixerRed = -12 }"#;
+    let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
     Ok(())
 }
 #[test]
