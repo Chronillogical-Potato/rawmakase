@@ -3,7 +3,9 @@
 //! uploaded again. Only the histogram and, when asked, a small thumbnail or the
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input};
-use crate::develop::{Recipe, effects::VignetteMix, pipeline::pixel_params::PixelParams, quality};
+use crate::develop::{
+    Recipe, effects::PostCropVignette, pipeline::pixel_params::PixelParams, quality,
+};
 use anyhow::{Context, Result, ensure};
 use std::{
     path::Path,
@@ -204,7 +206,7 @@ impl Presenter {
                 cache: None,
             })
         };
-        let present = include_str!("present.wgsl");
+        let present = PostCropVignette::wgsl_tone() + include_str!("present.wgsl");
         let histogram = |label, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -215,7 +217,7 @@ impl Presenter {
         };
         Self {
             pipelines: ["blur_horizontal", "sharpen", "present"]
-                .map(|entry| pipeline(present, &layout, entry)),
+                .map(|entry| pipeline(&present, &layout, entry)),
             reduce: pipeline(include_str!("reduce.wgsl"), &reduce_layout, "reduce"),
             layout,
             reduce_layout,
@@ -414,8 +416,9 @@ impl Processor {
         let effects = e.grain != 0. || e.vignette != 0. || e.lens_vignette != 0.;
         let [cx, cy, cw, ch] = finish.crop;
         let f = f32::to_bits;
+        let vignette = PostCropVignette::new(e, finish.full);
         let parameters = |shown: bool| -> wgpu::Buffer {
-            let values: [u32; 32] = [
+            let values: [u32; 36] = [
                 width,
                 height,
                 cx,
@@ -441,16 +444,20 @@ impl Processor {
                 f(e.grain_size),
                 f(e.grain_roughness),
                 e.grain_seed,
-                f(e.vignette),
-                f(e.vignette_roundness),
-                f(e.vignette_midpoint),
-                f(e.vignette_feather),
-                f(e.vignette_highlight_protection()),
-                (e.vignette_style.mix() == VignetteMix::Blend) as u32,
+                f(vignette.map_or(0., |v| v.amount)),
+                vignette.map_or(0, |v| v.style.code() as u32),
+                f(vignette.map_or(0., |v| v.highlights)),
+                f(vignette.map_or(1., |v| v.scale[0])),
+                f(vignette.map_or(1., |v| v.scale[1])),
+                f(vignette.map_or(2., |v| v.power)),
+                f(vignette.map_or(0., |v| v.midpoint)),
+                f(vignette.map_or(1., |v| v.feather)),
                 f(e.lens_vignette),
                 f(e.lens_vignette_midpoint),
                 effects as u32,
                 shown as u32,
+                0,
+                0,
                 0,
             ];
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

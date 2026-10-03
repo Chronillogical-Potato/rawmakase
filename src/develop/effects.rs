@@ -6,6 +6,8 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+mod vignette;
+pub(crate) use vignette::PostCropVignette;
 /// Lightroom's post-crop vignette styles. Recipes and XMP store Lightroom's codes:
 /// 1 Highlight Priority, 2 Color Priority, 3 Paint Overlay. Camera Raw 18.7 renders 0
 /// and an omitted style as Highlight Priority.
@@ -17,27 +19,12 @@ pub enum VignetteStyle {
     ColorPriority,
     PaintOverlay,
 }
-/// How a vignette style changes a pixel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum VignetteMix {
-    /// An exposure change, darkening or brightening in proportion.
-    Exposure,
-    /// A blend toward black or white. Color Priority renders this way until it has its
-    /// own operator; recipes that stored code 2 always have.
-    Blend,
-}
 impl VignetteStyle {
     pub fn code(self) -> u8 {
         match self {
             VignetteStyle::HighlightPriority => 1,
             VignetteStyle::ColorPriority => 2,
             VignetteStyle::PaintOverlay => 3,
-        }
-    }
-    pub(crate) fn mix(self) -> VignetteMix {
-        match self {
-            VignetteStyle::HighlightPriority => VignetteMix::Exposure,
-            VignetteStyle::ColorPriority | VignetteStyle::PaintOverlay => VignetteMix::Blend,
         }
     }
 }
@@ -366,30 +353,15 @@ pub(crate) fn spatial_finish_scaled(
     if e.grain == 0. && e.vignette == 0. && e.lens_vignette == 0. {
         return;
     }
-    let (mix, highlights) = (e.vignette_style.mix(), e.vignette_highlight_protection());
+    let vignette = PostCropVignette::new(e, full);
     im.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         let x = origin[0] + i as u32 % im.width;
         let y = origin[1] + i as u32 / im.width;
         let nx = ((x as f32 + 0.5) / full[0] as f32 - 0.5) * 2.;
         let ny = ((y as f32 + 0.5) / full[1] as f32 - 0.5) * 2.;
-        let power = 2f32.powf(-e.vignette_roundness * 1.5 + 1.);
-        let distance = (nx.abs().powf(power) + ny.abs().powf(power)).powf(1. / power);
-        let start = e.vignette_midpoint * 0.9;
-        let feather = (e.vignette_feather * 0.9 + 0.05).max(0.05);
-        let t = ((distance - start) / feather).clamp(0., 1.);
-        let mask = t * t * (3. - 2. * t);
         let l = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
-        let protect = 1. - highlights * l.powi(4);
-        if mix == VignetteMix::Blend {
-            let target = if e.vignette < 0. { 0. } else { 1. };
-            for v in p.iter_mut() {
-                *v += (target - *v) * e.vignette.abs() * mask * protect;
-            }
-        } else {
-            let gain = 2f32.powf(e.vignette * mask * protect * 2.);
-            for v in p.iter_mut() {
-                *v *= gain;
-            }
+        if let Some(v) = &vignette {
+            *p = v.apply(*p, v.mask(nx, ny));
         }
         let lens = ((nx * nx + ny * ny - e.lens_vignette_midpoint).max(0.)
             / (2. - e.lens_vignette_midpoint))
@@ -435,7 +407,7 @@ mod tests {
         let old: Effects = serde_json::from_str(r#"{"vignette_style": 0}"#).unwrap();
         assert_eq!(old.vignette_style, HighlightPriority);
         let old: Effects = serde_json::from_str(r#"{"vignette_style": 2}"#).unwrap();
-        assert_eq!(old.vignette_style.mix(), VignetteMix::Blend);
+        assert_eq!(old.vignette_style, ColorPriority);
         let paint = Effects {
             vignette_style: PaintOverlay,
             ..Default::default()

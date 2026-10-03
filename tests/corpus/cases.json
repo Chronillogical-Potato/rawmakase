@@ -796,6 +796,63 @@
    "settings": {
     "PostCropVignetteAmount": "-60"
    }
+  },
+  {
+   "name": "vignette-highlight-100",
+   "settings": {
+    "PostCropVignetteAmount": "-100",
+    "PostCropVignetteStyle": "1"
+   }
+  },
+  {
+   "name": "vignette-color+100",
+   "settings": {
+    "PostCropVignetteAmount": "+100",
+    "PostCropVignetteStyle": "2"
+   }
+  },
+  {
+   "name": "vignette-highlight-60-midpoint20",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "1",
+    "PostCropVignetteMidpoint": "20",
+    "PostCropVignetteFeather": "50"
+   }
+  },
+  {
+   "name": "vignette-highlight-60-midpoint80",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "1",
+    "PostCropVignetteMidpoint": "80",
+    "PostCropVignetteFeather": "50"
+   }
+  },
+  {
+   "name": "vignette-paint-60-midpoint20-feather80",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "3",
+    "PostCropVignetteMidpoint": "20",
+    "PostCropVignetteFeather": "80"
+   }
+  },
+  {
+   "name": "vignette-paint-60-roundness-50",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "3",
+    "PostCropVignetteRoundness": "-50"
+   }
+  },
+  {
+   "name": "vignette-paint-60-roundness+100",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "3",
+    "PostCropVignetteRoundness": "+100"
+   }
   }
  ]
 }

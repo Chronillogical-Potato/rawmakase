@@ -11,9 +11,11 @@ struct Params {
     // Output pixel of the buffer's first pixel, and the whole output's size.
     origin_x: u32, origin_y: u32, full_w: u32, full_h: u32,
     scale: f32, grain: f32, grain_size: f32, grain_roughness: f32,
-    grain_seed: u32, vignette: f32, vignette_roundness: f32, vignette_midpoint: f32,
-    vignette_feather: f32, vignette_highlights: f32, vignette_blend: u32, lens_vignette: f32,
-    lens_vignette_midpoint: f32, effects: u32, count: u32, pad: u32,
+    // `effects::PostCropVignette`; a zero amount has no vignette.
+    grain_seed: u32, vignette: f32, vignette_style: u32, vignette_highlights: f32,
+    vignette_scale_x: f32, vignette_scale_y: f32, vignette_power: f32, vignette_midpoint: f32,
+    vignette_feather: f32, lens_vignette: f32, lens_vignette_midpoint: f32, effects: u32,
+    count: u32, pad0: u32, pad1: u32, pad2: u32,
 };
 @group(0) @binding(0) var<storage, read_write> pixels: array<f32>;
 @group(0) @binding(1) var<storage, read_write> scratch: array<f32>;
@@ -91,24 +93,108 @@ fn power(base: f32, exponent: f32) -> f32 {
     if base <= 0.0 { return 0.0; }
     return pow(base, exponent);
 }
+// `color_math::srgb_decode` and `srgb_encode`.
+fn decode(v: f32) -> f32 {
+    if v <= 0.04045 { return v / 12.92; }
+    return pow((v + 0.055) / 1.055, 2.4);
+}
+fn encode(v: f32) -> f32 {
+    if v <= 0.0031308 { return 12.92 * v; }
+    return 1.055 * power(v, 1.0 / 2.4) - 0.055;
+}
+// `vignette::tone` and `tone_ev`: Camera Raw's neutral tone response and its inverse.
+fn tone(ev: f32) -> f32 {
+    let last = 24u;
+    let at = (ev - TONE_START_EV) / TONE_STEP_EV;
+    var log2v = 0.0;
+    if at <= 0.0 {
+        log2v = TONE_LOG2[0] + ev - TONE_START_EV;
+    } else if at < f32(last) {
+        let i = u32(at);
+        log2v = TONE_LOG2[i] + (TONE_LOG2[i + 1u] - TONE_LOG2[i]) * (at - f32(i));
+    }
+    return exp2(log2v);
+}
+fn tone_ev(y: f32) -> f32 {
+    let log2v = log2(y);
+    let last = 24u;
+    if log2v <= TONE_LOG2[0] { return TONE_START_EV + log2v - TONE_LOG2[0]; }
+    if log2v >= TONE_LOG2[last] { return TONE_START_EV + f32(last) * TONE_STEP_EV; }
+    var lo = 0u;
+    var hi = last;
+    while hi - lo > 1u {
+        let mid = (lo + hi) / 2u;
+        if TONE_LOG2[mid] <= log2v { lo = mid; } else { hi = mid; }
+    }
+    let t = (log2v - TONE_LOG2[lo]) / (TONE_LOG2[hi] - TONE_LOG2[lo]);
+    return TONE_START_EV + (f32(lo) + t) * TONE_STEP_EV;
+}
+// `PostCropVignette::mask`.
+fn vignette_mask(nx: f32, ny: f32) -> f32 {
+    let q = clamp(
+        (power(abs(nx * p.vignette_scale_x), p.vignette_power)
+            + power(abs(ny * p.vignette_scale_y), p.vignette_power)) / 2.0,
+        1e-6,
+        1.0 - 1e-6,
+    );
+    let z = clamp((log(q / (1.0 - q)) - p.vignette_midpoint) / p.vignette_feather, -40.0, 40.0);
+    return 1.0 / (1.0 + exp(-z));
+}
+fn paint_darken(b: vec3<f32>, amount: f32, mask: f32) -> vec3<f32> {
+    return b * (1.0 - (1.0 - decode(1.0 - amount)) * (1.0 - decode(1.0 - mask)));
+}
+// `PostCropVignette::apply`; styles use Lightroom's codes: 1 Highlight Priority,
+// 2 Color Priority, 3 Paint Overlay.
+fn vignette(encoded: vec3<f32>, mask: f32) -> vec3<f32> {
+    let e = clamp(encoded, vec3(0.0), vec3(1.0));
+    let b = vec3(decode(e.r), decode(e.g), decode(e.b));
+    let x = abs(p.vignette);
+    var out = b;
+    if p.vignette_style == 3u {
+        if p.vignette < 0.0 {
+            out = paint_darken(b, x, mask);
+        } else {
+            out = b + (vec3(1.0) - b) * (decode(x) * decode(mask));
+        }
+    } else if p.vignette > 0.0 {
+        var strength = 1.1;
+        if p.vignette_style == 2u { strength = 0.61; }
+        let opacity = strength * decode(x) * decode(mask);
+        let white = exp2(SCENE_WHITE_EV);
+        for (var c = 0u; c < 3u; c++) {
+            let scene = exp2(tone_ev(max(b[c], 1e-12)));
+            out[c] = tone(log2(scene + (white - scene) * opacity));
+        }
+    } else {
+        let shape = 1.7625 + 0.6875 * x * x;
+        let gain = 1.0 - 0.97 * (1.0 - decode(1.0 - x)) * (1.0 - power(1.0 - mask, shape));
+        let y = luminance(b);
+        var protect = 1.0;
+        if p.vignette_highlights > 0.0 {
+            protect = power(1.0 - smoothstep(0.198, 1.108, y), pow(p.vignette_highlights, 1.43));
+        }
+        let ev = log2(gain) * protect;
+        for (var c = 0u; c < 3u; c++) {
+            if b[c] > 0.0 { out[c] = tone(tone_ev(b[c]) + ev); } else { out[c] = 0.0; }
+        }
+        if p.vignette_style == 2u {
+            let painted = paint_darken(b, x, mask);
+            let w = 0.13 + 0.19 * x;
+            for (var c = 0u; c < 3u; c++) {
+                out[c] = power(out[c], 1.0 - w) * power(painted[c], w);
+            }
+        }
+    }
+    let o = clamp(out, vec3(0.0), vec3(1.0));
+    return vec3(encode(o.r), encode(o.g), encode(o.b));
+}
 fn spatial(color: vec3<f32>, x: u32, y: u32) -> vec3<f32> {
     var c = color;
     let nx = ((f32(x) + 0.5) / f32(p.full_w) - 0.5) * 2.0;
     let ny = ((f32(y) + 0.5) / f32(p.full_h) - 0.5) * 2.0;
-    let shape = exp2(-p.vignette_roundness * 1.5 + 1.0);
-    let distance = power(power(abs(nx), shape) + power(abs(ny), shape), 1.0 / shape);
-    let start = p.vignette_midpoint * 0.9;
-    let feather = max(p.vignette_feather * 0.9 + 0.05, 0.05);
-    let t = clamp((distance - start) / feather, 0.0, 1.0);
-    let mask = t * t * (3.0 - 2.0 * t);
     let l = luminance(c);
-    let protect = 1.0 - p.vignette_highlights * (l * l * l * l);
-    if p.vignette_blend == 1u {
-        var toward = 1.0;
-        if p.vignette < 0.0 { toward = 0.0; }
-        c += (vec3(toward) - c) * abs(p.vignette) * mask * protect;
-    } else {
-        c *= exp2(p.vignette * mask * protect * 2.0);
+    if p.vignette != 0.0 {
+        c = vignette(c, vignette_mask(nx, ny));
     }
     let lens = clamp(
         max(nx * nx + ny * ny - p.lens_vignette_midpoint, 0.0) / (2.0 - p.lens_vignette_midpoint),
