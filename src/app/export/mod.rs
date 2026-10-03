@@ -7,6 +7,7 @@ mod watermark_editor;
 
 use super::{Editor, worker::Event};
 use crate::app::theme;
+use crate::app::widgets::plural;
 use crate::export::{
     Existing, ExportSettings,
     assemble::Values,
@@ -223,11 +224,7 @@ impl Editor {
         painter.text(
             egui::pos2(rect.left(), rect.top() + 7.),
             egui::Align2::LEFT_CENTER,
-            if n == 1 {
-                "Exporting 1 photo".to_string()
-            } else {
-                format!("Exporting {n} photos")
-            },
+            format!("Exporting {}", plural(n, "photo", "photos")),
             egui::FontId::proportional(11.),
             theme::gray(190),
         );

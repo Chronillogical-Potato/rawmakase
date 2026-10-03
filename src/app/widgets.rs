@@ -1236,6 +1236,54 @@ pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
             .min_size(Vec2::new(84., 30.)),
     )
 }
+/// A modal window asking before an action: a title, a line of detail and
+/// `buttons`, the last one primary. Returns the choice clicked, `dismissed`
+/// when the window is closed, or None while it is open. Return confirms
+/// nothing unless a button has focus. A `truncated` detail stays on one line,
+/// e.g. a path.
+pub(super) fn confirm_modal<T: Copy>(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    detail: &str,
+    truncated: bool,
+    buttons: &[(&str, T)],
+    dismissed: T,
+) -> Option<T> {
+    let mut choice = None;
+    let response = egui::Modal::new(egui::Id::new(id))
+        .frame(modal_frame().inner_margin(24))
+        .show(ctx, |ui| {
+            ui.set_width(420.);
+            ui.label(egui::RichText::new(title).size(15.).color(theme::gray(236)));
+            ui.add_space(6.);
+            let detail = egui::Label::new(
+                egui::RichText::new(detail)
+                    .size(12.)
+                    .color(theme::gray(150)),
+            );
+            ui.add(if truncated { detail.truncate() } else { detail });
+            ui.add_space(20.);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                for (i, (text, value)) in buttons.iter().enumerate() {
+                    let clicked = if i + 1 == buttons.len() {
+                        primary_button(ui, text).clicked()
+                    } else {
+                        ui.button(*text).clicked()
+                    };
+                    if clicked {
+                        choice = Some(*value);
+                    }
+                }
+            });
+        });
+    choice.or(response.should_close().then_some(dismissed))
+}
+/// "1 photo", "2 photos": `n` with the word for its number.
+pub(super) fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
 /// A form row as in Lightroom's dialogs: a right-aligned label in a fixed
 /// column, then the controls.
 pub(super) fn form_row(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {

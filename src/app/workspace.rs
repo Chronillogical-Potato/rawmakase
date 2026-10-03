@@ -495,13 +495,12 @@ impl Editor {
                     ui.add(egui::Spinner::new().size(11.));
                     ui.small(work);
                 } else {
-                    let library = self.library.as_ref().filter(|l| !l.message.is_empty());
-                    let shown = ui.small(library.map_or(self.status.as_str(), |l| l.message.as_str()));
-                    // A summary (sidecars that could not be read) lists its
-                    // items on hover.
-                    if let Some(detail) = library.and_then(|l| l.message_detail()) {
-                        shown.on_hover_text(detail);
-                    }
+                    let shown = self
+                        .library
+                        .as_ref()
+                        .filter(|l| !l.message.is_empty())
+                        .map_or(self.status.as_str(), |l| l.message.as_str());
+                    status_text(ui, shown, self.message_detail(shown), None);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = ui
@@ -765,24 +764,28 @@ impl Editor {
         }
     }
 
+    /// The items a Library summary (sidecars that could not be read) lists
+    /// on hover, while `message` is that summary.
+    fn message_detail(&self, message: &str) -> Option<&str> {
+        self.library
+            .as_ref()
+            .filter(|l| !l.message.is_empty() && l.message == message)
+            .and_then(|l| l.message_detail())
+    }
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
-                // A Library summary (sidecars that could not be read) lists
-                // its items on hover while it is shown.
-                let detail = self
-                    .library
-                    .as_ref()
-                    .filter(|l| l.message == self.status)
-                    .and_then(|l| l.message_detail().map(String::from));
-                ui.small(self.document.save.message().unwrap_or(&self.status))
-                    .on_hover_text(detail.unwrap_or_else(|| {
-                        if self.view.monitor.is_some() {
-                            "Display: custom ICC (disable compositor ICC conversion)".into()
-                        } else {
-                            "Display: sRGB (compositor may manage the monitor)".into()
-                        }
-                    }));
+                let display = if self.view.monitor.is_some() {
+                    "Display: custom ICC (disable compositor ICC conversion)"
+                } else {
+                    "Display: sRGB (compositor may manage the monitor)"
+                };
+                status_text(
+                    ui,
+                    self.document.save.message().unwrap_or(&self.status),
+                    self.message_detail(&self.status),
+                    Some(display),
+                );
                 if !self.preview.status.is_empty() {
                     ui.separator();
                     ui.small(&self.preview.status);
@@ -943,5 +946,13 @@ fn title_bar_drag(ui: &mut egui::Ui) {
     } else if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
         // AppKit only starts a drag during the original mouse-down.
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+}
+/// A status line showing `text`, with `detail` (a Library summary's items)
+/// or else `hover` on hover.
+fn status_text(ui: &mut egui::Ui, text: &str, detail: Option<&str>, hover: Option<&str>) {
+    let shown = ui.small(text);
+    if let Some(hover) = detail.or(hover) {
+        shown.on_hover_text(hover);
     }
 }

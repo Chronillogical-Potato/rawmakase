@@ -1,12 +1,18 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
+use super::widgets::confirm_modal;
 use super::worker::Event;
 use eframe::egui;
 use std::path::PathBuf;
 
 impl Editor {
+    /// Whether no work in progress stops a catalog change and the open edit
+    /// is saved; it is saved only when nothing is in progress.
+    fn ready_for_catalog(&mut self) -> bool {
+        !self.activity.is_busy() && self.flush()
+    }
     pub(super) fn load_catalog(&mut self, path: PathBuf, ctx: &egui::Context) {
-        if self.activity.is_busy() || !self.flush() {
+        if !self.ready_for_catalog() {
             return;
         }
         if !self.activity.begin_dialog() {
@@ -24,7 +30,7 @@ impl Editor {
         });
     }
     pub(super) fn catalog_dialog(&mut self, kind: CatalogDialog, ctx: &egui::Context) {
-        if self.activity.is_busy() || !self.flush() {
+        if !self.ready_for_catalog() {
             return;
         }
         if !self.activity.begin_dialog() {
@@ -39,8 +45,7 @@ impl Editor {
             let result = (|| -> anyhow::Result<Option<PathBuf>> {
                 Ok(match kind {
                     CatalogDialog::Create => {
-                        let Some(path) = rfd::FileDialog::new()
-                            .add_filter("RAWmakase catalog", &["rawmakase"])
+                        let Some(path) = catalog_file_dialog()
                             .set_file_name("Photos.rawmakase")
                             .save_file()
                         else {
@@ -49,9 +54,7 @@ impl Editor {
                         crate::catalog::Catalog::create(&path)?;
                         Some(path)
                     }
-                    CatalogDialog::Open => rfd::FileDialog::new()
-                        .add_filter("RAWmakase catalog", &["rawmakase"])
-                        .pick_file(),
+                    CatalogDialog::Open => catalog_file_dialog().pick_file(),
                     CatalogDialog::ImportLightroom => {
                         let Some(source) = rfd::FileDialog::new()
                             .add_filter("Lightroom catalog", &["lrcat"])
@@ -59,8 +62,7 @@ impl Editor {
                         else {
                             return Ok(None);
                         };
-                        let Some(destination) = rfd::FileDialog::new()
-                            .add_filter("RAWmakase catalog", &["rawmakase"])
+                        let Some(destination) = catalog_file_dialog()
                             .set_file_name(format!(
                                 "{}.rawmakase",
                                 source.file_stem().unwrap_or_default().to_string_lossy()
@@ -127,9 +129,7 @@ impl Editor {
                                 l.message=format!("Folder relinked. {available} of {} photos are available.",l.photos.len());
                                 if available==0 {l.message.push_str(" No files matched this location; check that the selected folder contains the expected subfolders.");}
                             }
-                            if let Some(summary) = report.summary() {
-                                l.set_message_with_detail(format!("Folder added · {summary}"), report.details());
-                            }
+                            folder_added(&mut l, &report);
                             Box::new(l)
                         })
                         .map_err(|e| format!("{e:#}")),
@@ -168,7 +168,7 @@ impl Editor {
         let Some(folder) = path.parent().map(PathBuf::from) else {
             return;
         };
-        if self.activity.is_busy() || !self.flush() || !self.activity.begin_dialog() {
+        if !self.ready_for_catalog() || !self.activity.begin_dialog() {
             return;
         }
         self.pending_photo = Some((path, true));
@@ -180,12 +180,7 @@ impl Editor {
                 let (_, report) = crate::catalog::Catalog::open(&current)?
                     .add_folder_with(&folder, &crate::catalog::MetadataDefaults::load())?;
                 let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
-                if let Some(summary) = report.summary() {
-                    library.set_message_with_detail(
-                        format!("Folder added · {summary}"),
-                        report.details(),
-                    );
-                }
+                folder_added(&mut library, &report);
                 Ok(library)
             })()
             .map(Box::new)
@@ -253,7 +248,7 @@ impl Editor {
             self.library_mode = false;
             return;
         }
-        if self.activity.is_busy() || !self.flush() {
+        if !self.ready_for_catalog() {
             return;
         }
         if let Some(l) = &mut self.library {
@@ -306,20 +301,23 @@ impl Editor {
     /// new copy starts from what is on screen. In Develop a new copy opens.
     pub(super) fn virtual_copy(&mut self, action: crate::app::library::CopyAction) {
         use crate::app::library::CopyAction;
-        if let CopyAction::Remove(id) = action {
-            self.remove_copy = Some(id);
-            return;
-        }
-        if self.activity.is_busy() || !self.flush() {
-            return;
-        }
-        let Some(library) = &mut self.library else {
-            return;
-        };
         let result = match action {
-            CopyAction::Create(id) => library.create_virtual_copy(id).map(Some),
-            CopyAction::SetMaster(id) => library.set_copy_as_master(id).map(|()| None),
-            CopyAction::Remove(_) => unreachable!(),
+            CopyAction::Remove(id) => {
+                self.remove_copy = Some(id);
+                return;
+            }
+            _ if !self.ready_for_catalog() => return,
+            CopyAction::Create(id) => self
+                .library
+                .as_mut()
+                .map(|l| l.create_virtual_copy(id).map(Some)),
+            CopyAction::SetMaster(id) => self
+                .library
+                .as_mut()
+                .map(|l| l.set_copy_as_master(id).map(|()| None)),
+        };
+        let (Some(result), Some(library)) = (result, &self.library) else {
+            return;
         };
         match result {
             Ok(open) => {
@@ -336,7 +334,6 @@ impl Editor {
     /// Asks before removing a virtual copy, as Lightroom does; a copy shown
     /// in Develop gives way to its master.
     pub(super) fn remove_copy_window(&mut self, ctx: &egui::Context) {
-        use super::widgets::{modal_frame, primary_button};
         let Some(id) = self.remove_copy else {
             return;
         };
@@ -344,42 +341,18 @@ impl Editor {
             self.remove_copy = None;
             return;
         };
-        let mut choice = None;
-        let response = egui::Modal::new(egui::Id::new("remove-virtual-copy"))
-            .frame(modal_frame().inner_margin(24))
-            .show(ctx, |ui| {
-                ui.set_width(420.);
-                ui.label(
-                    egui::RichText::new(format!(
-                        "Remove “{}” of {}?",
-                        photo.copy_name, photo.filename
-                    ))
-                    .size(15.)
-                    .color(super::theme::gray(236)),
-                );
-                ui.add_space(6.);
-                ui.label(
-                    egui::RichText::new(
-                        "Its edit, rating and keywords are removed from the catalog. \
-                         The photo file and its other copies are not affected.",
-                    )
-                    .size(12.)
-                    .color(super::theme::gray(150)),
-                );
-                ui.add_space(20.);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
-                    if ui.button("Cancel").clicked() {
-                        choice = Some(false);
-                    }
-                    // Only a click or the focused button confirms: a stray
-                    // Return must never remove a copy.
-                    if primary_button(ui, "Remove").clicked() {
-                        choice = Some(true);
-                    }
-                });
-            });
-        let Some(remove) = choice.or(response.should_close().then_some(false)) else {
+        // Only a click or the focused button confirms: a stray Return must
+        // never remove a copy.
+        let Some(remove) = confirm_modal(
+            ctx,
+            "remove-virtual-copy",
+            &format!("Remove “{}” of {}?", photo.copy_name, photo.filename),
+            "Its edit, rating and keywords are removed from the catalog. \
+             The photo file and its other copies are not affected.",
+            false,
+            &[("Cancel", false), ("Remove", true)],
+            false,
+        ) else {
             return;
         };
         self.remove_copy = None;
@@ -390,51 +363,30 @@ impl Editor {
     /// Asks before Read Metadata from Files, as Lightroom does: it replaces
     /// the catalog's values, edits included.
     pub(super) fn read_metadata_window(&mut self, ctx: &egui::Context) {
-        use super::widgets::{modal_frame, primary_button};
         let Some(ids) = self.read_metadata.clone() else {
             return;
         };
-        let mut choice = None;
-        let response = egui::Modal::new(egui::Id::new("read-metadata"))
-            .frame(modal_frame().inner_margin(24))
-            .show(ctx, |ui| {
-                ui.set_width(420.);
-                let n = ids.len();
-                ui.label(
-                    egui::RichText::new(if n == 1 {
-                        "Read metadata from the file?".to_string()
-                    } else {
-                        format!("Read metadata from {n} files?")
-                    })
-                    .size(15.)
-                    .color(super::theme::gray(236)),
-                );
-                ui.add_space(6.);
-                ui.label(
-                    egui::RichText::new(
-                        "Replaces title, caption, keywords and other metadata in the \
-                         catalog with the values in the files, including your edits. \
-                         Fields the files don't have are kept. Virtual copies are not read.",
-                    )
-                    .size(12.)
-                    .color(super::theme::gray(150)),
-                );
-                ui.add_space(20.);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
-                    if ui.button("Cancel").clicked() {
-                        choice = Some(false);
-                    }
-                    if primary_button(ui, "Read").clicked() {
-                        choice = Some(true);
-                    }
-                });
-            });
-        let Some(read) = choice.or(response.should_close().then_some(false)) else {
+        let n = ids.len();
+        let title = if n == 1 {
+            "Read metadata from the file?".to_string()
+        } else {
+            format!("Read metadata from {n} files?")
+        };
+        let Some(read) = confirm_modal(
+            ctx,
+            "read-metadata",
+            &title,
+            "Replaces title, caption, keywords and other metadata in the \
+             catalog with the values in the files, including your edits. \
+             Fields the files don't have are kept. Virtual copies are not read.",
+            false,
+            &[("Cancel", false), ("Read", true)],
+            false,
+        ) else {
             return;
         };
         self.read_metadata = None;
-        if !read || self.activity.is_busy() || !self.flush() {
+        if !read || !self.ready_for_catalog() {
             return;
         }
         let Some(library) = &mut self.library else {
@@ -445,7 +397,7 @@ impl Editor {
     }
     /// Removes virtual copy `id` once confirmed.
     pub(super) fn remove_virtual_copy(&mut self, id: i64) {
-        if self.activity.is_busy() || !self.flush() {
+        if !self.ready_for_catalog() {
             return;
         }
         let Some(library) = &mut self.library else {
@@ -471,5 +423,19 @@ impl Editor {
             }
             Err(e) => self.status = format!("Virtual copy not removed: {e:#}"),
         }
+    }
+}
+/// A file dialog for RAWmakase catalogs.
+fn catalog_file_dialog() -> rfd::FileDialog {
+    rfd::FileDialog::new().add_filter("RAWmakase catalog", &["rawmakase"])
+}
+/// Reports the sidecars a folder added could not read, if any, on the
+/// Library's status line.
+fn folder_added(
+    library: &mut crate::app::library::Library,
+    report: &crate::catalog::SidecarReport,
+) {
+    if let Some(summary) = report.summary() {
+        library.set_message_with_detail(format!("Folder added · {summary}"), report.details());
     }
 }

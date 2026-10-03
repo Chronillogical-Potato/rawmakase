@@ -4,6 +4,7 @@
 //! command for the shared undo log, which puts back each photo's rows as they
 //! were, absent ones included.
 use super::{Library, Place};
+use crate::app::widgets::plural;
 use crate::catalog::{MetadataSnapshot, TextField};
 use anyhow::{Result, ensure};
 
@@ -186,10 +187,7 @@ impl Library {
             return Ok(());
         }
         let n = photos.len();
-        self.message = format!(
-            "Reading metadata from {n} {}…",
-            if n == 1 { "file" } else { "files" }
-        );
+        self.message = format!("Reading metadata from {}…", plural(n, "file", "files"));
         self.reread = Some(Reread {
             paths: photos.iter().cloned().collect(),
             reader: super::background::Reader::start(
@@ -262,10 +260,7 @@ impl Library {
         let after = self.catalog.metadata_snapshot(&ids)?;
         let ratings_after = ratings(self);
         let n = ids.len();
-        let mut summary = format!(
-            "Read metadata from {n} {}",
-            if n == 1 { "file" } else { "files" }
-        );
+        let mut summary = format!("Read metadata from {}", plural(n, "file", "files"));
         if let Some(problems) = report.summary() {
             summary.push_str(" · ");
             summary.push_str(&problems);

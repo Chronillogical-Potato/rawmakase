@@ -1,5 +1,5 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
-use super::super::widgets::{form_row, modal_frame, pretty_path, primary_button};
+use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::{Conflict, Editor};
 use crate::app::theme;
 use crate::export::{Destination, Existing, Format, Include, settings::unique};
@@ -8,6 +8,8 @@ use std::{path::Path, sync::atomic::Ordering};
 
 const WIDTH: f32 = 700.;
 const HEIGHT: f32 = 600.;
+/// The name the built-in watermark is listed under.
+const SIMPLE_COPYRIGHT_LABEL: &str = "Simple Copyright Watermark";
 
 fn destination_label(d: Destination) -> &'static str {
     match d {
@@ -243,7 +245,7 @@ impl Editor {
         form_row(ui, "", |ui| {
             ui.checkbox(&mut s.watermark, "Watermark:");
             let label = if s.watermark_name == simple {
-                "Simple Copyright Watermark".to_string()
+                SIMPLE_COPYRIGHT_LABEL.to_string()
             } else {
                 s.watermark_name.clone()
             };
@@ -255,7 +257,7 @@ impl Editor {
                         ui.selectable_value(
                             &mut s.watermark_name,
                             simple.to_string(),
-                            "Simple Copyright Watermark",
+                            SIMPLE_COPYRIGHT_LABEL,
                         );
                         for w in &presets {
                             ui.selectable_value(&mut s.watermark_name, w.name.clone(), &w.name);
@@ -370,40 +372,19 @@ impl Editor {
         let Some(conflict) = self.exports.conflict.clone() else {
             return;
         };
-        let mut choice = None;
-        let response = egui::Modal::new(egui::Id::new("export-conflict"))
-            .frame(modal_frame().inner_margin(24))
-            .show(ctx, |ui| {
-                ui.set_width(420.);
-                ui.label(
-                    egui::RichText::new("A file with this name already exists")
-                        .size(15.)
-                        .color(theme::gray(236)),
-                );
-                ui.add_space(6.);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(conflict.target.display().to_string())
-                            .size(12.)
-                            .color(theme::gray(150)),
-                    )
-                    .truncate(),
-                );
-                ui.add_space(20.);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
-                    if ui.button("Skip").clicked() {
-                        choice = Some(Existing::Skip);
-                    }
-                    if ui.button("Use Unique Name").clicked() {
-                        choice = Some(Existing::Unique);
-                    }
-                    if primary_button(ui, "Overwrite").clicked() {
-                        choice = Some(Existing::Overwrite);
-                    }
-                });
-            });
-        let Some(choice) = choice.or(response.should_close().then_some(Existing::Skip)) else {
+        let Some(choice) = confirm_modal(
+            ctx,
+            "export-conflict",
+            "A file with this name already exists",
+            &conflict.target.display().to_string(),
+            true,
+            &[
+                ("Skip", Existing::Skip),
+                ("Use Unique Name", Existing::Unique),
+                ("Overwrite", Existing::Overwrite),
+            ],
+            Existing::Skip,
+        ) else {
             return;
         };
         self.exports.conflict = None;
