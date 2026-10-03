@@ -1158,6 +1158,9 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
     legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
     assert!(!legacy_on.lens_builtin);
     assert_eq!(legacy_on.missing_lens_profile(&m), None);
+    Ok(())
+}
+#[test]
 fn snapshots_are_named_states_kept_per_photo_and_listed_alphabetically() -> Result<()> {
     use crate::catalog::SnapshotSettings;
     let d = tempfile::tempdir()?;
