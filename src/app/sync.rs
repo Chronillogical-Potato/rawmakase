@@ -186,18 +186,23 @@ fn prepare(
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
+    let mut starting_warnings = Vec::new();
     let raw = crate::raw::Raw::open(&target.path)
         .with_context(|| format!("{} can't be read", target.name))?;
     let metadata = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let (before, export) = match catalog.load_edit(target.id, &target.path)? {
         Some(saved) => (EditBefore::Saved(Box::new(saved.recipe)), saved.export),
-        None => (
-            EditBefore::None {
-                starting: Box::new(starting_edit(catalog, target, &metadata, &profiles)?),
-            },
-            ExportOptions::default(),
-        ),
+        None => {
+            let start = starting_edit(catalog, target, &metadata, &profiles)?;
+            starting_warnings = start.warnings;
+            (
+                EditBefore::None {
+                    starting: Box::new(start.recipe),
+                },
+                ExportOptions::default(),
+            )
+        }
     };
     let transferred = settings_groups::transfer(
         Source {
@@ -211,7 +216,12 @@ fn prepare(
             profiles: &profiles,
         },
     );
-    let notes = transferred.notes;
+    // What its Lightroom edit could not bring along is said, as when it is opened.
+    let mut notes: Vec<String> = starting_warnings
+        .into_iter()
+        .map(|w| format!("Lightroom edit not fully rendered: {w}"))
+        .collect();
+    notes.extend(transferred.notes);
     let mut after = transferred.recipe;
     // Upright's corrections are analysed from each photo; the open photo's editor
     // does it on Paste, and here the photo is developed for it.
@@ -271,16 +281,25 @@ fn starting_edit(
     target: &SyncTarget,
     metadata: &crate::raw::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-) -> Result<Recipe> {
+) -> Result<Starting> {
     if target.start == StartingEdit::Defaults {
-        return Ok(Recipe::with_profiles(metadata, profiles));
+        return Ok(Starting {
+            recipe: Recipe::with_profiles(metadata, profiles),
+            warnings: Vec::new(),
+        });
     }
     let text = catalog
         .lightroom_develop(target.id)?
         .context("Its Lightroom edit is missing")?;
-    let (recipe, _) = crate::catalog::convert_develop(&text, metadata, profiles, None)
+    let (recipe, warnings) = crate::catalog::convert_develop(&text, metadata, profiles, None)
         .context("Its Lightroom edit can't be read")?;
-    Ok(recipe)
+    Ok(Starting { recipe, warnings })
+}
+
+/// The edit a photo starts from, and what its Lightroom edit could not bring along.
+struct Starting {
+    recipe: Recipe,
+    warnings: Vec<String>,
 }
 
 /// Writes one side of a Sync back, in one transaction, keeping each photo's History,
