@@ -156,9 +156,9 @@ fn embedded(file: &Path) -> Result<Option<String>> {
 /// A sidecar's text: UTF-8, or UTF-16 by its byte order mark, as XML allows.
 fn decode(bytes: &[u8]) -> Result<String> {
     let utf16 = |big: bool| -> Result<String> {
-        let units: Vec<u16> = bytes[2..]
-            .as_chunks::<2>()
-            .0
+        let (pairs, rest) = bytes[2..].as_chunks::<2>();
+        anyhow::ensure!(rest.is_empty(), "UTF-16 text cut short");
+        let units: Vec<u16> = pairs
             .iter()
             .map(|c| {
                 if big {
