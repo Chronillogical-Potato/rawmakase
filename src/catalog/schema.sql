@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS local_edits (
     data TEXT NOT NULL
 );
 
+-- A photo's Develop History (see `develop_history`), saved with its edit.
+CREATE TABLE IF NOT EXISTS develop_history (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    data BLOB NOT NULL
+);
+
 -- Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
 CREATE TABLE IF NOT EXISTS bitmaps (
     hash TEXT PRIMARY KEY,

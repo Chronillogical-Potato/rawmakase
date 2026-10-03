@@ -53,7 +53,8 @@ and a failure only finishes its owning task. Worker messages use named fields;
 render stages are enums, independent of user-facing status text. Exports capture
 their recipe before starting, and overwrite confirmation holds the current photo.
 
-Document reset clears its edit history and decoded images together. A frame's
+Document reset clears its edit history and decoded images together; a catalog
+photo's History then comes back from the catalog with its edit. A frame's
 history transaction is bound to the load generation, so navigation during drawing
 cannot record the previous photo's edits against the new photo. Preset-browser
 preferences survive navigation; hover previews and compatibility results do not.

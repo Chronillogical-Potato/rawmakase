@@ -572,6 +572,55 @@ fn catalog_header_keeps_the_recipe_resolved_by_the_loader() -> anyhow::Result<()
 }
 
 #[test]
+fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
+    use worker::LoadedHeader;
+    let dir = tempfile::tempdir()?;
+    let raw = dir.path().join("photo.ARW");
+    std::fs::write(&raw, b"identity fixture")?;
+    let path = dir.path().join("photos.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(dir.path())?;
+    let id = catalog.photos()?[0].id;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let open = |editor: &mut Editor| {
+        editor.document.reset(Some(id));
+        let (generation, _) = editor.load.start();
+        editor
+            .tx
+            .send(Event::Header(Box::new(LoadedHeader {
+                id: generation,
+                path: raw.clone(),
+                metadata: Metadata::default(),
+                recipe: Recipe::default(),
+                export: Default::default(),
+                protected: false,
+                status: "Original".into(),
+            })))
+            .unwrap();
+        editor.events(&ctx);
+    };
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+    open(&mut editor);
+    for exposure in [0.5, 1.] {
+        let before = editor.document.recipe.clone();
+        editor.document.recipe.exposure = exposure;
+        editor.history(before);
+    }
+    assert!(editor.flush());
+    // Another photo, or a restart, starts a new document.
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+    open(&mut editor);
+    assert_eq!(editor.document.recipe.exposure, 1.);
+    assert_eq!(editor.document.history.steps().0.len(), 2);
+    let mut recipe = editor.document.recipe.clone();
+    assert!(editor.document.history.undo(&mut recipe));
+    assert_eq!(recipe.exposure, 0.5);
+    Ok(())
+}
+#[test]
 fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();
     let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);

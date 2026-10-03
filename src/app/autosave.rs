@@ -2,7 +2,11 @@
 //! a catalog commit waits for the disk (fsync), which on a busy disk took long
 //! enough to stall the interface mid-edit. Saves before navigation stay
 //! synchronous, after waiting for the one in flight.
-use crate::{catalog::Catalog, develop::Recipe, export::ExportOptions};
+use crate::{
+    catalog::{Catalog, SavedHistory},
+    develop::Recipe,
+    export::ExportOptions,
+};
 use eframe::egui;
 use std::{
     path::PathBuf,
@@ -17,6 +21,8 @@ pub(super) struct Job {
     pub raw: PathBuf,
     pub recipe: Recipe,
     pub export: ExportOptions,
+    /// Its Develop History, saved in the same transaction.
+    pub history: SavedHistory,
 }
 /// Where the edit was saved, or why it was not.
 pub(super) type Done = Result<PathBuf, String>;
@@ -96,6 +102,12 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
         *catalog = Some(Catalog::open(path)?);
     }
     let c = catalog.as_ref().expect("opened above");
-    c.save_edit(job.photo, &job.raw, &job.recipe, &job.export)?;
+    c.save_edit(
+        job.photo,
+        &job.raw,
+        &job.recipe,
+        &job.export,
+        job.history.update(),
+    )?;
     Ok(path.clone())
 }

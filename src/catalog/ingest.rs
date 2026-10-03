@@ -167,6 +167,12 @@ impl Catalog {
         for bitmap in bitmaps {
             self.put_bitmap(&bitmap)?;
         }
-        self.save_edit(id, file, &sidecar.recipe, &sidecar.export)
+        self.save_edit(
+            id,
+            file,
+            &sidecar.recipe,
+            &sidecar.export,
+            super::HistoryUpdate::Keep,
+        )
     }
 }

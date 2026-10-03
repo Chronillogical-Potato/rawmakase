@@ -89,7 +89,13 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     let mut catalog = Catalog::create(&dir.path().join("photos.rawmakase"))?;
     catalog.add_folder(dir.path())?;
     let id = catalog.photos()?[0].id;
-    catalog.save_edit(id, &raw, &recipe, &ExportOptions::default())?;
+    catalog.save_edit(
+        id,
+        &raw,
+        &recipe,
+        &ExportOptions::default(),
+        rawmakase::catalog::HistoryUpdate::Keep,
+    )?;
     for options in [
         ExportOptions {
             quality: 0,
@@ -106,7 +112,17 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     ] {
         assert!(storage::save(&raw, &recipe, &options).is_err());
         assert_eq!(fs::read(&sidecar)?, original);
-        assert!(catalog.save_edit(id, &raw, &recipe, &options).is_err());
+        assert!(
+            catalog
+                .save_edit(
+                    id,
+                    &raw,
+                    &recipe,
+                    &options,
+                    rawmakase::catalog::HistoryUpdate::Keep
+                )
+                .is_err()
+        );
         let saved = catalog.load_edit(id, &raw)?.unwrap();
         assert_eq!(saved.export.quality, 92);
         assert_eq!(saved.export.max_edge, 0);
@@ -120,7 +136,13 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     assert!(catalog.load_edit(id, &raw).is_err());
     assert!(
         catalog
-            .save_edit(id, &raw, &recipe, &ExportOptions::default())
+            .save_edit(
+                id,
+                &raw,
+                &recipe,
+                &ExportOptions::default(),
+                rawmakase::catalog::HistoryUpdate::Keep
+            )
             .is_err()
     );
     let preserved: String = db.query_row(

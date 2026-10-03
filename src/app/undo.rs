@@ -246,7 +246,13 @@ impl Editor {
                 };
                 let saved = library.catalog.load_edit(id, &path).and_then(|edit| {
                     let export = edit.map(|e| e.export).unwrap_or_default();
-                    library.catalog.save_edit(id, &path, target, &export)
+                    library.catalog.save_edit(
+                        id,
+                        &path,
+                        target,
+                        &export,
+                        crate::catalog::HistoryUpdate::Keep,
+                    )
                 });
                 if let Err(e) = saved {
                     self.status = format!("{verb} failed: {e}");

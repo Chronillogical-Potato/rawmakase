@@ -33,6 +33,11 @@ impl Catalog {
             "INSERT INTO local_edits(photo,data) SELECT ?,data FROM local_edits WHERE photo=?",
             [copy, id],
         )?;
+        // The copy starts with the History of the edit it copies, then goes its own way.
+        tx.execute(
+            "INSERT INTO develop_history(photo,data) SELECT ?,data FROM develop_history WHERE photo=?",
+            [copy, id],
+        )?;
         tx.execute(
             "INSERT INTO photo_keywords(photo,keyword) SELECT ?,keyword FROM photo_keywords WHERE photo=?",
             [copy, id],
