@@ -2,7 +2,7 @@
 use super::super::widgets::{form_row, modal_frame, pretty_path, primary_button};
 use super::{Conflict, Editor};
 use crate::app::theme;
-use crate::export::{Destination, Existing, Format, settings::unique};
+use crate::export::{Destination, Existing, Format, Include, settings::unique};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -293,22 +293,56 @@ impl Editor {
         }
         let s = &mut self.exports.draft;
         section(ui, "Metadata");
-        form_row(ui, "", |ui| {
-            ui.checkbox(&mut s.capture, "Camera and capture info (EXIF)");
+        form_row(ui, "Include", |ui| {
+            egui::ComboBox::from_id_salt("export-include")
+                .width(260.)
+                .selected_text(s.include.label())
+                .show_ui(ui, |ui| {
+                    for include in Include::ALL {
+                        if include == Include::Custom {
+                            ui.separator();
+                        }
+                        ui.selectable_value(&mut s.include, include, include.label());
+                    }
+                });
         });
-        form_row(ui, "", |ui| {
-            ui.add_space(24.);
-            ui.add_enabled(
-                s.capture,
-                egui::Checkbox::new(&mut s.location, "Include location info"),
-            );
-        });
-        form_row(ui, "", |ui| {
-            ui.checkbox(&mut s.develop, "Develop settings (Camera Raw XMP)");
-        });
-        form_row(ui, "", |ui| {
-            ui.checkbox(&mut s.descriptive, "Rating, color label and keywords");
-        });
+        // Four rows in every mode, so nothing below moves.
+        if s.include == Include::Custom {
+            form_row(ui, "", |ui| {
+                ui.checkbox(&mut s.capture, "Camera and capture info (EXIF)");
+            });
+            form_row(ui, "", |ui| {
+                ui.add_space(24.);
+                ui.add_enabled(
+                    s.capture,
+                    egui::Checkbox::new(&mut s.location, "Include location info"),
+                );
+            });
+            form_row(ui, "", |ui| {
+                ui.checkbox(&mut s.develop, "Develop settings (Camera Raw XMP)");
+            });
+            form_row(ui, "", |ui| {
+                ui.checkbox(
+                    &mut s.descriptive,
+                    "Title, caption, creator, copyright, rating, label and keywords",
+                );
+            });
+        } else {
+            let forced = s.include.removes_location();
+            let mut remove = s.remove_location || forced;
+            form_row(ui, "", |ui| {
+                ui.add_enabled(
+                    !forced,
+                    egui::Checkbox::new(&mut remove, "Remove Location Info"),
+                );
+            });
+            if !forced {
+                s.remove_location = remove;
+            }
+            for _ in 0..3 {
+                form_row(ui, "", |_| {});
+            }
+        }
         ui.add_space(8.);
         if choose {
             self.choose_export_folder(ui.ctx());

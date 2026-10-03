@@ -742,3 +742,47 @@ fn reopening_a_catalog_adds_the_tables_a_newer_release_needs() -> Result<()> {
     assert!(cat.load_edit(id, &photo)?.is_some());
     Ok(())
 }
+#[test]
+fn lightroom_keyword_export_options_are_imported_and_backfilled() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("keywords.lrcat");
+    fixture(&source)?;
+    {
+        let db = Connection::open(&source)?;
+        db.execute_batch(
+            "ALTER TABLE AgLibraryKeyword ADD COLUMN includeOnExport INTEGER NOT NULL DEFAULT 1;
+             ALTER TABLE AgLibraryKeyword ADD COLUMN includeParents INTEGER NOT NULL DEFAULT 1;
+             UPDATE AgLibraryKeyword SET includeOnExport=0 WHERE id_local=60;
+             INSERT INTO AgLibraryKeyword VALUES(61,'Old Town',60,1,1),(62,'Square',61,1,0);
+             INSERT INTO AgLibraryKeywordImage VALUES(40,62);",
+        )?;
+    }
+    let destination = d.path().join("keywords.rawmakase");
+    import_lightroom(&source, &destination)?;
+    let mut cat = Catalog::open(&destination)?;
+    let exported = |cat: &Catalog| -> Result<Vec<(Vec<String>, Vec<bool>)>> {
+        Ok(cat
+            .keywords(40)?
+            .into_iter()
+            .map(|k| (k.path, k.exported))
+            .collect())
+    };
+    let expected = vec![
+        (vec!["City".to_string()], vec![false]),
+        (
+            vec!["City".to_string(), "Old Town".into(), "Square".into()],
+            vec![false, false, true],
+        ),
+    ];
+    assert_eq!(exported(&cat)?, expected);
+    // A catalog imported before the options were kept gets them once.
+    cat.db.execute_batch(
+        "DELETE FROM keyword_export;
+         DELETE FROM meta WHERE key='lightroom_keyword_export_backfilled';",
+    )?;
+    assert!(exported(&cat)?.iter().all(|(_, e)| e.iter().all(|x| *x)));
+    assert_eq!(cat.backfill_keyword_export()?, 2);
+    assert_eq!(cat.backfill_keyword_export()?, 0);
+    assert_eq!(exported(&cat)?, expected);
+    Ok(())
+}

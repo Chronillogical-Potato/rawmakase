@@ -40,6 +40,43 @@ pub enum Format {
     Tiff,
 }
 
+/// Lightroom's Metadata "Include" choice, or Custom: the four switches
+/// earlier releases had, which settings saved by them become.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Include {
+    CopyrightOnly,
+    CopyrightAndContact,
+    AllExceptCameraAndCameraRaw,
+    AllExceptCameraRaw,
+    All,
+    #[default]
+    Custom,
+}
+impl Include {
+    pub const ALL: [Self; 6] = [
+        Self::CopyrightOnly,
+        Self::CopyrightAndContact,
+        Self::AllExceptCameraRaw,
+        Self::AllExceptCameraAndCameraRaw,
+        Self::All,
+        Self::Custom,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CopyrightOnly => "Copyright Only",
+            Self::CopyrightAndContact => "Copyright & Contact Info Only",
+            Self::AllExceptCameraAndCameraRaw => "All Except Camera & Camera Raw Info",
+            Self::AllExceptCameraRaw => "All Except Camera Raw Info",
+            Self::All => "All Metadata",
+            Self::Custom => "Custom",
+        }
+    }
+    /// Lightroom always leaves the location out of these.
+    pub fn removes_location(self) -> bool {
+        matches!(self, Self::CopyrightOnly | Self::CopyrightAndContact)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExportSettings {
@@ -61,8 +98,13 @@ pub struct ExportSettings {
     pub location: bool,
     /// The edit as Camera Raw settings (XMP).
     pub develop: bool,
-    /// Rating, color label and keywords (XMP).
+    /// Rating, color label, keywords, and the title, caption, creator and
+    /// copyright set in RAWmakase (XMP, and EXIF with `capture`).
     pub descriptive: bool,
+    /// Which metadata goes in; the four switches above apply to Custom.
+    pub include: Include,
+    /// Lightroom's Remove Location Info, for the modes other than Custom.
+    pub remove_location: bool,
     /// Lightroom's Watermarking: whether to, and which: a preset's name or
     /// the Simple Copyright Watermark.
     pub watermark: bool,
@@ -88,6 +130,8 @@ impl Default for ExportSettings {
             location: true,
             develop: true,
             descriptive: true,
+            include: Include::Custom,
+            remove_location: false,
             watermark: false,
             watermark_name: crate::watermark::SIMPLE_COPYRIGHT.into(),
         }
@@ -239,6 +283,8 @@ mod tests {
         let old: ExportSettings = serde_json::from_str("{\"quality\": 80}").unwrap();
         assert_eq!(old.quality, 80);
         assert!(old.capture && old.develop);
+        // Settings saved before the Include popup keep their switches.
+        assert_eq!(old.include, Include::Custom);
     }
     #[test]
     fn unique_names_count_up_from_two() -> anyhow::Result<()> {
