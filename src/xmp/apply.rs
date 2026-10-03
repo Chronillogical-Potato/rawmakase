@@ -87,6 +87,8 @@ const METADATA: &[&str] = &[
     "CompatibleVersion",
     "AlreadyApplied",
     "RawFileName",
+    // Marks a preset made in RAWmakase, which it may update, rename or delete.
+    "RAWmakasePreset",
 ];
 impl Preset {
     /// Apply to a private recipe, publishing only after every stage validates.

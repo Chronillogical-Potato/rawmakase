@@ -33,8 +33,14 @@ impl Default for UserPresets {
 
 impl UserPresets {
     /// Whether `preset` was made in RAWmakase, so it may be changed here.
+    /// Only files RAWmakase wrote count: they carry its marker, so a preset copied
+    /// into the folder from elsewhere is never updated or deleted here.
     pub fn owns(&self, preset: &Preset) -> bool {
         preset.path.starts_with(&self.dir)
+            && preset
+                .settings
+                .get("RAWmakasePreset")
+                .is_some_and(|v| v == "1")
     }
     /// Saves a new preset of `r`'s `groups`; returns its file.
     pub fn create(
@@ -85,8 +91,13 @@ impl UserPresets {
         );
         let path = self.file_for(&info)?;
         let renamed = text.replacen(&old, &element(&info.name), 1);
-        if path == existing.path {
-            write(&path, Replace::Overwrite, &renamed)?;
+        // The same file whatever the case of its letters, as on macOS and Windows:
+        // write it in place, then let the rename fix the case.
+        let same_file =
+            path.to_string_lossy().to_lowercase() == existing.path.to_string_lossy().to_lowercase();
+        if same_file {
+            write(&existing.path, Replace::Overwrite, &renamed)?;
+            std::fs::rename(&existing.path, &path)?;
         } else {
             write(&path, Replace::NoClobber, &renamed).with_context(|| {
                 format!("A preset named {} is already in {}", info.name, info.group)
@@ -103,18 +114,36 @@ impl UserPresets {
     }
     /// `dir/<group>/<name>.xmp`, with characters file systems refuse replaced.
     fn file_for(&self, info: &PresetInfo) -> Result<PathBuf> {
+        // Characters and names Windows, macOS or Linux refuse in a file name.
         let clean = |s: &str| -> String {
-            s.chars()
+            let name: String = s
+                .chars()
                 .map(|c| {
-                    if matches!(c, '/' | '\\' | ':' | '\0') {
+                    if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                        || c.is_control()
+                    {
                         '-'
                     } else {
                         c
                     }
                 })
-                .collect::<String>()
-                .trim_start_matches('.')
-                .to_string()
+                .collect();
+            let name = name.trim_start_matches('.').trim_end_matches(['.', ' ']);
+            let reserved = ["CON", "PRN", "AUX", "NUL"].iter().any(|r| {
+                name.split('.')
+                    .next()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(r))
+            }) || ["COM", "LPT"].iter().any(|r| {
+                let stem = name.split('.').next().unwrap_or("");
+                stem.len() == 4
+                    && stem[..3].eq_ignore_ascii_case(r)
+                    && stem.as_bytes()[3].is_ascii_digit()
+            });
+            if reserved {
+                format!("_{name}")
+            } else {
+                name.to_string()
+            }
         };
         let group = match clean(&info.group) {
             g if g.is_empty() => "User Presets".to_string(),
@@ -237,6 +266,25 @@ mod tests {
         assert_eq!(presets[0].settings["UUID"], info.uuid);
         user.delete(&presets[0])?;
         assert!(library(&user.dir).presets.is_empty());
+        // A case-only rename keeps the one file.
+        let created = user.create(&r, &PresetInfo::new("lower", "Mine"), &groups)?;
+        let lower = library(&user.dir).presets.remove(0);
+        let upper = user.rename(&lower, "Lower")?;
+        assert_eq!(library(&user.dir).presets.len(), 1);
+        assert_eq!(library(&user.dir).presets[0].name, "Lower");
+        assert_ne!(created, upper);
+        user.delete(&library(&user.dir).presets[0])?;
+        // Windows-unsafe names are made safe.
+        let odd = user.create(&r, &PresetInfo::new("x? <b>.", "a|b"), &groups)?;
+        assert_eq!(odd, user.dir.join("a-b").join("x- -b-.xmp"));
+        let reserved = user.create(&r, &PresetInfo::new("CON", "a|b"), &groups)?;
+        assert_eq!(reserved, user.dir.join("a-b").join("_CON.xmp"));
+        // A file copied into the folder from elsewhere is not ours to change.
+        let foreign = crate::xmp::Preset {
+            settings: Default::default(),
+            ..library(&user.dir).presets[0].clone()
+        };
+        assert!(!user.owns(&foreign));
         // Presets that aren't ours are left alone.
         let elsewhere = crate::xmp::Preset {
             path: d.path().join("Imported").join("x.xmp"),

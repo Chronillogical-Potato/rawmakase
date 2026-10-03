@@ -15,9 +15,10 @@ pub(super) enum PresetAction {
     Delete(usize),
 }
 
-/// A preset being renamed: its place in the library and the name being typed.
+/// A preset being renamed: its file, which stays put while the library reloads,
+/// and the name being typed.
 pub(super) struct PresetRename {
-    index: usize,
+    path: std::path::PathBuf,
     name: String,
 }
 
@@ -33,7 +34,16 @@ impl Editor {
     pub(super) fn create_preset(&mut self, form: &PresetForm, groups: &GroupSelection) {
         self.create_preset_in(&UserPresets::default(), form, groups);
     }
+    /// A photo is open and loaded, so its settings are the ones shown, not the
+    /// defaults a document holds while the next photo loads.
+    fn settings_ready(&self) -> bool {
+        self.document.full().is_some() && !self.load.is_running()
+    }
     fn create_preset_in(&mut self, user: &UserPresets, form: &PresetForm, groups: &GroupSelection) {
+        if !self.settings_ready() {
+            self.status = "Preset not created: no photo is open".into();
+            return;
+        }
         let info = PresetInfo::new(&form.name, &form.group);
         match user.create(&self.document.recipe, &info, groups) {
             Ok(_) => {
@@ -48,6 +58,10 @@ impl Editor {
         let library = self.presets.library.clone();
         let user = UserPresets::default();
         let result = match action {
+            PresetAction::Update(_) if !self.settings_ready() => {
+                self.status = "Preset not updated: no photo is open".into();
+                return;
+            }
             PresetAction::Update(i) => library.presets.get(i).map(|p| {
                 user.update(p, &self.document.recipe)
                     .map(|()| format!("Preset {} updated", p.name))
@@ -59,7 +73,7 @@ impl Editor {
             PresetAction::StartRename(i) => {
                 if let Some(p) = library.presets.get(i) {
                     self.preset_rename = Some(PresetRename {
-                        index: i,
+                        path: p.path.clone(),
                         name: p.name.clone(),
                     });
                 }
@@ -121,11 +135,20 @@ impl Editor {
             return;
         }
         let library = self.presets.library.clone();
-        let Some(preset) = library.presets.get(rename.index) else {
+        let Some(preset) = library.presets.iter().find(|p| p.path == rename.path) else {
             return;
         };
         match UserPresets::default().rename(preset, &rename.name) {
-            Ok(_) => {
+            Ok(path) => {
+                // A favorite follows the preset to its new file.
+                let old = preset.id.clone();
+                if self.presets.favorites.remove(&old) {
+                    self.presets
+                        .favorites
+                        .insert(path.to_string_lossy().to_string());
+                    self.presets.revision += 1;
+                    let _ = crate::presets::save_favorites(&self.presets.favorites);
+                }
                 self.status = format!("Preset renamed to {}", rename.name.trim());
                 self.reload_presets(ctx);
             }
@@ -147,13 +170,27 @@ mod tests {
         let user = UserPresets {
             dir: d.path().join("User Presets"),
         };
-        e.document.recipe.exposure = 0.7;
-        let mut groups = GroupSelection::none();
-        groups.set(SettingGroup::Exposure, GroupInclusion::Included);
+        // Without a loaded photo there is nothing to save.
         let form = PresetForm {
             name: "Bright".into(),
             group: "Mine".into(),
         };
+        e.create_preset_in(&user, &form, &GroupSelection::all());
+        assert!(e.status.contains("no photo"), "{}", e.status);
+        e.document
+            .set_image(std::sync::Arc::new(crate::raw::CameraImage {
+                recovered: Default::default(),
+                width: 4,
+                height: 4,
+                pixels: vec![[0.1; 3]; 16],
+                metadata: Default::default(),
+                fast: false,
+                scale_factor: 1.,
+                scale_clipped: 0,
+            }));
+        e.document.recipe.exposure = 0.7;
+        let mut groups = GroupSelection::none();
+        groups.set(SettingGroup::Exposure, GroupInclusion::Included);
         e.create_preset_in(&user, &form, &groups);
         let path = user.dir.join("Mine/Bright.xmp");
         let preset = crate::xmp::parse(&path, &std::fs::read_to_string(&path).unwrap()).unwrap();

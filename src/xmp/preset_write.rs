@@ -63,6 +63,7 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         ("Copyright", ""),
         ("ContactInfo", ""),
         ("Version", "15.4"),
+        ("RAWmakasePreset", "1"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -73,6 +74,16 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             .into_iter()
             .filter(|(key, _)| group_of_key(key).is_some_and(|g| groups.contains(g))),
     );
+    // Each chosen panel's switch, on or off, so applying the preset also turns its
+    // panel back on where a photo had it off.
+    for panel in crate::develop::panels::Panel::ALL {
+        let key = panel.lightroom_keys()[0];
+        if groups.groups().any(|g| g.panel() == Some(panel))
+            && !attributes.iter().any(|(k, _)| k == key)
+        {
+            attributes.push((key.to_string(), "True".into()));
+        }
+    }
     // Written once, after the settings, as Lightroom does.
     attributes.push(("HasSettings".into(), "True".into()));
     let mut out = format!("  <rdf:Description rdf:about=\"\"\n    xmlns:crs=\"{CRS}\"");
@@ -260,6 +271,12 @@ mod tests {
         )?
         .apply(&Recipe::default(), &m, &[], None)?;
         assert!(all.effects.monochrome);
+        // A chosen panel's switch is written either way, so applying turns it on.
+        let mut grain = GroupSelection::none();
+        grain.set(SettingGroup::Grain, GroupInclusion::Included);
+        let text = preset(&Recipe::default(), &info, &grain);
+        assert!(text.contains(r#"crs:EnableEffects="True""#), "{text}");
+        assert!(!text.contains("crs:EnableDetail"));
         assert_eq!(
             all.panels.state(crate::develop::panels::Panel::Effects),
             crate::develop::panels::PanelState::Off
