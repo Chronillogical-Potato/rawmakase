@@ -656,6 +656,19 @@ impl Editor {
                         view.selected_curve,
                     );
                 });
+                // Lightroom's Refine Saturation, under the RGB point curve it acts on;
+                // the channel curves keep the same height so nothing below moves.
+                subheading(ui, "Refine");
+                // Camera Raw renders 101–200 as 100: shown there, and kept as imported
+                // until the slider is moved.
+                let mut shown = r.curve_saturation.min(1.);
+                let before = shown;
+                ui.add_enabled_ui(view.selected_curve == 0, |ui| {
+                    slider(ui, "Saturation", &mut shown, 0. ..=1., 1.);
+                });
+                if shown != before {
+                    r.curve_saturation = shown;
+                }
             }
             subheading(ui, "Levels");
             slider(
@@ -1005,6 +1018,13 @@ impl Editor {
                 {
                     import_folder = Some(ImportKind::LensProfiles);
                 }
+            });
+            // Lightroom's Manual tab: Distortion, then Defringe and Vignetting.
+            subheading(ui, "Distortion");
+            ui.push_id("manual-distortion", |ui| {
+                ui.add_enabled_ui(r.engine >= 4, |ui| {
+                    slider(ui, "Amount", &mut r.lens_manual_distortion, -1. ..=1., 0.);
+                });
             });
             let row = subheading(ui, "Defringe");
             // The Fringe Color Selector, at the row's far left as White Balance's.
