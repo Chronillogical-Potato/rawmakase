@@ -52,6 +52,13 @@ impl Editor {
                 path,
                 cancel: self.prefetch_cancel.clone(),
             });
+        // The photo being left is Paste from Previous's source; opening the same photo
+        // again (as a new demosaic setting does) leaves Previous as it was.
+        let another =
+            self.document.catalog_photo != photo || self.document.path.as_ref() != Some(&path);
+        if another && let Some(settings) = self.current_settings() {
+            self.previous_settings = Some(settings);
+        }
         self.document.reset(photo);
         let (id, cancel) = self.load.start();
         self.preview.clear_document();

@@ -19,6 +19,7 @@ pub mod panels;
 mod pipeline;
 mod preview_renderer;
 mod pyramid;
+pub mod settings_groups;
 pub mod upright;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;

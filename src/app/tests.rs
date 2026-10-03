@@ -1370,9 +1370,17 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     let analysed = e.document.recipe.clone();
     e.upright_ready(generation, &analysed, Ok(vec![identity; 5]));
     assert_eq!(e.document.recipe.upright.corrections[5], guided);
-    // Pasted onto another photo, the mode comes along but not the corrections.
+    // Pasted onto another photo, the mode comes along but not the corrections: that
+    // photo keeps its own, here none yet, for the editor to analyse.
     e.document.recipe.upright.mode = UprightMode::Vertical;
+    e.document.metadata = Some(Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    });
     e.copy_settings();
+    e.document.recipe = Recipe::default();
     e.paste_settings();
     assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
     assert!(e.document.recipe.upright.corrections.is_empty());
@@ -1946,4 +1954,48 @@ fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
         step,
         Some(("Defringe Green Hue".to_string(), "40 / 60".to_string()))
     );
+}
+#[test]
+fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_photo() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let camera = |wb: [f32; 3]| Metadata {
+        wb,
+        daylight_wb: wb,
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let (first, second) = (camera([2., 1., 1.8]), camera([2.6, 1., 1.3]));
+    // A photo from one camera, its settings copied.
+    editor.document.metadata = Some(first.clone());
+    let mut copied = Recipe {
+        temperature: 4200.,
+        tint: 8.,
+        exposure: 0.4,
+        ..Default::default()
+    };
+    copied.update_wb(&first);
+    editor.document.recipe = copied.clone();
+    editor.copy_settings();
+    // Pasted onto a photo from another camera.
+    editor.document.metadata = Some(second.clone());
+    editor.document.recipe = Recipe::default();
+    editor.paste_settings();
+    let pasted = editor.document.recipe.clone();
+    assert_eq!((pasted.temperature, pasted.exposure), (4200., 0.4));
+    let mut expected = pasted.clone();
+    expected.update_wb(&second);
+    assert_eq!(pasted.wb, expected.wb);
+    assert_ne!(pasted.wb, copied.wb);
+    // Moving to another photo makes this one's settings the Previous; opening that
+    // photo again leaves it.
+    let other = std::path::PathBuf::from("missing-previous-fixture.ARW");
+    editor.open_raw(other.clone(), None);
+    editor.document.metadata = Some(first);
+    editor.document.path = Some(other.clone());
+    editor.document.recipe.exposure = -1.;
+    editor.open_raw(other, None);
+    editor.document.metadata = Some(second);
+    editor.paste_previous();
+    assert_eq!(editor.document.recipe.exposure, 0.4);
 }

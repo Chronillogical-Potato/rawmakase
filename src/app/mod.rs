@@ -7,10 +7,9 @@
 //!
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
-use crate::{
-    app::worker::{Event, Latest, LoadJob, RenderJob},
-    develop::Recipe,
-};
+use crate::app::worker::{Event, Latest, LoadJob, RenderJob};
+#[cfg(test)]
+use crate::develop::Recipe;
 use eframe::egui::{self, Vec2};
 use std::{
     path::PathBuf,
@@ -32,7 +31,9 @@ pub struct Editor {
     rx: Receiver<Event>,
     loader: Latest<LoadJob>,
     renderer: Latest<RenderJob>,
-    clipboard: Option<Recipe>,
+    clipboard: Option<settings_transfer::Clipboard>,
+    /// The settings of the photo open before this one, for Paste from Previous.
+    previous_settings: Option<settings_transfer::Settings>,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
@@ -188,6 +189,7 @@ impl Editor {
             loader,
             renderer,
             clipboard: None,
+            previous_settings: None,
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
@@ -410,6 +412,7 @@ mod autosave;
 mod save_state;
 
 mod editing;
+mod settings_transfer;
 mod shortcuts;
 mod theme;
 mod toolbar;

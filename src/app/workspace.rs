@@ -656,6 +656,7 @@ impl Editor {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
             let (mut copy, mut paste, mut reset) = (false, false, false);
+            let mut previous = false;
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -670,6 +671,15 @@ impl Editor {
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::V) {
                     paste = true;
+                }
+                // Lightroom's Paste Settings from Previous. Option changes the typed
+                // letter on macOS, so match the physical key too.
+                let v = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
+                        if *key == egui::Key::V || *physical_key == Some(egui::Key::V))
+                });
+                if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
+                    previous = true;
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
@@ -768,6 +778,9 @@ impl Editor {
             }
             if paste {
                 self.paste_settings();
+            }
+            if previous {
+                self.paste_previous();
             }
         }
     }
