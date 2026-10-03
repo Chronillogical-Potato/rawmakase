@@ -1103,7 +1103,7 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
     // finishes.
     let mut time = 0.;
     let strip = std::cell::Cell::new(None);
-    let mut frames = |library: &mut Library, current: Option<i64>, in_library: bool| {
+    let mut frames = |library: &mut Library, current: Option<i64>, module: Module| {
         for _ in 0..3 {
             time += 1.;
             let mut output = ctx.run_ui(
@@ -1117,11 +1117,11 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
                 },
                 |ui| {
                     // As `filmstrip_panel` draws it, noting the scroll id.
-                    egui::Panel::bottom("filmstrip")
+                    egui::Panel::bottom(super::filmstrip::ID)
                         .exact_size(super::filmstrip::HEIGHT)
                         .show(ui, |ui| {
                             strip.set(Some(ui.make_persistent_id(egui::IdSalt::new("filmstrip"))));
-                            library.filmstrip(ui, current, in_library);
+                            library.filmstrip(ui, current, module);
                         });
                 },
             );
@@ -1130,26 +1130,26 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
         egui::scroll_area::State::load(&ctx, strip.get().unwrap()).map_or(0., |s| s.offset.x)
     };
     // Nothing selected: the strip still draws, at the start.
-    assert_eq!(frames(&mut library, None, true), 0.);
+    assert_eq!(frames(&mut library, None, Module::Library), 0.);
     // A photo shown off the end is brought into view.
-    let revealed = frames(&mut library, Some(last), true);
+    let revealed = frames(&mut library, Some(last), Module::Library);
     assert!(revealed > 0.);
     // Develop, on the same photo, shows the same strip where it was.
-    assert_eq!(frames(&mut library, Some(last), false), revealed);
+    assert_eq!(frames(&mut library, Some(last), Module::Develop), revealed);
     // Scrolled back to the start by hand, it stays there across views
     // while the photo shown is the same.
     let id = strip.get().unwrap();
     let mut state = egui::scroll_area::State::load(&ctx, id).unwrap();
     state.offset.x = 0.;
     state.store(&ctx, id);
-    assert_eq!(frames(&mut library, Some(last), true), 0.);
-    assert_eq!(frames(&mut library, Some(last), false), 0.);
+    assert_eq!(frames(&mut library, Some(last), Module::Library), 0.);
+    assert_eq!(frames(&mut library, Some(last), Module::Develop), 0.);
     // Another photo is brought into view.
-    assert!(frames(&mut library, Some(ids[38]), true) > 0.);
+    assert!(frames(&mut library, Some(ids[38]), Module::Library) > 0.);
     // A sort that moves the photo shown brings it back into view.
     library.filters.reverse = true;
     library.filter();
-    assert!(frames(&mut library, Some(ids[38]), true) < revealed);
+    assert!(frames(&mut library, Some(ids[38]), Module::Library) < revealed);
     Ok(())
 }
 #[test]
@@ -1160,7 +1160,7 @@ fn the_filmstrip_follows_a_grid_click_made_after_it_was_drawn() -> Result<()> {
     library.select(Some(ids[0]));
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         let active = library.selected();
-        library.filmstrip_panel(ui, active, true);
+        library.filmstrip_panel(ui, active, Module::Library);
     });
     output.textures_delta.clear();
     assert!(!library.filmstrip_behind());
@@ -1309,7 +1309,7 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
             |ui| {
                 // The filmstrip below, as the workspace draws it.
                 let active = library.selected();
-                library.filmstrip_panel(ui, active, true);
+                library.filmstrip_panel(ui, active, Module::Library);
                 library.grid(ui, zoom);
             },
         );

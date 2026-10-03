@@ -3,7 +3,7 @@
 //! width and scroll position as the views change; what a click does is up
 //! to the view shown.
 use super::grid::filter_caption;
-use super::selection::Mark;
+use super::selection::{Mark, Selection};
 use super::views::View;
 use super::{Action, Library, cell};
 use crate::app::theme;
@@ -12,6 +12,36 @@ use eframe::egui::{self, Color32, Vec2};
 
 /// The strip's height, the same in every view.
 pub const HEIGHT: f32 = 128.;
+/// The id of the strip's panel; its scroll area is salted the same way.
+/// Every view draws the one panel, so the strip keeps its scroll position.
+pub(super) const ID: &str = "filmstrip";
+
+/// The module the strip is shown in. The Library marks the whole selection
+/// and lets the view shown take a click; Develop marks the photo it has open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Module {
+    Library,
+    Develop,
+}
+
+/// What happened in the strip this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Outcome {
+    pub pick: Option<Pick>,
+    /// A rating, flag or label was changed from the strip.
+    pub metadata_changed: bool,
+}
+
+/// The strip's own state, beyond the scroll offset egui keeps.
+#[derive(Debug, Default)]
+pub(super) struct State {
+    /// The photo last brought into view, and where it was then in
+    /// `visible`: the strip scrolls again only when either changes.
+    revealed: Option<(i64, usize)>,
+    /// The selection the strip was last drawn with, to notice a view drawn
+    /// after it changing the selection.
+    drawn: Selection,
+}
 
 /// A photo chosen in the filmstrip: clicked, or opened from its menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,46 +51,56 @@ pub enum Pick {
 }
 
 impl Library {
+    /// The Library's strip: brings the views up to date, draws the strip
+    /// with the active photo, and carries out a click as the view shown
+    /// takes it. Call before the side panels, so it spans the window.
+    pub fn library_filmstrip(&mut self, ui: &mut egui::Ui) -> Action {
+        self.prepare(ui.ctx());
+        let active = self.selection.active;
+        match self.filmstrip_panel(ui, active, Module::Library).pick {
+            Some(pick) => self.filmstrip_pick(pick, ui.input(|i| i.modifiers)),
+            None => Action::None,
+        }
+    }
     /// The filmstrip's panel, at the bottom of the window. One panel and one
     /// scroll area serve every view, so the strip stays where it was when
-    /// they change. `current` is the photo shown (Develop's, or the active
-    /// one); `library` marks the selection as the grid does.
+    /// they change. `current` is the photo shown: Develop's, or the active
+    /// one.
     pub fn filmstrip_panel(
         &mut self,
         ui: &mut egui::Ui,
         current: Option<i64>,
-        library: bool,
-    ) -> (Option<Pick>, bool) {
-        let mut out = (None, false);
-        egui::Panel::bottom("filmstrip")
+        module: Module,
+    ) -> Outcome {
+        egui::Panel::bottom(ID)
             .exact_size(HEIGHT)
             .frame(egui::Frame::new().fill(theme::gray(26)))
-            .show(ui, |ui| out = self.filmstrip(ui, current, library));
-        out
+            .show(ui, |ui| self.filmstrip(ui, current, module))
+            .inner
     }
     /// Whether the selection changed after the strip was drawn, as a click
     /// in the grid below does: the strip then needs another frame to mark
     /// it and bring it into view.
     pub fn filmstrip_behind(&self) -> bool {
-        self.strip_drawn != self.selection
+        self.strip.drawn != self.selection
     }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
     /// makes the photo its candidate, and Select activates its side.
-    pub fn filmstrip_pick(&mut self, pick: Pick, modifiers: egui::Modifiers) -> Action {
-        match pick {
-            Pick::Develop(id) => Action::Develop(id),
-            Pick::Show(id) if self.compare.open => {
-                self.compare_pick(id);
-                Action::None
-            }
-            Pick::Show(id) => {
+    pub(super) fn filmstrip_pick(&mut self, pick: Pick, modifiers: egui::Modifiers) -> Action {
+        let id = match pick {
+            Pick::Develop(id) => return Action::Develop(id),
+            Pick::Show(id) => id,
+        };
+        match self.view() {
+            View::Compare => self.compare_pick(id),
+            View::Grid | View::Loupe | View::Survey => {
                 self.click(id, modifiers);
                 // The grid follows a photo chosen below it.
                 self.scroll_to_active = true;
-                Action::None
             }
         }
+        Action::None
     }
     /// The photos in the current source, with `current` highlighted and,
     /// in the Library, the rest of the selection marked. With no photo
@@ -70,12 +110,13 @@ impl Library {
         &mut self,
         ui: &mut egui::Ui,
         current: Option<i64>,
-        library: bool,
-    ) -> (Option<Pick>, bool) {
+        module: Module,
+    ) -> Outcome {
         let mut target = None;
         let mut changed = false;
-        if self.strip_drawn != self.selection {
-            self.strip_drawn = self.selection.clone();
+        let library = module == Module::Library;
+        if self.strip.drawn != self.selection {
+            self.strip.drawn = self.selection.clone();
         }
         let photo = current.and_then(|id| self.photo(id)).cloned();
         let position = current.and_then(|current| {
@@ -121,8 +162,8 @@ impl Library {
         // or filter moved: a photo already visible, e.g. one just clicked,
         // stays put, and so does a strip scrolled away from it.
         let shown = current.zip(position);
-        let reveal = if shown != self.strip_revealed {
-            self.strip_revealed = shown;
+        let reveal = if shown != self.strip.revealed {
+            self.strip.revealed = shown;
             position
         } else {
             None
@@ -130,7 +171,7 @@ impl Library {
         let height = ui.available_height().max(40.);
         let size = Vec2::new(height * 1.25, height);
         egui::ScrollArea::horizontal()
-            .id_salt("filmstrip")
+            .id_salt(ID)
             .auto_shrink(false)
             .show_viewport(ui, |ui, viewport| {
                 // Only the cells in view are laid out and drawn, however
@@ -166,7 +207,10 @@ impl Library {
                     }
                 }
             });
-        (target, changed)
+        Outcome {
+            pick: target,
+            metadata_changed: changed,
+        }
     }
     /// One photo in the strip, with its menu. Returns a photo chosen and
     /// whether the menu changed its metadata.

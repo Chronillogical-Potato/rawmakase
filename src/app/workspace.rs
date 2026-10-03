@@ -528,12 +528,7 @@ impl Editor {
         // The filmstrip runs the window's width, under both side panels, as
         // in Develop.
         if let Some(library) = &mut self.library {
-            library.prepare(&ctx);
-            let active = library.selected();
-            if let (Some(pick), _) = library.filmstrip_panel(ui, active, true) {
-                let modifiers = ui.input(|i| i.modifiers);
-                action = library.filmstrip_pick(pick, modifiers);
-            }
+            action = library.library_filmstrip(ui);
         }
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         if develops != self.loupe_tried {
@@ -850,14 +845,14 @@ impl Editor {
     fn filmstrip(&mut self, ui: &mut egui::Ui) {
         if let Some(library) = &mut self.library {
             let current = self.document.catalog_photo;
-            let (target, changed) = library.filmstrip_panel(ui, current, false);
-            if changed {
+            let strip = library.filmstrip_panel(ui, current, crate::app::library::Module::Develop);
+            if strip.metadata_changed {
                 self.status = library.message.clone();
             }
             // In Develop both a click and Open in Develop show the photo.
             if let Some(
                 crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
-            ) = target
+            ) = strip.pick
                 && Some(id) != current
                 && !self.activity.is_busy()
             {

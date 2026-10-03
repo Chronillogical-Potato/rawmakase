@@ -20,7 +20,7 @@ pub struct Place {
     selection: selection::Selection,
 }
 pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
-pub use filmstrip::Pick;
+pub use filmstrip::{Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
 pub use quick::CollectionCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
@@ -66,12 +66,7 @@ pub struct Library {
     /// Grid cells' photo info, read once per photo while expanded cells
     /// show it.
     cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
-    /// The photo the filmstrip last brought into view, and where it was
-    /// then in `visible`: the strip scrolls again only when either changes.
-    strip_revealed: Option<(i64, usize)>,
-    /// The selection the filmstrip was last drawn with, to notice a view
-    /// drawn after it changing the selection.
-    strip_drawn: selection::Selection,
+    strip: filmstrip::State,
     /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
     availability: availability::Availability,
@@ -165,8 +160,7 @@ impl Library {
             drawn_pass: 0,
             sort_keys: None,
             cell_info: HashMap::new(),
-            strip_revealed: None,
-            strip_drawn: selection::Selection::default(),
+            strip: filmstrip::State::default(),
             visible: Vec::new(),
             availability: Default::default(),
             cache: textures::PreviewTextures::new(&ctx),
