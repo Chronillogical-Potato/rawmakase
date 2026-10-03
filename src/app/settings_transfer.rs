@@ -167,7 +167,7 @@ impl Editor {
         let _ = self.save_session();
         match dialog.purpose {
             Transfer::Copy => self.copy_settings(dialog.groups),
-            Transfer::Sync => self.start_sync(dialog.groups),
+            Transfer::Sync => self.start_sync(super::sync::BatchChange::Settings(dialog.groups)),
         }
     }
     /// Pastes the copied settings. Spot removal and masks belong to their photo and

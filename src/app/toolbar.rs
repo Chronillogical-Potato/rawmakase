@@ -130,6 +130,29 @@ impl Editor {
                                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
                                 ui.close();
                             }
+                            // Lightroom's Match Total Exposures, for the photos selected
+                            // with this one, from their aperture, shutter speed and ISO.
+                            let matchable = targets > 0
+                                && !self.activity.is_busy()
+                                && self
+                                    .document
+                                    .metadata
+                                    .as_ref()
+                                    .and_then(super::sync::capture_stops)
+                                    .is_some();
+                            let match_keys = format!(
+                                "{cmd}{shift}{}M",
+                                if cfg!(target_os = "macos") {
+                                    "⌥ "
+                                } else {
+                                    "Alt+"
+                                }
+                            );
+                            if menu_item(ui, "Match Total Exposures", &match_keys, matchable, false)
+                            {
+                                self.start_sync(super::sync::BatchChange::MatchTotalExposures);
+                                ui.close();
+                            }
                             let reset = format!("{cmd}{shift}R");
                             if menu_item(ui, "Reset All Settings", &reset, true, false) {
                                 self.reset_settings();

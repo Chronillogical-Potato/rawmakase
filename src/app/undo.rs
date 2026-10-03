@@ -249,7 +249,8 @@ impl Editor {
                     self.load_raw(path, Some(open));
                 }
                 self.status = format!(
-                    "{verb} Sync Settings ({})",
+                    "{verb} {} ({})",
+                    sync.change.name(),
                     super::widgets::plural(sync.edits.len(), "photo", "photos")
                 );
                 true

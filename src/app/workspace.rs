@@ -662,6 +662,7 @@ impl Editor {
             let (mut copy, mut paste, mut reset) = (false, false, false);
             let mut previous = false;
             let mut sync = false;
+            let mut match_exposures = false;
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -685,6 +686,15 @@ impl Editor {
                 });
                 if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
                     previous = true;
+                }
+                // Lightroom's Match Total Exposures; Option changes the typed letter
+                // on macOS, so match the physical key too.
+                let m = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
+                        if *key == egui::Key::M || *physical_key == Some(egui::Key::M))
+                });
+                if m && i.modifiers.command && i.modifiers.shift && i.modifiers.alt {
+                    match_exposures = true;
                 }
                 // Lightroom's Sync Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::S) {
@@ -774,6 +784,9 @@ impl Editor {
             // As in Lightroom, Shift+Cmd+C opens Copy Settings.
             if copy {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
+            }
+            if match_exposures && !self.sync_targets().is_empty() && !self.activity.is_busy() {
+                self.start_sync(super::sync::BatchChange::MatchTotalExposures);
             }
             if sync && !self.sync_targets().is_empty() && !self.activity.is_busy() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
