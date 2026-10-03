@@ -22,6 +22,8 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 tiff = "0.11.3"
 tempfile = "3"
 unicode-normalization = "0.1"
+# The GUID of ExtendedXMP in JPEG exports is an MD5.
+md-5 = "0.11"
 # Installed fonts for text watermarks are mapped, not read whole.
 memmap2 = "0.9"
 # Glyph outlines for text watermarks (also behind egui's text).
