@@ -1104,3 +1104,37 @@ fn develop_history_stores_each_large_setting_once() -> Result<()> {
     assert_eq!(SavedHistory::decode(&encoded)?, Some(history));
     Ok(())
 }
+#[test]
+fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and_say_so()
+-> Result<()> {
+    let m = crate::raw::Metadata {
+        lens_model: "FE 55mm F1.8 ZA".into(),
+        lens: Some(crate::lens::LensCorrection {
+            source: "Sony built-in".into(),
+            default_on: false,
+            vignetting: None,
+            distortion: None,
+            chromatic: None,
+        }),
+        ..Default::default()
+    };
+    let (r, w) = convert_develop("s = { LensProfileEnable = 1 }", &m, &[], None)?;
+    assert!(r.lens_profile && r.lens_builtin);
+    assert!(
+        w.iter()
+            .any(|s| s.contains("FE 55mm F1.8 ZA") && s.contains("using Sony built-in")),
+        "{w:?}"
+    );
+    // Off leaves Sony's opt-in data off, with nothing to report.
+    let (r, w) = convert_develop("s = { LensProfileEnable = 0 }", &m, &[], None)?;
+    assert!(!r.lens_profile && !r.lens_builtin);
+    assert!(w.is_empty(), "{w:?}");
+    // Without any correction to fall back on, it says that too.
+    let bare = crate::raw::Metadata {
+        lens_model: "FE 55mm F1.8 ZA".into(),
+        ..Default::default()
+    };
+    let (_, w) = convert_develop("s = { LensProfileEnable = 1 }", &bare, &[], None)?;
+    assert!(w.iter().any(|s| s.contains("no lens correction")), "{w:?}");
+    Ok(())
+}

@@ -915,16 +915,20 @@ impl Editor {
                         .on_disabled_hover_text("Update the process version in Calibration to use lens corrections.");
                 });
                 control_row(ui, "", |ui| {
+                    let mut on = r.lens_profile;
                     if ui
-                        .checkbox(&mut r.lens_profile, "Enable Profile Corrections")
+                        .checkbox(&mut on, "Enable Profile Corrections")
                         .on_hover_text("Correct distortion and vignetting with an Adobe lens profile, or the lens data the camera stored in the RAW.")
                         .on_disabled_hover_text("Update the process version in Calibration to use lens corrections.")
                         .changed()
-                        // Sony's built-in data is off by default, so it follows the
-                        // checkbox; Fuji and DNG built-ins stay on, as in Lightroom.
-                        && builtin.is_some_and(|l| !l.default_on)
+                        && let Some(m) = &metadata
                     {
-                        r.lens_builtin = r.lens_profile;
+                        let state = if on {
+                            crate::develop::ProfileCorrections::On
+                        } else {
+                            crate::develop::ProfileCorrections::Off
+                        };
+                        r.set_profile_corrections(m, state);
                     }
                 });
             });
@@ -950,6 +954,19 @@ impl Editor {
                     .color(theme::gray(200)),
                 );
             });
+            // Said here as well as on import, so a missing profile is never silent.
+            if let Some(missing) = metadata.as_ref().and_then(|m| r.missing_lens_profile(m)) {
+                control_row(ui, "", |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(missing)
+                                .size(11.)
+                                .color(theme::gray(150)),
+                        )
+                        .wrap(),
+                    );
+                });
+            }
             if r.lens_profile {
                 subheading(ui, "Amount");
                 ui.push_id("lens-amount", |ui| {

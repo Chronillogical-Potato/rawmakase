@@ -369,6 +369,34 @@ impl Recipe {
             None => None,
         }
     }
+    /// Lightroom's Enable Profile Corrections: an imported Adobe lens profile, else the
+    /// correction the camera stored in the RAW. Built-in data that is off by default
+    /// (Sony's) follows the switch; Fuji's and a DNG's stay on, as in Lightroom.
+    pub fn set_profile_corrections(&mut self, m: &Metadata, state: ProfileCorrections) {
+        self.lens_profile = state == ProfileCorrections::On;
+        if m.lens.as_ref().is_some_and(|l| !l.default_on) {
+            self.lens_builtin = self.lens_profile;
+        }
+    }
+    /// Why Enable Profile Corrections cannot render with an Adobe profile here, and
+    /// what renders instead, when it is on.
+    pub fn missing_lens_profile(&self, m: &Metadata) -> Option<String> {
+        if !self.lens_profile || m.profile_lens.is_some() {
+            return None;
+        }
+        let lens = if m.lens_model.is_empty() {
+            "this lens".to_string()
+        } else {
+            m.lens_model.clone()
+        };
+        Some(match m.lens.as_ref().filter(|_| self.lens_builtin) {
+            Some(builtin) => format!(
+                "Adobe lens profile for {lens} isn't imported; using {}",
+                builtin.source
+            ),
+            None => format!("Adobe lens profile for {lens} isn't imported; no lens correction"),
+        })
+    }
     /// The built-in lens correction to apply, if enabled and present in the file.
     pub(crate) fn lens_correction<'a>(
         &self,
@@ -502,6 +530,12 @@ impl Recipe {
 }
 fn is_one(v: &f32) -> bool {
     *v == 1.
+}
+/// Whether Enable Profile Corrections is ticked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileCorrections {
+    On,
+    Off,
 }
 fn one() -> f32 {
     1.

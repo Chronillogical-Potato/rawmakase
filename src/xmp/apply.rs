@@ -107,7 +107,7 @@ impl Preset {
         self.apply_profile(&mut settings, &mut recipe, m, profiles)?;
         self.apply_basic(&mut settings, &mut recipe)?;
         // Auto white balance is measured on the crop, so geometry comes first.
-        self.apply_geometry(&mut settings, &mut recipe)?;
+        self.apply_geometry(&mut settings, &mut recipe, m)?;
         // Before white balance: Auto measures the photo as Upright frames it.
         self.apply_upright(&mut settings, &mut recipe)?;
         self.apply_white_balance(&mut settings, &mut recipe, m, image)?;
@@ -163,7 +163,7 @@ impl Preset {
             self.apply_basic(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|r| {
-            self.apply_geometry(&mut settings.borrow_mut(), r)
+            self.apply_geometry(&mut settings.borrow_mut(), r, m)
         });
         stage(&mut recipe, &|r| {
             self.apply_upright(&mut settings.borrow_mut(), r)
@@ -798,7 +798,12 @@ impl Preset {
     }
 
     /// Straighten, lens corrections, Transform and crop.
-    fn apply_geometry(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
+    fn apply_geometry(
+        &self,
+        settings: &mut Settings<'_>,
+        r: &mut Recipe,
+        m: &Metadata,
+    ) -> Result<()> {
         let v = settings.values;
         settings.assign("CropAngle", &mut r.straighten, 1., -45., 45.)?;
         settings.seen.insert("LensProfileEnable".into());
@@ -826,7 +831,12 @@ impl Preset {
             2.,
         )?;
         if let Some(enable) = number(v, "LensProfileEnable")? {
-            r.lens_profile = enable != 0.;
+            let state = if enable != 0. {
+                crate::develop::ProfileCorrections::On
+            } else {
+                crate::develop::ProfileCorrections::Off
+            };
+            r.set_profile_corrections(m, state);
         }
         settings.seen.insert("AutoLateralCA".into());
         if let Some(ca) = number(v, "AutoLateralCA")? {
