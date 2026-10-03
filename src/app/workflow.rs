@@ -84,7 +84,7 @@ impl Editor {
         if let Some(library) = &mut self.library
             && let Err(e) = library.commit_copy_name()
         {
-            self.status = format!("Copy name not saved: {e}");
+            self.status = format!("Not saved: {e}");
             return false;
         }
         if let Some(done) = self.autosave.wait() {
