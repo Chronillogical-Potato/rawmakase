@@ -96,7 +96,12 @@ impl Editor {
                         let mut cat = crate::catalog::Catalog::open(&current)?;
                         match action {
                             FolderAction::Add => {
-                                report = cat.add_folder_reporting(&path)?.1;
+                                report = cat
+                                    .add_folder_with(
+                                        &path,
+                                        &crate::catalog::MetadataDefaults::load(),
+                                    )?
+                                    .1;
                             }
                             FolderAction::RelinkRoot(id) => cat.relink_root(id, &path)?,
                             FolderAction::RelinkFolder(id) => cat.relink_folder(id, &path)?,
@@ -172,8 +177,8 @@ impl Editor {
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<_> {
-                let (_, report) =
-                    crate::catalog::Catalog::open(&current)?.add_folder_reporting(&folder)?;
+                let (_, report) = crate::catalog::Catalog::open(&current)?
+                    .add_folder_with(&folder, &crate::catalog::MetadataDefaults::load())?;
                 let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
                 if let Some(summary) = report.summary() {
                     library.set_message_with_detail(

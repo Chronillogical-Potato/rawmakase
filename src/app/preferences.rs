@@ -58,6 +58,8 @@ pub(super) struct Preferences {
     stale: bool,
     /// The status line when the window opened; only later messages are shown.
     status_at_open: String,
+    /// Default Creator and Copyright for photos added from folders, as typed.
+    defaults: crate::catalog::MetadataDefaults,
 }
 
 const WIDTH: f32 = 780.;
@@ -128,6 +130,7 @@ impl Editor {
         self.preferences.open = true;
         self.preferences.tab = tab;
         self.preferences.status_at_open = self.status.clone();
+        self.preferences.defaults = crate::catalog::MetadataDefaults::load();
         self.measure_usage();
     }
     fn measure_usage(&mut self) {
@@ -348,6 +351,29 @@ impl Editor {
         form_row(ui, "Previews", |ui| {
             value(ui, &bytes(usage.previews));
         });
+        gap(ui);
+        group(ui, "Metadata defaults");
+        let defaults = &mut self.preferences.defaults;
+        let mut left = false;
+        for (label, text) in [
+            ("Creator", &mut defaults.creator),
+            ("Copyright", &mut defaults.copyright),
+        ] {
+            form_row(ui, label, |ui| {
+                left |= ui
+                    .add(egui::TextEdit::singleline(text).desired_width(320.))
+                    .lost_focus();
+            });
+        }
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "For photos added from folders, when neither the file nor its sidecar has one.",
+            );
+        });
+        if left && let Err(e) = defaults.save() {
+            self.status = format!("Metadata defaults not saved: {e:#}");
+        }
         gap(ui);
         group(ui, "Catalogs");
         form_row(ui, "", |ui| {

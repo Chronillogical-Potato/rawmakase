@@ -19,6 +19,7 @@ pub struct Catalog {
 }
 
 mod copies;
+mod defaults;
 mod descriptive;
 mod edits;
 mod info;
@@ -27,6 +28,7 @@ pub mod lightroom;
 mod models;
 mod sidecar;
 pub use crate::xmp::descriptive::Read as FileMetadata;
+pub use defaults::MetadataDefaults;
 pub use descriptive::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
     Value, keyword_name,

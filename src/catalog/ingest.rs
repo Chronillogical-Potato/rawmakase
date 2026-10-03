@@ -14,6 +14,15 @@ impl Catalog {
     /// left alone; Read Metadata from Files reads theirs. Returns the photos
     /// added and what reading the sidecars found.
     pub fn add_folder_reporting(&mut self, folder: &Path) -> Result<(usize, super::SidecarReport)> {
+        self.add_folder_with(folder, &Default::default())
+    }
+    /// `add_folder_reporting`, then the default Creator and Copyright where
+    /// neither the file nor its sidecar has one.
+    pub fn add_folder_with(
+        &mut self,
+        folder: &Path,
+        defaults: &super::MetadataDefaults,
+    ) -> Result<(usize, super::SidecarReport)> {
         let folder = folder.canonicalize()?;
         let mut files = Vec::new();
         fn walk(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -118,6 +127,7 @@ impl Catalog {
             }
         }
         let report = self.import_file_metadata(&added)?;
+        self.apply_defaults(&added, defaults)?;
         Ok((added.len(), report))
     }
     /// Records capture times read from the photos' files, in one transaction.
