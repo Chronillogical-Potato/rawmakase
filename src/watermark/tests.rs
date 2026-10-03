@@ -375,7 +375,8 @@ fn renaming_by_case_alone_keeps_the_preset() -> Result<()> {
         Some(&w.name),
         None,
     )?;
-    assert_eq!(presets_in(&store).len(), 1);
+    let names: Vec<String> = presets_in(&store).into_iter().map(|p| p.name).collect();
+    assert_eq!(names, ["LOGO"]);
     assert!(renamed.ready_in(&store.join("images")).is_ok());
     Ok(())
 }

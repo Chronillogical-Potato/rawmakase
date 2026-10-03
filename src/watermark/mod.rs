@@ -377,6 +377,25 @@ fn decode(path: &Path) -> Result<image::Rgba32FImage> {
     Ok(rgba)
 }
 
+/// Whether two paths are one file, however the disk compares names.
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    }
+}
+
 /// Saved presets, by name.
 pub fn presets() -> Vec<Watermark> {
     presets_in(&dir())
@@ -485,16 +504,19 @@ pub fn save_in(
         file.persist(images.join(name)).map_err(|e| e.error)?;
     }
     if let Some(previous) = previous {
-        // Compared as the disk does: a rename by case alone is the same file.
-        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
-        if !same(&file_name(&previous.name), &file_name(&saved.name)) {
-            let _ = std::fs::remove_file(dir.join(file_name(&previous.name)));
+        // A rename by case alone is one file on most Mac and Windows disks.
+        let old = dir.join(file_name(&previous.name));
+        if !same_file(&old, &dir.join(file_name(&saved.name))) {
+            let _ = std::fs::remove_file(old);
         }
-        if let Some(old) = previous
-            .image
-            .filter(|i| !saved.image.as_ref().is_some_and(|s| same(i, s)))
-        {
-            let _ = std::fs::remove_file(images.join(old));
+        if let Some(old) = previous.image.map(|i| images.join(i)) {
+            let kept = saved
+                .image
+                .as_ref()
+                .is_some_and(|s| same_file(&old, &images.join(s)));
+            if !kept {
+                let _ = std::fs::remove_file(old);
+            }
         }
     }
     Ok(saved)
