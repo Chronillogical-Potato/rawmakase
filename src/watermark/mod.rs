@@ -370,6 +370,12 @@ fn decode(path: &Path) -> Result<image::Rgba32FImage> {
         .into_decoder()?;
     // The decoder's default size limits, which reading through it skips.
     decoder.set_limits(image::Limits::default())?;
+    // Converted to 16 bytes a pixel below: larger than any logo needs.
+    let (w, h) = image::ImageDecoder::dimensions(&decoder);
+    ensure!(
+        u64::from(w) * u64::from(h) <= 40_000_000,
+        "The image is too large for a watermark ({w} × {h})"
+    );
     let orientation = decoder.orientation()?;
     let mut image = image::DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);

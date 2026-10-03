@@ -188,7 +188,10 @@ impl Editor {
                 if let Some(w) = saved
                     && let Err(e) = watermark::delete(&w)
                 {
-                    self.status = format!("Watermark not deleted: {e:#}");
+                    // Nothing else changes; the editor stays open to say so.
+                    state.message = format!("Not deleted: {e:#}");
+                    self.exports.watermark_editor = Some(state);
+                    return;
                 }
                 // A deleted watermark is never swapped for another.
                 if self.exports.draft.watermark_name == original {
