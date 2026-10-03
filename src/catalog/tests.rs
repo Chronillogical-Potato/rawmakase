@@ -226,6 +226,36 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> {
+    use crate::develop::panels::{Panel, PanelState};
+    let m = crate::raw::Metadata::default();
+    // Lightroom stores every switch, on or off, with each edit.
+    let all_on: Vec<String> = Panel::ALL
+        .iter()
+        .flat_map(|p| p.lightroom_keys())
+        .map(|key| format!("{key} = true"))
+        .collect();
+    let text = format!("s = {{ Exposure2012 = 0.5, {} }}", all_on.join(", "));
+    let (r, w) = convert_develop(&text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert!(r.panels.all_on());
+    let text = r#"s = { EnableDetail = false, EnableEffects = false, EnableToneCurve = true, Sharpness = 40, PostCropVignetteAmount = -30, GrainAmount = 20, Exposure2012 = 0.5 }"#;
+    let (r, w) = convert_develop(text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.panels.state(Panel::Detail), PanelState::Off);
+    assert_eq!(r.panels.state(Panel::Effects), PanelState::Off);
+    assert_eq!(r.panels.state(Panel::ToneCurve), PanelState::On);
+    // The settings are kept, and render as if at their defaults.
+    assert!((r.sharpening - 40. / 150.).abs() < 1e-6);
+    assert!((r.effects.vignette + 0.3).abs() < 1e-6);
+    let shown = r.as_rendered();
+    assert_eq!(shown.sharpening, 0.);
+    assert_eq!(shown.effects.vignette, 0.);
+    assert_eq!(shown.effects.grain, 0.);
+    assert_eq!(shown.exposure, 0.5);
+    Ok(())
+}
+#[test]
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn lightroom_edits_fall_back_to_rawmakase_profiles() -> Result<()> {
     use crate::camera_profiles::open;

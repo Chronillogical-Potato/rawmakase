@@ -116,6 +116,7 @@ impl Preset {
         self.apply_grading(&mut settings, &mut recipe)?;
         self.apply_effects(&mut settings, &mut recipe)?;
         self.apply_auto_tone(&mut settings, &mut recipe, m, image)?;
+        self.apply_panels(&mut settings, &mut recipe)?;
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
         self.validate_remaining(&mut settings)?;
@@ -184,6 +185,9 @@ impl Preset {
         });
         stage(&mut recipe, &|r| {
             self.apply_auto_tone(&mut settings.borrow_mut(), r, m, image)
+        });
+        stage(&mut recipe, &|r| {
+            self.apply_panels(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|_| {
             self.validate_remaining(&mut settings.borrow_mut())
@@ -747,6 +751,27 @@ impl Preset {
             l.sort_by(f32::total_cmp);
             if !l.is_empty() {
                 r.exposure = (0.18 / l[l.len() / 2]).log2().clamp(-8., 8.);
+            }
+        }
+        Ok(())
+    }
+
+    /// Lightroom's panel switches. A panel is off when any of its keys says so, and
+    /// turned back on by a setting that says it is on.
+    fn apply_panels(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
+        use crate::develop::panels::{Panel, PanelState};
+        for panel in Panel::ALL {
+            let mut state = None;
+            for key in panel.lightroom_keys() {
+                settings.seen.insert(key.to_string());
+                match boolean(settings.values, key)? {
+                    Some(false) => state = Some(PanelState::Off),
+                    Some(true) if state.is_none() => state = Some(PanelState::On),
+                    _ => {}
+                }
+            }
+            if let Some(state) = state {
+                r.panels.set(panel, state);
             }
         }
         Ok(())

@@ -57,6 +57,45 @@ fn old_recipes_keep_original_profile_tones() {
 }
 
 #[test]
+fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
+    use crate::develop::panels::{Panel, PanelState};
+    let im = fixture();
+    let mut edited = Recipe::default();
+    edited.effects.vignette = -0.8;
+    edited.effects.grain = 0.6;
+    edited.hsl[0] = [0.4, -0.6, 0.3];
+    edited.exposure = 0.3;
+    let mut off = edited.clone();
+    off.panels.set(Panel::Effects, PanelState::Off);
+    off.panels.set(Panel::ColorMixer, PanelState::Off);
+    let plain = Recipe {
+        exposure: 0.3,
+        ..Default::default()
+    };
+    let pixels = |r: &Recipe| crate::develop::render(&im, r, 0).map(|out| out.pixels);
+    assert_ne!(pixels(&edited)?, pixels(&plain)?);
+    assert_eq!(pixels(&off)?, pixels(&plain)?);
+    // Through the preview renderer too, which the editor and thumbnails use.
+    let mut renderer = crate::develop::PreviewRenderer::with_processor(Err(anyhow::anyhow!("CPU")));
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let preview = renderer.render(&im, &off, 0, None, &cancel)?.pixels;
+    assert_eq!(preview, pixels(&plain)?);
+    Ok(())
+}
+#[test]
+fn panel_switches_round_trip_and_old_recipes_have_every_panel_on() {
+    use crate::develop::panels::{Panel, PanelState};
+    let old: Recipe =
+        serde_json::from_value(serde_json::to_value(Recipe::default()).unwrap()).unwrap();
+    assert!(old.panels.all_on());
+    assert!(!serde_json::to_string(&old).unwrap().contains("panels"));
+    let mut r = Recipe::default();
+    r.panels.set(Panel::Detail, PanelState::Off);
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back.panels.state(Panel::Detail), PanelState::Off);
+    assert!(back.unknown.is_empty());
+}
+#[test]
 fn reference_color_extremes_stay_finite_and_in_gamut() {
     let im = fixture();
     let mut r = Recipe {

@@ -166,7 +166,9 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         sharpening_detail: _,
         sharpening_masking: _,
         masks: _,
-        // Not read when rendering.
+        // Not read when rendering: switched-off panels are bypassed before the stages
+        // (see `Recipe::as_rendered`).
+        panels: _,
         preset_name: _,
         preset_settings: _,
         unknown: _,

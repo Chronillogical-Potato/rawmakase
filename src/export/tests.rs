@@ -129,6 +129,19 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     assert_eq!(back.curve.points.len(), 3);
     assert_eq!(back.upright, r.upright);
     assert!(back.lens_ca);
+    // Panel switches: an off panel is written and read back; on ones are left out.
+    use crate::develop::panels::{Panel, PanelState};
+    r.panels.set(Panel::Effects, PanelState::Off);
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(packet.contains("crs:EnableEffects=\"False\""));
+    assert!(!packet.contains("crs:EnableDetail"));
+    let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
+        &Recipe::default(),
+        &m,
+        &[],
+        None,
+    )?;
+    assert_eq!(back.panels, r.panels);
     Ok(())
 }
 #[test]

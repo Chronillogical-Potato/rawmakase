@@ -200,6 +200,10 @@ impl Editor {
         if self.view.is(super::state::Tool::Crop) {
             r.crop = [0., 0., 1., 1.];
         }
+        // Switched-off panels as rendered, so viewport geometry matches the photo shown.
+        if !r.panels.all_on() {
+            r = r.as_rendered().into_owned();
+        }
         r
     }
     /// What the active tool draws into the rendered preview.
