@@ -38,7 +38,7 @@ Supported enhanced-profile features:
 - The six Adobe Raw looks: Color, Portrait, Neutral, Landscape, Vivid and Monochrome, at their normal 100% strength.
 - XMP sidecars/presets and Lightroom catalog `Look` records resolve imported profiles by name, UUID when supplied, and camera model.
 
-The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. RGB-table creative profiles, adaptive/AI profiles, nondefault profile Amount, unsupported profile settings, and unsupported DCP variants fail explicitly. This is not universal Lightroom profile support or pixel-identical Lightroom development.
+The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. RGB-table creative profiles, adaptive/AI profiles, unsupported profile settings, and unsupported DCP variants fail explicitly. A look's Profile Amount renders only at 0% or 100%: an imported Lightroom edit at another Amount keeps the rest of the edit, renders the look at the nearer of the two and reports it, and a preset with one is listed as unavailable. This is not universal Lightroom profile support or pixel-identical Lightroom development.
 
 Schema/pipeline 5 embeds the resolved camera profile, enhanced color table, sampled curve, identity and copyright in the recipe. Reopening does not require the source XMP or DCP to remain available. Old schema 1–4 recipes migrate without changing their prior look. Older RAWmakase versions reject version 5 instead of silently dropping enhanced-profile data.
 
