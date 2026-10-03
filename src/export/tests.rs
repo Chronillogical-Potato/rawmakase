@@ -82,7 +82,9 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         captured: Some("2018:08:26 10:39:33".into()),
         now: "2026-09-27T06:12:22Z".into(),
         rating: 3,
-        keywords: vec!["coffee & books".into()],
+        keywords: vec![crate::xmp::write::KeywordPath::all(vec![
+            "coffee & books".into(),
+        ])],
         settings: true,
         format: "image/jpeg".into(),
         ..Default::default()
@@ -461,7 +463,10 @@ fn exiftool_reads_extended_xmp_back() -> Result<()> {
     let keywords: Vec<String> = (0..6000).map(|i| format!("keyword {i:05}")).collect();
     let photo = crate::xmp::write::Photo {
         rating: 3,
-        keywords: keywords.clone(),
+        keywords: keywords
+            .iter()
+            .map(|k| crate::xmp::write::KeywordPath::all(vec![k.clone()]))
+            .collect(),
         settings: true,
         format: "image/jpeg".into(),
         ..Default::default()
@@ -489,5 +494,69 @@ fn exiftool_reads_extended_xmp_back() -> Result<()> {
         read["Subject"].as_array().map(Vec::len),
         Some(keywords.len())
     );
+    Ok(())
+}
+#[test]
+fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
+    let photo = crate::xmp::write::Photo {
+        title: vec![
+            ("x-default".into(), "Pier <at> dusk".into()),
+            ("pl".into(), "Molo".into()),
+        ],
+        caption: vec![("x-default".into(), "Two\nlines".into())],
+        rights: vec![("x-default".into(), "© Example".into())],
+        creators: vec!["Zoë".into(), "A & B".into()],
+        keywords: vec![crate::xmp::write::KeywordPath::all(vec![
+            "Places".into(),
+            "Kraków".into(),
+        ])],
+        created: Some("2024-05-01T12:30:15.120456+02:00".into()),
+        captured: Some("2020:01:01 00:00:00".into()),
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(
+        &crate::develop::Recipe::default(),
+        &Metadata::default(),
+        &photo,
+    );
+    let doc = roxmltree::Document::parse(&packet)?;
+    const DC: &str = "http://purl.org/dc/elements/1.1/";
+    let items = |ns: &str, name: &str| -> Vec<(Option<String>, String)> {
+        doc.descendants()
+            .find(|n| n.has_tag_name((ns, name)))
+            .map(|n| {
+                n.descendants()
+                    .filter(|li| li.has_tag_name("li") || li.tag_name().name() == "li")
+                    .map(|li| {
+                        (
+                            li.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
+                                .map(String::from),
+                            li.text().unwrap_or("").to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        items(DC, "title"),
+        [
+            (Some("x-default".into()), "Pier <at> dusk".into()),
+            (Some("pl".into()), "Molo".into())
+        ]
+    );
+    assert_eq!(items(DC, "description")[0].1, "Two\nlines");
+    assert_eq!(items(DC, "rights")[0].1, "© Example");
+    let creators: Vec<String> = items(DC, "creator").into_iter().map(|i| i.1).collect();
+    assert_eq!(creators, ["Zoë", "A & B"]);
+    let subject: Vec<String> = items(DC, "subject").into_iter().map(|i| i.1).collect();
+    assert_eq!(subject, ["Places", "Kraków"]);
+    let paths: Vec<String> = items("http://ns.adobe.com/lightroom/1.0/", "hierarchicalSubject")
+        .into_iter()
+        .map(|i| i.1)
+        .collect();
+    assert_eq!(paths, ["Places|Kraków"]);
+    assert!(packet.contains("xmp:CreateDate=\"2024-05-01T12:30:15.120456+02:00\""));
     Ok(())
 }

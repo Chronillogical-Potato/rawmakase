@@ -1,6 +1,10 @@
 //! One photo's export from start to finish: the full-size image (decoded here when
 //! only a quick preview is loaded), the render, its metadata and the file.
-use super::{Embed, ExportSettings, exif};
+use super::{
+    Embed, ExportSettings,
+    assemble::{Policy, Values, assemble},
+    exif,
+};
 use crate::{
     decode_cache::DecodeCache,
     develop::Recipe,
@@ -21,9 +25,8 @@ pub struct Photo {
     pub image: Arc<CameraImage>,
     pub source: PathBuf,
     pub recipe: Recipe,
-    pub rating: i32,
-    pub label: String,
-    pub keywords: Vec<String>,
+    /// Its catalog metadata: rating, label, keywords and descriptive fields.
+    pub values: Values,
 }
 
 /// Exports `photo` to `target`, reporting progress from 0 to 1. Stops between
@@ -48,12 +51,25 @@ pub fn run(
     let rendered = crate::develop::render(&image, &photo.recipe, options.max_edge)?;
     cancelled()?;
     progress(0.85);
-    let camera = settings
-        .capture
+    let policy = Policy::of(settings);
+    let file = policy
+        .reads_file()
         .then(|| exif::read(&photo.source))
         .flatten();
-    let xmp = (settings.develop || settings.descriptive)
-        .then(|| xmp(&photo, &image, settings, camera.as_ref()));
+    // LibRaw's capture settings stand in for EXIF that could not be read.
+    let libraw = file.is_none().then(|| {
+        let (main, exif) = super::metadata::from_metadata(&image.metadata);
+        exif::CameraExif {
+            main,
+            exif,
+            gps: Vec::new(),
+        }
+    });
+    let assembled = assemble(policy, file.as_ref(), libraw, &photo.values);
+    let xmp = assembled
+        .xmp
+        .as_ref()
+        .map(|fields| xmp(&photo, &image, settings, fields));
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -64,9 +80,10 @@ pub fn run(
         &image.metadata,
         &options,
         &Embed {
-            camera,
-            capture: settings.capture,
-            location: settings.location,
+            camera: Some(assembled.exif),
+            capture: true,
+            location: true,
+            camera_fallback: policy.camera,
             xmp,
             ppi: settings.ppi,
         },
@@ -98,9 +115,8 @@ fn xmp(
     photo: &Photo,
     image: &CameraImage,
     settings: &ExportSettings,
-    camera: Option<&exif::CameraExif>,
+    fields: &super::assemble::XmpFields,
 ) -> String {
-    let descriptive = settings.descriptive;
     crate::xmp::write::packet(
         &photo.recipe,
         &image.metadata,
@@ -111,20 +127,18 @@ fn xmp(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string(),
-            captured: camera.and_then(|c| c.captured()),
+            captured: fields.captured.clone(),
+            created: fields.created.clone(),
             now: crate::time::now_xmp(),
-            rating: if descriptive { photo.rating } else { 0 },
-            label: if descriptive {
-                photo.label.clone()
-            } else {
-                String::new()
-            },
-            keywords: if descriptive {
-                photo.keywords.clone()
-            } else {
-                Vec::new()
-            },
-            settings: settings.develop,
+            rating: fields.rating,
+            label: fields.label.clone(),
+            keywords: fields.keywords.clone(),
+            title: fields.title.clone(),
+            caption: fields.caption.clone(),
+            rights: fields.rights.clone(),
+            creators: fields.creators.clone(),
+            lens: fields.lens,
+            settings: fields.develop,
             format: settings.mime_type().into(),
         },
     )
