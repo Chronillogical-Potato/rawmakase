@@ -898,7 +898,7 @@ impl Editor {
                 if !self.exporting() && ui.button("Close without saving").clicked() {
                     self.document.save.saved();
                     if let Some(library) = &mut self.library {
-                        library.discard_copy_name();
+                        library.discard_drafts();
                     }
                     self.close_confirm = false;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -20,10 +20,6 @@ impl CopyNames {
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }
-    /// Drops a Copy Name that could not be saved, e.g. closing without saving.
-    pub(super) fn discard(&mut self) {
-        self.clear();
-    }
     /// Saves a draft still being typed, e.g. when the Library panel goes away
     /// before the field loses focus. On failure the name stays pending, to be
     /// saved again or discarded. Returns whether a photo was renamed.
