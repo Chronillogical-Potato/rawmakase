@@ -477,7 +477,11 @@ pub fn save_in(
     if watermark.style == Style::Text
         && (watermark.family == fonts::INTER || fonts::families_if_listed().is_some())
     {
-        fonts::load(&watermark.family, &watermark.face)?;
+        let font = fonts::load(&watermark.family, &watermark.face)?;
+        ensure!(
+            raster::measure(&font, &watermark.text, 100.).is_some(),
+            "The font has none of the text's characters; choose another"
+        );
     }
     let images = dir.join("images");
     std::fs::create_dir_all(&images)?;
@@ -514,6 +518,7 @@ pub fn save_in(
     crate::storage::atomic_json(&dir.join(file_name(&saved.name)), &saved)?;
     if let Some((file, name)) = staged {
         file.persist(images.join(name)).map_err(|e| e.error)?;
+        crate::storage::sync_dir(&images)?;
     }
     if let Some(previous) = previous {
         // A rename by case alone is one file on most Mac and Windows disks.

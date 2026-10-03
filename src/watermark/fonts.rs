@@ -82,7 +82,9 @@ fn installed() -> Vec<Family> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
-        for entry in entries.flatten() {
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
             let path = entry.path();
             if path.is_dir() {
                 if depth < 4 {
@@ -101,6 +103,9 @@ fn installed() -> Vec<Family> {
     for dir in fastframe_fonts::system::font_directories() {
         walk(&dir, 0, &mut files);
     }
+    // Directories in their probing order, files by name within each: the
+    // same face wins on every run when two files claim it.
+    files.dedup();
     let mut families: std::collections::BTreeMap<String, Vec<Face>> = Default::default();
     for path in files {
         // Mapped, so only the header and name table are read.
