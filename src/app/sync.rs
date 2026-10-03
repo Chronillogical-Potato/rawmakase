@@ -479,6 +479,19 @@ impl Editor {
     /// Synchronizes the open photo's `groups` to the other selected photos, in the
     /// background; the result arrives as [`Event::Synced`].
     pub(super) fn start_sync(&mut self, change: BatchChange) {
+        // Matching to a photo without aperture, shutter speed and ISO means nothing.
+        if change == BatchChange::MatchTotalExposures
+            && self
+                .document
+                .metadata
+                .as_ref()
+                .and_then(capture_stops)
+                .is_none()
+        {
+            self.status =
+                "Match Total Exposures needs this photo's aperture, shutter speed and ISO".into();
+            return;
+        }
         let targets = self.sync_targets();
         if targets.is_empty() || self.activity.is_busy() || !self.flush() {
             return;
