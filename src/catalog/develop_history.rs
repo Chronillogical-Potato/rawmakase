@@ -206,6 +206,10 @@ impl Catalog {
     ) -> Result<()> {
         match history {
             HistoryUpdate::Keep => {}
+            // An empty History stores as none (Sync's Undo on a photo that had none).
+            HistoryUpdate::Replace(h) if h.steps.is_empty() => {
+                tx.execute("DELETE FROM develop_history WHERE photo=?", [id])?;
+            }
             HistoryUpdate::Replace(h) => {
                 tx.execute(
                     "INSERT OR REPLACE INTO develop_history(photo, data) VALUES (?, ?)",

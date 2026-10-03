@@ -45,6 +45,8 @@ pub struct Synced {
     pub after: Recipe,
     /// The History saved with `after`, which Redo writes back.
     pub history: SavedHistory,
+    /// The History before the Sync, which Undo writes back (empty when it had none).
+    pub history_before: SavedHistory,
     /// The file as the Sync read it: Redo refuses a file changed since.
     pub identity: crate::storage::Identity,
 }
@@ -234,6 +236,7 @@ fn prepare(
             steps: Vec::new(),
             applied: 0,
         });
+    let history_before = saved.clone();
     let mut history = History::restored(saved, &before_recipe);
     let mut current = before_recipe;
     history.set(&after, &mut current, Step::new("Synchronize Settings", ""));
@@ -245,6 +248,7 @@ fn prepare(
                 before,
                 after,
                 history: history.saved(&current),
+                history_before,
                 identity,
             },
             name: target.name.clone(),
@@ -294,7 +298,10 @@ pub(super) fn restore(
     for (e, path) in edits.iter().zip(paths) {
         let (recipe, history) = match (side, &e.before) {
             (SyncSide::Before, EditBefore::None { .. }) => continue,
-            (SyncSide::Before, EditBefore::Saved(r)) => (r.as_ref(), HistoryUpdate::Keep),
+            // Undo brings back the History it had, redo branch included.
+            (SyncSide::Before, EditBefore::Saved(r)) => {
+                (r.as_ref(), HistoryUpdate::Replace(&e.history_before))
+            }
             // Redo brings back the History the Sync saved, which Undo may have cleared.
             (SyncSide::After, _) => (&e.after, HistoryUpdate::Replace(&e.history)),
         };
@@ -363,8 +370,12 @@ impl Editor {
         let (Some(library), Some(open)) = (&self.library, self.document.catalog_photo) else {
             return Vec::new();
         };
-        // The open photo's settings are not final until its Lightroom edit is in.
-        if self.document.pending_lightroom || self.document.metadata.is_none() {
+        // The open photo's settings are not final until its Lightroom edit is in, or
+        // while an Auto estimate is still to land on them.
+        if self.document.pending_lightroom
+            || self.document.metadata.is_none()
+            || self.document.auto.is_running()
+        {
             return Vec::new();
         }
         // The open photo may be hidden by the filters and still selected.
@@ -564,6 +575,32 @@ mod tests {
                 .exposure,
             0.5
         );
+        // Undo on a photo that had an edit and History brings both back.
+        let (id, path0) = (photos[1].0, photos[1].1.clone());
+        let mut edited = c.load_edit(id, &path0)?.unwrap().recipe;
+        edited.exposure = -0.3;
+        let earlier = SavedHistory {
+            origin: Recipe::default(),
+            steps: vec![crate::catalog::SavedStep {
+                name: "Exposure".into(),
+                value: "-0.30".into(),
+                recipe: edited.clone(),
+            }],
+            applied: 1,
+        };
+        c.save_edit(
+            id,
+            &path0,
+            &edited,
+            &ExportOptions::default(),
+            HistoryUpdate::Replace(&earlier),
+        )?;
+        let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..1]);
+        assert_eq!(again.synced.len(), 1);
+        restore(&c, &again.synced, SyncSide::Before, path)?;
+        assert_eq!(c.load_history(id)?, Some(earlier));
+        assert_eq!(c.load_edit(id, &path0)?.unwrap().recipe.exposure, -0.3);
+        restore(&c, &again.synced, SyncSide::After, path)?;
         // Settings the photos already have change nothing.
         let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..2]);
         assert!(again.synced.is_empty() && again.failed.is_empty());
