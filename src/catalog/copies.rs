@@ -6,7 +6,7 @@ use rusqlite::{OptionalExtension, params};
 
 impl Catalog {
     /// Lightroom's Create Virtual Copy: a new photo of the same file with the
-    /// edit, rating, flag, label and keywords of `id`, named "Copy N" after
+    /// edit, rating, flag, label, keywords and descriptive metadata of `id`, named "Copy N" after
     /// its master's other copies. Returns the copy's id.
     pub fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
         let master: i64 = self
@@ -37,6 +37,7 @@ impl Catalog {
             "INSERT INTO photo_keywords(photo,keyword) SELECT ?,keyword FROM photo_keywords WHERE photo=?",
             [copy, id],
         )?;
+        super::descriptive::copy_rows(&tx, id, copy)?;
         tx.commit()?;
         Ok(copy)
     }
@@ -124,7 +125,10 @@ impl Catalog {
             "photo_keywords",
             "collection_photos",
             "photo_info",
-        ] {
+        ]
+        .into_iter()
+        .chain(super::descriptive::TABLES)
+        {
             tx.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
         }
         tx.execute("DELETE FROM photos WHERE id=?", [id])?;
