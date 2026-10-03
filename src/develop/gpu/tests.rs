@@ -239,6 +239,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.curve.insert([0.3, 0.25]);
     r.effects.channels[2].insert([0.6, 0.7]);
     r.effects.parametric = [0.2, -0.1, 0.3, 0.];
+    r.effects.curve_saturation = 0.4;
     r.black_point = 0.02;
     r.white_point = 0.97;
     r.midtone = 1.2;

@@ -236,6 +236,7 @@ impl SettingGroup {
                 to.white_point = from.white_point;
                 to.midtone = from.midtone;
                 e.channels = f.channels.clone();
+                e.curve_saturation = f.curve_saturation;
                 e.parametric = f.parametric;
                 e.splits = f.splits;
             }
@@ -551,6 +552,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
     } = r;
     let crate::develop::effects::Effects {
         channels: _,
+        curve_saturation: _,
         parametric: _,
         splits: _,
         calibration: _,
@@ -636,6 +638,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("panels", Derived),
         ("unknown", PhotosOwn),
         ("effects.channels", Group(ToneCurve)),
+        ("effects.curve_saturation", Group(ToneCurve)),
         ("effects.parametric", Group(ToneCurve)),
         ("effects.splits", Group(ToneCurve)),
         ("effects.calibration", Group(Calibration)),

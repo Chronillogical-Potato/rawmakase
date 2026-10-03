@@ -337,6 +337,36 @@ fn every_lightroom_vignette_style_imports() -> Result<()> {
     Ok(())
 }
 #[test]
+fn refine_saturation_imports_and_out_of_range_values_are_rejected() -> Result<()> {
+    let apply = |value: &str| {
+        parse(
+            Path::new("p.xmp"),
+            &xml(&format!("c:CurveRefineSaturation=\"{value}\""), ""),
+        )?
+        .apply(&Recipe::default(), &Metadata::default(), &[], None)
+    };
+    assert_eq!(apply("0")?.effects.curve_saturation, 0.);
+    assert_eq!(apply("50")?.effects.curve_saturation, 0.5);
+    assert_eq!(apply("200")?.effects.curve_saturation, 2.);
+    assert!(apply("201").is_err());
+    // A preset without it leaves the recipe's own.
+    let base = Recipe {
+        effects: crate::develop::effects::Effects {
+            curve_saturation: 0.3,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let r = parse(Path::new("p.xmp"), &xml(r#"c:Exposure2012="1""#, ""))?.apply(
+        &base,
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    assert_eq!(r.effects.curve_saturation, 0.3);
+    Ok(())
+}
+#[test]
 fn malformed_numbers_rejected() -> Result<()> {
     for value in ["NaN", "inf", "oops", "900"] {
         let p = parse(

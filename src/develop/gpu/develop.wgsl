@@ -451,6 +451,28 @@ fn level(v: f32) -> f32 {
     let low = x;
     return parametric(low / max(low + (1.0 - x), 1e-8));
 }
+// curve::refine_saturation: Refine Saturation below 100 keeps the colour's channel
+// differences from before the point curve, with the curved colour's luma.
+fn refine_saturation(input: vec3<f32>, curved: vec3<f32>) -> vec3<f32> {
+    let amount = p(P_REFINE_SATURATION);
+    if amount >= 1.0 {
+        return curved;
+    }
+    let luma = vec3(0.299, 0.587, 0.114);
+    let goal = dot(curved, luma);
+    let offset = input - vec3(dot(input, luma));
+    let high = max(max(max(offset.x, offset.y), offset.z), 0.0);
+    let low = min(min(min(offset.x, offset.y), offset.z), 0.0);
+    var scale = 1.0;
+    if high > 1e-6 {
+        scale = min(scale, (1.0 - goal) / high);
+    }
+    if low < -1e-6 {
+        scale = min(scale, goal / -low);
+    }
+    let kept = goal + offset * max(scale, 0.0);
+    return kept + (curved - kept) * amount;
+}
 fn reference_curves(rgb: vec3<f32>) -> vec3<f32> {
     let pro = RGB_TO_PRO * rgb;
     var q = vec3(
@@ -482,6 +504,7 @@ fn reference_curves(rgb: vec3<f32>) -> vec3<f32> {
     if hi - lo > 1e-8 {
         m = a + (b - a) * (q - lo) / (hi - lo);
     }
+    m = refine_saturation(q, m);
     let channels = vec3(
         srgb_decode(lut(offset(P_CHANNELS), 4096u, m.x)),
         srgb_decode(lut(offset(P_CHANNELS + 1u), 4096u, m.y)),

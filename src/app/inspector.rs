@@ -679,6 +679,7 @@ impl Editor {
             r.midtone = 1.;
             r.curve = Recipe::default().curve;
             r.effects.channels = std::array::from_fn(|_| Default::default());
+            r.effects.curve_saturation = 1.;
             r.effects.parametric = [0.; 4];
         }
 

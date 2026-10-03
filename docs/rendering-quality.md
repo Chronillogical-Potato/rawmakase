@@ -18,7 +18,7 @@ The matrix-only and legacy profile paths use a scene-luminance shoulder. New pro
 
 Highlight reconstruction estimates clipped camera channels from nearby unclipped channel ratios, before color conversion. It retains unclipped channels and blends in recovery near the sensor ceiling. With no usable color evidence, it falls back to neutral; it cannot recreate fully clipped texture. The recovered image is lazily cached per decoded image. Extreme WB changes after demosaicing still have limitations.
 
-Master point curves still have a saturated-color residual. Parametric curve controls remain an approximation, and non-default Curve Refine Saturation is unsupported. Generated-ramp regression data checks neutral master and independent RGB curves separately from RAW/profile differences; see `tests/data/README.md`. Exact Lightroom rendering parity is **not** established.
+Master point curves still have a saturated-color residual. Parametric curve controls remain an approximation. Generated-ramp regression data checks neutral master and independent RGB curves separately from RAW/profile differences; see `tests/data/README.md`. Exact Lightroom rendering parity is **not** established.
 
 ## Color mixer and grading
 

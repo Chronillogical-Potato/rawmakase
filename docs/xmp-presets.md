@@ -22,7 +22,7 @@ To add one, drop an `.xmp` into a group folder, list it in `src/presets/builtin.
 ## Implemented settings
 
 - White balance, exposure, contrast, highlights, shadows, whites, blacks, saturation and vibrance.
-- Master and RGB point curves, parametric curves and region boundaries.
+- Master and RGB point curves with Refine Saturation, parametric curves and region boundaries.
 - Eight-band HSL, black-and-white mixing, split toning and modern color grading.
 - Primary calibration and shadow tint, clarity, texture and dehaze.
 - Sharpening, luminance/chroma noise controls and hue-based defringing.

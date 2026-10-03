@@ -183,6 +183,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         texture: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         channels: _,
+        curve_saturation: _,
         parametric: _,
         splits: _,
         calibration: _,

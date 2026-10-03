@@ -97,6 +97,7 @@ fn everything_changed() -> Recipe {
         .insert("from_a_newer_release".into(), Value::Bool(true));
     let e = &mut r.effects;
     e.channels[0].points = vec![[0., 0.2], [1., 1.]];
+    e.curve_saturation = 0.4;
     e.parametric = [0.1; 4];
     e.splits = [0.2, 0.5, 0.8];
     e.calibration = [[0.1, 0.2]; 3];

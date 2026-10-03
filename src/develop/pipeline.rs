@@ -5,7 +5,7 @@ use super::masks::{
 use super::{Geometry, Recipe, Rendered, mul, srgb_encode};
 use crate::color_math::srgb_decode;
 use crate::{
-    develop::curve::CurveLut,
+    develop::curve::{CurveLut, refine_saturation},
     raw::{CameraImage, Metadata},
 };
 use anyhow::{Result, ensure};
@@ -467,6 +467,7 @@ fn apply_reference_curves(
     } else {
         [a; 3]
     };
+    let master = refine_saturation(p, master, r.effects.curve_saturation);
     let channels = std::array::from_fn(|c| srgb_decode(lut.channels[c].evaluate(master[c])));
     mul(crate::camera_profiles::PRO_TO_RGB, channels)
 }

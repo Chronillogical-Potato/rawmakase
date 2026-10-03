@@ -244,6 +244,40 @@ impl CurveLut {
         self.0[i] * (1. - t) + self.0[i + 1] * t
     }
 }
+
+/// Luma weights (Rec. 601) with which Refine Saturation measures a colour's lightness,
+/// in encoded ProPhoto RGB: fitted to Camera Raw 18.7 on the synthetic chart.
+const REFINE_LUMA: [f32; 3] = [0.299, 0.587, 0.114];
+
+/// Lightroom's Refine Saturation on the master point curve, in encoded ProPhoto RGB:
+/// `input` before the curve, `curved` after it. At 0 the colour keeps its channel
+/// differences from before the curve and takes its luma from `curved`, scaled down only
+/// as far as it must to stay within 0–1. Other amounts blend linearly, and amounts above
+/// 1 render as 1, as Camera Raw does.
+pub(crate) fn refine_saturation(input: [f32; 3], curved: [f32; 3], amount: f32) -> [f32; 3] {
+    let amount = amount.clamp(0., 1.);
+    if amount == 1. {
+        return curved;
+    }
+    let luma = |p: [f32; 3]| (0..3).map(|c| p[c] * REFINE_LUMA[c]).sum::<f32>();
+    let target = luma(curved);
+    let base = luma(input);
+    let offset = input.map(|v| v - base);
+    let high = offset.into_iter().fold(0f32, f32::max);
+    let low = offset.into_iter().fold(0f32, f32::min);
+    let mut scale = 1f32;
+    if high > 1e-6 {
+        scale = scale.min((1. - target) / high);
+    }
+    if low < -1e-6 {
+        scale = scale.min(target / -low);
+    }
+    let scale = scale.max(0.);
+    std::array::from_fn(|c| {
+        let kept = target + offset[c] * scale;
+        kept + (curved[c] - kept) * amount
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
