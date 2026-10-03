@@ -250,6 +250,7 @@ fn copy_tables(tx: &Connection) -> Result<()> {
         super::info::INFO_BACKFILLED,
         super::sidecar::METADATA_BACKFILLED,
         KEYWORD_EXPORT_BACKFILLED,
+        super::snapshots::SNAPSHOTS_BACKFILLED,
     ] {
         super::set_meta(tx, key, "1")?;
     }

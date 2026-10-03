@@ -32,7 +32,7 @@ pub enum SnapshotSettings {
 }
 
 /// Set in `meta` once snapshots have been recovered from the stored Lightroom catalog.
-const SNAPSHOTS_BACKFILLED: &str = "lightroom_snapshots_backfilled";
+pub(super) const SNAPSHOTS_BACKFILLED: &str = "lightroom_snapshots_backfilled";
 
 impl Catalog {
     /// Catalogs imported before snapshots were kept still hold the original Lightroom

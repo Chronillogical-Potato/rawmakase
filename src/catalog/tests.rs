@@ -1220,7 +1220,9 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
     }
     let destination = d.path().join("snapshots.rawmakase");
     import_lightroom(&source, &destination)?;
-    let cat = Catalog::open(&destination)?;
+    let mut cat = Catalog::open(&destination)?;
+    // Imported here, so opening the catalog has nothing to recover.
+    assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
     let snapshots = cat.snapshots(40)?;
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].name, "Before crop");
@@ -1229,8 +1231,11 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
         SnapshotSettings::Lightroom("s = { Exposure2012 = 0.5 }".into())
     );
     // A catalog imported before snapshots were kept recovers them once.
-    let mut cat = cat;
     cat.db.execute("DELETE FROM develop_snapshots", [])?;
+    cat.db.execute(
+        "DELETE FROM meta WHERE key='lightroom_snapshots_backfilled'",
+        [],
+    )?;
     assert_eq!(cat.backfill_lightroom_snapshots()?, 1);
     assert_eq!(cat.snapshots(40)?.len(), 1);
     assert_eq!(cat.backfill_lightroom_snapshots()?, 0);

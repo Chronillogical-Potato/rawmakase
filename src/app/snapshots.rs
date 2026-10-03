@@ -53,7 +53,8 @@ impl Editor {
         if self.document.metadata.is_none() || self.document.catalog_photo.is_none() {
             return;
         }
-        let mut action = None;
+        // A rename committed by clicking another snapshot comes first, then the click.
+        let mut actions = Vec::new();
         let panel = &mut self.document.snapshots;
         let add = super::widgets::section_with(
             ui,
@@ -81,7 +82,7 @@ impl Editor {
                         }
                         if edit.lost_focus() {
                             let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                            action = Some(if cancel {
+                            actions.push(if cancel {
                                 SnapshotAction::Rename(snapshot.id, snapshot.name.clone())
                             } else {
                                 SnapshotAction::Rename(snapshot.id, renaming.name.clone())
@@ -93,26 +94,26 @@ impl Editor {
                     // a rename never applies a snapshot first.
                     let row = snapshot_row(ui, &snapshot.name);
                     if row.clicked() {
-                        action = Some(SnapshotAction::Apply(snapshot.id));
+                        actions.push(SnapshotAction::Apply(snapshot.id));
                     }
                     row.context_menu(|ui| {
                         if ui.button("Update with Current Settings").clicked() {
-                            action = Some(SnapshotAction::Update(snapshot.id));
+                            actions.push(SnapshotAction::Update(snapshot.id));
                         }
                         if ui.button("Rename").clicked() {
-                            action = Some(SnapshotAction::StartRename(snapshot.id));
+                            actions.push(SnapshotAction::StartRename(snapshot.id));
                         }
                         if ui.button("Delete").clicked() {
-                            action = Some(SnapshotAction::Delete(snapshot.id));
+                            actions.push(SnapshotAction::Delete(snapshot.id));
                         }
                     });
                 }
             },
         );
         if add {
-            action = Some(SnapshotAction::New);
+            actions.push(SnapshotAction::New);
         }
-        if let Some(action) = action {
+        for action in actions {
             self.snapshot_action(action);
         }
     }
@@ -199,6 +200,10 @@ impl Editor {
                 }
             }
         };
+        // Already the edit: nothing to record, and no label left for the next step.
+        if recipe == self.document.recipe {
+            return;
+        }
         self.document
             .history
             .label(Step::new(format!("Snapshot: {}", snapshot.name), ""));
