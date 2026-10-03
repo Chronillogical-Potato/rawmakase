@@ -525,7 +525,7 @@ fn exports_match_the_render() {
                 &out,
                 &im.metadata,
                 &rawmakase::export::ExportOptions::default(),
-                false,
+                rawmakase::export::Replace::NoClobber,
             )
             .unwrap();
             let decoded = image::open(&path).unwrap().to_rgb16();

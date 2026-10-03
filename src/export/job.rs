@@ -40,7 +40,7 @@ pub fn run(
     photo: Photo,
     settings: &ExportSettings,
     target: &Path,
-    overwrite: bool,
+    replace: super::Replace,
     cancel: &AtomicBool,
     progress: impl Fn(f32),
 ) -> Result<Option<String>> {
@@ -110,7 +110,7 @@ pub fn run(
             xmp,
             ppi: settings.ppi,
         },
-        overwrite,
+        replace,
     )?;
     progress(1.);
     Ok(notice)

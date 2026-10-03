@@ -419,12 +419,9 @@ fn import_presets(
                 target = dir.join(format!("{stem} {n}.xmp"));
                 n += 1;
             }
-            let mut staged = tempfile::NamedTempFile::new_in(&dir)?;
-            staged.write_all(text.as_bytes())?;
-            staged.as_file().sync_all()?;
-            staged.persist_noclobber(&target).map_err(|e| e.error)?;
-            crate::storage::sync_dir(&dir)?;
-            Ok(())
+            crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
+                Ok(f.write_all(text.as_bytes())?)
+            })
         })();
         match written {
             Ok(()) => {

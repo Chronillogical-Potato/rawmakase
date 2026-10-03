@@ -7,6 +7,7 @@ mod extended_xmp;
 pub mod job;
 mod metadata;
 pub mod settings;
+pub use crate::storage::Replace;
 use crate::{
     develop::Rendered,
     raw::{self, Metadata},
@@ -79,17 +80,9 @@ pub fn export(
     image: &Rendered,
     m: &Metadata,
     options: &ExportOptions,
-    overwrite: bool,
+    replace: Replace,
 ) -> Result<()> {
-    export_with(
-        path,
-        source,
-        image,
-        m,
-        options,
-        &Embed::default(),
-        overwrite,
-    )
+    export_with(path, source, image, m, options, &Embed::default(), replace)
 }
 
 pub fn export_with(
@@ -99,7 +92,7 @@ pub fn export_with(
     m: &Metadata,
     options: &ExportOptions,
     embed: &Embed,
-    overwrite: bool,
+    replace: Replace,
 ) -> Result<()> {
     ensure!(!is_raw(path), "An export cannot overwrite a RAW file");
     options.validate()?;
@@ -108,7 +101,7 @@ pub fn export_with(
             fs::canonicalize(path)? != fs::canonicalize(source)?,
             "Cannot overwrite source"
         );
-        ensure!(overwrite, "Destination already exists");
+        ensure!(replace == Replace::Overwrite, "Destination already exists");
     }
     let parent = crate::storage::parent_dir(path);
     let mut temp = NamedTempFile::new_in(parent)?;
@@ -133,12 +126,7 @@ pub fn export_with(
         _ => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
     }
     temp.as_file().sync_all()?;
-    if overwrite {
-        temp.persist(path).map_err(|e| e.error)?;
-    } else {
-        temp.persist_noclobber(path).map_err(|e| e.error)?;
-    }
-    crate::storage::sync_dir(parent)
+    crate::storage::persist(temp, path, replace)
 }
 
 #[cfg(test)]

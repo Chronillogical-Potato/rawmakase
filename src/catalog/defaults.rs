@@ -18,10 +18,7 @@ impl MetadataDefaults {
         crate::storage::data_dir().join("metadata-defaults.json")
     }
     pub fn load() -> Self {
-        std::fs::read_to_string(Self::path())
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
+        crate::storage::read_json_or_default(&Self::path())
     }
     pub fn save(&self) -> Result<()> {
         crate::storage::atomic_json(&Self::path(), self)

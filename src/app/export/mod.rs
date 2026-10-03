@@ -9,7 +9,7 @@ use super::{Editor, worker::Event};
 use crate::app::theme;
 use crate::app::widgets::plural;
 use crate::export::{
-    Existing, ExportSettings,
+    Existing, ExportSettings, Replace,
     assemble::Values,
     job::{self, Photo},
     settings::unique,
@@ -149,7 +149,7 @@ impl Editor {
             return;
         };
         if !target.exists() {
-            return self.start_export(photo, target, settings, false);
+            return self.start_export(photo, target, settings, Replace::NoClobber);
         }
         match settings.existing {
             Existing::Ask => {
@@ -159,8 +159,10 @@ impl Editor {
                     photo,
                 })
             }
-            Existing::Unique => self.start_export(photo, unique(&target), settings, false),
-            Existing::Overwrite => self.start_export(photo, target, settings, true),
+            Existing::Unique => {
+                self.start_export(photo, unique(&target), settings, Replace::NoClobber)
+            }
+            Existing::Overwrite => self.start_export(photo, target, settings, Replace::Overwrite),
             Existing::Skip => self.status = format!("Skipped: {} already exists", target.display()),
         }
     }
@@ -170,7 +172,7 @@ impl Editor {
         photo: Photo,
         target: PathBuf,
         settings: ExportSettings,
-        overwrite: bool,
+        replace: Replace,
     ) {
         let job = Job {
             progress: Default::default(),
@@ -185,7 +187,7 @@ impl Editor {
             target.file_name().unwrap_or_default().to_string_lossy()
         );
         std::thread::spawn(move || {
-            let result = job::run(photo, &settings, &target, overwrite, &cancel, |p| {
+            let result = job::run(photo, &settings, &target, replace, &cancel, |p| {
                 progress.store((p * 1000.) as u32, Ordering::Relaxed);
                 ctx.request_repaint();
             });

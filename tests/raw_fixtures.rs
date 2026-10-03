@@ -54,7 +54,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
                 &output,
                 &image.metadata,
                 &ExportOptions::default(),
-                false,
+                export::Replace::NoClobber,
             )?;
             let decoded = image::open(&p)?;
             assert_eq!(
@@ -77,7 +77,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
                     &output,
                     &image.metadata,
                     &ExportOptions::default(),
-                    false
+                    export::Replace::NoClobber
                 )
                 .is_err()
             );

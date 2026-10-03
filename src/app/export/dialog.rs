@@ -2,7 +2,7 @@
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::{Conflict, Editor};
 use crate::app::theme;
-use crate::export::{Destination, Existing, Format, Include, settings::unique};
+use crate::export::{Destination, Existing, Format, Include, Replace, settings::unique};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -394,8 +394,10 @@ impl Editor {
             photo,
         } = conflict;
         match choice {
-            Existing::Overwrite => self.start_export(photo, target, settings, true),
-            Existing::Unique => self.start_export(photo, unique(&target), settings, false),
+            Existing::Overwrite => self.start_export(photo, target, settings, Replace::Overwrite),
+            Existing::Unique => {
+                self.start_export(photo, unique(&target), settings, Replace::NoClobber)
+            }
             _ => self.status = "Export skipped".into(),
         }
     }
