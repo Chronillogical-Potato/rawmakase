@@ -44,11 +44,11 @@ These controls were fitted to Camera Raw renders and match within the default-re
 - **Remove Chromatic Aberration** measures lateral CA radially from the image centre; Camera Raw's own estimate is not reproduced exactly, and off-centre (decentred) CA is not corrected ([lens corrections](lens-corrections.md#remove-chromatic-aberration)).
 - **Defringe** matches Camera Raw's hue ranges and strength, but not its extra reduction next to strong edges ([lens corrections](lens-corrections.md#defringe)).
 - **Manual lens vignetting** is not measured against Camera Raw.
-- **Manual Distortion** matches Camera Raw's radial map and order on the chart ([lens corrections](lens-corrections.md#manual-distortion)); Lens Corrections has a Distortion amount for it, and Constrain Crop is not implemented.
+- **Manual Distortion** matches Camera Raw's radial map and order on the chart ([lens corrections](lens-corrections.md#manual-distortion)); Lens Corrections has a Distortion amount for it, and Constrain Crop crops out the white it uncovers.
 
 ## Geometry
 
-- **Upright** renders imported edits from the corrections Lightroom stores, exactly. For new edits and mode-only presets RAWmakase analyses the photo itself; on 160 photos its Level is within a median 13 px of Lightroom's at 2000 px, Vertical and Auto about 60 px (mostly framing), Full about 180 px ([transform](transform.md)). Guided and Constrain Crop are not implemented.
+- **Upright** renders imported edits from the corrections Lightroom stores, exactly. For new edits and mode-only presets RAWmakase analyses the photo itself; on 160 photos its Level is within a median 13 px of Lightroom's at 2000 px, Vertical and Auto about 60 px (mostly framing), Full about 180 px ([transform](transform.md)). Guided is not implemented. Constrain Crop keeps the white out of the crop; its rule could not be measured in Camera Raw, which renders the stored crop as it is ([transform](transform.md#constrain-crop)).
 
 ## Local and finishing adjustments
 

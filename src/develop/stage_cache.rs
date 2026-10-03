@@ -129,6 +129,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         crop,
         rotation,
         straighten,
+        constrain_crop,
         flip_x,
         flip_y,
         transform,
@@ -228,6 +229,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             crop: *crop,
             rotation: *rotation,
             straighten: *straighten,
+            constrain_crop: *constrain_crop,
             flip_x: *flip_x,
             flip_y: *flip_y,
             transform: *transform,
@@ -396,7 +398,7 @@ mod tests {
             (a.blurs != b.blurs, a.samples != b.samples)
         };
         // (edit, changes the blurs, changes the samples)
-        let cases: [(&str, Recipe, bool, bool); 13] = [
+        let cases: [(&str, Recipe, bool, bool); 14] = [
             ("temperature", edit(&|r| r.temperature = 3000.), true, false),
             (
                 "lens vignetting",
@@ -424,6 +426,12 @@ mod tests {
                 true,
             ),
             ("straighten", edit(&|r| r.straighten = 2.), false, true),
+            (
+                "constrain crop",
+                edit(&|r| r.constrain_crop = true),
+                false,
+                true,
+            ),
             ("noise", edit(&|r| r.noise_luma = 0.3), false, true),
             (
                 "chroma detail",

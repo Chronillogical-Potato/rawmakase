@@ -68,6 +68,7 @@ fn everything_changed() -> Recipe {
         sharpening: 0.5,
         crop: [0.1, 0.1, 0.9, 0.9],
         straighten: 2.,
+        constrain_crop: true,
         rotation: 1,
         flip_x: true,
         flip_y: true,

@@ -57,6 +57,7 @@ pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) 
     // As rendered: a switched-off Lens Corrections panel corrects nothing.
     let mut a = r.as_rendered().into_owned();
     a.crop = [0., 0., 1., 1.];
+    a.constrain_crop = false;
     a.straighten = 0.;
     a.transform = Default::default();
     a.upright = Default::default();

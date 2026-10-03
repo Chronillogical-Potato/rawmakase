@@ -818,3 +818,17 @@ fn channel_curves_apply_only_as_a_full_set() -> Result<()> {
     assert!(!r.reference_curves && !r.wide_gamut_curves);
     Ok(())
 }
+/// Lightroom's Constrain Crop (`CropConstrainToWarp`) imports instead of being refused,
+/// apart from `CropConstrainToUnitSquare`, which leaves it off.
+#[test]
+fn constrain_crop_imports() -> Result<()> {
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("c.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let on = apply(r#"c:CropConstrainToWarp="1""#, &Recipe::default())?;
+    assert!(on.constrain_crop);
+    assert!(apply(r#"c:Exposure2012="1""#, &on)?.constrain_crop);
+    assert!(!apply(r#"c:CropConstrainToWarp="0""#, &on)?.constrain_crop);
+    assert!(!apply(r#"c:CropConstrainToUnitSquare="1""#, &Recipe::default())?.constrain_crop);
+    Ok(())
+}

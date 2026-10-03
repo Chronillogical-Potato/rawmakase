@@ -920,6 +920,11 @@ impl Preset {
         for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
             settings.assign(&format!("Crop{name}"), &mut r.crop[i], 1., 0., 1.)?;
         }
+        // Lightroom's Constrain Crop, not to be confused with `CropConstrainToUnitSquare`.
+        settings.seen.insert("CropConstrainToWarp".into());
+        if let Some(constrain) = number(v, "CropConstrainToWarp")? {
+            r.constrain_crop = constrain != 0.;
+        }
         Ok(())
     }
 
@@ -1015,7 +1020,6 @@ impl Preset {
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
         for (key, default) in [
             ("HDREditMode", "0"),
-            ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),
             ("IncrementalTint", "0"),
             // Camera Raw 18.6 effects without rendering support yet.

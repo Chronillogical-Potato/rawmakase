@@ -4,6 +4,16 @@ Engine 4 renders Lightroom's Transform panel: the manual sliders (`Recipe::trans
 
 Both are homographies applied after lens correction and before the crop, in the frame the camera recorded: before the photo is rotated or flipped for display, and after the camera's default crop. Camera Raw 18.6 works in that frame, so on a photo the camera turned to portrait, `PerspectiveVertical` keystones across the screen. Lightroom's panel shows the sliders along the displayed photo instead: its Vertical −70 on a photo turned 90° left is stored as `PerspectiveHorizontal` +70. RAWmakase stores them as Lightroom does and shows them the same way (`Transform::displayed`). Upright applies first, then the sliders. Lightroom's manual lens Distortion applies before both, in the same frame ([lens corrections](lens-corrections.md#manual-distortion)).
 
+## Constrain Crop
+
+Lightroom's Constrain Crop (`crs:CropConstrainToWarp` 1; the Transform panel's checkbox, `Recipe::constrain_crop`) keeps the white areas that Upright, the Transform sliders and manual Distortion uncover out of the crop. It is not `CropConstrainToUnitSquare`, which only limits Lightroom's crop tool.
+
+Camera Raw 18.7 does not apply the flag when it renders: on the synthetic chart with Vertical +30, Rotate 5, Scale 80 or manual Distortion +50, with no crop, a full crop or a user crop, renders with and without `CropConstrainToWarp="1"` are identical, white areas included. Lightroom constrains the crop in its crop tool and stores the result in `CropLeft` to `CropBottom`. How its tool picks that crop can't be scripted or read from a sidecar, so it was not measured.
+
+RAWmakase applies the constraint while rendering, so it follows every later change to the geometry: the crop as rendered (`Geometry::crop`) is the stored crop when every position in it has a source pixel, and otherwise the largest crop at the stored crop's aspect that has one everywhere and lies inside the stored crop. It shrinks about the stored crop's centre unless moving it keeps more than 0.1% more of its size; for a keystone from Vertical it slides towards the wider edge. Straighten alone never needs it: the photo is already enlarged to leave no white. The stored crop stays as the user drew it, and the Crop tool shows the whole photo around it, white areas included. Lens profiles and built-in lens data never uncover white (their correction is scaled to fill the frame), so the area is set by Upright, the Transform sliders and manual Distortion.
+
+An exported photo's settings carry the crop as rendered with `CropConstrainToWarp="1"`, as Lightroom stores it, so Camera Raw renders the same crop, and reading them back changes nothing.
+
 ## Upright
 
 Lightroom stores the correction for every mode, `crs:UprightTransform_0` to `_5`, indexed by the `PerspectiveUpright` code: 0 Off, 1 Auto, 2 Full, 3 Level, 4 Vertical, 5 Guided. Each is a row-major forward (source-to-output) homography in 0–1 coordinates of the recorded frame. Camera Raw renders the stored matrix as it is: replacing it with a translation moves the render by exactly that, and a wrong `UprightDependentDigest` does not make it recompute. RAWmakase keeps all six corrections, so switching modes needs no new analysis, and keeps the other `Upright*` settings to write back.

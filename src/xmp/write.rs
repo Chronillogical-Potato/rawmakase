@@ -84,7 +84,7 @@ impl Settings {
     }
 }
 
-fn settings(r: &Recipe) -> Settings {
+fn settings(r: &Recipe, m: &Metadata) -> Settings {
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
     if let Some(profile) = &r.profile {
@@ -384,11 +384,22 @@ fn settings(r: &Recipe) -> Settings {
     for (key, value) in &u.lightroom {
         s.text(key, value.clone());
     }
+    // With Constrain Crop, the crop as rendered: Camera Raw renders the stored crop as it
+    // is, and Lightroom stores the crop it constrained.
+    let crop = if r.constrain_crop {
+        crate::develop::Geometry::for_metadata(m, &r.as_rendered()).crop()
+    } else {
+        r.crop
+    };
     for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
-        s.put(&format!("Crop{name}"), r.crop[i], 1., 6, false);
+        s.put(&format!("Crop{name}"), crop[i], 1., 6, false);
     }
     s.put("CropAngle", r.straighten, 1., 2, true);
-    let cropped = r.crop != [0., 0., 1., 1.] || r.straighten != 0.;
+    s.text(
+        "CropConstrainToWarp",
+        if r.constrain_crop { "1" } else { "0" },
+    );
+    let cropped = crop != [0., 0., 1., 1.] || r.straighten != 0.;
     s.text("HasCrop", if cropped { "True" } else { "False" });
     s.text("HasSettings", "True");
     s
@@ -508,7 +519,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
             attributes.push(("crs:RawFileName".into(), photo.raw_name.clone()));
         }
         attributes.extend(
-            settings(r)
+            settings(r, m)
                 .0
                 .into_iter()
                 .map(|(k, v)| (format!("crs:{k}"), v)),

@@ -148,6 +148,56 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     assert_eq!(back.panels, r.panels);
     Ok(())
 }
+/// With Constrain Crop the settings carry the crop as rendered, which Camera Raw renders
+/// as stored, and reading them back renders the same crop.
+#[test]
+fn constrain_crop_writes_the_crop_as_rendered() -> Result<()> {
+    let m = Metadata {
+        width: 300,
+        height: 200,
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut r = crate::develop::Recipe {
+        constrain_crop: true,
+        crop: [0.1, 0., 1., 0.9],
+        ..Default::default()
+    };
+    r.transform.vertical = 0.5;
+    let photo = crate::xmp::write::Photo {
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let rendered = crate::develop::Geometry::for_metadata(&m, &r).crop();
+    assert_ne!(rendered, r.crop);
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(packet.contains("crs:CropConstrainToWarp=\"1\""));
+    assert!(packet.contains("crs:HasCrop=\"True\""));
+    let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
+        &crate::develop::Recipe::default(),
+        &m,
+        &[],
+        None,
+    )?;
+    assert!(back.constrain_crop);
+    for (a, b) in back.crop.iter().zip(rendered) {
+        assert!((a - b).abs() < 2e-6, "{:?} {rendered:?}", back.crop);
+    }
+    let again = crate::develop::Geometry::for_metadata(&m, &back).crop();
+    for (a, b) in again.iter().zip(back.crop) {
+        assert!((a - b).abs() < 2e-6, "{again:?} {:?}", back.crop);
+    }
+    // Off, the crop is written as it is.
+    r.constrain_crop = false;
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(packet.contains("crs:CropConstrainToWarp=\"0\""));
+    assert!(packet.contains("crs:CropLeft=\"0.100000\""));
+    Ok(())
+}
 #[test]
 fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     let dir = tempfile::tempdir()?;

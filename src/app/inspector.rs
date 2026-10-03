@@ -1115,9 +1115,8 @@ impl Editor {
                     }
                 }
                 control_row(ui, "", |ui| {
-                    let mut constrain = false;
-                    ui.add_enabled(false, egui::Checkbox::new(&mut constrain, "Constrain Crop"))
-                        .on_disabled_hover_text("Not available yet. Areas outside the photo render white; crop them out with the Crop tool.");
+                    ui.checkbox(&mut r.constrain_crop, "Constrain Crop")
+                        .on_hover_text("Shrink the crop, keeping its aspect, to leave out the white areas outside the photo");
                 });
                 subheading(ui, "Transform");
                 // Stored as Camera Raw applies them, before the photo is turned for
