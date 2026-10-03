@@ -64,7 +64,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## Catalog and interaction
 
 - The RAWmakase catalog is separate from Lightroom's, with no write-back or sync. Custom color-label text is kept, but custom labels display white.
-- Rating, flag and label changes, collection changes (such as the Quick Collection), and title, caption, creator, copyright, location and keyword edits apply to every photo selected in the Grid. Each is one step that Cmd+Z undoes and Cmd+Shift+Z redoes, in one undo sequence shared with Develop, as in Lightroom. That sequence is kept in memory only (up to 100 steps) and is cleared when another catalog opens.
+- Rating, flag and label changes, adding to or taking out of the Quick Collection, and title, caption, creator, copyright, location and keyword edits apply to every photo selected in the Grid. Each is one step that Cmd+Z undoes and Cmd+Shift+Z redoes, in one undo sequence shared with Develop, as in Lightroom. That sequence is kept in memory only (up to 100 steps) and is cleared when another catalog opens.
 - Develop settings change one photo at a time: Copy and Paste Settings work on the open photo, and there is no Sync Settings or Auto Sync for a selection.
 - Unsupported develop settings are kept and reported, but not rendered.
 
