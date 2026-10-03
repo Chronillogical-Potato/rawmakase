@@ -1837,3 +1837,47 @@ fn the_preset_list_is_kept_until_what_it_shows_changes() {
     editor.presets.clear_document();
     assert_eq!(names(&mut editor).len(), 2);
 }
+#[test]
+fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
+    let ctx = egui::Context::default();
+    let mut effects = crate::develop::effects::Effects {
+        defringe_ranges: [[0.1, 0.95], [0.15, 0.9]],
+        ..Default::default()
+    };
+    let mut time = 0.;
+    let mut frame =
+        |effects: &mut crate::develop::effects::Effects, events: Vec<egui::Event>, wait: f64| {
+            time += wait;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320., 400.))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| super::inspector::defringe_sliders(ui, effects),
+            );
+            output.textures_delta.clear();
+        };
+    // Six rows, Purple then Green: Amount, Hue (low end), Hue (high end).
+    frame(&mut effects, vec![], 0.);
+    let row = 24. + ctx.global_style().spacing.item_spacing.y;
+    for i in [1, 2, 4, 5] {
+        let at = Pos2::new(
+            40.,
+            ctx.global_style().spacing.window_margin.top as f32 + row * i as f32 + 12.,
+        );
+        let click = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Apart in time, so egui never counts a triple click.
+        frame(&mut effects, vec![egui::Event::PointerMoved(at)], 1.);
+        for pressed in [true, false, true, false] {
+            frame(&mut effects, vec![click(pressed)], 0.05);
+        }
+    }
+    assert_eq!(effects.defringe_ranges, [[0.3, 0.7], [0.4, 0.6]]);
+}

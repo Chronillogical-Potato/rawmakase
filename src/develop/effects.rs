@@ -6,6 +6,8 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+/// Defringe's default hue ranges: Purple, then Green (Lightroom's 30–70 and 40–60).
+pub const DEFRINGE_RANGES: [[f32; 2]; 2] = [[0.3, 0.7], [0.4, 0.6]];
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Effects {
@@ -70,7 +72,7 @@ impl Default for Effects {
             lens_vignette: 0.,
             lens_vignette_midpoint: 0.5,
             defringe: [0.; 2],
-            defringe_ranges: [[0.3, 0.7], [0.4, 0.6]],
+            defringe_ranges: DEFRINGE_RANGES,
             luma_detail: 0.5,
             luma_contrast: 0.,
             chroma_detail: 0.5,
@@ -79,6 +81,20 @@ impl Default for Effects {
     }
 }
 impl Effects {
+    /// The Effects panel's reset: post-crop vignette and grain at their defaults. Other
+    /// panels' settings and the grain seed are kept.
+    pub fn reset_post_crop(&mut self) {
+        let d = Effects::default();
+        self.vignette = d.vignette;
+        self.vignette_midpoint = d.vignette_midpoint;
+        self.vignette_roundness = d.vignette_roundness;
+        self.vignette_feather = d.vignette_feather;
+        self.vignette_highlights = d.vignette_highlights;
+        self.vignette_style = d.vignette_style;
+        self.grain = d.grain;
+        self.grain_size = d.grain_size;
+        self.grain_roughness = d.grain_roughness;
+    }
     pub fn validate(&self) -> Result<()> {
         for c in &self.channels {
             c.validate()?;
@@ -341,6 +357,67 @@ pub(crate) fn spatial_finish_scaled(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn effects_reset_covers_every_vignette_and_grain_control_and_nothing_else() {
+        let d = Effects::default();
+        let mut e = Effects {
+            clarity: 0.4,
+            dehaze: -0.2,
+            defringe: [0.5, 0.5],
+            lens_vignette: 0.3,
+            grain_seed: 7,
+            grain: 0.6,
+            grain_size: 0.9,
+            grain_roughness: 0.1,
+            vignette: -0.7,
+            vignette_midpoint: 0.2,
+            vignette_roundness: 0.6,
+            vignette_feather: 0.9,
+            vignette_highlights: 0.8,
+            vignette_style: 2,
+            ..Default::default()
+        };
+        let kept = e.clone();
+        e.reset_post_crop();
+        assert_eq!(
+            (e.grain, e.grain_size, e.grain_roughness),
+            (d.grain, d.grain_size, d.grain_roughness)
+        );
+        assert_eq!(
+            (
+                e.vignette,
+                e.vignette_midpoint,
+                e.vignette_roundness,
+                e.vignette_feather,
+                e.vignette_highlights,
+                e.vignette_style
+            ),
+            (
+                d.vignette,
+                d.vignette_midpoint,
+                d.vignette_roundness,
+                d.vignette_feather,
+                d.vignette_highlights,
+                d.vignette_style
+            )
+        );
+        assert_eq!(
+            (
+                e.clarity,
+                e.dehaze,
+                e.defringe,
+                e.lens_vignette,
+                e.grain_seed
+            ),
+            (
+                kept.clarity,
+                kept.dehaze,
+                kept.defringe,
+                kept.lens_vignette,
+                kept.grain_seed
+            )
+        );
+    }
     #[test]
     fn fringe_selector_sets_the_band_of_the_picked_color() {
         let mut e = Effects::default();
