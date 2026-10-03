@@ -632,3 +632,67 @@ fn remove_chromatic_aberration_imports_and_presets_leave_it_when_omitted() -> Re
     assert!(!apply(r#"c:AutoLateralCA="0""#, &old)?.lens_ca);
     Ok(())
 }
+#[test]
+fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<()> {
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("d.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let r = apply(r#"c:LensManualDistortionAmount="-35""#, &Recipe::default())?;
+    assert!((r.lens_manual_distortion + 0.35).abs() < 1e-6);
+    assert_eq!(
+        apply(r#"c:Exposure2012="1""#, &r)?.lens_manual_distortion,
+        r.lens_manual_distortion
+    );
+    assert!(apply(r#"c:LensManualDistortionAmount="101""#, &Recipe::default()).is_err());
+    let old = Recipe {
+        engine: 3,
+        ..Default::default()
+    };
+    assert!(apply(r#"c:LensManualDistortionAmount="20""#, &old).is_err());
+    assert_eq!(
+        apply(r#"c:LensManualDistortionAmount="0""#, &old)?.lens_manual_distortion,
+        0.
+    );
+    Ok(())
+}
+/// Settings that change how the lens renders leave no Upright correction analysed
+/// through the old lens settings; settings that change nothing rendered keep it.
+#[test]
+fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Result<()> {
+    use crate::develop::{
+        UprightMode,
+        panels::{Panel, PanelState},
+    };
+    let mut base = Recipe::default();
+    base.upright.mode = UprightMode::Level;
+    base.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("d.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let r = apply(r#"c:LensManualDistortionAmount="30""#, &base)?;
+    assert!(r.upright.corrections.is_empty());
+    assert_eq!(r.upright.mode, UprightMode::Level);
+    assert_eq!(apply(r#"c:Exposure2012="1""#, &base)?.upright, base.upright);
+    // With the Lens Corrections panel off the amount renders nothing.
+    let mut off = base.clone();
+    off.panels.set(Panel::LensCorrections, PanelState::Off);
+    let r = apply(r#"c:LensManualDistortionAmount="30""#, &off)?;
+    assert_eq!(r.upright.corrections, base.upright.corrections);
+    // Corrections the settings bring are kept, unless they fail to apply.
+    let identity = "1, 0, 0, 0, 1, 0, 0, 0, 1";
+    let stored = format!(
+        r#"c:LensManualDistortionAmount="30" c:PerspectiveUpright="1" c:UprightTransform_0="{identity}" c:UprightTransform_1="1.1, 0, 0, 0, 1, 0, 0, 0, 1""#
+    );
+    let r = apply(&stored, &base)?;
+    assert_eq!(r.upright.corrections.len(), 2);
+    let broken =
+        r#"c:LensManualDistortionAmount="30" c:PerspectiveUpright="1" c:UprightTransform_1="oops""#;
+    let (r, _) = parse(Path::new("d.xmp"), &xml(broken, ""))?.apply_lenient(
+        &base,
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    assert!(r.upright.corrections.is_empty());
+    Ok(())
+}

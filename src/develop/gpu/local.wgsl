@@ -109,6 +109,7 @@ const S_COUNT: u32 = 59u; // Workgroups per row of the dispatch.
 const S_SLIDERS: u32 = 60u; // Exposure, Shadows, Highlights, Clarity, Texture, texture blur.
 const S_BOX: u32 = 66u; // x, y, width, height of the pixels `gains` holds.
 const S_BOX_COUNT: u32 = 70u; // Workgroups per row of `region_gain`.
+const S_MANUAL: u32 = 72u; // `ManualDistortion`: k (0 when off) and the frame's axes.
 const OUTSIDE: f32 = -3e38;
 
 fn s(i: u32) -> f32 {
@@ -318,6 +319,28 @@ fn source(u: f32, v: f32) -> vec2<f32> {
         oy = (s(hm + 3u) * ox + s(hm + 4u) * oy + s(hm + 5u)) / w;
         ox = tx;
     }
+    // `ManualDistortion::source`.
+    let k = s(S_MANUAL);
+    if k != 0.0 {
+        let dx = (ox - 0.5) * 2.0 * s(S_MANUAL + 1u);
+        let dy = (oy - 0.5) * 2.0 * s(S_MANUAL + 2u);
+        let rho = sqrt(dx * dx + dy * dy);
+        var g = 1.0 + k;
+        if rho > 1e-6 {
+            var r = rho;
+            var extra = 0.0;
+            if k > 0.0 {
+                let turn = sqrt((1.0 + k) / (3.0 * k));
+                if rho > turn {
+                    r = turn;
+                    extra = rho - turn;
+                }
+            }
+            g = (r * (1.0 + k * (1.0 - r * r)) + extra) / rho;
+        }
+        ox = 0.5 + (ox - 0.5) * g;
+        oy = 0.5 + (oy - 0.5) * g;
+    }
     return vec2(
         (s(S_INSET) + ox * s(S_INSET + 2u)) * s(S_WIDTH) - 0.5,
         (s(S_INSET + 1u) + oy * s(S_INSET + 3u)) * s(S_HEIGHT) - 0.5,
@@ -336,7 +359,7 @@ fn sample_region(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocat
     let y0 = s(S_INSET + 1u) * s(S_HEIGHT) - 0.5;
     let x1 = (s(S_INSET) + s(S_INSET + 2u)) * s(S_WIDTH) - 0.5;
     let y1 = (s(S_INSET + 1u) + s(S_INSET + 3u)) * s(S_HEIGHT) - 0.5;
-    let outside = s(S_TRANSFORM) != 0.0 && (at.x < x0 || at.y < y0 || at.x > x1 || at.y > y1);
+    let outside = (s(S_TRANSFORM) != 0.0 || s(S_MANUAL) != 0.0) && (at.x < x0 || at.y < y0 || at.x > x1 || at.y > y1);
     var p = vec3(1.0);
     var pos = vec2(OUTSIDE);
     if !outside {

@@ -269,6 +269,7 @@ impl SettingGroup {
                 to.lens_profile = from.lens_profile;
                 to.lens_distortion = from.lens_distortion;
                 to.lens_vignetting = from.lens_vignetting;
+                to.lens_manual_distortion = from.lens_manual_distortion;
             }
             ChromaticAberration => {
                 to.lens_ca = from.lens_ca;
@@ -459,18 +460,9 @@ pub fn transfer(
     }
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
-    let lens = |r: &Recipe| {
-        (
-            r.lens_builtin,
-            r.lens_profile,
-            r.lens_distortion,
-            r.panels.state(Panel::LensCorrections),
-            // Lens corrections render from process version 4.
-            r.engine >= 4,
-        )
-    };
-    if lens(&recipe) != lens(to) {
+    if super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
         recipe.upright.corrections.clear();
+        recipe.upright.lightroom.clear();
         if recipe.upright.mode == super::UprightMode::Guided {
             recipe.upright.mode = super::UprightMode::Off;
             notes.push(
@@ -503,6 +495,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         lens_profile: _,
         lens_distortion: _,
         lens_vignetting: _,
+        lens_manual_distortion: _,
         lens_ca: _,
         profile_tone: _,
         effects,
@@ -590,6 +583,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("lens_profile", Group(LensProfileCorrections)),
         ("lens_distortion", Group(LensProfileCorrections)),
         ("lens_vignetting", Group(LensProfileCorrections)),
+        ("lens_manual_distortion", Group(LensProfileCorrections)),
         ("lens_ca", Group(ChromaticAberration)),
         ("profile_tone", Group(ProcessVersion)),
         ("preset_name", PhotosOwn),

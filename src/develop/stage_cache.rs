@@ -124,6 +124,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         lens_profile,
         lens_distortion,
         lens_vignetting,
+        lens_manual_distortion,
         lens_ca,
         crop,
         rotation,
@@ -235,6 +236,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             lens_profile: *lens_profile,
             lens_distortion: *lens_distortion,
             lens_vignetting: *lens_vignetting,
+            lens_manual_distortion: *lens_manual_distortion,
             lens_ca: *lens_ca,
             noise_luma: *noise_luma,
             noise_chroma: *noise_chroma,
@@ -394,7 +396,7 @@ mod tests {
             (a.blurs != b.blurs, a.samples != b.samples)
         };
         // (edit, changes the blurs, changes the samples)
-        let cases: [(&str, Recipe, bool, bool); 12] = [
+        let cases: [(&str, Recipe, bool, bool); 13] = [
             ("temperature", edit(&|r| r.temperature = 3000.), true, false),
             (
                 "lens vignetting",
@@ -406,6 +408,12 @@ mod tests {
             (
                 "distortion",
                 edit(&|r| r.lens_distortion = 0.5),
+                false,
+                true,
+            ),
+            (
+                "manual distortion",
+                edit(&|r| r.lens_manual_distortion = -0.3),
                 false,
                 true,
             ),

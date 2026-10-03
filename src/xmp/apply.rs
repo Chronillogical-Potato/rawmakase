@@ -120,6 +120,7 @@ impl Preset {
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
         self.validate_remaining(&mut settings)?;
+        self.keep_upright_fitting(base, &mut recipe);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
         recipe.validate()?;
@@ -195,10 +196,30 @@ impl Preset {
         // Spots and masks that convert apply; the rest are reported.
         let skipped = self.apply_local(&mut recipe, m);
         warnings.extend(skipped);
+        self.keep_upright_fitting(base, &mut recipe);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
         recipe.validate()?;
         Ok((recipe, warnings))
+    }
+    /// Upright corrections analysed through other lens settings than the result's no
+    /// longer fit the photo: they are dropped for a new analysis, unless these settings
+    /// bring Lightroom's own corrections, made with them.
+    fn keep_upright_fitting(&self, base: &Recipe, r: &mut Recipe) {
+        use crate::develop::upright::LensInputs;
+        // Whether the Upright stage installs corrections of its own: tried on a copy,
+        // since a lenient apply rolls back a stage that fails.
+        let mut trial = r.clone();
+        trial.upright.corrections.clear();
+        let mut settings = Settings {
+            values: &self.settings,
+            seen: BTreeSet::new(),
+        };
+        let brought = self.apply_upright(&mut settings, &mut trial).is_ok()
+            && !trial.upright.corrections.is_empty();
+        if !brought && LensInputs::of(r) != LensInputs::of(base) {
+            r.upright.clear_analysis();
+        }
     }
     /// The camera profile this preset asks for, if any.
     fn requested_profile(&self) -> Option<&str> {
@@ -838,6 +859,17 @@ impl Preset {
             };
             r.set_profile_corrections(m, state);
         }
+        settings.assign(
+            "LensManualDistortionAmount",
+            &mut r.lens_manual_distortion,
+            0.01,
+            -1.,
+            1.,
+        )?;
+        ensure!(
+            r.lens_manual_distortion == 0. || r.engine >= 4,
+            "Manual lens Distortion needs the current process version (Calibration)"
+        );
         settings.seen.insert("AutoLateralCA".into());
         if let Some(ca) = number(v, "AutoLateralCA")? {
             ensure!(
@@ -952,7 +984,6 @@ impl Preset {
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
         for (key, default) in [
             ("HDREditMode", "0"),
-            ("LensManualDistortionAmount", "0"),
             ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),
             ("IncrementalTint", "0"),

@@ -1046,6 +1046,7 @@ impl Editor {
             r.lens_profile = defaults.lens_profile;
             r.lens_distortion = defaults.lens_distortion;
             r.lens_vignetting = defaults.lens_vignetting;
+            r.lens_manual_distortion = defaults.lens_manual_distortion;
             let d = Recipe::default().effects;
             r.effects.defringe = d.defringe;
             r.effects.defringe_ranges = d.defringe_ranges;

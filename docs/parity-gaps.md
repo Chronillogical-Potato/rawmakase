@@ -44,6 +44,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 - **Remove Chromatic Aberration** measures lateral CA radially from the image centre; Camera Raw's own estimate is not reproduced exactly, and off-centre (decentred) CA is not corrected ([lens corrections](lens-corrections.md#remove-chromatic-aberration)).
 - **Defringe** matches Camera Raw's hue ranges and strength, but not its extra reduction next to strong edges ([lens corrections](lens-corrections.md#defringe)).
 - **Manual lens vignetting** is not measured against Camera Raw.
+- **Manual Distortion** matches Camera Raw's radial map and order on the chart ([lens corrections](lens-corrections.md#manual-distortion)); it has no panel control yet, and Constrain Crop is not implemented.
 
 ## Geometry
 

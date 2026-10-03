@@ -205,6 +205,88 @@ impl Upright {
         (m != IDENTITY && m[2][2] != 0.).then_some(m)
     }
 }
+/// Lightroom's manual lens Distortion, measured on Camera Raw 18.7 renders of the
+/// synthetic chart: an output position at radius r (1 at the frame's corners) samples
+/// the photo at radius r·(1 + k·(1 − r²)), with k = 0.4 × amount for positive amounts
+/// and 0.5 × amount for negative ones. Corners stay put; positive amounts pull the
+/// edges' middles in from outside the photo, which shows white, as Lightroom shows it
+/// without Constrain Crop. It applies in the frame as recorded, after Upright, the
+/// Transform sliders and the crop take an output position back to it, and before the
+/// lens profile (docs/lens-corrections.md#manual-distortion).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ManualDistortion {
+    k: f32,
+    /// Half the frame's width and height over its half diagonal.
+    axes: [f32; 2],
+}
+impl ManualDistortion {
+    /// For Lightroom's amount (−1 to 1) on a `width` by `height` frame; `None` at 0.
+    fn new(amount: f32, width: f32, height: f32) -> Option<Self> {
+        if amount == 0. {
+            return None;
+        }
+        let diagonal = width.hypot(height);
+        Some(Self {
+            k: amount * if amount > 0. { 0.4 } else { 0.5 },
+            axes: [width / diagonal, height / diagonal],
+        })
+    }
+    /// The source position (0–1 of the frame) that output position (`x`, `y`) samples.
+    fn source(&self, x: f32, y: f32) -> [f32; 2] {
+        let rho = self.radius_squared(x, y).sqrt();
+        let g = if rho > 1e-6 {
+            self.source_radius(rho) / rho
+        } else {
+            1. + self.k
+        };
+        [0.5 + (x - 0.5) * g, 0.5 + (y - 0.5) * g]
+    }
+    /// The output position that samples source position (`x`, `y`): the inverse of
+    /// [`Self::source`], its radius found by bisection on the increasing radial map.
+    fn output(&self, x: f32, y: f32) -> [f32; 2] {
+        let target = self.radius_squared(x, y).sqrt();
+        if target < 1e-6 {
+            return [x, y];
+        }
+        // The map's slope is at least min(1, 1 + k) up to `turn`, and 1 beyond it, where
+        // it lies below rho by less than `turn`.
+        let (mut lo, mut hi) = (
+            0f32,
+            target / (1. + self.k.min(0.)) + self.turn().unwrap_or(0.),
+        );
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if self.source_radius(mid) < target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let scale = 0.5 * (lo + hi) / target;
+        [0.5 + (x - 0.5) * scale, 0.5 + (y - 0.5) * scale]
+    }
+    /// Source radius for output radius `rho` (1 at the frame's corners): Camera Raw's
+    /// rho·(1 + k(1 − rho²)) up to where it stops increasing (for positive amounts, just
+    /// beyond the corners), and a slope of 1 past that, so positions outside the frame
+    /// map one to one and fall outside the photo.
+    fn source_radius(&self, rho: f32) -> f32 {
+        let f = |r: f32| r * (1. + self.k * (1. - r * r));
+        match self.turn() {
+            Some(turn) if rho > turn => f(turn) + rho - turn,
+            _ => f(rho),
+        }
+    }
+    /// Where the radial map stops increasing, for positive amounts.
+    fn turn(&self) -> Option<f32> {
+        (self.k > 0.).then(|| ((1. + self.k) / (3. * self.k)).sqrt())
+    }
+    fn radius_squared(&self, x: f32, y: f32) -> f32 {
+        let dx = (x - 0.5) * 2. * self.axes[0];
+        let dy = (y - 0.5) * 2. * self.axes[1];
+        dx * dx + dy * dy
+    }
+}
+
 const IDENTITY: [[f32; 3]; 3] = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
 fn mat(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
@@ -230,6 +312,8 @@ pub struct Geometry {
     transform: Option<[[f32; 3]; 3]>,
     /// Its inverse, source to output.
     forward: Option<[[f32; 3]; 3]>,
+    /// Lightroom's manual Distortion, after the homography on the way to the source.
+    manual: Option<ManualDistortion>,
 }
 impl Geometry {
     pub fn new(im: &CameraImage, r: &Recipe, max_edge: u32) -> Self {
@@ -247,11 +331,17 @@ impl Geometry {
         } else {
             1.
         };
-        let transform = Self::homography(
-            r,
+        let (frame_width, frame_height) = (
             im.width as f32 * frame.inset[2],
             im.height as f32 * frame.inset[3],
         );
+        let transform = Self::homography(r, frame_width, frame_height);
+        // Off with the Lens Corrections panel, for callers that pass the stored recipe
+        // (the white balance picker) rather than the rendered one.
+        let lens_panel = r.panels.state(super::panels::Panel::LensCorrections);
+        let manual = (r.engine >= 4 && lens_panel == super::panels::PanelState::On)
+            .then(|| ManualDistortion::new(r.lens_manual_distortion, frame_width, frame_height))
+            .flatten();
         Self {
             width: (w * factor).round().max(1.) as u32,
             height: (h * factor).round().max(1.) as u32,
@@ -268,6 +358,7 @@ impl Geometry {
             inset: frame.inset,
             transform,
             forward: transform.map(crate::color_math::inverse),
+            manual,
         }
     }
     /// Upright followed by the Transform sliders, output to source, in 0–1 coordinates
@@ -297,13 +388,13 @@ impl Geometry {
         }
         Some(h)
     }
-    /// Whether a transformed output position has no source pixel; Lightroom shows
-    /// white there.
+    /// Whether a transformed or manually distorted output position has no source pixel;
+    /// Lightroom shows white there.
     /// Pixels beyond the camera's default crop count as outside, as in Lightroom.
     pub fn outside(&self, x: f32, y: f32) -> bool {
         let (w, h) = (self.source_width as f32, self.source_height as f32);
         let [left, top, width, height] = self.inset;
-        self.transform.is_some()
+        (self.transform.is_some() || self.manual.is_some())
             && (x < left * w - 0.5
                 || y < top * h - 0.5
                 || x > (left + width) * w - 0.5
@@ -331,6 +422,11 @@ impl Geometry {
         out[16] = self.transform.is_some() as u8 as f32;
         out[17..].copy_from_slice(h.as_flattened());
         out
+    }
+    /// Manual Distortion as `gpu/local.wgsl` reads it (`S_MANUAL`): k, 0 when off, and
+    /// the frame's axes.
+    pub(crate) fn gpu_manual(&self) -> [f32; 3] {
+        self.manual.map_or([0.; 3], |m| [m.k, m.axes[0], m.axes[1]])
     }
     pub fn source(&self, u: f32, v: f32) -> [f32; 2] {
         let mut x = self.crop[0] + u * (self.crop[2] - self.crop[0]);
@@ -362,6 +458,9 @@ impl Geometry {
                 (h[1][0] * x + h[1][1] * y + h[1][2]) / w,
             );
         }
+        if let Some(m) = &self.manual {
+            [x, y] = m.source(x, y);
+        }
         [
             (self.inset[0] + x * self.inset[2]) * self.source_width as f32 - 0.5,
             (self.inset[1] + y * self.inset[3]) * self.source_height as f32 - 0.5,
@@ -372,6 +471,7 @@ impl Geometry {
     pub fn view(&self, x: f32, y: f32) -> [f32; 2] {
         let x = ((x + 0.5) / self.source_width as f32 - self.inset[0]) / self.inset[2];
         let y = ((y + 0.5) / self.source_height as f32 - self.inset[1]) / self.inset[3];
+        let [x, y] = self.manual.map_or([x, y], |m| m.output(x, y));
         let (x, y) = match &self.forward {
             Some(f) => {
                 let w = f[2][0] * x + f[2][1] * y + f[2][2];
@@ -459,6 +559,114 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+}
+#[cfg(test)]
+mod manual_distortion_tests {
+    use super::*;
+    fn photo() -> CameraImage {
+        CameraImage {
+            width: 300,
+            height: 200,
+            pixels: vec![[0.2; 3]; 300 * 200],
+            metadata: crate::raw::Metadata {
+                width: 300,
+                height: 200,
+                wb: [1.; 3],
+                ..Default::default()
+            },
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+            recovered: Default::default(),
+        }
+    }
+    fn distorted(amount: f32) -> Recipe {
+        Recipe {
+            lens_manual_distortion: amount,
+            ..Default::default()
+        }
+    }
+    /// Camera Raw 18.7 on the synthetic chart: corners stay, the centre is scaled by
+    /// 1 + 0.4 × amount (positive) or 1 + 0.5 × amount (negative), and positive amounts
+    /// bring white in at the edges' middles.
+    #[test]
+    fn manual_distortion_matches_camera_raws_radial_map() {
+        let im = photo();
+        let plain = Geometry::new(&im, &Recipe::default(), 0);
+        for (amount, centre) in [(0.5, 1.2), (-0.5, 0.75), (1., 1.4), (-1., 0.5)] {
+            let g = Geometry::new(&im, &distorted(amount), 0);
+            for corner in [[0., 0.], [1., 0.], [0., 1.], [1., 1.]] {
+                let (a, b) = (
+                    g.source(corner[0], corner[1]),
+                    plain.source(corner[0], corner[1]),
+                );
+                assert!(
+                    (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3,
+                    "{a:?} {b:?}"
+                );
+            }
+            // Near the centre the radius scales by the centre ratio.
+            let [cx, _] = plain.source(0.5, 0.5);
+            let [x, _] = g.source(0.51, 0.5);
+            let [px, _] = plain.source(0.51, 0.5);
+            let ratio = (x - cx) / (px - cx);
+            assert!((ratio - centre).abs() < 2e-3, "{amount}: {ratio}");
+            let [ex, ey] = g.source(0., 0.5);
+            assert_eq!(g.outside(ex, ey), amount > 0., "{amount}: {ex}");
+            // Positions well outside the frame (spots and masks may sit there) map back
+            // too: past the corners the map continues one to one.
+            for p in [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1], [1.8, 1.5], [-0.9, 2.5]] {
+                let [x, y] = g.source(p[0], p[1]);
+                let back = g.view(x, y);
+                assert!(
+                    (back[0] - p[0]).abs() < 1e-3 && (back[1] - p[1]).abs() < 1e-3,
+                    "{amount} {p:?}: {back:?}"
+                );
+            }
+        }
+        // Off at 0 and before engine 4.
+        assert!(Geometry::new(&im, &distorted(0.), 0).manual.is_none());
+        let old = Recipe {
+            engine: 3,
+            ..distorted(0.5)
+        };
+        assert!(Geometry::new(&im, &old, 0).manual.is_none());
+        let mut off = distorted(0.5);
+        off.panels.set(
+            crate::develop::panels::Panel::LensCorrections,
+            crate::develop::panels::PanelState::Off,
+        );
+        assert!(Geometry::new(&im, &off, 0).manual.is_none());
+    }
+    /// It applies in the frame as recorded, after the Transform takes an output position
+    /// back to that frame, as Camera Raw's renders with Scale, Offset and Vertical show.
+    #[test]
+    fn manual_distortion_applies_after_the_transform_towards_the_source() {
+        let im = photo();
+        let mut transformed = Recipe::default();
+        transformed.transform.scale = 0.8;
+        transformed.transform.offset_x = 0.2;
+        transformed.transform.vertical = 0.3;
+        let both = Recipe {
+            lens_manual_distortion: 0.5,
+            ..transformed.clone()
+        };
+        let (t, g) = (
+            Geometry::new(&im, &transformed, 0),
+            Geometry::new(&im, &both, 0),
+        );
+        let manual = ManualDistortion::new(0.5, 300., 200.).unwrap();
+        for p in [[0.2, 0.3], [0.6, 0.5], [0.9, 0.8]] {
+            let [x, y] = t.source(p[0], p[1]);
+            let [mx, my] = manual.source((x + 0.5) / 300., (y + 0.5) / 200.);
+            let got = g.source(p[0], p[1]);
+            assert!(
+                (got[0] - (mx * 300. - 0.5)).abs() < 1e-3
+                    && (got[1] - (my * 200. - 0.5)).abs() < 1e-3,
+                "{got:?}"
+            );
         }
     }
 }

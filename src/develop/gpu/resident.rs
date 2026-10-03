@@ -30,7 +30,7 @@ use wgpu::util::DeviceExt;
 /// Device samples kept, as the stage cache keeps CPU samples.
 const SAMPLES: usize = 4;
 /// Parameters before the radial tables in the sampling pass (`S_*` in `local.wgsl`).
-pub(crate) const SAMPLE_HEADER: usize = 72;
+pub(crate) const SAMPLE_HEADER: usize = 75;
 
 /// The local-tone stage of the current photo: log luminance and its blurs in one
 /// buffer (`local.wgsl`), and the sliders applied to them.

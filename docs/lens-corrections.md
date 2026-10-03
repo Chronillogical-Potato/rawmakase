@@ -77,6 +77,16 @@ Output-space figures are only comparable with each other: the colour matrix mixe
 
 Camera Raw renders with the setting off also show Sony's lateral CA corrected, as RAWmakase does only with built-in corrections on; this was seen on two A7 II photos and has not been investigated further.
 
+## Manual distortion
+
+Lightroom's manual Distortion (Lens Corrections > Manual, `crs:LensManualDistortionAmount`, −100 to 100) is `Recipe::lens_manual_distortion`, rendered by `geometry::ManualDistortion`. Measured on Camera Raw 18.7 renders of the synthetic chart at ±10, ±25, ±50, ±75 and ±100, fitting the radial map to whole images (residual 0.004–0.006 mean absolute difference, the resampling floor):
+
+- An output position at radius r, with r = 1 at the frame's corners, samples radius r·(1 + k·(1 − r²)), with k = 0.4 × amount / 100 for positive amounts and 0.5 × amount / 100 for negative ones. Corners stay where they are.
+- Positive amounts correct barrel distortion: the middle shrinks and the edges' middles come from outside the photo, which renders white, as Lightroom shows it without Constrain Crop. Negative amounts correct pincushion distortion and enlarge the middle, so nothing white appears.
+- Order: Camera Raw applies it in the frame as recorded, centred on the uncropped photo. Crop and Straighten cut its result (a cropped render equals the same crop of the uncropped one exactly), and Upright and the Transform sliders apply after it: Vertical, Scale and Offset renders match only that order. On a DNG whose WarpRectilinear opcode distorts the chart, the lens correction applies after it on the way to the sensor, so `Geometry::source` applies it after the homography and before `LensMap`.
+
+The `lens-manual-distortion*` corpus cases (±50, and +50 with Vertical +30) sit at mean ΔE00 1.3–1.7 from Camera Raw (the default render is 0.9), against 16–21 if it were ignored. The Lens Corrections panel has no control for it yet. Constrain Crop (`crs:CropConstrainToWarp` 1) is still reported as unsupported.
+
 ## Defringe
 
 Lightroom's Defringe (`crs:DefringePurpleAmount`, `…GreenAmount` and their Hue ranges) reduces the chroma of hues inside the Purple and Green ranges. `Effects::defringe_color` does it per pixel in Oklab, after the colour controls:

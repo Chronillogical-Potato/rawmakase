@@ -33,6 +33,7 @@ fn everything_changed() -> Recipe {
         lens_profile: true,
         lens_distortion: 0.5,
         lens_vignetting: 1.5,
+        lens_manual_distortion: -0.2,
         lens_ca: true,
         profile_tone: false,
         preset_name: "Film".into(),
@@ -388,6 +389,7 @@ fn unselected_groups_and_unchanged_lenses_leave_upright_alone() {
     let mut to = Recipe::default();
     to.upright.mode = UprightMode::Level;
     to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    to.upright.lightroom = [("UprightVersion".into(), "151388160".into())].into();
     let mut source = Recipe {
         lens_profile: true,
         ..Default::default()
@@ -396,6 +398,8 @@ fn unselected_groups_and_unchanged_lenses_leave_upright_alone() {
     let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
     assert_eq!(out.recipe.upright.mode, UprightMode::Level);
     assert!(out.recipe.upright.corrections.is_empty());
+    // Lightroom's analysis details went with its corrections.
+    assert!(out.recipe.upright.lightroom.is_empty());
 }
 
 #[test]
@@ -428,7 +432,12 @@ fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
         metadata: &m,
         profiles: &[],
     };
-    let mut to = Recipe::default();
+    // With profile corrections on, so switching the panel off changes the rendering
+    // (a camera's built-in correction stays either way).
+    let mut to = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
     to.upright.mode = UprightMode::Level;
     to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
     let mut source = to.clone();

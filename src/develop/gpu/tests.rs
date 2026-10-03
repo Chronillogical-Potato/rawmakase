@@ -448,6 +448,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.upright.corrections[3] = [1.02, 0.01, -0.02, -0.02, 1.02, 0.01, 0.01, 0., 1.];
             recipe.lens_builtin = true;
             recipe.lens_distortion = 0.8;
+            recipe.lens_manual_distortion = 0.3;
             recipe.noise_luma = 0.4;
             recipe.noise_chroma = 0.5;
         }

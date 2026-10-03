@@ -27,6 +27,12 @@ pub struct Recipe {
     pub lens_distortion: f32,
     #[serde(default = "one")]
     pub lens_vignetting: f32,
+    /// Lightroom's manual Distortion (Lens Corrections > Manual,
+    /// `crs:LensManualDistortionAmount` / 100, −1 to 1): positive corrects barrel
+    /// distortion, negative pincushion. Omitted at 0, so releases that predate it read
+    /// the recipe (and keep the field when it is set).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lens_manual_distortion: f32,
     /// Lightroom's Remove Chromatic Aberration: red and blue fringing measured from the
     /// photo itself, in place of any lens data's lateral CA (`crs:AutoLateralCA`).
     #[serde(default)]
@@ -134,6 +140,7 @@ impl Default for Recipe {
             lens_profile: false,
             lens_distortion: 1.,
             lens_vignetting: 1.,
+            lens_manual_distortion: 0.,
             lens_ca: false,
             profile_tone: true,
             effects: Default::default(),
@@ -325,9 +332,13 @@ impl Recipe {
         ensure!(self.upright.validate(), "Invalid Upright");
         ensure!(
             (0. ..=2.).contains(&self.lens_distortion)
-                && (0. ..=2.).contains(&self.curve_saturation)
-                && (0. ..=2.).contains(&self.lens_vignetting),
+                && (0. ..=2.).contains(&self.lens_vignetting)
+                && (-1. ..=1.).contains(&self.lens_manual_distortion),
             "Invalid lens correction amount"
+        );
+        ensure!(
+            (0. ..=2.).contains(&self.curve_saturation),
+            "Invalid Refine Saturation"
         );
         // Every other number is range-checked above, which also rejects NaN.
         crate::develop::retouch::validate(&self.retouch)?;
@@ -548,6 +559,9 @@ impl Recipe {
             *v /= g;
         }
     }
+}
+fn is_zero(v: &f32) -> bool {
+    *v == 0.
 }
 fn is_one(v: &f32) -> bool {
     *v == 1.
