@@ -92,11 +92,11 @@ pub struct Descriptive {
     pub location: Option<Location>,
 }
 impl Descriptive {
-    pub fn text(&self, field: TextField) -> &Option<Value<LangAlt>> {
+    pub fn text(&self, field: TextField) -> Option<&Value<LangAlt>> {
         match field {
-            TextField::Title => &self.title,
-            TextField::Caption => &self.caption,
-            TextField::Copyright => &self.copyright,
+            TextField::Title => self.title.as_ref(),
+            TextField::Caption => self.caption.as_ref(),
+            TextField::Copyright => self.copyright.as_ref(),
         }
     }
     pub fn text_mut(&mut self, field: TextField) -> &mut Option<Value<LangAlt>> {
@@ -152,9 +152,7 @@ impl Catalog {
     /// its other languages; empty text clears the field, every language.
     /// One transaction.
     pub fn set_text(&mut self, ids: &[i64], field: TextField, text: &str) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for id in ids {
-            let mut d = read(&tx, *id)?;
+        self.update_descriptive(ids, |d| {
             let slot = d.text_mut(field);
             *slot = Some(if text.is_empty() {
                 Value::Cleared
@@ -167,10 +165,7 @@ impl Catalog {
                 langs.0.insert(0, (DEFAULT_LANG.into(), text.into()));
                 Value::Set(langs)
             });
-            write(&tx, *id, &d)?;
-        }
-        tx.commit()?;
-        Ok(())
+        })
     }
     /// Sets the creators of every photo given, in order; none clears the field.
     pub fn set_creators(&mut self, ids: &[i64], names: &[String]) -> Result<()> {
@@ -179,37 +174,50 @@ impl Catalog {
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty())
             .collect();
-        let tx = self.db.transaction()?;
-        for id in ids {
-            let mut d = read(&tx, *id)?;
+        self.update_descriptive(ids, |d| {
             d.creator = Some(if names.is_empty() {
                 Value::Cleared
             } else {
                 Value::Set(names.clone())
             });
-            write(&tx, *id, &d)?;
-        }
-        tx.commit()?;
-        Ok(())
+        })
     }
     /// Leaves the location of every photo given out, its file's included.
     pub fn clear_location(&mut self, ids: &[i64]) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for id in ids {
-            let mut d = read(&tx, *id)?;
-            d.location = Some(Location::Cleared);
-            write(&tx, *id, &d)?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.update_descriptive(ids, |d| d.location = Some(Location::Cleared))
     }
     /// Records a capture time from elsewhere than the file, and sorts the
     /// photo by it.
+    #[cfg(test)]
     pub fn set_capture(&mut self, id: i64, capture: &Capture) -> Result<()> {
+        self.update_descriptive(&[id], |d| d.capture = Some(capture.clone()))
+    }
+    /// Reads, changes and writes back the overrides of every photo given, in
+    /// one transaction.
+    fn update_descriptive(
+        &mut self,
+        ids: &[i64],
+        mut f: impl FnMut(&mut Descriptive),
+    ) -> Result<()> {
+        self.update_descriptive_where(ids, |_, d| {
+            f(d);
+            true
+        })
+    }
+    /// `update_descriptive`, given each photo's id, writing back only the
+    /// photos `f` returns true for.
+    pub(super) fn update_descriptive_where(
+        &mut self,
+        ids: &[i64],
+        mut f: impl FnMut(i64, &mut Descriptive) -> bool,
+    ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let mut d = read(&tx, id)?;
-        d.capture = Some(capture.clone());
-        write(&tx, id, &d)?;
+        for &id in ids {
+            let mut d = read(&tx, id)?;
+            if f(id, &mut d) {
+                write(&tx, id, &d)?;
+            }
+        }
         tx.commit()?;
         Ok(())
     }
@@ -252,10 +260,7 @@ impl Catalog {
             }
             tx.execute("DELETE FROM photo_keywords WHERE photo=?", [s.photo])?;
             for keyword in &s.keywords {
-                tx.execute(
-                    "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
-                    [s.photo, *keyword],
-                )?;
+                tag_photo(&tx, s.photo, *keyword)?;
             }
         }
         tx.commit()?;
@@ -277,6 +282,7 @@ impl Catalog {
     }
     /// The keyword at `path` (top first), made where it or its parents are
     /// missing. Names are compared in NFC, case kept.
+    #[cfg(test)]
     pub fn keyword_at(&mut self, path: &[String]) -> Result<i64> {
         ensure!(!path.is_empty(), "A keyword needs a name");
         let tx = self.db.transaction()?;
@@ -292,23 +298,18 @@ impl Catalog {
             ensure!(!path.is_empty(), "A keyword needs a name");
             let keyword = keyword_at(&tx, path)?;
             for id in ids {
-                tx.execute(
-                    "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
-                    [*id, keyword],
-                )?;
+                tag_photo(&tx, *id, keyword)?;
             }
         }
         tx.commit()?;
         Ok(())
     }
     /// Adds a keyword to every photo given.
+    #[cfg(test)]
     pub fn add_keyword(&mut self, ids: &[i64], keyword: i64) -> Result<()> {
         let tx = self.db.transaction()?;
         for id in ids {
-            tx.execute(
-                "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
-                [*id, keyword],
-            )?;
+            tag_photo(&tx, *id, keyword)?;
         }
         tx.commit()?;
         Ok(())
@@ -325,6 +326,15 @@ impl Catalog {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Gives `photo` `keyword`, unless it has it already.
+pub(super) fn tag_photo(db: &Connection, photo: i64, keyword: i64) -> Result<()> {
+    db.execute(
+        "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
+        [photo, keyword],
+    )?;
+    Ok(())
 }
 
 /// The keyword at `path`, made where missing.
@@ -453,13 +463,7 @@ pub(super) fn read(db: &Connection, id: i64) -> Result<Descriptive> {
 
 /// Replaces every descriptive row of a photo with `d`.
 pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
-    for table in [
-        "photo_fields",
-        "photo_text",
-        "photo_creators",
-        "photo_capture",
-        "photo_location",
-    ] {
+    for table in TABLES {
         db.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
     }
     let state = |db: &Connection, field: &str, set: bool| -> Result<()> {

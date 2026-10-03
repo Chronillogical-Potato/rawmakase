@@ -218,11 +218,19 @@ pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {
     (read, report)
 }
 
-/// Writes what was read into photo `id`'s rows, in `db`'s transaction:
-/// every field the file has with `overwrite`, else only fields the photo
-/// has no row for. Keywords are added, or with `overwrite` replace the
-/// photo's; rating, label and flag are set where the file has them.
-pub(super) fn apply(db: &Connection, id: i64, read: &Read, overwrite: bool) -> Result<()> {
+/// How metadata read from files meets the catalog's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Merge {
+    /// Only fields a photo has no value for; keywords are added.
+    FillEmpty,
+    /// Every field a file has; keywords replace the photo's.
+    Overwrite,
+}
+
+/// Writes what was read into photo `id`'s rows, in `db`'s transaction, as
+/// `merge` says. Rating, label and flag are set where the file has them.
+pub(super) fn apply(db: &Connection, id: i64, read: &Read, merge: Merge) -> Result<()> {
+    let overwrite = merge == Merge::Overwrite;
     let mut d = super::descriptive::read(db, id)?;
     fn put<T: Clone>(slot: &mut Option<T>, value: &Option<T>, overwrite: bool) {
         if value.is_some() && (overwrite || slot.is_none()) {
@@ -242,10 +250,7 @@ pub(super) fn apply(db: &Connection, id: i64, read: &Read, overwrite: bool) -> R
         }
         for path in paths {
             let keyword = super::descriptive::keyword_at(db, path)?;
-            db.execute(
-                "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
-                [id, keyword],
-            )?;
+            super::descriptive::tag_photo(db, id, keyword)?;
         }
     }
     if let Some(rating) = read.rating {
@@ -272,32 +277,21 @@ impl Catalog {
             .filter(|p| ids.contains(&p.id) && p.master.is_none())
             .map(|p| (p.id, p.path))
             .collect();
-        let mut report = SidecarReport::default();
-        let reads: Vec<(i64, PathBuf, Read)> = photos
-            .into_iter()
-            .filter_map(|(id, path)| {
-                let (read, found) = read_file(&path);
-                report.add(found);
-                read.map(|r| (id, path, r))
-            })
-            .collect();
-        report.add(self.apply_file_metadata(&reads, true)?);
-        Ok(report)
+        self.read_and_apply(&photos, Merge::Overwrite)
     }
-    /// Writes what was read from files, in one transaction: with
-    /// `overwrite` every field a file has, else only fields a photo has no
-    /// value for. A photo whose values can't be written (an impossible
-    /// date) is left as it was and reported with its file.
+    /// Writes what was read from files, in one transaction, as `merge`
+    /// says. A photo whose values can't be written (an impossible date) is
+    /// left as it was and reported with its file.
     pub fn apply_file_metadata(
         &mut self,
         reads: &[(i64, PathBuf, Read)],
-        overwrite: bool,
+        merge: Merge,
     ) -> Result<SidecarReport> {
         let mut report = SidecarReport::default();
         let mut tx = self.db.transaction()?;
         for (id, path, read) in reads {
             let sp = tx.savepoint()?;
-            match apply(&sp, *id, read, overwrite) {
+            match apply(&sp, *id, read, merge) {
                 Ok(()) => sp.commit()?,
                 Err(e) => report.unreadable.push((path.clone(), format!("{e:#}"))),
             }
@@ -310,8 +304,12 @@ impl Catalog {
         &mut self,
         added: &[(i64, PathBuf)],
     ) -> Result<SidecarReport> {
+        self.read_and_apply(added, Merge::FillEmpty)
+    }
+    /// Reads each photo's files and writes what they have.
+    fn read_and_apply(&mut self, files: &[(i64, PathBuf)], merge: Merge) -> Result<SidecarReport> {
         let mut report = SidecarReport::default();
-        let reads: Vec<(i64, PathBuf, Read)> = added
+        let reads: Vec<(i64, PathBuf, Read)> = files
             .iter()
             .filter_map(|(id, path)| {
                 let (read, found) = read_file(path);
@@ -319,7 +317,7 @@ impl Catalog {
                 read.map(|r| (*id, path.clone(), r))
             })
             .collect();
-        report.add(self.apply_file_metadata(&reads, false)?);
+        report.add(self.apply_file_metadata(&reads, merge)?);
         Ok(report)
     }
 }
@@ -329,18 +327,11 @@ impl Catalog {
 /// that have no row yet. Keywords, rating, label and flag come from
 /// Lightroom's own tables. Returns the photos read.
 pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
-    let has: bool = db
-        .query_row(
-            "SELECT count(*) FROM lr.sqlite_master WHERE type='table' AND name='Adobe_AdditionalMetadata'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )?
-        > 0;
-    if !has {
+    if !super::lightroom::has_table(db, "lr", "Adobe_AdditionalMetadata")? {
         return Ok(0);
     }
     let rows: Vec<(i64, String)> = db
-        .prepare(
+        .prepare(&format!(
             // Only photos that are still that Lightroom image: a photo
             // added since may have taken a removed copy's id.
             "SELECT m.image, m.xmp FROM lr.Adobe_AdditionalMetadata m
@@ -349,10 +340,9 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
              JOIN lr.AgLibraryFile f ON f.id_local = i.rootFile
              JOIN lr.AgLibraryFolder d ON d.id_local = f.folder
              JOIN lr.AgLibraryRootFolder r ON r.id_local = d.rootFolder
-             WHERE p.original_path = r.absolutePath || d.pathFromRoot ||
-                 CASE WHEN f.idx_filename <> '' THEN f.idx_filename
-                      ELSE f.baseName || '.' || f.extension END",
-        )?
+             WHERE p.original_path = r.absolutePath || d.pathFromRoot || {}",
+            super::lightroom::LIGHTROOM_FILENAME
+        ))?
         .query_map([], |r| {
             let xmp = match r.get_ref(1)? {
                 rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
@@ -377,7 +367,7 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
             flag: None,
             ..found
         };
-        apply(db, id, &descriptive_only, false)?;
+        apply(db, id, &descriptive_only, Merge::FillEmpty)?;
         read += 1;
     }
     Ok(read)
@@ -391,19 +381,7 @@ impl Catalog {
     /// Catalogs imported before descriptive metadata was kept still hold
     /// the original Lightroom catalog; copy it once, for photos with no row.
     pub fn backfill_lightroom_metadata(&mut self) -> Result<usize> {
-        if self.meta(METADATA_BACKFILLED)?.is_some() {
-            return Ok(0);
-        }
-        let copied = self
-            .with_stored_lightroom(|db| {
-                let tx = db.unchecked_transaction()?;
-                let copied = copy_lightroom_metadata(&tx)?;
-                tx.commit()?;
-                Ok(copied)
-            })?
-            .unwrap_or(0);
-        self.set_meta(METADATA_BACKFILLED, "1")?;
-        Ok(copied)
+        self.backfill_once(METADATA_BACKFILLED, copy_lightroom_metadata)
     }
 }
 

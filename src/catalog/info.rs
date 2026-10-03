@@ -74,7 +74,7 @@ impl Catalog {
                 )
                 .optional()?;
             if let Some(master) = master {
-                insert(&tx, master, &info.clone().unwrap_or_default())?;
+                insert(&tx, master, info.as_ref().unwrap_or(&PhotoInfo::default()))?;
             }
         }
         tx.commit()?;
@@ -83,20 +83,7 @@ impl Catalog {
     /// Catalogs imported before photo info was kept still hold the original
     /// Lightroom catalog; copy its info once.
     pub fn backfill_lightroom_info(&mut self) -> Result<usize> {
-        if self.meta(INFO_BACKFILLED)?.is_some() {
-            return Ok(0);
-        }
-        // One transaction: a row at a time would flush the journal for each.
-        let copied = self
-            .with_stored_lightroom(|db| {
-                let tx = db.unchecked_transaction()?;
-                let copied = copy_lightroom_info(&tx)?;
-                tx.commit()?;
-                Ok(copied)
-            })?
-            .unwrap_or(0);
-        self.set_meta(INFO_BACKFILLED, "1")?;
-        Ok(copied)
+        self.backfill_once(INFO_BACKFILLED, copy_lightroom_info)
     }
 }
 
@@ -124,16 +111,7 @@ fn insert(db: &Connection, id: i64, info: &PhotoInfo) -> Result<()> {
 /// stores aperture and shutter speed as APEX values: aperture 2.0 is f/2,
 /// shutter speed 4.64 is 1/25 s. Returns the photos copied.
 pub(super) fn copy_lightroom_info(db: &Connection) -> Result<usize> {
-    let has = |table: &str| -> Result<bool> {
-        Ok(db
-            .query_row(
-                "SELECT 1 FROM lr.sqlite_master WHERE type='table' AND name=?",
-                [table],
-                |r| r.get::<_, i32>(0),
-            )
-            .optional()?
-            .is_some())
-    };
+    let has = |table: &str| super::lightroom::has_table(db, "lr", table);
     let interned = has("AgInternedExifCameraModel")? && has("AgInternedExifLens")?;
     if !has("AgHarvestedExifMetadata")? || !interned {
         return Ok(0);

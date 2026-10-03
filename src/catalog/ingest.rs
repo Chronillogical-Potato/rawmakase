@@ -7,17 +7,13 @@ use std::path::{Path, PathBuf};
 
 impl Catalog {
     pub fn add_folder(&mut self, folder: &Path) -> Result<usize> {
-        Ok(self.add_folder_reporting(folder)?.0)
+        Ok(self.add_folder_with(folder, &Default::default())?.0)
     }
     /// Adds a folder's new photos with the metadata of their XMP sidecars and
-    /// of the XMP inside JPEGs and TIFFs. Photos already in the catalog are
-    /// left alone; Read Metadata from Files reads theirs. Returns the photos
-    /// added and what reading the sidecars found.
-    pub fn add_folder_reporting(&mut self, folder: &Path) -> Result<(usize, super::SidecarReport)> {
-        self.add_folder_with(folder, &Default::default())
-    }
-    /// `add_folder_reporting`, then the default Creator and Copyright where
-    /// neither the file nor its sidecar has one.
+    /// of the XMP inside JPEGs and TIFFs, then the default Creator and
+    /// Copyright where neither the file nor its sidecar has one. Photos
+    /// already in the catalog are left alone; Read Metadata from Files reads
+    /// theirs. Returns the photos added and what reading the sidecars found.
     pub fn add_folder_with(
         &mut self,
         folder: &Path,
@@ -51,22 +47,22 @@ impl Catalog {
         let existing_paths: std::collections::HashSet<_> =
             self.photos()?.into_iter().map(|p| p.path).collect();
         let tx = self.db.transaction()?;
-        let root: i64 = tx
+        let root: Option<i64> = tx
             .query_row(
                 "SELECT id FROM roots WHERE original_path=?",
                 [folder.to_string_lossy()],
                 |r| r.get(0),
             )
-            .optional()?
-            .unwrap_or(0);
-        let root = if root == 0 {
-            tx.execute(
-                "INSERT INTO roots(original_path) VALUES(?)",
-                [folder.to_string_lossy()],
-            )?;
-            tx.last_insert_rowid()
-        } else {
-            root
+            .optional()?;
+        let root = match root {
+            Some(root) => root,
+            None => {
+                tx.execute(
+                    "INSERT INTO roots(original_path) VALUES(?)",
+                    [folder.to_string_lossy()],
+                )?;
+                tx.last_insert_rowid()
+            }
         };
         let mut added = Vec::new();
         for file in files {
