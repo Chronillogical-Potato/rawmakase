@@ -2,7 +2,10 @@
 //! do: capture settings, lens, dates, serial numbers and GPS. Maker notes, thumbnail
 //! offsets and other pointers into the RAW are left out; they would not survive the
 //! move to a new file.
-use crate::tiff::{Entry, Tiff};
+use crate::{
+    jpeg::{APP1, Segments},
+    tiff::{Entry, Tiff},
+};
 use std::{fs::File, io::Read, path::Path};
 
 /// A TIFF field with its value in little-endian byte order.
@@ -296,22 +299,21 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
 }
 
 /// Offset of the TIFF header inside a JPEG's EXIF segment, relative to the JPEG.
+/// Only the first `length` bytes, at most 64 KB, are read.
 fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<u64> {
-    use std::io::{Seek, SeekFrom};
+    use std::io::{Cursor, Seek, SeekFrom};
     f.seek(SeekFrom::Start(jpeg)).ok()?;
     let mut head = vec![0u8; length.min(1 << 16)];
     f.read_exact(&mut head).ok()?;
-    let mut at = 2;
-    while at + 10 <= head.len() && head[at] == 0xff {
-        let marker = head[at + 1];
-        let size = u16::from_be_bytes([head[at + 2], head[at + 3]]) as usize;
-        if marker == 0xe1 && head[at + 4..at + 10] == *b"Exif\0\0" {
-            return Some(at as u64 + 10);
+    let mut segments = Segments::new(Cursor::new(head)).ok()??;
+    while let Some(segment) = segments.next().ok()? {
+        let mut signature = [0u8; 6];
+        if segment.marker == APP1
+            && segments.reader().read_exact(&mut signature).is_ok()
+            && signature == *b"Exif\0\0"
+        {
+            return Some(segment.offset + 6);
         }
-        if marker == 0xda {
-            return None;
-        }
-        at += 2 + size;
     }
     None
 }

@@ -92,7 +92,7 @@ pub(super) fn tiff(
 /// not fit one follows as ExtendedXMP.
 pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
     use super::extended_xmp::{segments, split};
-    use crate::xmp::ns::JPEG_HEADER;
+    use crate::{jpeg::Segments, xmp::ns::JPEG_HEADER};
     ensure!(jpeg.starts_with(&[0xff, 0xd8]), "Not a JPEG");
     let split = split(xmp)?;
     let mut payloads = vec![[JPEG_HEADER, split.standard.as_bytes()].concat()];
@@ -105,9 +105,14 @@ pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
             "XMP is too large for a JPEG segment"
         );
     }
+    // After the APPn segments the encoder wrote.
     let mut at = 2;
-    while at + 4 <= jpeg.len() && jpeg[at] == 0xff && (0xe0..=0xef).contains(&jpeg[at + 1]) {
-        at += 2 + u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]) as usize;
+    if let Some(mut s) = Segments::new(std::io::Cursor::new(&jpeg))? {
+        while let Some(segment) = s.next()?
+            && (0xe0..=0xef).contains(&segment.marker)
+        {
+            at = segment.offset as usize + segment.length;
+        }
     }
     let extra: usize = payloads.iter().map(|p| p.len() + 4).sum();
     let mut out = Vec::with_capacity(jpeg.len() + extra);

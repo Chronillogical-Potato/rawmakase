@@ -22,6 +22,7 @@ pub mod demosaic;
 pub mod develop;
 pub mod dng;
 pub mod export;
+mod jpeg;
 pub mod lens;
 pub mod platform;
 pub mod presets;
