@@ -78,16 +78,18 @@ fn a_file_found_again_is_checked_back_online() -> Result<()> {
     let path = directory.path().join("library.rawmakase");
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
+    // As the catalog stores it, which on Windows differs from `file`.
+    let stored = library.photos[0].path.clone();
     std::fs::rename(&file, folder.join("moved"))?;
     library.refresh()?;
     library.wait_for_availability();
-    assert!(!library.is_available(&file));
+    assert!(!library.is_available(&stored));
     // Restored in place: counted offline until it is found again.
     std::fs::rename(folder.join("moved"), &file)?;
-    assert!(!library.is_available(&file));
-    library.found(&file);
+    assert!(!library.is_available(&stored));
+    library.found(&stored);
     library.wait_for_availability();
-    assert!(library.is_available(&file));
+    assert!(library.is_available(&stored));
     Ok(())
 }
 
