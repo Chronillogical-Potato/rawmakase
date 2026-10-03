@@ -514,6 +514,13 @@ impl Preset {
                 1.,
             )?;
         }
+        settings.assign(
+            "CurveRefineSaturation",
+            &mut r.curve_saturation,
+            0.01,
+            0.,
+            2.,
+        )?;
         for (i, name) in ["Shadow", "Midtone", "Highlight"].iter().enumerate() {
             settings.assign(
                 &format!("Parametric{name}Split"),
@@ -935,7 +942,6 @@ impl Preset {
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
         for (key, default) in [
             ("HDREditMode", "0"),
-            ("CurveRefineSaturation", "100"),
             ("LensManualDistortionAmount", "0"),
             ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),

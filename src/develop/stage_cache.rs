@@ -157,6 +157,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         white_point: _,
         midtone: _,
         curve: _,
+        curve_saturation: _,
         saturation: _,
         vibrance: _,
         hsl: _,

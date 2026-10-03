@@ -232,6 +232,7 @@ impl SettingGroup {
             }
             ToneCurve => {
                 to.curve = from.curve.clone();
+                to.curve_saturation = from.curve_saturation;
                 to.black_point = from.black_point;
                 to.white_point = from.white_point;
                 to.midtone = from.midtone;
@@ -530,6 +531,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         white_point: _,
         midtone: _,
         curve: _,
+        curve_saturation: _,
         saturation: _,
         vibrance: _,
         hsl: _,
@@ -615,6 +617,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("white_point", Group(ToneCurve)),
         ("midtone", Group(ToneCurve)),
         ("curve", Group(ToneCurve)),
+        ("curve_saturation", Group(ToneCurve)),
         ("saturation", Group(Saturation)),
         ("vibrance", Group(Vibrance)),
         ("hsl", Group(ColorAdjustments)),

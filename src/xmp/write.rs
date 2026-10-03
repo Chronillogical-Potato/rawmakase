@@ -120,6 +120,7 @@ fn settings(r: &Recipe) -> Settings {
             true,
         );
     }
+    s.put("CurveRefineSaturation", r.curve_saturation, 0.01, 0, false);
     for (i, name) in ["Shadow", "Midtone", "Highlight"].iter().enumerate() {
         s.put(
             &format!("Parametric{name}Split"),

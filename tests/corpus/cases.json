@@ -601,6 +601,49 @@
    }
   },
   {
+   "name": "curve-s-refine-saturation-0",
+   "settings": {
+    "CurveRefineSaturation": "0"
+   },
+   "curves": {
+    "ToneCurvePV2012": [
+     "0, 0",
+     "64, 48",
+     "128, 128",
+     "192, 208",
+     "255, 255"
+    ]
+   }
+  },
+  {
+   "name": "curve-s-refine-saturation-50",
+   "settings": {
+    "CurveRefineSaturation": "50"
+   },
+   "curves": {
+    "ToneCurvePV2012": [
+     "0, 0",
+     "64, 48",
+     "128, 128",
+     "192, 208",
+     "255, 255"
+    ]
+   }
+  },
+  {
+   "name": "curve-lift-refine-saturation-0",
+   "settings": {
+    "CurveRefineSaturation": "0"
+   },
+   "curves": {
+    "ToneCurvePV2012": [
+     "0, 0",
+     "128, 170",
+     "255, 255"
+    ]
+   }
+  },
+  {
    "name": "calibration-red-hue+50",
    "settings": {
     "RedHue": "+50"

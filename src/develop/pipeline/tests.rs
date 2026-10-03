@@ -95,6 +95,24 @@ fn panel_switches_round_trip_and_old_recipes_have_every_panel_on() {
     assert_eq!(back.panels.state(Panel::Detail), PanelState::Off);
     assert!(back.unknown.is_empty());
 }
+/// Refine Saturation is left out of recipes at its default and kept outside `effects`,
+/// whose older readers reject unknown fields, so releases that predate it still open
+/// every recipe.
+#[test]
+fn refine_saturation_is_omitted_at_its_default_and_round_trips() {
+    let json = serde_json::to_value(Recipe::default()).unwrap();
+    assert!(json.get("curve_saturation").is_none());
+    assert!(json["effects"].get("curve_saturation").is_none());
+    let r = Recipe {
+        curve_saturation: 0.25,
+        ..Default::default()
+    };
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back.curve_saturation, 0.25);
+    assert!(back.unknown.is_empty());
+    let old: Recipe = serde_json::from_value(json).unwrap();
+    assert_eq!(old.curve_saturation, 1.);
+}
 #[test]
 fn reference_color_extremes_stay_finite_and_in_gamut() {
     let im = fixture();
@@ -572,4 +590,41 @@ fn fringe_selector_reaches_the_hue_defringe_tests_through_channel_curves() {
     let chroma = |lab: [f32; 3]| lab[1].hypot(lab[2]);
     assert_eq!(pick_fringe(&mut r, &Metadata::default(), shown), Some(1));
     assert!(chroma(r.effects.defringe_color(lab, hue)) < chroma(lab) * 0.6);
+}
+
+/// Refine Saturation 0 keeps each colour's channel spread (encoded ProPhoto, before the
+/// point curve) and takes its luma from the curved colour; other amounts blend, and
+/// amounts above 1 render as 1 (Camera Raw 18.7 on the synthetic chart).
+#[test]
+fn refine_saturation_zero_keeps_the_colours_saturation_through_the_point_curve() {
+    let mut recipe = Recipe {
+        reference_curves: true,
+        ..Default::default()
+    };
+    recipe.curve = ToneCurve {
+        points: vec![[0., 0.], [0.25, 0.1], [0.75, 0.9], [1., 1.]],
+        ..Default::default()
+    };
+    let pro = |rgb: [f32; 3]| mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(srgb_encode);
+    let spread = |p: [f32; 3]| {
+        p.iter().copied().fold(f32::MIN, f32::max) - p.iter().copied().fold(f32::MAX, f32::min)
+    };
+    let luma = |p: [f32; 3]| 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+    let input = [0.25, 0.08, 0.04];
+    let render = |amount: f32| {
+        let mut r = recipe.clone();
+        r.curve_saturation = amount;
+        pro(apply_reference_curves(input, &r, &CurveSet::new(&r), None))
+    };
+    let (full, none, half) = (render(1.), render(0.), render(0.5));
+    assert!((spread(none) - spread(pro(input))).abs() < 1e-3, "{none:?}");
+    assert!(spread(full) > spread(none) + 0.05, "{full:?} {none:?}");
+    assert!((luma(none) - luma(full)).abs() < 1e-3);
+    for c in 0..3 {
+        assert!(
+            (half[c] - (full[c] + none[c]) / 2.).abs() < 1e-3,
+            "{half:?}"
+        );
+    }
+    assert_eq!(render(2.), full);
 }

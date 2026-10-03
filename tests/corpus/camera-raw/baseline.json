@@ -66,6 +66,10 @@
         1.598,
         2.61
       ],
+      "curve-lift-refine-saturation-0": [
+        1.536,
+        8.306
+      ],
       "curve-red": [
         8.659,
         17.627
@@ -73,6 +77,14 @@
       "curve-s": [
         1.427,
         5.998
+      ],
+      "curve-s-refine-saturation-0": [
+        1.095,
+        4.262
+      ],
+      "curve-s-refine-saturation-50": [
+        1.236,
+        4.713
       ],
       "default": [
         0.914,

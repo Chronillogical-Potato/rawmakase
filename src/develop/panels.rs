@@ -78,6 +78,7 @@ impl Panel {
         match self {
             Panel::ToneCurve => {
                 r.curve = defaults.curve.clone();
+                r.curve_saturation = defaults.curve_saturation;
                 e.channels = d.channels.clone();
                 e.parametric = d.parametric;
                 e.splits = d.splits;

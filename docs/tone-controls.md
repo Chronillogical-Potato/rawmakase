@@ -35,6 +35,16 @@ Offline fits on the sweeps show both are local operators whose effect is best ex
 
 Dehaze is mostly a per-photo tone curve with a spatial residual. A single curve per photo explains ±40 to 0.011–0.019 MAE (from 0.04–0.11 unchanged). Engine 4 applies the curve averaged across photos, before Contrast in the same composed curve. Extra MAE over the default render: +0.0078 / +0.0135 at +40 / −40 (previously +0.037 / +0.062), +0.0021 / +0.0045 at ±20, and +0.036 / +0.044 at ±100, where the per-photo adaptation dominates.
 
+## Refine Saturation
+
+Lightroom's Refine Saturation (`crs:CurveRefineSaturation`, default 100) sets how much of the saturation change a master point curve makes is kept. It was measured on the synthetic chart with Camera Raw 18.7, through an S curve, a strong S, a lift and a fade, at 0, 50, 100, 150 and 200:
+
+- It changes only the master point curve. Channel curves, the parametric curve and Contrast render the same at every value.
+- At 0 a colour keeps its channel differences from before the curve (in encoded ProPhoto RGB, where the curve runs) and takes its luma (Rec. 601 weights) from the curved colour. Where that would leave 0–1, the differences are scaled down just enough to fit.
+- Other values blend linearly between 0 and 100 (exact to 0.0002 at 50). 150 and 200 render exactly as 100.
+
+`curve::refine_saturation` implements it after the master curve on the CPU and the GPU. It is imported and written back with the edit; the Tone Curve panel has no control for it yet.
+
 ## Auto
 
 The Basic panel's **Auto** (the button at the top of the Basic panel, beside the B&W toggle, or Cmd/Ctrl+Shift+U) sets the six Tone sliders and Vibrance, and keeps white balance, including a manual one, as Lightroom's does; **Auto** in the WB menu sets white balance alone, and the menu shows Auto while the photo keeps that result. `rawmakase render --auto` applies Auto tone from the command line (it sets Exposure, so it does not combine with `--exposure`), and `--auto-wb` applies Auto white balance first. The implementation is `src/develop/auto.rs`; it keeps every other setting, and the app runs it off the UI thread and records one History step. Like Lightroom's, Auto tone measures the photo before its adjustments: as the profile, white balance, calibration, lens corrections and crop render it, without the tone sliders, curves and Levels, presence, color mixer, B&W, grading, detail, effects, spots and masks. So a film-look curve that lifts the blacks, or a color edit, does not change what Auto chooses. In a Lightroom catalog's history, photos whose point curve lifted black to 30/255 or more still got ordinary Auto Blacks (median −10, as against −17 without such a curve), which measuring through the curve could not give. Like Lightroom's, it also sets Vibrance (below). Auto is greyed out (and its shortcut does nothing) while running it again would change nothing: the six Tone sliders and Vibrance are as Auto set them and nothing Auto measures (profile, white balance, calibration, lens corrections, crop) has changed. Moving a Tone slider or Vibrance, changing one of those, undoing Auto or opening another photo turns it back on; adjustments Auto ignores, such as a curve, Clarity or the color mixer, leave it greyed out.
