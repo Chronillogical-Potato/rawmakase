@@ -37,6 +37,12 @@ impl Library {
             .show(ui, |ui| out = self.filmstrip(ui, current, library));
         out
     }
+    /// Whether the selection changed after the strip was drawn, as a click
+    /// in the grid below does: the strip then needs another frame to mark
+    /// it and bring it into view.
+    pub fn filmstrip_behind(&self) -> bool {
+        self.strip_drawn != self.selection
+    }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
     /// makes the photo its candidate, and Select activates its side.
@@ -67,6 +73,7 @@ impl Library {
     ) -> (Option<Pick>, bool) {
         let mut target = None;
         let mut changed = false;
+        self.strip_drawn = self.selection.clone();
         let photo = current.and_then(|id| self.photo(id)).cloned();
         let position = current.and_then(|current| {
             self.visible

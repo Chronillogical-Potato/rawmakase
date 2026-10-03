@@ -69,6 +69,9 @@ pub struct Library {
     /// The photo the filmstrip last brought into view, and where it was
     /// then in `visible`: the strip scrolls again only when either changes.
     strip_revealed: Option<(i64, usize)>,
+    /// The selection the filmstrip was last drawn with, to notice a view
+    /// drawn after it changing the selection.
+    strip_drawn: selection::Selection,
     /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
     availability: availability::Availability,
@@ -163,6 +166,7 @@ impl Library {
             sort_keys: None,
             cell_info: HashMap::new(),
             strip_revealed: None,
+            strip_drawn: selection::Selection::default(),
             visible: Vec::new(),
             availability: Default::default(),
             cache: textures::PreviewTextures::new(&ctx),

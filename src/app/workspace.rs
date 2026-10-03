@@ -603,6 +603,10 @@ impl Editor {
                     });
                 }
             });
+        // A click in the view, drawn after the strip, shows there next frame.
+        if self.library.as_ref().is_some_and(|l| l.filmstrip_behind()) {
+            ctx.request_repaint();
+        }
         if !self.activity.is_busy() {
             match action {
                 crate::app::library::Action::Develop(id) => self.develop_catalog_photo(id),
