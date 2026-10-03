@@ -163,7 +163,9 @@ impl Editor {
                             && previous.watermark_name == *old
                         {
                             previous.watermark_name = saved.name.clone();
-                            let _ = previous.save();
+                            if let Err(e) = previous.save() {
+                                self.status = format!("Export settings not saved: {e:#}");
+                            }
                         }
                         self.exports.draft.watermark = true;
                         self.exports.draft.watermark_name = saved.name;
@@ -192,6 +194,16 @@ impl Editor {
                 if self.exports.draft.watermark_name == original {
                     self.exports.draft.watermark = false;
                     self.exports.draft.watermark_name = watermark::SIMPLE_COPYRIGHT.into();
+                }
+                // Export with Previous neither uses it.
+                if let Some(mut previous) = crate::export::ExportSettings::load()
+                    && previous.watermark_name == original
+                {
+                    previous.watermark = false;
+                    previous.watermark_name = watermark::SIMPLE_COPYRIGHT.into();
+                    if let Err(e) = previous.save() {
+                        self.status = format!("Export settings not saved: {e:#}");
+                    }
                 }
                 self.exports.watermarks = watermark::presets();
             }
@@ -242,7 +254,8 @@ fn draw_preview(
         state.preview = (!loading).then_some((key, mark));
     }
     if let Some((_, Some((texture, rect)))) = &state.preview {
-        ui.painter().image(
+        // Cut at the photo's edges, as the export is.
+        ui.painter().with_clip_rect(shown).image(
             texture.id(),
             rect.translate(shown.min.to_vec2()),
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),

@@ -440,6 +440,10 @@ pub fn save_in(
 ) -> Result<Watermark> {
     ensure!(!watermark.name.trim().is_empty(), "Name the watermark");
     ensure!(
+        watermark.style == Style::Graphic || !watermark.text.trim().is_empty(),
+        "Type the watermark's text"
+    );
+    ensure!(
         watermark.name != SIMPLE_COPYRIGHT,
         "That name is reserved; choose another"
     );
