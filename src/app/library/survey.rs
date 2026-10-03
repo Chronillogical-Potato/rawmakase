@@ -4,7 +4,7 @@
 //! arrows move between them, and a photo's × or Cmd+click takes it out.
 use super::grid::filter_caption;
 use super::stage::MARGIN;
-use super::{Action, Library, Pick};
+use super::{Action, Library};
 use crate::app::theme;
 use eframe::egui::{self, Rect, Vec2};
 
@@ -138,26 +138,11 @@ impl Library {
             }
         }
     }
-    /// Survey in place of the grid: the photos tiled, a toolbar and the
-    /// filmstrip.
+    /// Survey in place of the grid: the photos tiled, with a toolbar.
     pub(super) fn survey(&mut self, ui: &mut egui::Ui) -> Action {
-        let Some(active) = self.selection.active else {
+        if self.selection.active.is_none() {
             self.close_survey();
             return Action::None;
-        };
-        let mut target = None;
-        egui::Panel::bottom("library-survey-filmstrip")
-            .exact_size(128.)
-            .frame(egui::Frame::new().fill(theme::gray(26)))
-            .show(ui, |ui| target = self.filmstrip(ui, active).0);
-        match target {
-            // As in the grid: a click chooses, Cmd and Shift add.
-            Some(Pick::Show(id)) => {
-                let modifiers = ui.input(|i| i.modifiers);
-                self.click(id, modifiers);
-            }
-            Some(Pick::Develop(id)) => return Action::Develop(id),
-            None => {}
         }
         egui::Panel::bottom("library-survey-toolbar")
             .frame(

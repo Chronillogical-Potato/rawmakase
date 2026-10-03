@@ -1086,24 +1086,24 @@ fn a_hidden_active_photo_hands_over_to_the_rest_of_the_selection() -> Result<()>
     Ok(())
 }
 #[test]
-fn each_filmstrip_scrolls_to_the_photo_shown() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let folder = directory.path().join("photos");
-    std::fs::create_dir(&folder)?;
-    for n in 0..40 {
-        image::RgbImage::new(8, 8).save(folder.join(format!("{n:02}.jpg")))?;
-    }
-    let path = directory.path().join("library.rawmakase");
-    Catalog::create(&path)?.add_folder(&folder)?;
-    let ctx = egui::Context::default();
-    let mut library = Library::load(&path, ctx.clone())?;
-    library.wait_for_availability();
-    let last = library.photos[library.visible[39]].id;
-    // The strip's horizontal offset after a few frames showing `last`, a
-    // second apart so the scroll animation finishes.
+fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
+    let (_directory, mut library) = library_of(
+        &(0..40)
+            .map(|n| format!("{n:02}.RAF"))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )?;
+    let ctx = library.ctx.clone();
+    let ids = ids_of(&library);
+    let last = ids[39];
+    // The strip's horizontal offset after a few frames showing `current`
+    // in the Library or in Develop, a second apart so the scroll animation
+    // finishes.
     let mut time = 0.;
-    let mut offset = |panel: &'static str| {
-        let mut strip = None;
+    let strip = std::cell::Cell::new(None);
+    let mut frames = |library: &mut Library, current: Option<i64>, in_library: bool| {
         for _ in 0..3 {
             time += 1.;
             let mut output = ctx.run_ui(
@@ -1116,20 +1116,82 @@ fn each_filmstrip_scrolls_to_the_photo_shown() -> Result<()> {
                     ..Default::default()
                 },
                 |ui| {
-                    egui::Panel::bottom(panel).exact_size(128.).show(ui, |ui| {
-                        strip = Some(ui.make_persistent_id(egui::IdSalt::new("develop-filmstrip")));
-                        library.filmstrip(ui, last);
-                    });
+                    // As `filmstrip_panel` draws it, noting the scroll id.
+                    egui::Panel::bottom("filmstrip")
+                        .exact_size(super::filmstrip::HEIGHT)
+                        .show(ui, |ui| {
+                            strip.set(Some(ui.make_persistent_id(egui::IdSalt::new("filmstrip"))));
+                            library.filmstrip(ui, current, in_library);
+                        });
                 },
             );
             output.textures_delta.clear();
         }
-        egui::scroll_area::State::load(&ctx, strip.unwrap()).map_or(0., |s| s.offset.x)
+        egui::scroll_area::State::load(&ctx, strip.get().unwrap()).map_or(0., |s| s.offset.x)
     };
-    // The Loupe's strip brings the photo into view; so does Develop's, opened
-    // next on the same photo.
-    assert!(offset("loupe-filmstrip") > 0.);
-    assert!(offset("develop-filmstrip") > 0.);
+    // Nothing selected: the strip still draws, at the start.
+    assert_eq!(frames(&mut library, None, true), 0.);
+    // A photo shown off the end is brought into view.
+    let revealed = frames(&mut library, Some(last), true);
+    assert!(revealed > 0.);
+    // Develop, on the same photo, shows the same strip where it was.
+    assert_eq!(frames(&mut library, Some(last), false), revealed);
+    // Scrolled back to the start by hand, it stays there across views
+    // while the photo shown is the same.
+    let id = strip.get().unwrap();
+    let mut state = egui::scroll_area::State::load(&ctx, id).unwrap();
+    state.offset.x = 0.;
+    state.store(&ctx, id);
+    assert_eq!(frames(&mut library, Some(last), true), 0.);
+    assert_eq!(frames(&mut library, Some(last), false), 0.);
+    // Another photo is brought into view.
+    assert!(frames(&mut library, Some(ids[38]), true) > 0.);
+    // A sort that moves the photo shown brings it back into view.
+    library.filters.reverse = true;
+    library.filter();
+    assert!(frames(&mut library, Some(ids[38]), true) < revealed);
+    Ok(())
+}
+#[test]
+fn a_filmstrip_click_does_what_the_view_shown_does() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = ids_of(&library);
+    let show = egui::Modifiers::NONE;
+    // Grid: Cmd adds, Shift extends, a click on the active photo keeps it.
+    library.select(Some(ids[0]));
+    library.filmstrip_pick(Pick::Show(ids[2]), egui::Modifiers::COMMAND);
+    assert_eq!(library.selected_ids(), [ids[0], ids[2]]);
+    library.filmstrip_pick(Pick::Show(ids[3]), egui::Modifiers::SHIFT);
+    assert_eq!(library.selected_ids(), [ids[2], ids[3]]);
+    // Cmd on the active photo takes it out of the selection.
+    library.filmstrip_pick(Pick::Show(ids[3]), egui::Modifiers::COMMAND);
+    assert_eq!(library.selected_ids(), [ids[2]]);
+    assert_eq!(library.selected(), Some(ids[2]));
+    // Loupe: a plain click shows the photo alone.
+    library.open_loupe();
+    library.filmstrip_pick(Pick::Show(ids[1]), show);
+    assert_eq!(library.selected_ids(), [ids[1]]);
+    // Compare: another photo becomes the candidate, the select activates
+    // its own side.
+    library.close_loupe();
+    library.click(ids[1], show);
+    library.click(ids[2], egui::Modifiers::COMMAND);
+    library.click(ids[1], show);
+    library.open_compare();
+    library.filmstrip_pick(Pick::Show(ids[3]), show);
+    assert_eq!(
+        (library.compare.select, library.compare.candidate),
+        (Some(ids[1]), Some(ids[3]))
+    );
+    assert_eq!(library.selected(), Some(ids[3]));
+    library.filmstrip_pick(Pick::Show(ids[1]), show);
+    assert_eq!(library.compare.candidate, Some(ids[3]));
+    assert_eq!(library.selected(), Some(ids[1]));
+    // Open in Develop is the same everywhere.
+    assert!(matches!(
+        library.filmstrip_pick(Pick::Develop(ids[0]), show),
+        Action::Develop(id) if id == ids[0]
+    ));
     Ok(())
 }
 #[test]
@@ -1227,6 +1289,9 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
                 ..Default::default()
             },
             |ui| {
+                // The filmstrip below, as the workspace draws it.
+                let active = library.selected();
+                library.filmstrip_panel(ui, active, true);
                 library.grid(ui, zoom);
             },
         );

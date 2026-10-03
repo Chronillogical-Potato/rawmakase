@@ -358,21 +358,13 @@ impl Library {
             self.scroll_to_active = true;
         }
     }
-    /// The Loupe in place of the grid, with the filmstrip below.
+    /// The Loupe in place of the grid, with its toolbar below.
     pub(super) fn loupe(&mut self, ui: &mut egui::Ui, zoom: &mut Zoom) -> Action {
         self.loupe.poll(ui.ctx());
         let Some(id) = self.selection.active else {
             self.close_loupe();
             return Action::None;
         };
-        let mut target = None;
-        egui::Panel::bottom("library-loupe-filmstrip")
-            .exact_size(128.)
-            .frame(egui::Frame::new().fill(theme::gray(26)))
-            .show(ui, |ui| {
-                // In Loupe a metadata change applies to the active photo only.
-                target = self.filmstrip(ui, id).0;
-            });
         egui::Panel::bottom("library-loupe-toolbar")
             .frame(
                 egui::Frame::new()
@@ -381,12 +373,7 @@ impl Library {
             )
             .show_separator_line(false)
             .show(ui, |ui| ui.horizontal(|ui| self.view_buttons(ui)));
-        match target {
-            Some(super::Pick::Show(id)) => self.select(Some(id)),
-            Some(super::Pick::Develop(id)) => return Action::Develop(id),
-            None => {}
-        }
-        let Some(photo) = self.selection.active.and_then(|id| self.photo(id)).cloned() else {
+        let Some(photo) = self.photo(id).cloned() else {
             return Action::None;
         };
         // An online RAW is drawn by the editor, through Develop's viewport.

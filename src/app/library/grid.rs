@@ -34,16 +34,13 @@ impl Library {
                 });
             });
     }
-    /// The grid, or the Loupe in its place at the shared `zoom`.
-    pub(in crate::app) fn grid(
-        &mut self,
-        ui: &mut egui::Ui,
-        zoom: &mut crate::app::navigator::Zoom,
-    ) -> Action {
-        self.poll_previews(ui.ctx());
+    /// Brings the photos up to date before the filmstrip and the view draw
+    /// them, so both show the same order and the same active photo.
+    pub(in crate::app) fn prepare(&mut self, ctx: &egui::Context) {
+        self.poll_previews(ctx);
         // Back from Develop, sorted by edit time: edits made there move
         // their photos.
-        let pass = ui.ctx().cumulative_pass_nr();
+        let pass = ctx.cumulative_pass_nr();
         let returned = std::mem::replace(&mut self.drawn_pass, pass) + 1 < pass;
         if returned && self.filters.sort == super::sort::Sort::EditTime {
             self.sort_keys = None;
@@ -53,6 +50,21 @@ impl Library {
         // Survey keeps every photo's preview it shows; other views the usual
         // number.
         self.cache.shown_at_once = 0;
+        // Compare settles its pair, so the strip highlights the photo it shows.
+        if self.compare.open {
+            if self.keep_compared_shown().is_some() {
+                self.sync_compare_selection();
+            } else {
+                self.close_compare();
+            }
+        }
+    }
+    /// The grid, or the Loupe in its place at the shared `zoom`.
+    pub(in crate::app) fn grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        zoom: &mut crate::app::navigator::Zoom,
+    ) -> Action {
         if self.compare.open {
             return self.compare(ui);
         }

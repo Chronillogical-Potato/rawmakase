@@ -66,9 +66,9 @@ pub struct Library {
     /// Grid cells' photo info, read once per photo while expanded cells
     /// show it.
     cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
-    /// The photo each filmstrip last brought into view. Develop, the Loupe,
-    /// Compare and Survey each scroll their own strip.
-    strip_current: HashMap<egui::Id, i64>,
+    /// The photo the filmstrip last brought into view, and where it was
+    /// then in `visible`: the strip scrolls again only when either changes.
+    strip_revealed: Option<(i64, usize)>,
     /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
     availability: availability::Availability,
@@ -162,7 +162,7 @@ impl Library {
             drawn_pass: 0,
             sort_keys: None,
             cell_info: HashMap::new(),
-            strip_current: HashMap::new(),
+            strip_revealed: None,
             visible: Vec::new(),
             availability: Default::default(),
             cache: textures::PreviewTextures::new(&ctx),

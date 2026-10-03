@@ -525,6 +525,16 @@ impl Editor {
             });
         });
         let mut action = crate::app::library::Action::None;
+        // The filmstrip runs the window's width, under both side panels, as
+        // in Develop.
+        if let Some(library) = &mut self.library {
+            library.prepare(&ctx);
+            let active = library.selected();
+            if let (Some(pick), _) = library.filmstrip_panel(ui, active, true) {
+                let modifiers = ui.input(|i| i.modifiers);
+                action = library.filmstrip_pick(pick, modifiers);
+            }
+        }
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         if develops != self.loupe_tried {
             self.loupe_tried = None;
@@ -831,24 +841,20 @@ impl Editor {
             });
         }
     }
+    /// The Library's filmstrip, the same panel as in the Library, with the
+    /// photo open here highlighted.
     fn filmstrip(&mut self, ui: &mut egui::Ui) {
-        if let (Some(library), Some(current)) = (&mut self.library, self.document.catalog_photo) {
-            let mut target = None;
-            egui::Panel::bottom("catalog-filmstrip")
-                .exact_size(128.)
-                .frame(egui::Frame::new().fill(theme::gray(26)))
-                .show(ui, |ui| {
-                    let (next, changed) = library.filmstrip(ui, current);
-                    target = next;
-                    if changed {
-                        self.status = library.message.clone();
-                    }
-                });
+        if let Some(library) = &mut self.library {
+            let current = self.document.catalog_photo;
+            let (target, changed) = library.filmstrip_panel(ui, current, false);
+            if changed {
+                self.status = library.message.clone();
+            }
             // In Develop both a click and Open in Develop show the photo.
             if let Some(
                 crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
             ) = target
-                && id != current
+                && Some(id) != current
                 && !self.activity.is_busy()
             {
                 self.develop_catalog_photo(id);
