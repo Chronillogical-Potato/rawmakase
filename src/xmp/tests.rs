@@ -111,8 +111,14 @@ fn named_white_balance_presets_apply_their_values() -> Result<()> {
         Path::new("preset.xmp"),
         &xml(r#"c:WhiteBalance="Daylight""#, ""),
     )?;
-    let r = preset.apply(&Recipe::default(), &m, &[], None)?;
+    // Applied over Auto, it no longer reads as Auto.
+    let auto = Recipe {
+        auto_white_balance: Some([5500., 10.]),
+        ..Default::default()
+    };
+    let r = preset.apply(&auto, &m, &[], None)?;
     assert_eq!((r.temperature, r.tint), (5500., 10.));
+    assert_eq!(r.auto_white_balance, None);
     // Stored values win, and one missing value falls back to the name's.
     let attrs = r#"c:WhiteBalance="Flash" c:Temperature="5300""#;
     let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;

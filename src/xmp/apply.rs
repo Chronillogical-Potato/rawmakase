@@ -436,6 +436,7 @@ impl Preset {
                 r.temperature = number(v, "Temperature")?.unwrap_or(values.temperature);
                 r.tint = number(v, "Tint")?.unwrap_or(values.tint);
                 r.update_wb(m);
+                r.auto_white_balance = None;
             }
             Some(other) => anyhow::bail!("Unsupported white balance mode: {other}"),
         }
