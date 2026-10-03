@@ -1266,6 +1266,7 @@ fn auto_is_off_while_its_settings_stand() {
     // Adjustments Auto does not measure leave it off.
     editor.document.recipe.effects.clarity = 0.3;
     editor.document.recipe.curve.points[0] = [0., 0.2];
+    editor.document.recipe.preset_name = "Curve only".into();
     assert!(editor.auto_in_effect());
     editor.document.recipe.effects.clarity = 0.;
     editor.document.recipe.curve.points[0] = [0., 0.];

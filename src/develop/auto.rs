@@ -120,6 +120,10 @@ pub fn auto_tone_basis(r: &Recipe) -> Recipe {
         sharpening_masking: d.sharpening_masking,
         retouch: Vec::new(),
         masks: Vec::new(),
+        // Bookkeeping that does not render.
+        preset_name: d.preset_name,
+        preset_settings: d.preset_settings,
+        auto_white_balance: None,
         effects: crate::develop::effects::Effects {
             calibration: e.calibration,
             shadow_tint: e.shadow_tint,
