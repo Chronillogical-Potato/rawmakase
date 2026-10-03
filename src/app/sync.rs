@@ -43,6 +43,8 @@ pub struct Synced {
     /// The edit before, or none when the photo had no RAWmakase edit yet.
     pub before: EditBefore,
     pub after: Recipe,
+    /// The History saved with `after`, which Redo writes back.
+    pub history: SavedHistory,
 }
 
 /// A photo's edit before a Sync.
@@ -136,7 +138,7 @@ pub(super) fn synchronize(
             path: &p.synced.path,
             recipe: &p.synced.after,
             export: &p.export,
-            history: HistoryUpdate::Replace(&p.history),
+            history: HistoryUpdate::Replace(&p.synced.history),
         })
         .collect();
     match catalog.save_edits(&edits) {
@@ -154,7 +156,6 @@ struct PreparedEdit {
     synced: Synced,
     name: String,
     export: ExportOptions,
-    history: SavedHistory,
 }
 
 /// A target's new edit (`None` when the Sync changes nothing on it), and what could
@@ -225,12 +226,12 @@ fn prepare(
     history.set(&after, &mut current, Step::new("Synchronize Settings", ""));
     Ok(Prepared {
         edit: Some(PreparedEdit {
-            history: history.saved(&current),
             synced: Synced {
                 id: target.id,
                 path: target.path.clone(),
                 before,
                 after,
+                history: history.saved(&current),
             },
             name: target.name.clone(),
             export,
@@ -268,30 +269,36 @@ pub(super) fn restore(
     edits: &[Synced],
     side: SyncSide,
     path: impl Fn(i64) -> Option<PathBuf>,
-) -> Result<()> {
+) -> std::result::Result<(), SyncRestoreError> {
+    // A photo removed since can't be restored; the caller drops the command.
+    let paths = edits
+        .iter()
+        .map(|e| path(e.id))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(SyncRestoreError::PhotoRemoved)?;
     let mut saves = Vec::with_capacity(edits.len());
-    for e in edits {
-        let recipe = match (side, &e.before) {
+    for (e, path) in edits.iter().zip(paths) {
+        let (recipe, history) = match (side, &e.before) {
             (SyncSide::Before, EditBefore::None { .. }) => continue,
-            (SyncSide::Before, EditBefore::Saved(r)) => r.as_ref(),
-            (SyncSide::After, _) => &e.after,
+            (SyncSide::Before, EditBefore::Saved(r)) => (r.as_ref(), HistoryUpdate::Keep),
+            // Redo brings back the History the Sync saved, which Undo may have cleared.
+            (SyncSide::After, _) => (&e.after, HistoryUpdate::Replace(&e.history)),
         };
-        let path =
-            path(e.id).with_context(|| "A synchronized photo is no longer in the catalog")?;
         let export = catalog
-            .load_edit(e.id, &path)?
+            .load_edit(e.id, &path)
+            .map_err(SyncRestoreError::Write)?
             .map(|saved| saved.export)
             .unwrap_or_default();
-        saves.push((e.id, path, recipe, export));
+        saves.push((e.id, path, recipe, export, history));
     }
     let saves: Vec<EditToSave> = saves
         .iter()
-        .map(|(id, path, recipe, export)| EditToSave {
+        .map(|(id, path, recipe, export, history)| EditToSave {
             id: *id,
             path,
             recipe,
             export,
-            history: HistoryUpdate::Keep,
+            history: *history,
         })
         .collect();
     let mut changes: Vec<EditChange> = saves.iter().map(EditChange::Save).collect();
@@ -303,7 +310,28 @@ pub(super) fn restore(
                 .map(|e| EditChange::Clear { id: e.id }),
         );
     }
-    catalog.change_edits(&changes)
+    catalog
+        .change_edits(&changes)
+        .map_err(SyncRestoreError::Write)
+}
+
+/// Why a Sync could not be undone or redone.
+#[derive(Debug)]
+pub(super) enum SyncRestoreError {
+    /// One of its photos was removed from the catalog since.
+    PhotoRemoved,
+    Write(anyhow::Error),
+}
+impl std::error::Error for SyncRestoreError {}
+impl std::fmt::Display for SyncRestoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncRestoreError::PhotoRemoved => {
+                f.write_str("a synchronized photo is no longer in the catalog")
+            }
+            SyncRestoreError::Write(e) => write!(f, "{e:#}"),
+        }
+    }
 }
 
 impl Editor {
@@ -312,6 +340,10 @@ impl Editor {
         let (Some(library), Some(open)) = (&self.library, self.document.catalog_photo) else {
             return Vec::new();
         };
+        // The open photo's settings are not final until its Lightroom edit is in.
+        if self.document.pending_lightroom || self.document.metadata.is_none() {
+            return Vec::new();
+        }
         let selected = library.selected_photos();
         if !selected.contains(&open) {
             return Vec::new();
@@ -354,17 +386,20 @@ impl Editor {
             super::widgets::plural(targets.len(), "photo", "photos")
         );
         std::thread::spawn(move || {
-            let result = Catalog::open(&catalog)
-                .map(|c| synchronize(&c, &source, &groups, &targets))
-                .unwrap_or_else(|e| SyncResult {
-                    catalog: catalog.clone(),
-                    notes: Vec::new(),
-                    synced: Vec::new(),
-                    failed: vec![SyncFailure {
-                        name: "Catalog".into(),
-                        reason: format!("{e:#}"),
-                    }],
-                });
+            // A panic (in Upright's analysis, say) still finishes the Sync.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                Catalog::open(&catalog).map(|c| synchronize(&c, &source, &groups, &targets))
+            }))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("the Sync failed unexpectedly")))
+            .unwrap_or_else(|e| SyncResult {
+                catalog: catalog.clone(),
+                notes: Vec::new(),
+                synced: Vec::new(),
+                failed: vec![SyncFailure {
+                    name: "Catalog".into(),
+                    reason: format!("{e:#}"),
+                }],
+            });
             let _ = tx.send(Event::Synced(Box::new(result)));
             ctx.request_repaint();
         });
@@ -377,6 +412,9 @@ impl Editor {
             return;
         }
         let done = result.synced.len();
+        if let Some(library) = &mut self.library {
+            library.edits_changed(result.synced.iter().map(|e| e.id));
+        }
         if done > 0 {
             self.undo_log
                 .push(super::undo::Command::Sync(Box::new(SyncCommand {
@@ -480,7 +518,15 @@ mod tests {
             assert!(c.load_edit(*id, path)?.is_none());
             assert!(c.load_history(*id)?.is_none());
         }
+        // Redo brings the edit back with its History step.
         restore(&c, &result.synced, SyncSide::After, path)?;
+        let history = c.load_history(photos[1].0)?.unwrap();
+        assert_eq!(history.steps.last().unwrap().name, "Synchronize Settings");
+        // A photo removed since makes the command unusable rather than wrong.
+        assert!(matches!(
+            restore(&c, &result.synced, SyncSide::Before, |_| None),
+            Err(SyncRestoreError::PhotoRemoved)
+        ));
         assert_eq!(
             c.load_edit(photos[1].0, &photos[1].1)?
                 .unwrap()

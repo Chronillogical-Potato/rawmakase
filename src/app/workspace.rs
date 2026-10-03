@@ -919,7 +919,9 @@ impl Editor {
         if self.document.save.needs_save() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
-        if ctx.input(|i| i.viewport().close_requested()) && (self.exporting() || !self.flush()) {
+        if ctx.input(|i| i.viewport().close_requested())
+            && (self.exporting() || self.activity.is_syncing() || !self.flush())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_confirm = true;
         }
@@ -927,13 +929,18 @@ impl Editor {
             egui::Window::new("Work still pending").show(ctx, |ui| {
                 ui.label(if self.exporting() {
                     "Wait for the export to finish before closing."
+                } else if self.activity.is_syncing() {
+                    "Wait for Sync Settings to finish before closing."
                 } else {
                     "Edits could not be saved. Retry or save a preset before closing."
                 });
                 if ui.button("Keep editing").clicked() {
                     self.close_confirm = false;
                 }
-                if !self.exporting() && ui.button("Close without saving").clicked() {
+                if !self.exporting()
+                    && !self.activity.is_syncing()
+                    && ui.button("Close without saving").clicked()
+                {
                     self.document.save.saved();
                     if let Some(library) = &mut self.library {
                         library.discard_drafts();

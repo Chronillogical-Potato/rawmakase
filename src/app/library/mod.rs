@@ -385,6 +385,12 @@ impl Library {
     pub(in crate::app) fn shown(&self) -> Vec<i64> {
         self.visible.iter().map(|i| self.photos[*i].id).collect()
     }
+    /// Edits written elsewhere (Sync, its Undo): their previews render again.
+    pub(in crate::app) fn edits_changed(&mut self, ids: impl IntoIterator<Item = i64>) {
+        for id in ids {
+            self.cache.forget(id);
+        }
+    }
     /// The selected photos in display order.
     pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
         self.selected_ids()

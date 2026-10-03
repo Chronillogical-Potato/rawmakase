@@ -57,6 +57,14 @@ impl UndoLog {
         self.undo.push_back(command);
         self.redo.clear();
     }
+    /// Drops commands that wrote a photo now removed, so its id, if a new photo gets
+    /// it, is never written by them.
+    pub(super) fn forget_photo(&mut self, id: i64) {
+        let touches =
+            |c: &Command| matches!(c, Command::Sync(s) if s.edits.iter().any(|e| e.id == id));
+        self.undo.retain(|c| !touches(c));
+        self.redo.retain(|c| !touches(c));
+    }
     pub(super) fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
@@ -130,11 +138,16 @@ impl Editor {
             self.undo_log.push(command);
         }
     }
+    /// Waits while Sync writes edits, which Undo could otherwise race.
     pub(super) fn undo(&mut self) {
-        self.step(Direction::Undo);
+        if !self.activity.is_syncing() {
+            self.step(Direction::Undo);
+        }
     }
     pub(super) fn redo(&mut self) {
-        self.step(Direction::Redo);
+        if !self.activity.is_syncing() {
+            self.step(Direction::Redo);
+        }
     }
     /// Reverses the latest command, or makes the latest reversed one again.
     /// What the Library panels hold is saved first, so it is a command
@@ -211,9 +224,20 @@ impl Editor {
                 };
                 // Each photo where it is now, after any relink since the Sync.
                 let path = |id: i64| library.photo(id).map(|p| p.path.clone());
-                if let Err(e) = super::sync::restore(&library.catalog, &sync.edits, side, path) {
-                    self.status = format!("{verb} failed: {e:#}");
-                    return false;
+                match super::sync::restore(&library.catalog, &sync.edits, side, path) {
+                    Ok(()) => {}
+                    // Nothing to return to: the command is used up, not retried.
+                    Err(e @ super::sync::SyncRestoreError::PhotoRemoved) => {
+                        self.status = format!("{verb} Sync Settings: {e}");
+                        return true;
+                    }
+                    Err(e) => {
+                        self.status = format!("{verb} failed: {e}");
+                        return false;
+                    }
+                }
+                if let Some(library) = &mut self.library {
+                    library.edits_changed(sync.edits.iter().map(|e| e.id));
                 }
                 // A synchronized photo open here shows the edit written back.
                 if let Some(open) = self.document.catalog_photo
