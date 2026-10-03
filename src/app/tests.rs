@@ -1365,13 +1365,13 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     // Pasted onto another photo, the mode comes along but not the corrections: that
     // photo keeps its own, here none yet, for the editor to analyse.
     e.document.recipe.upright.mode = UprightMode::Vertical;
-    e.copy_settings();
     e.document.metadata = Some(Metadata {
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     });
+    e.copy_settings();
     e.document.recipe = Recipe::default();
     e.paste_settings();
     assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
@@ -1979,12 +1979,15 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     expected.update_wb(&second);
     assert_eq!(pasted.wb, expected.wb);
     assert_ne!(pasted.wb, copied.wb);
-    // Moving to another photo makes this one's settings the Previous.
-    editor.open_raw(
-        std::path::PathBuf::from("missing-previous-fixture.ARW"),
-        None,
-    );
+    // Moving to another photo makes this one's settings the Previous; opening that
+    // photo again leaves it.
+    let other = std::path::PathBuf::from("missing-previous-fixture.ARW");
+    editor.open_raw(other.clone(), None);
     editor.document.metadata = Some(first);
+    editor.document.path = Some(other.clone());
+    editor.document.recipe.exposure = -1.;
+    editor.open_raw(other, None);
+    editor.document.metadata = Some(second);
     editor.paste_previous();
     assert_eq!(editor.document.recipe.exposure, 0.4);
 }

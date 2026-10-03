@@ -187,7 +187,8 @@ impl SettingGroup {
             Masking => "Masking",
         }
     }
-    /// The panel whose switch travels with this group, when this group is its first.
+    /// The panel whose switch travels with this group: every group of a panel with a
+    /// switch carries it.
     fn panel(self) -> Option<Panel> {
         use SettingGroup::*;
         Some(match self {
@@ -195,10 +196,10 @@ impl SettingGroup {
             ColorAdjustments => Panel::ColorMixer,
             BlackWhiteMix => Panel::BlackWhiteMix,
             ColorGrading => Panel::ColorGrading,
-            Sharpening => Panel::Detail,
-            LensProfileCorrections => Panel::LensCorrections,
-            TransformAdjustments => Panel::Transform,
-            PostCropVignetting => Panel::Effects,
+            Sharpening | LuminanceNoiseReduction | ColorNoiseReduction => Panel::Detail,
+            LensProfileCorrections | ChromaticAberration | LensVignetting => Panel::LensCorrections,
+            UprightMode | TransformAdjustments => Panel::Transform,
+            PostCropVignetting | Grain => Panel::Effects,
             Calibration => Panel::Calibration,
             SpotRemoval => Panel::SpotRemoval,
             Masking => Panel::Masks,
@@ -382,46 +383,66 @@ pub struct Transferred {
     pub notes: Vec<String>,
 }
 
-/// `from`'s settings in `selection` applied over `to`, with everything that depends on
-/// the photo worked out again for `target`.
+/// The photo settings come from: its recipe and its camera.
+#[derive(Clone, Copy)]
+pub struct Source<'a> {
+    pub recipe: &'a Recipe,
+    pub metadata: &'a Metadata,
+}
+
+/// How a photo is turned and flipped for display (see [`super::display_axes`]).
+fn display_axes(r: &Recipe, m: &Metadata) -> [[f32; 2]; 2] {
+    let turns = super::ImageFrame::for_metadata(m).turns;
+    super::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y)
+}
+
+/// The source's settings in `selection` applied over `to`, with everything that depends
+/// on the photo worked out again for `target`.
 pub fn transfer(
-    from: &Recipe,
+    source: Source<'_>,
     to: &Recipe,
     selection: &GroupSelection,
     target: Target<'_>,
 ) -> Transferred {
+    let from = source.recipe;
     let mut recipe = to.clone();
     let mut notes = Vec::new();
     for group in selection.groups() {
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
-    if selection.contains(SettingGroup::TreatmentAndProfile) {
-        // A profile is made for one camera: use the target's profile of that name.
-        let name = from.profile.as_ref().map(|p| p.name.as_str());
-        match name {
-            Some(name)
-                if from
-                    .profile
-                    .as_ref()
-                    .is_some_and(|p| p.ensure_camera(m).is_err()) =>
-            {
-                match target
-                    .profiles
-                    .iter()
-                    .find(|p| p.name == name && p.ensure_camera(m).is_ok())
-                {
-                    Some(p) => recipe.profile = Some(p.clone()),
-                    None => {
-                        recipe.profile = to.profile.clone();
-                        notes.push(format!(
-                            "{name} isn't available for this camera; kept its profile"
-                        ));
-                    }
-                }
+    if selection.contains(SettingGroup::TransformAdjustments) {
+        // The sliders as shown on the source photo, along the target's displayed axes.
+        recipe.transform = from
+            .transform
+            .displayed(display_axes(from, source.metadata))
+            .recorded(display_axes(&recipe, m));
+    }
+    if selection.contains(SettingGroup::TreatmentAndProfile)
+        && let Some(profile) = &from.profile
+    {
+        // A profile file belongs to one photo's camera (or its DNG): use the target's of
+        // that name, else the source's when it fits this camera, else keep the target's.
+        let name = profile.name.as_str();
+        match target
+            .profiles
+            .iter()
+            .find(|p| p.name == name && p.ensure_camera(m).is_ok())
+        {
+            Some(p) => recipe.profile = Some(p.clone()),
+            None if profile.ensure_camera(m).is_ok() => {}
+            None => {
+                recipe.profile = to.profile.clone();
+                notes.push(format!(
+                    "{name} isn't available for this camera; kept its profile"
+                ));
             }
-            _ => {}
         }
+    }
+    // The baseline depends on both the profile and the process version.
+    if selection.contains(SettingGroup::TreatmentAndProfile)
+        || selection.contains(SettingGroup::ProcessVersion)
+    {
         recipe.use_camera_baseline(m);
     }
     if selection.contains(SettingGroup::WhiteBalance) {
@@ -432,10 +453,23 @@ pub fn transfer(
         // A new profile maps the same gains to other Temperature and Tint values.
         recipe.sync_white_balance_controls(m);
     }
+    // Upright's corrections are analysed from the photo as its lens corrections render
+    // it: new lens settings call for a new analysis, which the editor runs.
+    let lens = |r: &Recipe| (r.lens_builtin, r.lens_profile, r.lens_distortion);
+    if lens(&recipe) != lens(to) {
+        recipe.upright.corrections.clear();
+        if recipe.upright.mode == super::UprightMode::Guided {
+            recipe.upright.mode = super::UprightMode::Off;
+            notes.push(
+                "New lens corrections need Guided Upright's guides drawn again; left Off".into(),
+            );
+        }
+    }
     // Only the mode transfers: the target keeps the corrections analysed from it, and
     // the editor analyses one it lacks. Guided needs guides drawn on the photo itself.
     let upright = &mut recipe.upright;
-    if upright.mode == super::UprightMode::Guided
+    if selection.contains(SettingGroup::UprightMode)
+        && upright.mode == super::UprightMode::Guided
         && upright.corrections.len() <= upright.mode.code()
     {
         upright.mode = super::UprightMode::Off;
@@ -586,7 +620,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("flip_y", PhotosOwn),
         ("retouch", Group(SpotRemoval)),
         ("masks", Group(Masking)),
-        // Each switch travels with its panel's first group.
+        // Each switch travels with its panel's groups.
         ("panels", Derived),
         ("unknown", PhotosOwn),
         ("effects.channels", Group(ToneCurve)),

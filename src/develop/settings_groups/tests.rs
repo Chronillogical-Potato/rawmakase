@@ -9,6 +9,10 @@ use crate::develop::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn from<'a>(recipe: &'a Recipe, metadata: &'a Metadata) -> Source<'a> {
+    Source { recipe, metadata }
+}
+
 fn camera(make: &str, model: &str) -> Metadata {
     Metadata {
         make: make.into(),
@@ -183,7 +187,10 @@ fn each_group_transfers_exactly_its_settings() {
         let mut selection = GroupSelection::none();
         selection.set(group, GroupInclusion::Included);
         let to = Recipe::default();
-        let moved = changed(&to, &transfer(&source, &to, &selection, target).recipe);
+        let moved = changed(
+            &to,
+            &transfer(from(&source, &m), &to, &selection, target).recipe,
+        );
         let mut expected: BTreeSet<String> = kinds
             .iter()
             .filter(|(_, kind)| *kind == Kind::Group(group))
@@ -199,7 +206,10 @@ fn each_group_transfers_exactly_its_settings() {
             SettingGroup::TreatmentAndProfile => {
                 expected.extend(["camera_exposure", "temperature", "tint", "wb"].map(String::from));
             }
-            SettingGroup::Sharpening => {
+            // The source has Detail switched off.
+            SettingGroup::Sharpening
+            | SettingGroup::LuminanceNoiseReduction
+            | SettingGroup::ColorNoiseReduction => {
                 expected.insert("panels".into());
             }
             _ => {}
@@ -224,10 +234,10 @@ fn nothing_selected_changes_nothing_and_the_photos_own_settings_never_move() {
     };
     let to = Recipe::default();
     assert_eq!(
-        transfer(&source, &to, &GroupSelection::none(), target).recipe,
+        transfer(from(&source, &m), &to, &GroupSelection::none(), target).recipe,
         to
     );
-    let all = transfer(&source, &to, &GroupSelection::all(), target).recipe;
+    let all = transfer(from(&source, &m), &to, &GroupSelection::all(), target).recipe;
     for key in [
         "rotation",
         "flip_x",
@@ -239,7 +249,7 @@ fn nothing_selected_changes_nothing_and_the_photos_own_settings_never_move() {
     }
     assert!(all.unknown.is_empty());
     // Paste's default leaves spots and masks where they were made.
-    let pasted = transfer(&source, &to, &GroupSelection::default(), target).recipe;
+    let pasted = transfer(from(&source, &m), &to, &GroupSelection::default(), target).recipe;
     assert!(pasted.retouch.is_empty() && pasted.masks.is_empty());
     assert_eq!(pasted.exposure, source.exposure);
 }
@@ -248,6 +258,7 @@ fn nothing_selected_changes_nothing_and_the_photos_own_settings_never_move() {
 fn profile_and_white_balance_are_resolved_for_the_target_camera() {
     use crate::camera_profiles::open;
     let fuji = camera("Fujifilm", "X100F");
+    let m = fuji.clone();
     let sony = camera("Sony", "ILCE-7M2");
     let source = Recipe {
         profile: open::color(&fuji).map(Arc::new),
@@ -258,7 +269,7 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
     let sony_profiles: Vec<_> = open::color(&sony).map(Arc::new).into_iter().collect();
     let to = Recipe::default();
     let out = transfer(
-        &source,
+        from(&source, &m),
         &to,
         &GroupSelection::default(),
         Target {
@@ -277,7 +288,7 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
     assert_eq!(out.recipe.wb, expected.wb);
     // Without that profile for the target, it keeps its own and says so.
     let out = transfer(
-        &source,
+        from(&source, &m),
         &to,
         &GroupSelection::default(),
         Target {
@@ -303,7 +314,7 @@ fn upright_moves_its_mode_and_guided_needs_this_photos_guides() {
     let mut source = Recipe::default();
     source.upright.mode = UprightMode::Guided;
     let out = transfer(
-        &source,
+        from(&source, &m),
         &Recipe::default(),
         &GroupSelection::default(),
         target,
@@ -314,7 +325,89 @@ fn upright_moves_its_mode_and_guided_needs_this_photos_guides() {
     source.upright.mode = UprightMode::Level;
     let mut to = Recipe::default();
     to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
-    let out = transfer(&source, &to, &GroupSelection::default(), target);
+    let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
     assert_eq!(out.recipe.upright.mode, UprightMode::Level);
     assert_eq!(out.recipe.upright.corrections, to.upright.corrections);
+}
+
+#[test]
+fn transform_keeps_what_it_shows_on_photos_turned_differently() {
+    let m = camera("Fujifilm", "X100F");
+    let mut source = Recipe {
+        rotation: 1,
+        ..Default::default()
+    };
+    let turned = |r: &Recipe| {
+        crate::develop::display_axes(
+            (crate::develop::ImageFrame::for_metadata(&m).turns + r.rotation) % 4,
+            r.flip_x,
+            r.flip_y,
+        )
+    };
+    // Vertical +50 as shown on the turned photo.
+    let mut shown = source.transform.displayed(turned(&source));
+    shown.vertical = 0.5;
+    source.transform = shown.recorded(turned(&source));
+    let mut selection = GroupSelection::none();
+    selection.set(SettingGroup::TransformAdjustments, GroupInclusion::Included);
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let out = transfer(from(&source, &m), &Recipe::default(), &selection, target).recipe;
+    let pasted = out.transform.displayed(turned(&out));
+    assert_eq!((pasted.vertical, pasted.horizontal), (0.5, 0.));
+}
+
+#[test]
+fn unselected_groups_and_unchanged_lenses_leave_upright_alone() {
+    let m = camera("Fujifilm", "X100F");
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let mut to = Recipe::default();
+    to.upright.mode = UprightMode::Guided;
+    let out = transfer(
+        from(&Recipe::default(), &m),
+        &to,
+        &GroupSelection::none(),
+        target,
+    );
+    assert_eq!(out.recipe, to);
+    // New lens corrections call for a new analysis.
+    let mut to = Recipe::default();
+    to.upright.mode = UprightMode::Level;
+    to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    let mut source = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    source.upright.mode = UprightMode::Level;
+    let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
+    assert_eq!(out.recipe.upright.mode, UprightMode::Level);
+    assert!(out.recipe.upright.corrections.is_empty());
+}
+
+#[test]
+fn a_profile_resolves_to_the_targets_own_file_of_that_name() {
+    use crate::camera_profiles::open;
+    let m = camera("Fujifilm", "X100F");
+    let source = Recipe {
+        profile: open::color(&m).map(Arc::new),
+        ..Default::default()
+    };
+    // The target's own profile of the same name (as a DNG's embedded one would be).
+    let own = Arc::new(open::color(&m).unwrap());
+    let profiles = [own.clone()];
+    let out = transfer(
+        from(&source, &m),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        Target {
+            metadata: &m,
+            profiles: &profiles,
+        },
+    );
+    assert!(Arc::ptr_eq(out.recipe.profile.as_ref().unwrap(), &own));
 }
