@@ -364,6 +364,8 @@ fn decode(path: &Path) -> Result<image::Rgba32FImage> {
     let mut decoder = image::ImageReader::open(path)?
         .with_guessed_format()?
         .into_decoder()?;
+    // The decoder's default size limits, which reading through it skips.
+    decoder.set_limits(image::Limits::default())?;
     let orientation = decoder.orientation()?;
     let mut image = image::DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
@@ -466,6 +468,9 @@ pub fn save_in(
             "Choose a PNG or JPEG image"
         );
         decode(source).context("The image can't be read")?;
+    }
+    if watermark.style == Style::Text {
+        fonts::load(&watermark.family, &watermark.face)?;
     }
     let images = dir.join("images");
     std::fs::create_dir_all(&images)?;
