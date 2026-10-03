@@ -92,9 +92,7 @@ impl DecodeCache {
         ))
     }
     fn file(&self, key: &str) -> PathBuf {
-        let hash = key.bytes().fold(0xcbf29ce484222325u64, |h, b| {
-            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
-        });
+        let hash = crate::storage::fnv1a(crate::storage::FNV_OFFSET, key.as_bytes());
         self.dir.join(format!("{hash:016x}.decoded"))
     }
     pub fn contains(&self, key: &str) -> bool {

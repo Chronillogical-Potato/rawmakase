@@ -12,6 +12,8 @@ pub(crate) use files::{
 };
 pub(crate) use format::migrate_recipe;
 pub use format::{PIPELINE, SCHEMA};
+pub use identity::Stamp;
+pub(crate) use identity::{FNV_OFFSET, fnv1a};
 pub use session::{LibraryLayout, Session, load_session, save_session};
 pub(crate) use sidecar::import;
 pub use sidecar::{Identity, Sidecar, load, save, sidecar_path};
