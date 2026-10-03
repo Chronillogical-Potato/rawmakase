@@ -36,8 +36,9 @@ pub struct SavedStep {
 /// What saving an edit does to its stored History.
 #[derive(Clone, Copy, Debug)]
 pub enum HistoryUpdate<'a> {
-    /// Leave it: the edit changed outside Develop (Paste, Sync, Undo in the Library),
-    /// which the History notices when the photo next opens.
+    /// Leave it: the edit changed outside Develop's History (Undo after moving to
+    /// another photo, a sidecar import), which the History notices when the photo
+    /// next opens.
     Keep,
     Replace(&'a SavedHistory),
 }

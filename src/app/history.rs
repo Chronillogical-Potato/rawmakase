@@ -112,7 +112,7 @@ impl History {
         }
     }
     /// History restored from `saved` for an edit now at `current`. When the edit was
-    /// changed since (Paste or Sync in the Library, or Undo there), that change
+    /// changed since (Undo after moving to another photo, or a sidecar import), that change
     /// becomes the latest step, as Lightroom adds one.
     pub fn restored(saved: SavedHistory, current: &Recipe) -> Self {
         let mut history = Self::default();
@@ -599,7 +599,7 @@ mod tests {
         recipe.exposure = 0.5;
         history.record(before, &recipe);
         let saved = history.saved(&recipe);
-        // Pasted onto in the Library while the photo was closed.
+        // Changed by Undo while another photo was open.
         let pasted = Recipe {
             exposure: 0.5,
             temperature: 4000.,
