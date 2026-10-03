@@ -574,6 +574,7 @@ mod metadata_fields;
 mod photo_info;
 mod previews;
 mod quick;
+mod rows;
 mod screen;
 mod selection;
 mod sidebar;

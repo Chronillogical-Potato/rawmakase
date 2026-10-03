@@ -1796,7 +1796,7 @@ fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> 
     library.sync_fields();
     // Typed, then deleted again.
     library.fields.drafts.title = String::new();
-    library.fields.mark_edited_for_tests(0);
+    library.fields.mark_title_edited_for_tests();
     library.commit_fields()?;
     for id in &ids {
         assert_eq!(

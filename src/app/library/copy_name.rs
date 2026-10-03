@@ -1,6 +1,7 @@
 //! The Copy Name of a virtual copy, edited in place in the Metadata panel like
 //! Lightroom's; saved on Return or when focus leaves, and kept when the
 //! selection moves or the save fails.
+use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, font, panel_edit};
 use crate::app::theme;
 use crate::catalog::{Catalog, Photo};
 use anyhow::Result;
@@ -52,14 +53,8 @@ impl CopyNames {
         photos: &mut [Photo],
     ) -> Result<bool> {
         let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), egui::Sense::hover());
-        ui.painter().text(
-            egui::pos2(rect.left() + 84., rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            "Copy Name",
-            egui::FontId::proportional(11.),
-            theme::gray(135),
-        );
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), egui::Sense::hover());
+        caption_at(ui, rect, "Copy Name");
         let mut outcome = Ok(false);
         if self.draft.as_ref().is_none_or(|(id, _)| *id != photo.id) {
             // Another copy was selected before the field lost focus: keep its
@@ -72,27 +67,20 @@ impl CopyNames {
                 self.draft = Some((photo.id, photo.copy_name.clone()));
             }
         }
-        let field = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 88., rect.top() + 1.),
-            egui::pos2(rect.right(), rect.bottom() - 1.),
-        );
+        let field = field_rect(rect);
         let Some((_, text)) = self.draft.as_mut().filter(|(id, _)| *id == photo.id) else {
             ui.painter().text(
                 egui::pos2(field.left() + 4., field.center().y),
                 egui::Align2::LEFT_CENTER,
                 &photo.copy_name,
-                egui::FontId::proportional(11.),
-                theme::gray(205),
+                font(),
+                theme::gray(VALUE_GRAY),
             );
             return outcome;
         };
         let response = ui.put(
             field,
-            egui::TextEdit::singleline(text)
-                .font(egui::FontId::proportional(11.))
-                .text_color(theme::gray(205))
-                .margin(egui::Margin::symmetric(4, 1))
-                .vertical_align(egui::Align::Center),
+            panel_edit(egui::TextEdit::singleline(text)).vertical_align(egui::Align::Center),
         );
         if response.lost_focus() {
             return Ok(self.commit(catalog, photos)? || outcome?);

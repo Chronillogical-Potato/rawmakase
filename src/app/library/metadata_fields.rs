@@ -4,13 +4,13 @@
 //! photos differ shows "< mixed >"; typing replaces it on all of them, leaving
 //! it alone changes nothing.
 use super::descriptive::{DescriptiveEdit, parse_keywords};
+use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, paint_truncated, panel_edit, value_at};
 use super::{Library, Place};
 use crate::app::theme;
 use crate::catalog::{Descriptive, Keyword, Location, TextField, Value};
 use eframe::egui::{self, Vec2};
 
 const MIXED: &str = "< mixed >";
-const ROW: f32 = 20.;
 const CAPTION: f32 = 46.;
 
 /// A field's value across the photos shown.
@@ -58,11 +58,24 @@ pub(super) struct Fields {
     /// "+" added an empty creator entry, to keep after a save reads the
     /// values again.
     add_creator: bool,
-    /// Title, caption, copyright and creator were typed in, even back to how
-    /// they were: emptying a mixed field clears it on every photo.
-    edited: [bool; 4],
+    /// Fields typed in, even back to how they were: emptying a mixed field
+    /// clears it on every photo.
+    edited: Edited,
     /// The drafts were saved and the values not read again yet.
     saved: bool,
+}
+/// The fields typed in since the values were read or saved.
+#[derive(Clone, Copy, Default)]
+struct Edited {
+    title: bool,
+    caption: bool,
+    copyright: bool,
+    creators: bool,
+}
+impl Edited {
+    fn any(&self) -> bool {
+        self.title || self.caption || self.copyright || self.creators
+    }
 }
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct Drafts {
@@ -77,8 +90,8 @@ impl Fields {
         self.stale = true;
     }
     #[cfg(test)]
-    pub(super) fn mark_edited_for_tests(&mut self, field: usize) {
-        self.edited[field] = true;
+    pub(super) fn mark_title_edited_for_tests(&mut self) {
+        self.edited.title = true;
     }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
@@ -142,18 +155,23 @@ impl Library {
         let mut edits = Vec::new();
         let edited = self.fields.edited;
         for (field, now, was, edited) in [
-            (TextField::Title, &drafts.title, &untouched.title, edited[0]),
+            (
+                TextField::Title,
+                &drafts.title,
+                &untouched.title,
+                edited.title,
+            ),
             (
                 TextField::Caption,
                 &drafts.caption,
                 &untouched.caption,
-                edited[1],
+                edited.caption,
             ),
             (
                 TextField::Copyright,
                 &drafts.copyright,
                 &untouched.copyright,
-                edited[2],
+                edited.copyright,
             ),
         ] {
             if now != was || edited {
@@ -168,7 +186,7 @@ impl Library {
         };
         // An entry added and left empty changes nothing.
         let creators = names(&drafts.creators);
-        if creators != names(&untouched.creators) || edited[3] {
+        if creators != names(&untouched.creators) || edited.creators {
             edits.push(DescriptiveEdit::Creators(creators));
         }
         let place = self.fields.place.clone();
@@ -176,7 +194,7 @@ impl Library {
         for edit in edits {
             self.edit_descriptive_at(&targets, edit, place.clone())?;
         }
-        self.fields.edited = [false; 4];
+        self.fields.edited = Edited::default();
         self.fields.saved |= saving;
         self.fields.reload();
         Ok(())
@@ -192,7 +210,7 @@ impl Library {
         // Drafts not shown (a collapsed section) are saved before the values
         // are read again, never dropped.
         let f = &self.fields;
-        let pending = !f.saved && (f.drafts != f.untouched() || f.edited.iter().any(|e| *e));
+        let pending = !f.saved && (f.drafts != f.untouched() || f.edited.any());
         if (moved || pending)
             && let Err(e) = self.commit_fields()
         {
@@ -241,7 +259,7 @@ impl Library {
         let n = keywords.len();
         f.keywords = counts.into_iter().map(|(k, c)| (k, c == n)).collect();
         f.drafts = f.untouched();
-        f.edited = [false; 4];
+        f.edited = Edited::default();
         f.saved = false;
     }
     /// Title, Caption, Creator, Copyright and Location rows.
@@ -253,15 +271,15 @@ impl Library {
             let f = &mut self.fields;
             let title = text_row(ui, "Title", &mut f.drafts.title, &f.title, false);
             let caption = text_row(ui, "Caption", &mut f.drafts.caption, &f.caption, true);
-            let (changed, added, typed) = creator_rows(ui, &mut f.drafts.creators, &f.creators);
-            f.edited[3] |= typed;
-            commit |= changed;
+            let creators = creator_rows(ui, &mut f.drafts.creators, &f.creators);
+            f.edited.creators |= creators.typed;
+            commit |= creators.commit;
             // A saved entry needs no empty one after it; "+" clicked while
             // an entry was saved keeps its new one.
-            if changed && !added {
+            if creators.commit && !creators.added {
                 f.add_creator = false;
             }
-            f.add_creator |= added;
+            f.add_creator |= creators.added;
             let copyright = text_row(
                 ui,
                 "Copyright",
@@ -269,10 +287,10 @@ impl Library {
                 &f.copyright,
                 false,
             );
-            for (i, (left, typed)) in [title, caption, copyright].into_iter().enumerate() {
-                commit |= left;
-                f.edited[i] |= typed;
-            }
+            commit |= title.left || caption.left || copyright.left;
+            f.edited.title |= title.typed;
+            f.edited.caption |= caption.typed;
+            f.edited.copyright |= copyright.typed;
         });
         if commit && let Err(e) = self.commit_fields() {
             self.message = format!("Metadata could not be saved: {e}");
@@ -333,16 +351,12 @@ impl Library {
                 egui::pos2(rect.right() - 20., rect.top()),
                 rect.right_bottom(),
             );
-            let galley = egui::WidgetText::from(name.as_str()).into_galley(
+            paint_truncated(
                 ui,
-                Some(egui::TextWrapMode::Truncate),
-                (button.left() - rect.left()).max(1.),
-                egui::FontId::proportional(11.),
-            );
-            ui.painter().galley(
-                egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.),
-                galley,
-                theme::gray(205),
+                rect.left_center(),
+                button.left() - rect.left(),
+                &name,
+                theme::gray(VALUE_GRAY),
             );
             let tip = if *all {
                 "Remove this keyword".to_string()
@@ -372,11 +386,8 @@ impl Library {
         let response = ui.add_enabled(!targets.is_empty(), |ui: &mut egui::Ui| {
             ui.put(
                 rect.shrink2(Vec2::new(0., 1.)),
-                egui::TextEdit::singleline(&mut self.fields.keyword_entry)
+                panel_edit(egui::TextEdit::singleline(&mut self.fields.keyword_entry))
                     .hint_text("Add keywords: Child < Parent, …")
-                    .font(egui::FontId::proportional(11.))
-                    .text_color(theme::gray(205))
-                    .margin(egui::Margin::symmetric(4, 1))
                     .vertical_align(egui::Align::Center),
             )
         });
@@ -393,50 +404,21 @@ impl Library {
     }
 }
 
-/// The caption column of a row.
-fn caption_at(ui: &egui::Ui, rect: egui::Rect, key: &str) {
-    ui.painter().text(
-        egui::pos2(rect.left() + 84., rect.top() + ROW / 2.),
-        egui::Align2::RIGHT_CENTER,
-        key,
-        egui::FontId::proportional(11.),
-        theme::gray(135),
-    );
-}
-fn value_at(ui: &egui::Ui, rect: egui::Rect, text: &str, set: bool) {
-    let left = rect.left() + 92.;
-    let galley = egui::WidgetText::from(text).into_galley(
-        ui,
-        Some(egui::TextWrapMode::Truncate),
-        (rect.right() - left).max(1.),
-        egui::FontId::proportional(11.),
-    );
-    ui.painter().galley(
-        egui::pos2(left, rect.center().y - galley.size().y / 2.),
-        galley,
-        theme::gray(if set { 205 } else { 90 }),
-    );
-}
-/// The text field area of a row, right of its caption.
-fn field_rect(rect: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 88., rect.top() + 1.),
-        egui::pos2(rect.right(), rect.bottom() - 1.),
-    )
-}
 fn edit<'t>(text: &'t mut String, shared: &Shared<String>, multiline: bool) -> egui::TextEdit<'t> {
     let edit = if multiline {
         egui::TextEdit::multiline(text).desired_rows(3)
     } else {
         egui::TextEdit::singleline(text)
     };
-    edit.hint_text(if *shared == Shared::Mixed { MIXED } else { "" })
-        .font(egui::FontId::proportional(11.))
-        .text_color(theme::gray(205))
-        .margin(egui::Margin::symmetric(4, 1))
+    panel_edit(edit).hint_text(if *shared == Shared::Mixed { MIXED } else { "" })
 }
-/// A text row. Returns whether it was left, to save it, and whether it was
-/// typed in. The caption is a fixed three lines that scroll, so the panel
+/// What a text row's field did this frame.
+struct RowInput {
+    /// Focus left it, to save it.
+    left: bool,
+    typed: bool,
+}
+/// A text row. The caption is a fixed three lines that scroll, so the panel
 /// never reflows.
 fn text_row(
     ui: &mut egui::Ui,
@@ -444,7 +426,7 @@ fn text_row(
     text: &mut String,
     shared: &Shared<String>,
     multiline: bool,
-) -> (bool, bool) {
+) -> RowInput {
     let height = if multiline { CAPTION } else { ROW };
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), height),
@@ -470,19 +452,35 @@ fn text_row(
             edit(text, shared, false).vertical_align(egui::Align::Center),
         )
     };
-    (response.lost_focus(), response.changed())
+    RowInput {
+        left: response.lost_focus(),
+        typed: response.changed(),
+    }
 }
-/// One row per creator, each removable, and a button to add one. Returns
-/// whether the list changed or an entry was left, to save it, whether an
-/// entry was added, and whether one was typed in.
+/// What the creator rows did this frame.
+struct CreatorInput {
+    /// The list changed or an entry was left, to save it.
+    commit: bool,
+    /// "+" added an entry.
+    added: bool,
+    typed: bool,
+}
+/// The button clicked on a creator row.
+enum CreatorButton {
+    /// "+" on the last row.
+    Add,
+    /// "−" on the row at this index.
+    Remove(usize),
+}
+/// One row per creator, each removable, and a button to add one.
 fn creator_rows(
     ui: &mut egui::Ui,
     names: &mut Vec<String>,
     shared: &Shared<Vec<String>>,
-) -> (bool, bool, bool) {
+) -> CreatorInput {
     let mut commit = false;
     let mut typed = false;
-    let mut remove = None;
+    let mut clicked = None;
     // Always a row, so the panel keeps its shape with nothing selected.
     if names.is_empty() {
         names.push(String::new());
@@ -508,11 +506,8 @@ fn creator_rows(
         };
         let response = ui.put(
             text,
-            egui::TextEdit::singleline(name)
+            panel_edit(egui::TextEdit::singleline(name))
                 .hint_text(hint)
-                .font(egui::FontId::proportional(11.))
-                .text_color(theme::gray(205))
-                .margin(egui::Margin::symmetric(4, 1))
                 .vertical_align(egui::Align::Center),
         );
         commit |= response.lost_focus();
@@ -531,24 +526,29 @@ fn creator_rows(
             .on_hover_text(tip)
             .clicked()
         {
-            if last {
-                remove = Some(usize::MAX);
+            clicked = Some(if last {
+                CreatorButton::Add
             } else {
-                remove = Some(i);
-            }
+                CreatorButton::Remove(i)
+            });
         }
     }
-    match remove {
+    let mut added = false;
+    match clicked {
         // "+" adds an empty entry to type in, saved when it is left.
-        Some(usize::MAX) => {
+        Some(CreatorButton::Add) => {
             names.push(String::new());
-            return (commit, true, typed);
+            added = true;
         }
-        Some(i) => {
+        Some(CreatorButton::Remove(i)) => {
             names.remove(i);
             commit = true;
         }
         None => {}
     }
-    (commit, false, typed)
+    CreatorInput {
+        commit,
+        added,
+        typed,
+    }
 }

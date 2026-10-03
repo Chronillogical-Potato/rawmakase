@@ -1,4 +1,5 @@
 //! The Library's right panel: Quick Develop and the selected photo's metadata.
+use super::rows::{ROW, caption_at, paint_truncated, value_at};
 use super::{Action, Library};
 use crate::app::theme;
 use crate::app::widgets::section;
@@ -143,26 +144,13 @@ impl Library {
 /// (a dash when empty), so the panel never widens or reflows.
 fn metadata_row(ui: &mut egui::Ui, key: &str, value: &str) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.), egui::Sense::hover());
-    let y = rect.center().y;
-    ui.painter().text(
-        egui::pos2(rect.left() + 84., y),
-        egui::Align2::RIGHT_CENTER,
-        key,
-        egui::FontId::proportional(11.),
-        theme::gray(135),
-    );
-    let left = rect.left() + 92.;
-    let galley = egui::WidgetText::from(if value.is_empty() { "—" } else { value }).into_galley(
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), egui::Sense::hover());
+    caption_at(ui, rect, key);
+    value_at(
         ui,
-        Some(egui::TextWrapMode::Truncate),
-        (rect.right() - left).max(1.),
-        egui::FontId::proportional(11.),
-    );
-    ui.painter().galley(
-        egui::pos2(left, y - galley.size().y / 2.),
-        galley,
-        theme::gray(if value.is_empty() { 90 } else { 205 }),
+        rect,
+        if value.is_empty() { "—" } else { value },
+        !value.is_empty(),
     );
     response
 }
@@ -170,15 +158,5 @@ fn metadata_row(ui: &mut egui::Ui, key: &str, value: &str) -> egui::Response {
 fn info_text(ui: &mut egui::Ui, text: &str) {
     let (rect, _) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.), egui::Sense::hover());
-    let galley = egui::WidgetText::from(text).into_galley(
-        ui,
-        Some(egui::TextWrapMode::Truncate),
-        rect.width().max(1.),
-        egui::FontId::proportional(11.),
-    );
-    ui.painter().galley(
-        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.),
-        galley,
-        theme::gray(150),
-    );
+    paint_truncated(ui, rect.left_center(), rect.width(), text, theme::gray(150));
 }
