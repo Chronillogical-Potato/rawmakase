@@ -256,7 +256,9 @@ impl Library {
         let before = self.catalog.metadata_snapshot(&ids)?;
         let ratings_before = ratings(self);
         let mut report = reread.report;
-        let written = self.catalog.apply_file_metadata(&read, true)?;
+        let written = self
+            .catalog
+            .apply_file_metadata(&read, crate::catalog::Merge::Overwrite)?;
         report.unreadable.extend(written.unreadable);
         self.refresh_photos(&ids)?;
         let after = self.catalog.metadata_snapshot(&ids)?;

@@ -303,6 +303,7 @@ impl Catalog {
     fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         set_meta(&self.db, key, value)
     }
+    #[cfg(test)]
     pub fn set_metadata(&mut self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
         self.set_metadata_of(&[(id, rating, flag, label.into())])
     }
@@ -335,6 +336,7 @@ fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+pub use sidecar::Merge;
 #[cfg(test)]
 mod descriptive_tests;
 pub mod preview_cache;

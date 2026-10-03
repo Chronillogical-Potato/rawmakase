@@ -77,7 +77,7 @@ fn folder_import_reads_sidecars_by_digikams_names_and_the_jpegs_own_xmp() -> Res
     w("C.NEF", b"synthetic raw c")?;
     w("C.NEF.xmp", b"<x:xmpmeta><rdf:RDF>")?;
     let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
-    let (added, report) = cat.add_folder_reporting(&folder)?;
+    let (added, report) = cat.add_folder_with(&folder, &Default::default())?;
     // Photos are kept by their canonical paths.
     let folder = folder.canonicalize()?;
     assert_eq!(added, 4);
@@ -105,7 +105,7 @@ fn folder_import_reads_sidecars_by_digikams_names_and_the_jpegs_own_xmp() -> Res
     );
     // Adding the folder again reads nothing of photos already there.
     std::fs::write(folder.join("A.NEF.xmp"), xmp(r#"dc:title="Changed""#, ""))?;
-    cat.add_folder_reporting(&folder)?;
+    cat.add_folder_with(&folder, &Default::default())?;
     assert_eq!(title(&cat, a)?, set("From A.NEF.xmp"));
     Ok(())
 }
@@ -185,7 +185,7 @@ fn a_photo_whose_values_cant_be_written_is_reported_and_the_rest_imported() -> R
             (a, folder.join("A.NEF.xmp"), bad),
             (b, folder.join("B.NEF.xmp"), good),
         ],
-        false,
+        crate::catalog::Merge::FillEmpty,
     )?;
     assert_eq!(report.unreadable.len(), 1);
     assert_eq!(title(&cat, a)?, None);

@@ -4,6 +4,7 @@
 use super::{Catalog, LangAlt, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -47,28 +48,26 @@ impl Catalog {
                 .is_some_and(|t| !t.is_empty())
         };
         let (creator, copyright) = (defaults.creator.trim(), defaults.copyright.trim());
-        let tx = self.db.transaction()?;
-        for (id, path) in added {
-            let mut d = super::descriptive::read(&tx, *id)?;
-            let before = d.clone();
+        let ids: Vec<i64> = added.iter().map(|(id, _)| *id).collect();
+        let paths: HashMap<i64, &PathBuf> = added.iter().map(|(id, path)| (*id, path)).collect();
+        self.update_descriptive_where(&ids, |id, d| {
             if (creator.is_empty() || d.creator.is_some())
                 && (copyright.is_empty() || d.copyright.is_some())
             {
-                continue;
+                return false;
             }
             // Read once for both.
-            let exif = crate::export::exif::read(path);
+            let exif = crate::export::exif::read(paths[&id]);
+            let mut changed = false;
             if !creator.is_empty() && d.creator.is_none() && !has(&exif, 0x013b) {
                 d.creator = Some(Value::Set(vec![creator.to_string()]));
+                changed = true;
             }
             if !copyright.is_empty() && d.copyright.is_none() && !has(&exif, 0x8298) {
                 d.copyright = Some(Value::Set(LangAlt::new(copyright)));
+                changed = true;
             }
-            if d != before {
-                super::descriptive::write(&tx, *id, &d)?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
+            changed
+        })
     }
 }
