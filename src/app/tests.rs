@@ -1841,7 +1841,8 @@ fn the_preset_list_is_kept_until_what_it_shows_changes() {
 fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
     let ctx = egui::Context::default();
     let mut effects = crate::develop::effects::Effects {
-        defringe_ranges: [[0.1, 0.95], [0.15, 0.9]],
+        // Green below its default, as the fringe selector can leave it.
+        defringe_ranges: [[0.1, 0.95], [0.0, 0.2]],
         ..Default::default()
     };
     let mut time = 0.;
@@ -1862,7 +1863,8 @@ fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
     // Six rows, Purple then Green: Amount, Hue (low end), Hue (high end).
     frame(&mut effects, vec![], 0.);
     let row = 24. + ctx.global_style().spacing.item_spacing.y;
-    for i in [1, 2, 4, 5] {
+    // Either end resets the whole range: Purple's high end, Green's low end.
+    for i in [2, 4] {
         let at = Pos2::new(
             40.,
             ctx.global_style().spacing.window_margin.top as f32 + row * i as f32 + 12.,

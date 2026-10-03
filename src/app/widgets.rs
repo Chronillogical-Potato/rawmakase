@@ -591,6 +591,13 @@ pub(super) fn slider(
 ) {
     slider_with(ui, label, value, range, default, None, None);
 }
+/// What happened to a slider this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SliderEvent {
+    None,
+    /// Double-clicked back to its default.
+    Reset,
+}
 /// `display` overrides the shown scale and decimals, e.g. Sharpening's 0–150.
 pub(super) fn slider_with(
     ui: &mut egui::Ui,
@@ -600,7 +607,8 @@ pub(super) fn slider_with(
     default: f32,
     display: Option<(f32, usize)>,
     gradient: Option<(Color32, Color32)>,
-) {
+) -> SliderEvent {
+    let mut event = SliderEvent::None;
     let start = *range.start();
     let end = *range.end();
     let span = end - start;
@@ -646,6 +654,7 @@ pub(super) fn slider_with(
         );
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
+            event = SliderEvent::Reset;
         }
         let value_rect = Rect::from_min_max(
             Pos2::new(row.right() - SLIDER_VALUE_WIDTH, row.top()),
@@ -739,6 +748,7 @@ pub(super) fn slider_with(
         );
         if response.double_clicked() {
             *value = default.clamp(start, end);
+            event = SliderEvent::Reset;
         } else if (response.dragged() || response.clicked())
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -787,6 +797,7 @@ pub(super) fn slider_with(
         let shown = slider_text(f64::from(*value * scale), decimals, signed);
         name_history_step(ui, name, shown);
     }
+    event
 }
 /// A slider's number as shown: Lightroom's scale, with a sign when it has one.
 fn slider_text(v: f64, decimals: usize, signed: bool) -> String {

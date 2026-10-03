@@ -3,8 +3,8 @@ use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
-    adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, parametric_curve_ui, segmented, slider, slider_with,
+    tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -1361,32 +1361,39 @@ pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effect
                 Some((20., 0)),
                 None,
             );
+            let defaults = crate::develop::effects::DEFRINGE_RANGES[i];
             let [lo, hi] = &mut e.defringe_ranges[i];
-            let [lo_default, hi_default] = crate::develop::effects::DEFRINGE_RANGES[i];
             let colors = hue.map(|h| {
                 let c = crate::develop::color::hue_rgb(h).map(|v| (v * 180.) as u8);
                 Color32::from_rgb(c[0], c[1], c[2])
             });
-            slider_with(
+            let low = slider_with(
                 ui,
                 &format!("{name} Hue"),
                 lo,
                 0. ..=(*hi - 0.1).max(0.),
-                lo_default,
+                defaults[0],
                 None,
                 Some((colors[0], colors[1])),
             );
-            ui.push_id("hi", |ui| {
-                slider_with(
-                    ui,
-                    "",
-                    hi,
-                    (*lo + 0.1).min(1.)..=1.,
-                    hi_default,
-                    None,
-                    Some((colors[0], colors[1])),
-                );
-            });
+            let high = ui
+                .push_id("hi", |ui| {
+                    slider_with(
+                        ui,
+                        "",
+                        hi,
+                        (*lo + 0.1).min(1.)..=1.,
+                        defaults[1],
+                        None,
+                        Some((colors[0], colors[1])),
+                    )
+                })
+                .inner;
+            // One range, as in Lightroom: resetting either end resets both, so the
+            // other end never keeps the default out of reach.
+            if [low, high].contains(&SliderEvent::Reset) {
+                [*lo, *hi] = defaults;
+            }
         });
     }
 }
