@@ -632,3 +632,26 @@ fn remove_chromatic_aberration_imports_and_presets_leave_it_when_omitted() -> Re
     assert!(!apply(r#"c:AutoLateralCA="0""#, &old)?.lens_ca);
     Ok(())
 }
+#[test]
+fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<()> {
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("d.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let r = apply(r#"c:LensManualDistortionAmount="-35""#, &Recipe::default())?;
+    assert!((r.lens_manual_distortion + 0.35).abs() < 1e-6);
+    assert_eq!(
+        apply(r#"c:Exposure2012="1""#, &r)?.lens_manual_distortion,
+        r.lens_manual_distortion
+    );
+    assert!(apply(r#"c:LensManualDistortionAmount="101""#, &Recipe::default()).is_err());
+    let old = Recipe {
+        engine: 3,
+        ..Default::default()
+    };
+    assert!(apply(r#"c:LensManualDistortionAmount="20""#, &old).is_err());
+    assert_eq!(
+        apply(r#"c:LensManualDistortionAmount="0""#, &old)?.lens_manual_distortion,
+        0.
+    );
+    Ok(())
+}

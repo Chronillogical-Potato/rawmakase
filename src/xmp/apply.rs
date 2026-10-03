@@ -828,6 +828,17 @@ impl Preset {
         if let Some(enable) = number(v, "LensProfileEnable")? {
             r.lens_profile = enable != 0.;
         }
+        settings.assign(
+            "LensManualDistortionAmount",
+            &mut r.lens_manual_distortion,
+            0.01,
+            -1.,
+            1.,
+        )?;
+        ensure!(
+            r.lens_manual_distortion == 0. || r.engine >= 4,
+            "Manual lens Distortion needs the current process version (Calibration)"
+        );
         settings.seen.insert("AutoLateralCA".into());
         if let Some(ca) = number(v, "AutoLateralCA")? {
             ensure!(
@@ -942,7 +953,6 @@ impl Preset {
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
         for (key, default) in [
             ("HDREditMode", "0"),
-            ("LensManualDistortionAmount", "0"),
             ("CropConstrainToWarp", "0"),
             ("IncrementalTemperature", "0"),
             ("IncrementalTint", "0"),

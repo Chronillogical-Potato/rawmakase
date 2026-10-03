@@ -110,6 +110,7 @@ impl Panel {
                 r.lens_ca = false;
                 r.lens_distortion = defaults.lens_distortion;
                 r.lens_vignetting = defaults.lens_vignetting;
+                r.lens_manual_distortion = defaults.lens_manual_distortion;
                 e.defringe = [0.; 2];
                 e.defringe_ranges = d.defringe_ranges;
                 e.lens_vignette = 0.;

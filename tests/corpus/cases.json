@@ -644,6 +644,25 @@
    }
   },
   {
+   "name": "lens-manual-distortion+50",
+   "settings": {
+    "LensManualDistortionAmount": "+50"
+   }
+  },
+  {
+   "name": "lens-manual-distortion-50",
+   "settings": {
+    "LensManualDistortionAmount": "-50"
+   }
+  },
+  {
+   "name": "lens-manual-distortion+50-vertical+30",
+   "settings": {
+    "LensManualDistortionAmount": "+50",
+    "PerspectiveVertical": "+30"
+   }
+  },
+  {
    "name": "calibration-red-hue+50",
    "settings": {
     "RedHue": "+50"

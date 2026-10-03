@@ -759,6 +759,7 @@ fn render_resident(
         spread,
     ]);
     sampling[10..36].copy_from_slice(&g.gpu_params());
+    sampling[72..75].copy_from_slice(&g.gpu_manual());
     let e = &base.effects;
     sampling[36..42].copy_from_slice(&[
         base.noise_luma,

@@ -351,6 +351,13 @@ fn settings(r: &Recipe) -> Settings {
         0,
         false,
     );
+    s.put(
+        "LensManualDistortionAmount",
+        r.lens_manual_distortion,
+        0.01,
+        0,
+        true,
+    );
     // Lightroom's panel switches, written only for panels switched off.
     for panel in r.panels.switched_off() {
         for key in panel.lightroom_keys() {

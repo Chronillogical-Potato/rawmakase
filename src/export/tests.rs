@@ -73,6 +73,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         crop: [0.1, 0.05, 0.9, 0.95],
         sharpening: 0.4,
         lens_ca: true,
+        lens_manual_distortion: -0.42,
         ..Default::default()
     };
     r.hsl[3][0] = 0.26;
@@ -123,6 +124,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         (back.grading[0][0], r.grading[0][0]),
         (back.grading[0][2], r.grading[0][2]),
         (back.effects.clarity, r.effects.clarity),
+        (back.lens_manual_distortion, r.lens_manual_distortion),
         (back.curve_saturation, r.curve_saturation),
     ] {
         assert!((a - b).abs() < 0.006, "{a} != {b}");

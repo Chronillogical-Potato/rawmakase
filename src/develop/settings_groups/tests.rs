@@ -33,6 +33,7 @@ fn everything_changed() -> Recipe {
         lens_profile: true,
         lens_distortion: 0.5,
         lens_vignetting: 1.5,
+        lens_manual_distortion: -0.2,
         lens_ca: true,
         profile_tone: false,
         preset_name: "Film".into(),
