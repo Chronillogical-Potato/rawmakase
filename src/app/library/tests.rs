@@ -36,6 +36,64 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
 }
 
 #[test]
+fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let photo = library.photos[0].clone();
+    assert_eq!(
+        develop_refusal(&photo, true),
+        Some(Refusal::NotRaw("JPG".into()))
+    );
+    assert_eq!(develop_refusal(&photo, false), Some(Refusal::Offline));
+    assert_eq!(Refusal::NotRaw("JPG".into()).label(), "JPG file");
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.library_mode = true;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.library_mode);
+    let (title, reason) = editor.not_editable.clone().unwrap();
+    assert_eq!(title, "a.jpg can't be opened in Develop");
+    assert!(reason.contains("camera RAW"));
+    // Dismissed, then the file goes offline.
+    editor.not_editable = None;
+    std::fs::remove_file(folder.join("a.jpg"))?;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.not_editable.unwrap().1.contains("offline"));
+    Ok(())
+}
+
+#[test]
+fn a_file_found_again_is_checked_back_online() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("a.jpg");
+    image::RgbImage::new(8, 8).save(&file)?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    // As the catalog stores it, which on Windows differs from `file`.
+    let stored = library.photos[0].path.clone();
+    std::fs::rename(&file, folder.join("moved"))?;
+    library.refresh()?;
+    library.wait_for_availability();
+    assert!(!library.is_available(&stored));
+    // Restored in place: counted offline until it is found again.
+    std::fs::rename(folder.join("moved"), &file)?;
+    assert!(!library.is_available(&stored));
+    library.found(&stored);
+    library.wait_for_availability();
+    assert!(library.is_available(&stored));
+    Ok(())
+}
+
+#[test]
 fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
     let ctx = egui::Context::default();
     let photo = Photo {

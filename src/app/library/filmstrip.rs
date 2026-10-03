@@ -129,7 +129,9 @@ impl Library {
                                 theme::gray(if active { 30 } else { 200 }),
                             );
                         }
-                        if let Some(menu) = cell::photo_menu(&response, &p) {
+                        if let Some(menu) =
+                            cell::photo_menu(&response, &p, self.is_available(&p.path))
+                        {
                             let is_edit = matches!(menu, cell::PhotoAction::Edit(_));
                             if let Some(id) = self.photo_action(ui.ctx(), &p, menu, false) {
                                 target = Some(Pick::Develop(id));

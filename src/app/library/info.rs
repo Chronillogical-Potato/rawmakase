@@ -19,27 +19,42 @@ impl Library {
             .auto_shrink(false)
             .show(ui, |ui| {
                 section(ui, "Quick Develop", false, |ui| {
+                    let refusal = photo
+                        .as_ref()
+                        .and_then(|p| super::develop_refusal(p, self.is_available(&p.path)));
                     let open = ui
                         .add_enabled(
-                            photo.is_some(),
+                            photo.is_some() && refusal.is_none(),
                             egui::Button::new("Open in Develop")
                                 .min_size(Vec2::new(ui.available_width(), 24.)),
                         )
-                        .on_hover_text("Develop · D");
+                        .on_hover_text("Develop · D")
+                        .on_disabled_hover_text(
+                            refusal
+                                .as_ref()
+                                .map(super::Refusal::detail)
+                                .unwrap_or_default(),
+                        );
                     if open.clicked()
                         && let Some(p) = &photo
                     {
                         action = Action::Develop(p.id);
                     }
                     ui.add_space(4.);
-                    info_text(
-                        ui,
-                        if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) {
-                            "Has Lightroom edits"
-                        } else {
-                            ""
-                        },
-                    );
+                    // Why the button is greyed out, in the line kept for this.
+                    let note = match &refusal {
+                        Some(super::Refusal::Offline) => {
+                            "Offline: relink its folder to edit".into()
+                        }
+                        Some(super::Refusal::NotRaw(format)) => {
+                            format!("{format} files can't be edited in Develop")
+                        }
+                        None if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) => {
+                            "Has Lightroom edits".into()
+                        }
+                        None => String::new(),
+                    };
+                    info_text(ui, &note);
                 });
                 section(ui, "Metadata", false, |ui| {
                     match &photo {

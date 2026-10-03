@@ -73,6 +73,7 @@ impl Editor {
             || self.export_modal()
             || self.remove_copy.is_some()
             || self.read_metadata.is_some()
+            || self.not_editable.is_some()
             || self.view.shortcuts;
         if !modal {
             self.metadata_shortcuts(&ctx);
@@ -114,6 +115,7 @@ impl Editor {
         }
         self.remove_copy_window(&ctx);
         self.read_metadata_window(&ctx);
+        self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);

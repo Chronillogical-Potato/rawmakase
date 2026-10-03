@@ -254,6 +254,9 @@ impl Editor {
                     && let Some(id) = photo.or_else(|| self.library.as_ref()?.selected())
                 {
                     self.develop_catalog_photo(id);
+                    // On launch, a photo gone offline leaves the Library shown
+                    // without a dialog; the status bar says why.
+                    self.not_editable = None;
                 }
                 self.open_pending_photo();
                 let _ = self.save_session();

@@ -208,7 +208,7 @@ pub(super) fn photo_cell(
         };
         footer_badges(painter, cell, footer, photo, badges);
     }
-    let action = photo_menu(&response, photo);
+    let action = photo_menu(&response, photo, available);
     (response, action)
 }
 /// What a cell's footer shows besides the photo's own flag and rating.
@@ -329,14 +329,22 @@ pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "maco
     "Ctrl+'"
 };
 /// The right-click menu shared by grid cells and the Develop filmstrip.
-pub(in crate::app) fn photo_menu(response: &egui::Response, photo: &Photo) -> Option<PhotoAction> {
+/// Open in Develop is greyed out for a photo Develop cannot open, e.g. one
+/// not `available`, with the reason in place of its shortcut.
+pub(in crate::app) fn photo_menu(
+    response: &egui::Response,
+    photo: &Photo,
+    available: bool,
+) -> Option<PhotoAction> {
     use crate::app::photo_metadata::{Edit, LABELS};
     use crate::app::widgets::{menu_item, menu_separator, submenu_style};
     let mut action = None;
     crate::app::widgets::context_menu(response, |ui| {
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
-        if menu_item(ui, "Open in Develop", "D", true, false) {
+        let refusal = super::develop_refusal(photo, available);
+        let shortcut = refusal.as_ref().map_or("D".into(), super::Refusal::label);
+        if menu_item(ui, "Open in Develop", &shortcut, refusal.is_none(), false) {
             action = Some(PhotoAction::Develop);
             ui.close();
         }

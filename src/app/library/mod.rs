@@ -283,6 +283,14 @@ impl Library {
             self.availability.start(&self.photos, &self.ctx);
         }
     }
+    /// Checks again, in the background, which photos are online when one
+    /// counted offline turns out to be there, e.g. restored in place on a
+    /// drive that stayed attached.
+    pub(in crate::app) fn found(&mut self, path: &std::path::Path) {
+        if !self.is_available(path) {
+            self.availability.start(&self.photos, &self.ctx);
+        }
+    }
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
     }
@@ -543,6 +551,46 @@ impl Library {
     pub(super) fn discard_drafts(&mut self) {
         self.copy_names.clear();
         self.fields.clear();
+    }
+}
+/// Why Develop cannot open a photo: it edits camera RAW files that are
+/// online.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) enum Refusal {
+    Offline,
+    /// Not a camera RAW: the file's format, e.g. "JPEG".
+    NotRaw(String),
+}
+impl Refusal {
+    /// A word or two, shown beside a greyed-out Open in Develop.
+    pub(in crate::app) fn label(&self) -> String {
+        match self {
+            Self::Offline => "Offline".into(),
+            Self::NotRaw(format) => format!("{format} file"),
+        }
+    }
+    /// The reason in full, with what to do about it.
+    pub(in crate::app) fn detail(&self) -> String {
+        match self {
+            Self::Offline => {
+                "The photo is offline. Use Locate root folder or right-click its folder to relink it."
+                    .into()
+            }
+            Self::NotRaw(format) => format!(
+                "{format} files can be browsed in Library; Develop edits camera RAW files."
+            ),
+        }
+    }
+}
+/// Why Develop cannot open `photo`, if it cannot, given whether its file is
+/// `available`.
+pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
+    if !available {
+        Some(Refusal::Offline)
+    } else if !crate::storage::is_raw(&photo.path) {
+        Some(Refusal::NotRaw(photo.format.clone()))
+    } else {
+        None
     }
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
