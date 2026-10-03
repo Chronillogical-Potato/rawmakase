@@ -207,10 +207,16 @@ impl Preset {
     /// bring Lightroom's own corrections, made with them.
     fn keep_upright_fitting(&self, base: &Recipe, r: &mut Recipe) {
         use crate::develop::upright::LensInputs;
-        let brought = self
-            .settings
-            .keys()
-            .any(|k| k.starts_with("UprightTransform_"));
+        // Whether the Upright stage installs corrections of its own: tried on a copy,
+        // since a lenient apply rolls back a stage that fails.
+        let mut trial = r.clone();
+        trial.upright.corrections.clear();
+        let mut settings = Settings {
+            values: &self.settings,
+            seen: BTreeSet::new(),
+        };
+        let brought = self.apply_upright(&mut settings, &mut trial).is_ok()
+            && !trial.upright.corrections.is_empty();
         if !brought && LensInputs::of(r) != LensInputs::of(base) {
             r.upright.clear_analysis();
         }

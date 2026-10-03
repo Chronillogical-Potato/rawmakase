@@ -678,5 +678,21 @@ fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Res
     off.panels.set(Panel::LensCorrections, PanelState::Off);
     let r = apply(r#"c:LensManualDistortionAmount="30""#, &off)?;
     assert_eq!(r.upright.corrections, base.upright.corrections);
+    // Corrections the settings bring are kept, unless they fail to apply.
+    let identity = "1, 0, 0, 0, 1, 0, 0, 0, 1";
+    let stored = format!(
+        r#"c:LensManualDistortionAmount="30" c:PerspectiveUpright="1" c:UprightTransform_0="{identity}" c:UprightTransform_1="1.1, 0, 0, 0, 1, 0, 0, 0, 1""#
+    );
+    let r = apply(&stored, &base)?;
+    assert_eq!(r.upright.corrections.len(), 2);
+    let broken =
+        r#"c:LensManualDistortionAmount="30" c:PerspectiveUpright="1" c:UprightTransform_1="oops""#;
+    let (r, _) = parse(Path::new("d.xmp"), &xml(broken, ""))?.apply_lenient(
+        &base,
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    assert!(r.upright.corrections.is_empty());
     Ok(())
 }
