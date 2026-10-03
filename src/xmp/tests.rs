@@ -99,6 +99,36 @@ fn resolved_photo_white_balance_differs_from_as_shot_preset() -> Result<()> {
     Ok(())
 }
 #[test]
+fn named_white_balance_presets_apply_their_values() -> Result<()> {
+    let m = Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    // A preset naming Lightroom's Daylight without values gets the menu's Daylight.
+    let preset = parse(
+        Path::new("preset.xmp"),
+        &xml(r#"c:WhiteBalance="Daylight""#, ""),
+    )?;
+    let r = preset.apply(&Recipe::default(), &m, &[], None)?;
+    assert_eq!((r.temperature, r.tint), (5500., 10.));
+    // Stored values win, and one missing value falls back to the name's.
+    let attrs = r#"c:WhiteBalance="Flash" c:Temperature="5300""#;
+    let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;
+    let r = preset.apply(&Recipe::default(), &m, &[], None)?;
+    assert_eq!((r.temperature, r.tint), (5300., 0.));
+    assert!(
+        parse(
+            Path::new("preset.xmp"),
+            &xml(r#"c:WhiteBalance="Moonlight""#, "")
+        )?
+        .apply(&Recipe::default(), &m, &[], None)
+        .is_err()
+    );
+    Ok(())
+}
+#[test]
 fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
     let (width, height) = (32u32, 24u32);
     let m = Metadata {

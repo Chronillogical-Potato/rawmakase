@@ -429,6 +429,14 @@ impl Preset {
                     r.update_wb(m);
                 }
             }
+            // Lightroom's named presets. Photo settings carry the values Lightroom
+            // resolved for the camera; a preset may name the mode alone.
+            Some(name) if let Some(named) = crate::develop::NamedWhiteBalance::from_name(name) => {
+                let values = named.values();
+                r.temperature = number(v, "Temperature")?.unwrap_or(values.temperature);
+                r.tint = number(v, "Tint")?.unwrap_or(values.tint);
+                r.update_wb(m);
+            }
             Some(other) => anyhow::bail!("Unsupported white balance mode: {other}"),
         }
         Ok(())

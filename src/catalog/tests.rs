@@ -226,6 +226,30 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
+    let m = crate::raw::Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    // Lightroom stores the resolved values with the preset's name.
+    let text =
+        r#"s = { WhiteBalance = "Tungsten", Temperature = 2850, Tint = 0, Exposure2012 = 0.5 }"#;
+    let (r, w) = convert_develop(text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!((r.temperature, r.tint), (2850., 0.));
+    let text = r#"s = { WhiteBalance = "Fluorescent", Temperature = 3900, Tint = 18 }"#;
+    let (r, w) = convert_develop(text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!((r.temperature, r.tint), (3900., 18.));
+    // A name Lightroom does not use is still reported.
+    let text = r#"s = { WhiteBalance = "Moonlight", Temperature = 4100, Tint = 5 }"#;
+    let (_, w) = convert_develop(text, &m, &[], None)?;
+    assert!(w.iter().any(|s| s.contains("Moonlight")), "{w:?}");
+    Ok(())
+}
+#[test]
 fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> {
     use crate::develop::panels::{Panel, PanelState};
     let m = crate::raw::Metadata::default();

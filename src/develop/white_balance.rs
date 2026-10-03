@@ -1,4 +1,5 @@
-//! Fallback white balance for cameras without calibrated DCP matrices.
+//! Fallback white balance for cameras without calibrated DCP matrices, and Lightroom's
+//! named white balance presets.
 use crate::{
     color_math::{inverse, mul},
     raw::Metadata,
@@ -42,4 +43,59 @@ pub(super) fn estimate_temperature(m: &Metadata) -> f32 {
             error(*a).total_cmp(&error(*b))
         })
         .unwrap_or(6500) as f32
+}
+
+/// Lightroom's named white balance presets for RAW files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NamedWhiteBalance {
+    Daylight,
+    Cloudy,
+    Shade,
+    Tungsten,
+    Fluorescent,
+    Flash,
+}
+
+/// A white balance as Temperature (kelvin) and Tint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TemperatureTint {
+    pub temperature: f32,
+    pub tint: f32,
+}
+
+impl NamedWhiteBalance {
+    pub const ALL: [NamedWhiteBalance; 6] = [
+        NamedWhiteBalance::Daylight,
+        NamedWhiteBalance::Cloudy,
+        NamedWhiteBalance::Shade,
+        NamedWhiteBalance::Tungsten,
+        NamedWhiteBalance::Fluorescent,
+        NamedWhiteBalance::Flash,
+    ];
+    /// The menu name, also Lightroom's `WhiteBalance` value.
+    pub fn name(self) -> &'static str {
+        match self {
+            NamedWhiteBalance::Daylight => "Daylight",
+            NamedWhiteBalance::Cloudy => "Cloudy",
+            NamedWhiteBalance::Shade => "Shade",
+            NamedWhiteBalance::Tungsten => "Tungsten",
+            NamedWhiteBalance::Fluorescent => "Fluorescent",
+            NamedWhiteBalance::Flash => "Flash",
+        }
+    }
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|w| w.name() == name)
+    }
+    /// The values Lightroom sets for RAW files.
+    pub fn values(self) -> TemperatureTint {
+        let (temperature, tint) = match self {
+            NamedWhiteBalance::Daylight => (5500., 10.),
+            NamedWhiteBalance::Cloudy => (6500., 10.),
+            NamedWhiteBalance::Shade => (7500., 10.),
+            NamedWhiteBalance::Tungsten => (2850., 0.),
+            NamedWhiteBalance::Fluorescent => (3800., 21.),
+            NamedWhiteBalance::Flash => (5500., 0.),
+        };
+        TemperatureTint { temperature, tint }
+    }
 }
