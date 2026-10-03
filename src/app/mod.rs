@@ -32,7 +32,9 @@ pub struct Editor {
     rx: Receiver<Event>,
     loader: Latest<LoadJob>,
     renderer: Latest<RenderJob>,
-    clipboard: Option<Recipe>,
+    clipboard: Option<settings_transfer::Clipboard>,
+    /// The settings of the photo open before this one, for Paste from Previous.
+    previous_settings: Option<Recipe>,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
@@ -188,6 +190,7 @@ impl Editor {
             loader,
             renderer,
             clipboard: None,
+            previous_settings: None,
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
@@ -410,6 +413,7 @@ mod autosave;
 mod save_state;
 
 mod editing;
+mod settings_transfer;
 mod shortcuts;
 mod theme;
 mod toolbar;

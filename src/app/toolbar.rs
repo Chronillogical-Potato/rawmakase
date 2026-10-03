@@ -100,6 +100,24 @@ impl Editor {
                                 self.paste_settings();
                                 ui.close();
                             }
+                            let previous = format!(
+                                "{cmd}{}V",
+                                if cfg!(target_os = "macos") {
+                                    "⌥ "
+                                } else {
+                                    "Alt+"
+                                }
+                            );
+                            if menu_item(
+                                ui,
+                                "Paste Settings from Previous",
+                                &previous,
+                                self.previous_settings.is_some(),
+                                false,
+                            ) {
+                                self.paste_previous();
+                                ui.close();
+                            }
                             let reset = format!("{cmd}{shift}R");
                             if menu_item(ui, "Reset All Settings", &reset, true, false) {
                                 self.reset_settings();
@@ -148,10 +166,6 @@ impl Editor {
                 });
             });
     }
-    pub(super) fn copy_settings(&mut self) {
-        self.clipboard = Some(self.document.recipe.clone());
-        self.status = "Settings copied".into();
-    }
     /// Back to the camera defaults, like Lightroom's Reset.
     pub(super) fn reset_settings(&mut self) {
         self.document
@@ -163,24 +177,5 @@ impl Editor {
             .as_ref()
             .map(|m| Recipe::with_profiles(m, &self.document.profiles))
             .unwrap_or_default();
-    }
-    /// Pastes the copied settings. Spot removal and masks belong to their photo and
-    /// stay as they were, as with Lightroom's default Paste Settings.
-    pub(super) fn paste_settings(&mut self) {
-        if let Some(mut recipe) = self.clipboard.clone() {
-            self.document
-                .history
-                .label(super::history::Step::new("Paste Settings", ""));
-            recipe.retouch = std::mem::take(&mut self.document.recipe.retouch);
-            recipe.masks = std::mem::take(&mut self.document.recipe.masks);
-            // Auto white balance was estimated for the copied photo; here its values
-            // are just Custom.
-            recipe.auto_white_balance = None;
-            // Upright's corrections were analysed from the copied photo: analyse this one.
-            recipe.upright.clear_analysis();
-            self.document.recipe = recipe;
-            self.ensure_upright();
-            self.status = "Settings pasted".into();
-        }
     }
 }

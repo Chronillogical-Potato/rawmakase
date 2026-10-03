@@ -52,6 +52,10 @@ impl Editor {
                 path,
                 cancel: self.prefetch_cancel.clone(),
             });
+        // The photo being left is Paste from Previous's source.
+        if self.document.metadata.is_some() {
+            self.previous_settings = Some(self.document.recipe.clone());
+        }
         self.document.reset(photo);
         let (id, cancel) = self.load.start();
         self.preview.clear_document();
