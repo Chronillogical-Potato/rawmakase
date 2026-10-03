@@ -15,7 +15,7 @@ use crate::{
     },
     export::ExportOptions,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;
 
 /// A photo settings are synchronized to.
@@ -229,6 +229,11 @@ fn prepare(
     if after == before_recipe {
         return Ok(Prepared { edit: None, notes });
     }
+    // A History this release can't read (a newer one's) is not replaced.
+    ensure!(
+        catalog.load_history(target.id)?.is_some() || !catalog.has_history(target.id)?,
+        "Its History is from a newer RAWmakase"
+    );
     let saved = catalog
         .load_history(target.id)?
         .unwrap_or_else(|| SavedHistory {
@@ -378,8 +383,9 @@ impl Editor {
         {
             return Vec::new();
         }
-        // The open photo may be hidden by the filters and still selected.
-        if !library.is_selected(open) {
+        // The open photo may be hidden by the filters and still selected. While Read
+        // Metadata from Files runs, which photos have a Lightroom edit can still change.
+        if !library.is_selected(open) || library.rereading() {
             return Vec::new();
         }
         let selected = library.selected_photos();
@@ -612,6 +618,51 @@ mod tests {
         std::fs::write(changed, bytes)?;
         assert!(restore(&c, &result.synced, SyncSide::After, path).is_err());
         assert!(c.load_edit(photos[2].0, &photos[2].1)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn a_history_from_a_newer_release_is_not_replaced() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: c,
+            photos,
+        } = catalog()?;
+        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let source = Settings {
+            recipe: Recipe {
+                exposure: 0.3,
+                ..Default::default()
+            },
+            metadata,
+        };
+        let (id, path) = (photos[1].0, photos[1].1.clone());
+        c.save_edit(
+            id,
+            &path,
+            &Recipe::default(),
+            &ExportOptions::default(),
+            HistoryUpdate::Keep,
+        )?;
+        // What a newer release might store: a format this one can't read.
+        let newer = {
+            use std::io::Write;
+            let mut z = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+            z.write_all(br#"{"version": 99}"#)?;
+            z.finish()?
+        };
+        c.db_for_tests().execute(
+            "INSERT INTO develop_history(photo, data) VALUES (?, ?)",
+            rusqlite::params![id, newer],
+        )?;
+        let result = synchronize(
+            &c,
+            &source,
+            &GroupSelection::default(),
+            &[target(id, &path)],
+        );
+        assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
+        assert_eq!(c.load_edit(id, &path)?.unwrap().recipe.exposure, 0.);
         Ok(())
     }
 

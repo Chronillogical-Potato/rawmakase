@@ -79,6 +79,11 @@ impl Catalog {
             db,
         })
     }
+    /// The connection, for tests that set up stored state directly.
+    #[cfg(test)]
+    pub(crate) fn db_for_tests(&self) -> &Connection {
+        &self.db
+    }
     pub fn photos(&self) -> Result<Vec<Photo>> {
         let mappings = self.folders()?;
         let paths: std::collections::HashMap<_, _> =

@@ -428,6 +428,10 @@ impl Library {
     }
     /// Whether Read Metadata from Files finished since the last call, for
     /// the status line to show its outcome.
+    /// Read Metadata from Files is still applying what it read.
+    pub(in crate::app) fn rereading(&self) -> bool {
+        self.reread.is_some()
+    }
     pub(in crate::app) fn take_reread_finished(&mut self) -> bool {
         std::mem::take(&mut self.reread_finished)
     }

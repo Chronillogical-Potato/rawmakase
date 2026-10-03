@@ -198,6 +198,16 @@ impl Catalog {
             .optional()?;
         Ok(data.and_then(|d| SavedHistory::decode(&d).ok().flatten()))
     }
+    /// Whether the photo has a stored History, readable here or not.
+    pub fn has_history(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .db
+            .query_row("SELECT 1 FROM develop_history WHERE photo=?", [id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some())
+    }
     /// Stores `history` for the photo inside the transaction saving its edit.
     pub(super) fn put_history(
         tx: &rusqlite::Transaction<'_>,
