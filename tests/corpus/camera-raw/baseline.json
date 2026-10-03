@@ -446,41 +446,69 @@
         1.371,
         3.854
       ],
+      "vignette-color+100": [
+        1.131,
+        3.192
+      ],
       "vignette-color+60": [
-        8.609,
-        26.169
+        1.058,
+        2.607
       ],
       "vignette-color-60": [
-        8.963,
-        29.165
+        1.363,
+        4.805
       ],
       "vignette-color-60-highlights80": [
-        6.329,
-        20.365
+        1.237,
+        4.64
       ],
       "vignette-highlight+60": [
-        13.142,
-        29.908
+        1.064,
+        3.033
+      ],
+      "vignette-highlight-100": [
+        2.046,
+        8.737
       ],
       "vignette-highlight-60": [
-        9.334,
-        29.503
+        1.635,
+        6.392
       ],
       "vignette-highlight-60-highlights80": [
-        7.193,
-        21.316
+        1.442,
+        4.698
+      ],
+      "vignette-highlight-60-midpoint20": [
+        2.759,
+        11.311
+      ],
+      "vignette-highlight-60-midpoint80": [
+        1.171,
+        3.393
       ],
       "vignette-paint+60": [
-        10.175,
-        30.079
+        0.923,
+        2.324
       ],
       "vignette-paint-60": [
-        8.018,
-        24.32
+        0.828,
+        2.333
+      ],
+      "vignette-paint-60-midpoint20-feather80": [
+        0.833,
+        2.129
+      ],
+      "vignette-paint-60-roundness+100": [
+        0.864,
+        2.366
+      ],
+      "vignette-paint-60-roundness-50": [
+        1.063,
+        3.017
       ],
       "vignette-unset-60": [
-        9.334,
-        29.503
+        1.635,
+        6.392
       ],
       "whites+50": [
         1.373,

@@ -420,7 +420,9 @@ mod tests {
                 .map(|(a, b)| (a - b).abs())
                 .sum::<f32>()
                 / (fit.pixels.len() * 3) as f32;
-            assert!(error < 0.01, "edge {edge}: mean error {error}");
+            // 0.0115 at edge 100. The old vignette darkened most of the frame and hid
+            // part of the pyramid's error; Camera Raw's mask leaves more of it lit.
+            assert!(error < 0.012, "edge {edge}: mean error {error}");
         }
     }
     /// Every edit, including ones that change only cached stages, must render exactly

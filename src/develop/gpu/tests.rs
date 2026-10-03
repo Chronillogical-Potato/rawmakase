@@ -414,18 +414,26 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let mut gpu = PreviewRenderer::with_gpu();
     let mut cpu = PreviewRenderer::default();
     let cancel = AtomicBool::new(false);
-    // `ca`: 1 the measured aberration alone, 2 with the built-in distortion.
-    for (spatial, clipping, ca) in [
-        (false, false, 0),
-        (true, false, 0),
-        (true, true, 0),
-        (true, false, 1),
-        (true, false, 2),
+    // `ca`: 1 the measured aberration alone, 2 with the built-in distortion. Each
+    // spatial run has another vignette style and amount.
+    use crate::develop::effects::VignetteStyle::*;
+    for (spatial, clipping, ca, (style, vignette)) in [
+        (false, false, 0, (HighlightPriority, 0.)),
+        (true, false, 0, (HighlightPriority, -0.3)),
+        (true, true, 0, (ColorPriority, -0.6)),
+        (true, false, 0, (PaintOverlay, -0.5)),
+        (true, false, 1, (HighlightPriority, 0.5)),
+        (true, false, 2, (ColorPriority, 0.4)),
+        (true, false, 0, (PaintOverlay, 0.7)),
     ] {
         let mut recipe = base.clone();
         if spatial {
             recipe.effects.grain = 0.4;
-            recipe.effects.vignette = -0.3;
+            recipe.effects.vignette = vignette;
+            recipe.effects.vignette_style = style;
+            recipe.effects.vignette_highlights = 0.6;
+            recipe.effects.vignette_roundness = -0.3;
+            recipe.effects.vignette_midpoint = 0.4;
             recipe.effects.lens_vignette = 0.2;
             recipe.effects.clarity = 0.3;
             recipe.effects.texture = -0.4;
@@ -490,8 +498,9 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .map(|(a, b)| a.abs_diff(*b))
                 .max()
                 .unwrap();
-            let label =
-                format!("spatial={spatial} clipping={clipping} ca={ca} {max_edge} {region:?}");
+            let label = format!(
+                "spatial={spatial} clipping={clipping} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
+            );
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(
                 "{label}: largest difference {worst}, {changed} of {} values",
@@ -765,7 +774,7 @@ fn shaders_are_valid_wgsl() {
         ),
         (
             "present.wgsl",
-            include_str!("present.wgsl").into(),
+            crate::develop::effects::PostCropVignette::wgsl_tone() + include_str!("present.wgsl"),
             &["blur_horizontal", "sharpen", "present"],
         ),
         (
