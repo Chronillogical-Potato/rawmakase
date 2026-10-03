@@ -164,14 +164,18 @@ impl Editor {
     }
     /// Saves defaults still being typed, once their page is left.
     fn save_defaults(&mut self) {
-        if std::mem::take(&mut self.preferences.defaults_dirty)
-            && let Err(e) = self.preferences.defaults.save()
-        {
-            self.status = format!("Metadata defaults not saved: {e:#}");
+        if !self.preferences.defaults_dirty {
+            return;
+        }
+        match self.preferences.defaults.save() {
+            Ok(()) => self.preferences.defaults_dirty = false,
+            // Still to save, tried again on the next change of page.
+            Err(e) => self.status = format!("Metadata defaults not saved: {e:#}"),
         }
     }
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
-        if !self.preferences.open || self.preferences.tab != Tab::Catalog {
+        let closing = ctx.input(|i| i.viewport().close_requested());
+        if !self.preferences.open || self.preferences.tab != Tab::Catalog || closing {
             self.save_defaults();
         }
         if !self.preferences.open {

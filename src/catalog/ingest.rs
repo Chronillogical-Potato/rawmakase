@@ -132,10 +132,11 @@ impl Catalog {
         let read: Vec<(i64, PathBuf)> = added
             .iter()
             .filter(|(_, file)| {
-                let stem = file.with_extension("");
-                !report.unreadable.iter().any(|(path, _)| {
-                    path == file || path.to_string_lossy().starts_with(&*stem.to_string_lossy())
-                })
+                let own = super::sidecars(file);
+                !report
+                    .unreadable
+                    .iter()
+                    .any(|(path, _)| path == file || own.contains(path))
             })
             .cloned()
             .collect();
