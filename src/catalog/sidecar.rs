@@ -342,8 +342,17 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
     }
     let rows: Vec<(i64, String)> = db
         .prepare(
+            // Only photos that are still that Lightroom image: a photo
+            // added since may have taken a removed copy's id.
             "SELECT m.image, m.xmp FROM lr.Adobe_AdditionalMetadata m
-             WHERE m.image IN (SELECT id FROM photos)",
+             JOIN photos p ON p.id = m.image
+             JOIN lr.Adobe_images i ON i.id_local = m.image
+             JOIN lr.AgLibraryFile f ON f.id_local = i.rootFile
+             JOIN lr.AgLibraryFolder d ON d.id_local = f.folder
+             JOIN lr.AgLibraryRootFolder r ON r.id_local = d.rootFolder
+             WHERE p.original_path = r.absolutePath || d.pathFromRoot ||
+                 CASE WHEN f.idx_filename <> '' THEN f.idx_filename
+                      ELSE f.baseName || '.' || f.extension END",
         )?
         .query_map([], |r| {
             let xmp = match r.get_ref(1)? {

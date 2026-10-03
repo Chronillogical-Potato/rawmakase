@@ -195,8 +195,10 @@ pub fn read(text: &str) -> Result<Read> {
                 _ => None,
             })
             .or_else(|| {
-                // Adobe writes -1 for a rejected photo.
-                (p.text(XMP, "Rating").as_deref() == Some("-1")).then_some(-1)
+                // Adobe writes -1 for a rejected photo, in any spelling of
+                // the number.
+                let rating = p.text(XMP, "Rating")?.parse::<f64>().ok()?;
+                (rating == -1.).then_some(-1)
             }),
         capture: [
             (EXIF, "DateTimeOriginal"),

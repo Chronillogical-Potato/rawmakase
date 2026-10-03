@@ -242,11 +242,16 @@ impl Library {
             .copied()
             .filter(|id| self.photo(*id).is_some())
             .collect();
+        let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
         let ratings = |library: &Self| -> Vec<super::Metadata> {
-            ids.iter()
-                .filter_map(|id| library.photo(*id))
+            let mut found: Vec<super::Metadata> = library
+                .photos
+                .iter()
+                .filter(|p| wanted.contains(&p.id))
                 .map(|p| (p.id, p.rating, p.flag, p.label.clone()))
-                .collect()
+                .collect();
+            found.sort_by_key(|m| m.0);
+            found
         };
         let before = self.catalog.metadata_snapshot(&ids)?;
         let ratings_before = ratings(self);
