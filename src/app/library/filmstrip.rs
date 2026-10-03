@@ -18,6 +18,7 @@ impl Library {
         let mut target = None;
         let mut changed = false;
         let photo = self.photo(current).cloned();
+        let strip = ui.id();
         let position = self
             .visible
             .iter()
@@ -64,11 +65,11 @@ impl Library {
                         let active = p.id == current;
                         // Scroll only to bring the open photo into view: a photo
                         // already visible, e.g. one just clicked, stays put.
-                        if active && self.strip_current != Some(current) {
+                        if active && self.strip_current.get(&strip) != Some(&current) {
                             if !ui.clip_rect().contains_rect(rect) {
                                 response.scroll_to_me(None);
                             }
-                            self.strip_current = Some(current);
+                            self.strip_current.insert(strip, current);
                         }
                         if !ui.is_rect_visible(rect) {
                             continue;
