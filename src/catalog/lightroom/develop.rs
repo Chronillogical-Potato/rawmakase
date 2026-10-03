@@ -233,16 +233,18 @@ pub fn convert_develop(
                 .filter(|k| k.starts_with("Upright")),
         )
         .collect();
-    // Auto black & white is judged with the mix Lightroom resolved for it.
-    let gray_mix: Vec<&str> = std::iter::once("AutoGrayscaleMix")
-        .chain(
-            preset
-                .settings
-                .keys()
-                .map(String::as_str)
-                .filter(|k| k.starts_with("GrayMixer")),
-        )
-        .collect();
+    // Auto black & white is judged with the mix Lightroom resolved for it; without
+    // Auto, each mixer channel stands on its own.
+    let gray_mix: Vec<&str> = if preset.settings.contains_key("AutoGrayscaleMix") {
+        preset
+            .settings
+            .keys()
+            .map(String::as_str)
+            .filter(|k| *k == "AutoGrayscaleMix" || k.starts_with("GrayMixer"))
+            .collect()
+    } else {
+        Vec::new()
+    };
     for keys in [
         vec!["WhiteBalance", "Temperature", "Tint"],
         vec![

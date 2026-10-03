@@ -593,8 +593,9 @@ impl Preset {
     /// or a monochrome profile) without the mixer values Lightroom resolves for it.
     fn leaves_auto_gray_mix(&self, r: &Recipe) -> Result<bool> {
         let v = &self.settings;
-        Ok(r.with_profile_adjustments().effects.monochrome
-            && boolean(v, "AutoGrayscaleMix")? == Some(true)
+        let auto = boolean(v, "AutoGrayscaleMix")? == Some(true);
+        Ok(auto
+            && r.with_profile_adjustments().effects.monochrome
             && !v.keys().any(|k| k.starts_with("GrayMixer")))
     }
 

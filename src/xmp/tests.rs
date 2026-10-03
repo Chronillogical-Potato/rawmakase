@@ -721,6 +721,14 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
         let p = parse(Path::new("p.xmp"), &xml(attrs, ""))?;
         p.apply(&Recipe::default(), &m, &[], None)?;
     }
+    let invalid = parse(
+        Path::new("p.xmp"),
+        &xml(
+            r#"c:ConvertToGrayscale="False" c:AutoGrayscaleMix="Maybe""#,
+            "",
+        ),
+    )?;
+    assert!(invalid.apply(&Recipe::default(), &m, &[], None).is_err());
     let mut base = Recipe::default();
     base.effects.gray_mix[2] = 0.4;
     let auto = parse(
