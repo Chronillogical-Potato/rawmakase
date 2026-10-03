@@ -20,6 +20,8 @@ pub(super) struct Document {
     pub(super) lightroom_notice: String,
     /// Lightroom's history for the open catalog photo, oldest first.
     pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
+    /// The open catalog photo's Snapshots.
+    pub(super) snapshots: super::snapshots::Snapshots,
     /// Apply the photo's Lightroom settings once its profiles arrive.
     pub(super) pending_lightroom: bool,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,

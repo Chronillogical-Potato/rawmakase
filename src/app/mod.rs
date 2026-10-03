@@ -420,6 +420,7 @@ mod save_state;
 mod editing;
 mod settings_transfer;
 mod shortcuts;
+mod snapshots;
 mod theme;
 mod toolbar;
 mod updates;

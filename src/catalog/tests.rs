@@ -1158,5 +1158,75 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
     legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
     assert!(!legacy_on.lens_builtin);
     assert_eq!(legacy_on.missing_lens_profile(&m), None);
+fn snapshots_are_named_states_kept_per_photo_and_listed_alphabetically() -> Result<()> {
+    use crate::catalog::SnapshotSettings;
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.RAF"), b"snapshot fixture")?;
+    let mut c = Catalog::create(&d.path().join("snapshots.rawmakase"))?;
+    c.add_folder(&photos)?;
+    let id = c.photos()?[0].id;
+    let warm = Recipe {
+        temperature: 7000.,
+        ..Default::default()
+    };
+    let b = c.add_snapshot(
+        id,
+        "  bright ",
+        &Recipe {
+            exposure: 1.,
+            ..Default::default()
+        },
+    )?;
+    let a = c.add_snapshot(id, "Warm", &warm)?;
+    assert!(c.add_snapshot(id, "  ", &warm).is_err());
+    let names: Vec<_> = c.snapshots(id)?.into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["bright", "Warm"]);
+    c.rename_snapshot(b, "Bright")?;
+    c.update_snapshot(a, &Recipe::default())?;
+    let snapshots = c.snapshots(id)?;
+    assert_eq!(snapshots[0].name, "Bright");
+    assert_eq!(
+        snapshots[1].settings,
+        SnapshotSettings::Recipe(Box::default())
+    );
+    c.delete_snapshot(b)?;
+    assert_eq!(c.snapshots(id)?.len(), 1);
+    // A virtual copy has its own; removing a photo removes its snapshots.
+    let copy = c.create_virtual_copy(id)?;
+    assert!(c.snapshots(copy)?.is_empty());
+    c.add_snapshot(copy, "Copy look", &warm)?;
+    c.remove_virtual_copy(copy)?;
+    let left: i64 =
+        c.db.query_row("SELECT COUNT(*) FROM develop_snapshots", [], |r| r.get(0))?;
+    assert_eq!(left, 1);
+    Ok(())
+}
+#[test]
+fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
+    use crate::catalog::SnapshotSettings;
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("snapshots.lrcat");
+    fixture(&source)?;
+    {
+        let db = Connection::open(&source)?;
+        db.execute_batch(
+            "CREATE TABLE Adobe_libraryImageDevelopSnapshot(id_local INTEGER, image INTEGER, name TEXT, text BLOB);
+             INSERT INTO Adobe_libraryImageDevelopSnapshot VALUES
+                (1, 40, 'Before crop', 's = { Exposure2012 = 0.5 }'),
+                (2, 99, 'Other catalog photo', 's = { Exposure2012 = 1 }');",
+        )?;
+    }
+    let destination = d.path().join("snapshots.rawmakase");
+    import_lightroom(&source, &destination)?;
+    let cat = Catalog::open(&destination)?;
+    let snapshots = cat.snapshots(40)?;
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].name, "Before crop");
+    assert_eq!(
+        snapshots[0].settings,
+        SnapshotSettings::Lightroom("s = { Exposure2012 = 0.5 }".into())
+    );
     Ok(())
 }
