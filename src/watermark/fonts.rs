@@ -182,8 +182,12 @@ pub fn load(family: &str, face: &str) -> Result<Font> {
             .iter()
             .find(|(name, _)| *name == face)
             .map_or(400., |(_, w)| *w);
+        // Copied once and shared by every load.
+        static DATA: OnceLock<Arc<Vec<u8>>> = OnceLock::new();
         return Ok(Font {
-            data: Arc::new(fastframe_fonts::INTER.to_vec()),
+            data: DATA
+                .get_or_init(|| Arc::new(fastframe_fonts::INTER.to_vec()))
+                .clone(),
             index: 0,
             weight: Some(weight),
         });
