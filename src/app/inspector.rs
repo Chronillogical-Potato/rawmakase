@@ -659,9 +659,16 @@ impl Editor {
                 // Lightroom's Refine Saturation, under the RGB point curve it acts on;
                 // the channel curves keep the same height so nothing below moves.
                 subheading(ui, "Refine");
+                // Camera Raw renders 101–200 as 100: shown there, and kept as imported
+                // until the slider is moved.
+                let mut shown = r.curve_saturation.min(1.);
+                let before = shown;
                 ui.add_enabled_ui(view.selected_curve == 0, |ui| {
-                    slider(ui, "Saturation", &mut r.curve_saturation, 0. ..=1., 1.);
+                    slider(ui, "Saturation", &mut shown, 0. ..=1., 1.);
                 });
+                if shown != before {
+                    r.curve_saturation = shown;
+                }
             }
             subheading(ui, "Levels");
             slider(

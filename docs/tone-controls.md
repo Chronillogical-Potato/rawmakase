@@ -43,7 +43,7 @@ Lightroom's Refine Saturation (`crs:CurveRefineSaturation`, default 100) sets ho
 - At 0 a colour keeps its channel differences from before the curve (in encoded ProPhoto RGB, where the curve runs) and takes its luma (Rec. 601 weights) from the curved colour. Where that would leave 0–1, the differences are scaled down just enough to fit.
 - Other values blend linearly between 0 and 100 (exact to 0.0002 at 50). 150 and 200 render exactly as 100.
 
-`curve::refine_saturation` implements it after the master curve on the CPU and the GPU. It is imported and written back with the edit; the Tone Curve panel has no control for it yet.
+`curve::refine_saturation` implements it after the master curve on the CPU and the GPU. It is imported and written back with the edit. Tone Curve's point mode has a Refine › Saturation slider (0–100) under the RGB curve; an imported value above 100 shows as 100 and is kept until the slider is moved.
 
 ## Auto
 
