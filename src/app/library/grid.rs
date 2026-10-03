@@ -204,6 +204,14 @@ impl Library {
                 }
             }
             PhotoAction::Copy(copy) => self.copy_request = Some(copy),
+            PhotoAction::ReadMetadata => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.read_request = Some(ids);
+            }
         }
         None
     }

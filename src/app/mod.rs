@@ -64,6 +64,8 @@ pub struct Editor {
     close_confirm: bool,
     /// The virtual copy waiting for the user to confirm its removal.
     remove_copy: Option<i64>,
+    /// Photos waiting for the user to confirm Read Metadata from Files.
+    read_metadata: Option<Vec<i64>>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
     /// Photo > Auto Advance, saved in the session.
@@ -217,6 +219,7 @@ impl Editor {
             importing: None,
             close_confirm: false,
             remove_copy: None,
+            read_metadata: None,
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
             loupe_tried: None,

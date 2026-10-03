@@ -116,6 +116,15 @@ pub struct Library {
     /// None before the first check.
     attached: Option<HashSet<std::path::PathBuf>>,
     pub message: String,
+    /// What a message sums up, one item per line, shown on hover while that
+    /// message is: (message, detail).
+    message_detail: (String, String),
+    /// Photos to Read Metadata from Files for, once confirmed.
+    read_request: Option<Vec<i64>>,
+    /// Read Metadata from Files while it reads.
+    reread: Option<descriptive::Reread>,
+    /// Read Metadata from Files finished since the editor last asked.
+    reread_finished: bool,
 }
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
@@ -125,6 +134,7 @@ impl Library {
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
         let _ = catalog.backfill_lightroom_info();
+        let _ = catalog.backfill_lightroom_metadata();
         // Unlike those, a failure here could export keywords Lightroom keeps
         // out, so it is said; it is tried again on the next open.
         let keyword_options = catalog.backfill_keyword_export().err();
@@ -179,6 +189,10 @@ impl Library {
             grid_shown: 0..usize::MAX,
             attached: None,
             message: String::new(),
+            message_detail: Default::default(),
+            read_request: None,
+            reread: None,
+            reread_finished: false,
         };
         s.refresh()?;
         if let Some(e) = keyword_options {
@@ -374,6 +388,16 @@ impl Library {
         self.scroll_to_active = true;
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
+    /// Photos Read Metadata from Files was chosen for, for the editor to
+    /// confirm.
+    /// Whether Read Metadata from Files finished since the last call, for
+    /// the status line to show its outcome.
+    pub(in crate::app) fn take_reread_finished(&mut self) -> bool {
+        std::mem::take(&mut self.reread_finished)
+    }
+    pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<i64>> {
+        self.read_request.take()
+    }
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }
@@ -441,6 +465,7 @@ impl Library {
         }
         self.poll_capture_times();
         self.poll_photo_info();
+        self.poll_reread();
         self.cache.poll(ctx);
         self.screen.poll(ctx);
     }
@@ -563,3 +588,16 @@ mod zoom;
 use thumbnails::thumbnail;
 #[cfg(test)]
 mod tests;
+
+impl Library {
+    /// Shows `message`, with `detail` on hover while it is shown.
+    pub(in crate::app) fn set_message_with_detail(&mut self, message: String, detail: String) {
+        self.message = message.clone();
+        self.message_detail = (message, detail);
+    }
+    /// What the message shown sums up, if it does.
+    pub(in crate::app) fn message_detail(&self) -> Option<&str> {
+        let (message, detail) = &self.message_detail;
+        (*message == self.message && !detail.is_empty()).then_some(detail.as_str())
+    }
+}

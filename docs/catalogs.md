@@ -36,6 +36,20 @@ Normalized tables retain images and virtual-copy identities, original paths, fol
 
 Smart collection definitions and any stored membership are preserved; RAWmakase does not evaluate Adobe's smart-collection rule language. Collections marked “smart snapshot” may therefore have no stored members.
 
+## Descriptive metadata and XMP sidecars
+
+Title, caption, creators, copyright, capture time, location and keywords are kept per photo in the catalog; a virtual copy has its own once created. A field with no value in the catalog is the file's own (its EXIF, at export); a cleared field leaves the file's out too.
+
+**Lightroom import** reads each photo's title, caption, creators, copyright, capture time and location from the XMP Lightroom keeps in its catalog; keywords, ratings, flags and labels come from Lightroom's own tables. Catalogs imported before this read it once when opened.
+
+**Add photo folder** reads, for each new photo, its XMP sidecar and, for JPEG and TIFF, the XMP inside the file. A RAW's sidecar is `IMG_1234.NEF.xmp` (digiKam's default), else `IMG_1234.xmp`; when both exist the first is used and the other is listed as ignored. `IMG_1234.xmp` beside both `IMG_1234.NEF` and `IMG_1234.JPG` is the RAW's; the JPEG reads only `IMG_1234.JPG.xmp` and its own XMP, field by field, the sidecar's winning, and an explicitly empty sidecar value clearing the field. Sidecars that can't be read are counted on the status line, which lists them on hover. Adding a folder again does not read the sidecars of photos already in the catalog.
+
+**Read Metadata from Files…** (thumbnail menu) does, for the selected masters: every field a file has replaces the catalog's, your edits included; fields the file lacks are kept. It asks first, is one step for Undo, and never reads into virtual copies.
+
+Keywords are read from `lr:hierarchicalSubject` ("|" between levels), else `digiKam:TagsList` ("/"), then any `dc:subject` name no path has, as a top-level keyword; with neither, `dc:subject` is flat keywords. digiKam's color labels map to Lightroom's names (red, yellow, green, blue, purple; others by their color name) and its pick labels to picks and rejects. What can't be reconstructed: a name containing "|" (or "/" through digiKam) read from another tool's file becomes a hierarchy; a top-level keyword named like an element of a hierarchy, in a file without a path for it, merges into that hierarchy; the parents of a keyword with "|" in its name are lost on a round trip.
+
+Not read or written: IPTC location and contact fields, headline, credit, source, usage terms, instructions, people and face regions, other digiKam data, ratings in other namespaces, XMP history and unknown namespaces. Sidecars are never written. A virtual copy created by RAWmakase 0.1.12 or older has no values of its own and uses the file's until edited.
+
 ## Lightroom rendering
 
 A photo without a RAWmakase edit opens with its Lightroom edit applied, once camera profiles are known. **Apply compatible Lightroom edits** re-applies it as one undoable change using RAWmakase's supported controls. It parses Lightroom's serialized settings as data, never as executable Lua. Lens corrections, Transform and Upright (from Lightroom's stored corrections) apply. It reports missing profiles and unsupported controls, such as AI and color-range masks, Glow, Reshape and profile Amount other than 100. Spot removal and brush, gradient, radial and luminance-range masks convert to RAWmakase's experimental spots and masks. Compatible controls use RAWmakase's algorithms; this is not a Lightroom appearance guarantee. The untouched original settings remain in the database even after further editing. Lightroom orientation metadata is preserved; current previews/Develop use the source camera orientation.

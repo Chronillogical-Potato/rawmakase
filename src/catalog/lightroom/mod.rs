@@ -192,10 +192,15 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
         copy_keyword_export(&tx)?;
     }
     super::info::copy_lightroom_info(&tx)?;
+    super::sidecar::copy_lightroom_metadata(&tx)?;
     // Copied here, so opening the new catalog has nothing to backfill.
     tx.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
         [super::info::INFO_BACKFILLED],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",
+        [super::sidecar::METADATA_BACKFILLED],
     )?;
     tx.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, '1')",

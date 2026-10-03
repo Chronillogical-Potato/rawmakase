@@ -396,7 +396,7 @@ fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
     })
 }
 
-fn read(db: &Connection, id: i64) -> Result<Descriptive> {
+pub(super) fn read(db: &Connection, id: i64) -> Result<Descriptive> {
     let states: HashMap<String, String> = db
         .prepare_cached("SELECT field, state FROM photo_fields WHERE photo=?")?
         .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -452,7 +452,7 @@ fn read(db: &Connection, id: i64) -> Result<Descriptive> {
 }
 
 /// Replaces every descriptive row of a photo with `d`.
-fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
+pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
     for table in [
         "photo_fields",
         "photo_text",
