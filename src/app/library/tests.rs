@@ -1028,6 +1028,53 @@ fn a_hidden_active_photo_hands_over_to_the_rest_of_the_selection() -> Result<()>
     Ok(())
 }
 #[test]
+fn each_filmstrip_scrolls_to_the_photo_shown() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for n in 0..40 {
+        image::RgbImage::new(8, 8).save(folder.join(format!("{n:02}.jpg")))?;
+    }
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    let last = library.photos[library.visible[39]].id;
+    // The strip's horizontal offset after a few frames showing `last`, a
+    // second apart so the scroll animation finishes.
+    let mut time = 0.;
+    let mut offset = |panel: &'static str| {
+        let mut strip = None;
+        for _ in 0..3 {
+            time += 1.;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1200., 800.),
+                    )),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::bottom(panel).exact_size(128.).show(ui, |ui| {
+                        strip = Some(ui.make_persistent_id(egui::IdSalt::new("develop-filmstrip")));
+                        library.filmstrip(ui, last);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        egui::scroll_area::State::load(&ctx, strip.unwrap()).map_or(0., |s| s.offset.x)
+    };
+    // The Loupe's strip brings the photo into view; so does Develop's, opened
+    // next on the same photo.
+    assert!(offset("loupe-filmstrip") > 0.);
+    assert!(offset("develop-filmstrip") > 0.);
+    Ok(())
+}
+#[test]
 fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let folder = directory.path().join("photos");
