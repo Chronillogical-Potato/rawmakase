@@ -389,6 +389,7 @@ fn unselected_groups_and_unchanged_lenses_leave_upright_alone() {
     let mut to = Recipe::default();
     to.upright.mode = UprightMode::Level;
     to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    to.upright.lightroom = [("UprightVersion".into(), "151388160".into())].into();
     let mut source = Recipe {
         lens_profile: true,
         ..Default::default()
@@ -397,6 +398,8 @@ fn unselected_groups_and_unchanged_lenses_leave_upright_alone() {
     let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
     assert_eq!(out.recipe.upright.mode, UprightMode::Level);
     assert!(out.recipe.upright.corrections.is_empty());
+    // Lightroom's analysis details went with its corrections.
+    assert!(out.recipe.upright.lightroom.is_empty());
 }
 
 #[test]

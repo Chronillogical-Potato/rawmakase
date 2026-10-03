@@ -48,7 +48,8 @@ impl Segment {
 /// The photo's luminance as displayed (orientation and lens correction applied, no crop,
 /// straighten or Transform), gamma-encoded to 0–255, and its width and height.
 pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) {
-    let mut a = r.clone();
+    // As rendered: a switched-off Lens Corrections panel corrects nothing.
+    let mut a = r.as_rendered().into_owned();
     a.crop = [0., 0., 1., 1.];
     a.straighten = 0.;
     a.transform = Default::default();
@@ -738,6 +739,14 @@ mod tests {
         let (image, w, h) = analysis_image(&im, &r);
         assert_eq!(image[h / 2 * w], 255.);
         assert!(image[h / 2 * w + w / 2] < 255.);
+        // Not with the Lens Corrections panel switched off, which bypasses it.
+        let mut off = r.clone();
+        off.panels.set(
+            crate::develop::panels::Panel::LensCorrections,
+            crate::develop::panels::PanelState::Off,
+        );
+        let (image, w, h) = analysis_image(&im, &off);
+        assert!(image[h / 2 * w] < 255.);
     }
 
     #[test]

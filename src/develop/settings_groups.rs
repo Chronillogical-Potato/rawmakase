@@ -462,6 +462,7 @@ pub fn transfer(
     // it: new lens settings call for a new analysis, which the editor runs.
     if super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
         recipe.upright.corrections.clear();
+        recipe.upright.lightroom.clear();
         if recipe.upright.mode == super::UprightMode::Guided {
             recipe.upright.mode = super::UprightMode::Off;
             notes.push(
