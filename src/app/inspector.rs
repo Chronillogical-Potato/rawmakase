@@ -3,8 +3,8 @@ use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
-    adjustment_section, parametric_curve_ui, segmented, slider, slider_with, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
+    slider_with, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -1007,44 +1007,7 @@ impl Editor {
             {
                 view.toggle(Tool::Defringe);
             }
-            for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
-                ui.push_id(("defringe", i), |ui| {
-                    slider_with(
-                        ui,
-                        &format!("{name} Amount"),
-                        &mut r.effects.defringe[i],
-                        0. ..=1.,
-                        0.,
-                        Some((20., 0)),
-                        None,
-                    );
-                    let [lo, hi] = &mut r.effects.defringe_ranges[i];
-                    let colors = hue.map(|h| {
-                        let c = crate::develop::color::hue_rgb(h).map(|v| (v * 180.) as u8);
-                        Color32::from_rgb(c[0], c[1], c[2])
-                    });
-                    slider_with(
-                        ui,
-                        &format!("{name} Hue"),
-                        lo,
-                        0. ..=(*hi - 0.1).max(0.),
-                        0.3,
-                        None,
-                        Some((colors[0], colors[1])),
-                    );
-                    ui.push_id("hi", |ui| {
-                        slider_with(
-                            ui,
-                            "",
-                            hi,
-                            (*lo + 0.1).min(1.)..=1.,
-                            0.7,
-                            None,
-                            Some((colors[0], colors[1])),
-                        );
-                    });
-                });
-            }
+            defringe_sliders(ui, &mut r.effects);
             subheading(ui, "Vignetting");
             ui.push_id("lens-vignette", |ui| {
                 slider(ui, "Amount", &mut r.effects.lens_vignette, -1. ..=1., 0.);
@@ -1172,12 +1135,7 @@ impl Editor {
                 );
             });
         }) {
-            r.effects.grain = 0.;
-            r.effects.grain_size = 0.25;
-            r.effects.grain_roughness = 0.5;
-            r.effects.vignette_midpoint = 0.5;
-            r.effects.vignette_feather = 0.5;
-            r.effects.vignette = 0.;
+            r.effects.reset_post_crop();
         }
 
         if adjustment_section(ui, "Calibration", |ui| {
@@ -1388,6 +1346,62 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
         },
     )
     .inner
+}
+/// Defringe's Amount and hue range for Purple, then Green. Double-clicking a hue
+/// resets it to that color's own default range.
+pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effects::Effects) {
+    for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
+        ui.push_id(("defringe", i), |ui| {
+            slider_with(
+                ui,
+                &format!("{name} Amount"),
+                &mut e.defringe[i],
+                0. ..=1.,
+                0.,
+                Some((20., 0)),
+                None,
+            );
+            let defaults = crate::develop::effects::DEFRINGE_RANGES[i];
+            let [lo, hi] = &mut e.defringe_ranges[i];
+            let colors = hue.map(|h| {
+                let c = crate::develop::color::hue_rgb(h).map(|v| (v * 180.) as u8);
+                Color32::from_rgb(c[0], c[1], c[2])
+            });
+            let low = slider_with(
+                ui,
+                &format!("{name} Hue"),
+                lo,
+                0. ..=(*hi - 0.1).max(0.),
+                defaults[0],
+                None,
+                Some((colors[0], colors[1])),
+            );
+            let high = ui
+                .push_id("hi", |ui| {
+                    slider_with(
+                        ui,
+                        "",
+                        hi,
+                        (*lo + 0.1).min(1.)..=1.,
+                        defaults[1],
+                        None,
+                        Some((colors[0], colors[1])),
+                    )
+                })
+                .inner;
+            // One range, as in Lightroom: resetting either end resets both, so the
+            // other end never keeps the default out of reach.
+            if [low, high].contains(&SliderEvent::Reset) {
+                [*lo, *hi] = defaults;
+                // Named after the whole range, not the end the slider clamped.
+                name_history_step(
+                    ui,
+                    format!("Defringe {name} Hue"),
+                    format!("{:.0} / {:.0}", defaults[0] * 100., defaults[1] * 100.),
+                );
+            }
+        });
+    }
 }
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     let color = theme::gray(if strong { 235 } else { 170 });

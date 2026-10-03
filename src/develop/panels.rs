@@ -118,17 +118,7 @@ impl Panel {
                 r.transform = defaults.transform;
                 r.upright = defaults.upright.clone();
             }
-            Panel::Effects => {
-                e.vignette = 0.;
-                e.vignette_midpoint = d.vignette_midpoint;
-                e.vignette_roundness = d.vignette_roundness;
-                e.vignette_feather = d.vignette_feather;
-                e.vignette_highlights = d.vignette_highlights;
-                e.vignette_style = d.vignette_style;
-                e.grain = 0.;
-                e.grain_size = d.grain_size;
-                e.grain_roughness = d.grain_roughness;
-            }
+            Panel::Effects => e.reset_post_crop(),
             Panel::Calibration => {
                 e.calibration = d.calibration;
                 e.shadow_tint = d.shadow_tint;
