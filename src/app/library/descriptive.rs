@@ -150,15 +150,19 @@ impl Library {
     /// The keywords shown for `ids`, read again from the catalog, and the
     /// photos shown, which a text filter may pick by them.
     fn refresh_keywords(&mut self, ids: &[i64]) -> Result<()> {
+        let mut names = std::collections::HashMap::new();
         for id in ids {
-            let names: Vec<String> = self
+            let keywords: Vec<String> = self
                 .catalog
                 .keywords(*id)?
                 .into_iter()
                 .map(|k| k.name)
                 .collect();
-            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
-                p.keywords = names.join(", ");
+            names.insert(*id, keywords.join(", "));
+        }
+        for p in &mut self.photos {
+            if let Some(n) = names.remove(&p.id) {
+                p.keywords = n;
             }
         }
         self.filter();
