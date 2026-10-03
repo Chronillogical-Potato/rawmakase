@@ -389,6 +389,13 @@ fn decode(path: &Path) -> Result<image::Rgba32FImage> {
     Ok(rgba)
 }
 
+/// A preset's file name as disks compare them: without case, and in one
+/// Unicode normalization (APFS ignores both).
+fn disk_name(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    file_name(name).to_lowercase().nfc().collect()
+}
+
 /// Whether two paths are one file, however the disk compares names.
 fn same_file(a: &Path, b: &Path) -> bool {
     if a == b {
@@ -463,7 +470,7 @@ pub fn save_in(
     if let Some(other) = presets.iter().find(|p| {
         Some(p.name.as_str()) != replacing
             // Case too: most Mac and Windows disks don't tell names apart by it.
-            && file_name(&p.name).to_lowercase() == file_name(&watermark.name).to_lowercase()
+            && disk_name(&p.name) == disk_name(&watermark.name)
     }) {
         anyhow::bail!(
             "A watermark named \"{}\" exists; choose another name",
