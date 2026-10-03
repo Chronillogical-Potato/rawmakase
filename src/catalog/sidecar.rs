@@ -134,7 +134,8 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             }
             Ok(None)
         }
-        "tif" | "tiff" => {
+        // A DNG keeps its XMP in the same TIFF tag.
+        "tif" | "tiff" | "dng" => {
             let Some(mut t) = crate::tiff::Tiff::open(std::fs::File::open(file)?, 0) else {
                 return Ok(None);
             };

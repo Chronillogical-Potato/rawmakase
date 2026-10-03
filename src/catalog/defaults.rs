@@ -4,7 +4,7 @@
 use super::{Catalog, LangAlt, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -41,8 +41,8 @@ impl Catalog {
         if defaults.is_empty() {
             return Ok(());
         }
-        let exif = |path: &Path, tag| {
-            crate::export::exif::read(path)
+        let has = |exif: &Option<crate::export::exif::CameraExif>, tag| {
+            exif.as_ref()
                 .and_then(|e| e.get(tag).and_then(crate::export::exif::Field::text))
                 .is_some_and(|t| !t.is_empty())
         };
@@ -51,10 +51,17 @@ impl Catalog {
         for (id, path) in added {
             let mut d = super::descriptive::read(&tx, *id)?;
             let before = d.clone();
-            if !creator.is_empty() && d.creator.is_none() && !exif(path, 0x013b) {
+            if (creator.is_empty() || d.creator.is_some())
+                && (copyright.is_empty() || d.copyright.is_some())
+            {
+                continue;
+            }
+            // Read once for both.
+            let exif = crate::export::exif::read(path);
+            if !creator.is_empty() && d.creator.is_none() && !has(&exif, 0x013b) {
                 d.creator = Some(Value::Set(vec![creator.to_string()]));
             }
-            if !copyright.is_empty() && d.copyright.is_none() && !exif(path, 0x8298) {
+            if !copyright.is_empty() && d.copyright.is_none() && !has(&exif, 0x8298) {
                 d.copyright = Some(Value::Set(LangAlt::new(copyright)));
             }
             if d != before {

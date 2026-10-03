@@ -213,7 +213,11 @@ impl Editor {
                             .auto_shrink(false)
                             .show(&mut content, |ui| self.general_page(ui));
                     }
-                    Tab::Catalog => self.catalog_page(&mut content),
+                    Tab::Catalog => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.catalog_page(ui));
+                    }
                     Tab::Profiles => self.profiles_page(&mut content),
                     Tab::Performance => self.performance_page(&mut content),
                     Tab::Display => self.display_page(&mut content),
@@ -354,15 +358,16 @@ impl Editor {
         gap(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
-        let mut left = false;
+        let mut changed = false;
         for (label, text) in [
             ("Creator", &mut defaults.creator),
             ("Copyright", &mut defaults.copyright),
         ] {
             form_row(ui, label, |ui| {
-                left |= ui
+                // Saved as typed: switching tabs would lose a pending edit.
+                changed |= ui
                     .add(egui::TextEdit::singleline(text).desired_width(320.))
-                    .lost_focus();
+                    .changed();
             });
         }
         form_row(ui, "", |ui| {
@@ -371,7 +376,7 @@ impl Editor {
                 "For photos added from folders, when neither the file nor its sidecar has one.",
             );
         });
-        if left && let Err(e) = defaults.save() {
+        if changed && let Err(e) = defaults.save() {
             self.status = format!("Metadata defaults not saved: {e:#}");
         }
         gap(ui);
