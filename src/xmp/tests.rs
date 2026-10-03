@@ -696,3 +696,46 @@ fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Res
     assert!(r.upright.corrections.is_empty());
     Ok(())
 }
+/// Lightroom writes `AutoGrayscaleMix` with the mixer it resolved: stored mixer values
+/// win, as in Camera Raw. Auto without values (a preset) keeps the current mix, and
+/// only lenient application accepts that, reporting it.
+#[test]
+fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> {
+    let m = Metadata::default();
+    let resolved = parse(
+        Path::new("photo.xmp"),
+        &xml(
+            r#"c:ConvertToGrayscale="True" c:AutoGrayscaleMix="True" c:GrayMixerRed="-12" c:GrayMixerBlue="30""#,
+            "",
+        ),
+    )?;
+    let r = resolved.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(r.effects.monochrome);
+    assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
+    assert_eq!(r.effects.gray_mix[5], 30. * 0.01);
+    // Off, or on for a colour photo, Auto changes nothing.
+    for attrs in [
+        r#"c:ConvertToGrayscale="True" c:AutoGrayscaleMix="False""#,
+        r#"c:ConvertToGrayscale="False" c:AutoGrayscaleMix="True""#,
+    ] {
+        let p = parse(Path::new("p.xmp"), &xml(attrs, ""))?;
+        p.apply(&Recipe::default(), &m, &[], None)?;
+    }
+    let mut base = Recipe::default();
+    base.effects.gray_mix[2] = 0.4;
+    let auto = parse(
+        Path::new("auto.xmp"),
+        &xml(
+            r#"c:ConvertToGrayscale="True" c:AutoGrayscaleMix="True" c:Exposure2012="0.5""#,
+            "",
+        ),
+    )?;
+    assert!(auto.apply(&base, &m, &[], None).is_err());
+    let (r, skipped) = auto.apply_lenient(&base, &m, &[], None)?;
+    assert!(r.effects.monochrome);
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(r.effects.gray_mix, base.effects.gray_mix);
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    assert!(skipped[0].contains("Auto black & white mix"), "{skipped:?}");
+    Ok(())
+}

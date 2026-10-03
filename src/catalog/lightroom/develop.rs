@@ -200,7 +200,6 @@ pub fn convert_develop(
                 "CustomTemperature"
                     | "CustomTint"
                     | "CropConstrainAspectRatio"
-                    | "AutoGrayscaleMix"
                     | "OverrideLookVignette"
             ) {
                 continue;
@@ -274,6 +273,8 @@ pub fn convert_develop(
             Err(e) => warnings.push(e.to_string()),
         }
     }
+    // Auto black & white without the mix Lightroom resolved keeps the default mix.
+    warnings.extend(accepted.drop_unresolved_auto_gray_mix()?.map(String::from));
     let mut recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
     if let Some((asked, used)) = accepted.profile_substitute(m, profiles) {
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
