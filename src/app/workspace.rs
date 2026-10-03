@@ -82,7 +82,9 @@ impl Editor {
             self.preferences_shortcut(&ctx);
         }
         self.workspace_bar(ui);
-        if self.activity.is_dialog() {
+        // A file dialog or a running Sync: nothing behind them takes clicks, so no
+        // catalog action is chosen only to be dropped.
+        if self.activity.is_busy() {
             ui.disable();
         }
         if self.onboarding.visible {
@@ -351,7 +353,7 @@ impl Editor {
                         }
                     });
                     ui.add_space(8.);
-                    if self.activity.is_dialog() {
+                    if self.activity.is_busy() {
                         ui.spinner();
                     }
                     self.export_progress(ui);

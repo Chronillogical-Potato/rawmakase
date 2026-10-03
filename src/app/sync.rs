@@ -396,9 +396,13 @@ impl Editor {
         };
         // The open photo's settings are not final until its Lightroom edit is in, or
         // while an Auto estimate is still to land on them.
+        // A protected edit (its file changed) shows camera defaults, not its settings;
+        // profiles still being imported would resolve differently photo to photo.
         if self.document.pending_lightroom
             || self.document.metadata.is_none()
             || self.document.auto.is_running()
+            || self.document.save.is_protected()
+            || self.importing.is_some()
         {
             return Vec::new();
         }
