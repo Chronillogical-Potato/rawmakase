@@ -329,8 +329,9 @@ pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "maco
     "Ctrl+'"
 };
 /// The right-click menu shared by grid cells and the Develop filmstrip.
-/// Open in Develop is greyed out for a photo Develop cannot open, e.g. one
-/// not `available`, with the reason in place of its shortcut.
+/// Open in Develop is greyed out for a photo Develop cannot open, with the
+/// reason in place of its shortcut. A photo not `available` when last
+/// checked is looked for again, in case it is back.
 pub(in crate::app) fn photo_menu(
     response: &egui::Response,
     photo: &Photo,
@@ -342,7 +343,7 @@ pub(in crate::app) fn photo_menu(
     crate::app::widgets::context_menu(response, |ui| {
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
-        let refusal = super::develop_refusal(photo, available);
+        let refusal = super::develop_refusal(photo, available || photo.path.is_file());
         let shortcut = refusal.as_ref().map_or("D".into(), super::Refusal::label);
         if menu_item(ui, "Open in Develop", &shortcut, refusal.is_none(), false) {
             action = Some(PhotoAction::Develop);

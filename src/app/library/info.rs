@@ -19,9 +19,10 @@ impl Library {
             .auto_shrink(false)
             .show(ui, |ui| {
                 section(ui, "Quick Develop", false, |ui| {
-                    let refusal = photo
-                        .as_ref()
-                        .and_then(|p| super::develop_refusal(p, self.is_available(&p.path)));
+                    // A file found missing may be back since: looked for again.
+                    let refusal = photo.as_ref().and_then(|p| {
+                        super::develop_refusal(p, self.is_available(&p.path) || p.path.is_file())
+                    });
                     let open = ui
                         .add_enabled(
                             photo.is_some() && refusal.is_none(),
