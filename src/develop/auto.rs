@@ -60,8 +60,9 @@ pub fn auto_white_balance_cancellable(
 }
 
 /// `base` with Exposure, Contrast, Highlights, Shadows, Whites and Blacks fitted to the
-/// photo as `base` otherwise renders it, as the Basic panel's Auto button applies them.
-/// White balance and every other setting of `base` are kept, as in Lightroom.
+/// photo before its adjustments (see [`auto_tone_basis`]), as the Basic panel's Auto
+/// button applies them. White balance and every other setting of `base` are kept, as
+/// in Lightroom.
 pub fn auto_tone(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
     auto_tone_cancellable(im, base, &AtomicBool::new(false))
 }
@@ -72,11 +73,64 @@ pub fn auto_tone_cancellable(
     base: &Recipe,
     cancel: &AtomicBool,
 ) -> Result<Recipe> {
-    let small = tone_copy(im, base, cancel)?;
+    let mut t = auto_tone_basis(base);
+    let small = tone_copy(im, &t, cancel)?;
+    fit_tone(&small, &mut t, cancel)?;
     let mut r = base.clone();
-    fit_tone(&small, &mut r, cancel)?;
+    r.exposure = t.exposure;
+    r.contrast = t.contrast;
+    r.highlights = t.highlights;
+    r.shadows = t.shadows;
+    r.whites = t.whites;
+    r.blacks = t.blacks;
     r.validate()?;
     Ok(r)
+}
+
+/// The photo Auto tone measures: `r` as its profile, white balance, calibration, lens
+/// corrections and geometry render it, without the adjustments made on top (the tone
+/// sliders, curves and Levels, presence, color mixer, B&W, grading, detail, effects,
+/// spots and masks). Lightroom's Auto ignores them too: a point curve that lifts black
+/// far above zero still leaves its Auto Blacks at ordinary values, which measuring
+/// through the curve could not give. Auto therefore gives the same result whatever
+/// those adjustments are.
+pub fn auto_tone_basis(r: &Recipe) -> Recipe {
+    let d = Recipe::default();
+    let e = &r.effects;
+    Recipe {
+        exposure: 0.,
+        contrast: 0.,
+        highlights: 0.,
+        shadows: 0.,
+        whites: 0.,
+        blacks: 0.,
+        black_point: d.black_point,
+        white_point: d.white_point,
+        midtone: d.midtone,
+        curve: d.curve,
+        saturation: d.saturation,
+        vibrance: d.vibrance,
+        hsl: d.hsl,
+        grading: d.grading,
+        noise_luma: d.noise_luma,
+        noise_chroma: d.noise_chroma,
+        sharpening: d.sharpening,
+        sharpening_radius: d.sharpening_radius,
+        sharpening_detail: d.sharpening_detail,
+        sharpening_masking: d.sharpening_masking,
+        retouch: Vec::new(),
+        masks: Vec::new(),
+        effects: crate::develop::effects::Effects {
+            calibration: e.calibration,
+            shadow_tint: e.shadow_tint,
+            lens_vignette: e.lens_vignette,
+            lens_vignette_midpoint: e.lens_vignette_midpoint,
+            defringe: e.defringe,
+            defringe_ranges: e.defringe_ranges,
+            ..d.effects
+        },
+        ..r.clone()
+    }
 }
 
 fn check_cancel(cancel: &AtomicBool) -> Result<()> {
@@ -816,6 +870,41 @@ mod tests {
         let fresh = auto_tone(&im, &untouched).unwrap();
         assert_eq!(fresh.exposure, auto.exposure);
         assert_eq!(fresh.whites, auto.whites);
+    }
+
+    #[test]
+    fn auto_tone_measures_the_photo_before_its_adjustments() {
+        let im = scene([1.2, 1., 0.8], 0.1);
+        let plain = Recipe::default();
+        // A lifted point curve, color and presence edits, as a film-look preset makes.
+        let mut adjusted = Recipe {
+            saturation: -0.2,
+            vibrance: 0.3,
+            ..Default::default()
+        };
+        adjusted.curve.points = vec![[0., 42. / 255.], [1., 1.]];
+        adjusted.hsl[1] = [0.1, -0.3, -0.2];
+        adjusted.effects.clarity = 0.4;
+        adjusted.effects.dehaze = 0.3;
+        adjusted.effects.channels[2].points = vec![[0., 0.], [0.3, 0.2], [1., 1.]];
+        adjusted.effects.vignette = -0.5;
+        let a = auto_tone(&im, &plain).unwrap();
+        let b = auto_tone(&im, &adjusted).unwrap();
+        let tone = |r: &Recipe| {
+            [
+                r.exposure,
+                r.contrast,
+                r.highlights,
+                r.shadows,
+                r.whites,
+                r.blacks,
+            ]
+        };
+        assert_eq!(tone(&a), tone(&b));
+        // The adjustments themselves are kept.
+        assert_eq!(b.curve, adjusted.curve);
+        assert_eq!(b.effects, adjusted.effects);
+        assert_eq!(b.hsl, adjusted.hsl);
     }
 
     #[test]

@@ -29,7 +29,8 @@ mod white_balance;
 
 pub use crate::color_math::{mul, srgb_encode};
 pub use auto::{
-    auto_tone, auto_tone_cancellable, auto_white_balance, auto_white_balance_cancellable,
+    auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
+    auto_white_balance_cancellable,
 };
 pub use geometry::{Geometry, Transform, Upright, UprightMode, display_axes};
 pub use image_space::{ImageFrame, ViewMapping};

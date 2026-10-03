@@ -7,18 +7,11 @@ use super::{
 use crate::develop::Recipe;
 
 /// Everything an estimate of `kind` was fitted against: `r` without the settings it
-/// chooses. Auto tone is fitted to the photo's white balance, so that is an input.
+/// chooses. Auto tone measures the photo before its adjustments, as its profile, white
+/// balance and geometry render it, so only those are inputs.
 fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
     match kind {
-        AutoKind::Settings => Recipe {
-            exposure: 0.,
-            contrast: 0.,
-            highlights: 0.,
-            shadows: 0.,
-            whites: 0.,
-            blacks: 0.,
-            ..r.clone()
-        },
+        AutoKind::Settings => crate::develop::auto_tone_basis(r),
         AutoKind::WhiteBalance => Recipe {
             wb: [1.; 3],
             temperature: 0.,
@@ -30,10 +23,28 @@ fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
 }
 
 impl Editor {
-    /// Whether the photo is exactly as Auto last left it, so running it again would
-    /// change nothing. Any other edit can change what Auto measures, so it counts too.
+    /// Whether the tone sliders are as Auto last set them and nothing Auto measures has
+    /// changed since, so running it again would change nothing. Adjustments Auto does not
+    /// measure (curves, presence, color and the like) leave it in effect.
     pub(super) fn auto_in_effect(&self) -> bool {
-        self.document.auto_applied.as_ref() == Some(&self.document.recipe)
+        let r = &self.document.recipe;
+        self.document.auto_applied.as_ref().is_some_and(|a| {
+            [
+                a.exposure,
+                a.contrast,
+                a.highlights,
+                a.shadows,
+                a.whites,
+                a.blacks,
+            ] == [
+                r.exposure,
+                r.contrast,
+                r.highlights,
+                r.shadows,
+                r.whites,
+                r.blacks,
+            ] && inputs(AutoKind::Settings, a) == inputs(AutoKind::Settings, r)
+        })
     }
 
     /// Starts Auto for the open photo; the estimate arrives as [`Event::Auto`]. Does
