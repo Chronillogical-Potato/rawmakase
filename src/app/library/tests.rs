@@ -69,6 +69,29 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
 }
 
 #[test]
+fn a_file_found_again_is_checked_back_online() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("a.jpg");
+    image::RgbImage::new(8, 8).save(&file)?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    std::fs::rename(&file, folder.join("moved"))?;
+    library.refresh()?;
+    library.wait_for_availability();
+    assert!(!library.is_available(&file));
+    // Restored in place: counted offline until it is found again.
+    std::fs::rename(folder.join("moved"), &file)?;
+    assert!(!library.is_available(&file));
+    library.found(&file);
+    library.wait_for_availability();
+    assert!(library.is_available(&file));
+    Ok(())
+}
+
+#[test]
 fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
     let ctx = egui::Context::default();
     let photo = Photo {

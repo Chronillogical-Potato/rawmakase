@@ -221,7 +221,11 @@ impl Editor {
         let Some(p) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
             return;
         };
-        if let Some(refusal) = crate::app::library::develop_refusal(&p, p.path.is_file()) {
+        let exists = p.path.is_file();
+        if exists && let Some(l) = &mut self.library {
+            l.found(&p.path);
+        }
+        if let Some(refusal) = crate::app::library::develop_refusal(&p, exists) {
             // Said in a dialog: in the status bar alone, it looks as if the
             // click did nothing.
             let reason = refusal.detail();

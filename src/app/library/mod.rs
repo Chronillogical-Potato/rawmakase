@@ -281,6 +281,14 @@ impl Library {
             self.availability.start(&self.photos, &self.ctx);
         }
     }
+    /// Checks again, in the background, which photos are online when one
+    /// counted offline turns out to be there, e.g. restored in place on a
+    /// drive that stayed attached.
+    pub(in crate::app) fn found(&mut self, path: &std::path::Path) {
+        if !self.is_available(path) {
+            self.availability.start(&self.photos, &self.ctx);
+        }
+    }
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
     }
