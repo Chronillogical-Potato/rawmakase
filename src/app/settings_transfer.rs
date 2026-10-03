@@ -84,20 +84,27 @@ impl Editor {
                 );
                 ui.add_space(14.);
                 // Sections fill the left column, then the right, in Lightroom's order.
+                // They scroll in a short window, so the buttons stay in view.
                 let (left, right) = SettingGroup::SECTIONS.split_at(LEFT_SECTIONS);
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = GAP;
-                    for column in [left, right] {
-                        ui.allocate_ui(Vec2::new(COLUMN, 0.), |ui| {
-                            ui.vertical(|ui| {
-                                ui.set_width(COLUMN);
-                                for section in column {
-                                    section_checkboxes(ui, section, &mut dialog.groups);
-                                }
-                            });
+                let height = (ctx.content_rect().height() * 0.85 - 130.).max(160.);
+                egui::ScrollArea::vertical()
+                    .max_height(height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = GAP;
+                            for column in [left, right] {
+                                ui.allocate_ui(Vec2::new(COLUMN, 0.), |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_width(COLUMN);
+                                        for section in column {
+                                            section_checkboxes(ui, section, &mut dialog.groups);
+                                        }
+                                    });
+                                });
+                            }
                         });
-                    }
-                });
+                    });
                 ui.add_space(16.);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().button_padding = Vec2::new(14., 6.);

@@ -2013,15 +2013,19 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     editor.document.recipe.exposure = 0.6;
     editor.document.recipe.contrast = 0.3;
     editor.open_copy_dialog();
-    // The dialog draws; Shift+Cmd+C is the same as the menu.
-    let mut output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
-            ..Default::default()
-        },
-        |ui| editor.draw(ui),
-    );
-    output.textures_delta.clear();
+    // The dialog draws, with its buttons in view in the smallest window.
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 650.))),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        output.textures_delta.clear();
+    }
+    let copy = ctx.memory(|m| m.area_rect(egui::Id::new("copy-settings")));
+    assert!(copy.is_some_and(|r| r.bottom() <= 650.), "{copy:?}");
     let dialog = editor.copy_dialog.as_mut().unwrap();
     dialog.groups = GroupSelection::none();
     dialog
