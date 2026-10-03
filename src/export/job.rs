@@ -82,8 +82,10 @@ pub fn run(
     progress(0.4);
     let options = settings.options();
     let mut rendered = crate::develop::render(&image, &photo.recipe, options.max_edge)?;
-    if let Some(w) = &watermark {
-        w.apply(&mut rendered);
+    if let Some(w) = &watermark
+        && !w.apply(&mut rendered)
+    {
+        notice = Some("the watermark's text has no characters its font can draw".into());
     }
     cancelled()?;
     progress(0.85);

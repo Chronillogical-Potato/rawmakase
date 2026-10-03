@@ -312,10 +312,14 @@ impl Ready {
         })
     }
     /// Lays the mark over `image`'s pixels.
-    pub fn apply(&self, image: &mut Rendered) {
-        if let Some(mark) = self.place(image.width, image.height) {
-            composite(image, &mark);
-        }
+    /// Lays the mark over `image`'s pixels; false when there was nothing
+    /// to draw (text the font has none of).
+    pub fn apply(&self, image: &mut Rendered) -> bool {
+        let Some(mark) = self.place(image.width, image.height) else {
+            return false;
+        };
+        composite(image, &mark);
+        true
     }
 }
 
