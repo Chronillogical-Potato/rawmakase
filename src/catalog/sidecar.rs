@@ -3,7 +3,10 @@
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
 use super::Catalog;
-use crate::xmp::descriptive::{self, Read};
+use crate::xmp::{
+    descriptive::{self, Read},
+    ns::JPEG_HEADER,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
@@ -84,7 +87,6 @@ fn embedded(file: &Path) -> Result<Option<String>> {
     match extension.as_str() {
         "jpg" | "jpeg" => {
             use std::io::{Read as _, Seek, SeekFrom};
-            const HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
             // Segment by segment up to the image data, not the whole file.
             let mut f = std::fs::File::open(file)?;
             let mut marker = [0u8; 4];
@@ -117,10 +119,10 @@ fn embedded(file: &Path) -> Result<Option<String>> {
                 marker = [0xff, byte[0], length[0], length[1]];
                 let len = u16::from_be_bytes(length) as usize;
                 let body = len.saturating_sub(2);
-                if marker[1] == 0xe1 && body > HEADER.len() {
+                if marker[1] == 0xe1 && body > JPEG_HEADER.len() {
                     let mut data = vec![0u8; body];
                     f.read_exact(&mut data)?;
-                    if let Some(xmp) = data.strip_prefix(HEADER) {
+                    if let Some(xmp) = data.strip_prefix(JPEG_HEADER) {
                         return Ok(Some(
                             String::from_utf8(xmp.to_vec())
                                 .context("embedded XMP is not valid UTF-8")?,

@@ -2,18 +2,10 @@
 //! TIFF's embedded XMP, or the XMP a Lightroom catalog keeps per photo.
 //! Namespaces are matched by URI, in attribute and element forms. Lightroom's
 //! and digiKam's properties are read as digiKam documents and writes them.
+use super::ns::{DC, DIGIKAM, EXIF, LR, PHOTOSHOP, RDF, XML, XMP};
 use crate::catalog::{Capture, LangAlt, Location, Value};
 use anyhow::{Result, ensure};
 use roxmltree::Node;
-
-const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-const DC: &str = "http://purl.org/dc/elements/1.1/";
-const XMP: &str = "http://ns.adobe.com/xap/1.0/";
-const EXIF: &str = "http://ns.adobe.com/exif/1.0/";
-const PHOTOSHOP: &str = "http://ns.adobe.com/photoshop/1.0/";
-const LR: &str = "http://ns.adobe.com/lightroom/1.0/";
-const DIGIKAM: &str = "http://www.digikam.org/ns/1.0/";
-const XML: &str = "http://www.w3.org/XML/1998/namespace";
 
 /// What a packet holds. `None` is a field the packet does not have; an
 /// explicitly empty one (an empty list or string) is `Value::Cleared`, or an

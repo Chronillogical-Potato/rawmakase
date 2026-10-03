@@ -91,10 +91,11 @@ pub(super) fn tiff(
 /// XMP goes in its own APP1 segment, after the EXIF and ICC ones; what does
 /// not fit one follows as ExtendedXMP.
 pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
-    use super::extended_xmp::{STANDARD_HEADER, segments, split};
+    use super::extended_xmp::{segments, split};
+    use crate::xmp::ns::JPEG_HEADER;
     ensure!(jpeg.starts_with(&[0xff, 0xd8]), "Not a JPEG");
     let split = split(xmp)?;
-    let mut payloads = vec![[STANDARD_HEADER, split.standard.as_bytes()].concat()];
+    let mut payloads = vec![[JPEG_HEADER, split.standard.as_bytes()].concat()];
     if let Some((guid, extended)) = &split.extended {
         payloads.extend(segments(guid, extended));
     }

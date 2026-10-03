@@ -1,18 +1,15 @@
-use super::Preset;
+use super::{
+    Preset,
+    ns::{CRS, PHOTOSHOP, RDF, XML},
+};
 use crate::develop::curve::ToneCurve;
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};
-pub(super) const CRS: &str = "http://ns.adobe.com/camera-raw-settings/1.0/";
-pub(super) const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 fn child_text(node: roxmltree::Node<'_, '_>, name: &str) -> Option<String> {
     let child = node.children().find(|n| n.has_tag_name((CRS, name)))?;
     let item = child
         .descendants()
-        .find(|n| {
-            n.has_tag_name((RDF, "li"))
-                && n.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
-                    == Some("x-default")
-        })
+        .find(|n| n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default"))
         .or_else(|| child.descendants().find(|n| n.has_tag_name((RDF, "li"))));
     Some(
         item.and_then(|n| n.text())
@@ -136,7 +133,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
             }
         } else if name == "Preset"
             && description
-                .attribute(("http://ns.adobe.com/photoshop/1.0/", "SidecarForExtension"))
+                .attribute((PHOTOSHOP, "SidecarForExtension"))
                 .is_some()
         {
             // In a photo sidecar, the nested preset-amount record is provenance.
@@ -205,7 +202,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     }
     let preset = Preset {
         photo_settings: description
-            .attribute(("http://ns.adobe.com/photoshop/1.0/", "SidecarForExtension"))
+            .attribute((PHOTOSHOP, "SidecarForExtension"))
             .is_some(),
         id,
         name,

@@ -2,8 +2,10 @@
 mod apply;
 pub mod descriptive;
 pub mod local;
+pub mod ns;
 mod parse;
 pub mod write;
+pub(crate) mod xml;
 use crate::develop::curve::ToneCurve;
 pub use parse::parse;
 use std::{collections::BTreeMap, path::PathBuf};

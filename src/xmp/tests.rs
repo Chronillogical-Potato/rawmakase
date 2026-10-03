@@ -1,4 +1,4 @@
-use super::parse::{CRS, RDF};
+use super::ns::{CRS, RDF};
 use super::*;
 use crate::{develop::Recipe, raw::Metadata};
 use anyhow::Result;

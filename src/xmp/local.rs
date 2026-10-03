@@ -77,7 +77,7 @@ impl Node {
     /// A CRS element's value: a list for `rdf:Seq`/`Bag`/`Alt`, a record for an
     /// `rdf:Description` or an element with CRS attributes, text otherwise.
     pub(crate) fn from_xml(node: roxmltree::Node<'_, '_>) -> Node {
-        use super::parse::{CRS, RDF};
+        use super::ns::{CRS, RDF};
         if let Some(seq) = node.children().find(|n| {
             n.has_tag_name((RDF, "Seq"))
                 || n.has_tag_name((RDF, "Bag"))

@@ -9,12 +9,13 @@
 //! darkens by 1 + a1 r² + a2 r⁴ + a3 r⁶, and the red/blue chromatic models scale the
 //! radius relative to green the same way, times their ScaleFactor.
 use super::{LensCorrection, Radial};
-use crate::raw::Metadata;
+use crate::{
+    raw::Metadata,
+    xmp::ns::{RDF, ST_CAMERA},
+};
 use anyhow::{Context, Result, ensure};
 use std::path::{Path, PathBuf};
 
-const CAMERA: &str = "http://ns.adobe.com/photoshop/1.0/camera-profile";
-const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// A chromatic model: ScaleFactor and radial parameters.
 type Chromatic = (f32, [f32; 3]);
 
@@ -39,11 +40,13 @@ pub struct Entry {
 }
 
 fn attr(node: roxmltree::Node, name: &str) -> Option<String> {
-    node.attribute((CAMERA, name))
+    node.attribute((ST_CAMERA, name))
         .map(str::to_string)
         .or_else(|| {
             node.children()
-                .find(|c| c.tag_name().namespace() == Some(CAMERA) && c.tag_name().name() == name)
+                .find(|c| {
+                    c.tag_name().namespace() == Some(ST_CAMERA) && c.tag_name().name() == name
+                })
                 .and_then(|c| c.text())
                 .map(|t| t.trim().to_string())
         })
@@ -58,7 +61,7 @@ fn number(node: roxmltree::Node, name: &str) -> Option<f32> {
 fn model<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<roxmltree::Node<'a, 'a>> {
     let m = node
         .children()
-        .find(|c| c.tag_name().namespace() == Some(CAMERA) && c.tag_name().name() == name)?;
+        .find(|c| c.tag_name().namespace() == Some(ST_CAMERA) && c.tag_name().name() == name)?;
     Some(
         m.children()
             .find(|c| c.tag_name().namespace() == Some(RDF) && c.tag_name().name() == "Description")
