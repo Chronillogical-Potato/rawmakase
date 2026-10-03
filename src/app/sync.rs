@@ -86,6 +86,7 @@ pub struct SyncNote {
 /// What a Sync did, in which catalog.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SyncResult {
+    pub change: BatchChange,
     pub catalog: PathBuf,
     pub synced: Vec<Synced>,
     pub failed: Vec<SyncFailure>,
@@ -96,7 +97,28 @@ pub struct SyncResult {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct SyncCommand {
     pub sequence: u64,
+    pub change: BatchChange,
     pub edits: Vec<Synced>,
+}
+
+/// What a batch change does to each of the other selected photos.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum BatchChange {
+    /// Sync Settings: the open photo's settings in these groups.
+    Settings(GroupSelection),
+    /// Lightroom's Match Total Exposures: each photo's Exposure set so that its
+    /// aperture, shutter speed and ISO end up as bright as the open photo.
+    #[default]
+    MatchTotalExposures,
+}
+impl BatchChange {
+    /// The History step and Undo name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            BatchChange::Settings(_) => "Synchronize Settings",
+            BatchChange::MatchTotalExposures => "Match Total Exposures",
+        }
+    }
 }
 
 /// Which edits an undo or redo of a Sync writes back.
@@ -112,16 +134,17 @@ pub(super) enum SyncSide {
 pub(super) fn synchronize(
     catalog: &Catalog,
     source: &Settings,
-    groups: &GroupSelection,
+    change: &BatchChange,
     targets: &[SyncTarget],
 ) -> SyncResult {
     let mut result = SyncResult {
+        change: change.clone(),
         catalog: catalog.path.clone(),
         ..Default::default()
     };
     let mut prepared = Vec::new();
     for target in targets {
-        match prepare(catalog, source, groups, target) {
+        match prepare(catalog, source, change, target) {
             Ok(p) => {
                 result.notes.extend(p.notes.iter().map(|note| SyncNote {
                     name: target.name.clone(),
@@ -181,7 +204,7 @@ struct Prepared {
 fn prepare(
     catalog: &Catalog,
     source: &Settings,
-    groups: &GroupSelection,
+    change: &BatchChange,
     target: &SyncTarget,
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
@@ -204,18 +227,29 @@ fn prepare(
             )
         }
     };
-    let transferred = settings_groups::transfer(
-        Source {
-            recipe: &source.recipe,
-            metadata: &source.metadata,
+    let transferred = match change {
+        BatchChange::Settings(groups) => settings_groups::transfer(
+            Source {
+                recipe: &source.recipe,
+                metadata: &source.metadata,
+            },
+            before.recipe(),
+            groups,
+            Target {
+                metadata: &metadata,
+                profiles: &profiles,
+            },
+        ),
+        BatchChange::MatchTotalExposures => settings_groups::Transferred {
+            recipe: crate::develop::Recipe {
+                exposure: matched_exposure(source, &metadata).with_context(|| {
+                    format!("{} has no aperture, shutter speed or ISO", target.name)
+                })?,
+                ..before.recipe().clone()
+            },
+            notes: Vec::new(),
         },
-        before.recipe(),
-        groups,
-        Target {
-            metadata: &metadata,
-            profiles: &profiles,
-        },
-    );
+    };
     // What its Lightroom edit could not bring along is said, as when it is opened.
     let mut notes: Vec<String> = starting_warnings
         .into_iter()
@@ -254,7 +288,7 @@ fn prepare(
     let history_before = saved.clone();
     let mut history = History::restored(saved, &before_recipe);
     let mut current = before_recipe;
-    history.set(&after, &mut current, Step::new("Synchronize Settings", ""));
+    history.set(&after, &mut current, Step::new(change.name(), ""));
     Ok(Prepared {
         edit: Some(PreparedEdit {
             synced: Synced {
@@ -271,6 +305,20 @@ fn prepare(
         }),
         notes,
     })
+}
+
+/// How much light a photo's camera settings let in, in stops from f/1, 1 s, ISO 100:
+/// what Match Total Exposures evens out. `None` without all three.
+pub(super) fn capture_stops(m: &crate::raw::Metadata) -> Option<f32> {
+    (m.aperture > 0. && m.shutter > 0. && m.iso > 0.)
+        .then(|| m.shutter.log2() - 2. * m.aperture.log2() + (m.iso / 100.).log2())
+}
+
+/// The Exposure that makes a photo shot with `target`'s settings as bright as the
+/// source: a photo that let in a stop more light gets a stop less Exposure.
+fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<f32> {
+    let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
+    Some((source.recipe.exposure + difference).clamp(-5., 5.))
 }
 
 /// The edit Develop opens a photo with when RAWmakase has none: its Lightroom edit,
@@ -430,7 +478,20 @@ impl Editor {
     }
     /// Synchronizes the open photo's `groups` to the other selected photos, in the
     /// background; the result arrives as [`Event::Synced`].
-    pub(super) fn start_sync(&mut self, groups: GroupSelection) {
+    pub(super) fn start_sync(&mut self, change: BatchChange) {
+        // Matching to a photo without aperture, shutter speed and ISO means nothing.
+        if change == BatchChange::MatchTotalExposures
+            && self
+                .document
+                .metadata
+                .as_ref()
+                .and_then(capture_stops)
+                .is_none()
+        {
+            self.status =
+                "Match Total Exposures needs this photo's aperture, shutter speed and ISO".into();
+            return;
+        }
         let targets = self.sync_targets();
         if targets.is_empty() || self.activity.is_busy() || !self.flush() {
             return;
@@ -446,16 +507,18 @@ impl Editor {
             return;
         }
         self.status = format!(
-            "Synchronizing {}…",
+            "{} on {}…",
+            change.name(),
             super::widgets::plural(targets.len(), "photo", "photos")
         );
         std::thread::spawn(move || {
             // A panic (in Upright's analysis, say) still finishes the Sync.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Catalog::open(&catalog).map(|c| synchronize(&c, &source, &groups, &targets))
+                Catalog::open(&catalog).map(|c| synchronize(&c, &source, &change, &targets))
             }))
             .unwrap_or_else(|_| Err(anyhow::anyhow!("the Sync failed unexpectedly")))
             .unwrap_or_else(|e| SyncResult {
+                change: change.clone(),
                 catalog: catalog.clone(),
                 notes: Vec::new(),
                 synced: Vec::new(),
@@ -489,11 +552,13 @@ impl Editor {
             self.undo_log
                 .push(super::undo::Command::Sync(Box::new(SyncCommand {
                     sequence: super::undo::sequence(),
+                    change: result.change.clone(),
                     edits: result.synced,
                 })));
         }
         let mut status = format!(
-            "Settings synchronized to {}",
+            "{}: {} changed",
+            result.change.name(),
             super::widgets::plural(done, "photo", "photos")
         );
         for failure in &result.failed {
@@ -565,7 +630,12 @@ mod tests {
             metadata,
         };
         let targets: Vec<_> = photos[1..].iter().map(|(id, p)| target(*id, p)).collect();
-        let result = synchronize(&c, &source, &GroupSelection::default(), &targets);
+        let result = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &targets,
+        );
         // The file that isn't a photo is reported; the two charts are saved.
         assert_eq!(result.synced.len(), 2);
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
@@ -624,14 +694,24 @@ mod tests {
             &ExportOptions::default(),
             HistoryUpdate::Replace(&earlier),
         )?;
-        let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..1]);
+        let again = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &targets[..1],
+        );
         assert_eq!(again.synced.len(), 1);
         restore(&c, &again.synced, SyncSide::Before, path)?;
         assert_eq!(c.load_history(id)?, Some(earlier));
         assert_eq!(c.load_edit(id, &path0)?.unwrap().recipe.exposure, -0.3);
         restore(&c, &again.synced, SyncSide::After, path)?;
         // Settings the photos already have change nothing.
-        let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..2]);
+        let again = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &targets[..2],
+        );
         assert!(again.synced.is_empty() && again.failed.is_empty());
         // A file changed while it had no edit is not given the old settings again.
         restore(&c, &result.synced, SyncSide::Before, path)?;
@@ -641,6 +721,55 @@ mod tests {
         std::fs::write(changed, bytes)?;
         assert!(restore(&c, &result.synced, SyncSide::After, path).is_err());
         assert!(c.load_edit(photos[2].0, &photos[2].1)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn match_total_exposures_evens_out_aperture_shutter_and_iso() -> Result<()> {
+        let camera = |aperture: f32, shutter: f32, iso: f32| crate::raw::Metadata {
+            aperture,
+            shutter,
+            iso,
+            ..Default::default()
+        };
+        let source = Settings {
+            recipe: Recipe {
+                exposure: 0.5,
+                ..Default::default()
+            },
+            metadata: camera(4., 1. / 125., 100.),
+        };
+        // A stop more light (1/60 s): a stop less Exposure. Twice the ISO and a stop
+        // smaller aperture cancel out.
+        assert!(
+            (matched_exposure(&source, &camera(4., 1. / 62.5, 100.)).unwrap() + 0.5).abs() < 1e-4
+        );
+        assert!(
+            (matched_exposure(&source, &camera(5.6568, 1. / 125., 200.)).unwrap() - 0.5).abs()
+                < 1e-3
+        );
+        assert_eq!(
+            matched_exposure(&source, &camera(0., 1. / 125., 100.)),
+            None
+        );
+        // On photos without those settings it says so and leaves them alone.
+        let Fixture {
+            _dir,
+            catalog: c,
+            photos,
+        } = catalog()?;
+        let result = synchronize(
+            &c,
+            &source,
+            &BatchChange::MatchTotalExposures,
+            &[target(photos[1].0, &photos[1].1)],
+        );
+        assert!(result.synced.is_empty());
+        assert!(
+            result.failed[0].reason.contains("aperture"),
+            "{:?}",
+            result.failed
+        );
         Ok(())
     }
 
@@ -681,7 +810,7 @@ mod tests {
         let result = synchronize(
             &c,
             &source,
-            &GroupSelection::default(),
+            &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
@@ -704,7 +833,12 @@ mod tests {
         let mut lightroom = target(photos[1].0, &photos[1].1);
         lightroom.start = StartingEdit::Lightroom;
         let targets = [lightroom, target(photos[2].0, &photos[2].1)];
-        let result = synchronize(&c, &source, &GroupSelection::default(), &targets);
+        let result = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &targets,
+        );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert!(result.failed[0].reason.contains("Lightroom edit"));
         assert!(c.load_edit(photos[1].0, &photos[1].1)?.is_none());
