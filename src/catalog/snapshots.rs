@@ -12,7 +12,9 @@ pub(super) const COPY_LIGHTROOM_SNAPSHOTS: &str =
     "INSERT INTO develop_snapshots(photo, name, recipe, lightroom)
     SELECT image, COALESCE(name, ''), NULL, text
     FROM lr.Adobe_libraryImageDevelopSnapshot
-    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos);";
+    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos)
+      AND NOT EXISTS (SELECT 1 FROM develop_snapshots s
+                      WHERE s.photo = image AND s.name = COALESCE(name, '') AND s.lightroom = text);";
 
 /// A snapshot, by name.
 #[derive(Clone, Debug, PartialEq)]

@@ -1242,5 +1242,12 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
     assert_eq!(cat.backfill_lightroom_snapshots()?, 1);
     assert_eq!(cat.snapshots(40)?.len(), 1);
     assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
+    // A copy cut short before its marker was written copies nothing twice.
+    cat.db.execute(
+        "DELETE FROM meta WHERE key='lightroom_snapshots_backfilled'",
+        [],
+    )?;
+    assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
+    assert_eq!(cat.snapshots(40)?.len(), 1);
     Ok(())
 }

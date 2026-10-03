@@ -93,10 +93,11 @@ impl Editor {
                     // A click applies it, as in Lightroom; renaming is in its menu, so
                     // a rename never applies a snapshot first.
                     let row = snapshot_row(ui, &snapshot.name);
-                    if row.clicked() {
+                    // Control-click opens the menu on macOS, as a right-click does.
+                    if row.clicked() && !super::widgets::context_clicked(&row) {
                         actions.push(SnapshotAction::Apply(snapshot.id));
                     }
-                    row.context_menu(|ui| {
+                    super::widgets::context_menu(&row, |ui| {
                         if ui.button("Update with Current Settings").clicked() {
                             actions.push(SnapshotAction::Update(snapshot.id));
                         }
@@ -165,6 +166,12 @@ impl Editor {
             self.status = format!("Snapshot not saved: {e:#}");
         }
         self.load_snapshots();
+    }
+    /// Saves a name still being typed, before the photo is left.
+    pub(super) fn commit_snapshot_rename(&mut self) {
+        if let Some(renaming) = self.document.snapshots.renaming.take() {
+            self.snapshot_action(SnapshotAction::Rename(renaming.id, renaming.name));
+        }
     }
     fn snapshot(&self, id: i64) -> Option<&Snapshot> {
         self.document.snapshots.list.iter().find(|s| s.id == id)
@@ -311,6 +318,11 @@ mod tests {
         frame(vec![]);
         assert!(e.document.snapshots.renaming.is_none());
         assert_eq!(e.document.snapshots.list[0].name, "Snapshot 1 warm");
+        // A name still being typed is kept when the photo is left.
+        e.snapshot_action(SnapshotAction::StartRename(e.document.snapshots.list[0].id));
+        e.document.snapshots.renaming.as_mut().unwrap().name = "Kept".into();
+        e.commit_snapshot_rename();
+        assert_eq!(e.document.snapshots.list[0].name, "Kept");
         Ok(())
     }
 }

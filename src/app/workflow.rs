@@ -59,6 +59,7 @@ impl Editor {
         if another && let Some(settings) = self.current_settings() {
             self.previous_settings = Some(settings);
         }
+        self.commit_snapshot_rename();
         self.document.reset(photo);
         let (id, cancel) = self.load.start();
         self.preview.clear_document();
