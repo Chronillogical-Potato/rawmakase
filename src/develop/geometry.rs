@@ -336,7 +336,10 @@ impl Geometry {
             im.height as f32 * frame.inset[3],
         );
         let transform = Self::homography(r, frame_width, frame_height);
-        let manual = (r.engine >= 4)
+        // Off with the Lens Corrections panel, for callers that pass the stored recipe
+        // (the white balance picker) rather than the rendered one.
+        let lens_panel = r.panels.state(super::panels::Panel::LensCorrections);
+        let manual = (r.engine >= 4 && lens_panel == super::panels::PanelState::On)
             .then(|| ManualDistortion::new(r.lens_manual_distortion, frame_width, frame_height))
             .flatten();
         Self {
@@ -630,6 +633,12 @@ mod manual_distortion_tests {
             ..distorted(0.5)
         };
         assert!(Geometry::new(&im, &old, 0).manual.is_none());
+        let mut off = distorted(0.5);
+        off.panels.set(
+            crate::develop::panels::Panel::LensCorrections,
+            crate::develop::panels::PanelState::Off,
+        );
+        assert!(Geometry::new(&im, &off, 0).manual.is_none());
     }
     /// It applies in the frame as recorded, after the Transform takes an output position
     /// back to that frame, as Camera Raw's renders with Scale, Offset and Vertical show.
