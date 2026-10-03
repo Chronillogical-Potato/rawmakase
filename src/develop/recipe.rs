@@ -374,7 +374,8 @@ impl Recipe {
     /// (Sony's) follows the switch; Fuji's and a DNG's stay on, as in Lightroom.
     pub fn set_profile_corrections(&mut self, m: &Metadata, state: ProfileCorrections) {
         self.lens_profile = state == ProfileCorrections::On;
-        if m.lens.as_ref().is_some_and(|l| !l.default_on) {
+        // Lens corrections render from process version 4 only.
+        if self.engine >= 4 && m.lens.as_ref().is_some_and(|l| !l.default_on) {
             self.lens_builtin = self.lens_profile;
         }
     }
@@ -388,6 +389,7 @@ impl Recipe {
         if !self.lens_profile
             || m.profile_lens.is_some()
             || panel == crate::develop::panels::PanelState::Off
+            || self.engine < 4
         {
             return None;
         }
