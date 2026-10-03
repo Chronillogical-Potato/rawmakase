@@ -28,7 +28,12 @@ impl Editor {
     /// measure (curves, presence, color and the like) leave it in effect.
     pub(super) fn auto_in_effect(&self) -> bool {
         let r = &self.document.recipe;
-        self.document.auto_applied.as_ref().is_some_and(|a| {
+        if let Some((seen, in_effect)) = &*self.document.auto_effect.borrow()
+            && seen == r
+        {
+            return *in_effect;
+        }
+        let in_effect = self.document.auto_applied.as_ref().is_some_and(|a| {
             [
                 a.exposure,
                 a.contrast,
@@ -44,7 +49,9 @@ impl Editor {
                 r.whites,
                 r.blacks,
             ] && inputs(AutoKind::Settings, a) == inputs(AutoKind::Settings, r)
-        })
+        });
+        *self.document.auto_effect.borrow_mut() = Some((r.clone(), in_effect));
+        in_effect
     }
 
     /// Starts Auto for the open photo; the estimate arrives as [`Event::Auto`]. Does
@@ -117,6 +124,7 @@ impl Editor {
                 r.whites = auto.whites;
                 r.blacks = auto.blacks;
                 self.document.auto_applied = Some(r.clone());
+                self.document.auto_effect.take();
                 Step::new("Auto Settings", "")
             }
             AutoKind::WhiteBalance => {

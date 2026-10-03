@@ -30,6 +30,11 @@ pub(super) struct Document {
     pub(super) auto_input: Option<Recipe>,
     /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
     pub(super) auto_applied: Option<Recipe>,
+    /// The recipe [`Editor::auto_in_effect`] last answered for, and its answer, so the
+    /// Basic panel does not rebuild what Auto measures on every frame.
+    ///
+    /// [`Editor::auto_in_effect`]: super::Editor::auto_in_effect
+    pub(super) auto_effect: std::cell::RefCell<Option<(Recipe, bool)>>,
     /// The Transform panel's Upright analysis for this photo.
     pub(super) upright: super::task::Task,
 }
