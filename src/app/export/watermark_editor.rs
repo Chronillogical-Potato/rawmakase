@@ -368,23 +368,75 @@ fn mark_texture(
     Some((texture, rect))
 }
 
+/// The panel's grid: a label column, then every control from the same x,
+/// on rows of one height, so nothing is out of line.
+const LABEL: f32 = 76.;
+const ROW: f32 = 26.;
+const GAP: f32 = 8.;
+/// The number box after a slider.
+const VALUE: f32 = 48.;
+
 fn heading(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(6.);
-    ui.label(
-        egui::RichText::new(title)
-            .size(12.)
-            .strong()
-            .color(theme::gray(200)),
+    ui.add_space(10.);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.), Sense::hover());
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(12.),
+        theme::gray(215),
     );
+    ui.add_space(2.);
 }
-fn slider(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>) {
-    ui.horizontal(|ui| {
+/// One row: `label` right-aligned in the label column, then `contents`,
+/// vertically centered, in the rest of the width.
+fn row<R>(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    row_of(ui, label, ROW, contents)
+}
+fn row_of<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    height: f32,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + LABEL, rect.top() + ROW / 2.),
+        egui::Align2::RIGHT_CENTER,
+        label,
+        egui::FontId::proportional(12.),
+        theme::gray(150),
+    );
+    let controls = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + LABEL + GAP, rect.top()),
+        rect.right_bottom(),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(controls)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.set_min_height(height);
+    contents(&mut child)
+}
+/// A slider across the row with its value in a box at the right edge.
+fn slider(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    suffix: &str,
+) {
+    row(ui, label, |ui| {
+        ui.spacing_mut().slider_width = (ui.available_width() - VALUE - GAP).max(40.);
+        ui.add(egui::Slider::new(value, range.clone()).show_value(false));
         ui.add_sized(
-            Vec2::new(70., 20.),
-            egui::Label::new(egui::RichText::new(label).size(12.).color(theme::gray(150))),
+            Vec2::new(VALUE, 20.),
+            egui::DragValue::new(value)
+                .range(range)
+                .fixed_decimals(0)
+                .suffix(suffix),
         );
-        ui.spacing_mut().slider_width = 150.;
-        ui.add(egui::Slider::new(value, range));
     });
 }
 /// `slider` for a fraction, shown in percent.
@@ -395,27 +447,34 @@ fn percent_slider(
     range: std::ops::RangeInclusive<f32>,
 ) {
     let mut percent = *fraction * 100.;
-    slider(ui, label, &mut percent, range);
+    slider(ui, label, &mut percent, range, "%");
     *fraction = percent / 100.;
 }
-/// The label before a row's controls.
-fn field_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(12.).color(theme::gray(150)));
+/// Choices side by side, as a segmented control.
+fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) {
+    ui.spacing_mut().item_spacing.x = 4.;
+    for (option, text) in options {
+        ui.selectable_value(value, *option, *text);
+    }
 }
 
 /// Style, image or text options, shadow and effects, as Lightroom's
 /// editor has them.
 fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context) {
+    ui.spacing_mut().item_spacing.y = 4.;
     let w = &mut state.watermark;
     heading(ui, "Watermark Style");
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut w.style, Style::Text, "Text");
-        ui.selectable_value(&mut w.style, Style::Graphic, "Graphic");
+    row(ui, "", |ui| {
+        choices(
+            ui,
+            &mut w.style,
+            &[(Style::Text, "Text"), (Style::Graphic, "Graphic")],
+        )
     });
     match w.style {
         Style::Graphic => {
             heading(ui, "Image Options");
-            ui.horizontal(|ui| {
+            row(ui, "Image", |ui| {
                 let name = state
                     .source
                     .as_ref()
@@ -423,34 +482,38 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     .map(|n| n.to_string_lossy().into_owned())
                     .or_else(|| w.image.clone())
                     .unwrap_or_else(|| "A PNG or JPEG image".into());
-                ui.add(
-                    egui::Label::new(egui::RichText::new(name).size(12.).color(theme::gray(180)))
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Choose…").clicked() {
+                        let picked = state.picked.clone();
+                        let ctx = ctx.clone();
+                        std::thread::spawn(move || {
+                            if let Some(file) = rfd::FileDialog::new()
+                                .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
+                                .pick_file()
+                                && let Ok(mut slot) = picked.lock()
+                            {
+                                *slot = Some(file);
+                            }
+                            ctx.request_repaint();
+                        });
+                    }
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(name).size(12.).color(theme::gray(180)),
+                        )
                         .truncate(),
-                );
-                if ui.button("Choose…").clicked() {
-                    let picked = state.picked.clone();
-                    let ctx = ctx.clone();
-                    std::thread::spawn(move || {
-                        if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
-                            .pick_file()
-                            && let Ok(mut slot) = picked.lock()
-                        {
-                            *slot = Some(file);
-                        }
-                        ctx.request_repaint();
-                    });
-                }
+                    );
+                });
             });
         }
         Style::Text => {
-            heading(ui, "Text");
-            ui.add(
-                egui::TextEdit::multiline(&mut w.text)
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY),
-            );
             heading(ui, "Text Options");
+            row_of(ui, "Text", 52., |ui| {
+                ui.add_sized(
+                    Vec2::new(ui.available_width(), 48.),
+                    egui::TextEdit::multiline(&mut w.text).desired_rows(2),
+                );
+            });
             // Installed fonts are still being listed at first: Inter until then.
             let listed = watermark::fonts::families_if_listed();
             if listed.is_none() {
@@ -458,10 +521,9 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             }
             let inter = [watermark::fonts::inter()];
             let families: &[watermark::fonts::Family] = listed.unwrap_or(&inter);
-            ui.horizontal(|ui| {
-                field_label(ui, "Font");
+            row(ui, "Font", |ui| {
                 egui::ComboBox::from_id_salt("watermark-font")
-                    .width(200.)
+                    .width(ui.available_width())
                     .selected_text(&w.family)
                     .show_ui(ui, |ui| {
                         for f in families {
@@ -473,15 +535,14 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                         }
                     });
             });
-            ui.horizontal(|ui| {
-                field_label(ui, "Style");
+            row(ui, "Style", |ui| {
                 let faces = families
                     .iter()
                     .find(|f| f.name == w.family)
                     .map(|f| f.faces.clone())
                     .unwrap_or_default();
                 egui::ComboBox::from_id_salt("watermark-face")
-                    .width(200.)
+                    .width(ui.available_width())
                     .selected_text(&w.face)
                     .show_ui(ui, |ui| {
                         for face in &faces {
@@ -489,13 +550,18 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                         }
                     });
             });
-            ui.horizontal(|ui| {
-                field_label(ui, "Align");
-                ui.selectable_value(&mut w.align, Align::Left, "Left");
-                ui.selectable_value(&mut w.align, Align::Center, "Center");
-                ui.selectable_value(&mut w.align, Align::Right, "Right");
-                ui.add_space(12.);
-                field_label(ui, "Color");
+            row(ui, "Align", |ui| {
+                choices(
+                    ui,
+                    &mut w.align,
+                    &[
+                        (Align::Left, "Left"),
+                        (Align::Center, "Center"),
+                        (Align::Right, "Right"),
+                    ],
+                )
+            });
+            row(ui, "Color", |ui| {
                 // The picker in sRGB, as the color is stored and laid over
                 // the photo.
                 let mut srgb = w.color.map(unit_to_u8);
@@ -503,19 +569,22 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     w.color = srgb.map(|c| c as f32 / 255.);
                 }
             });
-            ui.checkbox(&mut w.shadow.enabled, "Shadow");
+            heading(ui, "Shadow");
+            row(ui, "", |ui| {
+                ui.checkbox(&mut w.shadow.enabled, "Drop shadow")
+            });
             ui.add_enabled_ui(w.shadow.enabled, |ui| {
                 percent_slider(ui, "Opacity", &mut w.shadow.opacity, 0.0..=100.);
                 percent_slider(ui, "Offset", &mut w.shadow.offset, 0.0..=40.);
                 percent_slider(ui, "Radius", &mut w.shadow.radius, 0.0..=40.);
-                slider(ui, "Angle", &mut w.shadow.angle, -180.0..=180.);
+                slider(ui, "Angle", &mut w.shadow.angle, -180.0..=180., "°");
             });
         }
     }
     heading(ui, "Watermark Effects");
     percent_slider(ui, "Opacity", &mut w.opacity, 0.0..=100.);
-    ui.horizontal(|ui| {
-        field_label(ui, "Size");
+    row(ui, "Size", |ui| {
+        ui.spacing_mut().item_spacing.x = 4.;
         let proportional = matches!(w.size, Size::Proportional(_));
         if ui.selectable_label(proportional, "Proportional").clicked() && !proportional {
             w.size = Size::default();
@@ -523,15 +592,24 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
         ui.selectable_value(&mut w.size, Size::Fit, "Fit");
         ui.selectable_value(&mut w.size, Size::Fill, "Fill");
     });
+    // Always a row, so choosing Fit or Fill moves nothing below.
+    let mut percent = match w.size {
+        Size::Proportional(p) => p,
+        _ => 0.2,
+    };
+    ui.add_enabled_ui(matches!(w.size, Size::Proportional(_)), |ui| {
+        percent_slider(ui, "Amount", &mut percent, 1.0..=100.);
+    });
     if let Size::Proportional(p) = &mut w.size {
-        percent_slider(ui, "", p, 1.0..=100.);
+        *p = percent;
     }
+    heading(ui, "Inset");
     percent_slider(ui, "Horizontal", &mut w.inset[0], 0.0..=50.);
     percent_slider(ui, "Vertical", &mut w.inset[1], 0.0..=50.);
-    ui.horizontal(|ui| {
-        field_label(ui, "Anchor");
+    heading(ui, "Position");
+    row_of(ui, "Anchor", 3. * 20. + 4., |ui| {
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::splat(2.);
+            ui.spacing_mut().item_spacing = Vec2::new(6., 2.);
             for v in 0..3 {
                 ui.horizontal(|ui| {
                     for h in 0..3 {
@@ -540,8 +618,8 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                 });
             }
         });
-        ui.add_space(16.);
-        field_label(ui, "Rotate");
+    });
+    row(ui, "Rotate", |ui| {
         if ui
             .add(egui::Button::new("⟲").frame(false))
             .on_hover_text("Rotate left")
