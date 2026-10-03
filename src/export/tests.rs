@@ -127,17 +127,17 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
         height: 4,
         pixels: vec![[0.5; 3]; 32],
     };
-    let camera = exif::CameraExif {
+    let camera = crate::exif::CameraExif {
         main: vec![
-            exif::Field::ascii(0x010f, "SONY"),
-            exif::Field::ascii(0x0110, "ILCE-7M2"),
+            crate::exif::Field::ascii(0x010f, "SONY"),
+            crate::exif::Field::ascii(0x0110, "ILCE-7M2"),
         ],
         exif: vec![
-            exif::Field::ascii(0x9003, "2018:08:26 10:39:33"),
-            exif::Field::ascii(0xa434, "FE 55mm F1.8 ZA"),
-            exif::Field::ascii(0x927c, "maker note"),
+            crate::exif::Field::ascii(0x9003, "2018:08:26 10:39:33"),
+            crate::exif::Field::ascii(0xa434, "FE 55mm F1.8 ZA"),
+            crate::exif::Field::ascii(0x927c, "maker note"),
         ],
-        gps: vec![exif::Field::rational(0x0002, 52, 1)],
+        gps: vec![crate::exif::Field::rational(0x0002, 52, 1)],
     };
     let embed = Embed {
         camera: Some(camera.clone()),
@@ -163,7 +163,7 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     assert!(image::open(&jpg).is_ok());
     let tif = dir.path().join("out.tif");
     let without_location = Embed {
-        camera: Some(exif::CameraExif {
+        camera: Some(crate::exif::CameraExif {
             gps: Vec::new(),
             ..camera
         }),
@@ -183,7 +183,7 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
 }
 #[test]
 fn capture_times_take_lightroom_form_with_three_digit_subseconds() {
-    use exif::lightroom_time;
+    use crate::exif::lightroom_time;
     let t = |date, sub| lightroom_time(date, sub);
     assert_eq!(
         t("2018:08:26 10:39:33", Some("12")).as_deref(),
@@ -234,22 +234,22 @@ fn capture_time_is_read_from_tiff_and_jpeg_files() -> anyhow::Result<()> {
         let path = directory.path().join(name);
         std::fs::write(&path, exif::dated_file(jpeg, "2019:05:04 03:02:01", "7"))?;
         assert_eq!(
-            exif::capture_time(&path).as_deref(),
+            crate::exif::capture_time(&path).as_deref(),
             Some("2019-05-04T03:02:01.700"),
             "{name}"
         );
     }
     let undated = directory.path().join("c.jpg");
     std::fs::write(&undated, [0xff, 0xd8, 0xff, 0xd9])?;
-    assert_eq!(exif::capture_time(&undated), None);
+    assert_eq!(crate::exif::capture_time(&undated), None);
     Ok(())
 }
 #[test]
 fn photo_info_is_read_from_exif() -> anyhow::Result<()> {
-    use exif::Field;
+    use crate::exif::Field;
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("a.tif");
-    let block = exif::tiff_block(exif::CameraExif {
+    let block = exif::tiff_block(crate::exif::CameraExif {
         main: vec![
             Field::ascii(0x010f, "FUJIFILM"),
             Field::ascii(0x0110, "X100F"),
@@ -265,7 +265,7 @@ fn photo_info_is_read_from_exif() -> anyhow::Result<()> {
     let mut bytes = block;
     bytes.resize(512, 0);
     std::fs::write(&path, bytes)?;
-    let info = exif::photo_info(&path).unwrap();
+    let info = crate::exif::photo_info(&path).unwrap();
     assert_eq!(info.camera.as_deref(), Some("FUJIFILM X100F"));
     assert_eq!(info.exposure_text().as_deref(), Some("1/250 sec at f/2.8"));
     assert_eq!(info.iso_text().as_deref(), Some("ISO 400"));

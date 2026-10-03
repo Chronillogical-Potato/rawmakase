@@ -115,7 +115,7 @@ fn embedded(file: &Path) -> Result<Option<String>> {
                 return Ok(None);
             };
             Ok(main
-                .get(&700)
+                .get(&crate::exif::tag::XMP)
                 .and_then(|e| t.raw(e))
                 .map(String::from_utf8)
                 .transpose()

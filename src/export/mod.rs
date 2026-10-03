@@ -2,7 +2,7 @@
 //! edit as Camera Raw XMP, as Lightroom embeds them.
 pub mod assemble;
 mod encode;
-pub mod exif;
+pub(crate) mod exif;
 mod extended_xmp;
 pub mod job;
 mod metadata;
@@ -54,7 +54,7 @@ impl ExportOptions {
 pub struct Embed {
     /// The camera's EXIF, read from the RAW; LibRaw's capture settings stand in
     /// when it could not be read.
-    pub camera: Option<exif::CameraExif>,
+    pub camera: Option<crate::exif::CameraExif>,
     /// Make and model from LibRaw where the camera's EXIF has none.
     pub camera_fallback: bool,
     /// An XMP packet, e.g. the edit as Camera Raw settings.

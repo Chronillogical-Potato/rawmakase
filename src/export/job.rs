@@ -3,11 +3,11 @@
 use super::{
     Embed, ExportSettings,
     assemble::{Policy, Values, assemble, copyright},
-    exif,
 };
 use crate::{
     decode_cache::DecodeCache,
     develop::Recipe,
+    exif,
     raw::{CameraImage, Raw},
 };
 use anyhow::{Result, ensure};

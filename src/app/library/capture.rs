@@ -117,7 +117,7 @@ fn read(path: &Path) -> Read {
     if !super::background::can_read(path) {
         return Read::Unreadable;
     }
-    match crate::export::exif::capture_time(path) {
+    match crate::exif::capture_time(path) {
         Some(time) => Read::Dated(time),
         None => Read::Undated,
     }

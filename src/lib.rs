@@ -21,6 +21,7 @@ pub mod decode_cache;
 pub mod demosaic;
 pub mod develop;
 pub mod dng;
+pub mod exif;
 pub mod export;
 mod jpeg;
 pub mod lens;

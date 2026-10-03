@@ -330,7 +330,7 @@ fn capture(text: &str) -> Option<Capture> {
     }
     let captured = format!("{date}T{time}");
     // A date the catalog can sort by: never 0000-00-00.
-    crate::export::exif::lightroom_time(&captured, None)?;
+    crate::exif::lightroom_time(&captured, None)?;
     // Subseconds that aren't digits make the whole date suspect.
     if subsec.is_some_and(|s| s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit())) {
         return None;

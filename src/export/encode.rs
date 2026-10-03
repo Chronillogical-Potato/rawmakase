@@ -1,9 +1,13 @@
 //! JPEG and 16-bit TIFF encoding with an ICC profile, EXIF directories and XMP.
-use super::{
-    Embed,
-    exif::{CameraExif, Field},
+use super::Embed;
+use crate::{
+    develop::Rendered,
+    exif::{
+        CameraExif, Field,
+        tag::{EXIF_IFD, GPS_IFD, ICC_PROFILE, RESOLUTION_UNIT, X_RESOLUTION, XMP, Y_RESOLUTION},
+    },
+    tiff::kind::{ASCII, FLOAT, LONG, RATIONAL, SHORT, SLONG, SRATIONAL, SSHORT},
 };
-use crate::develop::Rendered;
 use anyhow::{Result, ensure};
 use image::{ImageEncoder, codecs::jpeg::JpegEncoder};
 use std::io::{Seek, Write};
@@ -60,17 +64,18 @@ pub(super) fn tiff(
         Some(gps.finish_with_offsets()?.offset)
     };
     let mut im = e.new_image::<RGB16>(image.width, image.height)?;
-    im.encoder().write_tag(Tag::Unknown(0x8769), exif_offset)?;
+    im.encoder()
+        .write_tag(Tag::Unknown(EXIF_IFD), exif_offset)?;
     if let Some(offset) = gps_offset {
-        im.encoder().write_tag(Tag::Unknown(0x8825), offset)?;
+        im.encoder().write_tag(Tag::Unknown(GPS_IFD), offset)?;
     }
     im.encoder()
-        .write_tag(Tag::Unknown(34675), profile.as_slice())?;
+        .write_tag(Tag::Unknown(ICC_PROFILE), profile.as_slice())?;
     // The encoder writes its own resolution tags.
     for f in directories
         .main
         .iter()
-        .filter(|f| ![0x011a, 0x011b, 0x0128].contains(&f.tag))
+        .filter(|f| ![X_RESOLUTION, Y_RESOLUTION, RESOLUTION_UNIT].contains(&f.tag))
     {
         write_field(im.encoder(), f)?;
     }
@@ -82,7 +87,7 @@ pub(super) fn tiff(
         },
     );
     if let Some(xmp) = &embed.xmp {
-        im.encoder().write_tag(Tag::Unknown(700), xmp.as_bytes())?;
+        im.encoder().write_tag(Tag::Unknown(XMP), xmp.as_bytes())?;
     }
     im.write_data(&image.rgb16())?;
     Ok(())
@@ -144,43 +149,43 @@ fn write_field<W: Write + Seek, K: TiffKind>(
             .map(|c| c.as_chunks::<4>().0)
     };
     match f.kind {
-        2 => dir.write_tag(tag, f.text().unwrap_or_default().as_str())?,
-        3 => dir.write_tag(
+        ASCII => dir.write_tag(tag, f.text().unwrap_or_default().as_str())?,
+        SHORT => dir.write_tag(
             tag,
             halves()
                 .map(u16::from_le_bytes)
                 .collect::<Vec<_>>()
                 .as_slice(),
         )?,
-        8 => dir.write_tag(
+        SSHORT => dir.write_tag(
             tag,
             halves()
                 .map(i16::from_le_bytes)
                 .collect::<Vec<_>>()
                 .as_slice(),
         )?,
-        4 => dir.write_tag(
+        LONG => dir.write_tag(
             tag,
             words()
                 .map(u32::from_le_bytes)
                 .collect::<Vec<_>>()
                 .as_slice(),
         )?,
-        9 => dir.write_tag(
+        SLONG => dir.write_tag(
             tag,
             words()
                 .map(i32::from_le_bytes)
                 .collect::<Vec<_>>()
                 .as_slice(),
         )?,
-        11 => dir.write_tag(
+        FLOAT => dir.write_tag(
             tag,
             words()
                 .map(f32::from_le_bytes)
                 .collect::<Vec<_>>()
                 .as_slice(),
         )?,
-        5 => {
+        RATIONAL => {
             let v: Vec<Rational> = pairs()
                 .map(|p| Rational {
                     n: u32::from_le_bytes(p[0]),
@@ -189,7 +194,7 @@ fn write_field<W: Write + Seek, K: TiffKind>(
                 .collect();
             write_array(dir, tag, v)?
         }
-        10 => {
+        SRATIONAL => {
             let v: Vec<SRational> = pairs()
                 .map(|p| SRational {
                     n: i32::from_le_bytes(p[0]),
