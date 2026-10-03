@@ -9,7 +9,7 @@ use super::widgets::{
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+use crate::develop::{NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 impl Editor {
@@ -489,10 +489,10 @@ impl Editor {
                 } else if as_shot.is_some_and(near) {
                     "As Shot"
                 } else {
-                    WB_PRESETS
-                        .iter()
-                        .find(|(_, t, n)| near((*t, *n)))
-                        .map_or("Custom", |(name, _, _)| *name)
+                    NamedWhiteBalance::ALL
+                        .into_iter()
+                        .find(|w| near((w.values().temperature, w.values().tint)))
+                        .map_or("Custom", NamedWhiteBalance::name)
                 };
                 // The selector sits at the row's far left, so the menu lines up
                 // with Profile's.
@@ -535,12 +535,15 @@ impl Editor {
                         {
                             auto_request = Some(AutoKind::WhiteBalance);
                         }
-                        for (name, temperature, tint) in WB_PRESETS {
-                            if ui.selectable_label(selected == name, name).clicked()
+                        for named in NamedWhiteBalance::ALL {
+                            if ui
+                                .selectable_label(selected == named.name(), named.name())
+                                .clicked()
                                 && let Some(m) = &metadata
                             {
-                                r.temperature = temperature;
-                                r.tint = tint;
+                                let values = named.values();
+                                r.temperature = values.temperature;
+                                r.tint = values.tint;
                                 r.update_wb(m);
                                 r.auto_white_balance = None;
                             }
@@ -1386,15 +1389,6 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
     )
     .inner
 }
-/// Lightroom's white balance presets for RAW files: (name, kelvin, tint).
-const WB_PRESETS: [(&str, f32, f32); 6] = [
-    ("Daylight", 5500., 10.),
-    ("Cloudy", 6500., 10.),
-    ("Shade", 7500., 10.),
-    ("Tungsten", 2850., 0.),
-    ("Fluorescent", 3800., 21.),
-    ("Flash", 5500., 0.),
-];
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     let color = theme::gray(if strong { 235 } else { 170 });
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
