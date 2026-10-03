@@ -67,8 +67,14 @@ impl Editor {
                     .map(|()| format!("Preset {} updated", p.name))
             }),
             PresetAction::Delete(i) => library.presets.get(i).map(|p| {
-                user.delete(p)
-                    .map(|()| format!("Preset {} deleted", p.name))
+                user.delete(p).map(|()| {
+                    // A new preset later saved at the same place starts unfavored.
+                    if self.presets.favorites.remove(&p.id) {
+                        self.presets.revision += 1;
+                        let _ = crate::presets::save_favorites(&self.presets.favorites);
+                    }
+                    format!("Preset {} deleted", p.name)
+                })
             }),
             PresetAction::StartRename(i) => {
                 if let Some(p) = library.presets.get(i) {

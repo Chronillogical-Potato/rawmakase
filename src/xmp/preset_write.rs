@@ -72,17 +72,32 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         settings(r, None)
             .0
             .into_iter()
-            .filter(|(key, _)| group_of_key(key).is_some_and(|g| groups.contains(g))),
+            .filter(|(key, _)| group_of_key(key).is_some_and(|g| groups.contains(g)))
+            // Panel switches are written below; Upright's corrections were analysed
+            // from this photo, so a preset names only the mode, as Lightroom's do.
+            .filter(|(key, _)| !key.starts_with("Enable") && !key.starts_with("Upright")),
     );
-    // Each chosen panel's switch, on or off, so applying the preset also turns its
-    // panel back on where a photo had it off.
+    // Each chosen panel's switch as the photo has it, on or off, so applying the
+    // preset also sets that panel the same way.
     for panel in crate::develop::panels::Panel::ALL {
-        let key = panel.lightroom_keys()[0];
-        if groups.groups().any(|g| g.panel() == Some(panel))
-            && !attributes.iter().any(|(k, _)| k == key)
-        {
-            attributes.push((key.to_string(), "True".into()));
+        if groups.groups().any(|g| g.panel() == Some(panel)) {
+            let on = r.panels.state(panel) == crate::develop::panels::PanelState::On;
+            for key in panel.lightroom_keys() {
+                attributes.push((key.to_string(), if on { "True" } else { "False" }.into()));
+            }
         }
+    }
+    // An enhanced profile (Adobe Color, a creative look) is, as Lightroom writes it, a
+    // Look over its base profile.
+    let look = r
+        .profile
+        .as_ref()
+        .and_then(|p| p.enhanced.as_ref().map(|e| (p.name.clone(), e)))
+        .filter(|_| groups.contains(SettingGroup::TreatmentAndProfile));
+    if let Some((_, enhanced)) = &look
+        && let Some(profile) = attributes.iter_mut().find(|(k, _)| k == "CameraProfile")
+    {
+        profile.1 = enhanced.base_name.clone();
     }
     // Written once, after the settings, as Lightroom does.
     attributes.push(("HasSettings".into(), "True".into()));
@@ -102,6 +117,14 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             out,
             "   <crs:{element}>\n    <rdf:Alt>\n     <rdf:li xml:lang=\"x-default\">{}</rdf:li>\n    </rdf:Alt>\n   </crs:{element}>\n",
             escape_text(text)
+        );
+    }
+    if let Some((name, enhanced)) = &look {
+        let _ = write!(
+            out,
+            "   <crs:Look>\n    <rdf:Description\n     crs:Name=\"{}\"\n     crs:Amount=\"1\"\n     crs:UUID=\"{}\"/>\n   </crs:Look>\n",
+            escape_text(name),
+            escape_text(&enhanced.uuid)
         );
     }
     if groups.contains(SettingGroup::ToneCurve) {
@@ -277,6 +300,21 @@ mod tests {
         let text = preset(&Recipe::default(), &info, &grain);
         assert!(text.contains(r#"crs:EnableEffects="True""#), "{text}");
         assert!(!text.contains("crs:EnableDetail"));
+        // As the photo has it: an Effects panel switched off stays off.
+        let mut off = Recipe::default();
+        off.panels.set(
+            crate::develop::panels::Panel::Effects,
+            crate::develop::panels::PanelState::Off,
+        );
+        let text = preset(&off, &info, &grain);
+        assert!(text.contains(r#"crs:EnableEffects="False""#), "{text}");
+        // Upright travels as its mode only, never this photo's corrections.
+        let mut upright = Recipe::default();
+        upright.upright.mode = crate::develop::UprightMode::Level;
+        upright.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+        let text = preset(&upright, &info, &GroupSelection::all());
+        assert!(text.contains("crs:PerspectiveUpright"));
+        assert!(!text.contains("UprightTransform"), "{text}");
         assert_eq!(
             all.panels.state(crate::develop::panels::Panel::Effects),
             crate::develop::panels::PanelState::Off

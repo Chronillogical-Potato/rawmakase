@@ -93,8 +93,11 @@ impl UserPresets {
         let renamed = text.replacen(&old, &element(&info.name), 1);
         // The same file whatever the case of its letters, as on macOS and Windows:
         // write it in place, then let the rename fix the case.
-        let same_file =
-            path.to_string_lossy().to_lowercase() == existing.path.to_string_lossy().to_lowercase();
+        // Only when both names lead to this very file, as on a case-insensitive file
+        // system; on Linux they can be two presets, and the other must not go.
+        let resolved = |p: &Path| std::fs::canonicalize(p).ok();
+        let same_file = path == existing.path
+            || resolved(&path).is_some_and(|p| Some(p) == resolved(&existing.path));
         if same_file {
             write(&existing.path, Replace::Overwrite, &renamed)?;
             std::fs::rename(&existing.path, &path)?;
@@ -158,7 +161,13 @@ impl UserPresets {
 /// The setting groups a preset holds, from the keys it sets.
 pub fn groups_of(preset: &Preset) -> GroupSelection {
     let mut groups = GroupSelection::none();
-    for key in preset.settings.keys().chain(preset.curves.keys()) {
+    // Panel switches go with whichever groups were chosen, so they say nothing here.
+    for key in preset
+        .settings
+        .keys()
+        .chain(preset.curves.keys())
+        .filter(|k| !k.starts_with("Enable"))
+    {
         if let Some(group) = group_of_key(key) {
             groups.set(group, GroupInclusion::Included);
         }
@@ -244,6 +253,8 @@ mod tests {
         let made = library(&user.dir).presets.remove(0);
         assert!(user.owns(&made));
         assert_eq!(made.name, "Bright/airy");
+        // The panel switches written with it don't count as groups of their own.
+        assert_eq!(groups_of(&made), groups);
         // Update keeps the groups it had: still only Exposure.
         user.update(
             &made,
