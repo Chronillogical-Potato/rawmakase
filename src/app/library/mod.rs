@@ -543,6 +543,23 @@ impl Library {
         self.fields.clear();
     }
 }
+/// Why Develop cannot open `photo`, if it cannot: it edits camera RAW files
+/// that are `available`.
+pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<String> {
+    if !available {
+        Some(
+            "The photo is offline. Use Locate root folder or right-click its folder to relink it."
+                .into(),
+        )
+    } else if !crate::storage::is_raw(&photo.path) {
+        Some(format!(
+            "{} files can be browsed in Library; Develop opens camera RAW files.",
+            photo.format
+        ))
+    } else {
+        None
+    }
+}
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
 /// else its Lightroom settings.
 fn edit_source(catalog: &Catalog, id: i64) -> Option<previews::EditSource> {

@@ -66,6 +66,8 @@ pub struct Editor {
     remove_copy: Option<i64>,
     /// Photos waiting for the user to confirm Read Metadata from Files.
     read_metadata: Option<Vec<i64>>,
+    /// A photo Develop could not open and why, until the user dismisses it.
+    not_editable: Option<(String, String)>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
     /// Photo > Auto Advance, saved in the session.
@@ -220,6 +222,7 @@ impl Editor {
             close_confirm: false,
             remove_copy: None,
             read_metadata: None,
+            not_editable: None,
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
             loupe_tried: None,

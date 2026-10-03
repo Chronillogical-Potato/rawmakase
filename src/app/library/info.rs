@@ -19,13 +19,17 @@ impl Library {
             .auto_shrink(false)
             .show(ui, |ui| {
                 section(ui, "Quick Develop", false, |ui| {
+                    let refusal = photo
+                        .as_ref()
+                        .and_then(|p| super::develop_refusal(p, self.is_available(&p.path)));
                     let open = ui
                         .add_enabled(
-                            photo.is_some(),
+                            photo.is_some() && refusal.is_none(),
                             egui::Button::new("Open in Develop")
                                 .min_size(Vec2::new(ui.available_width(), 24.)),
                         )
-                        .on_hover_text("Develop · D");
+                        .on_hover_text("Develop · D")
+                        .on_disabled_hover_text(refusal.unwrap_or_default());
                     if open.clicked()
                         && let Some(p) = &photo
                     {

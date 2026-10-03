@@ -36,6 +36,35 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
 }
 
 #[test]
+fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let photo = library.photos[0].clone();
+    assert!(develop_refusal(&photo, true).is_some_and(|r| r.contains("camera RAW")));
+    assert!(develop_refusal(&photo, false).is_some_and(|r| r.contains("offline")));
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.library_mode = true;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.library_mode);
+    let (title, reason) = editor.not_editable.clone().unwrap();
+    assert_eq!(title, "a.jpg can't be opened in Develop");
+    assert!(reason.contains("camera RAW"));
+    // Dismissed, then the file goes offline.
+    editor.not_editable = None;
+    std::fs::remove_file(folder.join("a.jpg"))?;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.not_editable.unwrap().1.contains("offline"));
+    Ok(())
+}
+
+#[test]
 fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
     let ctx = egui::Context::default();
     let photo = Photo {

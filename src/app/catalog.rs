@@ -221,17 +221,12 @@ impl Editor {
         let Some(p) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
             return;
         };
-        if !p.path.is_file() {
-            self.status =
-                "Photo is offline. Use Locate root folder or right-click its folder to relink it."
-                    .into();
-            return;
-        }
-        if !crate::storage::is_raw(&p.path) {
-            self.status = format!(
-                "{} can be browsed in Library; Develop opens camera RAW files.",
-                p.format
-            );
+        if let Some(reason) = crate::app::library::develop_refusal(&p, p.path.is_file()) {
+            // Said in a dialog: in the status bar alone, it looks as if the
+            // click did nothing.
+            self.status = reason.clone();
+            self.not_editable =
+                Some((format!("{} can't be opened in Develop", p.filename), reason));
             return;
         }
         // Already open, e.g. in the Loupe: Develop shows it as it is.
@@ -358,6 +353,15 @@ impl Editor {
         self.remove_copy = None;
         if remove {
             self.remove_virtual_copy(id);
+        }
+    }
+    /// Says why Develop could not open a photo.
+    pub(super) fn not_editable_window(&mut self, ctx: &egui::Context) {
+        let Some((title, reason)) = &self.not_editable else {
+            return;
+        };
+        if confirm_modal(ctx, "not-editable", title, reason, false, &[("OK", ())], ()).is_some() {
+            self.not_editable = None;
         }
     }
     /// Asks before Read Metadata from Files, as Lightroom does: it replaces
