@@ -232,7 +232,10 @@ fn keywords(p: &Packet) -> Option<Vec<Vec<String>>> {
         (Some(paths), subject) => {
             let mut paths = paths;
             for name in subject.unwrap_or_default() {
-                if !paths.iter().flatten().any(|n| *n == name) {
+                let same = |n: &String| {
+                    crate::catalog::keyword_name(n) == crate::catalog::keyword_name(&name)
+                };
+                if !paths.iter().flatten().any(same) {
                     paths.push(vec![name]);
                 }
             }
@@ -328,11 +331,13 @@ fn capture(text: &str) -> Option<Capture> {
     let captured = format!("{date}T{time}");
     // A date the catalog can sort by: never 0000-00-00.
     crate::export::exif::lightroom_time(&captured, None)?;
+    // Subseconds that aren't digits make the whole date suspect.
+    if subsec.is_some_and(|s| s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
     Some(Capture {
         captured,
-        subsec: subsec
-            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-            .map(String::from),
+        subsec: subsec.map(String::from),
         offset,
     })
 }
@@ -340,13 +345,16 @@ fn capture(text: &str) -> Option<Capture> {
 /// exif:GPSLatitude and GPSLongitude ("52,13.782N" or "52,13,46.92N"), with
 /// exif:GPSAltitude ("1005/10") above or below sea level by GPSAltitudeRef.
 fn location(p: &Packet) -> Option<Location> {
-    let coordinate = |text: String| -> Option<f64> {
+    // `positive` and `negative`: the axis's hemispheres, N/S or E/W.
+    let coordinate = |text: String, positive: char, negative: char| -> Option<f64> {
         let text = text.trim();
-        let hemisphere = text.chars().last()?;
-        let sign = match hemisphere.to_ascii_uppercase() {
-            'N' | 'E' => 1.,
-            'S' | 'W' => -1.,
-            _ => return None,
+        let hemisphere = text.chars().last()?.to_ascii_uppercase();
+        let sign = if hemisphere == positive {
+            1.
+        } else if hemisphere == negative {
+            -1.
+        } else {
+            return None;
         };
         let parts: Vec<f64> = text[..text.len() - 1]
             .split(',')
@@ -365,7 +373,7 @@ fn location(p: &Packet) -> Option<Location> {
     if lat.is_empty() && lon.is_empty() {
         return Some(Location::Cleared);
     }
-    let (lat, lon) = (coordinate(lat)?, coordinate(lon)?);
+    let (lat, lon) = (coordinate(lat, 'N', 'S')?, coordinate(lon, 'E', 'W')?);
     if !(-90.0..=90.).contains(&lat) || !(-180.0..=180.).contains(&lon) {
         return None;
     }

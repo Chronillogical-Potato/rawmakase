@@ -123,7 +123,10 @@ fn embedded(file: &Path) -> Result<Option<String>> {
                     let mut data = vec![0u8; body];
                     f.read_exact(&mut data)?;
                     if let Some(xmp) = data.strip_prefix(HEADER) {
-                        return Ok(Some(String::from_utf8_lossy(xmp).into_owned()));
+                        return Ok(Some(
+                            String::from_utf8(xmp.to_vec())
+                                .context("embedded XMP is not valid UTF-8")?,
+                        ));
                     }
                 } else {
                     f.seek(SeekFrom::Current(body as i64))?;
