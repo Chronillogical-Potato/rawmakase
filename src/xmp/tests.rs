@@ -737,5 +737,24 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
     assert_eq!(r.effects.gray_mix, base.effects.gray_mix);
     assert_eq!(skipped.len(), 1, "{skipped:?}");
     assert!(skipped[0].contains("Auto black & white mix"), "{skipped:?}");
+    // A monochrome profile makes the result black & white as well.
+    let m = Metadata {
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut profile = crate::camera_profiles::CameraProfile::camera_matrix_default(&m)
+        .unwrap()
+        .with_test_tables();
+    profile.enhanced.as_mut().unwrap().monochrome = true;
+    let base = Recipe {
+        profile: Some(std::sync::Arc::new(profile)),
+        engine: 3,
+        ..Default::default()
+    };
+    let auto = parse(
+        Path::new("auto.xmp"),
+        &xml(r#"c:AutoGrayscaleMix="True""#, ""),
+    )?;
+    assert!(auto.apply(&base, &m, &[], None).is_err());
     Ok(())
 }

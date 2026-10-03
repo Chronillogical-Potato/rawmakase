@@ -273,9 +273,18 @@ pub fn convert_develop(
             Err(e) => warnings.push(e.to_string()),
         }
     }
-    // Auto black & white without the mix Lightroom resolved keeps the default mix.
-    warnings.extend(accepted.drop_unresolved_auto_gray_mix()?.map(String::from));
-    let mut recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    let base = Recipe::with_profiles(m, profiles);
+    let mut recipe = match accepted.apply(&base, m, profiles, image) {
+        Ok(recipe) => recipe,
+        // Auto black & white without the mix Lightroom resolved (checked only with
+        // the treatment and profile together) keeps the default mix, reported.
+        Err(e) if accepted.settings.remove("AutoGrayscaleMix").is_some() => {
+            let recipe = accepted.apply(&base, m, profiles, image)?;
+            warnings.push(e.to_string());
+            recipe
+        }
+        Err(e) => return Err(e),
+    };
     if let Some((asked, used)) = accepted.profile_substitute(m, profiles) {
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
     }

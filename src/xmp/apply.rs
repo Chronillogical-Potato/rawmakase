@@ -586,30 +586,16 @@ impl Preset {
     /// mix stays, which only a lenient application accepts.
     fn apply_auto_gray_mix(&self, settings: &mut Settings<'_>, r: &Recipe) -> Result<()> {
         settings.seen.insert("AutoGrayscaleMix".into());
-        ensure!(
-            !self.leaves_auto_gray_mix(r.effects.monochrome)?,
-            "{UNRESOLVED_AUTO_GRAY_MIX}"
-        );
+        ensure!(!self.leaves_auto_gray_mix(r)?, "{UNRESOLVED_AUTO_GRAY_MIX}");
         Ok(())
     }
-    /// Whether Auto black & white applies to a black & white result without the
-    /// mixer values Lightroom resolves for it.
-    fn leaves_auto_gray_mix(&self, monochrome: bool) -> Result<bool> {
+    /// Whether Auto black & white applies to a black & white result (by Treatment
+    /// or a monochrome profile) without the mixer values Lightroom resolves for it.
+    fn leaves_auto_gray_mix(&self, r: &Recipe) -> Result<bool> {
         let v = &self.settings;
-        Ok(monochrome
+        Ok(r.with_profile_adjustments().effects.monochrome
             && boolean(v, "AutoGrayscaleMix")? == Some(true)
             && !v.keys().any(|k| k.starts_with("GrayMixer")))
-    }
-
-    /// For a fresh edit: removes an Auto black & white setting that would leave the
-    /// default mix, returning the report for it.
-    pub(crate) fn drop_unresolved_auto_gray_mix(&mut self) -> Result<Option<&'static str>> {
-        let monochrome = boolean(&self.settings, "ConvertToGrayscale")? == Some(true);
-        if !self.leaves_auto_gray_mix(monochrome)? {
-            return Ok(None);
-        }
-        self.settings.remove("AutoGrayscaleMix");
-        Ok(Some(UNRESOLVED_AUTO_GRAY_MIX))
     }
 
     fn apply_grading(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
