@@ -563,7 +563,7 @@ impl Editor {
                     }
                 }
                 if let Some(library) = &mut self.library {
-                    action = library.sidebar(ui, !loupe);
+                    action = action.then(library.sidebar(ui, !loupe));
                 } else {
                     ui.heading("Library");
                     ui.label("Create an RAWmakase catalog or import a Lightroom catalog from the Catalog menu.");
@@ -575,20 +575,14 @@ impl Editor {
             .max_size(420.)
             .show(ui, |ui| {
                 if let Some(library) = &mut self.library {
-                    let a = library.info_panel(ui);
-                    if !matches!(a, crate::app::library::Action::None) {
-                        action = a
-                    }
+                    action = action.then(library.info_panel(ui));
                 }
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 if let Some(l) = &mut self.library {
-                    let a = l.grid(ui, &mut self.view.zoom);
-                    if !matches!(a, crate::app::library::Action::None) {
-                        action = a
-                    }
+                    action = action.then(l.grid(ui, &mut self.view.zoom));
                     if let Some(id) = l.loupe_develops() {
                         self.loupe_viewport(ui, id);
                     }

@@ -4,12 +4,23 @@ use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     None,
     Develop(i64),
     RelinkRoot(i64),
     RelinkFolder(i64),
     AddFolder,
+}
+impl Action {
+    /// Combines the actions of panels drawn in turn: a later panel's action
+    /// replaces an earlier one, and none keeps it.
+    pub fn then(self, later: Action) -> Action {
+        match later {
+            Action::None => self,
+            later => later,
+        }
+    }
 }
 /// Where the Library was: its source, filter bar and selection, for undo to
 /// return to.

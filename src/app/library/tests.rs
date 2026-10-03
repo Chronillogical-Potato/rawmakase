@@ -1171,6 +1171,16 @@ fn the_filmstrip_follows_a_grid_click_made_after_it_was_drawn() -> Result<()> {
     Ok(())
 }
 #[test]
+fn a_panel_with_nothing_to_do_keeps_an_earlier_panels_action() {
+    // The strip's Open in Develop survives the sidebar drawn after it.
+    assert_eq!(Action::Develop(1).then(Action::None), Action::Develop(1));
+    assert_eq!(
+        Action::Develop(1).then(Action::AddFolder),
+        Action::AddFolder
+    );
+    assert_eq!(Action::None.then(Action::Develop(2)), Action::Develop(2));
+}
+#[test]
 fn a_filmstrip_click_does_what_the_view_shown_does() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
     let ids = ids_of(&library);
