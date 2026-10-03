@@ -1228,5 +1228,11 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
         snapshots[0].settings,
         SnapshotSettings::Lightroom("s = { Exposure2012 = 0.5 }".into())
     );
+    // A catalog imported before snapshots were kept recovers them once.
+    let mut cat = cat;
+    cat.db.execute("DELETE FROM develop_snapshots", [])?;
+    assert_eq!(cat.backfill_lightroom_snapshots()?, 1);
+    assert_eq!(cat.snapshots(40)?.len(), 1);
+    assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
     Ok(())
 }

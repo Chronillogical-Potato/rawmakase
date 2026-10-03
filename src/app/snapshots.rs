@@ -16,6 +16,15 @@ pub(super) struct Snapshots {
 struct Renaming {
     id: i64,
     name: String,
+    /// The field takes the keyboard once, when renaming starts.
+    focus: Focus,
+}
+
+/// Whether the rename field still has to take the keyboard.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Pending,
+    Taken,
 }
 
 /// What the panel asked for this frame.
@@ -66,7 +75,10 @@ impl Editor {
                             Vec2::new(ui.available_width(), 24.),
                             egui::TextEdit::singleline(&mut renaming.name),
                         );
-                        edit.request_focus();
+                        if renaming.focus == Focus::Pending {
+                            edit.request_focus();
+                            renaming.focus = Focus::Taken;
+                        }
                         if edit.lost_focus() {
                             let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
                             action = Some(if cancel {
@@ -77,12 +89,11 @@ impl Editor {
                         }
                         continue;
                     }
+                    // A click applies it, as in Lightroom; renaming is in its menu, so
+                    // a rename never applies a snapshot first.
                     let row = snapshot_row(ui, &snapshot.name);
                     if row.clicked() {
                         action = Some(SnapshotAction::Apply(snapshot.id));
-                    }
-                    if row.double_clicked() {
-                        action = Some(SnapshotAction::StartRename(snapshot.id));
                     }
                     row.context_menu(|ui| {
                         if ui.button("Update with Current Settings").clicked() {
@@ -115,7 +126,11 @@ impl Editor {
             SnapshotAction::New => {
                 let name = format!("Snapshot {}", self.document.snapshots.list.len() + 1);
                 catalog.add_snapshot(photo, &name, recipe).map(|id| {
-                    self.document.snapshots.renaming = Some(Renaming { id, name });
+                    self.document.snapshots.renaming = Some(Renaming {
+                        id,
+                        name,
+                        focus: Focus::Pending,
+                    });
                 })
             }
             SnapshotAction::Update(id) => catalog.update_snapshot(*id, recipe),
@@ -124,7 +139,11 @@ impl Editor {
                     .snapshot(*id)
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
-                self.document.snapshots.renaming = Some(Renaming { id: *id, name });
+                self.document.snapshots.renaming = Some(Renaming {
+                    id: *id,
+                    name,
+                    focus: Focus::Pending,
+                });
                 Ok(())
             }
             SnapshotAction::Rename(id, name) => {
@@ -206,7 +225,7 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
         );
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Click to apply · double-click to rename · right-click for more")
+        .on_hover_text("Click to apply · right-click to update, rename or delete")
 }
 
 #[cfg(test)]
@@ -254,6 +273,39 @@ mod tests {
         assert_eq!(e.document.recipe.exposure, -0.5);
         e.snapshot_action(SnapshotAction::Delete(id));
         assert!(e.document.snapshots.list.is_empty());
+        // Typing a name and pressing Return in the panel names the new snapshot.
+        e.library_mode = false;
+        e.snapshot_action(SnapshotAction::New);
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1400., 900.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| e.draw(ui),
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key, pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![]);
+        frame(vec![egui::Event::Text(" warm".into())]);
+        frame(vec![
+            key(egui::Key::Enter, true),
+            key(egui::Key::Enter, false),
+        ]);
+        frame(vec![]);
+        assert!(e.document.snapshots.renaming.is_none());
+        assert_eq!(e.document.snapshots.list[0].name, "Snapshot 1 warm");
         Ok(())
     }
 }

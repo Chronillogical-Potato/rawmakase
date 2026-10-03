@@ -31,7 +31,20 @@ pub enum SnapshotSettings {
     Lightroom(String),
 }
 
+/// Set in `meta` once snapshots have been recovered from the stored Lightroom catalog.
+const SNAPSHOTS_BACKFILLED: &str = "lightroom_snapshots_backfilled";
+
 impl Catalog {
+    /// Catalogs imported before snapshots were kept still hold the original Lightroom
+    /// catalog; copy its snapshots once. Returns snapshots added.
+    pub fn backfill_lightroom_snapshots(&mut self) -> Result<usize> {
+        self.backfill_once(SNAPSHOTS_BACKFILLED, |db| {
+            if !super::lightroom::has_table(db, "lr", "Adobe_libraryImageDevelopSnapshot")? {
+                return Ok(0);
+            }
+            Ok(db.execute(COPY_LIGHTROOM_SNAPSHOTS, [])?)
+        })
+    }
     /// The photo's snapshots, alphabetically as Lightroom lists them. A snapshot
     /// that cannot be read (from a newer release) is left out.
     pub fn snapshots(&self, photo: i64) -> Result<Vec<Snapshot>> {
