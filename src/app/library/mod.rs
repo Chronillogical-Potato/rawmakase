@@ -526,7 +526,7 @@ impl Library {
     /// Saves a Copy Name or metadata field still being typed, e.g. when the
     /// Library panel goes away before the field loses focus. On failure it
     /// stays pending, to be saved again or discarded.
-    pub(super) fn commit_copy_name(&mut self) -> Result<()> {
+    pub(super) fn commit_drafts(&mut self) -> Result<()> {
         if self.copy_names.commit(&self.catalog, &mut self.photos)? {
             self.filter();
         }
@@ -536,9 +536,10 @@ impl Library {
     pub(super) fn set_copy_name_draft(&mut self, id: i64, name: &str) {
         self.copy_names.draft = Some((id, name.into()));
     }
-    /// Drops a Copy Name that could not be saved, e.g. closing without saving.
-    pub(super) fn discard_copy_name(&mut self) {
-        self.copy_names.discard();
+    /// Drops a Copy Name or metadata field that could not be saved, e.g.
+    /// closing without saving.
+    pub(super) fn discard_drafts(&mut self) {
+        self.copy_names.clear();
         self.fields.clear();
     }
 }
@@ -573,6 +574,7 @@ mod metadata_fields;
 mod photo_info;
 mod previews;
 mod quick;
+mod rows;
 mod screen;
 mod selection;
 mod sidebar;

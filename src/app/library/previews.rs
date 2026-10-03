@@ -1,4 +1,5 @@
 //! Bounded, asynchronous disk-cache work and its UI progress.
+use crate::app::widgets::plural;
 use crate::catalog::preview_cache::{PreviewCache, Stamp};
 use eframe::egui;
 use std::{
@@ -303,12 +304,8 @@ impl Progress {
         }
         if edits_pending > 0 {
             ui.small(format!(
-                "Rendering {edits_pending} edited {}",
-                if edits_pending == 1 {
-                    "preview"
-                } else {
-                    "previews"
-                }
+                "Rendering {}",
+                plural(edits_pending, "edited preview", "edited previews")
             ))
             .on_hover_text(
                 "Photos with Lightroom or RAWmakase edits are rendered with them, \

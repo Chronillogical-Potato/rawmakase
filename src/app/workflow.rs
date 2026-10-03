@@ -78,13 +78,21 @@ impl Editor {
         let photo = library.photo(neighbour)?;
         (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
     }
+    /// Saves a Copy Name or metadata field still being typed in the Library;
+    /// false, with the error on the status line, if it could not be saved.
+    pub(super) fn commit_library_drafts(&mut self) -> bool {
+        if let Some(library) = &mut self.library
+            && let Err(e) = library.commit_drafts()
+        {
+            self.status = format!("Not saved: {e}");
+            return false;
+        }
+        true
+    }
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.
     pub(super) fn flush(&mut self) -> bool {
-        if let Some(library) = &mut self.library
-            && let Err(e) = library.commit_copy_name()
-        {
-            self.status = format!("Not saved: {e}");
+        if !self.commit_library_drafts() {
             return false;
         }
         if let Some(done) = self.autosave.wait() {

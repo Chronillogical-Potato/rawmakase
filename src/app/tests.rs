@@ -1465,7 +1465,7 @@ fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Re
         .unwrap()
         .set_copy_name_draft(copy, "B&W");
     assert!(!editor.flush());
-    editor.library.as_mut().unwrap().discard_copy_name();
+    editor.library.as_mut().unwrap().discard_drafts();
     assert!(editor.flush());
     Ok(())
 }

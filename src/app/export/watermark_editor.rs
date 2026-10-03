@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 const WIDTH: f32 = 920.;
 const HEIGHT: f32 = 620.;
 const PANEL: f32 = 300.;
-const LOADING: &str = "Loading fonts…";
 
 /// The editor's state while it is open.
 pub(super) struct WatermarkEditor {
@@ -29,7 +28,25 @@ pub(super) struct WatermarkEditor {
     /// The image or font the preview draws with, kept while only the
     /// settings change, and what it was loaded for.
     loaded: Option<(String, watermark::Ready)>,
-    message: String,
+    notice: Notice,
+}
+/// What the editor says beside the name field.
+#[derive(Default)]
+enum Notice {
+    #[default]
+    None,
+    /// Installed fonts are still being listed; the preview waits for them.
+    LoadingFonts,
+    Error(String),
+}
+impl Notice {
+    fn text(&self) -> &str {
+        match self {
+            Self::None => "",
+            Self::LoadingFonts => "Loading fonts…",
+            Self::Error(e) => e,
+        }
+    }
 }
 impl WatermarkEditor {
     pub(super) fn new(watermark: Watermark) -> Self {
@@ -45,7 +62,7 @@ impl WatermarkEditor {
             picked: Default::default(),
             preview: None,
             loaded: None,
-            message: String::new(),
+            notice: Notice::None,
         }
     }
 }
@@ -131,9 +148,10 @@ impl Editor {
                             .desired_width(200.)
                             .hint_text("Watermark name"),
                     );
-                    if !state.message.is_empty() {
+                    let notice = state.notice.text();
+                    if !notice.is_empty() {
                         ui.label(
-                            egui::RichText::new(&state.message)
+                            egui::RichText::new(notice)
                                 .size(12.)
                                 .color(Color32::from_rgb(230, 120, 100)),
                         );
@@ -145,7 +163,7 @@ impl Editor {
                 let graphic = state.watermark.style == Style::Graphic;
                 let source = state.source.clone().filter(|_| graphic);
                 if graphic && source.is_none() && state.watermark.image.is_none() {
-                    state.message = "Choose a PNG or JPEG image".into();
+                    state.notice = Notice::Error("Choose a PNG or JPEG image".into());
                     self.exports.watermark_editor = Some(state);
                     return;
                 }
@@ -159,20 +177,17 @@ impl Editor {
                         // Export with Previous follows a renamed watermark.
                         if let Some(old) = &state.original
                             && *old != saved.name
-                            && let Some(mut previous) = crate::export::ExportSettings::load()
-                            && previous.watermark_name == *old
                         {
-                            previous.watermark_name = saved.name.clone();
-                            if let Err(e) = previous.save() {
-                                self.status = format!("Export settings not saved: {e:#}");
-                            }
+                            self.update_previous(old, |previous| {
+                                previous.watermark_name = saved.name.clone();
+                            });
                         }
                         self.exports.draft.watermark = true;
                         self.exports.draft.watermark_name = saved.name;
                         self.exports.watermarks = watermark::presets();
                     }
                     Err(e) => {
-                        state.message = format!("{e:#}");
+                        state.notice = Notice::Error(format!("{e:#}"));
                         self.exports.watermark_editor = Some(state);
                     }
                 }
@@ -189,7 +204,7 @@ impl Editor {
                     && let Err(e) = watermark::delete(&w)
                 {
                     // Nothing else changes; the editor stays open to say so.
-                    state.message = format!("Not deleted: {e:#}");
+                    state.notice = Notice::Error(format!("Not deleted: {e:#}"));
                     self.exports.watermark_editor = Some(state);
                     return;
                 }
@@ -199,19 +214,30 @@ impl Editor {
                     self.exports.draft.watermark_name = watermark::SIMPLE_COPYRIGHT.into();
                 }
                 // Export with Previous neither uses it.
-                if let Some(mut previous) = crate::export::ExportSettings::load()
-                    && previous.watermark_name == original
-                {
+                self.update_previous(&original, |previous| {
                     previous.watermark = false;
                     previous.watermark_name = watermark::SIMPLE_COPYRIGHT.into();
-                    if let Err(e) = previous.save() {
-                        self.status = format!("Export settings not saved: {e:#}");
-                    }
-                }
+                });
                 self.exports.watermarks = watermark::presets();
             }
             Some(false) => {}
             None => self.exports.watermark_editor = Some(state),
+        }
+    }
+    /// Changes the settings Export with Previous uses, when they use the
+    /// watermark `name`.
+    fn update_previous(
+        &mut self,
+        name: &str,
+        change: impl FnOnce(&mut crate::export::ExportSettings),
+    ) {
+        if let Some(mut previous) = crate::export::ExportSettings::load()
+            && previous.watermark_name == name
+        {
+            change(&mut previous);
+            if let Err(e) = previous.save() {
+                self.status = format!("Export settings not saved: {e:#}");
+            }
         }
     }
 }
@@ -253,7 +279,7 @@ fn draw_preview(
     if state.preview.as_ref().is_none_or(|(k, _)| *k != key) {
         let mark = mark_texture(ui.ctx(), state, shown);
         // Tried again next frame while fonts are still being listed.
-        let loading = mark.is_none() && state.message == LOADING;
+        let loading = mark.is_none() && matches!(state.notice, Notice::LoadingFonts);
         state.preview = (!loading).then_some((key, mark));
     }
     if let Some((_, Some((texture, rect)))) = &state.preview {
@@ -287,7 +313,7 @@ fn mark_texture(
             && w.family != watermark::fonts::INTER
             && watermark::fonts::families_if_listed().is_none() =>
         {
-            state.message = LOADING.into();
+            state.notice = Notice::LoadingFonts;
             ui_repaint(ctx);
             return None;
         }
@@ -307,22 +333,19 @@ fn mark_texture(
                     r
                 }
                 Err(e) => {
-                    state.message = format!("{e:#}");
+                    state.notice = Notice::Error(format!("{e:#}"));
                     return None;
                 }
             }
         }
     };
-    state.message.clear();
+    state.notice = Notice::None;
     let (pw, ph) = (shown.width().round() as u32, shown.height().round() as u32);
     let placed = ready.place(pw.max(1), ph.max(1))?;
     let pixels: Vec<Color32> = placed
         .rgba
         .iter()
-        .map(|[r, g, b, a]| {
-            let byte = |v: f32| (v.clamp(0., 1.) * 255. + 0.5) as u8;
-            Color32::from_rgba_unmultiplied(byte(*r), byte(*g), byte(*b), byte(*a))
-        })
+        .map(|[r, g, b, a]| Color32::from_rgba_unmultiplied(byte(*r), byte(*g), byte(*b), byte(*a)))
         .collect();
     let image = egui::ColorImage {
         size: [placed.width, placed.height],
@@ -355,6 +378,25 @@ fn slider(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::Rang
         ui.spacing_mut().slider_width = 150.;
         ui.add(egui::Slider::new(value, range));
     });
+}
+/// `slider` for a fraction, shown in percent.
+fn percent_slider(
+    ui: &mut egui::Ui,
+    label: &str,
+    fraction: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+) {
+    let mut percent = *fraction * 100.;
+    slider(ui, label, &mut percent, range);
+    *fraction = percent / 100.;
+}
+/// The label before a row's controls.
+fn field_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).size(12.).color(theme::gray(150)));
+}
+/// A color channel from 0 to 1 as a byte.
+fn byte(v: f32) -> u8 {
+    (v.clamp(0., 1.) * 255. + 0.5) as u8
 }
 
 /// Style, image or text options, shadow and effects, as Lightroom's
@@ -408,16 +450,12 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             // Installed fonts are still being listed at first: Inter until then.
             let listed = watermark::fonts::families_if_listed();
             if listed.is_none() {
-                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                ui_repaint(ctx);
             }
             let inter = [watermark::fonts::inter()];
             let families: &[watermark::fonts::Family] = listed.unwrap_or(&inter);
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Font")
-                        .size(12.)
-                        .color(theme::gray(150)),
-                );
+                field_label(ui, "Font");
                 egui::ComboBox::from_id_salt("watermark-font")
                     .width(200.)
                     .selected_text(&w.family)
@@ -432,11 +470,7 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     });
             });
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Style")
-                        .size(12.)
-                        .color(theme::gray(150)),
-                );
+                field_label(ui, "Style");
                 let faces = families
                     .iter()
                     .find(|f| f.name == w.family)
@@ -452,52 +486,32 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     });
             });
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Align")
-                        .size(12.)
-                        .color(theme::gray(150)),
-                );
+                field_label(ui, "Align");
                 ui.selectable_value(&mut w.align, Align::Left, "Left");
                 ui.selectable_value(&mut w.align, Align::Center, "Center");
                 ui.selectable_value(&mut w.align, Align::Right, "Right");
                 ui.add_space(12.);
-                ui.label(
-                    egui::RichText::new("Color")
-                        .size(12.)
-                        .color(theme::gray(150)),
-                );
+                field_label(ui, "Color");
                 // The picker in sRGB, as the color is stored and laid over
                 // the photo.
-                let mut srgb = w.color.map(|c| (c.clamp(0., 1.) * 255. + 0.5) as u8);
+                let mut srgb = w.color.map(byte);
                 if ui.color_edit_button_srgb(&mut srgb).changed() {
                     w.color = srgb.map(|c| c as f32 / 255.);
                 }
             });
             ui.checkbox(&mut w.shadow.enabled, "Shadow");
             ui.add_enabled_ui(w.shadow.enabled, |ui| {
-                let mut opacity = w.shadow.opacity * 100.;
-                slider(ui, "Opacity", &mut opacity, 0.0..=100.);
-                w.shadow.opacity = opacity / 100.;
-                let mut offset = w.shadow.offset * 100.;
-                slider(ui, "Offset", &mut offset, 0.0..=40.);
-                w.shadow.offset = offset / 100.;
-                let mut radius = w.shadow.radius * 100.;
-                slider(ui, "Radius", &mut radius, 0.0..=40.);
-                w.shadow.radius = radius / 100.;
+                percent_slider(ui, "Opacity", &mut w.shadow.opacity, 0.0..=100.);
+                percent_slider(ui, "Offset", &mut w.shadow.offset, 0.0..=40.);
+                percent_slider(ui, "Radius", &mut w.shadow.radius, 0.0..=40.);
                 slider(ui, "Angle", &mut w.shadow.angle, -180.0..=180.);
             });
         }
     }
     heading(ui, "Watermark Effects");
-    let mut opacity = w.opacity * 100.;
-    slider(ui, "Opacity", &mut opacity, 0.0..=100.);
-    w.opacity = opacity / 100.;
+    percent_slider(ui, "Opacity", &mut w.opacity, 0.0..=100.);
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("Size")
-                .size(12.)
-                .color(theme::gray(150)),
-        );
+        field_label(ui, "Size");
         let proportional = matches!(w.size, Size::Proportional(_));
         if ui.selectable_label(proportional, "Proportional").clicked() && !proportional {
             w.size = Size::default();
@@ -506,20 +520,12 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
         ui.selectable_value(&mut w.size, Size::Fill, "Fill");
     });
     if let Size::Proportional(p) = &mut w.size {
-        let mut percent = *p * 100.;
-        slider(ui, "", &mut percent, 1.0..=100.);
-        *p = percent / 100.;
+        percent_slider(ui, "", p, 1.0..=100.);
     }
-    let mut inset = [w.inset[0] * 100., w.inset[1] * 100.];
-    slider(ui, "Horizontal", &mut inset[0], 0.0..=50.);
-    slider(ui, "Vertical", &mut inset[1], 0.0..=50.);
-    w.inset = [inset[0] / 100., inset[1] / 100.];
+    percent_slider(ui, "Horizontal", &mut w.inset[0], 0.0..=50.);
+    percent_slider(ui, "Vertical", &mut w.inset[1], 0.0..=50.);
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("Anchor")
-                .size(12.)
-                .color(theme::gray(150)),
-        );
+        field_label(ui, "Anchor");
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(2.);
             for v in 0..3 {
@@ -531,11 +537,7 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             }
         });
         ui.add_space(16.);
-        ui.label(
-            egui::RichText::new("Rotate")
-                .size(12.)
-                .color(theme::gray(150)),
-        );
+        field_label(ui, "Rotate");
         if ui
             .add(egui::Button::new("⟲").frame(false))
             .on_hover_text("Rotate left")

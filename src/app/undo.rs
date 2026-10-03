@@ -5,7 +5,8 @@
 //! It lives in memory and is cleared when another catalog opens.
 use super::Editor;
 use super::history::{Recorded, Step};
-use super::library::{CollectionCommand, DescriptiveCommand, MetadataCommand};
+use super::library::{CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place};
+use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -127,41 +128,33 @@ impl Editor {
             self.undo_log.push(command);
         }
     }
-    /// Saves what the Library panels hold, so it is a command before the
-    /// one to reverse is picked.
-    fn save_drafts(&mut self) -> bool {
-        if let Some(library) = &mut self.library
-            && let Err(e) = library.commit_copy_name()
-        {
-            self.status = format!("Not saved: {e}");
-            return false;
-        }
-        true
-    }
     pub(super) fn undo(&mut self) {
-        if !self.save_drafts() {
-            return;
-        }
-        self.sync_undo();
-        if let Some(command) = self.undo_log.undo.pop_back() {
-            if self.apply(&command, Direction::Undo) {
-                self.undo_log.redo.push(command);
-            } else {
-                self.undo_log.undo.push_back(command);
-            }
-        }
+        self.step(Direction::Undo);
     }
     pub(super) fn redo(&mut self) {
-        if !self.save_drafts() {
+        self.step(Direction::Redo);
+    }
+    /// Reverses the latest command, or makes the latest reversed one again.
+    /// What the Library panels hold is saved first, so it is a command
+    /// before the one to reverse is picked.
+    fn step(&mut self, direction: Direction) {
+        if !self.commit_library_drafts() {
             return;
         }
         self.sync_undo();
-        if let Some(command) = self.undo_log.redo.pop() {
-            if self.apply(&command, Direction::Redo) {
-                self.undo_log.undo.push_back(command);
-            } else {
-                self.undo_log.redo.push(command);
-            }
+        let log = &mut self.undo_log;
+        let command = match direction {
+            Direction::Undo => log.undo.pop_back(),
+            Direction::Redo => log.redo.pop(),
+        };
+        let Some(command) = command else {
+            return;
+        };
+        let applied = self.apply(&command, direction);
+        let log = &mut self.undo_log;
+        match (direction, applied) {
+            (Direction::Undo, true) | (Direction::Redo, false) => log.redo.push(command),
+            (Direction::Undo, false) | (Direction::Redo, true) => log.undo.push_back(command),
         }
     }
     /// Returns to where `command` was made and sets its state from before
@@ -178,54 +171,18 @@ impl Editor {
                     Direction::Undo => (&change.before, &change.place_before),
                     Direction::Redo => (&change.after, &change.place_after),
                 };
-                // Leaving the open photo saves it first; if that fails, the
-                // command stays and the save error stays on the status line.
-                if !self.flush() {
-                    return false;
-                }
-                let Some(library) = &mut self.library else {
-                    return false;
-                };
-                if let Err(e) = library.set_metadata(values) {
-                    self.status = format!("{verb} failed: {e}");
-                    return false;
-                }
-                match develop {
-                    Some(photo) => self.show_in_develop(*photo),
-                    None => {
-                        self.library_mode = true;
-                        if let Some(library) = &mut self.library {
-                            library.go_to_place(place);
-                        }
-                    }
-                }
-                self.status = format!("{verb} {}", change.summary);
-                // The Library's status line shows its own message first.
-                if let Some(library) = &mut self.library {
-                    library.message = self.status.clone();
-                }
-                true
+                self.apply_library(verb, &change.summary, place, *develop, |library| {
+                    library.set_metadata(values)
+                })
             }
             Command::Collection(change) => {
                 let (add, remove, place) = match direction {
                     Direction::Undo => (&change.removed, &change.added, &change.place_before),
                     Direction::Redo => (&change.added, &change.removed, &change.place_after),
                 };
-                if !self.flush() {
-                    return false;
-                }
-                let Some(library) = &mut self.library else {
-                    return false;
-                };
-                if let Err(e) = library.change_collection(change.collection, add, remove) {
-                    self.status = format!("{verb} failed: {e}");
-                    return false;
-                }
-                self.library_mode = true;
-                library.go_to_place(place);
-                self.status = format!("{verb} {}", change.summary);
-                library.message = self.status.clone();
-                true
+                self.apply_library(verb, &change.summary, place, None, |library| {
+                    library.change_collection(change.collection, add, remove)
+                })
             }
             Command::Descriptive(change) => {
                 let (values, ratings, place) = match direction {
@@ -234,21 +191,9 @@ impl Editor {
                     }
                     Direction::Redo => (&change.after, &change.ratings_after, &change.place_after),
                 };
-                if !self.flush() {
-                    return false;
-                }
-                let Some(library) = &mut self.library else {
-                    return false;
-                };
-                if let Err(e) = library.restore_descriptive(values, ratings) {
-                    self.status = format!("{verb} failed: {e}");
-                    return false;
-                }
-                self.library_mode = true;
-                library.go_to_place(place);
-                self.status = format!("{verb} {}", change.summary);
-                library.message = self.status.clone();
-                true
+                self.apply_library(verb, &change.summary, place, None, |library| {
+                    library.restore_descriptive(values, ratings)
+                })
             }
             Command::Develop {
                 photo,
@@ -311,6 +256,45 @@ impl Editor {
                 true
             }
         }
+    }
+    /// Writes a Library command with `write` and returns to where it was
+    /// made: `place` in the Library, or `develop`, the photo open in Develop.
+    /// False when nothing could be written.
+    fn apply_library(
+        &mut self,
+        verb: &str,
+        summary: &str,
+        place: &Place,
+        develop: Option<i64>,
+        write: impl FnOnce(&mut Library) -> Result<()>,
+    ) -> bool {
+        // Leaving the open photo saves it first; if that fails, the command
+        // stays and the save error stays on the status line.
+        if !self.flush() {
+            return false;
+        }
+        let Some(library) = &mut self.library else {
+            return false;
+        };
+        if let Err(e) = write(library) {
+            self.status = format!("{verb} failed: {e}");
+            return false;
+        }
+        match develop {
+            Some(photo) => self.show_in_develop(photo),
+            None => {
+                self.library_mode = true;
+                if let Some(library) = &mut self.library {
+                    library.go_to_place(place);
+                }
+            }
+        }
+        self.status = format!("{verb} {summary}");
+        // The Library's status line shows its own message first.
+        if let Some(library) = &mut self.library {
+            library.message = self.status.clone();
+        }
+        true
     }
     /// Shows `photo` in Develop, keeping its edit when it is already open.
     fn show_in_develop(&mut self, photo: i64) {

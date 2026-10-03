@@ -3,6 +3,7 @@
 //! any other, the one imported from Lightroom or made on first use, and each
 //! change is one undoable command.
 use super::{Library, Place};
+use crate::app::widgets::plural;
 use crate::catalog::{CollectionKind, QUICK_COLLECTION};
 use anyhow::Result;
 
@@ -74,8 +75,8 @@ impl Library {
         };
         let count = added.len() + removed.len();
         let summary = format!(
-            "{verb} Quick Collection · {count} {}",
-            if count == 1 { "photo" } else { "photos" }
+            "{verb} Quick Collection · {}",
+            plural(count, "photo", "photos")
         );
         self.record_collection(quick, added, removed, summary)
     }

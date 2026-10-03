@@ -3,7 +3,7 @@
 //! fixed-size page on the right so switching tabs never moves the window.
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
-use super::widgets::{form_row, modal_frame, pretty_path, primary_button};
+use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
 use crate::raw::Demosaic;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
@@ -125,9 +125,6 @@ fn bytes(n: u64) -> String {
     } else {
         "Empty".into()
     }
-}
-fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 impl Editor {
