@@ -16,8 +16,8 @@ pub const HEIGHT: f32 = 128.;
 /// Every view draws the one panel, so the strip keeps its scroll position.
 pub(super) const ID: &str = "filmstrip";
 
-/// The module the strip is shown in. The Library marks the whole selection
-/// and lets the view shown take a click; Develop marks the photo it has open.
+/// The module the strip is shown in. Both mark the whole selection; the Library lets
+/// the view shown take a click, and Develop marks the photo it has open as active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
     Library,
@@ -106,6 +106,33 @@ impl Library {
     pub fn filmstrip_behind(&self) -> bool {
         self.strip.drawn.0 != self.selection || self.strip.drawn.1 != self.shown_version
     }
+    /// A filmstrip click in Develop with Cmd or Shift: the photo joins or leaves the
+    /// selection, or a range does, as in the grid, while the photo open stays active.
+    /// Returns whether it was taken here; a plain click opens the photo instead.
+    pub fn develop_select(
+        &mut self,
+        id: i64,
+        open: Option<i64>,
+        modifiers: egui::Modifiers,
+    ) -> bool {
+        if !modifiers.command && !modifiers.shift {
+            return false;
+        }
+        // The open photo is the active one, stays in the selection, and is where a
+        // Shift range starts.
+        if let Some(open) = open {
+            self.selection.active = Some(open);
+            self.selection.anchor = Some(open);
+            self.selection.selected.insert(open);
+        }
+        self.click(id, modifiers);
+        if let Some(open) = open {
+            self.selection.selected.insert(open);
+            self.selection.active = Some(open);
+            self.selection.anchor = Some(open);
+        }
+        true
+    }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
     /// makes the photo its candidate, and Select activates its side.
@@ -157,11 +184,7 @@ impl Library {
                             .size(11.)
                             .color(theme::gray(200)),
                     );
-                    let selected = if library {
-                        self.selection.selected.len()
-                    } else {
-                        0
-                    };
+                    let selected = self.selection.selected.len();
                     ui.label(filter_caption(&match position {
                         Some(_) if selected > 1 => {
                             format!("{} of {} photos selected", selected, self.visible.len())
@@ -217,7 +240,7 @@ impl Library {
                     let photo = self.photos[self.visible[n]].clone();
                     let mark = if current == Some(photo.id) {
                         Mark::Active
-                    } else if library && self.selection.selected.contains(&photo.id) {
+                    } else if self.selection.selected.contains(&photo.id) {
                         Mark::Selected
                     } else {
                         Mark::None

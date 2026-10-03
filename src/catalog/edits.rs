@@ -6,6 +6,15 @@ use anyhow::{Context, Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;
 
+/// One photo's edit for [`Catalog::save_edits`].
+pub struct EditToSave<'a> {
+    pub id: i64,
+    pub path: &'a Path,
+    pub recipe: &'a Recipe,
+    pub export: &'a ExportOptions,
+    pub history: super::HistoryUpdate<'a>,
+}
+
 impl Catalog {
     /// Stores `bitmap` once and returns the hash that refers to it.
     pub fn put_bitmap(&self, bitmap: &crate::storage::bitmaps::Bitmap) -> Result<String> {
@@ -35,23 +44,39 @@ impl Catalog {
         export: &ExportOptions,
         history: super::HistoryUpdate<'_>,
     ) -> Result<()> {
-        recipe.validate()?;
-        export.validate()?;
-        let identity = Identity::read(path)?;
-        // Refuse replacing an edit after the underlying source changed.
-        let _ = self.load_edit(id, path)?;
-        let (saved, local) = recipe.split_local();
-        let tx = self.db.unchecked_transaction()?;
-        ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(export)?,serde_json::to_string(&identity)?,id])?==1,"Unknown photo");
-        if local.is_empty() {
-            tx.execute("DELETE FROM local_edits WHERE photo=?", [id])?;
-        } else {
-            tx.execute(
-                "INSERT OR REPLACE INTO local_edits(photo, data) VALUES (?, ?)",
-                params![id, serde_json::to_string(&local)?],
-            )?;
+        self.save_edits(&[EditToSave {
+            id,
+            path,
+            recipe,
+            export,
+            history,
+        }])
+    }
+    /// Saves several photos' edits in one transaction: all of them, or none when one
+    /// fails (as a Sync to many photos is one change).
+    pub fn save_edits(&self, edits: &[EditToSave<'_>]) -> Result<()> {
+        let mut identities = Vec::with_capacity(edits.len());
+        for e in edits {
+            e.recipe.validate()?;
+            e.export.validate()?;
+            identities.push(Identity::read(e.path)?);
+            // Refuse replacing an edit after the underlying source changed.
+            let _ = self.load_edit(e.id, e.path)?;
         }
-        Self::put_history(&tx, id, history)?;
+        let tx = self.db.unchecked_transaction()?;
+        for (e, identity) in edits.iter().zip(identities) {
+            let (saved, local) = e.recipe.split_local();
+            ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(e.export)?,serde_json::to_string(&identity)?,e.id])?==1,"Unknown photo");
+            if local.is_empty() {
+                tx.execute("DELETE FROM local_edits WHERE photo=?", [e.id])?;
+            } else {
+                tx.execute(
+                    "INSERT OR REPLACE INTO local_edits(photo, data) VALUES (?, ?)",
+                    params![e.id, serde_json::to_string(&local)?],
+                )?;
+            }
+            Self::put_history(&tx, e.id, e.history)?;
+        }
         tx.commit()?;
         Ok(())
     }

@@ -87,7 +87,7 @@ impl Editor {
                             let copy = format!("{cmd}{shift}C");
                             let paste = format!("{cmd}{shift}V");
                             if menu_item(ui, "Copy Settings…", &copy, true, false) {
-                                self.open_copy_dialog();
+                                self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
                                 ui.close();
                             }
                             if menu_item(
@@ -116,6 +116,18 @@ impl Editor {
                                 false,
                             ) {
                                 self.paste_previous();
+                                ui.close();
+                            }
+                            let sync = format!("{cmd}{shift}S");
+                            let targets = self.sync_targets().len();
+                            if menu_item(
+                                ui,
+                                "Sync Settings…",
+                                &sync,
+                                targets > 0 && !self.syncing,
+                                false,
+                            ) {
+                                self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
                                 ui.close();
                             }
                             let reset = format!("{cmd}{shift}R");

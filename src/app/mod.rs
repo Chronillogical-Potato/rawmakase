@@ -37,6 +37,8 @@ pub struct Editor {
     /// Copy Settings while open, and the groups it last copied.
     copy_dialog: Option<settings_transfer::CopyDialog>,
     copy_groups: crate::develop::settings_groups::GroupSelection,
+    /// A Sync is running in the background.
+    syncing: bool,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
@@ -194,6 +196,7 @@ impl Editor {
             clipboard: None,
             previous_settings: None,
             copy_dialog: None,
+            syncing: false,
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
@@ -421,6 +424,7 @@ mod editing;
 mod settings_transfer;
 mod shortcuts;
 mod snapshots;
+mod sync;
 mod theme;
 mod toolbar;
 mod updates;

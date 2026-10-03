@@ -659,6 +659,7 @@ impl Editor {
             self.zoom_keys(ctx);
             let (mut copy, mut paste, mut reset) = (false, false, false);
             let mut previous = false;
+            let mut sync = false;
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -682,6 +683,10 @@ impl Editor {
                 });
                 if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
                     previous = true;
+                }
+                // Lightroom's Sync Settings.
+                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::S) {
+                    sync = true;
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
@@ -766,7 +771,10 @@ impl Editor {
             });
             // As in Lightroom, Shift+Cmd+C opens Copy Settings.
             if copy {
-                self.open_copy_dialog();
+                self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
+            }
+            if sync && !self.sync_targets().is_empty() && !self.syncing {
+                self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
             }
             if reset {
                 self.reset_settings();
@@ -862,7 +870,14 @@ impl Editor {
             if strip.metadata_changed {
                 self.status = library.message.clone();
             }
-            // In Develop both a click and Open in Develop show the photo.
+            // Cmd and Shift select, as in the Library, for Sync; otherwise a click
+            // and Open in Develop show the photo.
+            let modifiers = ui.input(|i| i.modifiers);
+            if let Some(crate::app::library::Pick::Show(id)) = strip.pick
+                && library.develop_select(id, current, modifiers)
+            {
+                return;
+            }
             if let Some(
                 crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
             ) = strip.pick

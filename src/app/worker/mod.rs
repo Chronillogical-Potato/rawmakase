@@ -57,6 +57,8 @@ pub enum Event {
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),
     Imported(Box<crate::app::bulk_import::Summary>),
+    /// A Sync Settings finished.
+    Synced(Box<crate::app::sync::SyncResult>),
     Profiles {
         id: u64,
         profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,

@@ -36,6 +36,7 @@ pub use descriptive::{
     Value, keyword_name,
 };
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
+pub use edits::EditToSave;
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };

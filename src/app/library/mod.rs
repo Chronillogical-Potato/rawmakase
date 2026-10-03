@@ -30,6 +30,7 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+pub(in crate::app) use cell::copy_suffix;
 pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
 pub use filmstrip::{Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
@@ -384,7 +385,7 @@ impl Library {
     pub(in crate::app) fn shown(&self) -> Vec<i64> {
         self.visible.iter().map(|i| self.photos[*i].id).collect()
     }
-    #[cfg(test)]
+    /// The selected photos in display order.
     pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
         self.selected_ids()
     }

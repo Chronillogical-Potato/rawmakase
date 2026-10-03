@@ -24,16 +24,38 @@ pub(super) struct Clipboard {
     pub(super) groups: GroupSelection,
 }
 
-/// Copy Settings while it is open: the groups being chosen.
+/// Copy Settings or Synchronize Settings while it is open: the groups being chosen.
 #[derive(Clone, Debug)]
 pub(super) struct CopyDialog {
+    pub(super) purpose: Transfer,
     pub(super) groups: GroupSelection,
 }
 
-/// What the user did in Copy Settings.
+/// Where the chosen groups go: the clipboard, or the other selected photos.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Transfer {
+    Copy,
+    Sync,
+}
+impl Transfer {
+    fn title(self) -> &'static str {
+        match self {
+            Transfer::Copy => "Copy Settings",
+            Transfer::Sync => "Synchronize Settings",
+        }
+    }
+    fn button(self) -> &'static str {
+        match self {
+            Transfer::Copy => "Copy",
+            Transfer::Sync => "Synchronize",
+        }
+    }
+}
+
+/// What the user did in the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CopyChoice {
-    Copy,
+    Confirm,
     Cancel,
 }
 
@@ -60,9 +82,10 @@ impl Editor {
         self.clipboard = Some(Clipboard { settings, groups });
         self.status = "Settings copied".into();
     }
-    /// Opens Copy Settings with the groups chosen last time.
-    pub(super) fn open_copy_dialog(&mut self) {
+    /// Opens Copy Settings, or Synchronize Settings, with the groups chosen last time.
+    pub(super) fn open_copy_dialog(&mut self, purpose: Transfer) {
         self.copy_dialog = Some(CopyDialog {
+            purpose,
             groups: self.copy_groups.clone(),
         });
     }
@@ -78,7 +101,7 @@ impl Editor {
             .show(ctx, |ui| {
                 ui.set_width(COLUMN * 2. + GAP);
                 ui.label(
-                    egui::RichText::new("Copy Settings")
+                    egui::RichText::new(dialog.purpose.title())
                         .size(17.)
                         .color(theme::gray(235)),
                 );
@@ -115,8 +138,8 @@ impl Editor {
                         dialog.groups = GroupSelection::none();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if primary_button(ui, "Copy").clicked() {
-                            choice = Some(CopyChoice::Copy);
+                        if primary_button(ui, dialog.purpose.button()).clicked() {
+                            choice = Some(CopyChoice::Confirm);
                         }
                         if ui.button("Cancel").clicked() {
                             choice = Some(CopyChoice::Cancel);
@@ -131,15 +154,20 @@ impl Editor {
             self.close_copy_dialog(choice);
         }
     }
-    /// Copy keeps the groups chosen for Paste and for the next Copy Settings.
+    /// Copy keeps the groups chosen for Paste, and Synchronize applies them to the
+    /// other selected photos; both start the next dialog from that choice.
     pub(super) fn close_copy_dialog(&mut self, choice: CopyChoice) {
         let Some(dialog) = self.copy_dialog.take() else {
             return;
         };
-        if choice == CopyChoice::Copy {
-            self.copy_groups = dialog.groups.clone();
-            self.copy_settings(dialog.groups);
-            let _ = self.save_session();
+        if choice == CopyChoice::Cancel {
+            return;
+        }
+        self.copy_groups = dialog.groups.clone();
+        let _ = self.save_session();
+        match dialog.purpose {
+            Transfer::Copy => self.copy_settings(dialog.groups),
+            Transfer::Sync => self.start_sync(dialog.groups),
         }
     }
     /// Pastes the copied settings. Spot removal and masks belong to their photo and

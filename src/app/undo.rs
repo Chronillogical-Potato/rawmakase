@@ -40,6 +40,8 @@ pub(super) enum Command {
         history: u64,
         change: Box<Recorded>,
     },
+    /// Settings synchronized to several photos at once; undone and redone together.
+    Sync(Box<super::sync::SyncCommand>),
 }
 
 #[derive(Default)]
@@ -194,6 +196,34 @@ impl Editor {
                 self.apply_library(verb, &change.summary, place, None, |library| {
                     library.restore_descriptive(values, ratings)
                 })
+            }
+            Command::Sync(sync) => {
+                // The open photo is saved first, so a failure changes nothing.
+                if !self.flush() {
+                    return false;
+                }
+                let Some(library) = &self.library else {
+                    return false;
+                };
+                let side = match direction {
+                    Direction::Undo => super::sync::SyncSide::Before,
+                    Direction::Redo => super::sync::SyncSide::After,
+                };
+                if let Err(e) = super::sync::restore(&library.catalog, &sync.edits, side) {
+                    self.status = format!("{verb} failed: {e:#}");
+                    return false;
+                }
+                // A synchronized photo open here shows the edit written back.
+                if let Some(open) = self.document.catalog_photo
+                    && sync.edits.iter().any(|e| e.id == open)
+                {
+                    self.develop_catalog_photo(open);
+                }
+                self.status = format!(
+                    "{verb} Sync Settings ({})",
+                    super::widgets::plural(sync.edits.len(), "photo", "photos")
+                );
+                true
             }
             Command::Develop {
                 photo,

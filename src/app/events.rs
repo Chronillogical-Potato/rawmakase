@@ -76,6 +76,7 @@ impl Editor {
                     self.import(kind, paths, ctx);
                 }
                 Event::Imported(summary) => self.imported(summary, ctx),
+                Event::Synced(result) => self.synced(*result),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
                     match crate::presets::save_preset(&p, &self.document.recipe) {
