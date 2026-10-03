@@ -446,6 +446,42 @@
         1.371,
         3.854
       ],
+      "vignette-color+60": [
+        8.609,
+        26.169
+      ],
+      "vignette-color-60": [
+        8.963,
+        29.165
+      ],
+      "vignette-color-60-highlights80": [
+        6.329,
+        20.365
+      ],
+      "vignette-highlight+60": [
+        13.142,
+        29.908
+      ],
+      "vignette-highlight-60": [
+        9.334,
+        29.503
+      ],
+      "vignette-highlight-60-highlights80": [
+        7.193,
+        21.316
+      ],
+      "vignette-paint+60": [
+        10.175,
+        30.079
+      ],
+      "vignette-paint-60": [
+        8.018,
+        24.32
+      ],
+      "vignette-unset-60": [
+        9.334,
+        29.503
+      ],
       "whites+50": [
         1.373,
         6.874

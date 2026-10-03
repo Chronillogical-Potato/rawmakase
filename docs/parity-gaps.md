@@ -57,7 +57,8 @@ These controls were fitted to Camera Raw renders and match within the default-re
   - Gradient transition and brush feather profiles, Flow build-up, Auto Mask edges and range-mask Refine/Smoothness are approximations.
   - AI selections (Subject, Sky, Background, Objects, People, Depth), the AI Remove mode, AI Denoise, Enhance and Lens Blur are not implemented.
 - **Lightroom import of spots and masks:** positions (default crop, unrotated sensor frame), long-edge sizes and spot sources were checked exactly against Camera Raw renders. Gradient Full/Zero points, the radial `Flipped` flag (read as inside the ellipse; not flipped applies outside, as the old Radial Filter default), the radial angle's sign, mask blend modes (0 add, 1 subtract, 2 intersect), brush feather from `CenterWeight`, local Hue's scale and legacy range-mask feathering are assumptions: Camera Raw ignored the test files for those. Color range masks and AI masks are reported and left out.
-- Post-crop vignetting, grain, Glow and Reshape are not measured. Glow and Reshape are rejected when non-zero.
+- **Post-crop vignetting** reads all three Lightroom styles (codes 1 Highlight Priority, 2 Color Priority, 3 Paint Overlay; Camera Raw 18.7 renders 0 and an omitted style as Highlight Priority). Highlights applies only to Highlight and Color Priority with a negative Amount, as in Lightroom. Rendering is not yet matched: Color Priority and Paint Overlay share one blend, and `vignette-*` cases in `tests/corpus` record the distance from Camera Raw (mean ΔE00 6–13).
+- Grain, Glow and Reshape are not measured. Glow and Reshape are rejected when non-zero.
 - HDR editing and output are not implemented.
 
 ## Catalog and interaction

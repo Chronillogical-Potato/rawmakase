@@ -732,6 +732,70 @@
     "SplitToningHighlightHue": "45",
     "SplitToningHighlightSaturation": "20"
    }
+  },
+  {
+   "name": "vignette-highlight-60",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "1"
+   }
+  },
+  {
+   "name": "vignette-highlight+60",
+   "settings": {
+    "PostCropVignetteAmount": "+60",
+    "PostCropVignetteStyle": "1"
+   }
+  },
+  {
+   "name": "vignette-color-60",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "2"
+   }
+  },
+  {
+   "name": "vignette-color+60",
+   "settings": {
+    "PostCropVignetteAmount": "+60",
+    "PostCropVignetteStyle": "2"
+   }
+  },
+  {
+   "name": "vignette-paint-60",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "3"
+   }
+  },
+  {
+   "name": "vignette-paint+60",
+   "settings": {
+    "PostCropVignetteAmount": "+60",
+    "PostCropVignetteStyle": "3"
+   }
+  },
+  {
+   "name": "vignette-highlight-60-highlights80",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "1",
+    "PostCropVignetteHighlightContrast": "80"
+   }
+  },
+  {
+   "name": "vignette-color-60-highlights80",
+   "settings": {
+    "PostCropVignetteAmount": "-60",
+    "PostCropVignetteStyle": "2",
+    "PostCropVignetteHighlightContrast": "80"
+   }
+  },
+  {
+   "name": "vignette-unset-60",
+   "settings": {
+    "PostCropVignetteAmount": "-60"
+   }
   }
  ]
 }

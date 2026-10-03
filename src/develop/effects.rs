@@ -6,6 +6,57 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+/// Lightroom's post-crop vignette styles. Recipes and XMP store Lightroom's codes:
+/// 1 Highlight Priority, 2 Color Priority, 3 Paint Overlay. Camera Raw 18.7 renders 0
+/// and an omitted style as Highlight Priority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub enum VignetteStyle {
+    #[default]
+    HighlightPriority,
+    ColorPriority,
+    PaintOverlay,
+}
+/// How a vignette style changes a pixel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VignetteMix {
+    /// An exposure change, darkening or brightening in proportion.
+    Exposure,
+    /// A blend toward black or white. Color Priority renders this way until it has its
+    /// own operator; recipes that stored code 2 always have.
+    Blend,
+}
+impl VignetteStyle {
+    pub fn code(self) -> u8 {
+        match self {
+            VignetteStyle::HighlightPriority => 1,
+            VignetteStyle::ColorPriority => 2,
+            VignetteStyle::PaintOverlay => 3,
+        }
+    }
+    pub(crate) fn mix(self) -> VignetteMix {
+        match self {
+            VignetteStyle::HighlightPriority => VignetteMix::Exposure,
+            VignetteStyle::ColorPriority | VignetteStyle::PaintOverlay => VignetteMix::Blend,
+        }
+    }
+}
+impl TryFrom<u8> for VignetteStyle {
+    type Error = anyhow::Error;
+    fn try_from(code: u8) -> Result<Self> {
+        Ok(match code {
+            0 | 1 => VignetteStyle::HighlightPriority,
+            2 => VignetteStyle::ColorPriority,
+            3 => VignetteStyle::PaintOverlay,
+            _ => anyhow::bail!("Unsupported vignette style {code}"),
+        })
+    }
+}
+impl From<VignetteStyle> for u8 {
+    fn from(style: VignetteStyle) -> u8 {
+        style.code()
+    }
+}
 /// Defringe's default hue ranges: Purple, then Green (Lightroom's 30–70 and 40–60).
 pub const DEFRINGE_RANGES: [[f32; 2]; 2] = [[0.3, 0.7], [0.4, 0.6]];
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -33,7 +84,7 @@ pub struct Effects {
     pub vignette_roundness: f32,
     pub vignette_feather: f32,
     pub vignette_highlights: f32,
-    pub vignette_style: u8,
+    pub vignette_style: VignetteStyle,
     pub lens_vignette: f32,
     pub lens_vignette_midpoint: f32,
     pub defringe: [f32; 2],
@@ -68,7 +119,7 @@ impl Default for Effects {
             vignette_roundness: 0.,
             vignette_feather: 0.5,
             vignette_highlights: 0.,
-            vignette_style: 0,
+            vignette_style: VignetteStyle::HighlightPriority,
             lens_vignette: 0.,
             lens_vignette_midpoint: 0.5,
             defringe: [0.; 2],
@@ -83,6 +134,18 @@ impl Default for Effects {
 impl Effects {
     /// The Effects panel's reset: post-crop vignette and grain at their defaults. Other
     /// panels' settings and the grain seed are kept.
+    /// How strongly Highlights protects bright pixels. As in Lightroom, it applies only to
+    /// Highlight Priority and Color Priority, and only when the vignette darkens.
+    pub(crate) fn vignette_highlight_protection(&self) -> f32 {
+        match self.vignette_style {
+            VignetteStyle::HighlightPriority | VignetteStyle::ColorPriority
+                if self.vignette < 0. =>
+            {
+                self.vignette_highlights
+            }
+            _ => 0.,
+        }
+    }
     pub fn reset_post_crop(&mut self) {
         let d = Effects::default();
         self.vignette = d.vignette;
@@ -144,7 +207,6 @@ impl Effects {
             .all(|v| v.is_finite() && (0. ..=1.).contains(v)),
             "Invalid effect range"
         );
-        ensure!(self.vignette_style <= 2, "Invalid vignette style");
         ensure!(
             self.global_grade
                 .iter()
@@ -304,6 +366,7 @@ pub(crate) fn spatial_finish_scaled(
     if e.grain == 0. && e.vignette == 0. && e.lens_vignette == 0. {
         return;
     }
+    let (mix, highlights) = (e.vignette_style.mix(), e.vignette_highlight_protection());
     im.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         let x = origin[0] + i as u32 % im.width;
         let y = origin[1] + i as u32 / im.width;
@@ -316,8 +379,8 @@ pub(crate) fn spatial_finish_scaled(
         let t = ((distance - start) / feather).clamp(0., 1.);
         let mask = t * t * (3. - 2. * t);
         let l = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
-        let protect = 1. - e.vignette_highlights * l.powi(4);
-        if e.vignette_style == 2 {
+        let protect = 1. - highlights * l.powi(4);
+        if mix == VignetteMix::Blend {
             let target = if e.vignette < 0. { 0. } else { 1. };
             for v in p.iter_mut() {
                 *v += (target - *v) * e.vignette.abs() * mask * protect;
@@ -358,6 +421,63 @@ pub(crate) fn spatial_finish_scaled(
 mod tests {
     use super::*;
     #[test]
+    fn vignette_styles_follow_lightroom_codes_and_old_recipes_keep_theirs() {
+        use VignetteStyle::*;
+        for (code, style) in [
+            (0, HighlightPriority),
+            (1, HighlightPriority),
+            (2, ColorPriority),
+            (3, PaintOverlay),
+        ] {
+            assert_eq!(VignetteStyle::try_from(code).unwrap(), style);
+        }
+        assert!(VignetteStyle::try_from(4).is_err());
+        let old: Effects = serde_json::from_str(r#"{"vignette_style": 0}"#).unwrap();
+        assert_eq!(old.vignette_style, HighlightPriority);
+        let old: Effects = serde_json::from_str(r#"{"vignette_style": 2}"#).unwrap();
+        assert_eq!(old.vignette_style.mix(), VignetteMix::Blend);
+        let paint = Effects {
+            vignette_style: PaintOverlay,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&paint).unwrap();
+        assert!(json.contains(r#""vignette_style":3"#), "{json}");
+        assert_eq!(serde_json::from_str::<Effects>(&json).unwrap(), paint);
+    }
+    #[test]
+    fn vignette_highlights_apply_only_to_darkening_highlight_and_color_priority() {
+        use VignetteStyle::*;
+        let corner = |style, vignette, highlights| {
+            let r = Recipe {
+                effects: Effects {
+                    vignette_style: style,
+                    vignette,
+                    vignette_highlights: highlights,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut im = Rendered {
+                width: 9,
+                height: 9,
+                pixels: vec![[0.95; 3]; 81],
+            };
+            spatial_finish(&mut im, &r, [0, 0], [9, 9]);
+            im.pixels[0][1]
+        };
+        for (style, vignette, protected) in [
+            (HighlightPriority, -0.6, true),
+            (ColorPriority, -0.6, true),
+            (PaintOverlay, -0.6, false),
+            (HighlightPriority, 0.6, false),
+            (ColorPriority, 0.6, false),
+        ] {
+            let with = corner(style, vignette, 0.8);
+            let without = corner(style, vignette, 0.);
+            assert_eq!(with != without, protected, "{style:?} {vignette}");
+        }
+    }
+    #[test]
     fn effects_reset_covers_every_vignette_and_grain_control_and_nothing_else() {
         let d = Effects::default();
         let mut e = Effects {
@@ -374,7 +494,7 @@ mod tests {
             vignette_roundness: 0.6,
             vignette_feather: 0.9,
             vignette_highlights: 0.8,
-            vignette_style: 2,
+            vignette_style: VignetteStyle::ColorPriority,
             ..Default::default()
         };
         let kept = e.clone();

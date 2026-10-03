@@ -300,7 +300,7 @@ fn settings(r: &Recipe) -> Settings {
         );
         s.text(
             "PostCropVignetteStyle",
-            r.effects.vignette_style.to_string(),
+            r.effects.vignette_style.code().to_string(),
         );
     }
     s.put("VignetteAmount", r.effects.lens_vignette, 0.01, 0, true);

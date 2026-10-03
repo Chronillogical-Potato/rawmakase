@@ -12,7 +12,7 @@ struct Params {
     origin_x: u32, origin_y: u32, full_w: u32, full_h: u32,
     scale: f32, grain: f32, grain_size: f32, grain_roughness: f32,
     grain_seed: u32, vignette: f32, vignette_roundness: f32, vignette_midpoint: f32,
-    vignette_feather: f32, vignette_highlights: f32, vignette_style: u32, lens_vignette: f32,
+    vignette_feather: f32, vignette_highlights: f32, vignette_blend: u32, lens_vignette: f32,
     lens_vignette_midpoint: f32, effects: u32, count: u32, pad: u32,
 };
 @group(0) @binding(0) var<storage, read_write> pixels: array<f32>;
@@ -103,7 +103,7 @@ fn spatial(color: vec3<f32>, x: u32, y: u32) -> vec3<f32> {
     let mask = t * t * (3.0 - 2.0 * t);
     let l = luminance(c);
     let protect = 1.0 - p.vignette_highlights * (l * l * l * l);
-    if p.vignette_style == 2u {
+    if p.vignette_blend == 1u {
         var toward = 1.0;
         if p.vignette < 0.0 { toward = 0.0; }
         c += (vec3(toward) - c) * abs(p.vignette) * mask * protect;
