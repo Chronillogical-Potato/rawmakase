@@ -383,11 +383,9 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
     let mut imported = Vec::new();
     for (target, bytes) in staged {
         if !target.exists() {
-            let mut f = tempfile::NamedTempFile::new_in(destination)?;
-            f.write_all(&bytes)?;
-            f.as_file().sync_all()?;
-            f.persist_noclobber(&target).map_err(|e| e.error)?;
-            crate::storage::sync_dir(destination)?;
+            crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
+                Ok(f.write_all(&bytes)?)
+            })?;
         }
         imported.push(target);
     }

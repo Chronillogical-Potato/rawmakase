@@ -2,6 +2,7 @@
 //! stored once by content hash and referenced by that hash from the recipe. Catalog
 //! photos keep them in the catalog's `bitmaps` table; photos opened directly carry them
 //! in their sidecar's `bitmaps` map, as base64 of the compressed bytes.
+use super::{FNV_OFFSET, fnv1a};
 use anyhow::{Context, Result, ensure};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use std::io::{Read, Write};
@@ -39,19 +40,14 @@ impl Bitmap {
     }
     /// Content hash (128-bit, hex) of the bitmap, which names it in the store.
     pub fn hash(&self) -> String {
-        let header = [self.width.to_le_bytes(), self.height.to_le_bytes()].concat();
-        let fnv = |seed: u64| {
-            header
-                .iter()
-                .chain(&[self.channels, self.depth])
-                .chain(&self.data)
-                .fold(seed, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100000001b3))
-        };
-        format!(
-            "{:016x}{:016x}",
-            fnv(0xcbf29ce484222325),
-            fnv(0x84222325cbf29ce4)
-        )
+        let header = [
+            &self.width.to_le_bytes()[..],
+            &self.height.to_le_bytes(),
+            &[self.channels, self.depth],
+        ]
+        .concat();
+        let fnv = |seed| fnv1a(fnv1a(seed, &header), &self.data);
+        format!("{:016x}{:016x}", fnv(FNV_OFFSET), fnv(0x84222325cbf29ce4))
     }
     /// Header plus zlib-compressed samples.
     pub fn compress(&self) -> Result<Vec<u8>> {

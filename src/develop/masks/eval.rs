@@ -5,7 +5,7 @@ use super::range::{self, RangeInput};
 use super::{LocalDelta, MaskGroup, MaskOp, MaskShape};
 use crate::develop::image_space::LensMap;
 use crate::develop::retouch::profile;
-use crate::develop::{Geometry, ImageFrame, Recipe};
+use crate::develop::{Geometry, ImageFrame, Recipe, unit_to_u8};
 use crate::raw::CameraImage;
 use rayon::prelude::*;
 use std::sync::{Arc, Weak};
@@ -328,7 +328,7 @@ impl Weigher {
                         let lab = range.map(|im| range::oklab(im.pixels[i]));
                         for (k, group) in self.groups.iter().enumerate() {
                             let v = self.weight(group, p, lab);
-                            out[x as usize * n + k] = (v.clamp(0., 1.) * 255. + 0.5) as u8;
+                            out[x as usize * n + k] = unit_to_u8(v);
                         }
                     }
                 });

@@ -315,7 +315,11 @@ fn main() -> Result<()> {
                     camera: rawmakase::export::exif::read(&input),
                     ..Default::default()
                 },
-                overwrite,
+                if overwrite {
+                    rawmakase::export::Replace::Overwrite
+                } else {
+                    rawmakase::export::Replace::NoClobber
+                },
             )?;
             let max = im.pixels.iter().flatten().copied().fold(0f32, f32::max);
             println!(

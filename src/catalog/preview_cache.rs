@@ -10,23 +10,7 @@ const VERSION: i64 = 1;
 // 2: previews keep their aspect ratio (generation 1 forced 360×240).
 const GENERATION: i64 = 2;
 const LIMIT: i64 = 512 * 1024 * 1024;
-/// What tells a cached preview that its source changed: the file's size and
-/// modification time, from one stat. Unlike `Identity` it reads none of the
-/// file, which on a network share costs a round trip for every photo shown.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Stamp {
-    pub size: u64,
-    pub modified_ns: u128,
-}
-impl Stamp {
-    pub fn read(path: &Path) -> Result<Self> {
-        let m = std::fs::metadata(path)?;
-        Ok(Self {
-            size: m.len(),
-            modified_ns: m.modified()?.duration_since(UNIX_EPOCH)?.as_nanos(),
-        })
-    }
-}
+pub use crate::storage::Stamp;
 pub struct PreviewCache {
     db: Connection,
     writes: u32,

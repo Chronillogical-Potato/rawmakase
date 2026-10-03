@@ -235,11 +235,9 @@ fn import_into(
     let mut imported = Vec::new();
     for (target, bytes, _) in files {
         if !target.exists() {
-            let mut staged = tempfile::NamedTempFile::new_in(destination)?;
-            staged.write_all(&bytes)?;
-            staged.as_file().sync_all()?;
-            staged.persist_noclobber(&target).map_err(|e| e.error)?;
-            crate::storage::sync_dir(destination)?;
+            crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
+                Ok(f.write_all(&bytes)?)
+            })?;
         }
         imported.push(target);
     }

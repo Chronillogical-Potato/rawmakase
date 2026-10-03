@@ -509,11 +509,11 @@ pub fn save_in(
     let mut saved = watermark.clone();
     // The image, named after its preset, is copied beside first; it
     // replaces the live one only once the preset is written.
-    let stage = |from: &Path| -> Result<tempfile::NamedTempFile> {
-        let staged = tempfile::NamedTempFile::new_in(&images)?;
-        std::fs::copy(from, staged.path())?;
-        staged.as_file().sync_all()?;
-        Ok(staged)
+    let stage = |from: &Path| {
+        crate::storage::stage(&images, |f| {
+            std::fs::copy(from, f.path())?;
+            Ok(())
+        })
     };
     let mut staged = None;
     if let Some(source) = source {
@@ -534,8 +534,7 @@ pub fn save_in(
     }
     crate::storage::atomic_json(&dir.join(file_name(&saved.name)), &saved)?;
     if let Some((file, name)) = staged {
-        file.persist(images.join(name)).map_err(|e| e.error)?;
-        crate::storage::sync_dir(&images)?;
+        crate::storage::persist(file, &images.join(name), crate::storage::Replace::Overwrite)?;
     }
     if let Some(previous) = previous {
         // A rename by case alone is one file on most Mac and Windows disks.

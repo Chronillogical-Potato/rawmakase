@@ -19,7 +19,14 @@ fn icc_export_and_sixteen_bit_precision() -> Result<()> {
         ..Default::default()
     };
     let jpg = dir.path().join("out.jpg");
-    export(&jpg, &source, &image, &m, &ExportOptions::default(), false)?;
+    export(
+        &jpg,
+        &source,
+        &image,
+        &m,
+        &ExportOptions::default(),
+        Replace::NoClobber,
+    )?;
     let mut decoder =
         image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(fs::File::open(jpg)?))?;
     assert!(decoder.icc_profile()?.unwrap().len() > 100);
@@ -31,7 +38,14 @@ fn icc_export_and_sixteen_bit_precision() -> Result<()> {
             .any(|w| w == b"Sony")
     );
     let tif = dir.path().join("out.tiff");
-    export(&tif, &source, &image, &m, &ExportOptions::default(), false)?;
+    export(
+        &tif,
+        &source,
+        &image,
+        &m,
+        &ExportOptions::default(),
+        Replace::NoClobber,
+    )?;
     let out = image::open(tif)?.to_rgb16();
     let unique: std::collections::HashSet<_> = out.pixels().map(|p| p[0]).collect();
     assert_eq!(unique.len(), 1024);
@@ -153,7 +167,7 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
         &m,
         &ExportOptions::default(),
         &embed,
-        false,
+        Replace::NoClobber,
     )?;
     let bytes = fs::read(&jpg)?;
     let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
@@ -176,7 +190,7 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
         &m,
         &ExportOptions::default(),
         &without_location,
-        false,
+        Replace::NoClobber,
     )?;
     assert!(image::open(&tif).is_ok());
     Ok(())
@@ -294,7 +308,14 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     // are the pixels being developed, not somewhere to write.
     let raw_target = dir.path().join("out.ARW");
     assert_eq!(
-        message(export(&raw_target, &source, &image, &m, &options, true)),
+        message(export(
+            &raw_target,
+            &source,
+            &image,
+            &m,
+            &options,
+            Replace::Overwrite
+        )),
         "An export cannot overwrite a RAW file"
     );
     assert!(!raw_target.exists());
@@ -304,8 +325,8 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     // guards overlap and this is the one behind.
     let plain = dir.path().join("source.bin");
     fs::write(&plain, b"plain")?;
-    for overwrite in [false, true] {
-        let e = message(export(&plain, &plain, &image, &m, &options, overwrite));
+    for replace in [Replace::NoClobber, Replace::Overwrite] {
+        let e = message(export(&plain, &plain, &image, &m, &options, replace));
         assert!(e.contains("Cannot overwrite source"), "{e}");
     }
     assert_eq!(fs::read(&plain)?, b"plain");
@@ -315,13 +336,20 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     let target = dir.path().join("out.jpg");
     fs::write(&target, b"previous")?;
     assert_eq!(
-        message(export(&target, &source, &image, &m, &options, false)),
+        message(export(
+            &target,
+            &source,
+            &image,
+            &m,
+            &options,
+            Replace::NoClobber
+        )),
         "Destination already exists"
     );
     assert_eq!(fs::read(&target)?, b"previous");
 
     // With it, the file is replaced and no temporary is left behind.
-    export(&target, &source, &image, &m, &options, true)?;
+    export(&target, &source, &image, &m, &options, Replace::Overwrite)?;
     assert_ne!(fs::read(&target)?, b"previous");
     let mut left: Vec<String> = fs::read_dir(dir.path())?
         .filter_map(|e| e.ok())
@@ -333,7 +361,14 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     // An extension the encoder does not write is refused before anything is created.
     let png = dir.path().join("out.png");
     assert_eq!(
-        message(export(&png, &source, &image, &m, &options, false)),
+        message(export(
+            &png,
+            &source,
+            &image,
+            &m,
+            &options,
+            Replace::NoClobber
+        )),
         "Export extension must be .jpg, .jpeg, .tif or .tiff"
     );
     assert!(!png.exists());

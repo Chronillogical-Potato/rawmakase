@@ -6,10 +6,14 @@ mod identity;
 mod session;
 mod sidecar;
 
-pub use files::{RAW_EXTENSIONS, data_dir, is_hidden, is_raw, list_raws};
-pub(crate) use files::{asset_dirs, atomic_json, parent_dir, sync_dir};
+pub use files::{RAW_EXTENSIONS, Replace, data_dir, is_hidden, is_raw, list_raws};
+pub(crate) use files::{
+    asset_dirs, atomic_json, parent_dir, persist, read_json_or_default, stage, write_atomic,
+};
 pub(crate) use format::migrate_recipe;
 pub use format::{PIPELINE, SCHEMA};
+pub use identity::Stamp;
+pub(crate) use identity::{FNV_OFFSET, fnv1a};
 pub use session::{LibraryLayout, Session, load_session, save_session};
 pub(crate) use sidecar::import;
 pub use sidecar::{Identity, Sidecar, load, save, sidecar_path};

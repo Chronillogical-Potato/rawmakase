@@ -313,10 +313,7 @@ fn state_path(dir: &Path) -> std::path::PathBuf {
 }
 
 fn read_state(dir: &Path) -> State {
-    std::fs::read(state_path(dir))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    crate::storage::read_json_or_default(&state_path(dir))
 }
 
 /// Changes the state file under a short lock, rereading it first, so the

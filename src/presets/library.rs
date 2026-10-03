@@ -75,10 +75,7 @@ pub fn favorite_path() -> PathBuf {
     crate::storage::data_dir().join("preset-favorites.json")
 }
 pub fn load_favorites() -> BTreeSet<String> {
-    std::fs::read(favorite_path())
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    crate::storage::read_json_or_default(&favorite_path())
 }
 pub fn save_favorites(favorites: &BTreeSet<String>) -> Result<()> {
     crate::storage::atomic_json(&favorite_path(), favorites)
@@ -96,11 +93,9 @@ pub fn import_file(path: &Path) -> Result<PathBuf> {
         );
     } else {
         use std::io::Write;
-        let mut f = tempfile::NamedTempFile::new_in(&dir)?;
-        f.write_all(text.as_bytes())?;
-        f.as_file().sync_all()?;
-        f.persist_noclobber(&target).map_err(|e| e.error)?;
-        crate::storage::sync_dir(&dir)?;
+        crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
+            Ok(f.write_all(text.as_bytes())?)
+        })?;
     }
     Ok(target)
 }

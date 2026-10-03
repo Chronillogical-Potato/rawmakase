@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs,
     io::Write,
@@ -21,32 +21,75 @@ pub fn data_dir() -> PathBuf {
                 .flatten()
                 .map(|p| PathBuf::from(p).join("RAWmakase"))
         })
-        .or_else(|| {
-            if cfg!(target_os = "macos") || cfg!(windows) {
-                None
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                home().join("Library/Application Support/RAWmakase")
+            } else if cfg!(windows) {
+                // XDG_DATA_HOME is not consulted on Windows.
+                home().join(".local/share/rawmakase")
             } else {
-                std::env::var_os("XDG_DATA_HOME").map(|p| PathBuf::from(p).join("rawmakase"))
+                xdg_data_home().join("rawmakase")
             }
         })
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(
-                if cfg!(target_os = "macos") {
-                    "Library/Application Support/RAWmakase"
-                } else {
-                    ".local/share/rawmakase"
-                },
-            )
-        })
+}
+fn home() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+}
+/// $XDG_DATA_HOME, or its default ~/.local/share.
+fn xdg_data_home() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".local/share"))
+}
+/// What persisting does when the destination already exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Replace {
+    Overwrite,
+    /// Fail instead, even if another writer creates the file meanwhile.
+    NoClobber,
+}
+/// Writes `path` whole or not at all: `write` fills a temporary file beside
+/// it, which is synced and renamed over it, and the folder is synced.
+pub(crate) fn write_atomic(
+    path: &Path,
+    replace: Replace,
+    write: impl FnOnce(&mut NamedTempFile) -> Result<()>,
+) -> Result<()> {
+    persist(stage(parent_dir(path), write)?, path, replace)
+}
+/// A synced temporary file in `dir` holding what `write` wrote, for
+/// [`persist`] to put in place later.
+pub(crate) fn stage(
+    dir: &Path,
+    write: impl FnOnce(&mut NamedTempFile) -> Result<()>,
+) -> Result<NamedTempFile> {
+    let mut file = NamedTempFile::new_in(dir)?;
+    write(&mut file)?;
+    file.as_file().sync_all()?;
+    Ok(file)
+}
+/// Renames a file from [`stage`] to `path`, in the same folder, durably.
+pub(crate) fn persist(staged: NamedTempFile, path: &Path, replace: Replace) -> Result<()> {
+    match replace {
+        Replace::Overwrite => staged.persist(path),
+        Replace::NoClobber => staged.persist_noclobber(path),
+    }
+    .map_err(|e| e.error)?;
+    sync_dir(parent_dir(path))
 }
 pub(crate) fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let parent = parent_dir(path);
-    fs::create_dir_all(parent)?;
-    let mut f = NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut f, value)?;
-    f.write_all(b"\n")?;
-    f.as_file().sync_all()?;
-    f.persist(path).map_err(|e| e.error)?;
-    sync_dir(parent)
+    fs::create_dir_all(parent_dir(path))?;
+    write_atomic(path, Replace::Overwrite, |f| {
+        serde_json::to_writer_pretty(&mut *f, value)?;
+        Ok(f.write_all(b"\n")?)
+    })
+}
+/// The JSON at `path`, or the default when it is missing or unreadable.
+pub(crate) fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
 }
 /// Makes a rename into `dir` durable. Unix only: Windows cannot open a folder
 /// as a file, and NTFS journals the rename itself.
@@ -94,13 +137,7 @@ pub fn is_raw(p: &Path) -> bool {
 /// Search locations for user-installed assets, including the legacy Linux location.
 pub(crate) fn asset_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![data_dir()];
-    let standard = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                .join(".local/share")
-        })
-        .join("rawmakase");
+    let standard = xdg_data_home().join("rawmakase");
     if !dirs.contains(&standard) {
         dirs.push(standard);
     }
