@@ -5,7 +5,7 @@
 //! It lives in memory and is cleared when another catalog opens.
 use super::Editor;
 use super::history::{Recorded, Step};
-use super::library::{CollectionCommand, MetadataCommand};
+use super::library::{CollectionCommand, DescriptiveCommand, MetadataCommand};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,6 +29,9 @@ pub(super) enum Command {
     /// Photos added to or taken out of a collection, e.g. the Quick
     /// Collection; undone in the Library.
     Collection(Box<CollectionCommand>),
+    /// Title, caption, creator, copyright, location or keywords of one or
+    /// more photos; undone in the Library.
+    Descriptive(Box<DescriptiveCommand>),
     /// A Develop step or History click on `photo` (`None`: a file outside
     /// the catalog), in the History identified by `history`.
     Develop {
@@ -112,13 +115,33 @@ impl Editor {
                     .into_iter()
                     .map(|change| (change.sequence, Command::Collection(Box::new(change)))),
             );
+            commands.extend(
+                library
+                    .take_descriptive_done()
+                    .into_iter()
+                    .map(|change| (change.sequence, Command::Descriptive(Box::new(change)))),
+            );
         }
         commands.sort_by_key(|(sequence, _)| *sequence);
         for (_, command) in commands {
             self.undo_log.push(command);
         }
     }
+    /// Saves what the Library panels hold, so it is a command before the
+    /// one to reverse is picked.
+    fn save_drafts(&mut self) -> bool {
+        if let Some(library) = &mut self.library
+            && let Err(e) = library.commit_copy_name()
+        {
+            self.status = format!("Not saved: {e}");
+            return false;
+        }
+        true
+    }
     pub(super) fn undo(&mut self) {
+        if !self.save_drafts() {
+            return;
+        }
         self.sync_undo();
         if let Some(command) = self.undo_log.undo.pop_back() {
             if self.apply(&command, Direction::Undo) {
@@ -129,6 +152,9 @@ impl Editor {
         }
     }
     pub(super) fn redo(&mut self) {
+        if !self.save_drafts() {
+            return;
+        }
         self.sync_undo();
         if let Some(command) = self.undo_log.redo.pop() {
             if self.apply(&command, Direction::Redo) {
@@ -192,6 +218,27 @@ impl Editor {
                     return false;
                 };
                 if let Err(e) = library.change_collection(change.collection, add, remove) {
+                    self.status = format!("{verb} failed: {e}");
+                    return false;
+                }
+                self.library_mode = true;
+                library.go_to_place(place);
+                self.status = format!("{verb} {}", change.summary);
+                library.message = self.status.clone();
+                true
+            }
+            Command::Descriptive(change) => {
+                let (values, place) = match direction {
+                    Direction::Undo => (&change.before, &change.place_before),
+                    Direction::Redo => (&change.after, &change.place_after),
+                };
+                if !self.flush() {
+                    return false;
+                }
+                let Some(library) = &mut self.library else {
+                    return false;
+                };
+                if let Err(e) = library.restore_descriptive(values) {
                     self.status = format!("{verb} failed: {e}");
                     return false;
                 }

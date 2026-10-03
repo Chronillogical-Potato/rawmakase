@@ -247,6 +247,15 @@ impl Catalog {
         }
         Ok(members)
     }
+    /// Makes every write of descriptive metadata fail, as on a full disk.
+    #[cfg(test)]
+    pub(crate) fn fail_metadata_writes(&self) -> Result<()> {
+        self.db.execute_batch(
+            "CREATE TEMP TRIGGER fail_metadata BEFORE INSERT ON photo_fields
+             BEGIN SELECT RAISE(FAIL, 'disk full'); END;",
+        )?;
+        Ok(())
+    }
     #[cfg(test)]
     pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
         Ok(self

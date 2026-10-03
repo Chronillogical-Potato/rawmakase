@@ -19,6 +19,7 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
 pub use filmstrip::Pick;
 pub use metadata::{Metadata, MetadataCommand};
 pub use quick::CollectionCommand;
@@ -74,6 +75,8 @@ pub struct Library {
     /// A virtual copy command from a thumbnail menu, for the editor.
     copy_request: Option<CopyAction>,
     copy_names: copy_name::CopyNames,
+    /// Title, caption and the other descriptive fields being shown or typed.
+    fields: metadata_fields::Fields,
     loupe: loupe::Loupe,
     compare: compare::Compare,
     survey: survey::Survey,
@@ -86,6 +89,8 @@ pub struct Library {
     done: Vec<MetadataCommand>,
     /// Collection changes not yet handed to the shared undo log.
     collection_done: Vec<quick::CollectionCommand>,
+    /// Descriptive metadata changes not yet handed to the shared undo log.
+    descriptive_done: Vec<DescriptiveCommand>,
     /// Reads capture times for photos added from folders.
     capture: Option<background::Reader<capture::Read>>,
     /// Reads camera settings and sizes for photos added from folders.
@@ -152,8 +157,10 @@ impl Library {
             ctx,
             copy_request: None,
             copy_names: Default::default(),
+            fields: Default::default(),
             done: Vec::new(),
             collection_done: Vec::new(),
+            descriptive_done: Vec::new(),
             loupe,
             compare: Default::default(),
             survey: Default::default(),
@@ -220,8 +227,10 @@ impl Library {
             }
         }
         self.roots = self.catalog.roots()?;
-        // Copy commands save a name being typed before they run.
+        // Copy commands save a name being typed before they run, and so
+        // does anything else that reads the catalog again.
         self.copy_names.clear();
+        self.fields.clear();
         self.filter();
         Ok(())
     }
@@ -489,14 +498,14 @@ impl Library {
     }
 }
 impl Library {
-    /// Saves a Copy Name still being typed, e.g. when the Library panel
-    /// goes away before the field loses focus. On failure the name stays
-    /// pending, to be saved again or discarded.
+    /// Saves a Copy Name or metadata field still being typed, e.g. when the
+    /// Library panel goes away before the field loses focus. On failure it
+    /// stays pending, to be saved again or discarded.
     pub(super) fn commit_copy_name(&mut self) -> Result<()> {
         if self.copy_names.commit(&self.catalog, &mut self.photos)? {
             self.filter();
         }
-        Ok(())
+        self.commit_fields()
     }
     #[cfg(test)]
     pub(super) fn set_copy_name_draft(&mut self, id: i64, name: &str) {
@@ -505,6 +514,7 @@ impl Library {
     /// Drops a Copy Name that could not be saved, e.g. closing without saving.
     pub(super) fn discard_copy_name(&mut self) {
         self.copy_names.discard();
+        self.fields.clear();
     }
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
@@ -525,6 +535,7 @@ mod cell;
 mod collections;
 mod compare;
 mod copy_name;
+mod descriptive;
 mod filmstrip;
 mod filter;
 mod filter_bar;
@@ -533,6 +544,7 @@ mod info;
 mod layout;
 mod loupe;
 mod metadata;
+mod metadata_fields;
 mod photo_info;
 mod previews;
 mod quick;
