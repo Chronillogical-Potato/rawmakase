@@ -120,6 +120,7 @@ impl Preset {
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
         self.validate_remaining(&mut settings)?;
+        self.keep_upright_fitting(base, &mut recipe);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
         recipe.validate()?;
@@ -195,10 +196,24 @@ impl Preset {
         // Spots and masks that convert apply; the rest are reported.
         let skipped = self.apply_local(&mut recipe, m);
         warnings.extend(skipped);
+        self.keep_upright_fitting(base, &mut recipe);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
         recipe.validate()?;
         Ok((recipe, warnings))
+    }
+    /// Upright corrections analysed through other lens settings than the result's no
+    /// longer fit the photo: they are dropped for a new analysis, unless these settings
+    /// bring Lightroom's own corrections, made with them.
+    fn keep_upright_fitting(&self, base: &Recipe, r: &mut Recipe) {
+        use crate::develop::upright::LensInputs;
+        let brought = self
+            .settings
+            .keys()
+            .any(|k| k.starts_with("UprightTransform_"));
+        if !brought && LensInputs::of(r) != LensInputs::of(base) {
+            r.upright.clear_analysis();
+        }
     }
     /// The camera profile this preset asks for, if any.
     fn requested_profile(&self) -> Option<&str> {

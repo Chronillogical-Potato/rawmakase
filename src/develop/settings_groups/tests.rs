@@ -432,7 +432,12 @@ fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
         metadata: &m,
         profiles: &[],
     };
-    let mut to = Recipe::default();
+    // With profile corrections on, so switching the panel off changes the rendering
+    // (a camera's built-in correction stays either way).
+    let mut to = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
     to.upright.mode = UprightMode::Level;
     to.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
     let mut source = to.clone();

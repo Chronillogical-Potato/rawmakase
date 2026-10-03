@@ -655,3 +655,28 @@ fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<(
     );
     Ok(())
 }
+/// Settings that change how the lens renders leave no Upright correction analysed
+/// through the old lens settings; settings that change nothing rendered keep it.
+#[test]
+fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Result<()> {
+    use crate::develop::{
+        UprightMode,
+        panels::{Panel, PanelState},
+    };
+    let mut base = Recipe::default();
+    base.upright.mode = UprightMode::Level;
+    base.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("d.xmp"), &xml(attrs, ""))?.apply(r, &Metadata::default(), &[], None)
+    };
+    let r = apply(r#"c:LensManualDistortionAmount="30""#, &base)?;
+    assert!(r.upright.corrections.is_empty());
+    assert_eq!(r.upright.mode, UprightMode::Level);
+    assert_eq!(apply(r#"c:Exposure2012="1""#, &base)?.upright, base.upright);
+    // With the Lens Corrections panel off the amount renders nothing.
+    let mut off = base.clone();
+    off.panels.set(Panel::LensCorrections, PanelState::Off);
+    let r = apply(r#"c:LensManualDistortionAmount="30""#, &off)?;
+    assert_eq!(r.upright.corrections, base.upright.corrections);
+    Ok(())
+}

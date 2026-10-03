@@ -4,27 +4,33 @@
 use super::{Geometry, Recipe, image_space::LensMap};
 use crate::raw::CameraImage;
 
-/// The lens settings an analysis is made through: when any of them changes, the
-/// corrections analysed before no longer fit the photo.
+/// The lens settings an analysis is made through, as they render: when any of them
+/// changes, the corrections analysed before no longer fit the photo. A setting a
+/// switched-off panel or an older process version leaves unrendered changes nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LensInputs {
     builtin: bool,
     profile: bool,
     distortion: f32,
     manual_distortion: f32,
-    panel: super::panels::PanelState,
-    /// Lens corrections render from process version 4.
-    current_engine: bool,
 }
 impl LensInputs {
     pub fn of(r: &Recipe) -> Self {
+        // Lens corrections render from process version 4.
+        if r.engine < 4 {
+            return Self {
+                builtin: false,
+                profile: false,
+                distortion: 1.,
+                manual_distortion: 0.,
+            };
+        }
+        let shown = r.as_rendered();
         Self {
-            builtin: r.lens_builtin,
-            profile: r.lens_profile,
-            distortion: r.lens_distortion,
-            manual_distortion: r.lens_manual_distortion,
-            panel: r.panels.state(super::panels::Panel::LensCorrections),
-            current_engine: r.engine >= 4,
+            builtin: shown.lens_builtin,
+            profile: shown.lens_profile,
+            distortion: shown.lens_distortion,
+            manual_distortion: shown.lens_manual_distortion,
         }
     }
 }
