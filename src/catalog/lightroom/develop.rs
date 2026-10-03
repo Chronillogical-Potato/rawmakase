@@ -235,7 +235,11 @@ pub fn convert_develop(
         .collect();
     // Auto black & white is judged with the mix Lightroom resolved for it; without
     // Auto, each mixer channel stands on its own.
-    let gray_mix: Vec<&str> = if preset.settings.contains_key("AutoGrayscaleMix") {
+    let auto_gray_mix = preset
+        .settings
+        .get("AutoGrayscaleMix")
+        .is_some_and(|v| v == "true");
+    let gray_mix: Vec<&str> = if auto_gray_mix {
         preset
             .settings
             .keys()

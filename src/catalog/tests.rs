@@ -273,10 +273,14 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
     // Without Auto, a malformed channel does not take the others with it.
-    let text = r#"s = { ConvertToGrayscale = true, GrayMixerRed = -12, GrayMixerBlue = 300 }"#;
-    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
-    assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
-    assert_eq!(w.len(), 1, "{w:?}");
+    for auto in ["", "AutoGrayscaleMix = false, "] {
+        let text = format!(
+            "s = {{ {auto}ConvertToGrayscale = true, GrayMixerRed = -12, GrayMixerBlue = 300 }}"
+        );
+        let (r, w) = convert_develop(&text, &crate::raw::Metadata::default(), &[], None)?;
+        assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
+        assert_eq!(w.len(), 1, "{w:?}");
+    }
     Ok(())
 }
 #[test]
