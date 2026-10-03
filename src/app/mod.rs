@@ -34,6 +34,9 @@ pub struct Editor {
     clipboard: Option<settings_transfer::Clipboard>,
     /// The settings of the photo open before this one, for Paste from Previous.
     previous_settings: Option<settings_transfer::Settings>,
+    /// Copy Settings while open, and the groups it last copied.
+    copy_dialog: Option<settings_transfer::CopyDialog>,
+    copy_groups: crate::develop::settings_groups::GroupSelection,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
@@ -190,6 +193,8 @@ impl Editor {
             renderer,
             clipboard: None,
             previous_settings: None,
+            copy_dialog: None,
+            copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
@@ -265,6 +270,7 @@ impl Editor {
                     theme_chosen: self.themes.chosen().is_some(),
                     auto_advance: self.auto_advance,
                     library_layout: self.saved_layout.clone(),
+                    copy_groups: Some(self.copy_groups.clone()),
                 },
             )?;
         }
