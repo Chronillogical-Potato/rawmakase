@@ -19,11 +19,16 @@ pub struct Catalog {
 }
 
 mod copies;
+mod descriptive;
 mod edits;
 mod info;
 mod ingest;
 pub mod lightroom;
 mod models;
+pub use descriptive::{
+    Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
+    Value, keyword_name,
+};
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };
@@ -311,6 +316,8 @@ impl Catalog {
     }
 }
 
+#[cfg(test)]
+mod descriptive_tests;
 pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;
