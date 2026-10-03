@@ -147,6 +147,7 @@ impl Library {
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
+        let _ = catalog.backfill_lightroom_snapshots();
         let _ = catalog.backfill_lightroom_info();
         let _ = catalog.backfill_lightroom_metadata();
         // Unlike those, a failure here could export keywords Lightroom keeps

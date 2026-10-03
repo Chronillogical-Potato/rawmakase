@@ -259,6 +259,7 @@ impl Editor {
                         }
                     }
                 });
+                self.snapshots_section(ui);
                 self.history_section(ui);
             });
         if let Some(dialog) = import {

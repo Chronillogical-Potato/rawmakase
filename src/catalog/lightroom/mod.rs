@@ -230,6 +230,9 @@ fn copy_tables(tx: &Connection) -> Result<()> {
     if has("Adobe_libraryImageDevelopHistoryStep")? {
         tx.execute_batch(history::COPY_LIGHTROOM_HISTORY)?;
     }
+    if has("Adobe_libraryImageDevelopSnapshot")? {
+        tx.execute_batch(crate::catalog::snapshots::COPY_LIGHTROOM_SNAPSHOTS)?;
+    }
     if has("AgLibraryCollection")? {
         tx.execute_batch("INSERT INTO collections SELECT id_local,name,parent,creationId FROM lr.AgLibraryCollection;")?;
     }
@@ -247,6 +250,7 @@ fn copy_tables(tx: &Connection) -> Result<()> {
         super::info::INFO_BACKFILLED,
         super::sidecar::METADATA_BACKFILLED,
         KEYWORD_EXPORT_BACKFILLED,
+        super::snapshots::SNAPSHOTS_BACKFILLED,
     ] {
         super::set_meta(tx, key, "1")?;
     }

@@ -112,6 +112,30 @@ pub(super) fn section(
     resettable: bool,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> bool {
+    let button = if resettable {
+        HeaderButton::Reset
+    } else {
+        HeaderButton::None
+    };
+    section_with(ui, title, button, contents)
+}
+/// The button at the right of a panel header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HeaderButton {
+    None,
+    /// Resets the panel (and names the History step).
+    Reset,
+    /// Adds an item, as the Snapshots panel's +.
+    Add,
+}
+/// [`section`] with any header button; returns whether it was clicked.
+pub(super) fn section_with(
+    ui: &mut egui::Ui,
+    title: &str,
+    button: HeaderButton,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let resettable = button != HeaderButton::None;
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
     let mut open = !ui.ctx().data(|d| {
         d.get_temp::<std::collections::BTreeSet<String>>(collapsed_sections_id())
@@ -141,10 +165,10 @@ pub(super) fn section(
             Sense::hover()
         },
     );
-    let reset = if resettable {
-        reset.on_hover_text(format!("Reset {title}"))
-    } else {
-        reset
+    let reset = match button {
+        HeaderButton::Reset => reset.on_hover_text(format!("Reset {title}")),
+        HeaderButton::Add => reset.on_hover_text(format!("New {}", title.trim_end_matches('s'))),
+        HeaderButton::None => reset,
     };
     // A filled header band marks each collapsible panel, as in Lightroom.
     ui.painter().rect_filled(
@@ -186,7 +210,12 @@ pub(super) fn section(
     );
     if resettable {
         let color = theme::gray(if reset.hovered() { 240 } else { 150 });
-        icons::paint_at(ui.painter(), Icon::Reset, reset_rect.center(), 12., color);
+        let icon = if button == HeaderButton::Add {
+            Icon::Add
+        } else {
+            Icon::Reset
+        };
+        icons::paint_at(ui.painter(), icon, reset_rect.center(), 12., color);
     }
     if toggle.clicked() {
         open = !open;
@@ -201,7 +230,7 @@ pub(super) fn section(
             }
         });
     }
-    if resettable && reset.clicked() {
+    if button == HeaderButton::Reset && reset.clicked() {
         name_history_step(ui, format!("Reset {title}"), String::new());
     }
     if open {

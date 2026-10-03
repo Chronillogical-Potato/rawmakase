@@ -102,6 +102,8 @@ impl Editor {
         if !self.commit_library_drafts() {
             return false;
         }
+        // A snapshot name still being typed, as leaving the photo any way commits it.
+        self.commit_snapshot_rename();
         if let Some(done) = self.autosave.wait() {
             self.background_saved(done);
         }

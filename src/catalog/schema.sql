@@ -106,6 +106,17 @@ CREATE TABLE IF NOT EXISTS develop_history (
     data BLOB NOT NULL
 );
 
+-- Develop Snapshots (see `snapshots`): a RAWmakase recipe as JSON, or Lightroom's
+-- settings text for snapshots imported from Lightroom.
+CREATE TABLE IF NOT EXISTS develop_snapshots (
+    id INTEGER PRIMARY KEY,
+    photo INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    recipe TEXT,
+    lightroom BLOB
+);
+CREATE INDEX IF NOT EXISTS develop_snapshots_photo ON develop_snapshots(photo);
+
 -- Compressed bitmaps referenced by hash from saved recipes (see `storage::bitmaps`).
 CREATE TABLE IF NOT EXISTS bitmaps (
     hash TEXT PRIMARY KEY,

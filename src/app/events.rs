@@ -289,6 +289,7 @@ impl Editor {
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
             self.document.lightroom_history =
                 l.catalog.lightroom_history(photo).unwrap_or_default();
+            self.document.snapshots.list = l.catalog.snapshots(photo).unwrap_or_default();
             match l.catalog.load_edit(photo, &p) {
                 Ok(Some(saved)) => {
                     self.document.recipe = saved.recipe;
