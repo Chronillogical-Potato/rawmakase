@@ -239,7 +239,7 @@ impl Lua<'_> {
 
 /// Lightroom's local edits of one photo, converted.
 #[derive(Debug, Default)]
-pub struct LocalEdits {
+pub struct ConvertedLocal {
     /// `None` when the settings have no spot removal.
     pub retouch: Option<Vec<RetouchOp>>,
     /// `None` when the settings have no masks.
@@ -267,9 +267,9 @@ impl Frame {
         self.image.from_unrotated([x, y])
     }
 }
-pub fn convert(local: &BTreeMap<String, Node>, image: ImageFrame) -> LocalEdits {
+pub fn convert(local: &BTreeMap<String, Node>, image: ImageFrame) -> ConvertedLocal {
     let frame = Frame::new(image);
-    let mut edits = LocalEdits::default();
+    let mut edits = ConvertedLocal::default();
     if let Some(areas) = local.get("RetouchAreas").filter(|n| !n.is_empty()) {
         edits.retouch = Some(retouch_areas(areas, &frame, &mut edits.skipped));
     } else if let Some(info) = local.get("RetouchInfo").filter(|n| !n.is_empty()) {

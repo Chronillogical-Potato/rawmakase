@@ -120,6 +120,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [parse.rs](../src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
 | [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
+| [ns.rs](../src/xmp/ns.rs), [xml.rs](../src/xmp/xml.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
 | [local.rs](../src/xmp/local.rs) | Lightroom's spot removal and masks (`RetouchAreas`, legacy `RetouchInfo`, mask correction lists) from XMP or a catalog, as retouch operations and masks; import only. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
