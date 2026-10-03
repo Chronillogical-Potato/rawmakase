@@ -13,7 +13,7 @@ pub(super) struct Directories {
 }
 
 /// Capture settings LibRaw reports, for a RAW whose EXIF could not be read.
-fn from_metadata(m: &Metadata) -> (Vec<Field>, Vec<Field>) {
+pub(super) fn from_metadata(m: &Metadata) -> (Vec<Field>, Vec<Field>) {
     let rational =
         |tag, v: f32| Field::rational(tag, (v.max(0.) * 1_000_000.).round() as u32, 1_000_000);
     let main = vec![
@@ -41,7 +41,7 @@ pub(super) fn directories(m: &Metadata, embed: &Embed, width: u32, height: u32) 
             (main, exif, Vec::new())
         }
     };
-    if embed.capture && !main.iter().any(|f| f.tag == 0x010f) {
+    if embed.capture && embed.camera_fallback && !main.iter().any(|f| f.tag == 0x010f) {
         main.extend(from_metadata(m).0);
     }
     if !embed.location {
