@@ -469,7 +469,10 @@ pub fn save_in(
         );
         decode(source).context("The image can't be read")?;
     }
-    if watermark.style == Style::Text {
+    // Checked once installed fonts are listed; until then the export checks.
+    if watermark.style == Style::Text
+        && (watermark.family == fonts::INTER || fonts::families_if_listed().is_some())
+    {
         fonts::load(&watermark.family, &watermark.face)?;
     }
     let images = dir.join("images");
@@ -512,7 +515,8 @@ pub fn save_in(
         // A rename by case alone is one file on most Mac and Windows disks.
         let old = dir.join(file_name(&previous.name));
         if !same_file(&old, &dir.join(file_name(&saved.name))) {
-            let _ = std::fs::remove_file(old);
+            std::fs::remove_file(old)
+                .context("Saved under the new name, but the old one could not be removed")?;
         }
         if let Some(old) = previous.image.map(|i| images.join(i)) {
             let kept = saved

@@ -156,6 +156,15 @@ impl Editor {
                 );
                 match saved {
                     Ok(saved) => {
+                        // Export with Previous follows a renamed watermark.
+                        if let Some(old) = &state.original
+                            && *old != saved.name
+                            && let Some(mut previous) = crate::export::ExportSettings::load()
+                            && previous.watermark_name == *old
+                        {
+                            previous.watermark_name = saved.name.clone();
+                            let _ = previous.save();
+                        }
                         self.exports.draft.watermark = true;
                         self.exports.draft.watermark_name = saved.name;
                         self.exports.watermarks = watermark::presets();
