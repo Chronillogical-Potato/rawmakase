@@ -5,6 +5,7 @@
 use super::super::widgets::{modal_frame, primary_button};
 use super::Editor;
 use crate::app::theme;
+use crate::develop::unit_to_u8;
 use crate::watermark::{self, Align, Anchor, Size, Style, Watermark};
 use eframe::egui::{self, Color32, Sense, Vec2};
 use std::path::PathBuf;
@@ -345,7 +346,14 @@ fn mark_texture(
     let pixels: Vec<Color32> = placed
         .rgba
         .iter()
-        .map(|[r, g, b, a]| Color32::from_rgba_unmultiplied(byte(*r), byte(*g), byte(*b), byte(*a)))
+        .map(|[r, g, b, a]| {
+            Color32::from_rgba_unmultiplied(
+                unit_to_u8(*r),
+                unit_to_u8(*g),
+                unit_to_u8(*b),
+                unit_to_u8(*a),
+            )
+        })
         .collect();
     let image = egui::ColorImage {
         size: [placed.width, placed.height],
@@ -393,10 +401,6 @@ fn percent_slider(
 /// The label before a row's controls.
 fn field_label(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(12.).color(theme::gray(150)));
-}
-/// A color channel from 0 to 1 as a byte.
-fn byte(v: f32) -> u8 {
-    (v.clamp(0., 1.) * 255. + 0.5) as u8
 }
 
 /// Style, image or text options, shadow and effects, as Lightroom's
@@ -494,7 +498,7 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                 field_label(ui, "Color");
                 // The picker in sRGB, as the color is stored and laid over
                 // the photo.
-                let mut srgb = w.color.map(byte);
+                let mut srgb = w.color.map(unit_to_u8);
                 if ui.color_edit_button_srgb(&mut srgb).changed() {
                     w.color = srgb.map(|c| c as f32 / 255.);
                 }
