@@ -60,6 +60,9 @@ pub(super) struct Preferences {
     status_at_open: String,
     /// Default Creator and Copyright for photos added from folders, as typed.
     defaults: crate::catalog::MetadataDefaults,
+    /// Typed and not saved yet: saved when the field is left, or when the
+    /// page or window is.
+    defaults_dirty: bool,
 }
 
 const WIDTH: f32 = 780.;
@@ -159,7 +162,18 @@ impl Editor {
             self.view.shortcuts = !self.view.shortcuts;
         }
     }
+    /// Saves defaults still being typed, once their page is left.
+    fn save_defaults(&mut self) {
+        if std::mem::take(&mut self.preferences.defaults_dirty)
+            && let Err(e) = self.preferences.defaults.save()
+        {
+            self.status = format!("Metadata defaults not saved: {e:#}");
+        }
+    }
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
+        if !self.preferences.open || self.preferences.tab != Tab::Catalog {
+            self.save_defaults();
+        }
         if !self.preferences.open {
             return;
         }
@@ -358,16 +372,15 @@ impl Editor {
         gap(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
-        let mut changed = false;
+        let mut left = false;
         for (label, text) in [
             ("Creator", &mut defaults.creator),
             ("Copyright", &mut defaults.copyright),
         ] {
             form_row(ui, label, |ui| {
-                // Saved as typed: switching tabs would lose a pending edit.
-                changed |= ui
-                    .add(egui::TextEdit::singleline(text).desired_width(320.))
-                    .changed();
+                let field = ui.add(egui::TextEdit::singleline(text).desired_width(320.));
+                self.preferences.defaults_dirty |= field.changed();
+                left |= field.lost_focus();
             });
         }
         form_row(ui, "", |ui| {
@@ -376,8 +389,8 @@ impl Editor {
                 "For photos added from folders, when neither the file nor its sidecar has one.",
             );
         });
-        if changed && let Err(e) = defaults.save() {
-            self.status = format!("Metadata defaults not saved: {e:#}");
+        if left {
+            self.save_defaults();
         }
         gap(ui);
         group(ui, "Catalogs");

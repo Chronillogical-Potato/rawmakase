@@ -127,7 +127,19 @@ impl Catalog {
             }
         }
         let report = self.import_file_metadata(&added)?;
-        self.apply_defaults(&added, defaults)?;
+        // A photo whose metadata couldn't be read may have its own: no
+        // default goes in its place.
+        let read: Vec<(i64, PathBuf)> = added
+            .iter()
+            .filter(|(_, file)| {
+                let stem = file.with_extension("");
+                !report.unreadable.iter().any(|(path, _)| {
+                    path == file || path.to_string_lossy().starts_with(&*stem.to_string_lossy())
+                })
+            })
+            .cloned()
+            .collect();
+        self.apply_defaults(&read, defaults)?;
         Ok((added.len(), report))
     }
     /// Records capture times read from the photos' files, in one transaction.
