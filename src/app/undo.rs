@@ -209,7 +209,9 @@ impl Editor {
                     Direction::Undo => super::sync::SyncSide::Before,
                     Direction::Redo => super::sync::SyncSide::After,
                 };
-                if let Err(e) = super::sync::restore(&library.catalog, &sync.edits, side) {
+                // Each photo where it is now, after any relink since the Sync.
+                let path = |id: i64| library.photo(id).map(|p| p.path.clone());
+                if let Err(e) = super::sync::restore(&library.catalog, &sync.edits, side, path) {
                     self.status = format!("{verb} failed: {e:#}");
                     return false;
                 }

@@ -773,7 +773,7 @@ impl Editor {
             if copy {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
             }
-            if sync && !self.sync_targets().is_empty() && !self.syncing {
+            if sync && !self.sync_targets().is_empty() && !self.activity.is_busy() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
             }
             if reset {

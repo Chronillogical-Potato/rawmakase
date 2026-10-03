@@ -6,6 +6,12 @@ use anyhow::{Context, Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;
 
+/// One photo's change for [`Catalog::change_edits`].
+pub enum EditChange<'a, 'b> {
+    Save(&'b EditToSave<'a>),
+    Clear { id: i64 },
+}
+
 /// One photo's edit for [`Catalog::save_edits`].
 pub struct EditToSave<'a> {
     pub id: i64,
@@ -55,16 +61,34 @@ impl Catalog {
     /// Saves several photos' edits in one transaction: all of them, or none when one
     /// fails (as a Sync to many photos is one change).
     pub fn save_edits(&self, edits: &[EditToSave<'_>]) -> Result<()> {
-        let mut identities = Vec::with_capacity(edits.len());
-        for e in edits {
-            e.recipe.validate()?;
-            e.export.validate()?;
-            identities.push(Identity::read(e.path)?);
-            // Refuse replacing an edit after the underlying source changed.
-            let _ = self.load_edit(e.id, e.path)?;
+        self.change_edits(&edits.iter().map(EditChange::Save).collect::<Vec<_>>())
+    }
+    /// Saves or clears several photos' edits in one transaction. Clearing returns a
+    /// photo to having no RAWmakase edit: no recipe, spots, masks or History.
+    pub fn change_edits(&self, changes: &[EditChange<'_, '_>]) -> Result<()> {
+        let mut identities = Vec::new();
+        for change in changes {
+            if let EditChange::Save(e) = change {
+                e.recipe.validate()?;
+                e.export.validate()?;
+                identities.push(Identity::read(e.path)?);
+                // Refuse replacing an edit after the underlying source changed.
+                let _ = self.load_edit(e.id, e.path)?;
+            }
         }
         let tx = self.db.unchecked_transaction()?;
-        for (e, identity) in edits.iter().zip(identities) {
+        let mut identities = identities.into_iter();
+        for change in changes {
+            let e = match change {
+                EditChange::Save(e) => e,
+                EditChange::Clear { id } => {
+                    ensure!(tx.execute("UPDATE photos SET recipe=NULL,export_options=NULL,identity=NULL,edited_at=NULL WHERE id=?", [id])? == 1, "Unknown photo");
+                    tx.execute("DELETE FROM local_edits WHERE photo=?", [id])?;
+                    tx.execute("DELETE FROM develop_history WHERE photo=?", [id])?;
+                    continue;
+                }
+            };
+            let identity = identities.next().expect("one identity per save");
             let (saved, local) = e.recipe.split_local();
             ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(e.export)?,serde_json::to_string(&identity)?,e.id])?==1,"Unknown photo");
             if local.is_empty() {

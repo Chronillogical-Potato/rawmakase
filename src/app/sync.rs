@@ -8,7 +8,7 @@ use super::{
     worker::Event,
 };
 use crate::{
-    catalog::{Catalog, EditToSave, HistoryUpdate, SavedHistory},
+    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory},
     develop::{
         Recipe,
         settings_groups::{self, GroupSelection, Source, Target},
@@ -40,8 +40,27 @@ pub(super) enum StartingEdit {
 pub struct Synced {
     pub id: i64,
     pub path: PathBuf,
-    pub before: Recipe,
+    /// The edit before, or none when the photo had no RAWmakase edit yet.
+    pub before: EditBefore,
     pub after: Recipe,
+}
+
+/// A photo's edit before a Sync.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditBefore {
+    Saved(Box<Recipe>),
+    /// No RAWmakase edit: Develop started it from `starting`, its Lightroom edit or
+    /// the camera defaults. Undo returns the photo to having none.
+    None {
+        starting: Box<Recipe>,
+    },
+}
+impl EditBefore {
+    fn recipe(&self) -> &Recipe {
+        match self {
+            EditBefore::Saved(r) | EditBefore::None { starting: r } => r,
+        }
+    }
 }
 
 /// A photo a Sync left as it was, and why.
@@ -51,11 +70,20 @@ pub struct SyncFailure {
     pub reason: String,
 }
 
-/// What a Sync did.
+/// A setting a Sync could not apply as asked on one photo (see `Transferred::notes`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SyncNote {
+    pub name: String,
+    pub note: String,
+}
+
+/// What a Sync did, in which catalog.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SyncResult {
+    pub catalog: PathBuf,
     pub synced: Vec<Synced>,
     pub failed: Vec<SyncFailure>,
+    pub notes: Vec<SyncNote>,
 }
 
 /// A Sync for the shared undo log: every photo's edit before and after it.
@@ -81,12 +109,20 @@ pub(super) fn synchronize(
     groups: &GroupSelection,
     targets: &[SyncTarget],
 ) -> SyncResult {
-    let mut result = SyncResult::default();
+    let mut result = SyncResult {
+        catalog: catalog.path.clone(),
+        ..Default::default()
+    };
     let mut prepared = Vec::new();
     for target in targets {
         match prepare(catalog, source, groups, target) {
-            Ok(Some(p)) => prepared.push(p),
-            Ok(None) => {}
+            Ok(p) => {
+                result.notes.extend(p.notes.iter().map(|note| SyncNote {
+                    name: target.name.clone(),
+                    note: note.clone(),
+                }));
+                prepared.extend(p.edit);
+            }
             Err(e) => result.failed.push(SyncFailure {
                 name: target.name.clone(),
                 reason: format!("{e:#}"),
@@ -114,117 +150,160 @@ pub(super) fn synchronize(
 }
 
 /// A target's new edit, ready to save.
-struct Prepared {
+struct PreparedEdit {
     synced: Synced,
     name: String,
     export: ExportOptions,
     history: SavedHistory,
 }
 
-/// `None` when the Sync changes nothing on this photo.
+/// A target's new edit (`None` when the Sync changes nothing on it), and what could
+/// not be applied as asked.
+struct Prepared {
+    edit: Option<PreparedEdit>,
+    notes: Vec<String>,
+}
+
 fn prepare(
     catalog: &Catalog,
     source: &Settings,
     groups: &GroupSelection,
     target: &SyncTarget,
-) -> Result<Option<Prepared>> {
-    let metadata = crate::raw::Raw::open(&target.path)
-        .with_context(|| format!("{} can't be read", target.name))?
-        .metadata;
+) -> Result<Prepared> {
+    let raw = crate::raw::Raw::open(&target.path)
+        .with_context(|| format!("{} can't be read", target.name))?;
+    let metadata = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let (before, export) = match catalog.load_edit(target.id, &target.path)? {
-        Some(saved) => (saved.recipe, saved.export),
+        Some(saved) => (EditBefore::Saved(Box::new(saved.recipe)), saved.export),
         None => (
-            starting_edit(catalog, target, &metadata, &profiles),
+            EditBefore::None {
+                starting: Box::new(starting_edit(catalog, target, &metadata, &profiles)?),
+            },
             ExportOptions::default(),
         ),
     };
-    let after = settings_groups::transfer(
+    let transferred = settings_groups::transfer(
         Source {
             recipe: &source.recipe,
             metadata: &source.metadata,
         },
-        &before,
+        before.recipe(),
         groups,
         Target {
             metadata: &metadata,
             profiles: &profiles,
         },
-    )
-    .recipe;
-    if after == before {
-        return Ok(None);
+    );
+    let notes = transferred.notes;
+    let mut after = transferred.recipe;
+    // Upright's corrections are analysed from each photo; the open photo's editor
+    // does it on Paste, and here the photo is developed for it.
+    let upright = &after.upright;
+    if !matches!(
+        upright.mode,
+        crate::develop::UprightMode::Off | crate::develop::UprightMode::Guided
+    ) && upright.corrections.len() <= upright.mode.code()
+    {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let image = raw.develop(false, &cancel)?;
+        after.upright.corrections = crate::develop::upright::analyse(&image, &after);
+    }
+    let before_recipe = before.recipe().clone();
+    if after == before_recipe {
+        return Ok(Prepared { edit: None, notes });
     }
     let saved = catalog
         .load_history(target.id)?
         .unwrap_or_else(|| SavedHistory {
-            origin: before.clone(),
+            origin: before_recipe.clone(),
             steps: Vec::new(),
             applied: 0,
         });
-    let mut history = History::restored(saved, &before);
-    let mut current = before.clone();
+    let mut history = History::restored(saved, &before_recipe);
+    let mut current = before_recipe;
     history.set(&after, &mut current, Step::new("Synchronize Settings", ""));
-    Ok(Some(Prepared {
-        history: history.saved(&current),
-        synced: Synced {
-            id: target.id,
-            path: target.path.clone(),
-            before,
-            after,
-        },
-        name: target.name.clone(),
-        export,
-    }))
+    Ok(Prepared {
+        edit: Some(PreparedEdit {
+            history: history.saved(&current),
+            synced: Synced {
+                id: target.id,
+                path: target.path.clone(),
+                before,
+                after,
+            },
+            name: target.name.clone(),
+            export,
+        }),
+        notes,
+    })
 }
 
 /// The edit Develop opens a photo with when RAWmakase has none: its Lightroom edit,
-/// else the camera defaults.
+/// else the camera defaults. A Lightroom edit that cannot be read fails the photo
+/// rather than losing its unsynchronized settings.
 fn starting_edit(
     catalog: &Catalog,
     target: &SyncTarget,
     metadata: &crate::raw::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-) -> Recipe {
-    let defaults = || Recipe::with_profiles(metadata, profiles);
+) -> Result<Recipe> {
     if target.start == StartingEdit::Defaults {
-        return defaults();
+        return Ok(Recipe::with_profiles(metadata, profiles));
     }
-    catalog
-        .lightroom_develop(target.id)
-        .ok()
-        .flatten()
-        .and_then(|text| crate::catalog::convert_develop(&text, metadata, profiles, None).ok())
-        .map_or_else(defaults, |(recipe, _)| recipe)
+    let text = catalog
+        .lightroom_develop(target.id)?
+        .context("Its Lightroom edit is missing")?;
+    let (recipe, _) = crate::catalog::convert_develop(&text, metadata, profiles, None)
+        .context("Its Lightroom edit can't be read")?;
+    Ok(recipe)
 }
 
 /// Writes one side of a Sync back, in one transaction, keeping each photo's History,
-/// which notices the change when the photo opens.
-pub(super) fn restore(catalog: &Catalog, edits: &[Synced], side: SyncSide) -> Result<()> {
-    let mut exports = Vec::with_capacity(edits.len());
+/// which notices the change when the photo opens. A photo that had no edit before
+/// goes back to having none. `path` gives each photo's current location, which a
+/// relink may have changed since.
+pub(super) fn restore(
+    catalog: &Catalog,
+    edits: &[Synced],
+    side: SyncSide,
+    path: impl Fn(i64) -> Option<PathBuf>,
+) -> Result<()> {
+    let mut saves = Vec::with_capacity(edits.len());
     for e in edits {
-        exports.push(
-            catalog
-                .load_edit(e.id, &e.path)?
-                .map(|saved| saved.export)
-                .unwrap_or_default(),
-        );
+        let recipe = match (side, &e.before) {
+            (SyncSide::Before, EditBefore::None { .. }) => continue,
+            (SyncSide::Before, EditBefore::Saved(r)) => r.as_ref(),
+            (SyncSide::After, _) => &e.after,
+        };
+        let path =
+            path(e.id).with_context(|| "A synchronized photo is no longer in the catalog")?;
+        let export = catalog
+            .load_edit(e.id, &path)?
+            .map(|saved| saved.export)
+            .unwrap_or_default();
+        saves.push((e.id, path, recipe, export));
     }
-    let saves: Vec<EditToSave> = edits
+    let saves: Vec<EditToSave> = saves
         .iter()
-        .zip(&exports)
-        .map(|(e, export)| EditToSave {
-            id: e.id,
-            path: &e.path,
-            recipe: match side {
-                SyncSide::Before => &e.before,
-                SyncSide::After => &e.after,
-            },
+        .map(|(id, path, recipe, export)| EditToSave {
+            id: *id,
+            path,
+            recipe,
             export,
             history: HistoryUpdate::Keep,
         })
         .collect();
-    catalog.save_edits(&saves)
+    let mut changes: Vec<EditChange> = saves.iter().map(EditChange::Save).collect();
+    if side == SyncSide::Before {
+        changes.extend(
+            edits
+                .iter()
+                .filter(|e| matches!(e.before, EditBefore::None { .. }))
+                .map(|e| EditChange::Clear { id: e.id }),
+        );
+    }
+    catalog.change_edits(&changes)
 }
 
 impl Editor {
@@ -257,7 +336,7 @@ impl Editor {
     /// background; the result arrives as [`Event::Synced`].
     pub(super) fn start_sync(&mut self, groups: GroupSelection) {
         let targets = self.sync_targets();
-        if targets.is_empty() || self.syncing || !self.flush() {
+        if targets.is_empty() || self.activity.is_busy() || !self.flush() {
             return;
         }
         let (Some(source), Some(library)) = (self.current_settings(), &self.library) else {
@@ -265,7 +344,11 @@ impl Editor {
         };
         let catalog = library.catalog.path.clone();
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
-        self.syncing = true;
+        // Moving to another photo or catalog waits, so neither can see an edit change
+        // underneath it.
+        if !self.activity.begin_sync() {
+            return;
+        }
         self.status = format!(
             "Synchronizing {}…",
             super::widgets::plural(targets.len(), "photo", "photos")
@@ -274,6 +357,8 @@ impl Editor {
             let result = Catalog::open(&catalog)
                 .map(|c| synchronize(&c, &source, &groups, &targets))
                 .unwrap_or_else(|e| SyncResult {
+                    catalog: catalog.clone(),
+                    notes: Vec::new(),
                     synced: Vec::new(),
                     failed: vec![SyncFailure {
                         name: "Catalog".into(),
@@ -286,7 +371,11 @@ impl Editor {
     }
     /// A finished Sync: one command for Undo, and a status line naming what failed.
     pub(super) fn synced(&mut self, result: SyncResult) {
-        self.syncing = false;
+        self.activity.finish_sync();
+        // A result for a catalog no longer open must not reach this one's undo log.
+        if self.library.as_ref().map(|l| &l.catalog.path) != Some(&result.catalog) {
+            return;
+        }
         let done = result.synced.len();
         if done > 0 {
             self.undo_log
@@ -304,6 +393,9 @@ impl Editor {
                 " · {} not changed: {}",
                 failure.name, failure.reason
             ));
+        }
+        for note in &result.notes {
+            status.push_str(&format!(" · {}: {}", note.name, note.note));
         }
         self.status = status;
     }
@@ -376,12 +468,19 @@ mod tests {
             let history = c.load_history(*id)?.unwrap();
             assert_eq!(history.steps.last().unwrap().name, "Synchronize Settings");
         }
-        // One Undo restores every photo.
-        restore(&c, &result.synced, SyncSide::Before)?;
+        let path = |id: i64| {
+            photos
+                .iter()
+                .find(|(p, _)| *p == id)
+                .map(|(_, path)| path.clone())
+        };
+        // One Undo restores every photo; these had no edit, and have none again.
+        restore(&c, &result.synced, SyncSide::Before, path)?;
         for (id, path) in &photos[1..3] {
-            assert_eq!(c.load_edit(*id, path)?.unwrap().recipe.exposure, 0.);
+            assert!(c.load_edit(*id, path)?.is_none());
+            assert!(c.load_history(*id)?.is_none());
         }
-        restore(&c, &result.synced, SyncSide::After)?;
+        restore(&c, &result.synced, SyncSide::After, path)?;
         assert_eq!(
             c.load_edit(photos[1].0, &photos[1].1)?
                 .unwrap()
@@ -392,6 +491,35 @@ mod tests {
         // Settings the photos already have change nothing.
         let again = synchronize(&c, &source, &GroupSelection::default(), &targets[..2]);
         assert!(again.synced.is_empty() && again.failed.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_lightroom_edit_that_cant_be_read_fails_its_photo_and_notes_are_reported() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: c,
+            photos,
+        } = catalog()?;
+        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let mut recipe = Recipe::default();
+        recipe.upright.mode = crate::develop::UprightMode::Guided;
+        recipe.exposure = 0.3;
+        let source = Settings { recipe, metadata };
+        let mut lightroom = target(photos[1].0, &photos[1].1);
+        lightroom.start = StartingEdit::Lightroom;
+        let targets = [lightroom, target(photos[2].0, &photos[2].1)];
+        let result = synchronize(&c, &source, &GroupSelection::default(), &targets);
+        assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
+        assert!(result.failed[0].reason.contains("Lightroom edit"));
+        assert!(c.load_edit(photos[1].0, &photos[1].1)?.is_none());
+        // Guided Upright can't move without this photo's guides: said, not hidden.
+        assert_eq!(result.synced.len(), 1);
+        assert!(
+            result.notes.iter().any(|n| n.note.contains("Guided")),
+            "{:?}",
+            result.notes
+        );
         Ok(())
     }
 }

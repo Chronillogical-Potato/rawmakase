@@ -4,6 +4,9 @@ pub(super) enum Activity {
     #[default]
     Idle,
     ChoosingFile,
+    /// Sync Settings is writing other photos' edits: moving to another photo or
+    /// catalog waits for it.
+    Syncing,
 }
 impl Activity {
     pub fn is_busy(&self) -> bool {
@@ -18,6 +21,21 @@ impl Activity {
         }
         *self = Self::ChoosingFile;
         true
+    }
+    pub fn begin_sync(&mut self) -> bool {
+        if self.is_busy() {
+            return false;
+        }
+        *self = Self::Syncing;
+        true
+    }
+    pub fn is_syncing(&self) -> bool {
+        matches!(self, Self::Syncing)
+    }
+    pub fn finish_sync(&mut self) {
+        if self.is_syncing() {
+            *self = Self::Idle;
+        }
     }
     pub fn finish_dialog(&mut self) {
         if self.is_dialog() {
@@ -34,6 +52,17 @@ mod tests {
         assert!(activity.begin_dialog());
         assert!(!activity.begin_dialog());
         activity.finish_dialog();
+        assert!(!activity.is_busy());
+    }
+    #[test]
+    fn a_sync_keeps_dialogs_and_other_syncs_waiting() {
+        let mut activity = Activity::default();
+        assert!(activity.begin_sync());
+        assert!(activity.is_busy() && !activity.is_dialog());
+        assert!(!activity.begin_dialog() && !activity.begin_sync());
+        activity.finish_dialog();
+        assert!(activity.is_syncing());
+        activity.finish_sync();
         assert!(!activity.is_busy());
     }
 }

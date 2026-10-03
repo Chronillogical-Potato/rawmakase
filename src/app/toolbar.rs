@@ -124,7 +124,7 @@ impl Editor {
                                 ui,
                                 "Sync Settings…",
                                 &sync,
-                                targets > 0 && !self.syncing,
+                                targets > 0 && !self.activity.is_busy(),
                                 false,
                             ) {
                                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
