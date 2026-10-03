@@ -56,6 +56,8 @@ impl Editor {
         let library = self.presets.library.clone();
         let mut clicked = None;
         let mut hovered = None;
+        let mut user_action = None;
+        let user = crate::presets::user::UserPresets::default();
         let mut import = None;
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
@@ -247,6 +249,21 @@ impl Editor {
                             if enabled && response.clicked() {
                                 clicked = Some(i);
                             }
+                            // Presets made here can be changed, as Lightroom's own.
+                            if user.owns(p) {
+                                response.context_menu(|ui| {
+                                    use super::user_presets::PresetAction;
+                                    if ui.button("Update with Current Settings").clicked() {
+                                        user_action = Some(PresetAction::Update(i));
+                                    }
+                                    if ui.button("Rename…").clicked() {
+                                        user_action = Some(PresetAction::StartRename(i));
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        user_action = Some(PresetAction::Delete(i));
+                                    }
+                                });
+                            }
                             if response.hovered() && enabled {
                                 hovered = Some(i);
                             }
@@ -264,6 +281,9 @@ impl Editor {
             });
         if let Some(dialog) = import {
             self.dialog(dialog, &ui.ctx().clone());
+        }
+        if let Some(action) = user_action {
+            self.preset_action(action);
         }
         if let Some(i) = clicked {
             self.presets.preview = None;

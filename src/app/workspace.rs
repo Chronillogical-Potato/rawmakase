@@ -75,7 +75,8 @@ impl Editor {
             || self.read_metadata.is_some()
             || self.not_editable.is_some()
             || self.view.shortcuts
-            || self.copy_dialog.is_some();
+            || self.copy_dialog.is_some()
+            || self.preset_rename.is_some();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -121,6 +122,7 @@ impl Editor {
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
         self.copy_dialog_window(&ctx);
+        self.preset_rename_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);
@@ -663,6 +665,7 @@ impl Editor {
             let mut previous = false;
             let mut sync = false;
             let mut match_exposures = false;
+            let mut new_preset = false;
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -695,6 +698,10 @@ impl Editor {
                 });
                 if m && i.modifiers.command && i.modifiers.shift && i.modifiers.alt {
                     match_exposures = true;
+                }
+                // Lightroom's New Develop Preset.
+                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::N) {
+                    new_preset = true;
                 }
                 // Lightroom's Sync Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::S) {
@@ -787,6 +794,9 @@ impl Editor {
             }
             if match_exposures && !self.sync_targets().is_empty() && !self.activity.is_busy() {
                 self.start_sync(super::sync::BatchChange::MatchTotalExposures);
+            }
+            if new_preset {
+                self.open_copy_dialog(super::settings_transfer::Transfer::NewPreset);
             }
             if sync && !self.sync_targets().is_empty() && !self.activity.is_busy() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
