@@ -562,11 +562,10 @@ pub fn delete_in(dir: &Path, watermark: &Watermark) -> Result<()> {
     if path.exists() {
         std::fs::remove_file(path)?;
     }
+    // The preset is gone; an image that can't be removed is only an unused
+    // file, not a failed delete.
     if let Some(image) = &watermark.image {
-        let image = dir.join("images").join(image);
-        if image.exists() {
-            std::fs::remove_file(image)?;
-        }
+        let _ = std::fs::remove_file(dir.join("images").join(image));
     }
     Ok(())
 }
