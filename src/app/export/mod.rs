@@ -118,17 +118,13 @@ impl Editor {
                 return None;
             }
         };
-        let photo = Some(Photo {
+        Some(Photo {
             image: self.document.full()?.clone(),
             source: self.document.path.clone()?,
             recipe: self.document.recipe.clone(),
             values,
             watermark: None,
-        });
-        if photo.is_none() {
-            self.status = "Open a photo to export it".into();
-        }
-        photo
+        })
     }
 
     fn export(&mut self, settings: ExportSettings) {

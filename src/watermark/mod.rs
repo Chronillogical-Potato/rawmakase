@@ -135,8 +135,14 @@ pub struct Placed {
 #[derive(Clone)]
 pub struct Ready {
     watermark: Watermark,
-    image: Option<std::sync::Arc<image::Rgba32FImage>>,
-    font: Option<fonts::Font>,
+    asset: Asset,
+}
+
+/// What a watermark draws: a graphic's image or a text's font.
+#[derive(Clone)]
+enum Asset {
+    Image(std::sync::Arc<image::Rgba32FImage>),
+    Font(fonts::Font),
 }
 
 pub fn dir() -> PathBuf {
@@ -158,7 +164,7 @@ impl Watermark {
     }
     /// Loads its image or font, from `images` for a graphic preset.
     pub fn ready_in(&self, images: &Path) -> Result<Ready> {
-        let (image, font) = match self.style {
+        let asset = match self.style {
             Style::Graphic => {
                 let name = self.image.clone().unwrap_or_default();
                 let path = images.join(&name);
@@ -166,19 +172,16 @@ impl Watermark {
                     !name.is_empty() && path.is_file(),
                     "Watermark image not found: {name}"
                 );
-                (
-                    Some(std::sync::Arc::new(decode(&path).with_context(|| {
-                        format!("Watermark image not readable: {name}")
-                    })?)),
-                    None,
-                )
+                Asset::Image(std::sync::Arc::new(
+                    decode(&path)
+                        .with_context(|| format!("Watermark image not readable: {name}"))?,
+                ))
             }
-            Style::Text => (None, Some(fonts::load(&self.family, &self.face)?)),
+            Style::Text => Asset::Font(fonts::load(&self.family, &self.face)?),
         };
         Ok(Ready {
             watermark: self.clone(),
-            image,
-            font,
+            asset,
         })
     }
     pub fn ready(&self) -> Result<Ready> {
@@ -200,7 +203,7 @@ impl Ready {
     pub fn with(&self, watermark: &Watermark) -> Self {
         Self {
             watermark: watermark.clone(),
-            ..self.clone()
+            asset: self.asset.clone(),
         }
     }
     /// The mark for a photo `width` × `height`, placed.
@@ -240,8 +243,8 @@ impl Ready {
         };
         let mut rgba;
         let (mut mw, mut mh);
-        match (&self.image, &self.font) {
-            (Some(image), _) => {
+        match &self.asset {
+            Asset::Image(image) => {
                 let (iw, ih) = (image.width() as f32, image.height() as f32);
                 let (tw, th) = fit(aspect(iw, ih));
                 let (sw, sh) = if turned { (th, tw) } else { (tw, th) };
@@ -271,7 +274,7 @@ impl Ready {
                     })
                     .collect();
             }
-            (None, Some(font)) => {
+            Asset::Font(font) => {
                 // Measured at a reference size, then drawn at the one that
                 // gives the mark its width.
                 let reference = raster::measure(font, &w.text, 100.)?;
@@ -286,7 +289,6 @@ impl Ready {
                 let text = raster::text(font, &w.text, px, w.align, w.color, &w.shadow, limit)?;
                 (mw, mh, rgba) = (text.width, text.height, text.rgba);
             }
-            (None, None) => return None,
         }
         for _ in 0..w.rotation % 4 {
             (rgba, mw, mh) = rotate(&rgba, mw, mh);
@@ -311,7 +313,6 @@ impl Ready {
             rgba,
         })
     }
-    /// Lays the mark over `image`'s pixels.
     /// Lays the mark over `image`'s pixels; false when there was nothing
     /// to draw (text the font has none of).
     pub fn apply(&self, image: &mut Rendered) -> bool {
@@ -506,9 +507,8 @@ pub fn save_in(
         .trim_end_matches(".json")
         .to_string();
     let mut saved = watermark.clone();
-    // The image, copied beside and moved into place, named after its preset.
-    // The image is copied beside first; it replaces the live one only once
-    // the preset is written.
+    // The image, named after its preset, is copied beside first; it
+    // replaces the live one only once the preset is written.
     let stage = |from: &Path| -> Result<tempfile::NamedTempFile> {
         let staged = tempfile::NamedTempFile::new_in(&images)?;
         std::fs::copy(from, staged.path())?;

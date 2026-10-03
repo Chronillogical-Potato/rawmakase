@@ -1,3 +1,4 @@
+use super::super::{LangAlt, TextField, Value};
 use super::*;
 
 fn xmp(description: &str, body: &str) -> String {

@@ -9,7 +9,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 
 impl Catalog {
-    /// A photo's info; a virtual copy has its master's.
     /// Each photo's width over height, as shown, where it is known; a
     /// virtual copy has its master's.
     pub fn aspect_ratios(&self) -> Result<std::collections::HashMap<i64, f32>> {
@@ -24,6 +23,7 @@ impl Catalog {
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+    /// A photo's info; a virtual copy has its master's.
     pub fn photo_info(&self, id: i64) -> Result<Option<PhotoInfo>> {
         Ok(self
             .db

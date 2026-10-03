@@ -88,7 +88,6 @@ fn location<'a>(font: &Font, face: &skrifa::FontRef<'a>) -> skrifa::instance::Lo
     }
 }
 
-/// The size of `text`'s block at `px`.
 /// The size of `text`'s ink at `px`, as `text` draws it without a shadow.
 pub(super) fn measure(font: &Font, text: &str, px: f32) -> Option<(f32, f32)> {
     let drawn = self::text(

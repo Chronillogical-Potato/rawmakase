@@ -27,12 +27,5 @@ pub struct Preset {
     /// isn't imported.
     pub builtin: bool,
 }
-
-// Compatibility exports; preset collection management lives in `presets`.
-#[doc(hidden)]
-pub use crate::presets::{
-    Library, display_name, favorite_path, import_file, library_dirs, load_favorites, load_library,
-    save_favorites,
-};
 #[cfg(test)]
 mod tests;

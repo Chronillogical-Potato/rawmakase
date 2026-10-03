@@ -38,7 +38,7 @@ pub use models::{
 };
 pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
 // Compatibility for existing clients.
-pub use lightroom::{HistoryStep, convert_develop, import_lightroom};
+pub use lightroom::{HistoryStep, convert_develop};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {
         ensure!(!path.exists(), "Catalog already exists: {}", path.display());

@@ -18,6 +18,9 @@ pub use settings::{Destination, Existing, ExportSettings, Format, Include};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 
+/// The Software tag of an export and the creator tool of its XMP.
+pub(crate) const SOFTWARE: &str = concat!("RAWmakase ", env!("CARGO_PKG_VERSION"));
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ExportOptions {
@@ -52,10 +55,6 @@ pub struct Embed {
     /// The camera's EXIF, read from the RAW; LibRaw's capture settings stand in
     /// when it could not be read.
     pub camera: Option<exif::CameraExif>,
-    /// Include capture metadata at all (camera, exposure, lens, dates).
-    pub capture: bool,
-    /// Keep the camera's GPS position.
-    pub location: bool,
     /// Make and model from LibRaw where the camera's EXIF has none.
     pub camera_fallback: bool,
     /// An XMP packet, e.g. the edit as Camera Raw settings.
@@ -67,8 +66,6 @@ impl Default for Embed {
     fn default() -> Self {
         Self {
             camera: None,
-            capture: true,
-            location: true,
             camera_fallback: true,
             xmp: None,
             ppi: 240,

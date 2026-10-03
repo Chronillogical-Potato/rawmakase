@@ -93,8 +93,6 @@ impl Catalog {
             Ok(None)
         }
     }
-    /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
-    /// develop text, if any.
     /// When each edited photo was last edited, as "YYYY-MM-DD HH:MM:SS"
     /// UTC: in RAWmakase, or else in Lightroom, whose history counts seconds
     /// from 2001.
@@ -127,6 +125,8 @@ impl Catalog {
         texts.hash(&mut hasher);
         Ok(hasher.finish())
     }
+    /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
+    /// develop text, if any.
     pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
         let (recipe, lightroom): (Option<String>, Option<String>) = self.db.query_row(
             "SELECT recipe, lightroom_develop FROM photos WHERE id=?",

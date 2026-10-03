@@ -1,8 +1,8 @@
-use rawmakase::{camera_profiles, develop::Recipe, raw::Metadata, xmp};
+use rawmakase::{camera_profiles, develop::Recipe, presets, raw::Metadata};
 #[test]
 #[ignore = "Private XMP library installed in user data directory"]
 fn supplied_library_audit() -> anyhow::Result<()> {
-    let library = xmp::load_library();
+    let library = presets::load_library();
     println!(
         "{} presets; {} parse failures",
         library.presets.len(),

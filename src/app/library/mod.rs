@@ -387,17 +387,17 @@ impl Library {
         self.compare.restored = true;
         self.scroll_to_active = true;
     }
-    /// A virtual copy command chosen from a thumbnail menu since last asked.
-    /// Photos Read Metadata from Files was chosen for, for the editor to
-    /// confirm.
     /// Whether Read Metadata from Files finished since the last call, for
     /// the status line to show its outcome.
     pub(in crate::app) fn take_reread_finished(&mut self) -> bool {
         std::mem::take(&mut self.reread_finished)
     }
+    /// Photos Read Metadata from Files was chosen for, for the editor to
+    /// confirm.
     pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<i64>> {
         self.read_request.take()
     }
+    /// A virtual copy command chosen from a thumbnail menu since last asked.
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }
@@ -551,11 +551,11 @@ fn edit_source(catalog: &Catalog, id: i64) -> Option<previews::EditSource> {
         .or(lightroom.map(previews::EditSource::Lightroom))
 }
 
-/// Lightroom-style grid cells: the label tints the cell, while selection uses
-/// a lighter surround instead of the app's blue button fill.
 mod availability;
 mod background;
 mod capture;
+/// Lightroom-style grid cells: the label tints the cell, while selection uses
+/// a lighter surround instead of the app's blue button fill.
 mod cell;
 mod collections;
 mod compare;

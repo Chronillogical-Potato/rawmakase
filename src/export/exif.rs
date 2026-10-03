@@ -98,6 +98,29 @@ impl CameraExif {
             .and_then(Field::text)
             .filter(|s| !s.is_empty())
     }
+    /// Capture settings LibRaw reports, for a RAW whose EXIF could not be read.
+    pub fn from_libraw(m: &crate::raw::Metadata) -> Self {
+        let rational =
+            |tag, v: f32| Field::rational(tag, (v.max(0.) * 1_000_000.).round() as u32, 1_000_000);
+        let main = vec![
+            Field::ascii(0x010f, &m.make),
+            Field::ascii(0x0110, &m.model),
+        ];
+        let mut exif = vec![
+            rational(0x829a, m.shutter),
+            rational(0x829d, m.aperture),
+            Field::short(0x8827, m.iso.min(65535.) as u16),
+            rational(0x920a, m.focal),
+        ];
+        if !m.lens_model.is_empty() {
+            exif.push(Field::ascii(0xa434, &m.lens_model));
+        }
+        Self {
+            main,
+            exif,
+            gps: Vec::new(),
+        }
+    }
 }
 
 /// Main-directory tags an export keeps; it writes its own orientation, size and
@@ -330,7 +353,7 @@ fn fields(
 
 /// A little-endian TIFF block for a JPEG APP1 segment: the main directory, then
 /// the EXIF and GPS directories it points to.
-pub(super) fn tiff_block(mut main: Vec<Field>, exif: Vec<Field>, gps: Vec<Field>) -> Vec<u8> {
+pub(super) fn tiff_block(d: CameraExif) -> Vec<u8> {
     fn directory(mut fields: Vec<Field>, offset: u32) -> Vec<u8> {
         fields.sort_by_key(|f| f.tag);
         let mut out = (fields.len() as u16).to_le_bytes().to_vec();
@@ -356,6 +379,11 @@ pub(super) fn tiff_block(mut main: Vec<Field>, exif: Vec<Field>, gps: Vec<Field>
         out.extend(payload);
         out
     }
+    let CameraExif {
+        mut main,
+        exif,
+        gps,
+    } = d;
     let has_exif = !exif.is_empty();
     let has_gps = !gps.is_empty();
     main.retain(|f| f.tag != 0x8769 && f.tag != 0x8825);
@@ -395,7 +423,11 @@ pub(crate) fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8
     if !subseconds.is_empty() {
         exif.push(Field::ascii(0x9291, subseconds));
     }
-    let block = tiff_block(vec![Field::ascii(0x010f, "Test")], exif, Vec::new());
+    let block = tiff_block(CameraExif {
+        main: vec![Field::ascii(0x010f, "Test")],
+        exif,
+        gps: Vec::new(),
+    });
     let mut out = if jpeg {
         let mut out = vec![0xff, 0xd8, 0xff, 0xe1];
         out.extend(((block.len() + 8) as u16).to_be_bytes());
