@@ -808,5 +808,13 @@ fn channel_curves_apply_only_as_a_full_set() -> Result<()> {
         )?;
         assert_eq!(r.effects.channels, Recipe::default().effects.channels);
     }
+    // Nor does it switch the current curves to another curve mode.
+    let r = parse(Path::new("partial.xmp"), &xml("", &red))?.apply(
+        &Recipe::default(),
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    assert!(!r.reference_curves && !r.wide_gamut_curves);
     Ok(())
 }

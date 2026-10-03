@@ -372,7 +372,11 @@ impl Preset {
         if v.contains_key("CameraProfile") || !self.look.is_empty() {
             r.use_camera_baseline(m);
         }
-        if !self.curves.is_empty() {
+        // Every curve Camera Raw applies comes with the master curve.
+        if ["ToneCurvePV2012", "ToneCurve"]
+            .iter()
+            .any(|k| self.curves.contains_key(*k))
+        {
             r.wide_gamut_curves = true;
             r.reference_curves = true;
         }
