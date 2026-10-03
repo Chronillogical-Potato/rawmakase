@@ -6,9 +6,13 @@
 /// the corners, unless [`Covers::straight_edges`]. Manual Distortion bends the edges;
 /// between these samples one strays by far less than the margin the geometry keeps.
 const EDGE_SAMPLES: usize = 32;
-/// Centres tried on each axis at each size.
+/// Centres tried on each axis before the search closes in on the best one.
 const GRID: usize = 9;
+/// The finest grid, whose step (under 0.4% of the crop) is below the 1% smallest crop.
+const MAX_GRID: usize = 257;
 const BISECTIONS: usize = 24;
+/// Smallest step, in crop-space units, of the search for the best centre.
+const MIN_STEP: f32 = 1e-4;
 /// Scales closer than this, relatively, count as the same.
 const SAME_SCALE: f32 = 1e-3;
 
@@ -24,125 +28,156 @@ pub(crate) trait Covers {
 }
 
 /// The largest crop with the aspect of `crop`, inside it, that `area` covers entirely:
-/// `crop` itself when it is covered, otherwise its aspect shrunk to the largest size
-/// that fits, centred as near to its centre as fits. `None` when not even the smallest
-/// valid crop (1% of each side) fits anywhere inside it.
+/// `crop` itself when it is covered, otherwise shrunk about its centre, or moved where
+/// that keeps noticeably more of it. When no crop of at least 1% of each side fits
+/// inside it (it lies wholly in the white), the largest one at its aspect anywhere in
+/// the photo. `None` when there is none either.
 pub(crate) fn largest_covered(crop: [f32; 4], area: &impl Covers) -> Option<[f32; 4]> {
-    let search = Search { crop, area };
-    if search.fits(1., search.centre()) {
+    let size = [crop[2] - crop[0], crop[3] - crop[1]];
+    let inside = Search {
+        bounds: crop,
+        size,
+        preferred: [(crop[0] + crop[2]) / 2., (crop[1] + crop[3]) / 2.],
+        area,
+    };
+    if inside.fits(1., inside.preferred) {
         return Some(crop);
     }
-    let size = [crop[2] - crop[0], crop[3] - crop[1]];
-    let smallest = (0.01 / size[0]).max(0.01 / size[1]).min(1.);
-    let start = Fit {
-        scale: smallest,
-        centre: search.centre(),
-        span: [0.; 2],
+    let fill = (1. / size[0]).min(1. / size[1]);
+    let anywhere = Search {
+        bounds: [0., 0., 1., 1.],
+        size: size.map(|s| s * fill),
+        preferred: [0.5; 2],
+        area,
     };
-    // Shrunk about its centre, then moved over everything the crop allows and on a finer
-    // grid around the best place.
-    let centred = search.grow(start);
-    let coarse = search.grow(Fit {
-        span: [f32::INFINITY; 2],
-        ..start
-    })?;
-    let fine = search
-        .grow(Fit {
-            span: coarse.span.map(|s| s / (GRID - 1) as f32),
-            ..coarse
-        })
-        .unwrap_or(coarse);
-    // Moved only for a real gain, not one from where the edges happen to be checked.
-    let best = match centred {
-        Some(c) if c.scale >= fine.scale * (1. - SAME_SCALE) => c,
-        _ => fine,
-    };
-    // A hair smaller, so the crop found counts as covered when checked again.
-    Some(search.rect(best.scale * (1. - SAME_SCALE / 10.), best.centre))
+    inside.largest().or_else(|| anywhere.largest())
 }
 
-/// A crop of the original's aspect at `scale` of its size, centred at `centre`, and the
-/// half-extent of the grid of centres it was found on.
+/// A crop at `scale` of the search's size, centred at `centre`.
 #[derive(Clone, Copy, Debug)]
 struct Fit {
     scale: f32,
     centre: [f32; 2],
-    span: [f32; 2],
 }
 
+/// Crops of `size` (at scale 1) or smaller, at its aspect, inside `bounds`.
 struct Search<'a, A> {
-    crop: [f32; 4],
+    bounds: [f32; 4],
+    size: [f32; 2],
+    preferred: [f32; 2],
     area: &'a A,
 }
 impl<A: Covers> Search<'_, A> {
-    fn centre(&self) -> [f32; 2] {
-        let c = self.crop;
-        [(c[0] + c[2]) / 2., (c[1] + c[3]) / 2.]
-    }
-    fn rect(&self, scale: f32, [x, y]: [f32; 2]) -> [f32; 4] {
-        let c = self.crop;
-        let (w, h) = ((c[2] - c[0]) * scale / 2., (c[3] - c[1]) * scale / 2.);
-        [x - w, y - h, x + w, y + h]
-    }
-    /// The largest scale from `start` (whose scale fits) to 1 with a fitting centre on
-    /// the grid around `start.centre`, by bisection.
-    fn grow(&self, start: Fit) -> Option<Fit> {
-        let mut best = self.place(start.scale, start.centre, start.span)?;
-        let mut high = 1.;
-        for _ in 0..BISECTIONS {
-            let scale = 0.5 * (best.scale + high);
-            match self.place(scale, start.centre, start.span) {
-                Some(fit) => best = fit,
-                None => high = scale,
+    fn largest(&self) -> Option<[f32; 4]> {
+        let smallest = (0.01 / self.size[0]).max(0.01 / self.size[1]);
+        if smallest > 1. {
+            return None;
+        }
+        let centred = self.grow(self.preferred, smallest);
+        // Over a grid of centres, then closing in on the best one. With straight edges
+        // the largest scale at each centre is concave, so this finds its maximum.
+        // A covered area too small to hold a crop at any grid centre gets a finer grid.
+        let mut best = centred;
+        let b = self.bounds;
+        let mut grid = GRID;
+        let mut step;
+        loop {
+            step = [
+                (b[2] - b[0]) / (grid - 1) as f32,
+                (b[3] - b[1]) / (grid - 1) as f32,
+            ];
+            for i in 0..grid * grid {
+                let centre = [
+                    b[0] + step[0] * (i % grid) as f32,
+                    b[1] + step[1] * (i / grid) as f32,
+                ];
+                best = self.better(best, centre, smallest);
+            }
+            if best.is_some() || grid >= MAX_GRID {
+                break;
+            }
+            grid = 2 * grid - 1;
+        }
+        let mut step = step.map(|s| s / 2.);
+        while step[0].max(step[1]) > MIN_STEP {
+            let Some(at) = best else { break };
+            let mut moved = false;
+            for (dx, dy) in [
+                (1., 0.),
+                (-1., 0.),
+                (0., 1.),
+                (0., -1.),
+                (1., 1.),
+                (-1., -1.),
+                (1., -1.),
+                (-1., 1.),
+            ] {
+                let centre = [at.centre[0] + dx * step[0], at.centre[1] + dy * step[1]];
+                let next = self.better(best, centre, smallest);
+                if next.map(|n| n.scale) > best.map(|b| b.scale) {
+                    best = next;
+                    moved = true;
+                }
+            }
+            if !moved {
+                step = step.map(|s| s / 2.);
             }
         }
-        Some(best)
+        let best = best?;
+        // Moved only for a real gain, not one from where the edges happen to be checked.
+        let best = match centred {
+            Some(c) if c.scale >= best.scale * (1. - SAME_SCALE) => c,
+            _ => best,
+        };
+        // A hair smaller, so the crop found counts as covered when checked again.
+        Some(self.rect(best.scale * (1. - SAME_SCALE / 10.), best.centre))
     }
-    /// A centre where a crop at `scale` fits: the original centre if it does, otherwise
-    /// the one nearest to it on a grid of `GRID`² centres within `span` of `around`,
-    /// kept inside the original crop.
-    fn place(&self, scale: f32, around: [f32; 2], span: [f32; 2]) -> Option<Fit> {
-        let c = self.crop;
-        let half = [(c[2] - c[0]) * scale / 2., (c[3] - c[1]) * scale / 2.];
-        let allowed = [
-            [c[0] + half[0], c[2] - half[0]],
-            [c[1] + half[1], c[3] - half[1]],
-        ];
-        let range: [[f32; 2]; 2] = std::array::from_fn(|axis| {
-            let [lo, hi] = allowed[axis];
-            [
-                (around[axis] - span[axis]).max(lo),
-                (around[axis] + span[axis]).min(hi),
-            ]
-        });
-        let preferred = self.centre();
-        let step = |[lo, hi]: [f32; 2], i: usize| lo + (hi - lo) * i as f32 / (GRID - 1) as f32;
-        let mut centres: Vec<[f32; 2]> = (0..GRID * GRID)
-            .map(|i| [step(range[0], i % GRID), step(range[1], i / GRID)])
-            .collect();
-        let distance = |p: &[f32; 2]| (p[0] - preferred[0]).hypot(p[1] - preferred[1]);
-        centres.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
-        let inside = |v: f32, [lo, hi]: [f32; 2]| (lo..=hi).contains(&v);
-        let original =
-            (inside(preferred[0], range[0]) && inside(preferred[1], range[1])).then_some(preferred);
-        let step = [
-            (range[0][1] - range[0][0]) / (GRID - 1) as f32,
-            (range[1][1] - range[1][0]) / (GRID - 1) as f32,
-        ];
-        original
-            .into_iter()
-            .chain(centres)
-            .find(|&centre| self.fits(scale, centre))
-            .map(|centre| Fit {
-                scale,
-                centre,
-                span: step,
-            })
+    /// `best`, or the crop at `centre` when one larger than `best` fits there.
+    fn better(&self, best: Option<Fit>, centre: [f32; 2], smallest: f32) -> Option<Fit> {
+        let floor = best.map_or(smallest, |b| b.scale * (1. + 1e-6));
+        if floor > 1. || !self.fits(floor, centre) {
+            return best;
+        }
+        self.grow(centre, floor).or(best)
     }
-    /// Whether the area covers the crop at `scale` around `centre`: corners first, as
-    /// they usually leave the covered area first, then points along the edges.
+    /// The largest scale from `low` (which fits) to 1 that fits at `centre`, by
+    /// bisection; `None` when `low` does not fit.
+    fn grow(&self, centre: [f32; 2], low: f32) -> Option<Fit> {
+        if !self.fits(low, centre) {
+            return None;
+        }
+        let (mut low, mut high) = (low, 1.);
+        if self.fits(1., centre) {
+            low = 1.;
+        }
+        for _ in 0..BISECTIONS {
+            let scale = 0.5 * (low + high);
+            if self.fits(scale, centre) {
+                low = scale;
+            } else {
+                high = scale;
+            }
+        }
+        Some(Fit { scale: low, centre })
+    }
+    fn rect(&self, scale: f32, [x, y]: [f32; 2]) -> [f32; 4] {
+        let (w, h) = (self.size[0] * scale / 2., self.size[1] * scale / 2.);
+        [x - w, y - h, x + w, y + h]
+    }
+    /// Whether the crop at `scale` around `centre` lies in the bounds and the area
+    /// covers it: corners first, as they usually leave the covered area first, then
+    /// points along the edges.
     fn fits(&self, scale: f32, centre: [f32; 2]) -> bool {
         let [l, t, r, b] = self.rect(scale, centre);
+        let bounds = self.bounds;
+        let slack = 1e-6;
+        if l < bounds[0] - slack
+            || t < bounds[1] - slack
+            || r > bounds[2] + slack
+            || b > bounds[3] + slack
+        {
+            return false;
+        }
         let corners = [[l, t], [r, t], [r, b], [l, b]];
         if !corners.iter().all(|&[x, y]| self.area.covers(x, y)) {
             return false;

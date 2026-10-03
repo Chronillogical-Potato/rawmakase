@@ -292,7 +292,7 @@ fn mat(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
 /// Inverse map from output normalized coordinates to un-oriented decoded pixels.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geometry {
     pub width: u32,
     pub height: u32,
@@ -373,7 +373,7 @@ impl Geometry {
             manual,
         };
         if r.constrain_crop && (g.transform.is_some() || g.manual.is_some()) {
-            g.crop = super::crop_constraint::largest_covered(r.crop, &g).unwrap_or(r.crop);
+            g.crop = g.constrained_crop();
         }
         let w = ow * (g.crop[2] - g.crop[0]);
         let h = oh * (g.crop[3] - g.crop[1]);
@@ -385,6 +385,22 @@ impl Geometry {
         g.width = (w * factor).round().max(1.) as u32;
         g.height = (h * factor).round().max(1.) as u32;
         g
+    }
+    /// The crop Constrain Crop renders for this geometry's crop. The viewport builds a
+    /// geometry several times a frame, so the last one found is remembered.
+    fn constrained_crop(&self) -> [f32; 4] {
+        thread_local! {
+            static LAST: std::cell::Cell<Option<(Geometry, [f32; 4])>> =
+                const { std::cell::Cell::new(None) };
+        }
+        if let Some((key, crop)) = LAST.get()
+            && key == *self
+        {
+            return crop;
+        }
+        let crop = super::crop_constraint::largest_covered(self.crop, self).unwrap_or(self.crop);
+        LAST.set(Some((*self, crop)));
+        crop
     }
     /// The crop as rendered (0–1 of the straightened photo): the recipe's, or with
     /// Constrain Crop the part of it that has a source pixel everywhere.
@@ -943,6 +959,58 @@ mod constrain_crop_tests {
         let [l, _, right, _] = Geometry::new(&photo(), &r, 0).crop();
         assert!((right - l - 0.8).abs() < 2e-3, "{l} {right}");
         assert!((l - (0.1 + 0.0811)).abs() < 2e-3, "{l}");
+    }
+    /// Where the covered area is far from the crop's centre, the search still finds the
+    /// largest crop: a dense search over centres finds a side of 0.1038 here.
+    #[test]
+    fn constrain_crop_finds_the_largest_crop_away_from_the_centre() {
+        let mut r = Recipe {
+            constrain_crop: true,
+            ..Default::default()
+        };
+        r.transform = Transform {
+            horizontal: -0.1522,
+            vertical: -0.5199,
+            rotate: -2.83,
+            aspect: 0.,
+            scale: 0.5258,
+            offset_x: 0.2627,
+            offset_y: 0.8124,
+        };
+        let g = Geometry::new(&photo(), &r, 0);
+        let [l, _, right, _] = g.crop();
+        assert!(right - l > 0.1035, "{:?}", g.crop());
+        assert_eq!(white(&g), 0);
+    }
+    /// A crop wholly in the white becomes the largest crop at its aspect that the photo
+    /// covers, rather than staying white.
+    #[test]
+    fn constrain_crop_moves_a_crop_that_is_all_white() {
+        let mut r = Recipe {
+            constrain_crop: true,
+            crop: [0., 0.4, 0.15, 0.6],
+            ..Default::default()
+        };
+        r.transform.offset_x = 1.;
+        let free = Geometry::new(
+            &photo(),
+            &Recipe {
+                constrain_crop: false,
+                ..r.clone()
+            },
+            0,
+        );
+        assert_eq!(white(&free), 121 * 121);
+        let g = Geometry::new(&photo(), &r, 0);
+        assert_eq!(white(&g), 0, "{:?}", g.crop());
+        let [l, t, right, b] = g.crop();
+        assert!(
+            ((right - l) / (b - t) - 0.75).abs() < 1e-3,
+            "{:?}",
+            g.crop()
+        );
+        // The photo covers the right 0.189 of the frame.
+        assert!((right - l - 0.189).abs() < 2e-3, "{:?}", g.crop());
     }
     #[test]
     fn constrain_crop_keeps_crops_with_nothing_white() {

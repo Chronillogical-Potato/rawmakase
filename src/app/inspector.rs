@@ -1141,6 +1141,7 @@ impl Editor {
         }) {
             r.transform = Default::default();
             r.upright = Default::default();
+            r.constrain_crop = false;
         }
 
         if adjustment_section(ui, "Effects", |ui| {
