@@ -312,6 +312,31 @@ fn profile_amount_blocks_strict_presets_and_lenient_application_reports_it() -> 
     Ok(())
 }
 #[test]
+fn every_lightroom_vignette_style_imports() -> Result<()> {
+    use crate::develop::effects::VignetteStyle;
+    for (code, style) in [
+        ("1", VignetteStyle::HighlightPriority),
+        ("2", VignetteStyle::ColorPriority),
+        ("3", VignetteStyle::PaintOverlay),
+    ] {
+        let attrs = format!(r#"c:PostCropVignetteAmount="-40" c:PostCropVignetteStyle="{code}""#);
+        let r = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )?;
+        assert_eq!(r.effects.vignette_style, style);
+    }
+    let attrs = r#"c:PostCropVignetteAmount="-40" c:PostCropVignetteStyle="4""#;
+    assert!(
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &Metadata::default(), &[], None)
+            .is_err()
+    );
+    Ok(())
+}
+#[test]
 fn malformed_numbers_rejected() -> Result<()> {
     for value in ["NaN", "inf", "oops", "900"] {
         let p = parse(

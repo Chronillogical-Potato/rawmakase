@@ -3,7 +3,7 @@
 //! uploaded again. Only the histogram and, when asked, a small thumbnail or the
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input};
-use crate::develop::{Recipe, pipeline::pixel_params::PixelParams, quality};
+use crate::develop::{Recipe, effects::VignetteMix, pipeline::pixel_params::PixelParams, quality};
 use anyhow::{Context, Result, ensure};
 use std::{
     path::Path,
@@ -445,8 +445,8 @@ impl Processor {
                 f(e.vignette_roundness),
                 f(e.vignette_midpoint),
                 f(e.vignette_feather),
-                f(e.vignette_highlights),
-                e.vignette_style as u32,
+                f(e.vignette_highlight_protection()),
+                (e.vignette_style.mix() == VignetteMix::Blend) as u32,
                 f(e.lens_vignette),
                 f(e.lens_vignette_midpoint),
                 effects as u32,

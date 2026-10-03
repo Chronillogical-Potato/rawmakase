@@ -663,7 +663,11 @@ impl Preset {
         )?;
         settings.seen.insert("PostCropVignetteStyle".into());
         if let Some(style) = v.get("PostCropVignetteStyle") {
-            r.effects.vignette_style = style.parse()?;
+            r.effects.vignette_style = style
+                .parse::<u8>()
+                .ok()
+                .and_then(|code| code.try_into().ok())
+                .with_context(|| format!("Unsupported PostCropVignetteStyle {style}"))?;
         }
         settings.assign(
             "VignetteAmount",
