@@ -140,6 +140,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [session.rs](../src/storage/session.rs) | Last-opened path and monitor-profile preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
 | [catalog/edits.rs](../src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
+| [catalog/develop_history.rs](../src/catalog/develop_history.rs) | A photo's Develop History, saved in the same transaction as its edit; large settings are stored once per History. |
 | [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them. |
 | [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
@@ -165,7 +166,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [app/mod.rs](../src/app/mod.rs) | `Editor`, initialization, lifecycle, worker connections and explicit session-write destination. |
 | [state.rs](../src/app/state.rs) | Separate document, decoded-image pair, preview, viewport and preset-browser state; centralized document reset. |
-| [history.rs](../src/app/history.rs) | Bounded undo/redo, redo-branch invalidation and one transaction per editing gesture. |
+| [history.rs](../src/app/history.rs) | Bounded undo/redo, redo-branch invalidation, one transaction per editing gesture, and saving and restoring History with the edit. |
 | [editing.rs](../src/app/editing.rs) | Before/after frame snapshots bound to a document generation so navigation cannot mix histories. |
 | [activity.rs](../src/app/activity.rs) | Mutually exclusive foreground states: file choice, overwrite confirmation and export. |
 | [task.rs](../src/app/task.rs) | Load/render generations, cancellation and completion ownership. |
@@ -263,7 +264,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | Original RAW and Lightroom catalog | User-selected source files; treated as read-only. |
 | Legacy sidecar edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks, or identity-keyed JSON under the data directory's `sidecars/`, saved by releases before 0.1.8. Imported into the catalog when their folder is added and left on disk unchanged. |
-| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots and masks are in the `local_edits` table, raster data in `bitmaps`. |
+| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots and masks are in the `local_edits` table, Develop History in `develop_history`, raster data in `bitmaps`. |
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF destination. |
 | Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |

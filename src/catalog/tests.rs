@@ -133,7 +133,13 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
         exposure: 1.25,
         ..Default::default()
     };
-    cat.save_edit(40, &p, &edit, &ExportOptions::default())?;
+    cat.save_edit(
+        40,
+        &p,
+        &edit,
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     assert_eq!(cat.load_edit(40, &p)?.unwrap().recipe, edit);
     assert!(cat.load_edit(41, &p)?.is_none());
     assert!(!crate::storage::sidecar_path(&p).exists());
@@ -143,8 +149,14 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     std::fs::write(&p, b"changed raw")?;
     assert!(cat.load_edit(40, &p).is_err());
     assert!(
-        cat.save_edit(40, &p, &edit, &ExportOptions::default())
-            .is_err()
+        cat.save_edit(
+            40,
+            &p,
+            &edit,
+            &ExportOptions::default(),
+            crate::catalog::HistoryUpdate::Keep
+        )
+        .is_err()
     );
     let size = output.metadata()?.len();
     assert!(import_lightroom(&source, &output).is_err());
@@ -477,7 +489,13 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
         ..Default::default()
     });
     let unedited = c.edit_stamp(id)?;
-    c.save_edit(id, &photo, &r, &ExportOptions::default())?;
+    c.save_edit(
+        id,
+        &photo,
+        &r,
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     // The stamp follows the edit, masks included.
     let edited = c.edit_stamp(id)?;
     assert_ne!(edited, unedited);
@@ -489,7 +507,13 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
     assert_eq!(c.load_edit(id, &photo)?.unwrap().recipe, r);
     let (text, _) = c.edit_texts(id)?;
     assert_eq!(serde_json::from_str::<Recipe>(&text.unwrap())?, r);
-    c.save_edit(id, &photo, &Recipe::default(), &ExportOptions::default())?;
+    c.save_edit(
+        id,
+        &photo,
+        &Recipe::default(),
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     assert!(c.load_edit(id, &photo)?.unwrap().recipe.masks.is_empty());
     assert_ne!(c.edit_stamp(id)?, edited);
     Ok(())
@@ -560,7 +584,13 @@ fn virtual_copies_are_created_promoted_renamed_and_removed() -> Result<()> {
         exposure: 1.25,
         ..Default::default()
     };
-    cat.save_edit(original.id, &path, &edit, &ExportOptions::default())?;
+    cat.save_edit(
+        original.id,
+        &path,
+        &edit,
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     cat.db.execute_batch(&format!(
         "INSERT INTO keywords(id,name) VALUES(1,'City');
          INSERT INTO photo_keywords VALUES({},1);",
@@ -588,7 +618,13 @@ fn virtual_copies_are_created_promoted_renamed_and_removed() -> Result<()> {
         exposure: -0.5,
         ..Default::default()
     };
-    cat.save_edit(first, &path, &other, &ExportOptions::default())?;
+    cat.save_edit(
+        first,
+        &path,
+        &other,
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     assert_eq!(cat.load_edit(original.id, &path)?.unwrap().recipe, edit);
     assert_eq!(cat.load_edit(first, &path)?.unwrap().recipe, other);
 
@@ -846,7 +882,13 @@ fn reopening_a_catalog_adds_the_tables_a_newer_release_needs() -> Result<()> {
         data: vec![7],
     };
     assert_eq!(cat.bitmap(&cat.put_bitmap(&bitmap)?)?, Some(bitmap));
-    cat.save_edit(id, &photo, &Recipe::default(), &ExportOptions::default())?;
+    cat.save_edit(
+        id,
+        &photo,
+        &Recipe::default(),
+        &ExportOptions::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
     assert!(cat.load_edit(id, &photo)?.is_some());
     Ok(())
 }
@@ -933,5 +975,116 @@ fn lightroom_keyword_export_options_are_imported_and_backfilled() -> Result<()> 
     assert_eq!(cat.backfill_keyword_export()?, 2);
     assert_eq!(cat.backfill_keyword_export()?, 0);
     assert_eq!(exported(&cat)?, expected);
+    Ok(())
+}
+#[test]
+fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
+    use crate::catalog::{HistoryUpdate, SavedHistory, SavedStep};
+    use crate::export::ExportOptions;
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("a.RAF");
+    std::fs::write(&photo, b"history fixture")?;
+    let mut c = Catalog::create(&d.path().join("history.rawmakase"))?;
+    c.add_folder(&photos)?;
+    let id = c.photos()?[0].id;
+    let edited = Recipe {
+        exposure: 0.5,
+        ..Default::default()
+    };
+    let history = SavedHistory {
+        origin: Recipe::default(),
+        steps: vec![SavedStep {
+            name: "Exposure".into(),
+            value: "+0.50".into(),
+            recipe: edited.clone(),
+        }],
+        applied: 1,
+    };
+    let export = ExportOptions::default();
+    c.save_edit(
+        id,
+        &photo,
+        &edited,
+        &export,
+        HistoryUpdate::Replace(&history),
+    )?;
+    assert_eq!(c.load_history(id)?, Some(history.clone()));
+    // Saving from outside Develop keeps it.
+    c.save_edit(id, &photo, &Recipe::default(), &export, HistoryUpdate::Keep)?;
+    assert_eq!(c.load_history(id)?, Some(history.clone()));
+    // A History from a newer release is left unread, not misread.
+    c.db.execute(
+        "UPDATE develop_history SET data=? WHERE photo=?",
+        rusqlite::params![
+            {
+                use std::io::Write;
+                let mut z = flate2::write::ZlibEncoder::new(Vec::new(), Default::default());
+                z.write_all(br#"{"version": 99}"#)?;
+                z.finish()?
+            },
+            id
+        ],
+    )?;
+    assert_eq!(c.load_history(id)?, None);
+    c.save_edit(
+        id,
+        &photo,
+        &edited,
+        &export,
+        HistoryUpdate::Replace(&history),
+    )?;
+    // Removing the photo removes its History.
+    c.db.execute("DELETE FROM photos WHERE id=?", [id])?;
+    let rows: i64 =
+        c.db.query_row("SELECT COUNT(*) FROM develop_history", [], |r| r.get(0))?;
+    assert_eq!(rows, 0);
+    Ok(())
+}
+#[test]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
+fn develop_history_stores_each_large_setting_once() -> Result<()> {
+    use crate::catalog::{SavedHistory, SavedStep};
+    let m = crate::raw::Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        wb: [2.0198677, 1., 1.8874172],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let base = Recipe {
+        profile: crate::camera_profiles::open::color(&m).map(std::sync::Arc::new),
+        ..Default::default()
+    };
+    assert!(base.profile.is_some());
+    let one = serde_json::to_string(&base)?.len();
+    let steps = (1..=100)
+        .map(|i| SavedStep {
+            name: "Exposure".into(),
+            value: String::new(),
+            recipe: Recipe {
+                exposure: i as f32 / 100.,
+                ..base.clone()
+            },
+        })
+        .collect();
+    let history = SavedHistory {
+        origin: base,
+        steps,
+        applied: 100,
+    };
+    let encoded = history.encode()?;
+    // A hundred steps cost less than two recipes would uncompressed.
+    assert!(
+        encoded.len() < 2 * one,
+        "{} bytes for a {one}-byte recipe",
+        encoded.len()
+    );
+    assert_eq!(SavedHistory::decode(&encoded)?, Some(history));
     Ok(())
 }

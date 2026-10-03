@@ -1,5 +1,6 @@
 //! Bounded edit history; a pointer gesture is a single transaction. Each step
 //! is named, like Lightroom's History panel ("Exposure +0.50").
+use crate::catalog::{SavedHistory, SavedStep};
 use crate::develop::Recipe;
 use std::collections::VecDeque;
 
@@ -80,7 +81,79 @@ impl Default for History {
         }
     }
 }
+/// A new state identity for a step.
+fn next_state() -> u64 {
+    static STATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    STATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 impl History {
+    /// History as saved with the photo's edit: undone steps are kept, so they can
+    /// still be redone after the photo opens again, as in Lightroom.
+    pub fn saved(&self, current: &Recipe) -> SavedHistory {
+        let done: Vec<_> = self.undo.iter().collect();
+        let mut steps: Vec<SavedStep> = done
+            .iter()
+            .enumerate()
+            .map(|(i, (_, step))| SavedStep {
+                name: step.name.clone(),
+                value: step.value.clone(),
+                recipe: done.get(i + 1).map_or(current, |(r, _)| r).clone(),
+            })
+            .collect();
+        steps.extend(self.redo.iter().rev().map(|(r, step)| SavedStep {
+            name: step.name.clone(),
+            value: step.value.clone(),
+            recipe: r.clone(),
+        }));
+        SavedHistory {
+            origin: done.first().map_or(current, |(r, _)| r).clone(),
+            steps,
+            applied: done.len(),
+        }
+    }
+    /// History restored from `saved` for an edit now at `current`. When the edit was
+    /// changed since (Paste or Sync in the Library, or Undo there), that change
+    /// becomes the latest step, as Lightroom adds one.
+    pub fn restored(saved: SavedHistory, current: &Recipe) -> Self {
+        let mut history = Self::default();
+        let SavedHistory {
+            origin,
+            steps,
+            applied,
+        } = saved;
+        let applied = applied.min(steps.len());
+        // Oldest steps beyond the limit are dropped, as when they were recorded.
+        let skip = applied.saturating_sub(LIMIT);
+        let mut before = if skip == 0 {
+            origin
+        } else {
+            steps[skip - 1].recipe.clone()
+        };
+        let mut redo = Vec::new();
+        for (i, saved) in steps.into_iter().enumerate().skip(skip) {
+            let step = Step {
+                name: saved.name,
+                value: saved.value,
+                state: next_state(),
+            };
+            if i < applied {
+                history
+                    .undo
+                    .push_back((std::mem::replace(&mut before, saved.recipe), step));
+            } else {
+                redo.push((saved.recipe, step));
+            }
+        }
+        history.dropped = skip;
+        history.origin = next_state();
+        history.redo = redo.into_iter().rev().collect();
+        if before != *current {
+            let mut shown = before;
+            let step = describe(&shown, current);
+            history.set(current, &mut shown, step);
+        }
+        history
+    }
     pub fn id(&self) -> u64 {
         self.id
     }
@@ -217,9 +290,8 @@ impl History {
         if before == *after {
             return false;
         }
-        static STATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let mut step = label.unwrap_or_else(|| describe(&before, after));
-        step.state = STATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        step.state = next_state();
         if self.undo.len() == LIMIT
             && let Some((_, oldest)) = self.undo.pop_front()
         {
@@ -487,6 +559,59 @@ mod tests {
         exposed.masks[1].adjust.exposure = 1.;
         assert_eq!(describe(&before, &masked).name, "Brush Mask");
         assert_eq!(describe(&masked, &exposed).name, "Mask 2");
+    }
+    #[test]
+    fn saved_history_restores_steps_position_and_redo() {
+        let mut history = History::default();
+        let mut recipe = Recipe::default();
+        let original = recipe.clone();
+        for (name, value) in [("Exposure", 0.5), ("Exposure", 1.), ("Exposure", 1.5)] {
+            history.label(Step::new(name, format!("{value:+.2}")));
+            let before = recipe.clone();
+            recipe.exposure = value;
+            history.record(before, &recipe);
+        }
+        history.undo(&mut recipe);
+        let saved = history.saved(&recipe);
+        assert_eq!(saved.applied, 2);
+        assert_eq!(saved.steps.len(), 3);
+        let mut restored = History::restored(saved, &recipe);
+        let names: Vec<_> = restored.steps().0.iter().map(|s| s.value.clone()).collect();
+        assert_eq!(names, ["+0.50", "+1.00", "+1.50"]);
+        assert_eq!(restored.steps().1, 2);
+        assert!(restored.redo(&mut recipe));
+        assert_eq!(recipe.exposure, 1.5);
+        assert!(restored.go_to(0, &mut recipe));
+        assert_eq!(recipe, original);
+        // Editing an earlier state starts a new branch, as before.
+        restored.go_to(1, &mut recipe);
+        let before = recipe.clone();
+        recipe.contrast = 0.2;
+        restored.record(before, &recipe);
+        assert_eq!(restored.steps().0.len(), 2);
+        assert!(!restored.can_redo());
+    }
+    #[test]
+    fn an_edit_changed_elsewhere_becomes_the_latest_step() {
+        let mut history = History::default();
+        let mut recipe = Recipe::default();
+        let before = recipe.clone();
+        recipe.exposure = 0.5;
+        history.record(before, &recipe);
+        let saved = history.saved(&recipe);
+        // Pasted onto in the Library while the photo was closed.
+        let pasted = Recipe {
+            exposure: 0.5,
+            temperature: 4000.,
+            ..Default::default()
+        };
+        let mut restored = History::restored(saved, &pasted);
+        let (steps, applied) = restored.steps();
+        assert_eq!(applied, 2);
+        assert_eq!(steps[1].name, "White Balance");
+        let mut current = pasted.clone();
+        assert!(restored.undo(&mut current));
+        assert_eq!(current, recipe);
     }
     #[test]
     fn steps_are_named_and_go_to_moves_between_them() {

@@ -289,6 +289,11 @@ impl Editor {
                 Ok(Some(saved)) => {
                     self.document.recipe = saved.recipe;
                     self.document.export = saved.export;
+                    // A History that cannot be read leaves the edit as it is.
+                    if let Ok(Some(history)) = l.catalog.load_history(photo) {
+                        self.document.history =
+                            super::history::History::restored(history, &self.document.recipe);
+                    }
                     self.document.save.saved();
                     self.document.lightroom_notice.clear();
                 }

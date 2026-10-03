@@ -106,9 +106,16 @@ impl Editor {
             &self.library,
             self.document.catalog_photo,
         ) {
+            let history = self.document.history.saved(&self.document.recipe);
             let saved = l
                 .catalog
-                .save_edit(id, path, &self.document.recipe, &self.document.export)
+                .save_edit(
+                    id,
+                    path,
+                    &self.document.recipe,
+                    &self.document.export,
+                    crate::catalog::HistoryUpdate::Replace(&history),
+                )
                 .map(|()| l.catalog.path.clone());
             match saved {
                 Ok(p) => {
@@ -146,6 +153,7 @@ impl Editor {
             raw,
             recipe: self.document.recipe.clone(),
             export: self.document.export.clone(),
+            history: self.document.history.saved(&self.document.recipe),
         };
         match self.autosave.submit(job, ctx) {
             Ok(()) => self.document.save.saving(),

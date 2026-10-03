@@ -21,6 +21,7 @@ pub struct Catalog {
 mod copies;
 mod defaults;
 mod descriptive;
+mod develop_history;
 mod edits;
 mod info;
 mod ingest;
@@ -33,6 +34,7 @@ pub use descriptive::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
     Value, keyword_name,
 };
+pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };

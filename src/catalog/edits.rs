@@ -33,6 +33,7 @@ impl Catalog {
         path: &Path,
         recipe: &Recipe,
         export: &ExportOptions,
+        history: super::HistoryUpdate<'_>,
     ) -> Result<()> {
         recipe.validate()?;
         export.validate()?;
@@ -50,6 +51,7 @@ impl Catalog {
                 params![id, serde_json::to_string(&local)?],
             )?;
         }
+        Self::put_history(&tx, id, history)?;
         tx.commit()?;
         Ok(())
     }
