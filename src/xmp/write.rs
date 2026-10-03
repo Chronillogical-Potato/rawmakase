@@ -350,6 +350,12 @@ fn settings(r: &Recipe) -> Settings {
         0,
         false,
     );
+    // Lightroom's panel switches, written only for panels switched off.
+    for panel in r.panels.switched_off() {
+        for key in panel.lightroom_keys() {
+            s.text(key, "False");
+        }
+    }
     let t = &r.transform;
     s.put("PerspectiveVertical", t.vertical, 0.01, 0, true);
     s.put("PerspectiveHorizontal", t.horizontal, 0.01, 0, true);

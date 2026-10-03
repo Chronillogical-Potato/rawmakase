@@ -96,6 +96,8 @@ impl PreviewRenderer {
         cancel: &AtomicBool,
         display: Option<&gpu::Display>,
     ) -> Result<Output> {
+        let shown = recipe.as_rendered();
+        let recipe = shown.as_ref();
         self.backend.used_gpu = false;
         anyhow::ensure!(
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
@@ -181,6 +183,8 @@ impl PreviewRenderer {
         cancel: &AtomicBool,
         display: Option<&gpu::Display>,
     ) -> Result<Option<Output>> {
+        let shown = recipe.as_rendered();
+        let recipe = shown.as_ref();
         self.backend.used_gpu = false;
         if recipe.engine < 3 {
             return Ok(None);

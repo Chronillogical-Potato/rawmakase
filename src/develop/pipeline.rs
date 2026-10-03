@@ -1455,7 +1455,7 @@ fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
 
 /// Render a rectangle of the full output at one sample per output pixel.
 pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
-    let r = r.with_profile_adjustments();
+    let r = r.resolved(&im.metadata);
     render_region_inner(
         im.into(),
         &r,

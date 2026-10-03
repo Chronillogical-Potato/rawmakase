@@ -1,3 +1,4 @@
+use super::panels::PanelSwitches;
 use super::white_balance::{estimate_temperature, illuminant_camera};
 use crate::{develop::curve::ToneCurve, raw::Metadata};
 use anyhow::{Result, ensure};
@@ -93,6 +94,9 @@ pub struct Recipe {
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
+    /// Lightroom's panel switches; omitted while every panel is on.
+    #[serde(default, skip_serializing_if = "PanelSwitches::all_on")]
+    pub panels: PanelSwitches,
     /// Settings from a newer release, preserved as they were.
     #[serde(flatten)]
     pub unknown: std::collections::BTreeMap<String, serde_json::Value>,
@@ -168,6 +172,7 @@ impl Default for Recipe {
             flip_y: false,
             retouch: Vec::new(),
             masks: Vec::new(),
+            panels: PanelSwitches::default(),
             unknown: Default::default(),
         }
     }
@@ -369,9 +374,15 @@ impl Recipe {
             .filter(|_| self.lens_profile)
             .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
     }
-    /// Recipe as rendered: profile-internal adjustments plus the engine-4 default profile.
+    /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
+    /// and the engine-4 default profile.
     pub(crate) fn resolved(&self, m: &Metadata) -> std::borrow::Cow<'_, Self> {
-        let r = self.with_profile_adjustments();
+        let r = match self.as_rendered() {
+            std::borrow::Cow::Borrowed(r) => r.with_profile_adjustments(),
+            std::borrow::Cow::Owned(r) => {
+                std::borrow::Cow::Owned(r.with_profile_adjustments().into_owned())
+            }
+        };
         if r.profile.is_some() || r.engine < 4 {
             return r;
         }

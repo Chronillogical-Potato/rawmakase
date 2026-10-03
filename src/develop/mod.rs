@@ -15,6 +15,7 @@ mod image_space;
 mod local_tone;
 mod local_tone_data;
 pub mod masks;
+pub mod panels;
 mod pipeline;
 mod preview_renderer;
 mod pyramid;
