@@ -221,9 +221,10 @@ impl Editor {
         let Some(p) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
             return;
         };
-        if let Some(reason) = crate::app::library::develop_refusal(&p, p.path.is_file()) {
+        if let Some(refusal) = crate::app::library::develop_refusal(&p, p.path.is_file()) {
             // Said in a dialog: in the status bar alone, it looks as if the
             // click did nothing.
+            let reason = refusal.detail();
             self.status = reason.clone();
             self.not_editable =
                 Some((format!("{} can't be opened in Develop", p.filename), reason));

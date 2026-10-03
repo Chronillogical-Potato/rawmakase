@@ -46,8 +46,12 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     let ctx = egui::Context::default();
     let library = Library::load(&path, ctx.clone())?;
     let photo = library.photos[0].clone();
-    assert!(develop_refusal(&photo, true).is_some_and(|r| r.contains("camera RAW")));
-    assert!(develop_refusal(&photo, false).is_some_and(|r| r.contains("offline")));
+    assert_eq!(
+        develop_refusal(&photo, true),
+        Some(Refusal::NotRaw("JPG".into()))
+    );
+    assert_eq!(develop_refusal(&photo, false), Some(Refusal::Offline));
+    assert_eq!(Refusal::NotRaw("JPG".into()).label(), "JPG file");
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
     editor.library_mode = true;

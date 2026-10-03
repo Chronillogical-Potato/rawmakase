@@ -29,21 +29,32 @@ impl Library {
                                 .min_size(Vec2::new(ui.available_width(), 24.)),
                         )
                         .on_hover_text("Develop · D")
-                        .on_disabled_hover_text(refusal.unwrap_or_default());
+                        .on_disabled_hover_text(
+                            refusal
+                                .as_ref()
+                                .map(super::Refusal::detail)
+                                .unwrap_or_default(),
+                        );
                     if open.clicked()
                         && let Some(p) = &photo
                     {
                         action = Action::Develop(p.id);
                     }
                     ui.add_space(4.);
-                    info_text(
-                        ui,
-                        if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) {
-                            "Has Lightroom edits"
-                        } else {
-                            ""
-                        },
-                    );
+                    // Why the button is greyed out, in the line kept for this.
+                    let note = match &refusal {
+                        Some(super::Refusal::Offline) => {
+                            "Offline: relink its folder to edit".into()
+                        }
+                        Some(super::Refusal::NotRaw(format)) => {
+                            format!("{format} files can't be edited in Develop")
+                        }
+                        None if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) => {
+                            "Has Lightroom edits".into()
+                        }
+                        None => String::new(),
+                    };
+                    info_text(ui, &note);
                 });
                 section(ui, "Metadata", false, |ui| {
                     match &photo {

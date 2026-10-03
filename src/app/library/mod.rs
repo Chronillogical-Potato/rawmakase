@@ -543,19 +543,42 @@ impl Library {
         self.fields.clear();
     }
 }
-/// Why Develop cannot open `photo`, if it cannot: it edits camera RAW files
-/// that are `available`.
-pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<String> {
+/// Why Develop cannot open a photo: it edits camera RAW files that are
+/// online.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) enum Refusal {
+    Offline,
+    /// Not a camera RAW: the file's format, e.g. "JPEG".
+    NotRaw(String),
+}
+impl Refusal {
+    /// A word or two, shown beside a greyed-out Open in Develop.
+    pub(in crate::app) fn label(&self) -> String {
+        match self {
+            Self::Offline => "Offline".into(),
+            Self::NotRaw(format) => format!("{format} file"),
+        }
+    }
+    /// The reason in full, with what to do about it.
+    pub(in crate::app) fn detail(&self) -> String {
+        match self {
+            Self::Offline => {
+                "The photo is offline. Use Locate root folder or right-click its folder to relink it."
+                    .into()
+            }
+            Self::NotRaw(format) => format!(
+                "{format} files can be browsed in Library; Develop edits camera RAW files."
+            ),
+        }
+    }
+}
+/// Why Develop cannot open `photo`, if it cannot, given whether its file is
+/// `available`.
+pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
     if !available {
-        Some(
-            "The photo is offline. Use Locate root folder or right-click its folder to relink it."
-                .into(),
-        )
+        Some(Refusal::Offline)
     } else if !crate::storage::is_raw(&photo.path) {
-        Some(format!(
-            "{} files can be browsed in Library; Develop opens camera RAW files.",
-            photo.format
-        ))
+        Some(Refusal::NotRaw(photo.format.clone()))
     } else {
         None
     }
