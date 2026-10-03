@@ -507,7 +507,7 @@ pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
             "INSERT INTO photo_capture(photo, captured, subsec, offset) VALUES (?, ?, ?, ?)",
             params![id, c.captured, c.subsec, c.offset],
         )?;
-        let sort = crate::export::exif::lightroom_time(&c.captured, c.subsec.as_deref())
+        let sort = crate::exif::lightroom_time(&c.captured, c.subsec.as_deref())
             .context("Invalid capture time")?;
         db.execute("UPDATE photos SET captured=? WHERE id=?", params![sort, id])?;
     }

@@ -4,20 +4,19 @@
 //! `xmpNote:HasExtendedXMP`; the rest follows in chunks of its own segments.
 //! Camera Raw settings move first, as Adobe moves them, then the largest
 //! properties until the standard packet fits.
+use crate::xmp::{
+    ns::{CRS, JPEG_EXTENDED_HEADER, JPEG_HEADER, RDF, XMP_NOTE},
+    xml::{self, escape_attribute},
+};
 use anyhow::{Context, Result, ensure};
 use md5::{Digest, Md5};
 
 /// What a standard XMP segment holds: 65,535 bytes less the length field and
 /// the 29-byte namespace header.
-pub(super) const STANDARD_MAX: usize = 65_535 - 2 - STANDARD_HEADER.len();
-pub(super) const STANDARD_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
-pub(super) const EXTENDED_HEADER: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
+pub(super) const STANDARD_MAX: usize = 65_535 - 2 - JPEG_HEADER.len();
 /// Data per extended segment: what is left after the header, the GUID and
 /// the full length and offset.
-const CHUNK: usize = 65_535 - 2 - EXTENDED_HEADER.len() - 32 - 4 - 4;
-const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-const CRS: &str = "http://ns.adobe.com/camera-raw-settings/1.0/";
-const NOTE: &str = "http://ns.adobe.com/xmp/note/";
+const CHUNK: usize = 65_535 - 2 - JPEG_EXTENDED_HEADER.len() - 32 - 4 - 4;
 
 /// A property of the packet's description, as written.
 struct Property {
@@ -63,7 +62,7 @@ pub(super) fn split(packet: &str) -> Result<Split> {
                 "{}:{}=\"{}\"",
                 prefix(a.namespace().unwrap_or("")),
                 a.name(),
-                escape(a.value())
+                escape_attribute(a.value())
             ),
             attribute: true,
             camera_raw: a.namespace() == Some(CRS),
@@ -88,7 +87,7 @@ pub(super) fn split(packet: &str) -> Result<Split> {
     let mut placeholder = "0".repeat(32);
     for i in order.iter().copied().chain([usize::MAX]) {
         let kept = description_xml(&namespaces, &properties, &moved, false, Some(&placeholder));
-        if wrap(&kept).len() <= STANDARD_MAX {
+        if xml::packet(&kept).len() <= STANDARD_MAX {
             break;
         }
         ensure!(
@@ -97,7 +96,7 @@ pub(super) fn split(packet: &str) -> Result<Split> {
         );
         moved[i] = true;
     }
-    let extended = xmpmeta(&description_xml(
+    let extended = xml::xmpmeta(&description_xml(
         &namespaces,
         &properties,
         &moved,
@@ -109,7 +108,7 @@ pub(super) fn split(packet: &str) -> Result<Split> {
         .map(|b| format!("{b:02X}"))
         .collect();
     placeholder = guid.clone();
-    let standard = wrap(&description_xml(
+    let standard = xml::packet(&description_xml(
         &namespaces,
         &properties,
         &moved,
@@ -129,8 +128,8 @@ pub(super) fn segments(guid: &str, extended: &str) -> Vec<Vec<u8>> {
     data.chunks(CHUNK)
         .enumerate()
         .map(|(i, chunk)| {
-            let mut segment = Vec::with_capacity(EXTENDED_HEADER.len() + 40 + chunk.len());
-            segment.extend_from_slice(EXTENDED_HEADER);
+            let mut segment = Vec::with_capacity(JPEG_EXTENDED_HEADER.len() + 40 + chunk.len());
+            segment.extend_from_slice(JPEG_EXTENDED_HEADER);
             segment.extend_from_slice(guid.as_bytes());
             segment.extend((data.len() as u32).to_be_bytes());
             segment.extend(((i * CHUNK) as u32).to_be_bytes());
@@ -166,7 +165,7 @@ fn description_xml(
         out.push_str(ns);
     }
     if guid.is_some() {
-        out.push_str(&format!("\n    xmlns:xmpNote=\"{NOTE}\""));
+        out.push_str(&format!("\n    xmlns:xmpNote=\"{XMP_NOTE}\""));
     }
     for a in attributes {
         out.push_str("\n   ");
@@ -183,28 +182,4 @@ fn description_xml(
     }
     out.push_str("  </rdf:Description>\n");
     out
-}
-
-fn xmpmeta(description: &str) -> String {
-    format!(
-        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n <rdf:RDF xmlns:rdf=\"{RDF}\">\n{description} </rdf:RDF>\n</x:xmpmeta>"
-    )
-}
-/// A standard packet, with the xpacket wrapper.
-fn wrap(description: &str) -> String {
-    format!(
-        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n{}\n<?xpacket end=\"w\"?>",
-        xmpmeta(description)
-    )
-}
-
-/// An attribute value as XML writes it, whitespace included.
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\t', "&#x9;")
-        .replace('\n', "&#xA;")
-        .replace('\r', "&#xD;")
 }

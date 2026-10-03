@@ -1,18 +1,27 @@
-use super::Preset;
+use super::{
+    Preset,
+    ns::{CRS, PHOTOSHOP, RDF, XML},
+};
 use crate::develop::curve::ToneCurve;
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};
-pub(super) const CRS: &str = "http://ns.adobe.com/camera-raw-settings/1.0/";
-pub(super) const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+/// A preset's name and description, not settings.
+const LABELS: [&str; 5] = ["Name", "Group", "ShortName", "SortName", "Description"];
+/// Lightroom 18.5's empty point color selection: 19 values of -1.
+fn is_empty_point_colors(node: roxmltree::Node<'_, '_>) -> bool {
+    let values: Vec<_> = node
+        .descendants()
+        .filter(|n| n.has_tag_name((RDF, "li")))
+        .filter_map(|n| n.text())
+        .flat_map(|s| s.split(','))
+        .collect();
+    values.len() == 19 && values.iter().all(|v| v.trim().parse::<f32>() == Ok(-1.))
+}
 fn child_text(node: roxmltree::Node<'_, '_>, name: &str) -> Option<String> {
     let child = node.children().find(|n| n.has_tag_name((CRS, name)))?;
     let item = child
         .descendants()
-        .find(|n| {
-            n.has_tag_name((RDF, "li"))
-                && n.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
-                    == Some("x-default")
-        })
+        .find(|n| n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default"))
         .or_else(|| child.descendants().find(|n| n.has_tag_name((RDF, "li"))));
     Some(
         item.and_then(|n| n.text())
@@ -49,6 +58,9 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
                 && n.parent().is_some_and(|p| p.has_tag_name((RDF, "RDF")))
         })
         .context("No top-level XMP description")?;
+    let sidecar = description
+        .attribute((PHOTOSHOP, "SidecarForExtension"))
+        .is_some();
     let mut settings: BTreeMap<_, _> = description
         .attributes()
         .filter(|a| a.namespace() == Some(CRS))
@@ -64,17 +76,8 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     {
         let name = node.tag_name().name();
         if !node.children().any(|n| n.is_element())
-            && ![
-                "Name",
-                "Group",
-                "ShortName",
-                "SortName",
-                "Description",
-                "Look",
-                "PointColors",
-                "ColorVariance",
-            ]
-            .contains(&name)
+            && !LABELS.contains(&name)
+            && !matches!(name, "Look" | "PointColors" | "ColorVariance")
             && let Some(text) = node.text()
         {
             settings.insert(name.to_string(), text.trim().to_string());
@@ -134,44 +137,31 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
             if let Some(uuid) = d.attribute((CRS, "UUID")) {
                 settings.insert("RAWmakaseLookUUID".into(), uuid.into());
             }
-        } else if name == "Preset"
-            && description
-                .attribute(("http://ns.adobe.com/photoshop/1.0/", "SidecarForExtension"))
-                .is_some()
-        {
+        } else if name == "Preset" && sidecar {
             // In a photo sidecar, the nested preset-amount record is provenance.
             // The resolved top-level edits (including curves) remain authoritative.
         } else if matches!(name, "PointColors" | "ColorVariance") && {
             // Lightroom 18.5 writes these exact empty-selection sentinels.
-            let values: Vec<_> = node
-                .descendants()
-                .filter(|n| n.has_tag_name((RDF, "li")))
-                .filter_map(|n| n.text())
-                .flat_map(|s| s.split(','))
-                .map(|v| v.trim().parse::<f32>())
-                .collect();
             if name == "PointColors" {
-                values.len() == 19 && values.iter().all(|v| matches!(v, Ok(n) if *n == -1.))
+                is_empty_point_colors(node)
             } else {
+                let values: Vec<_> = node
+                    .descendants()
+                    .filter(|n| n.has_tag_name((RDF, "li")))
+                    .filter_map(|n| n.text())
+                    .flat_map(|s| s.split(','))
+                    .map(|v| v.trim().parse::<f32>())
+                    .collect();
                 values.len() == 1
                     && matches!(values[0], Ok(n) if n == -50.)
                     && description
                         .children()
                         .find(|n| n.has_tag_name((CRS, "PointColors")))
-                        .is_some_and(|n| {
-                            let values: Vec<_> = n
-                                .descendants()
-                                .filter(|n| n.has_tag_name((RDF, "li")))
-                                .filter_map(|n| n.text())
-                                .flat_map(|s| s.split(','))
-                                .collect();
-                            values.len() == 19
-                                && values.iter().all(|v| v.trim().parse::<f32>() == Ok(-1.))
-                        })
+                        .is_some_and(is_empty_point_colors)
             }
         } {
             // No selected point color to adjust.
-        } else if !["Name", "Group", "ShortName", "SortName", "Description"].contains(&name) {
+        } else if !LABELS.contains(&name) {
             let active = node.descendants().any(|n| {
                 n.has_tag_name((RDF, "li")) && n.text().is_some_and(|s| !s.trim().is_empty())
             });
@@ -204,9 +194,7 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         notes.push("Recovered duplicated XML Group closing tag; original file unchanged".into());
     }
     let preset = Preset {
-        photo_settings: description
-            .attribute(("http://ns.adobe.com/photoshop/1.0/", "SidecarForExtension"))
-            .is_some(),
+        photo_settings: sidecar,
         id,
         name,
         group,

@@ -3,7 +3,11 @@
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
 use super::Catalog;
-use crate::xmp::descriptive::{self, Read};
+use crate::jpeg::{APP1, Segments};
+use crate::xmp::{
+    descriptive::{self, Read},
+    ns::JPEG_HEADER,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
@@ -83,51 +87,21 @@ fn embedded(file: &Path) -> Result<Option<String>> {
         .unwrap_or_default();
     match extension.as_str() {
         "jpg" | "jpeg" => {
-            use std::io::{Read as _, Seek, SeekFrom};
-            const HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+            use std::io::Read as _;
             // Segment by segment up to the image data, not the whole file.
-            let mut f = std::fs::File::open(file)?;
-            let mut marker = [0u8; 4];
-            f.read_exact(&mut marker[..2])?;
-            if marker[..2] != [0xff, 0xd8] {
+            let Some(mut segments) = Segments::new(std::fs::File::open(file)?)? else {
                 return Ok(None);
-            }
-            let mut byte = [0u8; 1];
-            loop {
-                // A marker: 0xff, any fill bytes of 0xff, then its code.
-                if f.read_exact(&mut byte).is_err() || byte[0] != 0xff {
-                    break;
-                }
-                while byte[0] == 0xff {
-                    if f.read_exact(&mut byte).is_err() {
-                        return Ok(None);
-                    }
-                }
-                if byte[0] == 0xda || byte[0] == 0xd9 {
-                    break;
-                }
-                // Markers without a length: TEM and the restarts.
-                if byte[0] == 0x01 || (0xd0..=0xd7).contains(&byte[0]) {
-                    continue;
-                }
-                let mut length = [0u8; 2];
-                if f.read_exact(&mut length).is_err() {
-                    break;
-                }
-                marker = [0xff, byte[0], length[0], length[1]];
-                let len = u16::from_be_bytes(length) as usize;
-                let body = len.saturating_sub(2);
-                if marker[1] == 0xe1 && body > HEADER.len() {
-                    let mut data = vec![0u8; body];
-                    f.read_exact(&mut data)?;
-                    if let Some(xmp) = data.strip_prefix(HEADER) {
+            };
+            while let Some(segment) = segments.next()? {
+                if segment.marker == APP1 && segment.length > JPEG_HEADER.len() {
+                    let mut data = vec![0u8; segment.length];
+                    segments.reader().read_exact(&mut data)?;
+                    if let Some(xmp) = data.strip_prefix(JPEG_HEADER) {
                         return Ok(Some(
                             String::from_utf8(xmp.to_vec())
                                 .context("embedded XMP is not valid UTF-8")?,
                         ));
                     }
-                } else {
-                    f.seek(SeekFrom::Current(body as i64))?;
                 }
             }
             Ok(None)
@@ -141,7 +115,7 @@ fn embedded(file: &Path) -> Result<Option<String>> {
                 return Ok(None);
             };
             Ok(main
-                .get(&700)
+                .get(&crate::exif::tag::XMP)
                 .and_then(|e| t.raw(e))
                 .map(String::from_utf8)
                 .transpose()

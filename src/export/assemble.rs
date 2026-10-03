@@ -4,21 +4,25 @@
 //! EXIF Copyright), Contact (creator), Descriptive (title, caption, keywords,
 //! rating, label), capture time, location, Camera (make, model, exposure,
 //! lens) and Camera Raw (the develop settings).
-use super::{
-    Include,
-    exif::{CameraExif, Field},
-    settings::ExportSettings,
-};
+use super::{Include, settings::ExportSettings};
 use crate::catalog::{Capture, Descriptive, LangAlt, Location, Value};
+use crate::exif::{CameraExif, Field, MAX_VALUE, tag::*};
+use crate::tiff::kind::{BYTE, RATIONAL};
 use crate::xmp::write::KeywordPath;
 
-const CAPTION: u16 = 0x010e;
-const ARTIST: u16 = 0x013b;
-const COPYRIGHT: u16 = 0x8298;
+/// Lightroom's caption.
+const CAPTION: u16 = IMAGE_DESCRIPTION;
 /// Dates of the EXIF directory: original, digitized, their offsets and
 /// subseconds. They go with the capture time, not the camera.
 const DATES: [u16; 8] = [
-    0x9003, 0x9004, 0x9010, 0x9011, 0x9012, 0x9290, 0x9291, 0x9292,
+    DATE_TIME_ORIGINAL,
+    DATE_TIME_DIGITIZED,
+    OFFSET_TIME,
+    OFFSET_TIME_ORIGINAL,
+    OFFSET_TIME_DIGITIZED,
+    SUBSEC_TIME,
+    SUBSEC_TIME_ORIGINAL,
+    SUBSEC_TIME_DIGITIZED,
 ];
 
 /// The groups an export includes.
@@ -289,7 +293,7 @@ fn main_tag(
     // Text this long goes in the XMP only: the EXIF must fit one JPEG
     // segment with everything else. Never the file's in its place.
     let catalog = || match &set {
-        Some(v) if v.len() > super::exif::MAX_VALUE => None,
+        Some(v) if v.len() > MAX_VALUE => None,
         Some(v) => Some(Field::ascii(tag, v)),
         None => file.clone(),
     };
@@ -305,17 +309,24 @@ fn main_tag(
 /// capture time kept in the catalog; the camera's are replaced, its offset
 /// dropped when the catalog has none.
 fn capture_tags(exif: &mut Vec<Field>, c: &Capture) {
-    exif.retain(|f| ![0x9003, 0x9291, 0x9011].contains(&f.tag));
+    exif.retain(|f| {
+        ![
+            DATE_TIME_ORIGINAL,
+            SUBSEC_TIME_ORIGINAL,
+            OFFSET_TIME_ORIGINAL,
+        ]
+        .contains(&f.tag)
+    });
     let (date, time) = c.captured.split_once('T').unwrap_or((&c.captured, ""));
     exif.push(Field::ascii(
-        0x9003,
+        DATE_TIME_ORIGINAL,
         &format!("{} {time}", date.replace('-', ":")),
     ));
     if let Some(subsec) = c.subsec.as_deref().filter(|s| !s.is_empty()) {
-        exif.push(Field::ascii(0x9291, subsec));
+        exif.push(Field::ascii(SUBSEC_TIME_ORIGINAL, subsec));
     }
     if let Some(offset) = c.offset.as_deref().filter(|s| !s.is_empty()) {
-        exif.push(Field::ascii(0x9011, offset));
+        exif.push(Field::ascii(OFFSET_TIME_ORIGINAL, offset));
     }
 }
 
@@ -351,7 +362,7 @@ fn gps(lat: f64, lon: f64, alt: Option<f64>) -> Vec<Field> {
         }
         Field {
             tag,
-            kind: 5,
+            kind: RATIONAL,
             count: 3,
             bytes,
         }
@@ -359,25 +370,25 @@ fn gps(lat: f64, lon: f64, alt: Option<f64>) -> Vec<Field> {
     let reference = |tag, letter: &str| Field::ascii(tag, letter);
     let mut fields = vec![
         Field {
-            tag: 0x0000,
-            kind: 1,
+            tag: GPS_VERSION_ID,
+            kind: BYTE,
             count: 4,
             bytes: vec![2, 3, 0, 0],
         },
-        reference(0x0001, if lat < 0. { "S" } else { "N" }),
-        dms(0x0002, lat),
-        reference(0x0003, if lon < 0. { "W" } else { "E" }),
-        dms(0x0004, lon),
+        reference(GPS_LATITUDE_REF, if lat < 0. { "S" } else { "N" }),
+        dms(GPS_LATITUDE, lat),
+        reference(GPS_LONGITUDE_REF, if lon < 0. { "W" } else { "E" }),
+        dms(GPS_LONGITUDE, lon),
     ];
     if let Some(alt) = alt {
         fields.push(Field {
-            tag: 0x0005,
-            kind: 1,
+            tag: GPS_ALTITUDE_REF,
+            kind: BYTE,
             count: 1,
             bytes: vec![u8::from(alt < 0.)],
         });
         fields.push(Field::rational(
-            0x0006,
+            GPS_ALTITUDE,
             (alt.abs() * 100.).round() as u32,
             100,
         ));

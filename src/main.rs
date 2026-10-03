@@ -312,7 +312,7 @@ fn main() -> Result<()> {
                     ..Default::default()
                 },
                 &rawmakase::export::Embed {
-                    camera: rawmakase::export::exif::read(&input),
+                    camera: rawmakase::exif::read(&input),
                     ..Default::default()
                 },
                 if overwrite {

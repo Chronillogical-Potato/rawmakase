@@ -4,12 +4,11 @@ use super::{CameraProfile, Table};
 use crate::{
     color_math::{srgb_decode, srgb_encode},
     develop::curve::{CurveLut, ToneCurve},
+    xmp::ns::{CRS, RDF, XML},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{io::Read, path::Path};
-const CRS: &str = "http://ns.adobe.com/camera-raw-settings/1.0/";
-const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const ALPHABET: &[u8] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`'|()[]{}@%$#";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -245,11 +244,7 @@ pub(super) fn compose_text(text: &str, base: &CameraProfile) -> Result<CameraPro
         .context("Missing profile name")?;
     let name = name_node
         .descendants()
-        .find(|n| {
-            n.has_tag_name((RDF, "li"))
-                && n.attribute(("http://www.w3.org/XML/1998/namespace", "lang"))
-                    == Some("x-default")
-        })
+        .find(|n| n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default"))
         .and_then(|n| n.text())
         .context("Missing profile name")?;
     let table_id = attr("LookTable");

@@ -36,7 +36,9 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
 | [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
-| [src/tiff.rs](../src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF). |
+| [src/tiff.rs](../src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
+| [src/jpeg.rs](../src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
+| [src/exif.rs](../src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
 | [src/time.rs](../src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
@@ -118,6 +120,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [parse.rs](../src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
 | [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
+| [ns.rs](../src/xmp/ns.rs), [xml.rs](../src/xmp/xml.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
 | [local.rs](../src/xmp/local.rs) | Lightroom's spot removal and masks (`RetouchAreas`, legacy `RetouchInfo`, mask correction lists) from XMP or a catalog, as retouch operations and masks; import only. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
@@ -147,7 +150,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [lightroom/history.rs](../src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
 | [export/mod.rs](../src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
 | [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
-| [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | Selected EXIF/TIFF metadata and descriptions, and the camera's own EXIF read from the RAW; maker notes and offsets into the RAW are left out. |
+| [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
 | [export/job.rs](../src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
 | [export/settings.rs](../src/export/settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export. |
 

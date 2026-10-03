@@ -2,7 +2,7 @@
 //! edit as Camera Raw XMP, as Lightroom embeds them.
 pub mod assemble;
 mod encode;
-pub mod exif;
+pub(crate) mod exif;
 mod extended_xmp;
 pub mod job;
 mod metadata;
@@ -55,7 +55,7 @@ impl ExportOptions {
 pub struct Embed {
     /// The camera's EXIF, read from the RAW; LibRaw's capture settings stand in
     /// when it could not be read.
-    pub camera: Option<exif::CameraExif>,
+    pub camera: Option<crate::exif::CameraExif>,
     /// Make and model from LibRaw where the camera's EXIF has none.
     pub camera_fallback: bool,
     /// An XMP packet, e.g. the edit as Camera Raw settings.
@@ -107,14 +107,8 @@ pub fn export_with(
     let mut temp = NamedTempFile::new_in(parent)?;
     let profile = raw::srgb_profile()?;
     let directories = metadata::directories(m, embed, image.width, image.height);
-    match path
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_lowercase()
-        .as_str()
-    {
-        "jpg" | "jpeg" => encode::jpeg(
+    match Format::from_path(path) {
+        Some(Format::Jpeg) => encode::jpeg(
             &mut temp,
             image,
             options.quality,
@@ -122,8 +116,8 @@ pub fn export_with(
             directories,
             embed,
         )?,
-        "tif" | "tiff" => encode::tiff(&mut temp, image, profile, &directories, embed)?,
-        _ => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
+        Some(Format::Tiff) => encode::tiff(&mut temp, image, profile, &directories, embed)?,
+        None => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
     }
     temp.as_file().sync_all()?;
     crate::storage::persist(temp, path, replace)

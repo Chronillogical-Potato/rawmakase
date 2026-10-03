@@ -1,6 +1,10 @@
 //! Writes a recipe back out as Camera Raw settings (`crs:`), the XMP Lightroom
 //! embeds in its exports. The keys and scales mirror `apply`, so reading the
 //! packet back reproduces the edit.
+use super::{
+    ns::{AUX, CRS, DC, LR, PHOTOSHOP, XMP, XMP_MM},
+    xml::{self, escape_text},
+};
 use crate::{develop::Recipe, develop::curve::ToneCurve, raw::Metadata};
 use std::fmt::Write;
 
@@ -49,20 +53,6 @@ pub struct Photo {
     pub format: String,
 }
 
-fn escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
 /// "2018:08:26 10:39:33" as XMP's "2018-08-26T10:39:33".
 fn xmp_date(exif: &str) -> Option<String> {
     let (date, time) = exif.trim().split_once(' ')?;
@@ -414,8 +404,8 @@ fn lang_alt(out: &mut String, name: &str, langs: &[(String, String)]) {
         let _ = writeln!(
             out,
             "     <rdf:li xml:lang=\"{}\">{}</rdf:li>",
-            escape(lang),
-            escape(text)
+            escape_text(lang),
+            escape_text(text)
         );
     }
     let _ = write!(out, "    </rdf:Alt>\n   </{name}>\n");
@@ -427,7 +417,7 @@ fn list(out: &mut String, name: &str, kind: &str, items: &[String]) {
     }
     let _ = write!(out, "   <{name}>\n    <rdf:{kind}>\n");
     for item in items {
-        let _ = writeln!(out, "     <rdf:li>{}</rdf:li>", escape(item));
+        let _ = writeln!(out, "     <rdf:li>{}</rdf:li>", escape_text(item));
     }
     let _ = write!(out, "    </rdf:{kind}>\n   </{name}>\n");
 }
@@ -511,21 +501,18 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
         );
         attributes.push(("crs:AlreadyApplied".into(), "True".into()));
     }
-    let mut out = String::from(
-        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
-         <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n \
-         <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n  \
-         <rdf:Description rdf:about=\"\"\n    \
-         xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n    \
-         xmlns:aux=\"http://ns.adobe.com/exif/1.0/aux/\"\n    \
-         xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\"\n    \
-         xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\"\n    \
-         xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n    \
-         xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"\n    \
-         xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"",
+    let mut out = format!(
+        "  <rdf:Description rdf:about=\"\"\n    \
+         xmlns:xmp=\"{XMP}\"\n    \
+         xmlns:aux=\"{AUX}\"\n    \
+         xmlns:photoshop=\"{PHOTOSHOP}\"\n    \
+         xmlns:xmpMM=\"{XMP_MM}\"\n    \
+         xmlns:dc=\"{DC}\"\n    \
+         xmlns:lr=\"{LR}\"\n    \
+         xmlns:crs=\"{CRS}\""
     );
     for (key, value) in &attributes {
-        let _ = write!(out, "\n   {key}=\"{}\"", escape(value));
+        let _ = write!(out, "\n   {key}=\"{}\"", escape_text(value));
     }
     out.push_str(">\n");
     lang_alt(&mut out, "dc:title", &photo.title);
@@ -545,6 +532,6 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
             );
         }
     }
-    out.push_str("  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>");
-    out
+    out.push_str("  </rdf:Description>\n");
+    xml::packet(&out)
 }

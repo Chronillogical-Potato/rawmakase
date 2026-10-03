@@ -39,9 +39,9 @@ impl Catalog {
         if defaults.is_empty() {
             return Ok(());
         }
-        let has = |exif: &Option<crate::export::exif::CameraExif>, tag| {
+        let has = |exif: &Option<crate::exif::CameraExif>, tag| {
             exif.as_ref()
-                .and_then(|e| e.get(tag).and_then(crate::export::exif::Field::text))
+                .and_then(|e| e.get(tag).and_then(crate::exif::Field::text))
                 .is_some_and(|t| !t.is_empty())
         };
         let (creator, copyright) = (defaults.creator.trim(), defaults.copyright.trim());
@@ -54,13 +54,16 @@ impl Catalog {
                 return false;
             }
             // Read once for both.
-            let exif = crate::export::exif::read(paths[&id]);
+            let exif = crate::exif::read(paths[&id]);
             let mut changed = false;
-            if !creator.is_empty() && d.creator.is_none() && !has(&exif, 0x013b) {
+            if !creator.is_empty() && d.creator.is_none() && !has(&exif, crate::exif::tag::ARTIST) {
                 d.creator = Some(Value::Set(vec![creator.to_string()]));
                 changed = true;
             }
-            if !copyright.is_empty() && d.copyright.is_none() && !has(&exif, 0x8298) {
+            if !copyright.is_empty()
+                && d.copyright.is_none()
+                && !has(&exif, crate::exif::tag::COPYRIGHT)
+            {
                 d.copyright = Some(Value::Set(LangAlt::new(copyright)));
                 changed = true;
             }
