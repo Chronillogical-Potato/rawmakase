@@ -198,6 +198,16 @@ impl Catalog {
             .optional()?;
         Ok(data.and_then(|d| SavedHistory::decode(&d).ok().flatten()))
     }
+    /// Whether the photo has a stored History, readable here or not.
+    pub fn has_history(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .db
+            .query_row("SELECT 1 FROM develop_history WHERE photo=?", [id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some())
+    }
     /// Stores `history` for the photo inside the transaction saving its edit.
     pub(super) fn put_history(
         tx: &rusqlite::Transaction<'_>,
@@ -206,6 +216,10 @@ impl Catalog {
     ) -> Result<()> {
         match history {
             HistoryUpdate::Keep => {}
+            // An empty History stores as none (Sync's Undo on a photo that had none).
+            HistoryUpdate::Replace(h) if h.steps.is_empty() => {
+                tx.execute("DELETE FROM develop_history WHERE photo=?", [id])?;
+            }
             HistoryUpdate::Replace(h) => {
                 tx.execute(
                     "INSERT OR REPLACE INTO develop_history(photo, data) VALUES (?, ?)",

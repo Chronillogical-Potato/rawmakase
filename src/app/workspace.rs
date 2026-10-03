@@ -82,7 +82,9 @@ impl Editor {
             self.preferences_shortcut(&ctx);
         }
         self.workspace_bar(ui);
-        if self.activity.is_dialog() {
+        // A file dialog or a running Sync: nothing behind them takes clicks, so no
+        // catalog action is chosen only to be dropped.
+        if self.activity.is_busy() {
             ui.disable();
         }
         if self.onboarding.visible {
@@ -351,7 +353,7 @@ impl Editor {
                         }
                     });
                     ui.add_space(8.);
-                    if self.activity.is_dialog() {
+                    if self.activity.is_busy() {
                         ui.spinner();
                     }
                     self.export_progress(ui);
@@ -659,6 +661,7 @@ impl Editor {
             self.zoom_keys(ctx);
             let (mut copy, mut paste, mut reset) = (false, false, false);
             let mut previous = false;
+            let mut sync = false;
             let mut auto = false;
             let mut export = None;
             ctx.input(|i| {
@@ -682,6 +685,10 @@ impl Editor {
                 });
                 if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
                     previous = true;
+                }
+                // Lightroom's Sync Settings.
+                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::S) {
+                    sync = true;
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
@@ -766,7 +773,10 @@ impl Editor {
             });
             // As in Lightroom, Shift+Cmd+C opens Copy Settings.
             if copy {
-                self.open_copy_dialog();
+                self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
+            }
+            if sync && !self.sync_targets().is_empty() && !self.activity.is_busy() {
+                self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
             }
             if reset {
                 self.reset_settings();
@@ -862,7 +872,14 @@ impl Editor {
             if strip.metadata_changed {
                 self.status = library.message.clone();
             }
-            // In Develop both a click and Open in Develop show the photo.
+            // Cmd and Shift select, as in the Library, for Sync; otherwise a click
+            // and Open in Develop show the photo.
+            let modifiers = ui.input(|i| i.modifiers);
+            if let Some(crate::app::library::Pick::Show(id)) = strip.pick
+                && library.develop_select(id, current, modifiers)
+            {
+                return;
+            }
             if let Some(
                 crate::app::library::Pick::Show(id) | crate::app::library::Pick::Develop(id),
             ) = strip.pick
@@ -904,7 +921,9 @@ impl Editor {
         if self.document.save.needs_save() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
-        if ctx.input(|i| i.viewport().close_requested()) && (self.exporting() || !self.flush()) {
+        if ctx.input(|i| i.viewport().close_requested())
+            && (self.exporting() || self.activity.is_syncing() || !self.flush())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_confirm = true;
         }
@@ -912,13 +931,18 @@ impl Editor {
             egui::Window::new("Work still pending").show(ctx, |ui| {
                 ui.label(if self.exporting() {
                     "Wait for the export to finish before closing."
+                } else if self.activity.is_syncing() {
+                    "Wait for Sync Settings to finish before closing."
                 } else {
                     "Edits could not be saved. Retry or save a preset before closing."
                 });
                 if ui.button("Keep editing").clicked() {
                     self.close_confirm = false;
                 }
-                if !self.exporting() && ui.button("Close without saving").clicked() {
+                if !self.exporting()
+                    && !self.activity.is_syncing()
+                    && ui.button("Close without saving").clicked()
+                {
                     self.document.save.saved();
                     if let Some(library) = &mut self.library {
                         library.discard_drafts();

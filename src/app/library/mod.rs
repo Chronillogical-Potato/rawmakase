@@ -30,6 +30,7 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+pub(in crate::app) use cell::copy_suffix;
 pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
 pub use filmstrip::{Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
@@ -384,7 +385,19 @@ impl Library {
     pub(in crate::app) fn shown(&self) -> Vec<i64> {
         self.visible.iter().map(|i| self.photos[*i].id).collect()
     }
-    #[cfg(test)]
+    /// Edits written elsewhere (Sync, its Undo): their previews render again.
+    pub(in crate::app) fn edits_changed(&mut self, ids: impl IntoIterator<Item = i64>) {
+        for id in ids {
+            self.cache.forget(id);
+        }
+        // Edit Time order reads when each photo was last edited.
+        self.resort_in_place(|l| l.sort_keys = None);
+    }
+    /// Whether `id` is selected, shown or hidden by the filters.
+    pub(in crate::app) fn is_selected(&self, id: i64) -> bool {
+        self.selection.selected.contains(&id)
+    }
+    /// The selected photos in display order.
     pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
         self.selected_ids()
     }
@@ -415,6 +428,10 @@ impl Library {
     }
     /// Whether Read Metadata from Files finished since the last call, for
     /// the status line to show its outcome.
+    /// Read Metadata from Files is still applying what it read.
+    pub(in crate::app) fn rereading(&self) -> bool {
+        self.reread.is_some()
+    }
     pub(in crate::app) fn take_reread_finished(&mut self) -> bool {
         std::mem::take(&mut self.reread_finished)
     }

@@ -421,6 +421,7 @@ mod editing;
 mod settings_transfer;
 mod shortcuts;
 mod snapshots;
+mod sync;
 mod theme;
 mod toolbar;
 mod updates;

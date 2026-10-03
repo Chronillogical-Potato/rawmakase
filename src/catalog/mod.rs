@@ -36,6 +36,7 @@ pub use descriptive::{
     Value, keyword_name,
 };
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
+pub use edits::{EditChange, EditToSave};
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };
@@ -77,6 +78,11 @@ impl Catalog {
             path: path.into(),
             db,
         })
+    }
+    /// The connection, for tests that set up stored state directly.
+    #[cfg(test)]
+    pub(crate) fn db_for_tests(&self) -> &Connection {
+        &self.db
     }
     pub fn photos(&self) -> Result<Vec<Photo>> {
         let mappings = self.folders()?;

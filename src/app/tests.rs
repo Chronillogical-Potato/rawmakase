@@ -2012,7 +2012,7 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     });
     editor.document.recipe.exposure = 0.6;
     editor.document.recipe.contrast = 0.3;
-    editor.open_copy_dialog();
+    editor.open_copy_dialog(settings_transfer::Transfer::Copy);
     // The dialog draws, with its buttons in view in the smallest window.
     for _ in 0..2 {
         let mut output = ctx.run_ui(
@@ -2031,14 +2031,14 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     dialog
         .groups
         .set(SettingGroup::Exposure, GroupInclusion::Included);
-    editor.close_copy_dialog(settings_transfer::CopyChoice::Copy);
+    editor.close_copy_dialog(settings_transfer::CopyChoice::Confirm);
     assert!(editor.copy_dialog.is_none());
     editor.document.recipe = Recipe::default();
     editor.paste_settings();
     assert_eq!(editor.document.recipe.exposure, 0.6);
     assert_eq!(editor.document.recipe.contrast, 0.);
     // The next Copy Settings starts from that choice; Cancel copies nothing.
-    editor.open_copy_dialog();
+    editor.open_copy_dialog(settings_transfer::Transfer::Copy);
     assert!(
         editor
             .copy_dialog

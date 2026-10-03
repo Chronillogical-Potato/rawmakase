@@ -40,6 +40,8 @@ pub(super) enum Command {
         history: u64,
         change: Box<Recorded>,
     },
+    /// Settings synchronized to several photos at once; undone and redone together.
+    Sync(Box<super::sync::SyncCommand>),
 }
 
 #[derive(Default)]
@@ -54,6 +56,14 @@ impl UndoLog {
         }
         self.undo.push_back(command);
         self.redo.clear();
+    }
+    /// Drops commands that wrote a photo now removed, so its id, if a new photo gets
+    /// it, is never written by them.
+    pub(super) fn forget_photo(&mut self, id: i64) {
+        let touches =
+            |c: &Command| matches!(c, Command::Sync(s) if s.edits.iter().any(|e| e.id == id));
+        self.undo.retain(|c| !touches(c));
+        self.redo.retain(|c| !touches(c));
     }
     pub(super) fn clear(&mut self) {
         self.undo.clear();
@@ -128,11 +138,16 @@ impl Editor {
             self.undo_log.push(command);
         }
     }
+    /// Waits while Sync writes edits, which Undo could otherwise race.
     pub(super) fn undo(&mut self) {
-        self.step(Direction::Undo);
+        if !self.activity.is_syncing() {
+            self.step(Direction::Undo);
+        }
     }
     pub(super) fn redo(&mut self) {
-        self.step(Direction::Redo);
+        if !self.activity.is_syncing() {
+            self.step(Direction::Redo);
+        }
     }
     /// Reverses the latest command, or makes the latest reversed one again.
     /// What the Library panels hold is saved first, so it is a command
@@ -194,6 +209,50 @@ impl Editor {
                 self.apply_library(verb, &change.summary, place, None, |library| {
                     library.restore_descriptive(values, ratings)
                 })
+            }
+            Command::Sync(sync) => {
+                // The open photo is saved first, so a failure changes nothing.
+                if !self.flush() {
+                    return false;
+                }
+                let Some(library) = &self.library else {
+                    return false;
+                };
+                let side = match direction {
+                    Direction::Undo => super::sync::SyncSide::Before,
+                    Direction::Redo => super::sync::SyncSide::After,
+                };
+                // Each photo where it is now, after any relink since the Sync.
+                let path = |id: i64| library.photo(id).map(|p| p.path.clone());
+                match super::sync::restore(&library.catalog, &sync.edits, side, path) {
+                    Ok(()) => {}
+                    // Nothing to return to: the command is used up, not retried.
+                    Err(e @ super::sync::SyncRestoreError::PhotoRemoved) => {
+                        self.status = format!("{verb} Sync Settings: {e}");
+                        return true;
+                    }
+                    Err(e) => {
+                        self.status = format!("{verb} failed: {e}");
+                        return false;
+                    }
+                }
+                if let Some(library) = &mut self.library {
+                    library.edits_changed(sync.edits.iter().map(|e| e.id));
+                }
+                // A synchronized photo open here opens again with what was written
+                // back (or with no edit at all), so nothing stale is saved over it.
+                if let Some(open) = self.document.catalog_photo
+                    && sync.edits.iter().any(|e| e.id == open)
+                    && let Some(path) = self.document.path.clone()
+                {
+                    self.document.save.saved();
+                    self.load_raw(path, Some(open));
+                }
+                self.status = format!(
+                    "{verb} Sync Settings ({})",
+                    super::widgets::plural(sync.edits.len(), "photo", "photos")
+                );
+                true
             }
             Command::Develop {
                 photo,

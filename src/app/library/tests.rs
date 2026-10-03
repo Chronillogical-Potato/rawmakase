@@ -2088,3 +2088,22 @@ fn a_saved_draft_is_not_saved_again_after_undo() -> Result<()> {
     assert_eq!(library.catalog.descriptive(id)?.title, None);
     Ok(())
 }
+#[test]
+fn develop_filmstrip_cmd_and_shift_select_while_the_open_photo_stays_active() -> anyhow::Result<()>
+{
+    let (_d, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = library.shown();
+    library.select(Some(ids[1]));
+    // A plain click is left to Develop, which opens the photo.
+    assert!(!library.develop_select(ids[2], Some(ids[1]), egui::Modifiers::NONE));
+    assert!(library.develop_select(ids[3], Some(ids[1]), egui::Modifiers::COMMAND));
+    assert_eq!(library.selected(), Some(ids[1]));
+    assert_eq!(library.selected_photos(), [ids[1], ids[3]]);
+    // Cmd on a selected photo takes it out again; the open one stays.
+    library.develop_select(ids[3], Some(ids[1]), egui::Modifiers::COMMAND);
+    assert_eq!(library.selected_photos(), [ids[1]]);
+    library.develop_select(ids[3], Some(ids[1]), egui::Modifiers::SHIFT);
+    assert_eq!(library.selected(), Some(ids[1]));
+    assert_eq!(library.selected_photos(), ids[1..]);
+    Ok(())
+}

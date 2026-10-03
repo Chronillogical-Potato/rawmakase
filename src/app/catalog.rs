@@ -415,6 +415,7 @@ impl Editor {
         match library.remove_virtual_copy(id) {
             Ok(master) => {
                 self.status = library.message.clone();
+                self.undo_log.forget_photo(id);
                 if self.document.catalog_photo == Some(id) {
                     // Removed from Develop: show its master there instead.
                     if let Some(master) = master

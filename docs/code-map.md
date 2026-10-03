@@ -188,6 +188,8 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
+| [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `develop::settings_groups`. |
+| [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
 | [onboarding.rs](../src/app/onboarding.rs) | First-run setup: a catalog, then optional Lightroom profiles and presets. |
