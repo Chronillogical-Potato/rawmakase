@@ -1,9 +1,8 @@
 //! One-click Auto: the Basic tone sliders, and white balance, chosen for a photo.
 //!
-//! White balance is estimated from the camera pixels. The tone sliders are fitted by
-//! rendering a small copy of the photo through the real pipeline and measuring the
-//! result, so the estimates follow the sliders as they render rather than a model of
-//! them.
+//! White balance is estimated from the camera pixels. The tone sliders and Vibrance
+//! are predicted from a reduced render of the photo before its adjustments, by linear
+//! fits to Lightroom's own Auto values.
 use super::{
     Recipe,
     pipeline::{preview, render},
@@ -16,26 +15,18 @@ use crate::{
 use anyhow::{Result, bail, ensure};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Long edge of the cropped render the tone estimates are measured on.
-const ANALYSIS_EDGE: u32 = 256;
-/// Largest long edge of the reduced photo that render is cropped from, so a tight
-/// crop never copies a full-size photo (about 19 MB at 1536 × 1024).
-const ANALYSIS_SOURCE_MAX: u32 = 1536;
-/// Display (sRGB-encoded) luminance Auto places the photo's median at: 18% gray.
-const TARGET_MEDIAN: f32 = 0.46;
-/// Where Auto places the brightest channel of the brightest 0.2% of pixels.
-const TARGET_WHITE: f32 = 0.97;
-/// Where Auto places the darkest 0.2% of pixels' luminance.
-const TARGET_BLACK: f32 = 0.015;
-/// Slider limits for Whites and Blacks. Strong positive Whites and lifted Blacks look
-/// flat, and positive Whites is not yet image-adaptive (see docs/tone-controls.md).
-const WHITES: (f32, f32) = (-0.5, 0.35);
-const BLACKS: (f32, f32) = (-0.5, 0.2);
-/// Positive Exposure gives up to this many EV of the median target to avoid clipping.
-const MAX_CLIP_CONCESSION: f32 = 1.;
-/// Fraction of pixels Auto may newly clip when it raises exposure, beyond those already
-/// clipped at Exposure 0.
-const MAX_CLIPPED: f32 = 0.01;
+/// Long edge of the crop white balance is sampled on.
+const WHITE_BALANCE_EDGE: u32 = 256;
+/// Long edge of the cropped render the tone estimates are measured on. The fit to
+/// Lightroom was measured at this size: the brightest and darkest percentiles depend on
+/// how much small highlights and shadows are averaged away.
+const TONE_EDGE: u32 = 1024;
+/// Largest long edge of the reduced photo either is cropped from, so a tight crop never
+/// copies a full-size photo (about 34 MB at 2048 × 1365).
+const ANALYSIS_SOURCE_MAX: u32 = 2048;
+/// Vibrance Lightroom's Auto gives nearly every photo (median +15, half of photos
+/// within ±2; see docs/tone-controls.md).
+const AUTO_VIBRANCE: f32 = 0.15;
 
 /// `base` with white balance chosen so the photo's near-neutral areas render neutral.
 pub fn auto_white_balance(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
@@ -51,7 +42,7 @@ pub fn auto_white_balance_cancellable(
     check_cancel(cancel)?;
     // Camera pixels as decoded: highlight recovery invents colour where a channel
     // clipped, which must not count as a neutral.
-    let small = preview(im, analysis_edge(im, base));
+    let small = preview(im, analysis_edge(im, base, WHITE_BALANCE_EDGE));
     check_cancel(cancel)?;
     let mut r = base.clone();
     fit_white_balance(&small, &mut r)?;
@@ -59,30 +50,31 @@ pub fn auto_white_balance_cancellable(
     Ok(r)
 }
 
-/// `base` with Exposure, Contrast, Highlights, Shadows, Whites and Blacks fitted to the
-/// photo before its adjustments (see [`auto_tone_basis`]), as the Basic panel's Auto
-/// button applies them. White balance and every other setting of `base` are kept, as
-/// in Lightroom.
+/// `base` with Exposure, Contrast, Highlights, Shadows, Whites, Blacks and Vibrance
+/// estimated from the photo before its adjustments (see [`auto_tone_basis`]), as the
+/// Basic panel's Auto button applies them. White balance and every other setting of
+/// `base` are kept, as in Lightroom.
 pub fn auto_tone(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
     auto_tone_cancellable(im, base, &AtomicBool::new(false))
 }
 
-/// [`auto_tone`] that stops with an error between renders once `cancel` is set.
+/// [`auto_tone`] that stops with an error once `cancel` is set.
 pub fn auto_tone_cancellable(
     im: &CameraImage,
     base: &Recipe,
     cancel: &AtomicBool,
 ) -> Result<Recipe> {
-    let mut t = auto_tone_basis(base);
+    let t = auto_tone_basis(base);
     let small = tone_copy(im, &t, cancel)?;
-    fit_tone(&small, &mut t, cancel)?;
+    let tone = Tone::of(&Measure::of(&small, &t, cancel)?);
     let mut r = base.clone();
-    r.exposure = t.exposure;
-    r.contrast = t.contrast;
-    r.highlights = t.highlights;
-    r.shadows = t.shadows;
-    r.whites = t.whites;
-    r.blacks = t.blacks;
+    r.exposure = tone.exposure;
+    r.contrast = tone.contrast;
+    r.highlights = tone.highlights;
+    r.shadows = tone.shadows;
+    r.whites = tone.whites;
+    r.blacks = tone.blacks;
+    r.vibrance = AUTO_VIBRANCE;
     r.validate()?;
     Ok(r)
 }
@@ -146,15 +138,15 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 }
 
 /// Long edge of a reduced copy of `im` whose crop under `r` has a long edge of about
-/// [`ANALYSIS_EDGE`], so a tight crop is still measured on enough pixels, up to
+/// `edge`, so a tight crop is still measured on enough pixels, up to
 /// [`ANALYSIS_SOURCE_MAX`] for the whole copy.
-fn analysis_edge(im: &CameraImage, r: &Recipe) -> u32 {
+fn analysis_edge(im: &CameraImage, r: &Recipe, edge: u32) -> u32 {
     let [x0, y0, x1, y1] = r.crop;
     // The crop's sides may be in rotated (oriented) coordinates, so the shorter source
     // side gives a crop edge that is never overestimated.
     let crop_edge = ((x1 - x0).max(y1 - y0) * im.width.min(im.height) as f32).max(1.);
     let long_edge = im.width.max(im.height);
-    let scale = (ANALYSIS_EDGE as f32 / crop_edge).min(1.);
+    let scale = (edge as f32 / crop_edge).min(1.);
     ((long_edge as f32 * scale).ceil() as u32).clamp(1, long_edge.min(ANALYSIS_SOURCE_MAX))
 }
 
@@ -165,7 +157,7 @@ fn analysis_edge(im: &CameraImage, r: &Recipe) -> u32 {
 /// averaging hides it. The copy is marked as already recovered, so rendering it does
 /// not recover it again.
 fn tone_copy(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<CameraImage> {
-    let edge = analysis_edge(im, r);
+    let edge = analysis_edge(im, r, TONE_EDGE);
     // Engines before 3 render without highlight recovery.
     if r.engine < 3 {
         return Ok(preview(im, edge));
@@ -205,7 +197,7 @@ fn fit_white_balance_to(samples: &[[f32; 3]], m: &Metadata, r: &mut Recipe) -> R
 /// correction, as rendering samples them, so areas cropped away do not pull white
 /// balance.
 fn crop_samples(im: &CameraImage, r: &Recipe) -> Vec<[f32; 3]> {
-    let g = super::Geometry::new(im, r, ANALYSIS_EDGE);
+    let g = super::Geometry::new(im, r, WHITE_BALANCE_EDGE);
     let lens = super::image_space::LensMap::new(im, r);
     let (columns, rows) = (g.width.max(1), g.height.max(1));
     let mut samples = Vec::with_capacity((columns * rows) as usize);
@@ -250,7 +242,7 @@ struct Measure {
 impl Measure {
     fn of(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Self> {
         check_cancel(cancel)?;
-        let out = render(im, r, 0)?;
+        let out = render(im, r, TONE_EDGE)?;
         ensure!(!out.pixels.is_empty(), "Nothing to measure for Auto");
         let mut luma = Vec::with_capacity(out.pixels.len());
         let mut peak = Vec::with_capacity(out.pixels.len());
@@ -269,148 +261,50 @@ impl Measure {
     fn peak(&self, q: f32) -> f32 {
         percentile(&self.peak, q)
     }
-    /// Fraction of pixels with a channel at the top of the output range.
-    fn clipped(&self) -> f32 {
-        let from = self.peak.partition_point(|v| *v < 0.995);
-        (self.peak.len() - from) as f32 / self.peak.len() as f32
-    }
 }
 fn percentile(sorted: &[f32], q: f32) -> f32 {
     sorted[((sorted.len() - 1) as f32 * q.clamp(0., 1.)).round() as usize]
 }
 
-fn fit_tone(im: &CameraImage, r: &mut Recipe, cancel: &AtomicBool) -> Result<()> {
-    r.exposure = 0.;
-    r.contrast = 0.;
-    r.highlights = 0.;
-    r.shadows = 0.;
-    r.whites = 0.;
-    r.blacks = 0.;
-    // Spot removal barely moves the statistics and is the slowest stage to render.
-    let mut t = r.clone();
-    t.retouch.clear();
-
-    t.exposure = fit_exposure(im, &mut t, cancel)?;
-    let m = Measure::of(im, &t, cancel)?;
-
-    // Recover bright highlights and open deep shadows, in proportion to how much of
-    // the photo sits there.
-    t.highlights = -((m.luma(0.97) - 0.8) / 0.18).clamp(0., 1.) * 0.6;
-    t.shadows = ((0.15 - m.luma(0.05)) / 0.15).clamp(0., 1.) * 0.5;
-    // Flat photos get contrast, very contrasty ones lose a little.
-    let spread = m.luma(0.75) - m.luma(0.25);
-    t.contrast = ((0.36 - spread) * 1.2).clamp(-0.2, 0.25);
-
-    // Whites and Blacks set the end points, each measured as it renders. Highlights
-    // clipped in the camera stay clipped at any Whites, so when even the lowest setting
-    // cannot reach the target, Whites stays at 0 and Highlights does the recovery.
-    t.whites = solve(WHITES.0, WHITES.1, 0.2, |w| {
-        t.whites = w;
-        Ok(Measure::of(im, &t, cancel)?.peak(0.998) - TARGET_WHITE)
-    })?;
-    if t.whites <= WHITES.0 {
-        t.whites = WHITES.0;
-        if Measure::of(im, &t, cancel)?.peak(0.998) > TARGET_WHITE + 0.004 {
-            t.whites = 0.;
-        }
-    }
-    t.blacks = solve(BLACKS.0, BLACKS.1, 0.05, |b| {
-        t.blacks = b;
-        Ok(Measure::of(im, &t, cancel)?.luma(0.002) - TARGET_BLACK)
-    })?;
-    // Shadows crushed to black in the camera stay black at any Blacks, so when even the
-    // highest setting cannot reach the target, Blacks stays at 0 rather than lifting
-    // the rest of the shadows.
-    if t.blacks >= BLACKS.1 {
-        t.blacks = BLACKS.1;
-        if Measure::of(im, &t, cancel)?.luma(0.002) < TARGET_BLACK - 0.004 {
-            t.blacks = 0.;
-        }
-    }
-
-    r.exposure = round(t.exposure, 100.);
-    r.contrast = round(t.contrast, 100.);
-    r.highlights = round(t.highlights, 100.);
-    r.shadows = round(t.shadows, 100.);
-    r.whites = round(t.whites, 100.);
-    r.blacks = round(t.blacks, 100.);
-    Ok(())
+/// The tone sliders Auto sets, in slider units (Exposure in EV, the rest −1 to 1).
+struct Tone {
+    exposure: f32,
+    contrast: f32,
+    highlights: f32,
+    shadows: f32,
+    whites: f32,
+    blacks: f32,
 }
-
-/// Exposure that brings the median to [`TARGET_MEDIAN`], found by the secant method on
-/// the median's log linear luminance. Positive exposure is then reduced, by at most
-/// [`MAX_CLIP_CONCESSION`] EV, while it clips more than [`MAX_CLIPPED`] of the photo
-/// beyond what already clips at Exposure 0 (highlights clipped in the camera).
-fn fit_exposure(im: &CameraImage, t: &mut Recipe, cancel: &AtomicBool) -> Result<f32> {
-    let log_luminance = |v: f32| srgb_decode(v).max(1e-5).log2();
-    let target = log_luminance(TARGET_MEDIAN);
-    let mut e = 0f32;
-    let mut previous: Option<(f32, f32)> = None;
-    let mut clipped_at_zero = 0.;
-    for i in 0..6 {
-        t.exposure = e;
-        let m = Measure::of(im, t, cancel)?;
-        if i == 0 {
-            clipped_at_zero = m.clipped();
-        }
-        let error = log_luminance(m.luma(0.5)) - target;
-        if error.abs() < 0.05 {
-            break;
-        }
-        // The tone curve changes the slope; the last two steps estimate it.
-        let slope = match previous {
-            Some((pe, perr)) if (e - pe).abs() > 1e-3 => ((error - perr) / (e - pe)).clamp(0.3, 3.),
-            _ => 1.,
-        };
-        previous = Some((e, error));
-        e = (e - (error / slope).clamp(-2., 2.)).clamp(-4., 4.);
-    }
-    if e <= 0. {
-        return Ok(e);
-    }
-    let allowed = clipped_at_zero + MAX_CLIPPED;
-    t.exposure = e;
-    if Measure::of(im, t, cancel)?.clipped() <= allowed {
-        return Ok(e);
-    }
-    let lowest = (e - MAX_CLIP_CONCESSION).max(0.);
-    // Bisection for the highest exposure that keeps clipping in bounds.
-    let (mut lo, mut hi) = (lowest, e);
-    for _ in 0..4 {
-        let mid = (lo + hi) / 2.;
-        t.exposure = mid;
-        if Measure::of(im, t, cancel)?.clipped() <= allowed {
-            lo = mid;
-        } else {
-            hi = mid;
+impl Tone {
+    /// Lightroom's Auto values predicted from the photo rendered with its tone sliders
+    /// at 0. Each slider is a linear fit, to Lightroom Classic's own Auto results, of
+    /// the one or two percentiles that predicted it best on held-out photos (see
+    /// docs/tone-controls.md). Lightroom's Auto is a learned estimate rather than a
+    /// target it solves for: it lifts a dark photo only part of the way to middle gray,
+    /// and nearly always pulls Highlights down and opens Shadows.
+    fn of(m: &Measure) -> Self {
+        // Brighter midtones and highlights both take Exposure down.
+        let exposure = 2.22 - 2.13 * m.luma(0.4) - 1.52 * m.luma(0.99);
+        // Lightroom's Contrast barely follows the photo: about −10, raised for photos
+        // whose darkest tones are lifted.
+        let contrast = -10.8 + 54.8 * m.luma(0.01);
+        // About −65; more for bright highlights, less for photos with bright shadows.
+        let highlights = -34.6 - 51.1 * m.luma(0.9) + 27. * m.peak(0.25);
+        // About +45; less as the shadows brighten.
+        let shadows = 52. - 40.2 * m.peak(0.1);
+        // Raised the more the brightest channel falls short of white.
+        let whites = 67.5 - 52.2 * m.peak(0.998);
+        // About −15, from the darkest 1% in stops: deep shadows are darkened less.
+        let blacks = -35.3 - 1.91 * srgb_decode(m.luma(0.01)).max(1e-4).log2();
+        Self {
+            exposure: round(exposure.clamp(-5., 5.), 100.),
+            contrast: round(contrast.clamp(-100., 100.), 1.) / 100.,
+            highlights: round(highlights.clamp(-100., 0.), 1.) / 100.,
+            shadows: round(shadows.clamp(0., 100.), 1.) / 100.,
+            whites: round(whites.clamp(-100., 100.), 1.) / 100.,
+            blacks: round(blacks.clamp(-100., 0.), 1.) / 100.,
         }
     }
-    Ok(lo)
-}
-
-/// Root of an increasing `f` in `[lo, hi]`, by the secant method from 0 with an initial
-/// `slope` guess. Returns the limit when the target is out of reach.
-fn solve(lo: f32, hi: f32, slope: f32, mut f: impl FnMut(f32) -> Result<f32>) -> Result<f32> {
-    const TOLERANCE: f32 = 0.004;
-    let (mut x0, mut f0) = (0., f(0.)?);
-    if f0.abs() < TOLERANCE {
-        return Ok(0.);
-    }
-    let mut x1 = (-f0 / slope).clamp(lo, hi);
-    for _ in 0..4 {
-        let f1 = f(x1)?;
-        if f1.abs() < TOLERANCE || (x1 == hi && f1 < 0.) || (x1 == lo && f1 > 0.) {
-            break;
-        }
-        let measured = if (x1 - x0).abs() > 1e-4 {
-            (f1 - f0) / (x1 - x0)
-        } else {
-            slope
-        };
-        (x0, f0) = (x1, f1);
-        x1 = (x1 - f1 / measured.max(slope * 0.1)).clamp(lo, hi);
-    }
-    Ok(x1)
 }
 
 fn round(v: f32, steps: f32) -> f32 {
@@ -449,12 +343,6 @@ mod tests {
             scale_clipped: 0,
         }
     }
-    fn median(im: &CameraImage, r: &Recipe) -> f32 {
-        Measure::of(im, r, &AtomicBool::new(false))
-            .unwrap()
-            .luma(0.5)
-    }
-
     #[test]
     fn white_balance_neutralises_a_colour_cast() {
         let cast = [1.4, 1., 0.6];
@@ -580,7 +468,7 @@ mod tests {
             0,
         )
         .unwrap();
-        // Under ANALYSIS_EDGE, so every source pixel of the crop is measured.
+        // Under TONE_EDGE, so every source pixel of the crop is measured.
         assert!(
             out.width >= 48 && out.height >= 32,
             "{}x{}",
@@ -795,53 +683,69 @@ mod tests {
     }
 
     #[test]
-    fn exposure_brings_dark_and_bright_photos_towards_middle_gray() {
-        for (level, brighter) in [(0.04, true), (0.9, false)] {
+    fn exposure_raises_dark_photos_and_lowers_bright_ones() {
+        for (level, brighter) in [(0.04, true), (3., false)] {
             let im = scene([1.; 3], level);
-            let base = Recipe::default();
-            let auto = auto_tone(&im, &base).unwrap();
+            let auto = auto_tone(&im, &Recipe::default()).unwrap();
             assert_eq!(auto.exposure > 0., brighter, "exposure {}", auto.exposure);
-            let before = (median(&im, &base) - TARGET_MEDIAN).abs();
-            let after = (median(&im, &auto) - TARGET_MEDIAN).abs();
-            assert!(after < before, "median error {before} -> {after}");
-            assert!(after < 0.1, "median error {after}");
         }
     }
 
     #[test]
-    fn highlights_clipped_in_the_camera_do_not_hold_exposure_back() {
-        let clean = scene([1.; 3], 0.25);
-        let mut clipped = clean.clone();
-        let n = clipped.pixels.len();
-        // A light source far beyond the sensor's range: 3% of the photo clips at any
-        // exposure.
-        for p in &mut clipped.pixels[n - n * 3 / 100..] {
-            *p = [8.; 3];
-        }
-        let base = Recipe::default();
-        let expected = auto_tone(&clean, &base).unwrap().exposure;
-        let exposure = auto_tone(&clipped, &base).unwrap().exposure;
-        assert!(expected > 0.3, "exposure {expected}");
+    fn auto_sets_sliders_as_lightrooms_auto_does() {
+        // An evenly lit mid-tone photo. Lightroom's Auto pulls Highlights well down,
+        // opens Shadows, darkens Blacks and adds Vibrance (see docs/tone-controls.md);
+        // these are the fitted model's values, so a change to it shows here.
+        let auto = auto_tone(&scene([1.; 3], 0.5), &Recipe::default()).unwrap();
+        let got = [
+            auto.exposure,
+            auto.contrast,
+            auto.highlights,
+            auto.shadows,
+            auto.whites,
+            auto.blacks,
+            auto.vibrance,
+        ];
+        let expected = [0.5, -0.05, -0.59, 0.46, 0.33, -0.23, AUTO_VIBRANCE];
         assert!(
-            (exposure - expected).abs() < 0.25,
-            "{exposure} vs {expected}"
+            got.iter().zip(expected).all(|(g, e)| (g - e).abs() < 0.015),
+            "{got:?} vs {expected:?}"
         );
     }
 
     #[test]
-    fn crushed_shadows_leave_blacks_alone() {
-        let mut im = scene([1.; 3], 0.5);
-        // Shadows crushed in the camera: 1% of the photo is black.
-        let n = im.pixels.len();
-        for p in &mut im.pixels[..n / 100] {
-            *p = [0.; 3];
+    fn bright_highlights_hold_exposure_back() {
+        let clean = scene([1.; 3], 0.25);
+        let mut bright = clean.clone();
+        let n = bright.pixels.len();
+        // A light source far beyond the sensor's range covers 3% of the photo.
+        for p in &mut bright.pixels[n - n * 3 / 100..] {
+            *p = [8.; 3];
         }
-        let auto = auto_tone(&im, &Recipe::default()).unwrap();
-        assert_eq!(auto.blacks, 0., "blacks {}", auto.blacks);
+        let base = Recipe::default();
+        let clean = auto_tone(&clean, &base).unwrap().exposure;
+        let bright = auto_tone(&bright, &base).unwrap().exposure;
+        assert!(bright < clean - 0.1, "{bright} vs {clean}");
     }
 
     #[test]
-    fn auto_tone_sets_only_the_tone_sliders() {
+    fn crushed_shadows_are_darkened_less() {
+        let open = scene([1.; 3], 0.5);
+        let mut crushed = open.clone();
+        // Shadows crushed in the camera: 2% of the photo is black.
+        let n = crushed.pixels.len();
+        for p in &mut crushed.pixels[..n / 50] {
+            *p = [0.; 3];
+        }
+        let base = Recipe::default();
+        let open = auto_tone(&open, &base).unwrap().blacks;
+        let crushed = auto_tone(&crushed, &base).unwrap().blacks;
+        assert!(crushed > open, "{crushed} vs {open}");
+        assert!(crushed < 0., "{crushed}");
+    }
+
+    #[test]
+    fn auto_tone_sets_only_the_tone_sliders_and_vibrance() {
         let im = scene([1.2, 1., 0.8], 0.1);
         let mut base = Recipe {
             saturation: 0.3,
@@ -865,6 +769,7 @@ mod tests {
         expected.shadows = base.shadows;
         expected.whites = base.whites;
         expected.blacks = base.blacks;
+        expected.vibrance = base.vibrance;
         assert_eq!(expected, base);
         // Estimates are independent of the tone sliders they replace.
         let untouched = Recipe {
@@ -917,17 +822,5 @@ mod tests {
         let mut im = scene([1.; 3], 0.5);
         im.pixels.iter_mut().for_each(|p| *p = [0.; 3]);
         assert!(auto_white_balance(&im, &Recipe::default()).is_err());
-    }
-
-    #[test]
-    fn solve_finds_roots_and_stops_at_the_limits() {
-        let root = solve(-1., 1., 1., |x| Ok(0.3 * x * x * x + 0.5 * x - 0.2)).unwrap();
-        assert!(
-            (0.3 * root.powi(3) + 0.5 * root - 0.2).abs() < 0.004,
-            "{root}"
-        );
-        assert_eq!(solve(-0.5, 0.5, 1., |x| Ok(x - 2.)).unwrap(), 0.5);
-        assert_eq!(solve(-0.5, 0.5, 1., |x| Ok(x + 2.)).unwrap(), -0.5);
-        assert_eq!(solve(-0.5, 0.5, 1., |x| Ok(x * 0.001)).unwrap(), 0.);
     }
 }
