@@ -390,6 +390,12 @@ impl Library {
         for id in ids {
             self.cache.forget(id);
         }
+        // Edit Time order reads when each photo was last edited.
+        self.resort_in_place(|l| l.sort_keys = None);
+    }
+    /// Whether `id` is selected, shown or hidden by the filters.
+    pub(in crate::app) fn is_selected(&self, id: i64) -> bool {
+        self.selection.selected.contains(&id)
     }
     /// The selected photos in display order.
     pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {

@@ -239,20 +239,14 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     library.edits_changed(sync.edits.iter().map(|e| e.id));
                 }
-                // A synchronized photo open here takes the edit written back, as a
-                // History step, so nothing stale is saved over it afterwards.
+                // A synchronized photo open here opens again with what was written
+                // back (or with no edit at all), so nothing stale is saved over it.
                 if let Some(open) = self.document.catalog_photo
-                    && let Some(edit) = sync.edits.iter().find(|e| e.id == open)
+                    && sync.edits.iter().any(|e| e.id == open)
+                    && let Some(path) = self.document.path.clone()
                 {
-                    let target = edit.recipe(side).clone();
-                    self.document.history.set(
-                        &target,
-                        &mut self.document.recipe,
-                        Step::new(verb, ""),
-                    );
-                    self.document.history.take_recorded();
-                    self.ensure_upright();
-                    self.schedule();
+                    self.document.save.saved();
+                    self.load_raw(path, Some(open));
                 }
                 self.status = format!(
                     "{verb} Sync Settings ({})",

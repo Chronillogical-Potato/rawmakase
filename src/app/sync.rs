@@ -48,15 +48,6 @@ pub struct Synced {
     /// The file as the Sync read it: Redo refuses a file changed since.
     pub identity: crate::storage::Identity,
 }
-impl Synced {
-    /// The edit one side of the Sync leaves.
-    pub(super) fn recipe(&self, side: SyncSide) -> &Recipe {
-        match side {
-            SyncSide::Before => self.before.recipe(),
-            SyncSide::After => &self.after,
-        }
-    }
-}
 
 /// A photo's edit before a Sync.
 #[derive(Clone, Debug, PartialEq)]
@@ -142,6 +133,15 @@ pub(super) fn synchronize(
             }),
         }
     }
+    // A file replaced since it was read gets nothing: its settings were worked out
+    // for the file that was there.
+    let (prepared, replaced): (Vec<_>, Vec<_>) = prepared.into_iter().partition(|p| {
+        crate::storage::Identity::read(&p.synced.path).is_ok_and(|now| now == p.synced.identity)
+    });
+    result.failed.extend(replaced.iter().map(|p| SyncFailure {
+        name: p.name.clone(),
+        reason: "the file changed during the Sync".into(),
+    }));
     let edits: Vec<EditToSave> = prepared
         .iter()
         .map(|p| EditToSave {
@@ -182,6 +182,8 @@ fn prepare(
     groups: &GroupSelection,
     target: &SyncTarget,
 ) -> Result<Prepared> {
+    // Read first, so a file replaced while its settings are worked out is noticed.
+    let identity = crate::storage::Identity::read(&target.path)?;
     let raw = crate::raw::Raw::open(&target.path)
         .with_context(|| format!("{} can't be read", target.name))?;
     let metadata = raw.metadata.clone();
@@ -243,7 +245,7 @@ fn prepare(
                 before,
                 after,
                 history: history.saved(&current),
-                identity: crate::storage::Identity::read(&target.path)?,
+                identity,
             },
             name: target.name.clone(),
             export,
@@ -365,10 +367,11 @@ impl Editor {
         if self.document.pending_lightroom || self.document.metadata.is_none() {
             return Vec::new();
         }
-        let selected = library.selected_photos();
-        if !selected.contains(&open) {
+        // The open photo may be hidden by the filters and still selected.
+        if !library.is_selected(open) {
             return Vec::new();
         }
+        let selected = library.selected_photos();
         selected
             .into_iter()
             .filter(|id| *id != open)
@@ -428,6 +431,12 @@ impl Editor {
     /// A finished Sync: one command for Undo, and a status line naming what failed.
     pub(super) fn synced(&mut self, result: SyncResult) {
         self.activity.finish_sync();
+        // A close asked for during the Sync is asked again, now that it can go ahead.
+        if self.close_confirm {
+            self.close_confirm = false;
+            self.context
+                .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+        }
         // A result for a catalog no longer open must not reach this one's undo log.
         if self.library.as_ref().map(|l| &l.catalog.path) != Some(&result.catalog) {
             return;
