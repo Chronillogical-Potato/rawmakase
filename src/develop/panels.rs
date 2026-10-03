@@ -173,7 +173,8 @@ impl Recipe {
         for panel in self.panels.switched_off() {
             panel.bypass(&mut r, &defaults);
         }
-        r.panels = PanelSwitches::default();
+        // The switches stay, so `Recipe::resolved`, which knows the camera, can also
+        // turn off lens data that is only on because of the panel.
         std::borrow::Cow::Owned(r)
     }
 }

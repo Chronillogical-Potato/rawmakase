@@ -1104,3 +1104,59 @@ fn develop_history_stores_each_large_setting_once() -> Result<()> {
     assert_eq!(SavedHistory::decode(&encoded)?, Some(history));
     Ok(())
 }
+#[test]
+fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and_say_so()
+-> Result<()> {
+    let m = crate::raw::Metadata {
+        lens_model: "FE 55mm F1.8 ZA".into(),
+        lens: Some(crate::lens::LensCorrection {
+            source: "Sony built-in".into(),
+            default_on: false,
+            vignetting: None,
+            distortion: None,
+            chromatic: None,
+        }),
+        ..Default::default()
+    };
+    let (r, w) = convert_develop("s = { LensProfileEnable = 1 }", &m, &[], None)?;
+    assert!(r.lens_profile && r.lens_builtin);
+    assert!(
+        w.iter()
+            .any(|s| s.contains("FE 55mm F1.8 ZA") && s.contains("using Sony built-in")),
+        "{w:?}"
+    );
+    // Off leaves Sony's opt-in data off, with nothing to report.
+    let (r, w) = convert_develop("s = { LensProfileEnable = 0 }", &m, &[], None)?;
+    assert!(!r.lens_profile && !r.lens_builtin);
+    assert!(w.is_empty(), "{w:?}");
+    // Without any correction to fall back on, it says that too.
+    let bare = crate::raw::Metadata {
+        lens_model: "FE 55mm F1.8 ZA".into(),
+        ..Default::default()
+    };
+    let (_, w) = convert_develop("s = { LensProfileEnable = 1 }", &bare, &[], None)?;
+    assert!(w.iter().any(|s| s.contains("no lens correction")), "{w:?}");
+    // With Lightroom's Lens Corrections panel switched off, nothing renders and
+    // nothing is reported missing.
+    let (r, w) = convert_develop(
+        "s = { LensProfileEnable = 1, EnableLensCorrections = false }",
+        &m,
+        &[],
+        None,
+    )?;
+    assert!(w.is_empty(), "{w:?}");
+    assert!(!r.resolved(&m).lens_builtin);
+    // As the preview and renderer see it: bypassed first, then resolved.
+    assert!(!r.as_rendered().resolved(&m).lens_builtin);
+    // An older process version renders no lens correction, so none is claimed.
+    let legacy = Recipe {
+        engine: 3,
+        lens_builtin: false,
+        ..Default::default()
+    };
+    let mut legacy_on = legacy.clone();
+    legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
+    assert!(!legacy_on.lens_builtin);
+    assert_eq!(legacy_on.missing_lens_profile(&m), None);
+    Ok(())
+}

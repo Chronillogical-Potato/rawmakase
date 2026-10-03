@@ -369,6 +369,43 @@ impl Recipe {
             None => None,
         }
     }
+    /// Lightroom's Enable Profile Corrections: an imported Adobe lens profile, else the
+    /// correction the camera stored in the RAW. Built-in data that is off by default
+    /// (Sony's) follows the switch; Fuji's and a DNG's stay on, as in Lightroom.
+    pub fn set_profile_corrections(&mut self, m: &Metadata, state: ProfileCorrections) {
+        self.lens_profile = state == ProfileCorrections::On;
+        // Lens corrections render from process version 4 only.
+        if self.engine >= 4 && m.lens.as_ref().is_some_and(|l| !l.default_on) {
+            self.lens_builtin = self.lens_profile;
+        }
+    }
+    /// Why Enable Profile Corrections cannot render with an Adobe profile here, and
+    /// what renders instead, when it is on.
+    pub fn missing_lens_profile(&self, m: &Metadata) -> Option<String> {
+        // A Lens Corrections panel switched off renders no lens correction at all.
+        let panel = self
+            .panels
+            .state(crate::develop::panels::Panel::LensCorrections);
+        if !self.lens_profile
+            || m.profile_lens.is_some()
+            || panel == crate::develop::panels::PanelState::Off
+            || self.engine < 4
+        {
+            return None;
+        }
+        let lens = if m.lens_model.is_empty() {
+            "this lens".to_string()
+        } else {
+            m.lens_model.clone()
+        };
+        Some(match m.lens.as_ref().filter(|_| self.lens_builtin) {
+            Some(builtin) => format!(
+                "Adobe lens profile for {lens} isn't imported; using {}",
+                builtin.source
+            ),
+            None => format!("Adobe lens profile for {lens} isn't imported; no lens correction"),
+        })
+    }
     /// The built-in lens correction to apply, if enabled and present in the file.
     pub(crate) fn lens_correction<'a>(
         &self,
@@ -385,12 +422,24 @@ impl Recipe {
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
     /// and the engine-4 default profile.
     pub(crate) fn resolved(&self, m: &Metadata) -> std::borrow::Cow<'_, Self> {
-        let r = match self.as_rendered() {
+        let mut r = match self.as_rendered() {
             std::borrow::Cow::Borrowed(r) => r.with_profile_adjustments(),
             std::borrow::Cow::Owned(r) => {
                 std::borrow::Cow::Owned(r.with_profile_adjustments().into_owned())
             }
         };
+        // A Lens Corrections panel switched off also turns off built-in data that is
+        // off by default (Sony's), which Enable Profile Corrections turned on; what a
+        // camera always applies (Fuji, DNG) stays, as the panel bypass leaves it.
+        if self
+            .panels
+            .state(crate::develop::panels::Panel::LensCorrections)
+            == crate::develop::panels::PanelState::Off
+            && r.lens_builtin
+            && m.lens.as_ref().is_some_and(|l| !l.default_on)
+        {
+            r.to_mut().lens_builtin = false;
+        }
         if r.profile.is_some() || r.engine < 4 {
             return r;
         }
@@ -502,6 +551,12 @@ impl Recipe {
 }
 fn is_one(v: &f32) -> bool {
     *v == 1.
+}
+/// Whether Enable Profile Corrections is ticked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileCorrections {
+    On,
+    Off,
 }
 fn one() -> f32 {
     1.

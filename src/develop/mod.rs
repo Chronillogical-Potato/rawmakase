@@ -40,7 +40,9 @@ pub use pipeline::{
     neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
-pub use recipe::{LocalEdits, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+pub use recipe::{
+    LocalEdits, ProfileCorrections, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT,
+};
 pub use rendered::Rendered;
 pub(crate) use rendered::unit_to_u8;
 pub use white_balance::{NamedWhiteBalance, TemperatureTint};
