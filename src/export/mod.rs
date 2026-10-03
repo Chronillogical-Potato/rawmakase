@@ -3,6 +3,7 @@
 pub mod assemble;
 mod encode;
 pub mod exif;
+mod extended_xmp;
 pub mod job;
 mod metadata;
 pub mod settings;

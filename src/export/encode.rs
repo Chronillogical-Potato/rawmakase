@@ -85,22 +85,34 @@ pub(super) fn tiff(
     Ok(())
 }
 
-/// XMP goes in its own APP1 segment, after the EXIF and ICC ones.
-fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
-    const HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
-    let length = 2 + HEADER.len() + xmp.len();
-    ensure!(length <= 65_535, "XMP is too large for a JPEG segment");
+/// XMP goes in its own APP1 segment, after the EXIF and ICC ones; what does
+/// not fit one follows as ExtendedXMP.
+pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
+    use super::extended_xmp::{STANDARD_HEADER, segments, split};
     ensure!(jpeg.starts_with(&[0xff, 0xd8]), "Not a JPEG");
+    let split = split(xmp)?;
+    let mut payloads = vec![[STANDARD_HEADER, split.standard.as_bytes()].concat()];
+    if let Some((guid, extended)) = &split.extended {
+        payloads.extend(segments(guid, extended));
+    }
+    for payload in &payloads {
+        ensure!(
+            2 + payload.len() <= 65_535,
+            "XMP is too large for a JPEG segment"
+        );
+    }
     let mut at = 2;
     while at + 4 <= jpeg.len() && jpeg[at] == 0xff && (0xe0..=0xef).contains(&jpeg[at + 1]) {
         at += 2 + u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]) as usize;
     }
-    let mut out = Vec::with_capacity(jpeg.len() + length + 2);
+    let extra: usize = payloads.iter().map(|p| p.len() + 4).sum();
+    let mut out = Vec::with_capacity(jpeg.len() + extra);
     out.extend_from_slice(&jpeg[..at]);
-    out.extend([0xff, 0xe1]);
-    out.extend((length as u16).to_be_bytes());
-    out.extend_from_slice(HEADER);
-    out.extend_from_slice(xmp.as_bytes());
+    for payload in &payloads {
+        out.extend([0xff, 0xe1]);
+        out.extend(((2 + payload.len()) as u16).to_be_bytes());
+        out.extend_from_slice(payload);
+    }
     out.extend_from_slice(&jpeg[at..]);
     Ok(out)
 }
