@@ -58,6 +58,13 @@ pub(super) struct Preferences {
     stale: bool,
     /// The status line when the window opened; only later messages are shown.
     status_at_open: String,
+    /// Default Creator and Copyright for photos added from folders, as typed.
+    defaults: crate::catalog::MetadataDefaults,
+    /// Typed and not saved yet: saved when the field is left, or when the
+    /// page or window is.
+    defaults_dirty: bool,
+    /// Saving failed; tried again after the next edit, not every frame.
+    defaults_failed: bool,
 }
 
 const WIDTH: f32 = 780.;
@@ -128,6 +135,10 @@ impl Editor {
         self.preferences.open = true;
         self.preferences.tab = tab;
         self.preferences.status_at_open = self.status.clone();
+        // Edits not saved yet are kept, not replaced by the file's.
+        if !self.preferences.defaults_dirty {
+            self.preferences.defaults = crate::catalog::MetadataDefaults::load();
+        }
         self.measure_usage();
     }
     fn measure_usage(&mut self) {
@@ -156,7 +167,24 @@ impl Editor {
             self.view.shortcuts = !self.view.shortcuts;
         }
     }
+    /// Saves defaults still being typed, once their page is left.
+    fn save_defaults(&mut self) {
+        if !self.preferences.defaults_dirty || self.preferences.defaults_failed {
+            return;
+        }
+        match self.preferences.defaults.save() {
+            Ok(()) => self.preferences.defaults_dirty = false,
+            Err(e) => {
+                self.preferences.defaults_failed = true;
+                self.status = format!("Metadata defaults not saved: {e:#}");
+            }
+        }
+    }
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
+        let closing = ctx.input(|i| i.viewport().close_requested());
+        if !self.preferences.open || self.preferences.tab != Tab::Catalog || closing {
+            self.save_defaults();
+        }
         if !self.preferences.open {
             return;
         }
@@ -210,7 +238,11 @@ impl Editor {
                             .auto_shrink(false)
                             .show(&mut content, |ui| self.general_page(ui));
                     }
-                    Tab::Catalog => self.catalog_page(&mut content),
+                    Tab::Catalog => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.catalog_page(ui));
+                    }
                     Tab::Profiles => self.profiles_page(&mut content),
                     Tab::Performance => self.performance_page(&mut content),
                     Tab::Display => self.display_page(&mut content),
@@ -348,6 +380,32 @@ impl Editor {
         form_row(ui, "Previews", |ui| {
             value(ui, &bytes(usage.previews));
         });
+        gap(ui);
+        group(ui, "Metadata defaults");
+        let defaults = &mut self.preferences.defaults;
+        let mut left = false;
+        for (label, text) in [
+            ("Creator", &mut defaults.creator),
+            ("Copyright", &mut defaults.copyright),
+        ] {
+            form_row(ui, label, |ui| {
+                let field = ui.add(egui::TextEdit::singleline(text).desired_width(320.));
+                if field.changed() {
+                    self.preferences.defaults_dirty = true;
+                    self.preferences.defaults_failed = false;
+                }
+                left |= field.lost_focus();
+            });
+        }
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "For photos added from folders, when neither the file nor its sidecar has one.",
+            );
+        });
+        if left {
+            self.save_defaults();
+        }
         gap(ui);
         group(ui, "Catalogs");
         form_row(ui, "", |ui| {

@@ -205,3 +205,36 @@ fn jpeg_fill_bytes_before_a_marker_are_skipped() -> Result<()> {
     assert_eq!(read.unwrap().title, set("Filled"));
     Ok(())
 }
+
+#[test]
+fn defaults_fill_only_what_neither_file_nor_sidecar_has() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("A.NEF"), b"synthetic raw a")?;
+    std::fs::write(folder.join("B.NEF"), b"synthetic raw b")?;
+    std::fs::write(
+        folder.join("B.NEF.xmp"),
+        xmp(
+            "",
+            "<dc:creator><rdf:Seq><rdf:li>From sidecar</rdf:li></rdf:Seq></dc:creator>",
+        ),
+    )?;
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    let defaults = crate::catalog::MetadataDefaults {
+        creator: "Default Creator".into(),
+        copyright: "© Default".into(),
+    };
+    cat.add_folder_with(&folder, &defaults)?;
+    let (a, b) = (id_of(&cat, "A.NEF")?, id_of(&cat, "B.NEF")?);
+    assert_eq!(
+        cat.descriptive(a)?.creator,
+        Some(Value::Set(vec!["Default Creator".into()]))
+    );
+    assert_eq!(cat.descriptive(a)?.copyright, set("© Default"));
+    assert_eq!(
+        cat.descriptive(b)?.creator,
+        Some(Value::Set(vec!["From sidecar".into()]))
+    );
+    Ok(())
+}
