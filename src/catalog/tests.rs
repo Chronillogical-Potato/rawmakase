@@ -1136,5 +1136,15 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
     };
     let (_, w) = convert_develop("s = { LensProfileEnable = 1 }", &bare, &[], None)?;
     assert!(w.iter().any(|s| s.contains("no lens correction")), "{w:?}");
+    // With Lightroom's Lens Corrections panel switched off, nothing renders and
+    // nothing is reported missing.
+    let (r, w) = convert_develop(
+        "s = { LensProfileEnable = 1, EnableLensCorrections = false }",
+        &m,
+        &[],
+        None,
+    )?;
+    assert!(w.is_empty(), "{w:?}");
+    assert!(!r.resolved(&m).lens_builtin);
     Ok(())
 }
