@@ -3,8 +3,8 @@ use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
-    SliderEvent, adjustment_section, parametric_curve_ui, segmented, slider, slider_with,
-    tone_curve_ui, toolbar_action,
+    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
+    slider_with, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -1393,6 +1393,12 @@ pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effect
             // other end never keeps the default out of reach.
             if [low, high].contains(&SliderEvent::Reset) {
                 [*lo, *hi] = defaults;
+                // Named after the whole range, not the end the slider clamped.
+                name_history_step(
+                    ui,
+                    format!("Defringe {name} Hue"),
+                    format!("{:.0} / {:.0}", defaults[0] * 100., defaults[1] * 100.),
+                );
             }
         });
     }

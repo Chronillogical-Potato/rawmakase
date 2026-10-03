@@ -1882,4 +1882,11 @@ fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
         }
     }
     assert_eq!(effects.defringe_ranges, [[0.3, 0.7], [0.4, 0.6]]);
+    // History names the range reset, not the value the clamped end briefly took.
+    let step: Option<(String, String)> =
+        ctx.data(|d| d.get_temp(super::widgets::history_step_id()));
+    assert_eq!(
+        step,
+        Some(("Defringe Green Hue".to_string(), "40 / 60".to_string()))
+    );
 }
