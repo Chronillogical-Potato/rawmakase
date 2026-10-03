@@ -23,7 +23,7 @@ fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
 }
 
 impl Editor {
-    /// Whether the tone sliders are as Auto last set them and nothing Auto measures has
+    /// Whether the tone sliders and Vibrance are as Auto last set them and nothing Auto measures has
     /// changed since, so running it again would change nothing. Adjustments Auto does not
     /// measure (curves, presence, color and the like) leave it in effect.
     pub(super) fn auto_in_effect(&self) -> bool {
@@ -41,6 +41,7 @@ impl Editor {
                 a.shadows,
                 a.whites,
                 a.blacks,
+                a.vibrance,
             ] == [
                 r.exposure,
                 r.contrast,
@@ -48,6 +49,7 @@ impl Editor {
                 r.shadows,
                 r.whites,
                 r.blacks,
+                r.vibrance,
             ] && inputs(AutoKind::Settings, a) == inputs(AutoKind::Settings, r)
         });
         *self.document.auto_effect.borrow_mut() = Some((r.clone(), in_effect));
@@ -123,6 +125,7 @@ impl Editor {
                 r.shadows = auto.shadows;
                 r.whites = auto.whites;
                 r.blacks = auto.blacks;
+                r.vibrance = auto.vibrance;
                 self.document.auto_applied = Some(r.clone());
                 self.document.auto_effect.take();
                 Step::new("Auto Settings", "")

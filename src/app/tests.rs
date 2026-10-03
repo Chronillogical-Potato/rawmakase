@@ -1083,7 +1083,9 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     }
     let auto = editor.document.recipe.clone();
     assert!(auto.exposure > 1., "exposure {}", auto.exposure);
-    // Auto sets tone only; white balance is the WB menu's Auto.
+    // Auto sets the tone sliders and Vibrance, as Lightroom's does; white balance is the
+    // WB menu's Auto.
+    assert!(auto.vibrance > 0., "vibrance {}", auto.vibrance);
     assert_eq!(
         (auto.wb, auto.temperature, auto.tint),
         (before.wb, before.temperature, before.tint)
@@ -1300,10 +1302,16 @@ fn auto_is_off_while_its_settings_stand() {
     assert!(!editor.auto_in_effect());
     let mut auto = editor.document.recipe.clone();
     auto.exposure = 1.;
+    auto.vibrance = 0.15;
     editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
+    assert_eq!(editor.document.recipe.vibrance, 0.15);
     assert!(editor.auto_in_effect());
     // Any change, to a slider Auto sets or to what it measured, turns it back on, and
     // so does undoing Auto.
+    editor.document.recipe.vibrance = 0.;
+    assert!(!editor.auto_in_effect());
+    editor.document.recipe.vibrance = 0.15;
+    assert!(editor.auto_in_effect());
     editor.document.recipe.exposure = 0.5;
     assert!(!editor.auto_in_effect());
     editor.document.recipe.exposure = 1.;

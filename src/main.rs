@@ -285,14 +285,15 @@ fn main() -> Result<()> {
                 let t = Instant::now();
                 edit = develop::auto_tone(&im, &edit)?;
                 eprintln!(
-                    "Auto ({:?}): exposure {:+.2} contrast {:+.0} highlights {:+.0} shadows {:+.0} whites {:+.0} blacks {:+.0}",
+                    "Auto ({:?}): exposure {:+.2} contrast {:+.0} highlights {:+.0} shadows {:+.0} whites {:+.0} blacks {:+.0} vibrance {:+.0}",
                     t.elapsed(),
                     edit.exposure,
                     edit.contrast * 100.,
                     edit.highlights * 100.,
                     edit.shadows * 100.,
                     edit.whites * 100.,
-                    edit.blacks * 100.
+                    edit.blacks * 100.,
+                    edit.vibrance * 100.
                 );
             }
             if let Some(path) = save_recipe {
