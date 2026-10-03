@@ -5,7 +5,7 @@
 //! Both are shown at the size of their half, with their edits (see `stage`).
 use super::grid::filter_caption;
 use super::stage::MARGIN;
-use super::{Action, Library, Pick};
+use super::{Action, Library};
 use crate::app::theme;
 use eframe::egui::{self, Rect, Vec2};
 
@@ -154,6 +154,16 @@ impl Library {
         };
         self.sync_compare_selection();
     }
+    /// A filmstrip click: the select activates its side; any other photo
+    /// becomes the candidate, as in Lightroom.
+    pub(super) fn compare_pick(&mut self, id: i64) {
+        if Some(id) == self.compare.select {
+            self.activate(Side::Select);
+        } else {
+            self.compare.candidate = Some(id);
+            self.activate(Side::Candidate);
+        }
+    }
     fn activate(&mut self, side: Side) {
         if self.compare.id(side).is_some() {
             self.compare.active = side;
@@ -162,7 +172,7 @@ impl Library {
     }
     /// Selects the two photos, with the active one active, so the panels,
     /// the filmstrip and the keys follow Compare.
-    fn sync_compare_selection(&mut self) {
+    pub(super) fn sync_compare_selection(&mut self) {
         let active = self.compare.id(self.compare.active).or(self.compare.select);
         self.selection.selected = [self.compare.select, self.compare.candidate]
             .into_iter()
@@ -309,32 +319,13 @@ impl Library {
             }
         }
     }
-    /// Compare in place of the grid: the two photos, a toolbar and the
-    /// filmstrip.
+    /// Compare in place of the grid: the two photos, with a toolbar.
     pub(super) fn compare(&mut self, ui: &mut egui::Ui) -> Action {
-        let Some(select) = self.keep_compared_shown() else {
+        if self.keep_compared_shown().is_none() {
             self.close_compare();
             return Action::None;
-        };
-        self.sync_compare_selection();
-        let mut target = None;
-        egui::Panel::bottom("library-compare-filmstrip")
-            .exact_size(128.)
-            .frame(egui::Frame::new().fill(theme::gray(26)))
-            .show(ui, |ui| {
-                let active = self.selection.active.unwrap_or(select);
-                target = self.filmstrip(ui, active).0;
-            });
-        match target {
-            Some(Pick::Show(id)) if Some(id) == self.compare.select => self.activate(Side::Select),
-            // Another photo becomes the candidate, as in Lightroom.
-            Some(Pick::Show(id)) => {
-                self.compare.candidate = Some(id);
-                self.activate(Side::Candidate);
-            }
-            Some(Pick::Develop(id)) => return Action::Develop(id),
-            None => {}
         }
+        self.sync_compare_selection();
         egui::Panel::bottom("library-compare-toolbar")
             .frame(
                 egui::Frame::new()
