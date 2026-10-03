@@ -38,9 +38,31 @@ pub(super) struct State {
     /// The photo last brought into view, and where it was then in
     /// `visible`: the strip scrolls again only when either changes.
     revealed: Option<(i64, usize)>,
-    /// The selection the strip was last drawn with, to notice a view drawn
-    /// after it changing the selection.
-    drawn: Selection,
+    /// The selection and `shown_version` the strip was last drawn with, to
+    /// notice a view drawn after it changing either.
+    drawn: (Selection, u64),
+}
+
+/// Draws the frame again before it is shown, as egui allows once a frame
+/// (else on the next frame): for a change made after the strip was drawn.
+pub fn redraw(ctx: &egui::Context, reason: &'static str) {
+    ctx.request_discard(reason);
+    if !ctx.will_discard() {
+        ctx.request_repaint();
+    }
+}
+
+/// The cells a strip scrolled to `viewport` shows, of `count` cells `width`
+/// wide, and whether the viewport starts past them: an offset left from a
+/// longer list, which the scroll area clamps only after this frame.
+pub(super) fn in_view(
+    viewport: egui::Rect,
+    width: f32,
+    count: usize,
+) -> (std::ops::Range<usize>, bool) {
+    let first = (viewport.min.x / width).floor().max(0.) as usize;
+    let last = ((viewport.max.x / width).ceil().max(0.) as usize).min(count);
+    (first.min(last)..last, count > 0 && first >= count)
 }
 
 /// A photo chosen in the filmstrip: clicked, or opened from its menu.
@@ -82,7 +104,7 @@ impl Library {
     /// in the grid below does: the strip then needs another frame to mark
     /// it and bring it into view.
     pub fn filmstrip_behind(&self) -> bool {
-        self.strip.drawn != self.selection
+        self.strip.drawn.0 != self.selection || self.strip.drawn.1 != self.shown_version
     }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
@@ -115,8 +137,8 @@ impl Library {
         let mut target = None;
         let mut changed = false;
         let library = module == Module::Library;
-        if self.strip.drawn != self.selection {
-            self.strip.drawn = self.selection.clone();
+        if self.filmstrip_behind() {
+            self.strip.drawn = (self.selection.clone(), self.shown_version);
         }
         let photo = current.and_then(|id| self.photo(id)).cloned();
         let position = current.and_then(|current| {
@@ -187,9 +209,11 @@ impl Library {
                         ui.scroll_to_rect(rect, None);
                     }
                 }
-                let first = (viewport.min.x / size.x).floor().max(0.) as usize;
-                let last = ((viewport.max.x / size.x).ceil() as usize).min(self.visible.len());
-                for n in first..last {
+                let (cells, past_end) = in_view(viewport, size.x, self.visible.len());
+                if past_end {
+                    redraw(ui.ctx(), "filmstrip scrolled past a shorter list");
+                }
+                for n in cells {
                     let photo = self.photos[self.visible[n]].clone();
                     let mark = if current == Some(photo.id) {
                         Mark::Active

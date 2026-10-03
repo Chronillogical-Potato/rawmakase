@@ -594,7 +594,10 @@ impl Editor {
             });
         // A click in the view, drawn after the strip, shows there next frame.
         if self.library.as_ref().is_some_and(|l| l.filmstrip_behind()) {
-            ctx.request_repaint();
+            crate::app::library::filmstrip::redraw(
+                &ctx,
+                "the view changed what the filmstrip shows",
+            );
         }
         if !self.activity.is_busy() {
             match action {

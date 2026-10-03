@@ -78,6 +78,9 @@ pub struct Library {
     /// show it.
     cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
     strip: filmstrip::State,
+    /// Counts changes to the photos shown, their order or their metadata,
+    /// so the filmstrip notices a change made after it was drawn.
+    shown_version: u64,
     /// Indices into `photos` of the ones shown, in display order.
     visible: Vec<usize>,
     availability: availability::Availability,
@@ -172,6 +175,7 @@ impl Library {
             sort_keys: None,
             cell_info: HashMap::new(),
             strip: filmstrip::State::default(),
+            shown_version: 0,
             visible: Vec::new(),
             availability: Default::default(),
             cache: textures::PreviewTextures::new(&ctx),
@@ -231,6 +235,7 @@ impl Library {
         self.sort_keys = None;
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         self.photos = self.catalog.photos()?;
+        self.shown_version += 1;
         self.photos
             .retain(|p| !crate::storage::is_hidden(std::path::Path::new(&p.filename)));
         self.folders = self.catalog.folders()?;
@@ -313,6 +318,7 @@ impl Library {
             self.sort_keys = Some((sort, sort.keys(&self.catalog)));
         }
         let keys = &self.sort_keys.as_ref().unwrap().1;
+        self.shown_version += 1;
         self.visible = self.filters.visible(
             &self.photos,
             |path| self.availability.is_available(path),
@@ -621,7 +627,7 @@ mod collections;
 mod compare;
 mod copy_name;
 mod descriptive;
-mod filmstrip;
+pub mod filmstrip;
 mod filter;
 mod filter_bar;
 mod grid;

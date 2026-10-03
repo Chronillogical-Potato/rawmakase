@@ -1153,22 +1153,46 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
     Ok(())
 }
 #[test]
-fn the_filmstrip_follows_a_grid_click_made_after_it_was_drawn() -> Result<()> {
+fn the_filmstrip_follows_a_change_made_after_it_was_drawn() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
     let ctx = library.ctx.clone();
     let ids = ids_of(&library);
     library.select(Some(ids[0]));
-    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let active = library.selected();
-        library.filmstrip_panel(ui, active, Module::Library);
-    });
-    output.textures_delta.clear();
+    let draw = |library: &mut Library| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let active = library.selected();
+            library.filmstrip_panel(ui, active, Module::Library);
+        });
+        output.textures_delta.clear();
+    };
+    draw(&mut library);
     assert!(!library.filmstrip_behind());
     // The grid, drawn after the strip, takes a click: the strip is behind
     // until it draws again.
     library.click(ids[1], egui::Modifiers::NONE);
     assert!(library.filmstrip_behind());
+    draw(&mut library);
+    assert!(!library.filmstrip_behind());
+    // So is a re-sort that keeps the selection.
+    library.filters.reverse = true;
+    library.filter();
+    assert!(library.filmstrip_behind());
     Ok(())
+}
+#[test]
+fn a_strip_scrolled_past_a_shorter_list_draws_again() {
+    let view = |x: f32| egui::Rect::from_min_size(egui::pos2(x, 0.), Vec2::new(800., 100.));
+    assert_eq!(super::filmstrip::in_view(view(0.), 100., 40), (0..8, false));
+    assert_eq!(
+        super::filmstrip::in_view(view(3150.), 100., 40),
+        (31..40, false)
+    );
+    // An offset from a longer list, past the 3 photos now shown.
+    assert_eq!(
+        super::filmstrip::in_view(view(3000.), 100., 3),
+        (3..3, true)
+    );
+    assert_eq!(super::filmstrip::in_view(view(0.), 100., 0), (0..0, false));
 }
 #[test]
 fn a_panel_with_nothing_to_do_keeps_an_earlier_panels_action() {
