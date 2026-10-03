@@ -216,7 +216,7 @@ fn names_entities_and_rgb_curves_parse_with_namespace_aliases() -> Result<()> {
         Path::new("preset.xmp"),
         &xml(
             "",
-            r#"<c:Name><r:Alt><r:li xml:lang="x-default">Warm &amp; soft</r:li></r:Alt></c:Name><c:ToneCurvePV2012Red><r:Seq><r:li>1, 12</r:li><r:li>240, 250</r:li></r:Seq></c:ToneCurvePV2012Red>"#,
+            r#"<c:Name><r:Alt><r:li xml:lang="x-default">Warm &amp; soft</r:li></r:Alt></c:Name><c:ToneCurvePV2012Red><r:Seq><r:li>1, 12</r:li><r:li>240, 250</r:li></r:Seq></c:ToneCurvePV2012Red><c:ToneCurvePV2012><r:Seq><r:li>0, 0</r:li><r:li>255, 255</r:li></r:Seq></c:ToneCurvePV2012><c:ToneCurvePV2012Green><r:Seq><r:li>0, 0</r:li><r:li>255, 255</r:li></r:Seq></c:ToneCurvePV2012Green><c:ToneCurvePV2012Blue><r:Seq><r:li>0, 0</r:li><r:li>255, 255</r:li></r:Seq></c:ToneCurvePV2012Blue>"#,
         ),
     )?;
     assert_eq!(p.name, "Warm & soft");
@@ -764,5 +764,49 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
         &xml(r#"c:AutoGrayscaleMix="True""#, ""),
     )?;
     assert!(auto.apply(&base, &m, &[], None).is_err());
+    Ok(())
+}
+/// Camera Raw reads the Red, Green and Blue point curves only as the full set
+/// Lightroom writes, with the master curve; a partial set changes nothing.
+#[test]
+fn channel_curves_apply_only_as_a_full_set() -> Result<()> {
+    let seq = |name: &str, points: &[&str]| {
+        let items: String = points.iter().map(|p| format!("<r:li>{p}</r:li>")).collect();
+        format!("<c:{name}><r:Seq>{items}</r:Seq></c:{name}>")
+    };
+    let linear = ["0, 0", "255, 255"];
+    let red = seq("ToneCurvePV2012Red", &["0, 0", "128, 150", "255, 255"]);
+    let full = [
+        seq("ToneCurvePV2012", &linear),
+        red.clone(),
+        seq("ToneCurvePV2012Green", &linear),
+        seq("ToneCurvePV2012Blue", &linear),
+    ]
+    .concat();
+    let r = parse(Path::new("full.xmp"), &xml("", &full))?.apply(
+        &Recipe::default(),
+        &Metadata::default(),
+        &[],
+        None,
+    )?;
+    assert_eq!(r.effects.channels[0].points[1], [128. / 255., 150. / 255.]);
+    for partial in [
+        red.clone(),
+        [seq("ToneCurvePV2012", &linear), red.clone()].concat(),
+        [
+            red.clone(),
+            seq("ToneCurvePV2012Green", &linear),
+            seq("ToneCurvePV2012Blue", &linear),
+        ]
+        .concat(),
+    ] {
+        let r = parse(Path::new("partial.xmp"), &xml("", &partial))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )?;
+        assert_eq!(r.effects.channels, Recipe::default().effects.channels);
+    }
     Ok(())
 }

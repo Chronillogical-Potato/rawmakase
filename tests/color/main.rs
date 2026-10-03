@@ -660,11 +660,11 @@ const PARITY_MEAN_MARGIN: f64 = 0.1;
 const PARITY_P95_MARGIN: f64 = 0.3;
 /// Cases whose committed Camera Raw reference is identical to that chart's
 /// `default`, so the case measures nothing and its baseline pins a distance that
-/// is really RAWmakase's own output. `synthetic-d65` / `curve-red` has been so
-/// since the references were first committed: Camera Raw applied no red curve.
-/// Re-render it with `camera-raw-charts.py --charts synthetic-d65 --cases
-/// curve-red` and drop the entry here once it differs.
-const UNMEASURED_REFERENCES: &[(&str, &str)] = &[("synthetic-d65", "curve-red")];
+/// is really RAWmakase's own output. Re-render such a case with
+/// `camera-raw-charts.py --charts <chart> --cases <case>` and drop its entry here
+/// once it differs. (Camera Raw ignores Red, Green and Blue point curves unless
+/// the master curve and all three are given, as Lightroom writes them.)
+const UNMEASURED_REFERENCES: &[(&str, &str)] = &[];
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Baseline {

@@ -66,17 +66,25 @@
         1.598,
         2.61
       ],
+      "curve-green-blue": [
+        1.44,
+        6.937
+      ],
       "curve-lift-refine-saturation-0": [
         1.536,
         8.306
       ],
       "curve-red": [
-        8.659,
-        17.627
+        1.336,
+        4.466
       ],
       "curve-s": [
         1.427,
         5.998
+      ],
+      "curve-s-red": [
+        1.826,
+        8.371
       ],
       "curve-s-refine-saturation-0": [
         1.095,
