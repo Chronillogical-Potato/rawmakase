@@ -200,7 +200,6 @@ pub fn convert_develop(
                 "CustomTemperature"
                     | "CustomTint"
                     | "CropConstrainAspectRatio"
-                    | "AutoGrayscaleMix"
                     | "OverrideLookVignette"
             ) {
                 continue;
@@ -234,6 +233,22 @@ pub fn convert_develop(
                 .filter(|k| k.starts_with("Upright")),
         )
         .collect();
+    // Auto black & white is judged with the mix Lightroom resolved for it; without
+    // Auto, each mixer channel stands on its own.
+    let auto_gray_mix = preset
+        .settings
+        .get("AutoGrayscaleMix")
+        .is_some_and(|v| v == "true");
+    let gray_mix: Vec<&str> = if auto_gray_mix {
+        preset
+            .settings
+            .keys()
+            .map(String::as_str)
+            .filter(|k| *k == "AutoGrayscaleMix" || k.starts_with("GrayMixer"))
+            .collect()
+    } else {
+        Vec::new()
+    };
     for keys in [
         vec!["WhiteBalance", "Temperature", "Tint"],
         vec![
@@ -249,6 +264,7 @@ pub fn convert_develop(
             "ParametricHighlightSplit",
         ],
         upright,
+        gray_mix,
     ] {
         let mut p = preset.clone();
         p.settings.retain(|k, _| keys.contains(&k.as_str()));
@@ -274,7 +290,18 @@ pub fn convert_develop(
             Err(e) => warnings.push(e.to_string()),
         }
     }
-    let mut recipe = accepted.apply(&Recipe::with_profiles(m, profiles), m, profiles, image)?;
+    let base = Recipe::with_profiles(m, profiles);
+    let mut recipe = match accepted.apply(&base, m, profiles, image) {
+        Ok(recipe) => recipe,
+        // Auto black & white without the mix Lightroom resolved (checked only with
+        // the treatment and profile together) keeps the default mix, reported.
+        Err(e) if accepted.settings.remove("AutoGrayscaleMix").is_some() => {
+            let recipe = accepted.apply(&base, m, profiles, image)?;
+            warnings.push(e.to_string());
+            recipe
+        }
+        Err(e) => return Err(e),
+    };
     if let Some((asked, used)) = accepted.profile_substitute(m, profiles) {
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
     }

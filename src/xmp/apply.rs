@@ -52,6 +52,8 @@ impl Settings<'_> {
         Ok(())
     }
 }
+const UNRESOLVED_AUTO_GRAY_MIX: &str =
+    "Auto black & white mix without stored mixer values isn't supported; the current mix is kept";
 const METADATA: &[&str] = &[
     "Version",
     "ProcessVersion",
@@ -115,6 +117,7 @@ impl Preset {
         self.apply_curves(&mut settings, &mut recipe)?;
         self.apply_grading(&mut settings, &mut recipe)?;
         self.apply_effects(&mut settings, &mut recipe)?;
+        self.apply_auto_gray_mix(&mut settings, &recipe)?;
         self.apply_auto_tone(&mut settings, &mut recipe, m, image)?;
         self.apply_panels(&mut settings, &mut recipe)?;
         let skipped = self.apply_local(&mut recipe, m);
@@ -183,6 +186,9 @@ impl Preset {
         });
         stage(&mut recipe, &|r| {
             self.apply_effects(&mut settings.borrow_mut(), r)
+        });
+        stage(&mut recipe, &|r| {
+            self.apply_auto_gray_mix(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|r| {
             self.apply_auto_tone(&mut settings.borrow_mut(), r, m, image)
@@ -572,6 +578,25 @@ impl Preset {
             r.effects.monochrome = b;
         }
         Ok(())
+    }
+
+    /// Lightroom resolves Auto black & white into the stored `GrayMixer` values,
+    /// which then render as Auto off does in Camera Raw. Without stored values
+    /// (a preset naming Auto alone) there is no Auto mix to render: the current
+    /// mix stays, which only a lenient application accepts.
+    fn apply_auto_gray_mix(&self, settings: &mut Settings<'_>, r: &Recipe) -> Result<()> {
+        settings.seen.insert("AutoGrayscaleMix".into());
+        ensure!(!self.leaves_auto_gray_mix(r)?, "{UNRESOLVED_AUTO_GRAY_MIX}");
+        Ok(())
+    }
+    /// Whether Auto black & white applies to a black & white result (by Treatment
+    /// or a monochrome profile) without the mixer values Lightroom resolves for it.
+    fn leaves_auto_gray_mix(&self, r: &Recipe) -> Result<bool> {
+        let v = &self.settings;
+        let auto = boolean(v, "AutoGrayscaleMix")? == Some(true);
+        Ok(auto
+            && r.with_profile_adjustments().effects.monochrome
+            && !v.keys().any(|k| k.starts_with("GrayMixer")))
     }
 
     fn apply_grading(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {

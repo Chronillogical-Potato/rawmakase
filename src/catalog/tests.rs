@@ -238,6 +238,52 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
+    let m = crate::raw::Metadata::default();
+    // Lightroom stores the mix it resolved, which renders as Camera Raw does.
+    let text = r#"s = { ConvertToGrayscale = true, AutoGrayscaleMix = true, GrayMixerRed = -12, GrayMixerBlue = 30 }"#;
+    let (r, w) = convert_develop(text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert!(r.effects.monochrome);
+    assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
+    assert_eq!(r.effects.gray_mix[5], 30. * 0.01);
+    // Without stored values the default mix is kept, and that is reported.
+    let text = r#"s = { ConvertToGrayscale = true, AutoGrayscaleMix = true, Exposure2012 = 0.5 }"#;
+    let (r, w) = convert_develop(text, &m, &[], None)?;
+    assert!(r.effects.monochrome);
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(r.effects.gray_mix, Recipe::default().effects.gray_mix);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("Auto black & white mix"), "{w:?}");
+    // With a monochrome default profile, Auto is still judged with its stored mix.
+    let m = crate::raw::Metadata {
+        model: "Synthetic".into(),
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut profile = crate::camera_profiles::CameraProfile::camera_matrix_default(&m)
+        .unwrap()
+        .with_test_tables();
+    profile.name = "Adobe Color".into();
+    profile.camera = "Synthetic".into();
+    profile.enhanced.as_mut().unwrap().monochrome = true;
+    let profiles = [std::sync::Arc::new(profile)];
+    let text = r#"s = { AutoGrayscaleMix = true, GrayMixerRed = -12 }"#;
+    let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
+    // Without Auto, a malformed channel does not take the others with it.
+    for auto in ["", "AutoGrayscaleMix = false, "] {
+        let text = format!(
+            "s = {{ {auto}ConvertToGrayscale = true, GrayMixerRed = -12, GrayMixerBlue = 300 }}"
+        );
+        let (r, w) = convert_develop(&text, &crate::raw::Metadata::default(), &[], None)?;
+        assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
+        assert_eq!(w.len(), 1, "{w:?}");
+    }
+    Ok(())
+}
+#[test]
 fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
     let m = crate::raw::Metadata {
         wb: [2., 1., 1.8],
