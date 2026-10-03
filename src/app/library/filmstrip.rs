@@ -7,6 +7,7 @@ use super::selection::Mark;
 use super::views::View;
 use super::{Action, Library, cell};
 use crate::app::theme;
+use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Vec2};
 
 /// The strip's height, the same in every view.
@@ -73,7 +74,9 @@ impl Library {
     ) -> (Option<Pick>, bool) {
         let mut target = None;
         let mut changed = false;
-        self.strip_drawn = self.selection.clone();
+        if self.strip_drawn != self.selection {
+            self.strip_drawn = self.selection.clone();
+        }
         let photo = current.and_then(|id| self.photo(id)).cloned();
         let position = current.and_then(|current| {
             self.visible
@@ -117,127 +120,141 @@ impl Library {
         // Scroll only to bring a newly shown photo into view, or one a sort
         // or filter moved: a photo already visible, e.g. one just clicked,
         // stays put, and so does a strip scrolled away from it.
-        let reveal = current.zip(position);
-        let reveal = if reveal != self.strip_revealed {
-            self.strip_revealed = reveal;
-            reveal.map(|(id, _)| id)
+        let shown = current.zip(position);
+        let reveal = if shown != self.strip_revealed {
+            self.strip_revealed = shown;
+            position
         } else {
             None
         };
         let height = ui.available_height().max(40.);
+        let size = Vec2::new(height * 1.25, height);
         egui::ScrollArea::horizontal()
             .id_salt("filmstrip")
             .auto_shrink(false)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.;
-                    for n in 0..self.visible.len() {
-                        let p = self.photos[self.visible[n]].clone();
-                        let (rect, response) = ui.allocate_exact_size(
-                            Vec2::new(height * 1.25, height),
-                            egui::Sense::click(),
-                        );
-                        let mark = if current == Some(p.id) {
-                            Mark::Active
-                        } else if library && self.selection.selected.contains(&p.id) {
-                            Mark::Selected
-                        } else {
-                            Mark::None
-                        };
-                        let active = mark == Mark::Active;
-                        if reveal == Some(p.id) && !ui.clip_rect().contains_rect(rect) {
-                            response.scroll_to_me(None);
-                        }
-                        if !ui.is_rect_visible(rect) {
-                            continue;
-                        }
-                        self.request_previews(&p, ui.ctx());
-                        let cell = rect.shrink(2.);
-                        let base = theme::gray(if active {
-                            120
-                        } else if mark == Mark::Selected {
-                            78
-                        } else if response.hovered() {
-                            58
-                        } else {
-                            40
-                        });
-                        // Same cues as the grid: the label tints the cell, and
-                        // flag and stars sit on a strip below the photo.
-                        let fill = crate::app::photo_metadata::label_color(&p.label).map_or(
-                            base,
-                            |label| {
-                                base.lerp_to_gamma(
-                                    label,
-                                    if mark == Mark::None { 0.25 } else { 0.35 },
-                                )
-                            },
-                        );
-                        ui.painter().rect_filled(cell, 2., fill);
-                        let strip = 14.;
-                        if let Some(texture) = self.texture(&p) {
-                            let area = egui::Rect::from_min_max(
-                                cell.min + Vec2::splat(5.),
-                                cell.max - Vec2::new(5., strip + 2.),
-                            );
-                            let size = texture.size_vec2();
-                            let scale = (area.width() / size.x).min(area.height() / size.y);
-                            let image = egui::Rect::from_center_size(area.center(), size * scale);
-                            ui.painter().image(
-                                texture.id(),
-                                image,
-                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
-                                Color32::WHITE,
-                            );
-                            if p.master.is_some() {
-                                cell::copy_badge(ui.painter(), image, fill);
-                            }
-                        }
-                        let y = cell.bottom() - strip / 2. - 2.;
-                        let mut x = cell.left() + 6.;
-                        if p.flag != 0 {
-                            crate::app::photo_metadata::flag_icon(
-                                ui.painter(),
-                                egui::pos2(x + 4., y),
-                                p.flag,
-                                active,
-                            );
-                            x += 13.;
-                        }
-                        if p.rating > 0 {
-                            ui.painter().text(
-                                egui::pos2(x, y),
-                                egui::Align2::LEFT_CENTER,
-                                "★".repeat(p.rating as usize),
-                                egui::FontId::proportional(9.),
-                                theme::gray(if active { 30 } else { 200 }),
-                            );
-                        }
-                        if let Some(menu) =
-                            cell::photo_menu(&response, &p, self.is_available(&p.path))
-                        {
-                            let is_edit = matches!(menu, cell::PhotoAction::Edit(_));
-                            if let Some(id) = self.photo_action(ui.ctx(), &p, menu, whole_selection)
-                            {
-                                target = Some(Pick::Develop(id));
-                            }
-                            if is_edit {
-                                // Filters may have changed the visible list.
-                                changed = true;
-                                break;
-                            }
-                        }
-                        let context = crate::app::widgets::context_clicked(&response);
-                        if response
-                            .on_hover_text(format!("{}{}", p.filename, cell::copy_suffix(&p)))
-                            .clicked()
-                            && !context
-                        {
-                            target = Some(Pick::Show(p.id));
-                        }
+            .show_viewport(ui, |ui, viewport| {
+                // Only the cells in view are laid out and drawn, however
+                // many photos the source has.
+                ui.set_min_size(Vec2::new(size.x * self.visible.len() as f32, height));
+                let origin = ui.max_rect().min;
+                let at = |n: usize| {
+                    egui::Rect::from_min_size(origin + Vec2::new(size.x * n as f32, 0.), size)
+                };
+                if let Some(n) = reveal {
+                    let rect = at(n);
+                    if !ui.clip_rect().contains_rect(rect) {
+                        ui.scroll_to_rect(rect, None);
                     }
-                });
+                }
+                let first = (viewport.min.x / size.x).floor().max(0.) as usize;
+                let last = ((viewport.max.x / size.x).ceil() as usize).min(self.visible.len());
+                for n in first..last {
+                    let photo = self.photos[self.visible[n]].clone();
+                    let mark = if current == Some(photo.id) {
+                        Mark::Active
+                    } else if library && self.selection.selected.contains(&photo.id) {
+                        Mark::Selected
+                    } else {
+                        Mark::None
+                    };
+                    let (pick, edited) = self.strip_cell(ui, at(n), &photo, mark, whole_selection);
+                    target = pick.or(target);
+                    if edited {
+                        // Filters may have changed the visible list.
+                        changed = true;
+                        break;
+                    }
+                }
             });
         (target, changed)
+    }
+    /// One photo in the strip, with its menu. Returns a photo chosen and
+    /// whether the menu changed its metadata.
+    fn strip_cell(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        photo: &Photo,
+        mark: Mark,
+        whole_selection: bool,
+    ) -> (Option<Pick>, bool) {
+        let response = ui.interact(rect, ui.id().with(photo.id), egui::Sense::click());
+        self.request_previews(photo, ui.ctx());
+        paint_cell(
+            ui.painter(),
+            rect,
+            photo,
+            self.texture(photo),
+            mark,
+            response.hovered(),
+        );
+        if let Some(menu) = cell::photo_menu(&response, photo, self.is_available(&photo.path)) {
+            let edited = matches!(menu, cell::PhotoAction::Edit(_));
+            let develop = self.photo_action(ui.ctx(), photo, menu, whole_selection);
+            return (develop.map(Pick::Develop), edited);
+        }
+        let context = crate::app::widgets::context_clicked(&response);
+        let clicked = response
+            .on_hover_text(format!("{}{}", photo.filename, cell::copy_suffix(photo)))
+            .clicked();
+        ((clicked && !context).then_some(Pick::Show(photo.id)), false)
+    }
+}
+
+/// A strip cell: the preview over a row for its flag and stars, tinted by
+/// its label, with the same cues as the grid.
+fn paint_cell(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    photo: &Photo,
+    texture: Option<&egui::TextureHandle>,
+    mark: Mark,
+    hovered: bool,
+) {
+    let active = mark == Mark::Active;
+    let cell = rect.shrink(2.);
+    let base = theme::gray(match mark {
+        Mark::Active => 120,
+        Mark::Selected => 78,
+        Mark::None if hovered => 58,
+        Mark::None => 40,
+    });
+    let fill = crate::app::photo_metadata::label_color(&photo.label).map_or(base, |label| {
+        base.lerp_to_gamma(label, if mark == Mark::None { 0.25 } else { 0.35 })
+    });
+    painter.rect_filled(cell, 2., fill);
+    let strip = 14.;
+    if let Some(texture) = texture {
+        let area = egui::Rect::from_min_max(
+            cell.min + Vec2::splat(5.),
+            cell.max - Vec2::new(5., strip + 2.),
+        );
+        let size = texture.size_vec2();
+        let scale = (area.width() / size.x).min(area.height() / size.y);
+        let image = egui::Rect::from_center_size(area.center(), size * scale);
+        painter.image(
+            texture.id(),
+            image,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
+            Color32::WHITE,
+        );
+        if photo.master.is_some() {
+            cell::copy_badge(painter, image, fill);
+        }
+    }
+    let y = cell.bottom() - strip / 2. - 2.;
+    let mut x = cell.left() + 6.;
+    if photo.flag != 0 {
+        crate::app::photo_metadata::flag_icon(painter, egui::pos2(x + 4., y), photo.flag, active);
+        x += 13.;
+    }
+    if photo.rating > 0 {
+        painter.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_CENTER,
+            "★".repeat(photo.rating as usize),
+            egui::FontId::proportional(9.),
+            theme::gray(if active { 30 } else { 200 }),
+        );
     }
 }
