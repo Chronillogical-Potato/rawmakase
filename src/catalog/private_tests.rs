@@ -1,4 +1,4 @@
-use super::lightroom::develop_fields;
+use super::lightroom::{develop_fields, import_lightroom};
 use super::*;
 use crate::storage::Identity;
 use anyhow::Context;

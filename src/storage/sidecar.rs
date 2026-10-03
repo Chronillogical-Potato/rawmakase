@@ -38,42 +38,13 @@ struct Companion {
     bitmaps: std::collections::BTreeMap<String, String>,
 }
 const COMPANION_SCHEMA: u32 = 1;
-/// A bitmap saved with the photo's spots and masks.
-pub fn bitmap(raw: &Path, hash: &str) -> Result<Option<super::bitmaps::Bitmap>> {
-    let id = Identity::read(raw)?;
-    let companion = [local_path(raw), fallback_at(&id, &data_dir(), "local.json")]
-        .into_iter()
-        .filter(|p| p.exists())
-        .map(|p| parse_companion(&p, &id))
-        .next()
-        .transpose()?;
-    companion
-        .and_then(|c| c.bitmaps.get(hash).cloned())
-        .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(&text)?))
-        .transpose()
-}
-/// Every bitmap saved with the photo's spots and masks.
-pub fn bitmaps(raw: &Path) -> Result<Vec<super::bitmaps::Bitmap>> {
-    let id = Identity::read(raw)?;
-    let Some(path) = [local_path(raw), fallback_at(&id, &data_dir(), "local.json")]
-        .into_iter()
-        .find(|p| p.exists())
-    else {
-        return Ok(Vec::new());
-    };
-    parse_companion(&path, &id)?
-        .bitmaps
-        .values()
-        .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
-        .collect()
-}
 pub fn sidecar_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();
     p.push(".rawmakase.json");
     p.into()
 }
 /// Where the photo's spots and masks are saved: next to the sidecar.
-pub fn local_path(raw: &Path) -> PathBuf {
+fn local_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();
     p.push(".rawmakase-local.json");
     p.into()
