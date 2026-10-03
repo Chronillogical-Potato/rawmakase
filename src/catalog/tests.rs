@@ -1028,6 +1028,17 @@ fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
         ],
     )?;
     assert_eq!(c.load_history(id)?, None);
+    // Saving with nothing recorded (an export-only change) keeps that History.
+    let empty = SavedHistory {
+        origin: edited.clone(),
+        steps: Vec::new(),
+        applied: 0,
+    };
+    c.save_edit(id, &photo, &edited, &export, empty.update())?;
+    let count = |c: &Catalog| -> Result<i64> {
+        Ok(c.db.query_row("SELECT COUNT(*) FROM develop_history", [], |r| r.get(0))?)
+    };
+    assert_eq!(count(&c)?, 1);
     c.save_edit(
         id,
         &photo,
@@ -1035,11 +1046,16 @@ fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
         &export,
         HistoryUpdate::Replace(&history),
     )?;
+    // A virtual copy starts with the History of the edit it copies, and takes its
+    // own with it when removed.
+    let copy = c.create_virtual_copy(id)?;
+    assert_eq!(c.load_history(copy)?, Some(history.clone()));
+    assert_eq!(count(&c)?, 2);
+    c.remove_virtual_copy(copy)?;
+    assert_eq!(count(&c)?, 1);
     // Removing the photo removes its History.
     c.db.execute("DELETE FROM photos WHERE id=?", [id])?;
-    let rows: i64 =
-        c.db.query_row("SELECT COUNT(*) FROM develop_history", [], |r| r.get(0))?;
-    assert_eq!(rows, 0);
+    assert_eq!(count(&c)?, 0);
     Ok(())
 }
 #[test]

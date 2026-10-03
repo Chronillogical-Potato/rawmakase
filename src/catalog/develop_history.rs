@@ -109,6 +109,16 @@ impl StoredState {
 }
 
 impl SavedHistory {
+    /// How saving the edit treats the stored History. Without steps nothing was
+    /// recorded here, so a stored one (even one this release cannot read, from a
+    /// newer release) is kept.
+    pub fn update(&self) -> HistoryUpdate<'_> {
+        if self.steps.is_empty() {
+            HistoryUpdate::Keep
+        } else {
+            HistoryUpdate::Replace(self)
+        }
+    }
     pub fn encode(&self) -> Result<Vec<u8>> {
         ensure!(self.applied <= self.steps.len(), "Invalid History position");
         let mut pool = Pool::default();
@@ -196,9 +206,6 @@ impl Catalog {
     ) -> Result<()> {
         match history {
             HistoryUpdate::Keep => {}
-            HistoryUpdate::Replace(h) if h.steps.is_empty() => {
-                tx.execute("DELETE FROM develop_history WHERE photo=?", [id])?;
-            }
             HistoryUpdate::Replace(h) => {
                 tx.execute(
                     "INSERT OR REPLACE INTO develop_history(photo, data) VALUES (?, ?)",

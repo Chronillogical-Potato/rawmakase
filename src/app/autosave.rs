@@ -3,7 +3,7 @@
 //! enough to stall the interface mid-edit. Saves before navigation stay
 //! synchronous, after waiting for the one in flight.
 use crate::{
-    catalog::{Catalog, HistoryUpdate, SavedHistory},
+    catalog::{Catalog, SavedHistory},
     develop::Recipe,
     export::ExportOptions,
 };
@@ -107,7 +107,7 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
         &job.raw,
         &job.recipe,
         &job.export,
-        HistoryUpdate::Replace(&job.history),
+        job.history.update(),
     )?;
     Ok(path.clone())
 }

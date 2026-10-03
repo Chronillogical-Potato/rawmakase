@@ -114,7 +114,7 @@ impl Editor {
                     path,
                     &self.document.recipe,
                     &self.document.export,
-                    crate::catalog::HistoryUpdate::Replace(&history),
+                    history.update(),
                 )
                 .map(|()| l.catalog.path.clone());
             match saved {
