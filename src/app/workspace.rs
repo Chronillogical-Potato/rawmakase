@@ -74,7 +74,8 @@ impl Editor {
             || self.remove_copy.is_some()
             || self.read_metadata.is_some()
             || self.not_editable.is_some()
-            || self.view.shortcuts;
+            || self.view.shortcuts
+            || self.copy_dialog.is_some();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -117,6 +118,7 @@ impl Editor {
         self.read_metadata_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
+        self.copy_dialog_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);
@@ -762,8 +764,9 @@ impl Editor {
                     }
                 }
             });
+            // As in Lightroom, Shift+Cmd+C opens Copy Settings.
             if copy {
-                self.copy_settings();
+                self.open_copy_dialog();
             }
             if reset {
                 self.reset_settings();

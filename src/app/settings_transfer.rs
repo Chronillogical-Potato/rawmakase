@@ -1,11 +1,14 @@
 //! Copy Settings, Paste Settings and Paste from Previous: settings moving from one
 //! photo to another by group (see `develop::settings_groups`).
 use super::Editor;
+use super::theme;
+use super::widgets::{modal_frame, primary_button};
 use crate::develop::{
     Recipe,
-    settings_groups::{self, GroupSelection, Source, Target},
+    settings_groups::{self, GroupInclusion, GroupSelection, SettingGroup, Source, Target},
 };
 use crate::raw::Metadata;
+use eframe::egui::{self, Color32, Vec2};
 
 /// A photo's settings with its camera, as Copy or leaving a photo keeps them.
 #[derive(Clone, Debug)]
@@ -19,6 +22,19 @@ pub(super) struct Settings {
 pub(super) struct Clipboard {
     pub(super) settings: Settings,
     pub(super) groups: GroupSelection,
+}
+
+/// Copy Settings while it is open: the groups being chosen.
+#[derive(Clone, Debug)]
+pub(super) struct CopyDialog {
+    pub(super) groups: GroupSelection,
+}
+
+/// What the user did in Copy Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CopyChoice {
+    Copy,
+    Cancel,
 }
 
 impl Editor {
@@ -36,15 +52,95 @@ impl Editor {
             .clone()
             .or_else(|| self.document.full().map(|im| im.metadata.clone()))
     }
-    pub(super) fn copy_settings(&mut self) {
+    /// Copies the open photo's settings for Paste, which applies only `groups`.
+    pub(super) fn copy_settings(&mut self, groups: GroupSelection) {
         let Some(settings) = self.current_settings() else {
             return;
         };
-        self.clipboard = Some(Clipboard {
-            settings,
-            groups: GroupSelection::default(),
-        });
+        self.clipboard = Some(Clipboard { settings, groups });
         self.status = "Settings copied".into();
+    }
+    /// Opens Copy Settings with the groups chosen last time.
+    pub(super) fn open_copy_dialog(&mut self) {
+        self.copy_dialog = Some(CopyDialog {
+            groups: self.copy_groups.clone(),
+        });
+    }
+    /// Lightroom's Copy Settings: a checkbox per group, under its section.
+    pub(super) fn copy_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &mut self.copy_dialog else {
+            return;
+        };
+        let mut choice = None;
+        let response = egui::Modal::new(egui::Id::new("copy-settings"))
+            .backdrop_color(Color32::from_black_alpha(140))
+            .frame(modal_frame().inner_margin(egui::Margin::symmetric(28, 22)))
+            .show(ctx, |ui| {
+                ui.set_width(COLUMN * 2. + GAP);
+                ui.label(
+                    egui::RichText::new("Copy Settings")
+                        .size(17.)
+                        .color(theme::gray(235)),
+                );
+                ui.add_space(14.);
+                // Sections fill the left column, then the right, in Lightroom's order.
+                // They scroll in a short window, so the buttons stay in view.
+                let (left, right) = SettingGroup::SECTIONS.split_at(LEFT_SECTIONS);
+                let height = (ctx.content_rect().height() * 0.85 - 130.).max(160.);
+                egui::ScrollArea::vertical()
+                    .max_height(height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = GAP;
+                            for column in [left, right] {
+                                ui.allocate_ui(Vec2::new(COLUMN, 0.), |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_width(COLUMN);
+                                        for section in column {
+                                            section_checkboxes(ui, section, &mut dialog.groups);
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    });
+                ui.add_space(16.);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    if ui.button("Check All").clicked() {
+                        dialog.groups = GroupSelection::all();
+                    }
+                    if ui.button("Check None").clicked() {
+                        dialog.groups = GroupSelection::none();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if primary_button(ui, "Copy").clicked() {
+                            choice = Some(CopyChoice::Copy);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            choice = Some(CopyChoice::Cancel);
+                        }
+                    });
+                });
+            });
+        if response.should_close() {
+            choice = Some(CopyChoice::Cancel);
+        }
+        if let Some(choice) = choice {
+            self.close_copy_dialog(choice);
+        }
+    }
+    /// Copy keeps the groups chosen for Paste and for the next Copy Settings.
+    pub(super) fn close_copy_dialog(&mut self, choice: CopyChoice) {
+        let Some(dialog) = self.copy_dialog.take() else {
+            return;
+        };
+        if choice == CopyChoice::Copy {
+            self.copy_groups = dialog.groups.clone();
+            self.copy_settings(dialog.groups);
+            let _ = self.save_session();
+        }
     }
     /// Pastes the copied settings. Spot removal and masks belong to their photo and
     /// stay as they were, as with Lightroom's default Paste Settings.
@@ -88,4 +184,53 @@ impl Editor {
             format!("Settings pasted · {}", out.notes.join(" · "))
         };
     }
+}
+
+/// Copy Settings' column width, the space between columns, and how many sections the
+/// left column holds.
+const COLUMN: f32 = 230.;
+const GAP: f32 = 28.;
+const LEFT_SECTIONS: usize = 7;
+
+/// A section's checkbox, which checks or clears all of it, and one indented checkbox per
+/// group when it has several.
+fn section_checkboxes(
+    ui: &mut egui::Ui,
+    section: &settings_groups::Section,
+    groups: &mut GroupSelection,
+) {
+    let chosen = section
+        .groups
+        .iter()
+        .filter(|g| groups.contains(**g))
+        .count();
+    let mut all = chosen == section.groups.len();
+    let checkbox = egui::Checkbox::new(&mut all, section.title)
+        .indeterminate(chosen > 0 && chosen < section.groups.len());
+    if ui.add(checkbox).changed() {
+        let inclusion = if all {
+            GroupInclusion::Included
+        } else {
+            GroupInclusion::Excluded
+        };
+        for group in section.groups {
+            groups.set(*group, inclusion);
+        }
+    }
+    if let [_, _, ..] = section.groups {
+        ui.indent(section.title, |ui| {
+            for group in section.groups {
+                let mut on = groups.contains(*group);
+                if ui.checkbox(&mut on, group.label()).changed() {
+                    let inclusion = if on {
+                        GroupInclusion::Included
+                    } else {
+                        GroupInclusion::Excluded
+                    };
+                    groups.set(*group, inclusion);
+                }
+            }
+        });
+    }
+    ui.add_space(6.);
 }

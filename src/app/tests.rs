@@ -1114,7 +1114,7 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     let (steps, _) = editor.document.history.steps();
     assert_eq!(steps[1].name, "White Balance");
     // Pasted onto a photo, the values were not estimated for it: the WB menu says Custom.
-    editor.copy_settings();
+    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
     editor.paste_settings();
     let r = &editor.document.recipe;
     assert!(r.wb[0] < 1. && r.wb[2] > 1., "wb {:?}", r.wb);
@@ -1379,7 +1379,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     });
-    e.copy_settings();
+    e.copy_settings(crate::develop::settings_groups::GroupSelection::default());
     e.document.recipe = Recipe::default();
     e.paste_settings();
     assert_eq!(e.document.recipe.upright.mode, UprightMode::Vertical);
@@ -1976,7 +1976,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     };
     copied.update_wb(&first);
     editor.document.recipe = copied.clone();
-    editor.copy_settings();
+    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
     // Pasted onto a photo from another camera.
     editor.document.metadata = Some(second.clone());
     editor.document.recipe = Recipe::default();
@@ -1998,4 +1998,66 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     editor.document.metadata = Some(second);
     editor.paste_previous();
     assert_eq!(editor.document.recipe.exposure, 0.4);
+}
+#[test]
+fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
+    use crate::develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.document.metadata = Some(Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    });
+    editor.document.recipe.exposure = 0.6;
+    editor.document.recipe.contrast = 0.3;
+    editor.open_copy_dialog();
+    // The dialog draws, with its buttons in view in the smallest window.
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 650.))),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        output.textures_delta.clear();
+    }
+    let copy = ctx.memory(|m| m.area_rect(egui::Id::new("copy-settings")));
+    assert!(copy.is_some_and(|r| r.bottom() <= 650.), "{copy:?}");
+    let dialog = editor.copy_dialog.as_mut().unwrap();
+    dialog.groups = GroupSelection::none();
+    dialog
+        .groups
+        .set(SettingGroup::Exposure, GroupInclusion::Included);
+    editor.close_copy_dialog(settings_transfer::CopyChoice::Copy);
+    assert!(editor.copy_dialog.is_none());
+    editor.document.recipe = Recipe::default();
+    editor.paste_settings();
+    assert_eq!(editor.document.recipe.exposure, 0.6);
+    assert_eq!(editor.document.recipe.contrast, 0.);
+    // The next Copy Settings starts from that choice; Cancel copies nothing.
+    editor.open_copy_dialog();
+    assert!(
+        editor
+            .copy_dialog
+            .as_ref()
+            .unwrap()
+            .groups
+            .contains(SettingGroup::Exposure)
+    );
+    assert!(
+        !editor
+            .copy_dialog
+            .as_ref()
+            .unwrap()
+            .groups
+            .contains(SettingGroup::Contrast)
+    );
+    editor.document.recipe.exposure = -1.;
+    editor.close_copy_dialog(settings_transfer::CopyChoice::Cancel);
+    editor.document.recipe = Recipe::default();
+    editor.paste_settings();
+    assert_eq!(editor.document.recipe.exposure, 0.6);
 }

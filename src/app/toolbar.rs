@@ -86,8 +86,8 @@ impl Editor {
                             };
                             let copy = format!("{cmd}{shift}C");
                             let paste = format!("{cmd}{shift}V");
-                            if menu_item(ui, "Copy Settings", &copy, true, false) {
-                                self.copy_settings();
+                            if menu_item(ui, "Copy Settings…", &copy, true, false) {
+                                self.open_copy_dialog();
                                 ui.close();
                             }
                             if menu_item(

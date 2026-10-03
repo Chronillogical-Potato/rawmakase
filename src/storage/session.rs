@@ -42,6 +42,9 @@ pub struct Session {
     /// How the Library showed its photos last time.
     #[serde(default)]
     pub library_layout: LibraryLayout,
+    /// The groups Copy Settings copied last time; None until it has been used.
+    #[serde(default)]
+    pub copy_groups: Option<crate::develop::settings_groups::GroupSelection>,
 }
 
 /// How the Library shows its photos: its view, filter bar, sort and grid,
