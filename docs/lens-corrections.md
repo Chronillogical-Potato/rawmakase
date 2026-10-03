@@ -40,7 +40,7 @@ Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at t
 
 Status 2026-10-03. Available, not measured. Sony's tables are read and render, but no Lightroom or Camera Raw render has been compared with them alone, and it is still unknown whether Lightroom applies Sony's stored data or only Adobe's own profiles. What is measured for Sony is the [imported Adobe profile](#adobe-lcp-profiles) path, and one unexplained observation under [Remove Chromatic Aberration](#validation--2026-10-01).
 
-So the correction is off by default (`default_on` is false), and in the Lens Corrections panel it follows Enable Profile Corrections: ticking the box turns it on, unticking turns it off, and the Profile row names "Sony built-in" when no imported Adobe profile matches. An imported Adobe profile replaces it whenever one matches. A Lightroom edit or preset with `crs:LensProfileEnable` set turns on only the Adobe profile, not Sony's data, so without an imported profile it leaves a Sony photo uncorrected.
+So the correction is off by default (`default_on` is false), and in the Lens Corrections panel it follows Enable Profile Corrections: ticking the box turns it on, unticking turns it off, and the Profile row names "Sony built-in" when no imported Adobe profile matches. An imported Adobe profile replaces it whenever one matches. A Lightroom edit or preset with `crs:LensProfileEnable` set turns on only the Adobe profile and leaves `lens_builtin` as it was. A Lightroom edit starts from the defaults, so without an imported profile the Sony photo stays uncorrected; a preset applied to a photo whose Sony correction was already ticked keeps it.
 
 ## Remove Chromatic Aberration
 
