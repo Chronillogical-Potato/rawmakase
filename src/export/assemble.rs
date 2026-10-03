@@ -132,6 +132,17 @@ fn resolve(value: &Option<Value<LangAlt>>, file: Option<String>) -> Vec<(String,
     }
 }
 
+/// The photo's copyright for the Simple Copyright Watermark: the catalog's,
+/// else the file's; `None` when cleared or empty.
+pub fn copyright(values: &Values, file: Option<&CameraExif>) -> Option<String> {
+    match &values.descriptive.copyright {
+        Some(Value::Set(langs)) => langs.default_text().map(str::to_string),
+        Some(Value::Cleared) => None,
+        None => file.and_then(|e| e.get(COPYRIGHT).and_then(Field::text)),
+    }
+    .filter(|c| !c.is_empty())
+}
+
 /// Decides every tag of an export. `file` is the source's EXIF when it could
 /// be read; `libraw` stands in for the camera info when it could not.
 pub fn assemble(

@@ -163,7 +163,10 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     assert!(image::open(&jpg).is_ok());
     let tif = dir.path().join("out.tif");
     let without_location = Embed {
-        location: false,
+        camera: Some(exif::CameraExif {
+            gps: Vec::new(),
+            ..camera
+        }),
         ..embed
     };
     export_with(
@@ -246,19 +249,19 @@ fn photo_info_is_read_from_exif() -> anyhow::Result<()> {
     use exif::Field;
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("a.tif");
-    let block = exif::tiff_block(
-        vec![
+    let block = exif::tiff_block(exif::CameraExif {
+        main: vec![
             Field::ascii(0x010f, "FUJIFILM"),
             Field::ascii(0x0110, "X100F"),
         ],
-        vec![
+        exif: vec![
             Field::rational(0x829a, 1, 250),
             Field::rational(0x829d, 28, 10),
             Field::short(0x8827, 400),
             Field::rational(0x920a, 23, 1),
         ],
-        Vec::new(),
-    );
+        gps: Vec::new(),
+    });
     let mut bytes = block;
     bytes.resize(512, 0);
     std::fs::write(&path, bytes)?;

@@ -473,9 +473,8 @@ pub fn keyword_lists(keywords: &[KeywordPath]) -> (Vec<String>, Vec<String>) {
 
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
-    let tool = format!("RAWmakase {}", env!("CARGO_PKG_VERSION"));
     let mut attributes: Vec<(String, String)> = vec![
-        ("xmp:CreatorTool".into(), tool),
+        ("xmp:CreatorTool".into(), crate::export::SOFTWARE.into()),
         ("xmp:ModifyDate".into(), photo.now.clone()),
         ("xmp:MetadataDate".into(), photo.now.clone()),
     ];

@@ -1,5 +1,8 @@
 //! JPEG and 16-bit TIFF encoding with an ICC profile, EXIF directories and XMP.
-use super::{Embed, exif::Field, metadata::Directories};
+use super::{
+    Embed,
+    exif::{CameraExif, Field},
+};
 use crate::develop::Rendered;
 use anyhow::{Result, ensure};
 use image::{ImageEncoder, codecs::jpeg::JpegEncoder};
@@ -14,7 +17,7 @@ pub(super) fn jpeg(
     image: &Rendered,
     quality: u8,
     profile: Vec<u8>,
-    directories: Directories,
+    directories: CameraExif,
     embed: &Embed,
 ) -> Result<()> {
     let mut jpeg = Vec::new();
@@ -38,7 +41,7 @@ pub(super) fn tiff(
     out: &mut (impl Write + Seek),
     image: &Rendered,
     profile: Vec<u8>,
-    directories: &Directories,
+    directories: &CameraExif,
     embed: &Embed,
 ) -> Result<()> {
     let mut e = TiffEncoder::new(out)?;

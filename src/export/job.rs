@@ -2,7 +2,7 @@
 //! only a quick preview is loaded), the render, its metadata and the file.
 use super::{
     Embed, ExportSettings,
-    assemble::{Policy, Values, assemble},
+    assemble::{Policy, Values, assemble, copyright},
     exif,
 };
 use crate::{
@@ -32,12 +32,10 @@ pub struct Photo {
     pub watermark: Option<crate::watermark::Watermark>,
 }
 
-/// What an export has to say besides "Exported", such as a Simple
-/// Copyright Watermark left out for want of a copyright.
-pub type Notice = Option<String>;
-
 /// Exports `photo` to `target`, reporting progress from 0 to 1. Stops between
-/// stages once `cancel` is set.
+/// stages once `cancel` is set. Returns what the export has to say besides
+/// "Exported", such as a Simple Copyright Watermark left out for want of a
+/// copyright.
 pub fn run(
     photo: Photo,
     settings: &ExportSettings,
@@ -45,35 +43,33 @@ pub fn run(
     overwrite: bool,
     cancel: &AtomicBool,
     progress: impl Fn(f32),
-) -> Result<Notice> {
+) -> Result<Option<String>> {
     let cancelled = || -> Result<()> {
         ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
         Ok(())
     };
     progress(0.05);
+    let policy = Policy::of(settings);
+    let simple_copyright = matches!(
+        &photo.watermark,
+        Some(w) if w.name == crate::watermark::SIMPLE_COPYRIGHT
+    );
+    // Read once: for the export's metadata and the Simple Copyright
+    // Watermark.
+    let file = (policy.reads_file() || simple_copyright)
+        .then(|| exif::read(&photo.source))
+        .flatten();
     // Loaded first: a missing image or font fails the export before it
     // renders.
     let mut notice = None;
     let watermark = match &photo.watermark {
-        Some(w) if w.name == crate::watermark::SIMPLE_COPYRIGHT => {
-            // The photo's copyright: the catalog's, else the file's.
-            use crate::catalog::Value;
-            let copyright = match &photo.values.descriptive.copyright {
-                Some(Value::Set(langs)) => langs.default_text().map(str::to_string),
-                Some(Value::Cleared) => None,
-                None => exif::read(&photo.source)
-                    .and_then(|e| e.get(0x8298).and_then(exif::Field::text)),
+        Some(_) if simple_copyright => match copyright(&photo.values, file.as_ref()) {
+            Some(text) => Some(crate::watermark::Watermark::simple_copyright(&text).ready()?),
+            None => {
+                notice = Some("no copyright in the file for the Simple Copyright Watermark".into());
+                None
             }
-            .filter(|c| !c.is_empty());
-            match copyright {
-                Some(text) => Some(crate::watermark::Watermark::simple_copyright(&text).ready()?),
-                None => {
-                    notice =
-                        Some("no copyright in the file for the Simple Copyright Watermark".into());
-                    None
-                }
-            }
-        }
+        },
         Some(w) => Some(w.ready()?),
         None => None,
     };
@@ -89,20 +85,11 @@ pub fn run(
     }
     cancelled()?;
     progress(0.85);
-    let policy = Policy::of(settings);
-    let file = policy
-        .reads_file()
-        .then(|| exif::read(&photo.source))
-        .flatten();
+    let file = file.filter(|_| policy.reads_file());
     // LibRaw's capture settings stand in for EXIF that could not be read.
-    let libraw = file.is_none().then(|| {
-        let (main, exif) = super::metadata::from_metadata(&image.metadata);
-        exif::CameraExif {
-            main,
-            exif,
-            gps: Vec::new(),
-        }
-    });
+    let libraw = file
+        .is_none()
+        .then(|| exif::CameraExif::from_libraw(&image.metadata));
     let assembled = assemble(policy, file.as_ref(), libraw, &photo.values);
     let xmp = assembled
         .xmp
@@ -119,8 +106,6 @@ pub fn run(
         &options,
         &Embed {
             camera: Some(assembled.exif),
-            capture: true,
-            location: true,
             camera_fallback: policy.camera,
             xmp,
             ppi: settings.ppi,
