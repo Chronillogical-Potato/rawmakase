@@ -3,7 +3,7 @@
 //! settings a photo opens with.
 use crate::catalog::Catalog;
 use anyhow::Result;
-use rusqlite::OptionalExtension;
+use rusqlite::Connection;
 
 /// Set in `meta` once Lightroom history has been recovered from the stored catalog.
 const HISTORY_BACKFILLED: &str = "lightroom_history_backfilled";
@@ -78,36 +78,18 @@ impl Catalog {
     /// Lightroom catalog; copy its history steps once. Returns steps added.
     pub fn backfill_lightroom_history(&mut self) -> Result<usize> {
         // Once is enough: without history to recover, the stored catalog would
-        // otherwise be written out and attached on every open.
-        if self.meta(HISTORY_BACKFILLED)?.is_some() {
-            return Ok(0);
+        // otherwise be written out and attached on every open. History that
+        // came with the import leaves nothing to recover, so it is not.
+        if self.meta(HISTORY_BACKFILLED)?.is_none() && self.has_lightroom_history()? {
+            self.set_meta(HISTORY_BACKFILLED, "1")?;
         }
-        let copied = self.copy_lightroom_history()?;
-        self.set_meta(HISTORY_BACKFILLED, "1")?;
-        Ok(copied)
+        self.backfill_once(HISTORY_BACKFILLED, copy_history)
     }
-    fn copy_lightroom_history(&mut self) -> Result<usize> {
+    fn has_lightroom_history(&self) -> Result<bool> {
         let have: i64 = self
             .db
             .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
-        if have > 0 {
-            return Ok(0);
-        }
-        let copied = self.with_stored_lightroom(|db| {
-            let exists = db
-                .query_row(
-                    "SELECT 1 FROM lr.sqlite_master WHERE type='table' AND name='Adobe_libraryImageDevelopHistoryStep'",
-                    [],
-                    |r| r.get::<_, i32>(0),
-                )
-                .optional()?
-                .is_some();
-            if !exists {
-                return Ok(0);
-            }
-            Ok(db.execute(COPY_LIGHTROOM_HISTORY, [])?)
-        })?;
-        Ok(copied.unwrap_or(0))
+        Ok(have > 0)
     }
     pub fn lightroom_develop(&self, id: i64) -> Result<Option<String>> {
         Ok(self.db.query_row(
@@ -116,4 +98,12 @@ impl Catalog {
             |r| r.get(0),
         )?)
     }
+}
+
+/// Copies history steps from a Lightroom catalog attached as `lr` that has them.
+fn copy_history(db: &Connection) -> Result<usize> {
+    if !super::has_table(db, "lr", "Adobe_libraryImageDevelopHistoryStep")? {
+        return Ok(0);
+    }
+    Ok(db.execute(COPY_LIGHTROOM_HISTORY, [])?)
 }

@@ -301,11 +301,7 @@ impl Catalog {
             .optional()?)
     }
     fn set_meta(&self, key: &str, value: &str) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-            params![key, value],
-        )?;
-        Ok(())
+        set_meta(&self.db, key, value)
     }
     pub fn set_metadata(&mut self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
         self.set_metadata_of(&[(id, rating, flag, label.into())])
@@ -328,6 +324,15 @@ impl Catalog {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Records a fact about the catalog in its `meta` table.
+fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
+    db.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

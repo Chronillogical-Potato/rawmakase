@@ -331,18 +331,11 @@ impl Catalog {
 /// that have no row yet. Keywords, rating, label and flag come from
 /// Lightroom's own tables. Returns the photos read.
 pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
-    let has: bool = db
-        .query_row(
-            "SELECT count(*) FROM lr.sqlite_master WHERE type='table' AND name='Adobe_AdditionalMetadata'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )?
-        > 0;
-    if !has {
+    if !super::lightroom::has_table(db, "lr", "Adobe_AdditionalMetadata")? {
         return Ok(0);
     }
     let rows: Vec<(i64, String)> = db
-        .prepare(
+        .prepare(&format!(
             // Only photos that are still that Lightroom image: a photo
             // added since may have taken a removed copy's id.
             "SELECT m.image, m.xmp FROM lr.Adobe_AdditionalMetadata m
@@ -351,10 +344,9 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
              JOIN lr.AgLibraryFile f ON f.id_local = i.rootFile
              JOIN lr.AgLibraryFolder d ON d.id_local = f.folder
              JOIN lr.AgLibraryRootFolder r ON r.id_local = d.rootFolder
-             WHERE p.original_path = r.absolutePath || d.pathFromRoot ||
-                 CASE WHEN f.idx_filename <> '' THEN f.idx_filename
-                      ELSE f.baseName || '.' || f.extension END",
-        )?
+             WHERE p.original_path = r.absolutePath || d.pathFromRoot || {}",
+            super::lightroom::LIGHTROOM_FILENAME
+        ))?
         .query_map([], |r| {
             let xmp = match r.get_ref(1)? {
                 rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
@@ -393,19 +385,7 @@ impl Catalog {
     /// Catalogs imported before descriptive metadata was kept still hold
     /// the original Lightroom catalog; copy it once, for photos with no row.
     pub fn backfill_lightroom_metadata(&mut self) -> Result<usize> {
-        if self.meta(METADATA_BACKFILLED)?.is_some() {
-            return Ok(0);
-        }
-        let copied = self
-            .with_stored_lightroom(|db| {
-                let tx = db.unchecked_transaction()?;
-                let copied = copy_lightroom_metadata(&tx)?;
-                tx.commit()?;
-                Ok(copied)
-            })?
-            .unwrap_or(0);
-        self.set_meta(METADATA_BACKFILLED, "1")?;
-        Ok(copied)
+        self.backfill_once(METADATA_BACKFILLED, copy_lightroom_metadata)
     }
 }
 
