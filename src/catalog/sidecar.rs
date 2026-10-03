@@ -348,7 +348,8 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
         .query_map([], |r| {
             let xmp = match r.get_ref(1)? {
                 rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
-                    String::from_utf8_lossy(t).into_owned()
+                    // Invalid text is left out rather than imported mangled.
+                    String::from_utf8(t.to_vec()).unwrap_or_default()
                 }
                 _ => String::new(),
             };

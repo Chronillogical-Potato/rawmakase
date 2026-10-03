@@ -326,7 +326,7 @@ fn capture(text: &str) -> Option<Capture> {
         _ => return None,
     };
     let (hour, minute, second) = (n(&time[..2])?, n(&time[3..5])?, n(&time[6..8])?);
-    if day == 0 || day > days || hour > 23 || minute > 59 || second > 60 {
+    if day == 0 || day > days || hour > 23 || minute > 59 || second > 59 {
         return None;
     }
     if let Some(o) = &offset
@@ -395,9 +395,8 @@ fn location(p: &Packet) -> Option<Location> {
             Some("1") => true,
             Some(_) => return None,
         };
-        value
-            .is_finite()
-            .then_some(if below { -value } else { value })
+        // The magnitude only; the reference gives the side.
+        (value.is_finite() && value >= 0.).then_some(if below { -value } else { value })
     });
     Some(Location::At { lat, lon, alt })
 }
