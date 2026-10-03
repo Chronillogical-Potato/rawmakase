@@ -50,10 +50,6 @@ pub const DEFRINGE_RANGES: [[f32; 2]; 2] = [[0.3, 0.7], [0.4, 0.6]];
 #[serde(default, deny_unknown_fields)]
 pub struct Effects {
     pub channels: [ToneCurve; 3],
-    /// Lightroom's Refine Saturation (`crs:CurveRefineSaturation` / 100): how much of the
-    /// saturation the point curve adds or removes is kept. 1 is Lightroom's default; Camera
-    /// Raw renders values above 1 as 1.
-    pub curve_saturation: f32,
     pub parametric: [f32; 4],
     pub splits: [f32; 3],
     pub calibration: [[f32; 2]; 3],
@@ -89,7 +85,6 @@ impl Default for Effects {
     fn default() -> Self {
         Self {
             channels: std::array::from_fn(|_| ToneCurve::default()),
-            curve_saturation: 1.,
             parametric: [0.; 4],
             splits: [0.25, 0.5, 0.75],
             calibration: [[0.; 2]; 3],
@@ -154,10 +149,6 @@ impl Effects {
         for c in &self.channels {
             c.validate()?;
         }
-        ensure!(
-            (0. ..=2.).contains(&self.curve_saturation),
-            "Invalid Refine Saturation"
-        );
         ensure!(
             self.parametric
                 .iter()

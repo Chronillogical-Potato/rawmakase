@@ -157,6 +157,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         white_point: _,
         midtone: _,
         curve: _,
+        curve_saturation: _,
         saturation: _,
         vibrance: _,
         hsl: _,
@@ -183,7 +184,6 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         texture: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         channels: _,
-        curve_saturation: _,
         parametric: _,
         splits: _,
         calibration: _,

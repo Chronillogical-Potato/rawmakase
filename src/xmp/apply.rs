@@ -516,7 +516,7 @@ impl Preset {
         }
         settings.assign(
             "CurveRefineSaturation",
-            &mut r.effects.curve_saturation,
+            &mut r.curve_saturation,
             0.01,
             0.,
             2.,

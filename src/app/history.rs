@@ -373,7 +373,7 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         "Crop"
     } else if a.curve != b.curve
         || a.effects.channels != b.effects.channels
-        || a.effects.curve_saturation != b.effects.curve_saturation
+        || a.curve_saturation != b.curve_saturation
         || a.effects.parametric != b.effects.parametric
     {
         "Tone Curve"

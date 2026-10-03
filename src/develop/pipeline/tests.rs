@@ -95,6 +95,24 @@ fn panel_switches_round_trip_and_old_recipes_have_every_panel_on() {
     assert_eq!(back.panels.state(Panel::Detail), PanelState::Off);
     assert!(back.unknown.is_empty());
 }
+/// Refine Saturation is left out of recipes at its default and kept outside `effects`,
+/// whose older readers reject unknown fields, so releases that predate it still open
+/// every recipe.
+#[test]
+fn refine_saturation_is_omitted_at_its_default_and_round_trips() {
+    let json = serde_json::to_value(Recipe::default()).unwrap();
+    assert!(json.get("curve_saturation").is_none());
+    assert!(json["effects"].get("curve_saturation").is_none());
+    let r = Recipe {
+        curve_saturation: 0.25,
+        ..Default::default()
+    };
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back.curve_saturation, 0.25);
+    assert!(back.unknown.is_empty());
+    let old: Recipe = serde_json::from_value(json).unwrap();
+    assert_eq!(old.curve_saturation, 1.);
+}
 #[test]
 fn reference_color_extremes_stay_finite_and_in_gamut() {
     let im = fixture();
@@ -595,7 +613,7 @@ fn refine_saturation_zero_keeps_the_colours_saturation_through_the_point_curve()
     let input = [0.25, 0.08, 0.04];
     let render = |amount: f32| {
         let mut r = recipe.clone();
-        r.effects.curve_saturation = amount;
+        r.curve_saturation = amount;
         pro(apply_reference_curves(input, &r, &CurveSet::new(&r), None))
     };
     let (full, none, half) = (render(1.), render(0.), render(0.5));

@@ -467,7 +467,7 @@ fn apply_reference_curves(
     } else {
         [a; 3]
     };
-    let master = refine_saturation(p, master, r.effects.curve_saturation);
+    let master = refine_saturation(p, master, r.curve_saturation);
     let channels = std::array::from_fn(|c| srgb_decode(lut.channels[c].evaluate(master[c])));
     mul(crate::camera_profiles::PRO_TO_RGB, channels)
 }

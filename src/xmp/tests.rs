@@ -345,16 +345,13 @@ fn refine_saturation_imports_and_out_of_range_values_are_rejected() -> Result<()
         )?
         .apply(&Recipe::default(), &Metadata::default(), &[], None)
     };
-    assert_eq!(apply("0")?.effects.curve_saturation, 0.);
-    assert_eq!(apply("50")?.effects.curve_saturation, 0.5);
-    assert_eq!(apply("200")?.effects.curve_saturation, 2.);
+    assert_eq!(apply("0")?.curve_saturation, 0.);
+    assert_eq!(apply("50")?.curve_saturation, 0.5);
+    assert_eq!(apply("200")?.curve_saturation, 2.);
     assert!(apply("201").is_err());
     // A preset without it leaves the recipe's own.
     let base = Recipe {
-        effects: crate::develop::effects::Effects {
-            curve_saturation: 0.3,
-            ..Default::default()
-        },
+        curve_saturation: 0.3,
         ..Default::default()
     };
     let r = parse(Path::new("p.xmp"), &xml(r#"c:Exposure2012="1""#, ""))?.apply(
@@ -363,7 +360,7 @@ fn refine_saturation_imports_and_out_of_range_values_are_rejected() -> Result<()
         &[],
         None,
     )?;
-    assert_eq!(r.effects.curve_saturation, 0.3);
+    assert_eq!(r.curve_saturation, 0.3);
     Ok(())
 }
 #[test]

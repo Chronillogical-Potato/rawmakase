@@ -80,7 +80,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     r.grading[0] = [220. / 360., 0.2, -0.1];
     r.effects.clarity = 0.15;
     r.curve.points = vec![[0., 0.1], [0.5, 0.55], [1., 1.]];
-    r.effects.curve_saturation = 0.35;
+    r.curve_saturation = 0.35;
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
     r.upright = crate::develop::Upright {
         mode: crate::develop::UprightMode::Level,
@@ -123,7 +123,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
         (back.grading[0][0], r.grading[0][0]),
         (back.grading[0][2], r.grading[0][2]),
         (back.effects.clarity, r.effects.clarity),
-        (back.effects.curve_saturation, r.effects.curve_saturation),
+        (back.curve_saturation, r.curve_saturation),
     ] {
         assert!((a - b).abs() < 0.006, "{a} != {b}");
     }

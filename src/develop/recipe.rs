@@ -69,6 +69,12 @@ pub struct Recipe {
     pub white_point: f32,
     pub midtone: f32,
     pub curve: ToneCurve,
+    /// Lightroom's Refine Saturation (`crs:CurveRefineSaturation` / 100): how much of the
+    /// saturation the master point curve adds or removes is kept. 1 is Lightroom's
+    /// default; Camera Raw renders values above 1 as 1. Omitted at 1, so releases that
+    /// predate it read the recipe (and keep the field when it is set).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub curve_saturation: f32,
     pub saturation: f32,
     pub vibrance: f32,
     pub hsl: [[f32; 3]; 8],
@@ -156,6 +162,7 @@ impl Default for Recipe {
             white_point: 1.,
             midtone: 1.,
             curve: ToneCurve::default(),
+            curve_saturation: 1.,
             saturation: 0.,
             vibrance: 0.,
             hsl: [[0.; 3]; 8],
@@ -318,6 +325,7 @@ impl Recipe {
         ensure!(self.upright.validate(), "Invalid Upright");
         ensure!(
             (0. ..=2.).contains(&self.lens_distortion)
+                && (0. ..=2.).contains(&self.curve_saturation)
                 && (0. ..=2.).contains(&self.lens_vignetting),
             "Invalid lens correction amount"
         );
@@ -491,6 +499,9 @@ impl Recipe {
             *v /= g;
         }
     }
+}
+fn is_one(v: &f32) -> bool {
+    *v == 1.
 }
 fn one() -> f32 {
     1.

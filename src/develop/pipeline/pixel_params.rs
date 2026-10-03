@@ -231,7 +231,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("SPLITS", &e.splits);
     let master = p.push(lut.master.values().iter().copied());
     p.set("MASTER", &[master]);
-    p.set("REFINE_SATURATION", &[e.curve_saturation.clamp(0., 1.)]);
+    p.set("REFINE_SATURATION", &[r.curve_saturation.clamp(0., 1.)]);
     let channels = lut
         .channels
         .each_ref()
