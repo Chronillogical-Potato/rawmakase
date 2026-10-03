@@ -233,37 +233,57 @@ impl ManualDistortion {
     }
     /// The source position (0–1 of the frame) that output position (`x`, `y`) samples.
     fn source(&self, x: f32, y: f32) -> [f32; 2] {
-        let g = self.ratio(self.radius_squared(x, y));
+        let rho = self.radius_squared(x, y).sqrt();
+        let g = if rho > 1e-6 {
+            self.source_radius(rho) / rho
+        } else {
+            1. + self.k
+        };
         [0.5 + (x - 0.5) * g, 0.5 + (y - 0.5) * g]
     }
     /// The output position that samples source position (`x`, `y`): the inverse of
-    /// [`Self::source`], its radius found with Newton steps (the map is monotonic for
-    /// every amount).
+    /// [`Self::source`], its radius found by bisection on the increasing radial map.
     fn output(&self, x: f32, y: f32) -> [f32; 2] {
         let target = self.radius_squared(x, y).sqrt();
         if target < 1e-6 {
             return [x, y];
         }
-        let mut rho = target;
-        for _ in 0..8 {
-            let value = rho * self.ratio(rho * rho) - target;
-            let slope = 1. + self.k - 3. * self.k * rho * rho;
-            let step = value / slope;
-            rho -= step;
-            if step.abs() < 1e-7 {
-                break;
+        // The map's slope is at least min(1, 1 + k) up to `turn`, and 1 beyond it, where
+        // it lies below rho by less than `turn`.
+        let (mut lo, mut hi) = (
+            0f32,
+            target / (1. + self.k.min(0.)) + self.turn().unwrap_or(0.),
+        );
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if self.source_radius(mid) < target {
+                lo = mid;
+            } else {
+                hi = mid;
             }
         }
-        let scale = rho / target;
+        let scale = 0.5 * (lo + hi) / target;
         [0.5 + (x - 0.5) * scale, 0.5 + (y - 0.5) * scale]
+    }
+    /// Source radius for output radius `rho` (1 at the frame's corners): Camera Raw's
+    /// rho·(1 + k(1 − rho²)) up to where it stops increasing (for positive amounts, just
+    /// beyond the corners), and a slope of 1 past that, so positions outside the frame
+    /// map one to one and fall outside the photo.
+    fn source_radius(&self, rho: f32) -> f32 {
+        let f = |r: f32| r * (1. + self.k * (1. - r * r));
+        match self.turn() {
+            Some(turn) if rho > turn => f(turn) + rho - turn,
+            _ => f(rho),
+        }
+    }
+    /// Where the radial map stops increasing, for positive amounts.
+    fn turn(&self) -> Option<f32> {
+        (self.k > 0.).then(|| ((1. + self.k) / (3. * self.k)).sqrt())
     }
     fn radius_squared(&self, x: f32, y: f32) -> f32 {
         let dx = (x - 0.5) * 2. * self.axes[0];
         let dy = (y - 0.5) * 2. * self.axes[1];
         dx * dx + dy * dy
-    }
-    fn ratio(&self, r2: f32) -> f32 {
-        1. + self.k * (1. - r2)
     }
 }
 
@@ -592,10 +612,15 @@ mod manual_distortion_tests {
             assert!((ratio - centre).abs() < 2e-3, "{amount}: {ratio}");
             let [ex, ey] = g.source(0., 0.5);
             assert_eq!(g.outside(ex, ey), amount > 0., "{amount}: {ex}");
-            for p in [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1]] {
+            // Positions well outside the frame (spots and masks may sit there) map back
+            // too: past the corners the map continues one to one.
+            for p in [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1], [1.8, 1.5], [-0.9, 2.5]] {
                 let [x, y] = g.source(p[0], p[1]);
                 let back = g.view(x, y);
-                assert!((back[0] - p[0]).abs() < 1e-4 && (back[1] - p[1]).abs() < 1e-4);
+                assert!(
+                    (back[0] - p[0]).abs() < 1e-3 && (back[1] - p[1]).abs() < 1e-3,
+                    "{amount} {p:?}: {back:?}"
+                );
             }
         }
         // Off at 0 and before engine 4.

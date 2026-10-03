@@ -3,14 +3,12 @@ use super::{Editor, worker::Event};
 use crate::develop::{Recipe, UprightMode};
 
 /// What the analysis measures: the photo's orientation and lens correction.
-fn inputs(r: &Recipe) -> (u8, bool, bool, bool, bool, u32) {
+fn inputs(r: &Recipe) -> (u8, bool, bool, crate::develop::upright::LensInputs) {
     (
         r.rotation,
         r.flip_x,
         r.flip_y,
-        r.lens_builtin,
-        r.lens_profile,
-        r.lens_distortion.to_bits(),
+        crate::develop::upright::LensInputs::of(r),
     )
 }
 

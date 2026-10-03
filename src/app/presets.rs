@@ -617,6 +617,7 @@ impl Editor {
 }
 /// A preset's Upright mode, with this photo's own corrections rather than any the preset
 /// carries from the photo it was saved from; a mode without one is analysed on apply.
+/// New lens settings call for a new analysis, as pasting them does.
 fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
     if r.upright != current.upright {
         let mode = r.upright.mode;
@@ -625,6 +626,10 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
         if mode == crate::develop::UprightMode::Guided && r.upright.correction().is_none() {
             r.upright.mode = current.upright.mode;
         }
+    }
+    use crate::develop::upright::LensInputs;
+    if LensInputs::of(r) != LensInputs::of(current) {
+        r.upright.clear_analysis();
     }
 }
 /// A History row: the step on the left, its value on the right. The current
@@ -687,4 +692,26 @@ fn format_unix(seconds: i64) -> String {
 #[test]
 fn formats_lightroom_history_dates() {
     assert_eq!(format_unix(1_469_686_444), "2016-07-28 06:14");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// A preset that changes only a lens setting leaves no Upright correction analysed
+    /// through the old one: the editor analyses the photo again.
+    #[test]
+    fn presets_with_new_lens_settings_drop_the_photos_upright_analysis() {
+        let mut current = Recipe::default();
+        current.upright.mode = crate::develop::UprightMode::Level;
+        current.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
+        let mut same = current.clone();
+        same.exposure = 1.;
+        this_photos_upright(&mut same, &current);
+        assert_eq!(same.upright, current.upright);
+        let mut lens = current.clone();
+        lens.lens_manual_distortion = 0.3;
+        this_photos_upright(&mut lens, &current);
+        assert!(lens.upright.corrections.is_empty());
+        assert_eq!(lens.upright.mode, crate::develop::UprightMode::Level);
+    }
 }

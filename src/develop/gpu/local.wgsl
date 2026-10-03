@@ -324,7 +324,20 @@ fn source(u: f32, v: f32) -> vec2<f32> {
     if k != 0.0 {
         let dx = (ox - 0.5) * 2.0 * s(S_MANUAL + 1u);
         let dy = (oy - 0.5) * 2.0 * s(S_MANUAL + 2u);
-        let g = 1.0 + k * (1.0 - dx * dx - dy * dy);
+        let rho = sqrt(dx * dx + dy * dy);
+        var g = 1.0 + k;
+        if rho > 1e-6 {
+            var r = rho;
+            var extra = 0.0;
+            if k > 0.0 {
+                let turn = sqrt((1.0 + k) / (3.0 * k));
+                if rho > turn {
+                    r = turn;
+                    extra = rho - turn;
+                }
+            }
+            g = (r * (1.0 + k * (1.0 - r * r)) + extra) / rho;
+        }
         ox = 0.5 + (ox - 0.5) * g;
         oy = 0.5 + (oy - 0.5) * g;
     }

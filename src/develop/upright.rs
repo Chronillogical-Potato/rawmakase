@@ -4,6 +4,31 @@
 use super::{Geometry, Recipe, image_space::LensMap};
 use crate::raw::CameraImage;
 
+/// The lens settings an analysis is made through: when any of them changes, the
+/// corrections analysed before no longer fit the photo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensInputs {
+    builtin: bool,
+    profile: bool,
+    distortion: f32,
+    manual_distortion: f32,
+    panel: super::panels::PanelState,
+    /// Lens corrections render from process version 4.
+    current_engine: bool,
+}
+impl LensInputs {
+    pub fn of(r: &Recipe) -> Self {
+        Self {
+            builtin: r.lens_builtin,
+            profile: r.lens_profile,
+            distortion: r.lens_distortion,
+            manual_distortion: r.lens_manual_distortion,
+            panel: r.panels.state(super::panels::Panel::LensCorrections),
+            current_engine: r.engine >= 4,
+        }
+    }
+}
+
 /// Long edge of the image the lines are found in.
 const ANALYSIS_EDGE: u32 = 1024;
 
@@ -41,6 +66,9 @@ pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) 
     let step = (iw.max(ih) as f32 / w.max(h) as f32).max(1.);
     let taps = (step.round() as usize).clamp(1, 4);
     let mut out = vec![0f32; w * h];
+    // Taps with no photo behind them (manual Distortion's white border), which render
+    // white; they are set to white once the white level is known.
+    let mut blank = vec![0u8; w * h];
     for y in 0..h {
         for x in 0..w {
             let mut sum = 0.;
@@ -49,6 +77,10 @@ pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) 
                     let u = (x as f32 + (i as f32 + 0.5) / taps as f32) / w as f32;
                     let v = (y as f32 + (j as f32 + 0.5) / taps as f32) / h as f32;
                     let [sx, sy] = g.source(u, v);
+                    if g.outside(sx, sy) {
+                        blank[y * w + x] += 1;
+                        continue;
+                    }
                     let [sx, sy] = lens.as_ref().map_or([sx, sy], |l| l.forward(sx, sy));
                     // Clamped to the edge, as rendering samples.
                     sum += at(sx.max(0.) as usize, sy.max(0.) as usize);
@@ -64,8 +96,9 @@ pub fn analysis_image(im: &CameraImage, r: &Recipe) -> (Vec<f32>, usize, usize) 
         .copied()
         .unwrap_or(1.)
         .max(1e-6);
-    for v in &mut out {
-        *v = (*v / white).clamp(0., 1.).sqrt() * 255.;
+    let taps = (taps * taps) as f32;
+    for (v, blank) in out.iter_mut().zip(blank) {
+        *v = (*v / white + blank as f32 / taps).clamp(0., 1.).sqrt() * 255.;
     }
     (out, w, h)
 }
@@ -673,6 +706,38 @@ mod tests {
             })
             .collect();
         (image, w, h, if d[1] < 0. { d.map(|v| -v) } else { d })
+    }
+
+    /// Manual Distortion's white border is analysed as the white it renders, not as
+    /// edge pixels stretched into it.
+    #[test]
+    fn analysis_sees_manual_distortions_white_border() {
+        let im = CameraImage {
+            width: 300,
+            height: 200,
+            // Darker towards the left edge, which the border covers.
+            pixels: (0..300 * 200)
+                .map(|i| [0.05 + 0.9 * (i % 300) as f32 / 300.; 3])
+                .collect(),
+            metadata: crate::raw::Metadata {
+                width: 300,
+                height: 200,
+                wb: [1.; 3],
+                ..Default::default()
+            },
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+            recovered: Default::default(),
+        };
+        let r = Recipe {
+            wb: [1.; 3],
+            lens_manual_distortion: 1.,
+            ..Default::default()
+        };
+        let (image, w, h) = analysis_image(&im, &r);
+        assert_eq!(image[h / 2 * w], 255.);
+        assert!(image[h / 2 * w + w / 2] < 255.);
     }
 
     #[test]
