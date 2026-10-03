@@ -177,15 +177,21 @@ pub fn read(text: &str) -> Result<Read> {
             }
         }),
         label: p.text(XMP, "Label").or_else(|| {
-            p.text(DIGIKAM, "ColorLabel")
-                .and_then(|c| digikam_label(&c))
+            p.text(DIGIKAM, "ColorLabel").and_then(|c| {
+                // Empty: no label, as "0" is.
+                if c.is_empty() {
+                    Some(String::new())
+                } else {
+                    digikam_label(&c)
+                }
+            })
         }),
         flag: p
             .text(DIGIKAM, "PickLabel")
             .and_then(|f| match f.as_str() {
                 "1" => Some(-1),
                 "3" => Some(1),
-                "0" | "2" => Some(0),
+                "" | "0" | "2" => Some(0),
                 _ => None,
             })
             .or_else(|| {
@@ -382,7 +388,13 @@ fn location(p: &Packet) -> Option<Location> {
             Some((n, d)) => n.trim().parse::<f64>().ok()? / d.trim().parse::<f64>().ok()?,
             None => a.trim().parse().ok()?,
         };
-        let below = p.text(EXIF, "GPSAltitudeRef").as_deref() == Some("1");
+        // Above sea level unless the reference says below; any other
+        // reference leaves the altitude out.
+        let below = match p.text(EXIF, "GPSAltitudeRef").as_deref() {
+            None | Some("0") => false,
+            Some("1") => true,
+            Some(_) => return None,
+        };
         value
             .is_finite()
             .then_some(if below { -value } else { value })

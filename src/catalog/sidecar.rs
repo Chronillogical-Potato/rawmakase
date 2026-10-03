@@ -144,7 +144,9 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             Ok(main
                 .get(&700)
                 .and_then(|e| t.raw(e))
-                .map(|b| String::from_utf8_lossy(&b).into_owned()))
+                .map(String::from_utf8)
+                .transpose()
+                .context("embedded XMP is not valid UTF-8")?)
         }
         _ => Ok(None),
     }
