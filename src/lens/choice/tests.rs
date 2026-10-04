@@ -284,3 +284,28 @@ fn choosing_an_imported_profile_replaces_the_cameras_own() {
     assert!(!c.id.as_ref().unwrap().embedded);
     assert_eq!(used(&c, &m).as_deref(), Some(ADOBE));
 }
+
+#[test]
+fn a_profile_whose_entries_for_this_lens_have_no_model_is_not_its_match() {
+    // One file with an empty entry for the photo's lens and a usable one for another.
+    let usable = test_profile("Testcam", "50mm F2", "Adobe (Testcam 35/50)", 0.01, -0.4);
+    let empty = test_profile("Testcam", "35mm F2", "Adobe (Testcam 35/50)", 0., 0.).replace(
+        r#"<stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="0">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="0"/>
+ </rdf:Description></stCamera:PerspectiveModel>"#,
+        "",
+    );
+    let entry = |t: &str| {
+        let start = t.find("<rdf:li>").unwrap();
+        let end = t.rfind("</rdf:li>").unwrap() + "</rdf:li>".len();
+        t[start..end].to_string()
+    };
+    let both = usable.replace(&entry(&usable), &(entry(&empty) + &entry(&usable)));
+    let mut m = photo();
+    m.lens_profiles = Library::from_texts([("both.lcp", both.as_str())]).for_photo(&m);
+    assert_eq!(m.lens_profiles.all().len(), 1);
+    assert!(m.lens_profiles.auto(&m).is_none());
+    let custom = choice(LensProfileSetup::Custom, id("both.lcp"));
+    let candidate = custom.resolve(&m.lens_profiles, &m).used.unwrap();
+    assert!(candidate.correction(&m).is_some());
+}

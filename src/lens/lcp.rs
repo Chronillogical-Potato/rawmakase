@@ -485,7 +485,9 @@ impl Library {
                 profile: Arc::clone(p),
                 lens_rank: p
                     .usable()
-                    .filter(|e| lens_matches(e, m))
+                    // Entries of this lens without a correction model don't make it
+                    // a profile of this lens.
+                    .filter(|e| e.has_model() && lens_matches(e, m))
                     .filter_map(|e| make_rank(e, m))
                     .min(),
                 correction: OnceLock::new(),
