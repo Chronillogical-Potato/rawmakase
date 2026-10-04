@@ -7,11 +7,12 @@ use super::state::{MixerTab, Tool};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
     SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
-    slider_with, tone_curve_ui, toolbar_action,
+    slider_with, switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
+use crate::develop::panels::{Panel, PanelState};
 use crate::develop::{
     NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, Treatment,
 };
@@ -754,7 +755,8 @@ impl Editor {
             r.blacks = 0.;
         }
 
-        if adjustment_section(ui, "Tone Curve", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::ToneCurve);
+        if switched_section(ui, "Tone Curve", &mut switch.state, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.;
                 segmented(
@@ -839,12 +841,18 @@ impl Editor {
             r.curve_saturation = 1.;
             r.effects.parametric = [0.; 4];
         }
+        switch.finish(r);
 
         // The B&W panel replaces the Color Mixer whenever the photo renders black &
         // white, by its Treatment or by a black & white profile.
         let black_white = r.treatment() == Treatment::BlackWhite;
-        let mixer_title = if black_white { "B&W" } else { "Color Mixer" };
-        if adjustment_section(ui, mixer_title, |ui| {
+        let (mixer_title, mixer_panel) = if black_white {
+            ("B&W", Panel::BlackWhiteMix)
+        } else {
+            ("Color Mixer", Panel::ColorMixer)
+        };
+        let mut switch = PanelSwitch::new(r, mixer_panel);
+        if switched_section(ui, mixer_title, &mut switch.state, |ui| {
             if black_white {
                 let heading = subheading(ui, "Black & White Mix");
                 // Measured (once) only while this panel is open.
@@ -999,8 +1007,10 @@ impl Editor {
                 r.point_colors.clear();
             }
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Color Grading", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::ColorGrading);
+        if switched_section(ui, "Color Grading", &mut switch.state, |ui| {
             ui.push_id(grading_document, |ui| {
                 super::color_grading::color_grading_ui(ui, r, &mut view.grading);
             });
@@ -1010,8 +1020,10 @@ impl Editor {
             r.effects.balance = 0.;
             r.effects.blending = 0.5;
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Detail", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::Detail);
+        if switched_section(ui, "Detail", &mut switch.state, |ui| {
             subheading(ui, "Sharpening");
             slider_with(
                 ui,
@@ -1065,8 +1077,10 @@ impl Editor {
             r.sharpening_detail = 0.25;
             r.sharpening_masking = 0.35;
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Lens Corrections", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::LensCorrections);
+        if switched_section(ui, "Lens Corrections", &mut switch.state, |ui| {
             subheading(ui, "Profile");
             let builtin = metadata.as_ref().and_then(|m| m.lens.as_ref());
             let adobe = metadata.as_ref().and_then(|m| m.profile_lens.as_ref());
@@ -1222,8 +1236,10 @@ impl Editor {
             r.effects.lens_vignette = d.lens_vignette;
             r.effects.lens_vignette_midpoint = d.lens_vignette_midpoint;
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Transform", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::Transform);
+        if switched_section(ui, "Transform", &mut switch.state, |ui| {
             let supported = r.engine >= 4;
             if !supported {
                 hint_row(ui, "Update the process in Calibration to use Transform.");
@@ -1329,8 +1345,10 @@ impl Editor {
             r.upright = Default::default();
             r.constrain_crop = false;
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Effects", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::Effects);
+        if switched_section(ui, "Effects", &mut switch.state, |ui| {
             subheading(ui, "Post-Crop Vignetting");
             slider(ui, "Amount", &mut r.effects.vignette, -1. ..=1., 0.);
             slider(
@@ -1362,8 +1380,10 @@ impl Editor {
         }) {
             r.effects.reset_post_crop();
         }
+        switch.finish(r);
 
-        if adjustment_section(ui, "Calibration", |ui| {
+        let mut switch = PanelSwitch::new(r, Panel::Calibration);
+        if switched_section(ui, "Calibration", &mut switch.state, |ui| {
             subheading(ui, "Process");
             if r.engine < 4 {
                 ui.horizontal(|ui| {
@@ -1455,6 +1475,7 @@ impl Editor {
             r.effects.calibration = [[0.; 2]; 3];
             r.effects.shadow_tint = 0.;
         }
+        switch.finish(r);
         if let Some(kind) = auto_request {
             self.start_auto(kind);
         }
@@ -1577,6 +1598,34 @@ fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
         0 => (band_color((band + 7) % 8), band_color((band + 1) % 8)),
         1 => (theme::gray(110), color),
         _ => (theme::gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
+    }
+}
+/// A panel's switch while its section is drawn. Changing a setting in a panel that
+/// is off turns it back on, as in Lightroom, so the change shows.
+pub(super) struct PanelSwitch {
+    panel: Panel,
+    pub(super) state: PanelState,
+    /// The recipe before the section, kept only while the panel is off.
+    before: Option<Recipe>,
+}
+impl PanelSwitch {
+    pub(super) fn new(r: &Recipe, panel: Panel) -> Self {
+        let state = r.panels.state(panel);
+        Self {
+            panel,
+            state,
+            before: (state == PanelState::Off).then(|| r.clone()),
+        }
+    }
+    /// Stores the switch, turned on if the section changed a setting while off.
+    pub(super) fn finish(self, r: &mut Recipe) {
+        let edited = self.before.is_some_and(|before| before != *r);
+        let state = if edited && self.state == PanelState::Off {
+            PanelState::On
+        } else {
+            self.state
+        };
+        r.panels.set(self.panel, state);
     }
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.

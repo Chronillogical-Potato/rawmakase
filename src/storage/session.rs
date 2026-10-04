@@ -9,6 +9,10 @@ pub struct Session {
     /// Titles of panel sections the user collapsed; all others start open.
     #[serde(default)]
     pub collapsed: std::collections::BTreeSet<String>,
+    /// The sides of the window in Solo Mode, where opening a panel closes the
+    /// others: "develop-left", "develop-right", "library-left", "library-right".
+    #[serde(default)]
+    pub solo: std::collections::BTreeSet<String>,
     /// The first-run setup was completed; until then it opens on launch.
     #[serde(default)]
     pub onboarding_done: bool,

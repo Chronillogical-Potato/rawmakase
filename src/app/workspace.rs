@@ -147,6 +147,15 @@ impl Editor {
             self.collapsed = collapsed;
             let _ = self.save_session();
         }
+        let solo = ctx.data(|d| {
+            d.get_temp::<std::collections::BTreeSet<String>>(super::widgets::solo_sections_id())
+        });
+        if let Some(solo) = solo
+            && solo != self.solo
+        {
+            self.solo = solo;
+            let _ = self.save_session();
+        }
         self.sync_undo();
         let place = self.current_place();
         let layout = self.library.as_ref().map(|l| l.layout());
@@ -552,6 +561,7 @@ impl Editor {
             .min_size(180.)
             .max_size(500.)
             .show(ui, |ui| {
+                let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
                 // In the Loupe, the Navigator controls the zoom: Develop's for
                 // a RAW, the same one for other photos.
                 let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
@@ -587,6 +597,10 @@ impl Editor {
             .min_size(220.)
             .max_size(420.)
             .show(ui, |ui| {
+                let _side = super::widgets::SectionSide::enter(
+                    ui,
+                    super::widgets::SectionGroup::LibraryRight,
+                );
                 if let Some(library) = &mut self.library {
                     action = action.then(library.info_panel(ui));
                 }
@@ -952,6 +966,10 @@ impl Editor {
             .min_size(180.)
             .max_size(400.)
             .show(ui, |ui| {
+                let _side = super::widgets::SectionSide::enter(
+                    ui,
+                    super::widgets::SectionGroup::DevelopLeft,
+                );
                 self.navigator_ui(ui);
                 self.presets_ui(ui);
             });
@@ -962,6 +980,10 @@ impl Editor {
             .min_size(300.)
             .max_size(400.)
             .show(ui, |ui| {
+                let _side = super::widgets::SectionSide::enter(
+                    ui,
+                    super::widgets::SectionGroup::DevelopRight,
+                );
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.add_enabled_ui(self.document.full().is_some() && !self.view.compare, |ui| {
                         self.controls(ui)

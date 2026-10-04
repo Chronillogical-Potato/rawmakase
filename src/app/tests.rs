@@ -3690,3 +3690,194 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     assert!(recipe.point_colors.is_empty());
     assert_eq!(editor.visualized_swatch(), Some(0));
 }
+
+/// Runs one frame of `add` in a 360-point-wide window at `time`.
+fn widget_frame(
+    ctx: &egui::Context,
+    time: f64,
+    events: Vec<egui::Event>,
+    add: impl FnMut(&mut egui::Ui),
+) {
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(360., 600.))),
+            time: Some(time),
+            events,
+            ..Default::default()
+        },
+        add,
+    );
+    output.textures_delta.clear();
+}
+fn click_at(at: Pos2, button: egui::PointerButton) -> Vec<egui::Event> {
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    vec![egui::Event::PointerMoved(at), press(true), press(false)]
+}
+#[test]
+fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
+    use crate::develop::panels::PanelState;
+    let ctx = egui::Context::default();
+    let mut state = PanelState::On;
+    let area = std::cell::Cell::new(Rect::NOTHING);
+    let draw = |state: &mut PanelState, events, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            area.set(ui.max_rect());
+            super::widgets::switched_section(ui, "Tone Curve", state, |ui| {
+                ui.label("contents");
+            });
+        })
+    };
+    draw(&mut state, vec![], 0.);
+    // The switch sits left of the reset button, in the 28-point header 8 points down.
+    let area = area.get();
+    let switch = Pos2::new(area.right() - 28. - 18., area.top() + 8. + 14.);
+    draw(
+        &mut state,
+        click_at(switch, egui::PointerButton::Primary),
+        1.,
+    );
+    assert_eq!(state, PanelState::Off);
+    draw(
+        &mut state,
+        click_at(switch, egui::PointerButton::Primary),
+        2.,
+    );
+    assert_eq!(state, PanelState::On);
+    let collapsed: Option<std::collections::BTreeSet<String>> =
+        ctx.data(|d| d.get_temp(super::widgets::collapsed_sections_id()));
+    assert!(collapsed.is_none_or(|set| set.is_empty()));
+}
+#[test]
+fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
+    use crate::develop::panels::{Panel, PanelState};
+    let mut r = develop::Recipe::default();
+    r.panels.set(Panel::Detail, PanelState::Off);
+    // Drawing it without a change keeps it off.
+    super::inspector::PanelSwitch::new(&r, Panel::Detail).finish(&mut r);
+    assert_eq!(r.panels.state(Panel::Detail), PanelState::Off);
+    let switch = super::inspector::PanelSwitch::new(&r, Panel::Detail);
+    r.sharpening = 0.6;
+    switch.finish(&mut r);
+    assert_eq!(r.panels.state(Panel::Detail), PanelState::On);
+    // Clicking the switch off stays off.
+    let mut switch = super::inspector::PanelSwitch::new(&r, Panel::Detail);
+    switch.state = PanelState::Off;
+    switch.finish(&mut r);
+    assert_eq!(r.panels.state(Panel::Detail), PanelState::Off);
+    // A switched-off panel renders, and so exports, at its defaults.
+    assert_eq!(r.as_rendered().sharpening, 0.);
+}
+#[test]
+fn solo_mode_opens_one_panel_per_side_and_is_set_from_the_header_menu() {
+    use super::widgets::{SectionGroup, SectionSide};
+    let ctx = egui::Context::default();
+    let titles = ["Basic", "Tone Curve", "Detail"];
+    let headers = std::cell::RefCell::new(Vec::new());
+    let draw = |events, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let _side = SectionSide::enter(ui, SectionGroup::DevelopRight);
+            headers.borrow_mut().clear();
+            for title in titles {
+                headers.borrow_mut().push(ui.cursor().top() + 8. + 14.);
+                super::widgets::section(ui, title, false, |ui| {
+                    ui.label(title);
+                });
+            }
+        })
+    };
+    let collapsed = || -> std::collections::BTreeSet<String> {
+        ctx.data(|d| d.get_temp(super::widgets::collapsed_sections_id()))
+            .unwrap_or_default()
+    };
+    draw(vec![], 0.);
+    // Right-click Tone Curve's header, then Solo Mode in its menu.
+    let header = Pos2::new(60., headers.borrow()[1]);
+    draw(click_at(header, egui::PointerButton::Secondary), 1.);
+    draw(vec![], 1.1);
+    let item = Pos2::new(header.x + 30., header.y + 14.);
+    draw(click_at(item, egui::PointerButton::Primary), 2.);
+    let solo: Option<std::collections::BTreeSet<String>> =
+        ctx.data(|d| d.get_temp(super::widgets::solo_sections_id()));
+    assert_eq!(solo, Some(["develop-right".to_string()].into()));
+    assert_eq!(
+        collapsed(),
+        ["Basic".to_string(), "Detail".to_string()].into()
+    );
+    // Opening Detail closes Tone Curve.
+    draw(vec![], 3.);
+    let detail = Pos2::new(60., headers.borrow()[2]);
+    draw(click_at(detail, egui::PointerButton::Primary), 4.);
+    assert_eq!(
+        collapsed(),
+        ["Basic".to_string(), "Tone Curve".to_string()].into()
+    );
+}
+#[test]
+fn up_and_down_nudge_the_hovered_slider_but_never_while_typing_or_scrolling() {
+    let ctx = egui::Context::default();
+    let mut value = 0.;
+    let mut text = String::new();
+    let row = std::cell::Cell::new(Rect::NOTHING);
+    let mut draw = |value: &mut f32, focus: bool, events: Vec<egui::Event>, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let top = ui.cursor().min;
+            super::widgets::slider(ui, "Contrast", value, -1. ..=1., 0.);
+            row.set(Rect::from_min_max(
+                top,
+                Pos2::new(ui.max_rect().right(), ui.cursor().top()),
+            ));
+            let field = ui.text_edit_singleline(&mut text);
+            if focus {
+                field.request_focus();
+            }
+        })
+    };
+    let key = |key, modifiers| egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    draw(&mut value, false, vec![], 0.);
+    let row = row.get();
+    let over = egui::Event::PointerMoved(Pos2::new(row.center().x, row.top() + 12.));
+    draw(&mut value, false, vec![over.clone()], 1.);
+    draw(
+        &mut value,
+        false,
+        vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+        2.,
+    );
+    assert!((value - 0.01).abs() < 1e-6, "{value}");
+    draw(
+        &mut value,
+        false,
+        vec![key(egui::Key::ArrowDown, egui::Modifiers::SHIFT)],
+        3.,
+    );
+    assert!((value + 0.09).abs() < 1e-6, "{value}");
+    // Scrolling over it never moves it.
+    let scroll = egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: Vec2::new(0., -3.),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    };
+    draw(&mut value, false, vec![scroll], 4.);
+    assert!((value + 0.09).abs() < 1e-6, "{value}");
+    // While a text field has the keyboard, the keys are the field's.
+    draw(&mut value, true, vec![], 5.);
+    draw(
+        &mut value,
+        true,
+        vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+        6.,
+    );
+    assert!((value + 0.09).abs() < 1e-6, "{value}");
+}

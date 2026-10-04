@@ -223,7 +223,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset, and Update, Rename and Delete for presets made here (`presets/user.rs`, written by `xmp/preset_write.rs`). |
 | [photo_metadata.rs](../src/app/photo_metadata.rs) | Rating, color label and pick/reject controls and shortcuts. |
-| [widgets.rs](../src/app/widgets.rs) | Shared buttons, adjustment sections, sliders, curve editor and workspace tabs. |
+| [widgets.rs](../src/app/widgets.rs) | Shared buttons, adjustment sections (with Lightroom's panel switches and per-side Solo Mode), sliders (Up/Down over a hovered slider), curve editor and workspace tabs. |
 | [library/mod.rs](../src/app/library/mod.rs) | The Library: composes the owners below, writes metadata and virtual-copy changes to the catalog, and draws the sidebar, grid, filmstrip and info panel. |
 | [library/filter.rs](../src/app/library/filter.rs) | The source (folder scope or collection), the filter bar's search, flag, rating and label, the offline filter and sort order; computes what is shown. |
 | [library/availability.rs](../src/app/library/availability.rs) | Which originals are online, found out in the background while the Library already shows them. |

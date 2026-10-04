@@ -1,5 +1,6 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
+use crate::develop::panels::PanelState;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -135,8 +136,140 @@ pub(super) fn section_with(
     button: HeaderButton,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> bool {
+    section_header(ui, title, button, None, contents)
+}
+/// A resettable Develop panel with Lightroom's on/off switch in its header, over
+/// the photo's `Enable*` setting; returns whether reset was clicked.
+pub(super) fn switched_section(
+    ui: &mut egui::Ui,
+    title: &str,
+    switch: &mut PanelState,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    section_header(ui, title, HeaderButton::Reset, Some(switch), contents)
+}
+/// The side of the window a panel is in. Solo Mode is per side, as in Lightroom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SectionGroup {
+    DevelopLeft,
+    DevelopRight,
+    LibraryLeft,
+    LibraryRight,
+}
+impl SectionGroup {
+    /// A stable name, as saved in the session.
+    pub(super) fn key(self) -> &'static str {
+        match self {
+            SectionGroup::DevelopLeft => "develop-left",
+            SectionGroup::DevelopRight => "develop-right",
+            SectionGroup::LibraryLeft => "library-left",
+            SectionGroup::LibraryRight => "library-right",
+        }
+    }
+}
+/// Where the sides in Solo Mode live in egui memory, by [`SectionGroup::key`]; the
+/// editor seeds it from the session and saves it back when it changes.
+pub(super) fn solo_sections_id() -> egui::Id {
+    egui::Id::new("rawmakase-solo-sections")
+}
+fn section_group_id() -> egui::Id {
+    egui::Id::new("rawmakase-section-group")
+}
+/// Every section title drawn so far on each side, so Solo Mode can close the others.
+fn section_titles_id() -> egui::Id {
+    egui::Id::new("rawmakase-section-titles")
+}
+type SectionTitles = std::collections::BTreeMap<String, std::collections::BTreeSet<String>>;
+/// While alive, the sections drawn belong to one side of the window.
+pub(super) struct SectionSide {
+    ctx: egui::Context,
+}
+impl SectionSide {
+    pub(super) fn enter(ui: &egui::Ui, group: SectionGroup) -> Self {
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(section_group_id(), Some(group.key())));
+        Self {
+            ctx: ui.ctx().clone(),
+        }
+    }
+}
+impl Drop for SectionSide {
+    fn drop(&mut self) {
+        self.ctx
+            .data_mut(|d| d.insert_temp::<Option<&'static str>>(section_group_id(), None));
+    }
+}
+fn current_group(ui: &egui::Ui) -> Option<&'static str> {
+    ui.ctx()
+        .data(|d| d.get_temp::<Option<&'static str>>(section_group_id()))
+        .flatten()
+}
+fn solo(ui: &egui::Ui, group: &str) -> bool {
+    ui.ctx().data(|d| {
+        d.get_temp::<std::collections::BTreeSet<String>>(solo_sections_id())
+            .is_some_and(|set| set.contains(group))
+    })
+}
+fn set_open(ui: &egui::Ui, title: &str, open: bool) {
+    ui.ctx().data_mut(|d| {
+        let set = d
+            .get_temp_mut_or_default::<std::collections::BTreeSet<String>>(collapsed_sections_id());
+        if open {
+            set.remove(title);
+        } else {
+            set.insert(title.to_string());
+        }
+    });
+}
+/// Closes every other section on `group`'s side, as opening one in Solo Mode does.
+fn close_others(ui: &egui::Ui, group: &str, title: &str) {
+    let others: Vec<String> = ui.ctx().data(|d| {
+        d.get_temp::<SectionTitles>(section_titles_id())
+            .and_then(|titles| titles.get(group).cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|other| other != title)
+            .collect()
+    });
+    for other in others {
+        set_open(ui, &other, false);
+    }
+}
+/// Turns Solo Mode on or off for `group`; turning it on leaves only `title` open,
+/// if it is.
+fn toggle_solo(ui: &egui::Ui, group: &str, title: &str) {
+    let on = !solo(ui, group);
+    ui.ctx().data_mut(|d| {
+        let set =
+            d.get_temp_mut_or_default::<std::collections::BTreeSet<String>>(solo_sections_id());
+        if on {
+            set.insert(group.to_string());
+        } else {
+            set.remove(group);
+        }
+    });
+    if on {
+        close_others(ui, group, title);
+    }
+}
+fn section_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    button: HeaderButton,
+    switch: Option<&mut PanelState>,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> bool {
     let resettable = button != HeaderButton::None;
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
+    let group = current_group(ui);
+    if let Some(group) = group {
+        ui.ctx().data_mut(|d| {
+            d.get_temp_mut_or_default::<SectionTitles>(section_titles_id())
+                .entry(group.to_string())
+                .or_default()
+                .insert(title.to_string());
+        });
+    }
     let mut open = !ui.ctx().data(|d| {
         d.get_temp::<std::collections::BTreeSet<String>>(collapsed_sections_id())
             .is_some_and(|set| set.contains(title))
@@ -147,10 +280,17 @@ pub(super) fn section_with(
         Pos2::new(rect.right() - 16., rect.center().y),
         Vec2::splat(24.),
     );
-    let toggle_right = if resettable {
+    let right = if resettable {
         reset_rect.left()
     } else {
         rect.right()
+    };
+    let switch_rect =
+        Rect::from_center_size(Pos2::new(right - 18., rect.center().y), Vec2::new(26., 20.));
+    let toggle_right = if switch.is_some() {
+        switch_rect.left()
+    } else {
+        right
     };
     let toggle_rect = Rect::from_min_max(rect.min, Pos2::new(toggle_right, rect.bottom()));
     let toggle = ui
@@ -170,6 +310,7 @@ pub(super) fn section_with(
         HeaderButton::Add => reset.on_hover_text(format!("New {}", title.trim_end_matches('s'))),
         HeaderButton::None => reset,
     };
+    let enabled = switch.as_deref().is_none_or(|s| *s == PanelState::On);
     // A filled header band marks each collapsible panel, as in Lightroom.
     ui.painter().rect_filled(
         rect,
@@ -206,7 +347,11 @@ pub(super) fn section_with(
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(13.),
-        theme::gray(if toggle.hovered() { 250 } else { 235 }),
+        theme::gray(match (enabled, toggle.hovered()) {
+            (false, _) => 140,
+            (true, true) => 250,
+            (true, false) => 235,
+        }),
     );
     if resettable {
         let color = theme::gray(if reset.hovered() { 240 } else { 150 });
@@ -217,18 +362,41 @@ pub(super) fn section_with(
         };
         icons::paint_at(ui.painter(), icon, reset_rect.center(), 12., color);
     }
-    if toggle.clicked() {
-        open = !open;
-        ui.ctx().data_mut(|d| {
-            let set = d.get_temp_mut_or_default::<std::collections::BTreeSet<String>>(
-                collapsed_sections_id(),
-            );
-            if open {
-                set.remove(title);
-            } else {
-                set.insert(title.to_string());
+    if let Some(state) = switch {
+        let response = ui
+            .interact(switch_rect, id.with("switch"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(match state {
+                PanelState::On => format!("Turn {title} off"),
+                PanelState::Off => format!("Turn {title} on"),
+            });
+        paint_switch(
+            ui.painter(),
+            switch_rect.center(),
+            *state,
+            response.hovered(),
+        );
+        if response.clicked() {
+            *state = match state {
+                PanelState::On => PanelState::Off,
+                PanelState::Off => PanelState::On,
+            };
+        }
+    }
+    if let Some(group) = group {
+        context_menu(&toggle, |ui| {
+            if menu_item(ui, "Solo Mode", "", true, solo(ui, group)) {
+                toggle_solo(ui, group, title);
+                ui.close();
             }
         });
+    }
+    if toggle.clicked() && !context_clicked(&toggle) {
+        open = !open;
+        set_open(ui, title, open);
+        if open && let Some(group) = group.filter(|g| solo(ui, g)) {
+            close_others(ui, group, title);
+        }
     }
     if button == HeaderButton::Reset && reset.clicked() {
         name_history_step(ui, format!("Reset {title}"), String::new());
@@ -248,6 +416,33 @@ pub(super) fn section_with(
         });
     }
     resettable && reset.clicked()
+}
+/// Lightroom's panel switch: a small track with its knob to the right when on.
+fn paint_switch(painter: &egui::Painter, c: Pos2, state: PanelState, hovered: bool) {
+    let track = Rect::from_center_size(c, Vec2::new(20., 10.));
+    let on = state == PanelState::On;
+    painter.rect_filled(
+        track,
+        5.,
+        theme::gray(match (on, hovered) {
+            (true, true) => 175,
+            (true, false) => 150,
+            (false, true) => 80,
+            (false, false) => 34,
+        }),
+    );
+    painter.rect_stroke(
+        track,
+        5.,
+        Stroke::new(1., theme::gray(if on { 120 } else { 95 })),
+        egui::StrokeKind::Inside,
+    );
+    let knob = if on {
+        track.right_center() - Vec2::new(5., 0.)
+    } else {
+        track.left_center() + Vec2::new(5., 0.)
+    };
+    painter.circle_filled(knob, 3.5, theme::gray(if on { 235 } else { 140 }));
 }
 #[derive(Clone, Default)]
 struct CurveInteraction {
@@ -822,6 +1017,11 @@ pub(super) fn slider_with(
             let v = from_rail(p.x, rail);
             let v = step.map_or(v, |step| (v / step).round() * step);
             *value = v.clamp(start, end);
+        } else if let Some(nudge) = hovered_nudge(ui, row) {
+            // Lightroom's keys over a hovered slider: Up and Down move it by its
+            // smallest shown step, ten with Shift.
+            let unit = step.unwrap_or(10f32.powi(-(decimals as i32)) / scale);
+            *value = (*value + nudge * unit).clamp(start, end);
         }
         let x = to_rail(*value, rail);
         if gradient.is_none() {
@@ -865,6 +1065,29 @@ pub(super) fn slider_with(
         name_history_step(ui, name, shown);
     }
     event
+}
+/// Steps the Up and Down keys ask of the slider in `row` this frame: +1 or −1 each,
+/// ×10 with Shift. Only while the pointer is over the row and no text field (a
+/// slider's number being typed, a search) has the keyboard, which keeps the keys;
+/// Left and Right stay with photo navigation, and scrolling never moves a slider.
+fn hovered_nudge(ui: &egui::Ui, row: Rect) -> Option<f32> {
+    if !ui.rect_contains_pointer(row)
+        || ui.ctx().text_edit_focused()
+        || ui.input(|i| i.pointer.any_down())
+    {
+        return None;
+    }
+    let nudge = ui.input_mut(|i| {
+        let mut nudge = 0.;
+        // Shift first: the plain pattern would also take Shift's presses.
+        for (modifiers, size) in [(egui::Modifiers::SHIFT, 10.), (egui::Modifiers::NONE, 1.)] {
+            nudge += size
+                * (i.count_and_consume_key(modifiers, egui::Key::ArrowUp) as f32
+                    - i.count_and_consume_key(modifiers, egui::Key::ArrowDown) as f32);
+        }
+        nudge
+    });
+    (nudge != 0.).then_some(nudge)
 }
 /// A slider's number as shown: Lightroom's scale, with a sign when it has one.
 fn slider_text(v: f64, decimals: usize, signed: bool) -> String {

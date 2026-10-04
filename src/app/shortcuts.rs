@@ -71,7 +71,7 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 34] = [
+const DEVELOP: [Shortcut; 36] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -108,6 +108,8 @@ const DEVELOP: [Shortcut; 34] = [
     ("double-click", "Reset a slider or grading wheel"),
     ("Shift+drag", "Grading wheel: hue or saturation only"),
     ("Cmd+drag", "Grading wheel: fine adjustment"),
+    ("Up / Down", "Nudge the hovered slider (Shift: 10)"),
+    ("right-click", "Panel header: Solo Mode"),
     ("E", "Show the photo in the Loupe"),
 ];
 
