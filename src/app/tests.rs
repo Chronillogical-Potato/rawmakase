@@ -3611,17 +3611,22 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.events(&ctx);
     assert_eq!(editor.document.recipe.point_colors.len(), 1);
     editor.view.toggle(state::Tool::PointColor);
-    // Nor when the Library opens meanwhile.
-    in_edit_frame(&ctx, &mut editor, |e| e.start_point_color_sample(0.2, 0.5));
-    editor.library_mode = true;
-    let start = std::time::Instant::now();
-    while editor.document.point_color_pick.is_running() {
-        assert!(start.elapsed().as_secs() < 60, "sampling did not finish");
-        std::thread::sleep(std::time::Duration::from_millis(5));
+    // Nor when the Library or Before opens meanwhile: the sample stops at once.
+    for leave in [
+        (|e: &mut Editor| e.library_mode = true) as fn(&mut Editor),
+        |e: &mut Editor| e.view.compare = true,
+    ] {
+        in_edit_frame(&ctx, &mut editor, |e| e.start_point_color_sample(0.2, 0.5));
+        leave(&mut editor);
         editor.events(&ctx);
+        assert!(!editor.document.point_color_pick.is_running());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        editor.events(&ctx);
+        assert_eq!(editor.document.recipe.point_colors.len(), 1);
+        editor.library_mode = false;
+        editor.view.compare = false;
+        editor.view.tool = state::Tool::PointColor;
     }
-    assert_eq!(editor.document.recipe.point_colors.len(), 1);
-    editor.library_mode = false;
     // A sample of a photo edited meanwhile is dropped.
     let mut changed = editor.document.recipe.clone();
     changed.exposure = 1.;

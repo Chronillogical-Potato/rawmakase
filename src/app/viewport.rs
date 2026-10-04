@@ -481,7 +481,10 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
-            if self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe()) {
+            // And the final render, not a reduced draft of it.
+            if self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe())
+                && !self.preview.task.is_running()
+            {
                 let u = (pos.x - rect.left()) / rect.width();
                 let v = (pos.y - rect.top()) / rect.height();
                 self.start_point_color_sample(u, v);

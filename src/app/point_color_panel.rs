@@ -13,11 +13,13 @@ pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
 }
 
 impl super::Editor {
-    /// Whether Point Color's tab is where the photo is edited: Develop, a color photo
-    /// with the current process, and the Color Mixer on its Point Color tab.
+    /// Whether Point Color's tab is where the photo is edited: Develop (not Before), a
+    /// color photo with the current process, and the Color Mixer on its Point Color
+    /// tab.
     pub(super) fn point_color_tab_shown(&self) -> bool {
         let r = &self.document.recipe;
         !self.library_mode
+            && !self.view.compare
             && self.view.mixer_tab == super::state::MixerTab::PointColor
             && r.treatment() == crate::develop::Treatment::Color
             && renders_point_color(r)
