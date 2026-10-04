@@ -123,7 +123,10 @@ pub fn color(m: &Metadata) -> Option<CameraProfile> {
         highlights: 0.,
         shadows: 0.,
         clarity: 0.,
+        contrast: 0.,
+        blacks: 0.,
         monochrome: false,
+        amount: None,
         table: color_table(),
         curve: CurveLut::new(&ToneCurve {
             points: COLOR_CURVE.to_vec(),

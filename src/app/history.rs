@@ -375,6 +375,9 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
     if profile(a) != profile(b) {
         return Step::new("Profile", profile(a).unwrap_or_default());
     }
+    if a.profile_amount != b.profile_amount {
+        return Step::new("Profile Amount", format!("{:.0}", a.profile_amount * 100.));
+    }
     if a.effects.monochrome != b.effects.monochrome {
         let treatment = if a.effects.monochrome {
             "Black & White"

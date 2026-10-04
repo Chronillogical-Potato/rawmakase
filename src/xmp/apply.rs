@@ -367,6 +367,17 @@ impl Preset {
             r.reference_curves = true;
             r.wide_gamut_curves = true;
         }
+        // A new profile starts at 100%; a look that supports Amount takes the preset's.
+        settings.seen.insert(super::look::SETTING.into());
+        if v.contains_key("CameraProfile") || !self.look.is_empty() {
+            r.profile_amount = 1.;
+        }
+        if let Some(amount) = v.get(super::look::SETTING)
+            && !self.look.is_empty()
+            && r.profile.as_ref().is_some_and(|p| p.supports_amount())
+        {
+            r.profile_amount = super::look::LookAmount::parse(amount)?.0;
+        }
         if r.profile.as_ref().is_some_and(|p| p.enhanced.is_some()) {
             r.reference_curves = true;
             r.wide_gamut_curves = true;

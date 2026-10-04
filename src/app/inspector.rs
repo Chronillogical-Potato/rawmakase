@@ -556,6 +556,22 @@ impl Editor {
                         }
                     });
             });
+            // Lightroom's Profile Amount, under the profile. Profiles without one show
+            // it dimmed at 100%, so the panel doesn't move when switching.
+            let supports_amount = r.profile.as_ref().is_some_and(|p| p.supports_amount());
+            ui.add_enabled_ui(supports_amount, |ui| {
+                let mut fixed = 1.;
+                let amount = if supports_amount {
+                    &mut r.profile_amount
+                } else {
+                    &mut fixed
+                };
+                ui.push_id("profile-amount", |ui| {
+                    slider_with(ui, "Amount", amount, 0. ..=2., 1., Some((100., 0)), None)
+                });
+            })
+            .response
+            .on_disabled_hover_text("This profile has no Amount");
             if !profile_errors.is_empty() {
                 ui.horizontal(|ui| {
                     ui.add_space(88.);
@@ -565,6 +581,10 @@ impl Editor {
                         import_adobe = true;
                     }
                 });
+            }
+            if old_profile != r.profile {
+                // A newly chosen profile starts at 100%, as in Lightroom.
+                r.profile_amount = 1.;
             }
             if old_profile != r.profile
                 && let Some(m) = &metadata

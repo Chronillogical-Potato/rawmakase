@@ -96,6 +96,7 @@ fn everything_changed() -> Recipe {
     });
     r.panels.set(Panel::Detail, PanelState::Off);
     r.curve_saturation = 0.4;
+    r.profile_amount = 0.6;
     r.unknown
         .insert("from_a_newer_release".into(), Value::Bool(true));
     let e = &mut r.effects;

@@ -96,7 +96,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [camera_profiles/mod.rs](../src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
 | [dcp.rs](../src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
 | [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
-| [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments. |
+| [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments; camera and creative look files (`LookFile`) and Profile Amount (`Enhanced::at_amount`). |
 | [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../src/camera_profiles/reference.rs) | Verified camera-specific exposure baseline and neutral calibration data. |
 | [dng_tone.rs](../src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |

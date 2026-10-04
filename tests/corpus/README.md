@@ -8,7 +8,8 @@ Tests that RAWmakase's colors don't change unnoticed, and how far they are from 
 | --- | --- |
 | `charts/*.dng` | Synthetic chart DNGs (970×742 RGGB mosaic, lossless JPEG, about 0.27 MB each), written by the generator in `tests/color/chart.rs` and `dng.rs`. |
 | `charts/layout.json` | The patch areas every chart shares: 24-step gray ramp (−8 to +3.5 EV), 24 hues × 3 lightness × 3 chroma, a wide-gamut row, ColorChecker, skin tones, near-neutrals, two sweeps, and colors on black and white surrounds. |
-| `cases.json` | 131 settings cases (sliders one at a time, pairs, one combined look) as Camera Raw XMP attributes. |
+| `cases.json` | 150 settings cases (sliders one at a time, pairs, one combined look, Profile Amounts) as Camera Raw XMP attributes. A case's `look` names a file in `looks/` and its Amount. |
+| `looks/*.xmp` | Synthetic look profiles with Profile Amount, written by `scripts/corpus/synthetic-looks.py` from simple formulas (no Adobe data). |
 | `snapshots/*.json` | RAWmakase's own render of every chart and case. |
 | `camera-raw/*.json` | Camera Raw 18.6 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
 | `camera-raw/baseline.json` | RAWmakase's accepted distance from those renders, per case. |
@@ -66,6 +67,7 @@ RAWMAKASE_CORPUS=… RAWMAKASE_PROFILES=<folder of DCPs> cargo test --release --
 
 All run from the repository root with a Python that has numpy (`/opt/homebrew/bin/python3.12` here). Photoshop scripts refuse to start while Photoshop has documents open, open only RAW or DNG copies (never TIFFs, which block Photoshop with a dialog), and delete every render once it is reduced.
 
+- `scripts/corpus/synthetic-looks.py`: writes the synthetic look profiles in `looks/`. Camera Raw reads them from the sidecar (`crs:Look` with its parameters and the `Table_` attribute), so nothing is installed.
 - `scripts/corpus/camera-raw-charts.py`: Camera Raw renders of the synthetic charts into `camera-raw/`; with `--adobe`, of the camera charts with Adobe Standard into the private corpus.
 - `scripts/corpus/camera-raw-photos.py`: Camera Raw renders of every corpus photo for the `photos` cases.
 - `scripts/corpus/pixls.py`: `manifest` (rebuild `pixls.json`), `download` (checks hashes and the budget), `cameras` (rebuild `cameras.json` from the corpus RAWs).
