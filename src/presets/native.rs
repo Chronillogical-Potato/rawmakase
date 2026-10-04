@@ -49,3 +49,51 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     recipe.validate()?;
     Ok(recipe)
 }
+
+/// `preset` as applied to a photo edited as `photo`: presets never carry spot removal
+/// or red eye, so the photo keeps its own and their panel switches; the preset's masks
+/// replace the photo's only when it has any, as in Lightroom.
+pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
+    use crate::develop::panels::Panel;
+    preset.retouch = photo.retouch.clone();
+    preset.red_eye = photo.red_eye.clone();
+    for panel in [Panel::SpotRemoval, Panel::RedEye] {
+        preset.panels.set(panel, photo.panels.state(panel));
+    }
+    if preset.masks.is_empty() {
+        preset.masks = photo.masks.clone();
+    }
+    preset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::develop::{
+        panels::{Panel, PanelState},
+        red_eye::RedEyeOp,
+    };
+    #[test]
+    fn a_preset_leaves_the_photos_red_eye_and_its_switch() {
+        let mut photo = Recipe::default();
+        photo.red_eye.push(RedEyeOp {
+            kind: Default::default(),
+            center: [0.4, 0.4],
+            radius: [0.01; 2],
+            correlation: 0.,
+            pupil_size: 0.5,
+            darken: 0.5,
+        });
+        let mut preset = Recipe {
+            exposure: 0.5,
+            ..Default::default()
+        };
+        preset.panels.set(Panel::RedEye, PanelState::Off);
+        preset.panels.set(Panel::SpotRemoval, PanelState::Off);
+        let applied = applied_to(preset, &photo);
+        assert_eq!(applied.exposure, 0.5);
+        assert_eq!(applied.red_eye, photo.red_eye);
+        assert_eq!(applied.panels.state(Panel::RedEye), PanelState::On);
+        assert_eq!(applied.panels.state(Panel::SpotRemoval), PanelState::On);
+    }
+}

@@ -115,6 +115,19 @@ fn finds_small_and_large_pupils() {
     }
 }
 #[test]
+fn large_searches_are_subsampled_and_still_accurate() {
+    // A 4000-pixel photo searched with a 900-pixel circle: a grid of every 6th pixel.
+    let c = [2000.4, 1300.7];
+    let im = image(4000, 2600, 0, &[eye(c, 260., BROWN_IRIS)]);
+    let frame = ImageFrame::new(&im);
+    let op = correct(&im, c, 900.);
+    let [x, y] = frame.to_source(op.center);
+    assert!((x - c[0]).abs() < 3. && (y - c[1]).abs() < 3., "{x},{y}");
+    for axis in op.radius {
+        assert!((axis * 4000. - 260.).abs() < 6., "{}", axis * 4000.);
+    }
+}
+#[test]
 fn corrects_the_pupil_and_leaves_a_reddish_iris() {
     let c = [150., 120.];
     let r = 15.;

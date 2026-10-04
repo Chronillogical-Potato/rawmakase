@@ -39,6 +39,8 @@ pub struct Pupil {
 /// Red must be at least this many times the larger of green and blue at the pupil (in
 /// linear values a brown iris reaches about 2.5, a red pupil 10 or more).
 const MIN_RATIO: f32 = 3.5;
+/// The largest search radius, in grid cells; larger circles are subsampled.
+const MAX_GRID_RADIUS: f32 = 160.;
 /// Where the pupil's edge lies between the surroundings' redness and the pupil's.
 const EDGE: f32 = 0.5;
 
@@ -53,14 +55,23 @@ pub fn find_pupil(im: &CameraImage, center: [f32; 2], radius: f32) -> Result<Pup
     let y0 = ((cy - r).floor() as i32).clamp(0, h);
     let x1 = ((cx + r).ceil() as i32 + 1).clamp(0, w);
     let y1 = ((cy + r).ceil() as i32 + 1).clamp(0, h);
-    let (gw, gh) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    // Large circles are searched on every `step`th pixel, so a search never costs more
+    // than a circle of `MAX_GRID_RADIUS` pixels.
+    let step = (r / MAX_GRID_RADIUS).ceil().max(1.) as usize;
+    let (gw, gh) = ((x1 - x0) as usize / step, (y1 - y0) as usize / step);
     if gw < 3 || gh < 3 {
         return Err(DetectError::NotRed);
     }
-    let at =
-        |x: usize, y: usize| im.pixels[(y0 as usize + y) * im.width as usize + x0 as usize + x];
-    let distance =
-        |x: usize, y: usize| ((x0 as f32 + x as f32 - cx).hypot(y0 as f32 + y as f32 - cy)) / r;
+    // Decoded coordinates of grid cell (`x`, `y`).
+    let decoded = |x: usize, y: usize| (x0 as usize + x * step, y0 as usize + y * step);
+    let at = |x: usize, y: usize| {
+        let (sx, sy) = decoded(x, y);
+        im.pixels[sy * im.width as usize + sx]
+    };
+    let distance = |x: usize, y: usize| {
+        let (sx, sy) = decoded(x, y);
+        (sx as f32 - cx).hypot(sy as f32 - cy) / r
+    };
     // A small floor keeps noise in the darkest pixels from looking red.
     let floor = 2e-3;
     let redness: Vec<f32> = (0..gw * gh)
@@ -150,12 +161,21 @@ pub fn find_pupil(im: &CameraImage, center: [f32; 2], radius: f32) -> Result<Pup
         vyy += dy * dy;
         vxy += dx * dy;
     }
-    // A pixel's own extent (1/12) keeps tiny areas from collapsing to a line.
-    let (vxx, vyy, vxy) = (vxx / n + 1. / 12., vyy / n + 1. / 12., vxy / n);
+    // In decoded pixels; a cell's own extent (1/12) keeps tiny areas from collapsing
+    // to a line.
+    let s2 = (step * step) as f64;
+    let (vxx, vyy, vxy) = (
+        (vxx / n + 1. / 12.) * s2,
+        (vyy / n + 1. / 12.) * s2,
+        vxy / n * s2,
+    );
     let source_radius = [2. * vxx.sqrt() as f32, 2. * vyy.sqrt() as f32];
     let correlation = ((vxy / (vxx * vyy).sqrt()) as f32).clamp(-MAX_CORRELATION, MAX_CORRELATION);
     let long = frame.long_edge();
-    let center = frame.to_image(x0 as f32 + mx as f32, y0 as f32 + my as f32);
+    let center = frame.to_image(
+        x0 as f32 + (mx * step as f64) as f32,
+        y0 as f32 + (my * step as f64) as f32,
+    );
     // Back from decoded axes to image axes: a quarter turn swaps them and mirrors the tilt.
     let (radius, correlation) = if frame.turns % 2 == 1 {
         (
