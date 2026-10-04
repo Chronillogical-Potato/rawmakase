@@ -309,4 +309,31 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[test]
+    fn a_drag_does_not_carry_over_to_the_next_photo() {
+        let mut h = Harness::new(Vec::new());
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let start = Pos2::new(70., 50.);
+        h.frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+        h.frame(vec![egui::Event::PointerMoved(Pos2::new(120., 50.))]);
+        assert_eq!(h.recipe.blacks, 0.1);
+        // Another photo opens mid-drag, as Left/Right does.
+        let mut view = crate::app::state::ViewState {
+            tone_drag: h.drag,
+            ..Default::default()
+        };
+        view.clear_document();
+        assert_eq!(view.tone_drag, None);
+        h.drag = view.tone_drag;
+        h.recipe = Recipe::default();
+        h.frame(vec![egui::Event::PointerMoved(Pos2::new(220., 50.))]);
+        h.frame(vec![press(Pos2::new(220., 50.), false)]);
+        assert_eq!(h.recipe, Recipe::default());
+    }
 }

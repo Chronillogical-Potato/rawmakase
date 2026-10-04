@@ -338,6 +338,8 @@ impl ViewState {
         self.tool = Tool::None;
         self.crop_drag = None;
         self.ruler = Default::default();
+        // Ends a histogram drag: the next photo starts from its own values.
+        self.tone_drag = None;
         self.retouch.clear_document();
         self.masking.clear_document();
         self.compare = false;
