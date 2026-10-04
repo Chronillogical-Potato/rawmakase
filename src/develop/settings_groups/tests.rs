@@ -645,4 +645,22 @@ fn a_lens_profile_the_target_cannot_use_is_reported() {
         "{:?}",
         out.notes
     );
+    // So is the camera's own profile on a photo whose RAW has none.
+    let mut embedded = source.clone();
+    embedded.lens_profile_choice.id = Some(crate::lens::choice::LensProfileId {
+        name: "Camera Settings".into(),
+        embedded: true,
+        ..Default::default()
+    });
+    let out = transfer(
+        from(&embedded, &m),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        target(&m),
+    );
+    assert!(
+        out.notes.iter().any(|n| n.contains("Camera Settings")),
+        "{:?}",
+        out.notes
+    );
 }

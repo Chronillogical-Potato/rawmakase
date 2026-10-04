@@ -165,9 +165,16 @@ impl LensProfileChoice {
             .as_ref()
             .map(|id| (id, profiles.find(&id.filename, &id.name)));
         match (self.setup, named) {
-            (LensProfileSetup::Custom, Some((_, Some(found)))) => Resolved {
-                used: Some(found).filter(|c| c.correction(m).is_some()),
-                missing: None,
+            // Found but unable to correct this photo, it is reported as not imported is.
+            (LensProfileSetup::Custom, Some((id, Some(found)))) => match found.correction(m) {
+                Some(_) => Resolved {
+                    used: Some(found),
+                    missing: None,
+                },
+                None => Resolved {
+                    used: None,
+                    missing: Some(id),
+                },
             },
             (LensProfileSetup::Custom, Some((id, None))) => Resolved {
                 used: None,
