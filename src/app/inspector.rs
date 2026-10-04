@@ -1707,7 +1707,7 @@ pub(super) const ASPECTS: [(f32, &str); 9] = [
     (16. / 9., "16 x 9"),
     (65. / 24., "65 x 24 (XPan)"),
 ];
-const BANDS: [&str; 8] = [
+pub(super) const BANDS: [&str; 8] = [
     "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta",
 ];
 fn band_color(i: usize) -> Color32 {

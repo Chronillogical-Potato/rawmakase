@@ -108,7 +108,10 @@ impl Editor {
         if let Some(left) = self.view.wheel.remaining() {
             ctx.request_repaint_after(left);
         }
-        let gesture = ctx.input(|i| i.pointer.primary_down()) || self.view.wheel.active();
+        // A dial turned on a control surface is one too.
+        let gesture = ctx.input(|i| i.pointer.primary_down())
+            || self.view.wheel.active()
+            || self.surface.turning();
         if !self.document.history.is_replaying() {
             turn_on_edited_panels(&frame.recipe, &mut self.document.recipe);
         }

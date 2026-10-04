@@ -68,6 +68,7 @@ impl Editor {
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.surface_buttons(&ctx);
         self.events(&ctx);
         self.poll_updates(&ctx);
         self.themes.poll(&ctx);
@@ -103,6 +104,7 @@ impl Editor {
             self.library_workspace(ui);
         } else {
             let frame = self.begin_edit_frame();
+            self.surface_dials(&ctx);
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
