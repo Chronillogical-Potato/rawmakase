@@ -8,8 +8,8 @@ Tests that RAWmakase's colors don't change unnoticed, and how far they are from 
 | --- | --- |
 | `charts/*.dng` | Synthetic chart DNGs (970×742 RGGB mosaic, lossless JPEG, about 0.27 MB each), written by the generator in `tests/color/chart.rs` and `dng.rs`. |
 | `charts/layout.json` | The patch areas every chart shares: 24-step gray ramp (−8 to +3.5 EV), 24 hues × 3 lightness × 3 chroma, a wide-gamut row, ColorChecker, skin tones, near-neutrals, two sweeps, and colors on black and white surrounds. |
-| `cases.json` | 150 settings cases (sliders one at a time, pairs, one combined look, Profile Amounts) as Camera Raw XMP attributes. A case's `look` names a file in `looks/` and its Amount. |
-| `looks/*.xmp` | Synthetic look profiles with Profile Amount, written by `scripts/corpus/synthetic-looks.py` from simple formulas (no Adobe data). |
+| `cases.json` | 172 settings cases (sliders one at a time, pairs, one combined look, Profile Amounts, RGB-table looks) as Camera Raw XMP attributes. A case's `look` names a file in `looks/` and its Amount. |
+| `looks/*.xmp` | Synthetic look profiles with Profile Amount and RGB tables, written by `scripts/corpus/synthetic-looks.py` from simple formulas (no Adobe data). |
 | `snapshots/*.json` | RAWmakase's own render of every chart and case. |
 | `camera-raw/*.json` | Camera Raw 18.6 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
 | `camera-raw/baseline.json` | RAWmakase's accepted distance from those renders, per case. |

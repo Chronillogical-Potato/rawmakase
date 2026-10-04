@@ -244,6 +244,9 @@ fn color_stage(
     // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
+    // A look's RGB table: after the colour mixer, before colour grading, as Camera
+    // Raw 18.7 applies it (also after the user's tone curves and Saturation).
+    let rgb = lut.rgb_table.as_ref().map_or(rgb, |t| t.apply(rgb));
     let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let mut lab = srgb_to_lab(rgb);
     if let Some(d) = local {
@@ -376,6 +379,8 @@ struct CurveSet {
     /// Engine 4: the DNG exposure ramp's black point (Adobe's default Shadows of 5).
     black_ramp: Option<ExposureRamp>,
     color_adjustments: bool,
+    /// The profile look's RGB table, at the recipe's Profile Amount.
+    rgb_table: Option<crate::camera_profiles::RgbLook>,
     calibration: crate::develop::calibration::Calibration,
     master: CurveLut,
     channels: [CurveLut; 3],
@@ -422,6 +427,11 @@ impl CurveSet {
             black_ramp: basic_curves.then(|| {
                 ExposureRamp::new(DNG_SHADOWS_BLACK * 2f32.powf(r.exposure + r.camera_exposure))
             }),
+            rgb_table: r
+                .profile
+                .as_ref()
+                .filter(|_| r.engine >= 3)
+                .and_then(|p| p.enhanced.as_ref()?.rgb().cloned()),
             color_adjustments: r.vibrance != 0.
                 || r.saturation != 0.
                 || r.hsl != [[0.; 3]; 8]

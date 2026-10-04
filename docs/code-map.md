@@ -98,6 +98,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [dcp.rs](../src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
 | [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
 | [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments; camera and creative look files (`LookFile`) and Profile Amount (`Enhanced::at_amount`). |
+| [rgb_table.rs](../src/camera_profiles/rgb_table.rs) | Adobe RGB tables (1D and 3D, in their own primaries and encoding) of creative and camera-matching looks, with tetrahedral interpolation; the colour stage applies them after the colour mixer (`develop.wgsl`'s `rgb_table` on the GPU). |
 | [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../src/camera_profiles/reference.rs) | Verified camera-specific exposure baseline and neutral calibration data. |
 | [dng_tone.rs](../src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |

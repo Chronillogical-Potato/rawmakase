@@ -418,7 +418,8 @@ pub(crate) struct GpuTables<'a> {
     /// HueSatMap for this temperature: the first table, the second and its weight.
     pub hue: Option<(&'a Table, Option<&'a Table>, f32)>,
     pub look: Option<&'a Table>,
-    pub enhanced: Option<(&'a Table, &'a [f32])>,
+    pub enhanced: Option<&'a Table>,
+    pub enhanced_curve: Option<&'a [f32]>,
     pub tone: &'a [[f32; 2]],
     pub exposure_scale: f32,
 }
@@ -441,10 +442,8 @@ impl CameraProfile {
                 .as_ref()
                 .map(|t| (t, self.hue2.as_ref(), self.weight(temperature))),
             look: self.look.as_ref(),
-            enhanced: self
-                .enhanced
-                .as_ref()
-                .map(|e| (&e.table, e.curve.as_slice())),
+            enhanced: self.enhanced.as_ref().and_then(|e| e.table.as_ref()),
+            enhanced_curve: self.enhanced.as_ref().map(|e| e.curve.as_slice()),
             tone: &self.tone,
             exposure_scale: 2f32.powf(self.exposure),
         }
@@ -460,6 +459,21 @@ impl CameraProfile {
             table_max: 2.,
         });
         p
+    }
+    /// This profile with each kind of RGB table (see `rgb_table::tests::variety`) in
+    /// its look, at amounts below, at and above the table's own.
+    #[cfg(test)]
+    pub(crate) fn with_test_rgb_tables(self) -> Vec<Self> {
+        rgb_table::tests::variety()
+            .into_iter()
+            .zip([0.7, 1., 1.5])
+            .map(|(table, amount)| {
+                let mut p = self.clone();
+                let look = p.enhanced.as_mut().expect("a profile with a look");
+                look.rgb = Some(enhanced::RgbLook::for_test(table, amount));
+                p
+            })
+            .collect()
     }
     /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
     #[cfg(test)]
@@ -550,11 +564,13 @@ mod dcp;
 mod enhanced;
 mod library;
 pub mod open;
+mod rgb_table;
 pub use dcp::{d65_color_matrix, from_bytes};
-pub use enhanced::AmountRange;
+pub use enhanced::{AmountRange, RgbLook};
 pub use library::{
     adobe_installed, builtin, compose_look, import_files, installed, library_dirs, load,
 };
+pub(crate) use rgb_table::{Dimensions, Gamut};
 #[cfg(test)]
 mod tests;
 

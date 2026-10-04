@@ -555,6 +555,104 @@ fn mixer(rgb: vec3<f32>) -> vec3<f32> {
     let c = v * s2;
     return PRO_TO_RGB * (hsv_to_rgb(h2, v, s2) + (max_v * exp2(delta.z) - c));
 }
+// camera_profiles::rgb_table: a look's RGB table, in its own primaries and encoding.
+fn rgb_encode(v: f32, gamma: u32) -> f32 {
+    switch gamma {
+        case 1u: { return srgb_encode(v); }
+        case 2u: { return powf(v, 1.0 / 1.8); }
+        case 3u: { return powf(v, 1.0 / 2.2); }
+        default: { return v; }
+    }
+}
+fn rgb_decode(v: f32, gamma: u32) -> f32 {
+    switch gamma {
+        case 1u: { return srgb_decode(v); }
+        case 2u: { return powf(v, 1.8); }
+        case 3u: { return powf(v, 2.2); }
+        default: { return v; }
+    }
+}
+/// Tetrahedral interpolation in a 3D table of `n` divisions, as `rgb_table::tetrahedral`.
+fn rgb_lookup_3d(base: i32, n: u32, q: vec3<f32>) -> vec3<f32> {
+    let scaled = q * f32(n - 1u);
+    let cell = min(vec3<u32>(scaled), vec3(n - 2u));
+    let f = scaled - vec3<f32>(cell);
+    let n_i = i32(n);
+    let origin = base + 3 * ((i32(cell.x) * n_i + i32(cell.y)) * n_i + i32(cell.z));
+    let dr = 3 * n_i * n_i;
+    let dg = 3 * n_i;
+    let db = 3;
+    let c000 = table3(origin);
+    let c111 = table3(origin + dr + dg + db);
+    var a: vec3<f32>;
+    var b: vec3<f32>;
+    var w: vec3<f32>;
+    if f.x > f.y {
+        if f.y > f.z {
+            a = table3(origin + dr);
+            b = table3(origin + dr + dg);
+            w = vec3(f.x, f.y, f.z);
+        } else if f.x > f.z {
+            a = table3(origin + dr);
+            b = table3(origin + dr + db);
+            w = vec3(f.x, f.z, f.y);
+        } else {
+            a = table3(origin + db);
+            b = table3(origin + dr + db);
+            w = vec3(f.z, f.x, f.y);
+        }
+    } else if f.z > f.y {
+        a = table3(origin + db);
+        b = table3(origin + dg + db);
+        w = vec3(f.z, f.y, f.x);
+    } else if f.z > f.x {
+        a = table3(origin + dg);
+        b = table3(origin + dg + db);
+        w = vec3(f.y, f.z, f.x);
+    } else {
+        a = table3(origin + dg);
+        b = table3(origin + dr + dg);
+        w = vec3(f.y, f.x, f.z);
+    }
+    return c000 + w.x * (a - c000) + w.y * (b - a) + w.z * (c111 - b);
+}
+fn rgb_lookup_1d(base: i32, n: u32, q: vec3<f32>) -> vec3<f32> {
+    var out: vec3<f32>;
+    for (var k = 0; k < 3; k++) {
+        let scaled = q[k] * f32(n - 1u);
+        let i = min(u32(scaled), n - 2u);
+        let lo = table(base + 3 * i32(i) + k);
+        let hi = table(base + 3 * i32(i + 1u) + k);
+        out[k] = lo + (hi - lo) * (scaled - f32(i));
+    }
+    return out;
+}
+fn rgb_table(rgb: vec3<f32>) -> vec3<f32> {
+    let base = offset(P_RGB);
+    let n = u32(p(P_RGB + 2u));
+    let gamma = u32(p(P_RGB + 3u));
+    let amount = p(P_RGB + 5u);
+    let linear = matrix(P_RGB_INTO) * rgb;
+    var full: vec3<f32>;
+    for (var k = 0; k < 3; k++) {
+        full[k] = sign(linear[k]) * rgb_encode(abs(linear[k]), gamma);
+    }
+    let q = clamp(full, vec3(0.0), vec3(1.0));
+    var looked: vec3<f32>;
+    if p(P_RGB + 1u) == 1.0 {
+        looked = rgb_lookup_1d(base, n, q);
+    } else {
+        looked = rgb_lookup_3d(base, n, q);
+    }
+    var out = q + amount * (looked - q);
+    if p(P_RGB + 4u) != 0.0 {
+        out += full - q;
+    }
+    for (var k = 0; k < 3; k++) {
+        out[k] = sign(out[k]) * rgb_decode(abs(out[k]), gamma);
+    }
+    return matrix(P_RGB_BACK) * out;
+}
 // color_grade::ColorGrade
 fn grade_at(base: i32, l: f32) -> vec3<f32> {
     let bins = u32(p(P_GRADE + 2u));
@@ -708,6 +806,9 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     rgb = reference_curves(rgb);
     if offset(P_MIXER) >= 0 {
         rgb = mixer(rgb);
+    }
+    if offset(P_RGB) >= 0 {
+        rgb = rgb_table(rgb);
     }
     if offset(P_GRADE) >= 0 {
         rgb = grade(rgb);

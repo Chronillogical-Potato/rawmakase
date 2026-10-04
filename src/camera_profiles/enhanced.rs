@@ -1,6 +1,6 @@
-//! XMP look profiles backed by Adobe DNG SDK-format HSV big tables.
+//! XMP look profiles backed by Adobe DNG SDK-format HSV big tables and RGB tables.
 //! Assets are read from the user's installation, never bundled with RAWmakase.
-use super::{CameraProfile, Table};
+use super::{CameraProfile, Table, rgb_table::RgbTable};
 use crate::{
     color_math::{srgb_decode, srgb_encode},
     develop::curve::{CurveLut, ToneCurve},
@@ -8,7 +8,7 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{io::Read, path::Path};
+use std::{io::Read, path::Path, sync::Arc};
 /// A look with Lightroom's Profile Amount (`crs:SupportsAmount`). The slider runs
 /// 0–200%; the look's table follows it only between the bounds its table stores
 /// (version 2 tables; a version 1 table stays at 100%).
@@ -31,6 +31,43 @@ struct DecodedTable {
 }
 fn is_zero(v: &f32) -> bool {
     *v == 0.
+}
+/// A look's RGB table and the amount it applies at.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RgbLook {
+    pub(super) table: Arc<RgbTable>,
+    /// The look's own amount for its table (`crs:RGBTableAmount`, 1 when absent).
+    pub(super) look_amount: f32,
+    /// The amount the table applies at, for the Profile Amount the look was resolved at.
+    pub(super) amount: f32,
+}
+impl RgbLook {
+    fn new(table: RgbTable, look_amount: f32) -> Self {
+        Self {
+            amount: table.amount(look_amount, 1.),
+            table: Arc::new(table),
+            look_amount,
+        }
+    }
+    /// Linear display RGB through the table.
+    pub(crate) fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        self.table.apply(rgb, self.amount)
+    }
+    #[cfg(test)]
+    pub(super) fn for_test(table: RgbTable, amount: f32) -> Self {
+        Self {
+            table: Arc::new(table),
+            look_amount: 1.,
+            amount,
+        }
+    }
+    pub(crate) fn table(&self) -> &RgbTable {
+        &self.table
+    }
+    pub(crate) fn amount(&self) -> f32 {
+        self.amount
+    }
 }
 const ALPHABET: &[u8] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`'|()[]{}@%$#";
@@ -56,7 +93,13 @@ pub struct Enhanced {
     /// Whether the look has Lightroom's Profile Amount, and how far its table goes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount: Option<AmountRange>,
-    pub(super) table: Table,
+    /// The HSV look table; camera-matching looks with an RGB table may have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) table: Option<Table>,
+    /// The RGB table of creative and camera-matching looks, which the colour stage
+    /// applies after the colour mixer (see `develop::pipeline`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) rgb: Option<RgbLook>,
     pub(super) curve: Vec<f32>,
 }
 impl Enhanced {
@@ -72,7 +115,8 @@ impl Enhanced {
             blacks: 0.,
             monochrome: false,
             amount: None,
-            table,
+            table: Some(table),
+            rgb: None,
             curve: (0..=4096)
                 .map(|i| {
                     let x = i as f32 / 4096.;
@@ -103,7 +147,20 @@ impl Enhanced {
             .all(|v| v.is_finite() && (-1. ..=1.).contains(v)),
             "Invalid profile tone adjustment"
         );
-        self.table.validate()?;
+        if let Some(table) = &self.table {
+            table.validate()?;
+        }
+        ensure!(
+            self.table.is_some() || self.rgb.is_some(),
+            "Look has no table"
+        );
+        ensure!(
+            self.rgb.as_ref().is_none_or(|t| t.look_amount.is_finite()
+                && (0. ..=2.).contains(&t.look_amount)
+                && t.amount.is_finite()
+                && (0. ..=4.).contains(&t.amount)),
+            "Invalid RGB table amount"
+        );
         ensure!(
             self.amount.is_none_or(
                 |a| (0. ..=1.).contains(&a.table_min) && (1. ..=2.).contains(&a.table_max)
@@ -124,14 +181,19 @@ impl Enhanced {
     /// 100% the table's shifts and scales, the curve's change and the internal
     /// adjustments grow from none. Above, the table's shifts keep growing (within the
     /// bounds its table stores), the curve is applied again at the excess, and the
-    /// adjustments grow at half the rate (+40 Shadows is +60 at 200%). A look without
-    /// an Amount stays at 100%.
+    /// adjustments grow at half the rate (+40 Shadows is +60 at 200%). An RGB table
+    /// applies at the Profile Amount times the look's own amount, within its bounds.
+    /// A look without an Amount stays at 100%.
     pub fn at_amount(&self, amount: f32) -> Self {
         let Some(range) = self.amount.filter(|_| amount != 1.) else {
             return self.clone();
         };
         let strength = range.table(amount);
-        let table = self.table.scaled(strength);
+        let table = self.table.as_ref().map(|t| t.scaled(strength));
+        let rgb = self.rgb.as_ref().map(|t| RgbLook {
+            amount: t.table.amount(t.look_amount, amount),
+            ..t.clone()
+        });
         let adjustment = if amount > 1. {
             1. + (amount - 1.) * 0.5
         } else {
@@ -149,6 +211,7 @@ impl Enhanced {
             contrast: self.contrast * adjustment,
             blacks: self.blacks * adjustment,
             table,
+            rgb,
             curve: self
                 .curve
                 .iter()
@@ -166,7 +229,18 @@ impl Enhanced {
         }
     }
     pub(super) fn apply_table(&self, rgb: [f32; 3]) -> [f32; 3] {
-        self.table.apply(rgb.map(|v| v.clamp(0., 1.)), None, 0.)
+        match &self.table {
+            Some(table) => table.apply(rgb.map(|v| v.clamp(0., 1.)), None, 0.),
+            None => rgb,
+        }
+    }
+    pub(crate) fn rgb(&self) -> Option<&RgbLook> {
+        self.rgb.as_ref()
+    }
+    /// Whether the look has an RGB table or lacks an HSV one, which releases before
+    /// RGB tables can't read.
+    pub fn has_rgb_table(&self) -> bool {
+        self.rgb.is_some() || self.table.is_none()
     }
     pub(super) fn apply_curve(&self, rgb: [f32; 3]) -> [f32; 3] {
         let p = rgb.map(|v| srgb_encode(v.clamp(0., 1.)));
@@ -186,7 +260,9 @@ impl Enhanced {
         }
     }
 }
-fn decode_table(text: &str) -> Result<DecodedTable> {
+/// A table attribute's bytes: Adobe's base 85 over zlib, with the expanded length
+/// first. HSV look tables and RGB tables share it.
+pub(super) fn expand(text: &str) -> Result<Vec<u8>> {
     ensure!(text.len() <= 16_000_000, "Look table too large");
     let digits: Vec<_> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     ensure!(digits.len() % 5 != 1, "Truncated base85 table");
@@ -212,10 +288,12 @@ fn decode_table(text: &str) -> Result<DecodedTable> {
     flate2::read::ZlibDecoder::new(&compressed[4..])
         .take(expected as u64 + 1)
         .read_to_end(&mut data)?;
-    ensure!(
-        data.len() == expected && data.len() >= 24,
-        "Invalid expanded table size"
-    );
+    ensure!(data.len() == expected, "Invalid expanded table size");
+    Ok(data)
+}
+fn decode_table(text: &str) -> Result<DecodedTable> {
+    let data = expand(text)?;
+    ensure!(data.len() >= 24, "Invalid expanded table size");
     let word = |i| u32::from_le_bytes(data[i..i + 4].try_into().unwrap());
     ensure!(
         word(0) == 0 && matches!(word(4), 1 | 2),
@@ -262,6 +340,15 @@ fn decode_table(text: &str) -> Result<DecodedTable> {
     };
     table.validate()?;
     Ok(DecodedTable { table, bounds })
+}
+/// An XMP boolean, `None` when absent.
+fn boolean(text: &str) -> Result<Option<bool>> {
+    Ok(match text.to_ascii_lowercase().as_str() {
+        "" => None,
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => anyhow::bail!("Invalid profile flag {text}"),
+    })
 }
 /// Which base profile a look builds on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -338,7 +425,7 @@ impl LookFile {
             "" => LookBase::Any,
             name => LookBase::Named(name.into()),
         };
-        // Fail closed: do not silently discard profile-internal develop controls or RGB LUTs.
+        // Fail closed: do not silently discard profile-internal develop controls.
         const META: &[&str] = &[
             "PresetType",
             "Cluster",
@@ -358,6 +445,11 @@ impl LookFile {
             "ConvertToGrayscale",
             "CameraProfile",
             "LookTable",
+            "RGBTable",
+            "RGBTableAmount",
+            "RequiresRGBTables",
+            "ShowInPresets",
+            "ShowInQuickActions",
             "HasSettings",
             "Highlights2012",
             "Shadows2012",
@@ -396,13 +488,47 @@ impl LookFile {
             })
             .and_then(|n| n.text())
             .context("Missing profile name")?;
-        let table_id = attr("LookTable");
         ensure!(
-            table_id.len() == 32 && table_id.bytes().all(|b| b.is_ascii_hexdigit()),
-            "Missing HSV look table"
+            boolean(attr("RequiresRGBTables"))? != Some(true),
+            "Look requires the photo's own RGB tables"
         );
-        let table_key = format!("Table_{table_id}");
-        let DecodedTable { table, bounds } = decode_table(attr(&table_key))?;
+        // A table attribute names its `Table_<md5>` attribute, which must be in the file.
+        let table_text = |key: &'static str| -> Result<Option<&str>> {
+            let id = attr(key);
+            if id.is_empty() {
+                return Ok(None);
+            }
+            ensure!(
+                id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()),
+                "Invalid {key}"
+            );
+            let text = d
+                .attribute((CRS, format!("Table_{id}").as_str()))
+                .with_context(|| format!("The look's {key} is not in the file"))?;
+            Ok(Some(text))
+        };
+        let (table, bounds) = match table_text("LookTable")? {
+            Some(text) => {
+                let DecodedTable { table, bounds } = decode_table(text)?;
+                (Some(table), bounds)
+            }
+            None => (None, [1.; 2]),
+        };
+        let rgb = match table_text("RGBTable")? {
+            Some(text) => {
+                let look_amount = match attr("RGBTableAmount") {
+                    "" => 1.,
+                    v => v.parse::<f32>().context("Invalid RGB table amount")?,
+                };
+                ensure!(
+                    look_amount.is_finite() && (0. ..=2.).contains(&look_amount),
+                    "Invalid RGB table amount"
+                );
+                Some(RgbLook::new(RgbTable::decode(text)?, look_amount))
+            }
+            None => None,
+        };
+        ensure!(table.is_some() || rgb.is_some(), "Missing look table");
         let amount = match attr("SupportsAmount").to_ascii_lowercase().as_str() {
             "" | "false" => None,
             "true" => Some(AmountRange {
@@ -471,6 +597,7 @@ impl LookFile {
             monochrome,
             amount,
             table,
+            rgb,
             curve: (0..=4096).map(|i| lut.evaluate(i as f32 / 4096.)).collect(),
         };
         look.validate_contents()?;
@@ -484,9 +611,28 @@ impl LookFile {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::io::Write;
+    /// A table's bytes in Adobe's encoding: zlib with the expanded length first, in
+    /// base 85.
+    pub(crate) fn encode(bytes: &[u8]) -> String {
+        let mut compressed = (bytes.len() as u32).to_le_bytes().to_vec();
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(bytes).unwrap();
+        compressed.extend(z.finish().unwrap());
+        let mut text = String::new();
+        for chunk in compressed.chunks(4) {
+            let mut word = [0; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            let mut value = u32::from_le_bytes(word);
+            for _ in 0..chunk.len() + 1 {
+                text.push(ALPHABET[(value % 85) as usize] as char);
+                value /= 85;
+            }
+        }
+        text
+    }
     fn compose_text(text: &str, base: &CameraProfile) -> Result<CameraProfile> {
         LookFile::parse(text)?.compose(base)
     }
@@ -501,21 +647,7 @@ mod tests {
             }
         }
         bytes.extend(0u32.to_le_bytes());
-        let mut compressed = (bytes.len() as u32).to_le_bytes().to_vec();
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        z.write_all(&bytes).unwrap();
-        compressed.extend(z.finish().unwrap());
-        let mut text = String::new();
-        for chunk in compressed.chunks(4) {
-            let mut word = [0; 4];
-            word[..chunk.len()].copy_from_slice(chunk);
-            let mut value = u32::from_le_bytes(word);
-            for _ in 0..chunk.len() + 1 {
-                text.push(ALPHABET[(value % 85) as usize] as char);
-                value /= 85;
-            }
-        }
-        text
+        encode(&bytes)
     }
     fn profile_xml(table: &str) -> String {
         format!(
@@ -585,7 +717,7 @@ mod tests {
         });
         assert_eq!(look.at_amount(1.), look);
         let none = look.at_amount(0.);
-        assert!(none.table.data.iter().all(|d| *d == [0., 1., 1.]));
+        assert!(none.table.unwrap().data.iter().all(|d| *d == [0., 1., 1.]));
         assert!(
             none.curve
                 .iter()
@@ -594,12 +726,12 @@ mod tests {
         );
         assert_eq!((none.shadows, none.contrast), (0., 0.));
         let half = look.at_amount(0.5);
-        assert_eq!(half.table.data[0], [60., 1., 1.]);
+        assert_eq!(half.table.unwrap().data[0], [60., 1., 1.]);
         assert_eq!(half.shadows, 0.2);
         // Above 100% the internal adjustments grow at half the rate, the table's
         // shifts keep growing and the curve is applied again.
         let double = look.at_amount(2.);
-        assert_eq!(double.table.data[0], [240., 1., 1.]);
+        assert_eq!(double.table.as_ref().unwrap().data[0], [240., 1., 1.]);
         assert!((double.shadows - 0.6).abs() < 1e-6);
         let mid = 2048;
         let once = look.curve[mid];
@@ -676,6 +808,56 @@ mod tests {
             base_of(&bases, Some(&own)).as_deref(),
             Some("Adobe Standard")
         );
+        Ok(())
+    }
+    #[test]
+    fn rgb_table_looks_parse_compose_and_scale_with_amount() -> Result<()> {
+        use super::super::rgb_table::tests::{fade, table_bytes};
+        let mut base = CameraProfile::camera_matrix_default(&crate::raw::Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        })
+        .unwrap();
+        base.name = "Camera Standard".into();
+        let rgb = encode(&table_bytes(5, fade, (1, 3, 0, [0., 1.])));
+        let id = "FEDCBA9876543210FEDCBA9876543210";
+        // A camera-matching look: an RGB table over a named base, no HSV table.
+        let xml = format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="{RDF}"><r:Description xmlns:c="{CRS}" c:PresetType="Look" c:UUID="0123456789ABCDEF0123456789ABCDEF" c:SupportsAmount="True" c:CameraProfile="Camera Standard" c:RequiresRGBTables="False" c:ShowInPresets="True" c:RGBTable="{id}" c:RGBTableAmount="0.5" c:Table_{id}="{rgb}"><c:Name><r:Alt><r:li xml:lang="x-default">Test match</r:li></r:Alt></c:Name></r:Description></r:RDF></x:xmpmeta>"#
+        );
+        let file = LookFile::parse(&xml)?;
+        assert_eq!(file.base, LookBase::Named("Camera Standard".into()));
+        let composed = file.compose(&base)?;
+        let look = composed.enhanced.as_ref().unwrap();
+        assert!(look.table.is_none() && look.has_rgb_table());
+        // The look's own amount at 100%; times the Profile Amount, within the
+        // table's bounds (0–1) above.
+        assert_eq!(look.rgb().unwrap().amount(), 0.5);
+        assert_eq!(look.at_amount(0.5).rgb().unwrap().amount(), 0.25);
+        assert_eq!(look.at_amount(2.).rgb().unwrap().amount(), 1.);
+        // Saved in Adobe's encoding and read back.
+        let copy: CameraProfile = serde_json::from_slice(&serde_json::to_vec(&composed)?)?;
+        assert_eq!(copy, composed);
+        copy.validate()?;
+        // A table kept outside the file, or a look that needs Camera Raw's own tables,
+        // is refused.
+        let missing = xml.replace(
+            &format!("c:Table_{id}="),
+            "c:Table_00000000000000000000000000000000=",
+        );
+        let err = LookFile::parse(&missing).unwrap_err();
+        assert!(format!("{err:#}").contains("not in the file"), "{err:#}");
+        assert!(
+            LookFile::parse(&xml.replace(
+                r#"RequiresRGBTables="False""#,
+                r#"RequiresRGBTables="True""#
+            ))
+            .is_err()
+        );
+        // Without either table there is nothing to render.
+        assert!(LookFile::parse(&xml.replace(&format!(r#"c:RGBTable="{id}""#), "")).is_err());
         Ok(())
     }
 }
