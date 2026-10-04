@@ -163,6 +163,8 @@ pub struct LoadJob {
     pub cancel: Arc<AtomicBool>,
     /// The photo to decode ahead of time once this one is fully developed.
     pub prefetch: Option<Prefetch>,
+    /// What the photo starts from when it has no edit.
+    pub defaults: Arc<crate::develop::defaults::DevelopDefaults>,
 }
 /// A photo to develop into the decode cache ahead of time, so opening it next
 /// skips decoding. It has its own cancel flag: the photo on screen finishing

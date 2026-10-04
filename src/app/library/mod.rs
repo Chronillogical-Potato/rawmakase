@@ -140,6 +140,8 @@ pub struct Library {
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
     reread_finished: bool,
+    /// What photos without an edit are previewed with (see `set_defaults`).
+    defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
 }
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
@@ -192,6 +194,7 @@ impl Library {
             compare: Default::default(),
             survey: Default::default(),
             screen,
+            defaults: Default::default(),
             stamps: Default::default(),
             loupe_direction: 1,
             capture: None,
@@ -549,6 +552,25 @@ impl Library {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
         self.selection.active
+    }
+    /// Previews photos without an edit with `defaults` from now on; the ones
+    /// shown with the previous defaults are made again.
+    pub(in crate::app) fn set_defaults(
+        &mut self,
+        defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
+    ) {
+        self.defaults = defaults;
+        self.screen.clear();
+        // Develop's renders of photos without an edit: back to the embedded
+        // preview until Develop shows one with the new defaults.
+        let unedited: Vec<i64> = self
+            .cache
+            .edited_ids()
+            .filter(|id| edit_source(&self.catalog, *id).is_none())
+            .collect();
+        for id in unedited {
+            self.cache.forget(id);
+        }
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
     pub(super) fn has_edited_thumbnail(&self, id: i64) -> bool {

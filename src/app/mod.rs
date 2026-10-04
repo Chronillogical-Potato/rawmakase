@@ -81,6 +81,9 @@ pub struct Editor {
     /// The RAW the Loupe last started loading, so one that fails is not
     /// loaded again every frame.
     loupe_tried: Option<i64>,
+    /// Preferences > Raw Defaults, ready to apply; shared with the loader and the
+    /// Library's previews.
+    raw_defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
 }
 impl Editor {
     pub fn new(
@@ -237,6 +240,9 @@ impl Editor {
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
             loupe_tried: None,
+            raw_defaults: std::sync::Arc::new(crate::develop::defaults::DevelopDefaults::load(
+                session.raw_defaults.clone(),
+            )),
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;
@@ -276,6 +282,7 @@ impl Editor {
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
                     crop_guides: self.view.crop_guides.to_session(),
+                    raw_defaults: self.raw_defaults.settings().clone(),
                 },
             )?;
         }
@@ -397,6 +404,7 @@ mod overlay;
 mod photo_metadata;
 mod preferences;
 mod presets;
+mod raw_defaults;
 mod retouch_tool;
 #[cfg(feature = "telemetry")]
 mod stats;

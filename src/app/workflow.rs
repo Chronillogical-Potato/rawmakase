@@ -70,6 +70,7 @@ impl Editor {
             path,
             cancel,
             prefetch,
+            defaults: self.raw_defaults.clone(),
         });
         true
     }
@@ -195,12 +196,8 @@ impl Editor {
     }
     pub(super) fn effective_recipe(&self) -> Recipe {
         let mut r = if self.view.compare {
-            let mut r = self
-                .document
-                .metadata
-                .as_ref()
-                .map(|m| Recipe::with_profiles(m, &self.document.profiles))
-                .unwrap_or_default();
+            // Before: the raw defaults.
+            let mut r = self.photo_defaults().map(|d| d.recipe).unwrap_or_default();
             r.crop = self.document.recipe.crop;
             r.rotation = self.document.recipe.rotation;
             r.flip_x = self.document.recipe.flip_x;

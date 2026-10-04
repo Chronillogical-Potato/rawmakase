@@ -65,6 +65,8 @@ pub(super) struct Preferences {
     defaults_dirty: bool,
     /// Saving failed; tried again after the next edit, not every frame.
     defaults_failed: bool,
+    /// Raw Defaults' camera rows.
+    pub(super) raw_defaults: super::raw_defaults::Form,
 }
 
 const WIDTH: f32 = 780.;
@@ -137,6 +139,7 @@ impl Editor {
             self.preferences.defaults = crate::catalog::MetadataDefaults::load();
         }
         self.measure_usage();
+        self.measure_raw_defaults();
     }
     fn measure_usage(&mut self) {
         let catalog = self.library.as_ref().map(|l| &l.catalog);
@@ -240,7 +243,11 @@ impl Editor {
                             .auto_shrink(false)
                             .show(&mut content, |ui| self.catalog_page(ui));
                     }
-                    Tab::Profiles => self.profiles_page(&mut content),
+                    Tab::Profiles => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.profiles_page(ui));
+                    }
                     Tab::Performance => self.performance_page(&mut content),
                     Tab::Display => self.display_page(&mut content),
                 }
@@ -420,6 +427,9 @@ impl Editor {
 
     fn profiles_page(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        // First, as in Lightroom's Presets preferences.
+        self.raw_defaults_block(ui);
+        gap(ui);
         let usage = &self.preferences.usage;
         let (cameras, lenses) = (usage.camera_profiles, usage.lens_profiles);
         let presets = self.presets.library.presets.len();
@@ -456,7 +466,6 @@ impl Editor {
             }
             reveal_button(ui, &presets_dir());
         });
-        gap(ui);
         form_row(ui, "", |ui| {
             hint(
                 ui,
@@ -627,7 +636,7 @@ impl Editor {
     }
 }
 
-fn group(ui: &mut egui::Ui, title: &str) {
+pub(super) fn group(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
             .size(12.)
@@ -647,7 +656,7 @@ fn path_value(ui: &mut egui::Ui, path: &Path) {
     )
     .on_hover_text(path.display().to_string());
 }
-fn hint(ui: &mut egui::Ui, text: &str) {
+pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(135))).wrap());
 }
 fn reveal_button(ui: &mut egui::Ui, path: &Path) {

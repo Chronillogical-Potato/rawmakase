@@ -4,8 +4,8 @@ mod library;
 mod native;
 pub mod user;
 pub use library::{
-    Library, display_name, favorite_path, import_file, library_dirs, load_favorites, load_library,
-    save_favorites,
+    Library, display_name, favorite_path, find_preset, import_file, library_dirs, load_favorites,
+    load_library, save_favorites,
 };
 pub use native::{load_preset, save_preset};
 

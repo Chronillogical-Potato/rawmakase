@@ -291,6 +291,9 @@ impl Editor {
                 };
             }
             Err(e) => {
+                // Lightroom's edit starts from Adobe Default, not the raw defaults.
+                self.document.recipe =
+                    crate::develop::Recipe::with_profiles(m, &self.document.profiles);
                 self.document.lightroom_notice = format!("Lightroom settings not applied: {e:#}")
             }
         }

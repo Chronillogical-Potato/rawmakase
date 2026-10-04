@@ -24,6 +24,11 @@ pub(super) struct Document {
     pub(super) snapshots: super::snapshots::Snapshots,
     /// Apply the photo's Lightroom settings once its profiles arrive.
     pub(super) pending_lightroom: bool,
+    /// Where the edit on screen started from.
+    pub(super) origin: EditOrigin,
+    /// The raw defaults for this photo, once its profiles are known: what Reset
+    /// returns to and Before shows.
+    pub(super) defaults: Option<crate::develop::defaults::Resolved>,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
@@ -41,6 +46,18 @@ pub(super) struct Document {
     pub(super) upright: super::task::Task,
     /// The Crop panel's Auto straighten analysis for this photo.
     pub(super) straighten: super::task::Task,
+}
+
+/// Where a photo's edit in Develop started from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum EditOrigin {
+    /// No edit: the raw defaults, which follow Preferences until it is edited.
+    #[default]
+    Defaults,
+    /// The catalog's RAWmakase edit.
+    Saved,
+    /// The photo's Lightroom edit, converted from Adobe Default.
+    Lightroom,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.

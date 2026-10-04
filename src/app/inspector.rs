@@ -1399,9 +1399,16 @@ impl Editor {
             match crate::camera_profiles::import_files(&adobe) {
                 Ok(done) => {
                     let (profiles, errors) = crate::camera_profiles::installed(&m);
-                    self.document.profiles = profiles;
-                    self.document.profile_errors = errors;
-                    self.refresh_preset_support();
+                    // As the loader's: the raw defaults are resolved again
+                    // after this frame, so changing an unedited photo's recipe
+                    // is not taken for an edit.
+                    let _ = self.tx.send(super::worker::Event::Profiles {
+                        id: self.load.id(),
+                        profiles,
+                        errors,
+                    });
+                    ui.ctx().request_repaint();
+                    self.refresh_library_defaults();
                     self.status = format!(
                         "Imported {} Adobe profiles for {} {}. Choose one from the Profile menu.",
                         done.len(),

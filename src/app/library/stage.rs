@@ -2,6 +2,7 @@
 //! fitted to its place with its edit at the size shown (see `screen`), the
 //! grid's preview standing in until it is ready, and a caption below.
 use super::Library;
+use super::previews::EditSource;
 use super::screen::Shown;
 use crate::app::photo_metadata::{flag_icon, label_color};
 use crate::app::theme;
@@ -99,11 +100,12 @@ impl Library {
             return (stand_in, None);
         }
         let stamp = self.edit_stamp(ctx, photo.id);
-        let catalog = &self.catalog;
-        match self
-            .screen
-            .get(photo, edge, stamp, || super::edit_source(catalog, photo.id))
-        {
+        let (catalog, defaults) = (&self.catalog, &self.defaults);
+        let edit = || {
+            super::edit_source(catalog, photo.id)
+                .or_else(|| Some(EditSource::Defaults(defaults.clone())))
+        };
+        match self.screen.get(photo, edge, stamp, edit) {
             Shown::Ready(texture) => (Some(texture.clone()), None),
             Shown::Loading => (stand_in, Some("Loading…".into())),
             Shown::Failed(error) => (stand_in, Some(format!("Preview unavailable: {error}"))),

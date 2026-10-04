@@ -162,6 +162,10 @@ impl PreviewTextures {
             .get(&photo.id)
             .or_else(|| self.thumbs.get(&photo.path))
     }
+    /// Photos whose thumbnail shows an edit.
+    pub(super) fn edited_ids(&self) -> impl Iterator<Item = i64> + '_ {
+        self.edited.keys().copied()
+    }
     /// Whether the photo's thumbnail already shows its edit (crop included).
     pub(super) fn has_edited(&self, id: i64) -> bool {
         self.edited.contains_key(&id)

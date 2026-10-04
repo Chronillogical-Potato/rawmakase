@@ -25,6 +25,20 @@ Settings › New Develop Preset… (Shift+Cmd+N) saves the open photo's settings
 
 A preset made here has Update with Current Settings, Rename… and Delete in its menu. Update keeps its name, group, UUID and the groups it holds. Imported and built-in presets cannot be changed from the app. Save Preset File… and Load Preset File… still write and read RAWmakase's own JSON preset files.
 
+## Raw defaults
+
+Preferences › Profiles & Presets › Raw Defaults works like Lightroom Classic's Preferences › Presets › Raw Defaults. The Master choice is one of:
+
+- **Adobe Default** (out of the box): Adobe Color, else Adobe Standard, else a DNG's embedded profile, else RAWmakase Color, with the camera's own white balance and lens defaults.
+- **RAWmakase Default**: the same, with RAWmakase Color wherever it fits the camera, even when Adobe profiles are imported.
+- **Any Develop preset**, applied over Adobe Default as a click in the Presets panel would be.
+
+“Override global setting for specific camera” gives a camera its own choice: pick the camera (those in the open catalog, and the open photo's), its default, then Create Default (or Update Default). A camera's choice beats the Master; turning the checkbox off keeps the cameras' choices without using them. Cameras are named as Lightroom names them and match by model, so a choice made for “ILCE-7CR” applies to a Sony ILCE-7CR whichever way the catalog names it. As in current Lightroom Classic there are no ISO- or serial-number-specific defaults.
+
+They apply to a photo with no RAWmakase edit and no Lightroom edit when it opens (and when the Library renders it for Compare or Survey, or Sync starts from it), and to Reset. A Lightroom edit, its history steps and Snapshots always convert from Adobe Default, because that is what Lightroom stores them relative to. A saved edit is never rewritten; Reset brings it to the current defaults. If the chosen preset is gone or does not apply to the photo (another camera's profile, say), the photo gets Adobe Default and the status line says why; the photo still opens. Auto Tone or Auto white balance in a default preset is not measured on the photo, so a photo looks the same opened, reset or previewed; those stages keep Adobe Default's values. For the same reason a default preset's Upright mode is left off, since it would need analysing on each photo.
+
+One difference from Lightroom: Lightroom writes the defaults into every photo at import, so changing them later affects only new imports and Reset. RAWmakase saves nothing for a photo until it is edited, so photos without an edit follow the current defaults, and changing them updates the open photo and the Library's previews of unedited photos. The choices are kept with the session, by preset id (a built-in preset's UUID or an installed file's path) and name.
+
 ## Implemented settings
 
 - White balance, exposure, contrast, highlights, shadows, whites, blacks, saturation and vibrance.
