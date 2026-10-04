@@ -30,25 +30,6 @@ impl PointCurve {
     /// The curve on the 0–255 steps a curve file stores. Points that land on the same
     /// input there are merged, keeping the end points, so the file reads back.
     fn quantized(&self) -> Self {
-        let quantize = |c: &ToneCurve| {
-            let mut points: Vec<[f32; 2]> = Vec::with_capacity(c.points.len());
-            let last = c.points.len().saturating_sub(1);
-            for (i, p) in c.points.iter().enumerate() {
-                let p = p.map(|v| (v * 255.).round() / 255.);
-                match points.last_mut() {
-                    Some(previous) if previous[0] == p[0] => {
-                        if i == last {
-                            *previous = p;
-                        }
-                    }
-                    _ => points.push(p),
-                }
-            }
-            ToneCurve {
-                points,
-                ..c.clone()
-            }
-        };
         Self {
             rgb: quantize(&self.rgb),
             channels: self.channels.each_ref().map(quantize),
@@ -69,15 +50,31 @@ impl PointCurve {
     }
 }
 
-/// Whether two curves have the same points at the 0–255 steps Lightroom saves.
+/// `c` on the 0–255 steps a curve file stores. Points that land on the same input
+/// there are merged, keeping the end points, as saving does.
+fn quantize(c: &ToneCurve) -> ToneCurve {
+    let mut points: Vec<[f32; 2]> = Vec::with_capacity(c.points.len());
+    let last = c.points.len().saturating_sub(1);
+    for (i, p) in c.points.iter().enumerate() {
+        let p = p.map(|v| (v * 255.).round() / 255.);
+        match points.last_mut() {
+            Some(previous) if previous[0] == p[0] => {
+                if i == last {
+                    *previous = p;
+                }
+            }
+            _ => points.push(p),
+        }
+    }
+    ToneCurve {
+        points,
+        ..c.clone()
+    }
+}
+
+/// Whether two curves are the same once saved: the same points on the 0–255 steps.
 fn same(a: &ToneCurve, b: &ToneCurve) -> bool {
-    let steps = |c: &ToneCurve| -> Vec<[i32; 2]> {
-        c.points
-            .iter()
-            .map(|p| p.map(|v| (v * 255.).round() as i32))
-            .collect()
-    };
-    steps(a) == steps(b)
+    quantize(a).points == quantize(b).points
 }
 
 /// Lightroom's built-in point curves.
@@ -396,6 +393,8 @@ mod tests {
         store.save("Close", &PointCurve::of(&r))?;
         let list = store.list();
         assert!(list.errors.is_empty(), "{:?}", list.errors);
+        // The edit it was saved from still shows as that curve.
+        assert_eq!(ShownCurve::of(&r, &list.curves), ShownCurve::Saved(0));
         assert_eq!(
             points(&list.curves[0].curve.rgb),
             [[0, 0], [128, 102], [255, 255]]
