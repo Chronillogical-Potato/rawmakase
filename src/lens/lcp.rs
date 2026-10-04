@@ -48,11 +48,14 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Whether the entry describes any correction this reader applies.
-    fn has_model(&self) -> bool {
+    /// Whether the entry describes any correction this reader applies for `m`,
+    /// counting distortion it leaves to the camera's own data when the photo has it.
+    fn has_model(&self, m: &Metadata) -> bool {
         self.distortion.is_some()
             || self.vignette.is_some()
             || (self.red.is_some() && self.blue.is_some())
+            || (self.prefer_metadata_distortion
+                && m.lens.as_ref().is_some_and(|l| l.distortion.is_some()))
     }
 }
 
@@ -274,7 +277,7 @@ pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
 fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Option<LensCorrection> {
     let mut found: Vec<&Entry> = entries
         .iter()
-        .filter(|e| e.has_model() && (which == LensEntries::Any || lens_matches(e, m)))
+        .filter(|e| e.has_model(m) && (which == LensEntries::Any || lens_matches(e, m)))
         .collect();
     match (found.iter().filter_map(|e| make_rank(e, m)).min(), which) {
         (Some(best), _) => found.retain(|e| make_rank(e, m) == Some(best)),
@@ -463,7 +466,7 @@ impl Library {
             .iter()
             .filter(|p| {
                 p.usable()
-                    .any(|e| e.has_model() && make_rank(e, m).is_some())
+                    .any(|e| e.has_model(m) && make_rank(e, m).is_some())
             })
             .collect();
         let shadowed = |p: &ImportedProfile| {
@@ -487,7 +490,7 @@ impl Library {
                     .usable()
                     // Entries of this lens without a correction model don't make it
                     // a profile of this lens.
-                    .filter(|e| e.has_model() && lens_matches(e, m))
+                    .filter(|e| e.has_model(m) && lens_matches(e, m))
                     .filter_map(|e| make_rank(e, m))
                     .min(),
                 correction: OnceLock::new(),

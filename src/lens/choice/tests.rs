@@ -386,3 +386,41 @@ fn profiles_whose_correction_does_not_validate_are_not_offered() {
         );
     }
 }
+
+#[test]
+fn a_profile_leaving_distortion_to_the_camera_is_its_match() {
+    // An entry with no model of its own that defers distortion to the RAW's data.
+    let deferring = test_profile("Testcam", "35mm F2", "Adobe (Testcam 35mm F2)", 0., 0.)
+        .replace(
+            r#"<stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="0">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="0"/>
+ </rdf:Description></stCamera:PerspectiveModel>"#,
+            "",
+        )
+        .replace(
+            r#"stCamera:SensorFormatFactor="1""#,
+            r#"stCamera:SensorFormatFactor="1" stCamera:PreferMetadataDistort="True""#,
+        );
+    let mut m = photo();
+    m.lens = Some(crate::lens::LensCorrection {
+        source: "Testcam built-in".into(),
+        distortion: Some(crate::lens::Radial {
+            knots: vec![0., 1.],
+            values: vec![1., 1.02],
+        }),
+        vignetting: Some(crate::lens::Radial {
+            knots: vec![0., 1.],
+            values: vec![1., 1.5],
+        }),
+        ..Default::default()
+    });
+    m.lens_profiles = Library::from_texts([("defer.lcp", deferring.as_str())]).for_photo(&m);
+    let c = m
+        .lens_profiles
+        .auto(&m)
+        .expect("the deferring profile matches");
+    let correction = c.correction(&m).unwrap();
+    // Only the camera's distortion, not its vignetting.
+    assert_eq!(correction.distortion, m.lens.as_ref().unwrap().distortion);
+    assert!(correction.vignetting.is_none());
+}
