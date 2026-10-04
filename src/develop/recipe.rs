@@ -307,7 +307,7 @@ impl Recipe {
             }
         }
         if let Some(v) = s.vignette {
-            e.vignette = v.amount;
+            e.vignette = v.amount.clamp(-1., 1.);
             e.vignette_midpoint = v.midpoint;
             e.vignette_feather = v.feather;
             e.vignette_roundness = v.roundness;

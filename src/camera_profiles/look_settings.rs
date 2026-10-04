@@ -196,6 +196,27 @@ impl LookSettings {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        let within = |v: f32, lo: f32, hi: f32| v.is_finite() && (lo..=hi).contains(&v);
+        ensure!(
+            self.toning.is_none_or(|t| {
+                [t.shadows, t.highlights]
+                    .iter()
+                    .flatten()
+                    .all(|v| within(*v, 0., 1.))
+                    && within(t.balance, -1., 1.)
+            }),
+            "Invalid profile split toning"
+        );
+        // The amount may reach ±2 at a Profile Amount of 200%; it renders clamped.
+        ensure!(
+            self.vignette.is_none_or(|v| within(v.amount, -2., 2.)
+                && [v.midpoint, v.feather, v.highlights]
+                    .iter()
+                    .all(|x| within(*x, 0., 1.))
+                && within(v.roundness, -1., 1.)
+                && (1..=3).contains(&v.style)),
+            "Invalid profile vignette"
+        );
         // As `Effects` requires: increasing, strictly inside 0–1.
         ensure!(
             self.splits[0] > 0.
@@ -319,5 +340,20 @@ mod tests {
         assert!((r.saturation - 0.).abs() < 1e-6);
         assert_eq!(r.grading[2], [0.15, 0.1, 0.]);
         assert_eq!(r.effects.vignette, -0.05);
+        // A full-strength vignette at 200% stays within the slider's range.
+        let mut strong = user.clone();
+        let mut profile = (**strong.profile.as_ref().unwrap()).clone();
+        let look = profile.enhanced.as_mut().unwrap();
+        look.settings.vignette.as_mut().unwrap().amount = -1.;
+        strong.profile = Some(Arc::new(profile));
+        strong.profile_amount = 2.;
+        assert_eq!(strong.with_profile_adjustments().effects.vignette, -1.);
+        // Stored settings outside what the parser accepts are refused.
+        let mut bad = vintage();
+        bad.vignette.as_mut().unwrap().midpoint = 100.;
+        assert!(bad.validate().is_err());
+        let mut bad = vintage();
+        bad.toning.as_mut().unwrap().balance = 3.;
+        assert!(bad.validate().is_err());
     }
 }
