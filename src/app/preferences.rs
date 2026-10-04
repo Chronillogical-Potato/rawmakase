@@ -17,14 +17,16 @@ pub(super) enum Tab {
     Profiles,
     Performance,
     Display,
+    Automation,
 }
 impl Tab {
-    const ALL: [Tab; 5] = [
+    const ALL: [Tab; 6] = [
         Tab::General,
         Tab::Catalog,
         Tab::Profiles,
         Tab::Performance,
         Tab::Display,
+        Tab::Automation,
     ];
     fn title(self) -> &'static str {
         match self {
@@ -33,6 +35,7 @@ impl Tab {
             Tab::Profiles => "Profiles & Presets",
             Tab::Performance => "Performance",
             Tab::Display => "Display",
+            Tab::Automation => "Automation",
         }
     }
 }
@@ -250,6 +253,11 @@ impl Editor {
                     }
                     Tab::Performance => self.performance_page(&mut content),
                     Tab::Display => self.display_page(&mut content),
+                    Tab::Automation => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.automation_page(ui));
+                    }
                 }
                 let footer = egui::Rect::from_min_max(
                     egui::pos2(sidebar.right() + 32., rect.bottom() - 56.),
@@ -663,7 +671,7 @@ pub(super) fn group(ui: &mut egui::Ui, title: &str) {
             .color(theme::gray(175)),
     );
 }
-fn gap(ui: &mut egui::Ui) {
+pub(super) fn gap(ui: &mut egui::Ui) {
     ui.add_space(14.);
 }
 fn value(ui: &mut egui::Ui, text: &str) {

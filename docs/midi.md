@@ -52,7 +52,21 @@ Not bound: D1 (CC 41), D2 (CC 42), C2, L1–L3, Col, Fn, Tab, Custom Mode, and t
 Texture and Dehaze sliders. [tools/loupedeck/controls.json](../tools/loupedeck/controls.json)
 lists every control the device sends.
 
-## Changing the mapping
+## Changing the mapping in Preferences
+
+Preferences > Automation lists every dial, fader and button the Loupedeck+
+sends, each with the action it runs. Pick another from the list, or type a key
+(`cmd+shift+z`, `hold:shift`, `toggle:bw`) into the field beside a button. Changes
+apply at once and are saved to `midi.json`, as the next section describes, so
+only what you changed is written. The page also shows whether the device is
+connected and the last message it sent, and Restore Default Actions undoes every
+change to the dials and buttons.
+
+The same page has a **Command line** checkbox: with it off, RAWmakase does not
+listen for `rawmakase-ctl`, and `control.json` is removed. Turning it on listens
+again on a new port with a new token.
+
+## Changing the mapping in midi.json
 
 Put a `midi.json` in the data folder (`~/Library/Application Support/RAWmakase`
 on macOS, `%APPDATA%\RAWmakase` on Windows). It changes the defaults above:

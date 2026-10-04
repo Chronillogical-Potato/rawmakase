@@ -3,6 +3,7 @@
 //! device is plugged in; `midi.json` in the data folder overrides the mapping.
 //! The same commands also arrive from the `rawmakase-ctl` tool, over a local
 //! socket (see [`socket`]).
+mod settings;
 mod socket;
 
 use super::Editor;
@@ -14,7 +15,8 @@ use eframe::egui::{self, Event, Key, Modifiers};
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
     },
     time::{Duration, Instant},
@@ -141,6 +143,18 @@ impl Param {
             Some(_) => return None,
         })
     }
+    /// The name `parse` reads back: `exposure`, `band3`, `band3.sat`.
+    fn spec(self) -> String {
+        if let Some((name, _)) = Self::NAMED.iter().find(|(_, p)| *p == self) {
+            return (*name).into();
+        }
+        match self {
+            Self::Band(i) => format!("band{}", i + 1),
+            Self::Hsl(i, c) => format!("band{}.{}", i + 1, ["hue", "sat", "lum"][c]),
+            Self::Gray(i) => format!("band{}.gray", i + 1),
+            _ => unreachable!("every other slider has a name"),
+        }
+    }
     /// The name the slider and its History step carry.
     fn label(self, channel: usize) -> String {
         match self {
@@ -265,7 +279,7 @@ enum Action {
     ToggleMono,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Config {
     /// Part of the MIDI port's name.
     port: String,
@@ -330,7 +344,72 @@ fn parse_action(text: &str) -> Option<Action> {
         _ => None,
     }
 }
+/// The text `parse_action` reads back: `cmd+shift+z`, `hold:shift`, `mixer:hue`.
+fn action_spec(action: Action) -> String {
+    let modifiers = |m: Modifiers| {
+        let mut parts = Vec::new();
+        if m.command || m.mac_cmd {
+            parts.push("cmd");
+        } else if m.ctrl {
+            parts.push("ctrl");
+        }
+        if m.shift {
+            parts.push("shift");
+        }
+        if m.alt {
+            parts.push("alt");
+        }
+        parts
+    };
+    match action {
+        Action::ToggleMono => "toggle:bw".into(),
+        Action::Mixer(c) => format!("mixer:{}", ["hue", "sat", "lum"][c]),
+        Action::Hold(m) => format!("hold:{}", modifiers(m).join("+")),
+        Action::Key(key, m) => {
+            let mut parts = modifiers(m);
+            parts.push(key.name());
+            parts.join("+")
+        }
+    }
+}
 impl Config {
+    fn path() -> std::path::PathBuf {
+        crate::storage::data_dir().join("midi.json")
+    }
+    /// Writes `midi.json` as what differs from the defaults, so a later release's
+    /// better defaults still reach whatever was left alone.
+    fn save(&self) -> anyhow::Result<()> {
+        crate::storage::atomic_json(&Self::path(), &self.to_json())
+    }
+    fn to_json(&self) -> serde_json::Value {
+        use serde_json::{Map, Value};
+        let defaults = Self::defaults();
+        fn changes<T: PartialEq + Copy>(
+            now: &HashMap<u8, T>,
+            was: &HashMap<u8, T>,
+            spec: impl Fn(T) -> String,
+        ) -> Map<String, Value> {
+            let mut numbers: Vec<u8> = now.keys().chain(was.keys()).copied().collect();
+            numbers.sort_unstable();
+            numbers.dedup();
+            numbers
+                .into_iter()
+                .filter(|n| now.get(n) != was.get(n))
+                .map(|n| {
+                    let value = now.get(&n).map_or(Value::Null, |v| spec(*v).into());
+                    (n.to_string(), value)
+                })
+                .collect()
+        }
+        serde_json::json!({
+            "port": self.port,
+            "socket": self.socket,
+            "photo_dial": self.photo_dial,
+            "photo_detent": self.photo_detent,
+            "dials": changes(&self.dials, &defaults.dials, Param::spec),
+            "buttons": changes(&self.buttons, &defaults.buttons, action_spec),
+        })
+    }
     /// The Loupedeck+ layout, as mapped with its default Lightroom profile.
     fn defaults() -> Self {
         let faders = (0..8).map(|i| (17 + i as u8, Param::Band(i)));
@@ -402,7 +481,7 @@ impl Config {
     /// where `null` removes a default and a button is `"cmd+shift+z"` or `"hold:shift"`.
     fn load() -> Self {
         let mut config = Self::defaults();
-        let path = crate::storage::data_dir().join("midi.json");
+        let path = Self::path();
         if let Ok(text) = std::fs::read_to_string(&path) {
             match serde_json::from_str::<serde_json::Value>(&text) {
                 Ok(json) => config.apply(&json),
@@ -461,17 +540,43 @@ fn parse(bytes: &[u8]) -> Option<Msg> {
     }
 }
 
+/// The latest message from the device, for Preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Last {
+    Dial(u8, i32),
+    Button(u8),
+}
+
+/// What the listener tells Preferences.
+#[derive(Default)]
+struct Status {
+    /// The MIDI port while it is connected.
+    connected: Option<String>,
+    last: Option<Last>,
+}
+
+fn locked(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status> {
+    status.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Listens for the device on a thread of its own, finding it again when it is
-/// plugged back in. Where there is no MIDI backend nothing is ever sent.
+/// plugged back in, until `stop` is set. Where there is no MIDI backend nothing
+/// is ever sent.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn listen(port: String, tx: Sender<Msg>, ctx: egui::Context) {
+fn listen(
+    port: String,
+    tx: Sender<Msg>,
+    ctx: egui::Context,
+    status: Arc<Mutex<Status>>,
+    stop: Arc<AtomicBool>,
+) {
     use midir::{MidiInput, MidiInputConnection};
     let spawned = std::thread::Builder::new()
         .name("midi".into())
         .spawn(move || {
             let mut connected: Option<(String, String, MidiInputConnection<()>)> = None;
             let mut last = Instant::now();
-            loop {
+            while !stop.load(Ordering::Relaxed) {
                 // A gap far beyond the poll interval means the Mac slept; the
                 // device comes back as a new endpoint behind the same name.
                 if last.elapsed() > Duration::from_secs(10) {
@@ -491,13 +596,24 @@ fn listen(port: String, tx: Sender<Msg>, ctx: egui::Context) {
                         None => {
                             if let Some(p) = ports.iter().find(|p| named(p).contains(&port)) {
                                 let (name, id) = (named(p), p.id());
-                                let (tx, ctx) = (tx.clone(), ctx.clone());
+                                let (tx, ctx, status) = (tx.clone(), ctx.clone(), status.clone());
                                 connected = input
                                     .connect(
                                         p,
                                         "RAWmakase input",
                                         move |_, bytes, _| {
                                             if let Some(msg) = parse(bytes) {
+                                                match msg {
+                                                    Msg::Cc(cc, v) => {
+                                                        locked(&status).last =
+                                                            Some(Last::Dial(cc, ticks(v)));
+                                                    }
+                                                    Msg::Note(n, true) => {
+                                                        locked(&status).last =
+                                                            Some(Last::Button(n));
+                                                    }
+                                                    _ => {}
+                                                }
                                                 let _ = tx.send(msg);
                                                 ctx.request_repaint();
                                             }
@@ -510,15 +626,23 @@ fn listen(port: String, tx: Sender<Msg>, ctx: egui::Context) {
                         }
                     }
                 }
-                std::thread::sleep(Duration::from_secs(2));
+                locked(&status).connected = connected.as_ref().map(|(name, ..)| name.clone());
+                // Looked at again in two seconds; a stop is noticed sooner.
+                for _ in 0..8 {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
             }
+            locked(&status).connected = None;
         });
     if let Err(e) = spawned {
         eprintln!("MIDI listener: {e}");
     }
 }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn listen(_: String, _: Sender<Msg>, _: egui::Context) {}
+fn listen(_: String, _: Sender<Msg>, _: egui::Context, _: Arc<Mutex<Status>>, _: Arc<AtomicBool>) {}
 
 pub(super) struct Surface {
     rx: Receiver<Msg>,
@@ -543,20 +667,56 @@ pub(super) struct Surface {
     photo_dir: i32,
     last_photo: Option<Instant>,
     last_turn: Option<Instant>,
+    /// What the MIDI thread reports, and how to stop it.
+    status: Arc<Mutex<Status>>,
+    stop_midi: Arc<AtomicBool>,
+    /// The port name the MIDI thread is looking for.
+    listening_port: String,
+    /// What the threads need to send messages and wake the app; none in tests.
+    link: Option<(Sender<Msg>, egui::Context)>,
+    /// The control socket while it listens.
+    socket: Option<socket::Handle>,
 }
 impl Surface {
     pub(super) fn start(ctx: &egui::Context) -> Self {
         let config = Config::load();
         let (tx, rx) = mpsc::channel();
-        listen(config.port.clone(), tx.clone(), ctx.clone());
-        let surface = Self::new(config, rx);
-        if surface.config.socket {
-            socket::start(tx, ctx.clone(), surface.shared.clone());
-        }
+        let mut surface = Self::new(config, rx);
+        surface.link = Some((tx, ctx.clone()));
+        surface.restart_midi();
+        surface.set_socket(surface.config.socket);
         surface
+    }
+    /// Listens again, for the port named in the config.
+    fn restart_midi(&mut self) {
+        self.stop_midi.store(true, Ordering::Relaxed);
+        let Some((tx, ctx)) = &self.link else { return };
+        self.stop_midi = Arc::new(AtomicBool::new(false));
+        self.status = Arc::default();
+        self.listening_port = self.config.port.clone();
+        listen(
+            self.config.port.clone(),
+            tx.clone(),
+            ctx.clone(),
+            self.status.clone(),
+            self.stop_midi.clone(),
+        );
+    }
+    /// Starts or stops the control socket; stopping removes `control.json`, so
+    /// `rawmakase-ctl` says RAWmakase is not listening.
+    fn set_socket(&mut self, on: bool) {
+        self.socket = None;
+        if on && let Some((tx, ctx)) = &self.link {
+            self.socket = socket::start(tx.clone(), ctx.clone(), self.shared.clone());
+        }
     }
     fn new(config: Config, rx: Receiver<Msg>) -> Self {
         Self {
+            status: Arc::default(),
+            stop_midi: Arc::default(),
+            listening_port: config.port.clone(),
+            link: None,
+            socket: None,
             rx,
             config,
             held: Modifiers::NONE,
@@ -1248,6 +1408,70 @@ mod tests {
             Some(Action::Key(Key::ArrowLeft, Modifiers::NONE))
         );
         assert_eq!(parse_action("nonsense"), None);
+    }
+
+    #[test]
+    fn saved_config_is_the_changes_and_reads_back_the_same() {
+        let defaults = Config::defaults();
+        let saved = defaults.to_json();
+        assert_eq!(saved["dials"], serde_json::json!({}));
+        assert_eq!(saved["buttons"], serde_json::json!({}));
+        let mut config = Config::defaults();
+        config.dials.insert(41, Param::Hsl(2, 1));
+        config.dials.insert(42, Param::Gray(7));
+        config.dials.remove(&33);
+        config
+            .buttons
+            .insert(50, Action::Key(Key::U, command() | SHIFT));
+        config.buttons.insert(110, Action::Hold(Modifiers::ALT));
+        config.buttons.insert(111, Action::Mixer(2));
+        config.buttons.remove(&95);
+        config.photo_dial = None;
+        config.socket = false;
+        let mut read = Config::defaults();
+        read.apply(&config.to_json());
+        assert_eq!(read, config);
+    }
+
+    #[test]
+    fn every_default_spells_back_to_itself() {
+        let config = Config::defaults();
+        for (cc, param) in &config.dials {
+            assert_eq!(Param::parse(&param.spec()), Some(*param), "CC {cc}");
+        }
+        for (note, action) in &config.buttons {
+            // Ctrl alone is the one default `parse_action` cannot name: it reads
+            // "ctrl" as the command key, which is the same key off the Mac.
+            if *action == Action::Hold(Modifiers::CTRL) && cfg!(target_os = "macos") {
+                continue;
+            }
+            assert_eq!(
+                parse_action(&action_spec(*action)),
+                Some(*action),
+                "note {note}"
+            );
+        }
+        for (label, spec) in settings::PRESETS {
+            assert!(
+                spec.is_empty() || parse_action(spec).is_some(),
+                "{label}: {spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_device_message_is_listed_for_the_page() {
+        // The page lists what the device sends; the defaults must be among it.
+        let config = Config::defaults();
+        for cc in config.dials.keys().chain(config.photo_dial.iter()) {
+            assert!(settings::DIALS.iter().any(|(_, n)| n == cc), "CC {cc}");
+        }
+        for note in config.buttons.keys() {
+            assert!(
+                settings::BUTTONS.iter().any(|(_, n)| n == note),
+                "note {note}"
+            );
+        }
     }
 
     #[test]

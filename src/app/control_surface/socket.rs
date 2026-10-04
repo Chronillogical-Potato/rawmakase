@@ -24,7 +24,7 @@ use std::{
     net::{Ipv4Addr, TcpListener, TcpStream},
     sync::{
         Condvar, Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::Sender,
     },
     time::Duration,
@@ -206,11 +206,15 @@ fn spawn(
     tx: Sender<Msg>,
     ctx: egui::Context,
     shared: std::sync::Arc<Shared>,
+    stop: std::sync::Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("control-socket".into())
         .spawn(move || {
             for stream in listener.incoming().flatten() {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
                 let (token, tx, ctx, shared) =
                     (token.clone(), tx.clone(), ctx.clone(), shared.clone());
                 // A client that stalls must not hold up the next.
@@ -244,16 +248,52 @@ fn write_connection(port: u16, token: &str) -> std::io::Result<()> {
     std::fs::rename(tmp, dir.join("control.json"))
 }
 
-/// Starts listening on a thread of its own. Without a socket nothing is ever sent.
-pub(super) fn start(tx: Sender<Msg>, ctx: egui::Context, shared: std::sync::Arc<Shared>) {
-    let token = new_token();
-    let started = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|listener| {
-        write_connection(listener.local_addr()?.port(), &token)?;
-        spawn(listener, token, tx, ctx, shared)
-    });
-    if let Err(e) = started {
-        eprintln!("Control socket: {e}");
+/// A listening socket. Dropping it stops listening and takes `control.json`
+/// away, if it is still this socket's.
+pub(super) struct Handle {
+    stop: std::sync::Arc<AtomicBool>,
+    port: u16,
+    token: String,
+}
+impl Handle {
+    pub(super) fn port(&self) -> u16 {
+        self.port
     }
+}
+impl Drop for Handle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // The thread is waiting in accept; a connection wakes it to see the flag.
+        let _ = TcpStream::connect_timeout(
+            &(Ipv4Addr::LOCALHOST, self.port).into(),
+            Duration::from_secs(1),
+        );
+        let file = crate::storage::data_dir().join("control.json");
+        let ours = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|json| json["token"].as_str() == Some(self.token.as_str()));
+        if ours {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
+/// Starts listening on a thread of its own. Without a socket nothing is ever sent.
+pub(super) fn start(
+    tx: Sender<Msg>,
+    ctx: egui::Context,
+    shared: std::sync::Arc<Shared>,
+) -> Option<Handle> {
+    let token = new_token();
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let started = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|listener| {
+        let port = listener.local_addr()?.port();
+        write_connection(port, &token)?;
+        spawn(listener, token.clone(), tx, ctx, shared, stop.clone())?;
+        Ok(Handle { stop, port, token })
+    });
+    started.map_err(|e| eprintln!("Control socket: {e}")).ok()
 }
 
 #[cfg(test)]
@@ -338,6 +378,35 @@ mod tests {
     }
 
     #[test]
+    fn dropping_the_handle_stops_listening() {
+        let (tx, _rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        spawn(
+            listener,
+            "t".into(),
+            tx,
+            egui::Context::default(),
+            Arc::default(),
+            stop.clone(),
+        )
+        .unwrap();
+        assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_ok());
+        // Its token is not in any control.json, so no file is touched.
+        drop(Handle {
+            stop,
+            port,
+            token: "not in any file".into(),
+        });
+        let closed = (0..50).any(|_| {
+            std::thread::sleep(Duration::from_millis(20));
+            TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err()
+        });
+        assert!(closed, "the port stayed open");
+    }
+
+    #[test]
     fn the_socket_checks_the_token_and_answers_over_tcp() {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared::default());
@@ -349,6 +418,7 @@ mod tests {
             tx,
             egui::Context::default(),
             shared.clone(),
+            Default::default(),
         )
         .unwrap();
         // A stand-in for the app's frames.
