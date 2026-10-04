@@ -66,6 +66,11 @@ impl Editor {
         {
             self.view.tool = super::state::Tool::None;
         }
+        // A conversion waiting for the photo, once it is decoded and nothing else
+        // changed this frame (any edit drops it below).
+        if self.document.recipe == frame.recipe {
+            self.finish_pending_treatment();
+        }
         let edited = self.document.history.observe(
             frame.recipe,
             &self.document.recipe,

@@ -2908,6 +2908,15 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
         (applied, steps[0].name.as_str()),
         (1, "Convert to Black & White")
     );
+    // An edit in the frame the photo decodes in drops the request too.
+    let (mut editor, image) =
+        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
+    editor.document.set_image(image);
+    in_edit_frame(&ctx, &mut editor, |e| e.document.recipe.exposure = 0.3);
+    assert!(!editor.document.recipe.effects.monochrome);
+    in_edit_frame(&ctx, &mut editor, |_| {});
+    assert!(!editor.document.recipe.effects.monochrome);
     // A request lapses when the recipe changes otherwise before the photo decodes.
     let (mut editor, image) =
         editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);

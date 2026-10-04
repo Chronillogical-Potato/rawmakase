@@ -56,10 +56,11 @@ impl Editor {
         if self.document.recipe.treatment() == treatment {
             return;
         }
-        let colors = self.first_conversion_colors();
         let needs_auto = treatment == Treatment::BlackWhite
             && self.first_conversion == FirstConversion::AutoMix
             && self.document.recipe.effects.gray_mix == [0.; 8];
+        // Measured only when the conversion uses it.
+        let colors = needs_auto.then(|| self.photo_colors()).flatten();
         if needs_auto && colors.is_none() {
             self.document.pending_treatment = Some(super::state::PendingTreatment {
                 treatment,
@@ -102,7 +103,13 @@ impl Editor {
         &mut self,
         old: Option<&crate::camera_profiles::CameraProfile>,
     ) {
-        let colors = self.first_conversion_colors();
+        let r = &self.document.recipe;
+        // Measured only for a first conversion by a black & white profile.
+        let converts = crate::develop::is_monochrome(r.profile.as_deref())
+            && !crate::develop::is_monochrome(old)
+            && !r.effects.monochrome
+            && r.effects.gray_mix == [0.; 8];
+        let colors = converts.then(|| self.first_conversion_colors()).flatten();
         let first = colors.as_ref().map(PhotoColors::auto_mix);
         self.document.recipe.follow_profile_treatment(old, first);
     }
