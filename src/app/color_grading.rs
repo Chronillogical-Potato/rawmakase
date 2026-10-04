@@ -386,6 +386,16 @@ impl WheelDrag {
     }
 }
 
+/// A single click waits for egui's double-click window before changing the recipe.
+/// This keeps a double-click reset to one edit, without an intermediate color in Undo.
+#[derive(Clone, Copy)]
+struct WheelClick {
+    color: HueSat,
+    before: [f32; 3],
+    deadline: f64,
+    frame: u64,
+}
+
 /// A hue/saturation wheel filling `rect`.
 fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     let id = ui.id().with(("grade-wheel", region));
@@ -393,6 +403,34 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     let center = rect.center();
     let radius = rect.width().min(rect.height()) / 2. - 3.;
     let to_offset = |p: Pos2| (p - center) / radius;
+    let on_disc = |p: Pos2| p.distance(center) <= radius;
+    // Keep the press origin through release (egui clears press_origin on release),
+    // including a press and release delivered in the same frame.
+    let press_memory = id.with("press-on-disc");
+    let mut accepted = ui
+        .data(|d| d.get_temp::<bool>(press_memory))
+        .unwrap_or(false);
+    ui.input(|i| {
+        for event in &i.events {
+            if let egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                ..
+            } = event
+            {
+                accepted = on_disc(*pos);
+            }
+        }
+    });
+    let primary_down = ui.input(|i| i.pointer.primary_down());
+    ui.data_mut(|d| {
+        if primary_down {
+            d.insert_temp(press_memory, accepted);
+        } else {
+            d.remove::<bool>(press_memory);
+        }
+    });
     let before = HueSat::of(grade);
     let modifiers = ui.input(|i| i.modifiers);
     let precision = if modifiers.command {
@@ -407,19 +445,48 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     };
     let memory = id.with("drag");
     let mut drag: Option<WheelDrag> = ui.data(|d| d.get_temp(memory));
-    if response.double_clicked() {
+    let click_memory = id.with("click");
+    let mut click: Option<WheelClick> = ui.data_mut(|d| {
+        let pending = d.get_temp(click_memory);
+        d.remove::<WheelClick>(click_memory);
+        pending
+    });
+    let frame = ui.ctx().cumulative_frame_nr();
+    let now = ui.input(|i| i.time);
+    // A hidden panel or another edit must not replay a stale click later.
+    click = click.filter(|c| c.frame + 1 >= frame && c.before == *grade);
+    if ui.input(|i| {
+        i.events.iter().any(|e| match e {
+            egui::Event::PointerButton {
+                pos, pressed: true, ..
+            } => !on_disc(*pos),
+            egui::Event::Key { pressed: true, .. } => true,
+            _ => false,
+        })
+    }) {
+        click = None;
+    }
+    if response.double_clicked() && accepted {
+        click = None;
         HueSat::NEUTRAL.store(grade);
         drag = None;
     } else if let Some(pointer) = response.interact_pointer_pos() {
         let on_puck = |p: Pos2| (to_offset(p) - before.offset()).length() * radius <= PUCK_GRAB;
         let mut delta = response.drag_delta() / radius;
         // A plain click away from the puck moves it there, as in Lightroom.
-        if response.clicked() && modifiers.is_none() && !on_puck(pointer) {
-            HueSat::at(to_offset(pointer), before.hue).store(grade);
+        if response.clicked() && accepted && modifiers.is_none() && !on_puck(pointer) {
+            click = Some(WheelClick {
+                color: HueSat::at(to_offset(pointer), before.hue),
+                before: *grade,
+                deadline: now + ui.ctx().options(|o| o.input_options.max_double_click_delay),
+                frame,
+            });
         }
         if response.drag_started()
+            && accepted
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
+            click = None;
             // A plain press away from the puck moves it there too; a press on it, or
             // with Shift or Cmd held, keeps its color to start from.
             let grab = if on_puck(origin) || !modifiers.is_none() {
@@ -439,6 +506,18 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     }
     if response.drag_stopped() {
         drag = None;
+    }
+    if let Some(mut pending) = click {
+        if now >= pending.deadline && !ui.input(|i| i.pointer.primary_down()) {
+            pending.color.store(grade);
+        } else {
+            pending.frame = frame;
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(
+                    (pending.deadline - now).max(0.01),
+                ));
+            ui.data_mut(|d| d.insert_temp(click_memory, pending));
+        }
     }
     let start = drag.map_or(before, |d| d.start);
     ui.data_mut(|d| match drag {
@@ -844,6 +923,7 @@ mod tests {
         h.frame(&mut grade, vec![press(true)], egui::Modifiers::NONE);
         h.time -= 0.45;
         h.frame(&mut grade, vec![press(false)], egui::Modifiers::NONE);
+        h.frame(&mut grade, vec![], egui::Modifiers::NONE);
         assert_eq!((grade[0], grade[1]), (0.5, 0.3));
         // Double-click resets hue and saturation, not Luminance.
         let at = h.at(Vec2::ZERO);
@@ -863,6 +943,96 @@ mod tests {
             h.frame(&mut grade, vec![click(pressed)], egui::Modifiers::NONE);
         }
         assert_eq!(grade, [0., 0., 0.25]);
+    }
+
+    #[test]
+    fn empty_corners_ignore_clicks_double_clicks_and_drags() {
+        for diameter in [SMALL_WHEEL, LARGE_WHEEL] {
+            for corner in [
+                Vec2::new(-0.9, -0.9),
+                Vec2::new(0.9, -0.9),
+                Vec2::new(-0.9, 0.9),
+                Vec2::new(0.9, 0.9),
+            ] {
+                let mut h = Harness::new();
+                h.rect = Rect::from_min_size(h.rect.min, Vec2::splat(diameter));
+                let original = [0.25, 0.4, 0.2];
+                let mut grade = original;
+                let at = h.at(corner);
+                h.frame(
+                    &mut grade,
+                    vec![egui::Event::PointerMoved(at)],
+                    egui::Modifiers::NONE,
+                );
+                for pressed in [true, false, true, false] {
+                    h.time -= 0.45;
+                    h.frame(
+                        &mut grade,
+                        vec![egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                        egui::Modifiers::NONE,
+                    );
+                    assert_eq!(grade, original);
+                }
+                h.frame(&mut grade, vec![], egui::Modifiers::NONE);
+                assert_eq!(grade, original);
+                h.drag(
+                    &mut grade,
+                    &[corner, Vec2::ZERO, Vec2::new(0.5, 0.)],
+                    egui::Modifiers::NONE,
+                );
+                assert_eq!(grade, original);
+                // A drag that starts on the disc can still move beyond its rim.
+                h.drag(
+                    &mut grade,
+                    &[Vec2::ZERO, Vec2::new(1.5, 0.)],
+                    egui::Modifiers::NONE,
+                );
+                assert_eq!(grade, [0., 1., 0.2]);
+            }
+        }
+    }
+
+    #[test]
+    fn double_click_reset_undo_restores_the_grade_before_either_click() {
+        let mut h = Harness::new();
+        let mut history = super::super::history::History::default();
+        let mut recipe = Recipe::default();
+        recipe.grading[0] = [0.25, 0.4, 0.2];
+        let original = recipe.clone();
+        let at = h.at(Vec2::new(-0.5, 0.));
+        h.frame(
+            &mut recipe.grading[0],
+            vec![egui::Event::PointerMoved(at)],
+            egui::Modifiers::NONE,
+        );
+        for pressed in [true, false, true, false] {
+            history.begin_frame();
+            let before = recipe.clone();
+            h.time -= 0.45;
+            h.frame(
+                &mut recipe.grading[0],
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                egui::Modifiers::NONE,
+            );
+            history.observe(before, &recipe, pressed);
+        }
+        assert_eq!(recipe.grading[0], [0., 0., 0.2]);
+        assert_eq!(history.steps().1, 1);
+        assert!(history.undo(&mut recipe));
+        assert_eq!(recipe, original);
+        // No delayed first click may reapply itself after the reset.
+        h.frame(&mut recipe.grading[0], vec![], egui::Modifiers::NONE);
+        assert_eq!(recipe, original);
     }
 
     #[test]

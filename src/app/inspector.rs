@@ -477,6 +477,7 @@ impl Editor {
             .pending_treatment
             .as_ref()
             .map(|p| p.treatment);
+        let grading_document = self.document.history.id();
         let view = &mut self.view;
         let (r, photo) = self.document.recipe_and_colors();
 
@@ -974,7 +975,9 @@ impl Editor {
         }
 
         if adjustment_section(ui, "Color Grading", |ui| {
-            super::color_grading::color_grading_ui(ui, r, &mut view.grading);
+            ui.push_id(grading_document, |ui| {
+                super::color_grading::color_grading_ui(ui, r, &mut view.grading);
+            });
         }) {
             r.grading = [[0.; 3]; 3];
             r.effects.global_grade = [0.; 3];
