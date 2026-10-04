@@ -1,4 +1,5 @@
 use super::Editor;
+use super::before_after;
 use super::crop_tool::{Attention, Guide, Ruler};
 use super::icons::{self, Icon};
 use super::navigator;
@@ -226,33 +227,19 @@ impl Editor {
             self.set_zoom(level);
         }
     }
-    /// Screen rectangle of the whole photo for the current zoom: fitted in Fit,
-    /// otherwise `zoom.level` screen pixels per image pixel around `zoom.pan`,
-    /// centered when smaller than the viewport.
+    /// Screen rectangle of the whole photo for the current zoom: see `Zoom::photo_rect`.
     fn photo_rect(&self, area: Rect, g: &Geometry, ppp: f32) -> Rect {
-        let (w, h) = (g.width as f32, g.height as f32);
-        if !self.view.zoom.on {
-            let k = (area.width() / w).min(area.height() / h);
-            return Rect::from_center_size(area.center(), Vec2::new(w, h) * k);
-        }
-        let size = Vec2::new(w, h) * (self.view.zoom.level / ppp);
-        let place = |pan: f32, lo: f32, len: f32, size: f32| {
-            if size <= len {
-                lo + (len - size) / 2.
-            } else {
-                (lo + len / 2. - pan * size).clamp(lo + len - size, lo)
-            }
-        };
-        let min = Pos2::new(
-            place(self.view.zoom.pan[0], area.left(), area.width(), size.x),
-            place(self.view.zoom.pan[1], area.top(), area.height(), size.y),
-        );
-        Rect::from_min_size(min, size)
+        let size = Vec2::new(g.width as f32, g.height as f32);
+        self.view.zoom.photo_rect(area, size, ppp)
     }
     pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) {
-        let available = ui.available_size();
-        let (area, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
-        ui.painter().rect_filled(area, 0., theme::photo_backdrop());
+        let (whole, response) =
+            ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        ui.painter().rect_filled(whole, 0., theme::photo_backdrop());
+        // The edit's side of the viewport; all of it unless Before shows beside it.
+        let panes = before_after::panes(self.view.compare, whole);
+        let area = panes.after.area;
+        let available = area.size();
         let ppp = ui.ctx().pixels_per_point();
         self.view.viewport = available * ppp;
         if !self.view.zoom.on
@@ -273,7 +260,7 @@ impl Editor {
             TextureMode::Whole => None,
         };
         let Some(texture) = self.preview.texture.clone().or(region_texture.clone()) else {
-            self.loading_placeholder(ui, area);
+            self.loading_placeholder(ui, whole);
             return;
         };
         let geometry = self
@@ -319,19 +306,13 @@ impl Editor {
         };
         self.view.shown_rect = Some(rect);
         let region_rect = match (self.preview.mode, &geometry) {
-            (TextureMode::Region([x, y, w, h]), Some(g)) => {
-                let at = |px: u32, py: u32| {
-                    Pos2::new(
-                        rect.left() + px as f32 / g.width as f32 * rect.width(),
-                        rect.top() + py as f32 / g.height as f32 * rect.height(),
-                    )
-                };
-                Some(Rect::from_min_max(at(x, y), at(x + w, y + h)))
+            (TextureMode::Region(region), Some(g)) => {
+                Some(before_after::region_on(rect, g, region))
             }
             _ => None,
         };
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
-        let painter = ui.painter().with_clip_rect(area);
+        let painter = ui.painter().with_clip_rect(panes.after.clip);
         if self.preview.texture.is_some() {
             // Opening or leaving the Crop tool changes the crop before the render for
             // it lands: the old render goes where its crop sits, clipped to the new one.
@@ -346,12 +327,9 @@ impl Editor {
                         whole + Vec2::new(then[0], then[1]) * size,
                         whole + Vec2::new(then[2], then[3]) * size,
                     );
-                    painter.with_clip_rect(area.intersect(rect)).image(
-                        texture.id(),
-                        at,
-                        uv,
-                        Color32::WHITE,
-                    );
+                    painter
+                        .with_clip_rect(panes.after.clip.intersect(rect))
+                        .image(texture.id(), at, uv, Color32::WHITE);
                 }
                 _ => {
                     painter.image(texture.id(), rect, uv, Color32::WHITE);
@@ -361,19 +339,20 @@ impl Editor {
         if let (Some(region), Some(at)) = (&region_texture, region_rect) {
             painter.image(region.id(), at, uv, Color32::WHITE);
         }
-        if self.view.compare {
-            let badge =
-                Rect::from_min_size(area.left_top() + Vec2::splat(12.), Vec2::new(62., 25.));
-            ui.painter()
-                .rect_filled(badge, 3., Color32::from_black_alpha(190));
-            ui.painter().text(
-                badge.center(),
-                egui::Align2::CENTER_CENTER,
-                "Before",
-                egui::FontId::proportional(12.),
-                Color32::WHITE,
-            );
+        if self.view.compare.before_only() {
+            before_after::badge(ui, area, "Before");
         }
+        self.before_pane_ui(ui, &panes, rect);
+        // A click or drag on Before acts where the same point is on the edit.
+        let before_rect = before_after::before_rect(rect, &panes, true);
+        let on_after = |pos: Pos2| match (before_rect, panes.before) {
+            (Some(before), Some(pane))
+                if pane.clip.contains(pos) && !panes.after.clip.contains(pos) =>
+            {
+                before_after::to_after(pos, before, rect)
+            }
+            _ => pos,
+        };
         // A tool that owns the pointer (spots, brushes, gradients) takes drags and
         // clicks; the hand tool pans only when no tool claims them.
         // The wheel over the photo sizes the brush, spot or red eye circle, before the
@@ -398,7 +377,7 @@ impl Editor {
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
         // Holding Space pans while an eyedropper is open, as in Lightroom.
         let space = ui.input(|i| i.key_down(egui::Key::Space));
-        let picking = self.view.picks_color() && !space && !self.view.compare;
+        let picking = self.view.picks_color() && !space && !self.view.compare.shows_before();
         let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
         if self.view.zoom.on && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
@@ -423,7 +402,7 @@ impl Editor {
             && !response.triple_clicked()
             && hand
             && !self.view.is(Tool::Crop)
-            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(pos) = response.interact_pointer_pos().map(on_after)
             && rect.contains(pos)
         {
             if !self.view.zoom.on

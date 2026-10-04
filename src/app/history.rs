@@ -252,6 +252,22 @@ impl History {
             .collect();
         (steps, self.undo.len())
     }
+    /// The edit at a History state, done or undone: `applied` steps applied, counted
+    /// as `steps` lists them (0 is the oldest state kept), with `current` the state
+    /// applied now. For Copy History Step Settings to Before.
+    pub fn state(&self, applied: usize, current: &Recipe) -> Option<Recipe> {
+        let now = self.undo.len();
+        match applied.cmp(&now) {
+            std::cmp::Ordering::Less => Some(self.undo[applied].0.clone()),
+            std::cmp::Ordering::Equal => Some(current.clone()),
+            std::cmp::Ordering::Greater => self
+                .redo
+                .iter()
+                .rev()
+                .nth(applied - now - 1)
+                .map(|(r, _)| r.clone()),
+        }
+    }
     /// Undoes or redoes until `applied` steps are applied, as clicking a
     /// History step in Lightroom does. Later steps stay until a new edit.
     pub fn go_to(&mut self, applied: usize, current: &mut Recipe) -> bool {
@@ -760,6 +776,27 @@ mod tests {
         let mut current = pasted.clone();
         assert!(restored.undo(&mut current));
         assert_eq!(current, recipe);
+    }
+    #[test]
+    fn each_state_reads_back_done_or_undone_without_moving() {
+        let mut history = History::default();
+        let mut recipe = Recipe::default();
+        let mut states = vec![recipe.clone()];
+        for value in [0.5, 1., 1.5] {
+            let before = recipe.clone();
+            recipe.exposure = value;
+            history.record(before, &recipe);
+            states.push(recipe.clone());
+        }
+        history.undo(&mut recipe);
+        let shown = recipe.clone();
+        for (applied, state) in states.iter().enumerate() {
+            assert_eq!(history.state(applied, &recipe).as_ref(), Some(state));
+        }
+        assert_eq!(history.state(4, &recipe), None);
+        // Reading a state changes neither the edit nor where History is.
+        assert_eq!(recipe, shown);
+        assert_eq!(history.steps().1, 2);
     }
     #[test]
     fn steps_are_named_and_go_to_moves_between_them() {

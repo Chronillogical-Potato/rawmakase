@@ -16,7 +16,7 @@ impl Editor {
         area: Rect,
     ) -> bool {
         // Holding Space pans instead, as in Lightroom.
-        if ui.input(|i| i.key_down(egui::Key::Space)) || self.view.compare {
+        if ui.input(|i| i.key_down(egui::Key::Space)) || self.view.compare.shows_before() {
             return false;
         }
         match self.view.tool {

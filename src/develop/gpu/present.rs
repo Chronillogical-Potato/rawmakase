@@ -31,6 +31,10 @@ pub enum Slot {
     Whole,
     /// A 100% region and its reduced preview.
     Region,
+    /// Before's whole photo and region beside the edit, in Before/After views: kept
+    /// apart so neither side is presented into a texture the other still shows.
+    BeforeWhole,
+    BeforeRegion,
 }
 /// How a preview is shown.
 pub struct Display {

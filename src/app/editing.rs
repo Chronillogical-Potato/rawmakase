@@ -16,7 +16,7 @@ pub(super) struct EditFrame {
 struct RenderModes {
     crop: bool,
     clipping: crate::develop::ClipOverlay,
-    compare: bool,
+    compare: super::before_after::Compare,
     zoom: bool,
     /// The swatch Point Color's Visualize Range shows.
     visualized: Option<usize>,
@@ -75,6 +75,7 @@ impl Editor {
                 .history
                 .label(super::history::Step::new(name, value));
         }
+        self.leave_compare_for_tools();
         if frame.aspect != self.view.aspect {
             self.fit_aspect();
         }

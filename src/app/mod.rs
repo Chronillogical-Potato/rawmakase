@@ -7,7 +7,7 @@
 //!
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
-use crate::app::worker::{Event, Latest, LoadJob, RenderJob};
+use crate::app::worker::{Event, Latest, LoadJob};
 #[cfg(test)]
 use crate::develop::Recipe;
 use eframe::egui::{self, Vec2};
@@ -30,7 +30,7 @@ pub struct Editor {
     tx: Sender<Event>,
     rx: Receiver<Event>,
     loader: Latest<LoadJob>,
-    renderer: Latest<RenderJob>,
+    renderer: worker::Renderer,
     clipboard: Option<settings_transfer::Clipboard>,
     /// The settings of the photo open before this one, for Paste from Previous.
     previous_settings: Option<settings_transfer::Settings>,
@@ -404,6 +404,7 @@ fn survive_surface_errors(device: &wgpu::Device) {
 }
 
 mod auto;
+mod before_after;
 mod brush_scroll;
 mod bulk_import;
 mod catalog;

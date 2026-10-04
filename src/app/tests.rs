@@ -373,7 +373,7 @@ fn compact_inspector_keeps_canvas_and_before_preserves_edits() {
             "Inspector consumed canvas on frame {frame}"
         );
     }
-    assert!(editor.view.compare);
+    assert_eq!(editor.view.compare, before_after::Compare::BeforeOnly);
     assert_eq!(editor.document.recipe, saved);
     assert_eq!(editor.effective_recipe().crop, saved.crop);
     assert_eq!(editor.effective_recipe().exposure, 0.);
@@ -446,6 +446,7 @@ fn stale_preview_results_are_discarded() {
     e.preview.task.start();
     e.tx.send(Event::Rendered {
         id: old,
+        pane: worker::Pane::After,
         preview: worker::Preview::Pixels {
             image: develop::Rendered {
                 width: 1,
@@ -467,6 +468,45 @@ fn stale_preview_results_are_discarded() {
 }
 
 #[test]
+fn before_and_after_renders_go_to_their_own_side() {
+    use worker::Pane;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    // Each side counts its renders from the same start: ids alone do not tell them apart.
+    let (after, _) = e.preview.task.start();
+    let (before, _) = e.preview.before.task.start();
+    assert_eq!(after, before);
+    let rendered = |pane, value: u8| Event::Rendered {
+        id: after,
+        pane,
+        preview: worker::Preview::Pixels {
+            image: develop::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![value; 3],
+            navigator: None,
+        },
+        histogram: Box::new(develop::Histogram::EMPTY),
+        thumbnail: None,
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: "rendered".into(),
+    };
+    e.tx.send(rendered(Pane::Before, 10)).unwrap();
+    e.events(&ctx);
+    assert!(e.preview.texture.is_none());
+    assert!(e.preview.before.texture.is_some());
+    assert!(!e.preview.before.task.is_running());
+    assert!(e.preview.task.is_running());
+    e.tx.send(rendered(Pane::After, 200)).unwrap();
+    e.events(&ctx);
+    assert!(e.preview.texture.is_some());
+    assert!(!e.preview.task.is_running());
+}
+
+#[test]
 fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
     use worker::{RenderStage, TaskKind};
     let ctx = egui::Context::default();
@@ -477,7 +517,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
         .tx
         .send(Event::Failed {
             id: render_id,
-            task: TaskKind::Render,
+            task: TaskKind::Render(worker::Pane::After),
             error: "render failed".into(),
         })
         .unwrap();
@@ -490,7 +530,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
         .tx
         .send(Event::Failed {
             id: render_id,
-            task: TaskKind::Render,
+            task: TaskKind::Render(worker::Pane::After),
             error: "stale failure".into(),
         })
         .unwrap();
@@ -513,6 +553,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
             .tx
             .send(Event::Rendered {
                 id: current,
+                pane: worker::Pane::After,
                 preview: worker::Preview::Pixels {
                     image: develop::Rendered {
                         width: 1,

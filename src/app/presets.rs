@@ -702,24 +702,40 @@ impl Editor {
             return;
         }
         let mut go_to = None;
+        let mut to_before = None;
         let mut lightroom = None;
         let (steps, applied) = self.document.history.steps();
+        // A click goes to the step; its menu copies it to Before, as in Lightroom.
+        let mut row = |ui: &mut egui::Ui, n: usize, name: &str, value: &str| {
+            let response = history_row(ui, name, value, n == applied, n > applied);
+            if response.clicked() && !super::widgets::context_clicked(&response) {
+                go_to = Some(n);
+            }
+            super::widgets::context_menu(&response, |ui| {
+                ui.set_width(270.);
+                if super::widgets::menu_item(
+                    ui,
+                    "Copy History Step Settings to Before",
+                    "",
+                    true,
+                    false,
+                ) {
+                    to_before = Some(n);
+                    ui.close();
+                }
+            });
+        };
         section(ui, "History", false, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             for (i, step) in steps.iter().enumerate().rev() {
-                let n = i + 1;
-                if history_row(ui, &step.name, &step.value, n == applied, n > applied).clicked() {
-                    go_to = Some(n);
-                }
+                row(ui, i + 1, &step.name, &step.value);
             }
             let opened = if self.document.lightroom_history.is_empty() {
                 "Opened"
             } else {
                 "Opened with Lightroom edit"
             };
-            if history_row(ui, opened, "", applied == 0, false).clicked() {
-                go_to = Some(0);
-            }
+            row(ui, 0, opened, "");
             if self.document.lightroom_history.is_empty() {
                 return;
             }
@@ -748,6 +764,9 @@ impl Editor {
                 }
             }
         });
+        if let Some(n) = to_before {
+            self.before_from_history(n);
+        }
         if let Some(n) = go_to {
             // A resize still being grouped is a step before the jump, so it isn't lost.
             self.finish_wheel_gesture();

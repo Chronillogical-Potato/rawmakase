@@ -26,6 +26,9 @@ pub(super) struct Document {
     pub(super) lightroom_notice: String,
     /// Lightroom's history for the open catalog photo, oldest first.
     pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
+    /// What Before shows when not the photo's starting settings: a History step,
+    /// snapshot or the edit copied to it. Not saved, as in Lightroom.
+    pub(super) before: Option<Recipe>,
     /// The open catalog photo's Snapshots.
     pub(super) snapshots: super::snapshots::Snapshots,
     /// Apply the photo's Lightroom settings once its profiles arrive.
@@ -162,6 +165,8 @@ pub(super) struct PreviewState {
     /// crop lands, the old one is placed where its crop sits instead of stretched.
     pub(super) crop: Option<[f32; 4]>,
     pub(super) pending_crop: [f32; 4],
+    /// Before's render, while it shows beside the edit.
+    pub(super) before: super::before_after::BeforePreview,
 }
 impl Default for PreviewState {
     fn default() -> Self {
@@ -183,6 +188,7 @@ impl Default for PreviewState {
             pending_mode: TextureMode::Whole,
             crop: None,
             pending_crop: [0., 0., 1., 1.],
+            before: Default::default(),
         }
     }
 }
@@ -226,8 +232,11 @@ pub(super) struct PointColorView {
 pub(super) struct ViewState {
     /// Fit or a zoom level, and where; Develop's and the Library's.
     pub(super) zoom: super::navigator::Zoom,
+    /// The size, in pixels, of the area the edit is shown in: the viewport, or its
+    /// half beside Before.
     pub(super) viewport: Vec2,
-    pub(super) compare: bool,
+    /// Before alone or beside the edit.
+    pub(super) compare: super::before_after::Compare,
     /// The histogram's clipping warnings.
     pub(super) clipping: super::clipping::ClippingView,
     /// A drag in the histogram in progress.
@@ -274,7 +283,7 @@ impl Default for ViewState {
         Self {
             zoom: Default::default(),
             viewport: Vec2::ZERO,
-            compare: false,
+            compare: Default::default(),
             clipping: Default::default(),
             tone_drag: None,
             tool: Tool::None,
@@ -361,20 +370,34 @@ impl PreviewState {
         self.last_region = None;
         self.mode = TextureMode::Whole;
         self.crop = None;
+        self.before.clear();
     }
     /// Textures the renderer presented into that the viewport draws.
     pub fn presented(&self) -> Vec<egui::TextureId> {
-        [&self.texture, &self.region, &self.navigator]
-            .into_iter()
-            .flatten()
-            .filter(|p| p.is_presented())
-            .map(Picture::id)
-            .collect()
+        [
+            &self.texture,
+            &self.region,
+            &self.navigator,
+            &self.before.texture,
+            &self.before.region,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|p| p.is_presented())
+        .map(Picture::id)
+        .collect()
     }
     /// Stops drawing textures the renderer presented into, once it has freed them.
     /// Not rendering again at once: a render that keeps failing would repeat.
     pub fn forget_presented(&mut self) {
-        for slot in [&mut self.texture, &mut self.region, &mut self.navigator] {
+        let [before, before_region] = self.before.pictures();
+        for slot in [
+            &mut self.texture,
+            &mut self.region,
+            &mut self.navigator,
+            before,
+            before_region,
+        ] {
             if slot.as_ref().is_some_and(Picture::is_presented) {
                 *slot = None;
             }
@@ -425,7 +448,11 @@ impl ViewState {
         self.red_eye.clear_document();
         self.masking.clear_document();
         self.guided.clear_document();
-        self.compare = false;
+        // Before alone is left with the photo; Before beside the edit stays, as
+        // Lightroom keeps its Before/After view from photo to photo.
+        if self.compare.before_only() {
+            self.compare = Default::default();
+        }
     }
 }
 impl PresetBrowser {

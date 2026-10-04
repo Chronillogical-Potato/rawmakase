@@ -479,12 +479,12 @@ impl Editor {
         // Develop's tools, Before view, clipping warning and preset preview
         // stay in Develop.
         if self.view.tool != Tool::None
-            || self.view.compare
+            || self.view.compare.shows_before()
             || self.view.clipping != Default::default()
             || self.presets.preview.is_some()
         {
             self.view.tool = Tool::None;
-            self.view.compare = false;
+            self.view.compare = Default::default();
             self.view.clipping.clear();
             self.presets.preview = None;
             self.schedule();
@@ -690,12 +690,43 @@ impl Editor {
             let mut auto = false;
             let mut treatment = false;
             let mut export = None;
+            let mut transfer = None;
             ctx.input(|i| {
-                if i.key_pressed(egui::Key::ArrowRight) {
+                // Lightroom's Copy After's Settings to Before (←), Copy Before's to
+                // After (→) and Swap (↑), with Cmd+Option+Shift.
+                let m = i.modifiers;
+                if m.command && m.alt && m.shift {
+                    use super::before_after::Transfer;
+                    transfer = [
+                        (egui::Key::ArrowLeft, Transfer::AfterToBefore),
+                        (egui::Key::ArrowRight, Transfer::BeforeToAfter),
+                        (egui::Key::ArrowUp, Transfer::Swap),
+                    ]
+                    .into_iter()
+                    .find(|(key, _)| i.key_pressed(*key))
+                    .map(|(_, t)| t);
+                } else if i.key_pressed(egui::Key::ArrowRight) {
                     self.navigate(1);
-                }
-                if i.key_pressed(egui::Key::ArrowLeft) {
+                } else if i.key_pressed(egui::Key::ArrowLeft) {
                     self.navigate(-1);
+                }
+                // Y: Before/After left and right, Option+Y top and bottom, Shift+Y
+                // split. Option changes the typed letter on macOS, so match the
+                // physical key too.
+                let y = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
+                        if *key == egui::Key::Y || *physical_key == Some(egui::Key::Y))
+                });
+                if y && !m.command {
+                    use super::before_after::{Axis, Compare};
+                    let view = if m.alt {
+                        Compare::SideBySide(Axis::TopBottom)
+                    } else if m.shift {
+                        Compare::Split(Axis::LeftRight)
+                    } else {
+                        Compare::SideBySide(Axis::LeftRight)
+                    };
+                    self.set_compare(self.view.compare.toggled(view));
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::C) {
                     copy = true;
@@ -777,7 +808,8 @@ impl Editor {
                     self.view.clipping.toggle_both();
                 }
                 if i.key_pressed(egui::Key::Backslash) {
-                    self.view.compare = !self.view.compare;
+                    let view = self.view.compare.toggled(super::before_after::Compare::BeforeOnly);
+                    self.set_compare(view);
                 }
                 if i.key_pressed(egui::Key::Enter)
                     && (self.view.is(Tool::Crop) || self.view.is(Tool::Guided))
@@ -863,6 +895,9 @@ impl Editor {
             }
             if previous {
                 self.paste_previous();
+            }
+            if let Some(transfer) = transfer {
+                self.transfer(transfer);
             }
         }
     }
@@ -985,9 +1020,9 @@ impl Editor {
                     super::widgets::SectionGroup::DevelopRight,
                 );
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_enabled_ui(self.document.full().is_some() && !self.view.compare, |ui| {
-                        self.controls(ui)
-                    });
+                    let enabled =
+                        self.document.full().is_some() && !self.view.compare.before_only();
+                    ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                 });
             });
         egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));

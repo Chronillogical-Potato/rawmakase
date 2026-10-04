@@ -71,7 +71,7 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 36] = [
+const DEVELOP: [Shortcut; 41] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -91,7 +91,15 @@ const DEVELOP: [Shortcut; 36] = [
     ("H", "Hide spot pins"),
     ("A", "Visualize spots"),
     ("Space", "Pan while a tool is open"),
-    ("\\", "Before / after"),
+    ("\\", "Before alone"),
+    ("Y", "Before and after, left and right"),
+    ("Option+Y", "Before and after, top and bottom"),
+    ("Shift+Y", "Before and after, split"),
+    (
+        "Cmd+Option+Shift+→ / ←",
+        "Copy Before to After / After to Before",
+    ),
+    ("Cmd+Option+Shift+↑", "Swap Before and After"),
     ("J", "Show shadow and highlight clipping"),
     ("Z / F", "Toggle zoom / fit"),
     ("Left / Right", "Previous / next photo"),

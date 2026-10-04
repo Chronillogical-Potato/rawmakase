@@ -1,4 +1,6 @@
-use super::{Event, Latest, Preview, RenderJob, RenderStage, RetiredTextures, TaskKind, send};
+use super::{
+    Event, Latest, Pane, Preview, RenderJob, RenderStage, RetiredTextures, TaskKind, send,
+};
 use crate::{
     develop::{self, gpu, quality::Output},
     raw,
@@ -126,17 +128,31 @@ impl Textures {
     }
 }
 
+/// The preview renderer: one thread, with a lane for the edit and one for Before, so
+/// each keeps its latest job and the edit's goes first.
+pub struct Renderer(Latest<RenderJob>);
+impl Renderer {
+    pub fn submit(&self, job: RenderJob) {
+        let lane = match job.pane {
+            Pane::After => 0,
+            Pane::Before => 1,
+        };
+        self.0.submit_to(lane, job);
+    }
+}
+
 /// CPU-only compatibility entry point, also suitable for headless UI tests.
-pub fn renderer(tx: Sender<Event>, ctx: egui::Context) -> Latest<RenderJob> {
+pub fn renderer(tx: Sender<Event>, ctx: egui::Context) -> Renderer {
     renderer_with_backend(tx, ctx, RenderBackend::Cpu)
 }
 pub(in crate::app) fn renderer_with_backend(
     tx: Sender<Event>,
     ctx: egui::Context,
     backend: RenderBackend,
-) -> Latest<RenderJob> {
+) -> Renderer {
     let mut state = RendererState::default();
-    Latest::new(move |job: RenderJob| {
+    Renderer(Latest::with_lanes(2, move |job: RenderJob| {
+        let pane = job.pane;
         let id = job.id;
         let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             render(&mut state, &backend, &tx, &ctx, job)
@@ -160,12 +176,12 @@ pub(in crate::app) fn renderer_with_backend(
                 &ctx,
                 Event::Failed {
                     id,
-                    task: TaskKind::Render,
+                    task: TaskKind::Render(pane),
                     error: format!("Rendering failed: {}", super::panic_message(&*panic)),
                 },
             );
         }
-    })
+    }))
 }
 
 /// Everything the renderer keeps between jobs, replaced as a whole after a panic.
@@ -175,6 +191,13 @@ struct RendererState {
     textures: Option<Textures>,
     /// The monitor profile as the GPU applies it, per profile path.
     lut: Option<(PathBuf, Result<Arc<gpu::MonitorLut>, String>)>,
+    /// What each pane last showed: the edit's, and Before's.
+    after: PaneState,
+    before: PaneState,
+}
+/// What the renderer keeps between one pane's jobs.
+#[derive(Default)]
+struct PaneState {
     /// The last finished Fit and 100% region, so switching back to a view with the same
     /// edit shows its sharp image at once instead of rendering it again.
     fit: Option<Shown>,
@@ -201,12 +224,23 @@ fn render(
         processor,
         textures,
         lut,
+        after,
+        before,
+    } = state;
+    let PaneState {
         fit,
         zoomed,
         showing_region,
         quick_region,
         whole_shown,
-    } = state;
+    } = match job.pane {
+        Pane::After => after,
+        Pane::Before => before,
+    };
+    let (whole_slot, region_slot) = match job.pane {
+        Pane::After => (gpu::Slot::Whole, gpu::Slot::Region),
+        Pane::Before => (gpu::Slot::BeforeWhole, gpu::Slot::BeforeRegion),
+    };
     {
         let processor = processor.get_or_insert_with(|| match backend {
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
@@ -263,8 +297,8 @@ fn render(
                 drawn: drawn.clone(),
             })
         };
-        let whole = display(gpu::Slot::Whole, job.navigator, job.thumbnail);
-        let zoomed_display = display(gpu::Slot::Region, false, false);
+        let whole = display(whole_slot, job.navigator, job.thumbnail);
+        let zoomed_display = display(region_slot, false, false);
         let status = |stage: RenderStage, backend: &str, warning: &str| {
             format!(
                 "{} • {backend} • {:.0} ms{warning}",
@@ -339,6 +373,7 @@ fn render(
                 ctx,
                 Event::Rendered {
                     id: job.id,
+                    pane: job.pane,
                     histogram: Box::new(out.histogram()),
                     preview: Preview::Pixels {
                         image: out,
@@ -381,6 +416,7 @@ fn render(
                             ctx,
                             Event::Rendered {
                                 id: job.id,
+                                pane: job.pane,
                                 preview: presented.preview(),
                                 histogram: frame.histogram.clone(),
                                 thumbnail: frame
@@ -417,6 +453,7 @@ fn render(
                         ctx,
                         Event::Rendered {
                             id: job.id,
+                            pane: job.pane,
                             preview: preview.preview(),
                             histogram: histogram.clone(),
                             thumbnail: None,
@@ -427,7 +464,7 @@ fn render(
                     ),
                 }
                 *showing_region = job.region.is_some();
-                if job.region.is_some() {
+                if job.region.is_some() && job.pane == Pane::After {
                     whole_histogram(&job, processor, fit, whole_shown, tx, ctx)?;
                 }
                 return Ok(());
@@ -469,7 +506,10 @@ fn render(
                 *zoomed =
                     publish(out, RenderStage::Region, true, gpu).map(|out| Shown::new(&job, out));
                 *showing_region = true;
-                whole_histogram(&job, processor, fit, whole_shown, tx, ctx)?;
+                // Only the edit's histogram is shown.
+                if job.pane == Pane::After {
+                    whole_histogram(&job, processor, fit, whole_shown, tx, ctx)?;
+                }
                 return Ok(());
             }
             let out = processor.render_to(
@@ -493,7 +533,7 @@ fn render(
                 ctx,
                 Event::Failed {
                     id: job.id,
-                    task: TaskKind::Render,
+                    task: TaskKind::Render(job.pane),
                     error: e.to_string(),
                 },
             );
@@ -581,8 +621,20 @@ mod tests {
     }
     /// Renders one job and returns its published stages and final pixels.
     fn run(
-        worker: &Latest<RenderJob>,
+        worker: &Renderer,
         rx: &std::sync::mpsc::Receiver<Event>,
+        id: u64,
+        image: &Arc<CameraImage>,
+        recipe: &develop::Recipe,
+        region: Option<[u32; 4]>,
+    ) -> Vec<(RenderStage, Vec<[f32; 3]>)> {
+        run_in(worker, rx, Pane::After, id, image, recipe, region)
+    }
+    /// `run`, for `pane`.
+    fn run_in(
+        worker: &Renderer,
+        rx: &std::sync::mpsc::Receiver<Event>,
+        pane: Pane,
         id: u64,
         image: &Arc<CameraImage>,
         recipe: &develop::Recipe,
@@ -590,6 +642,7 @@ mod tests {
     ) -> Vec<(RenderStage, Vec<[f32; 3]>)> {
         worker.submit(RenderJob {
             id,
+            pane,
             image: image.clone(),
             max_edge: 60,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -610,8 +663,9 @@ mod tests {
                     preview: Preview::Pixels { image, .. },
                     stage,
                     id: i,
+                    pane: p,
                     ..
-                } if i == id => {
+                } if i == id && p == pane => {
                     stages.push((stage, image.pixels));
                     if stage != RenderStage::Draft {
                         return stages;
@@ -649,6 +703,31 @@ mod tests {
         assert_ne!(back[0].1, fit[0].1);
     }
     #[test]
+    fn before_renders_beside_the_edit_keep_the_edits_views() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = renderer(tx, egui::Context::default());
+        let image = image();
+        let mut recipe = develop::Recipe::default();
+        let before = develop::Recipe {
+            exposure: -1.,
+            ..Default::default()
+        };
+        let region = Some([10, 10, 80, 60]);
+        run(&worker, &rx, 1, &image, &recipe, region);
+        // Before at 100%, then at Fit, between the edit's renders.
+        run_in(&worker, &rx, Pane::Before, 1, &image, &before, region);
+        let shown = run_in(&worker, &rx, Pane::Before, 2, &image, &before, None);
+        // The edit is still being edited at 100%: a reduced preview first, as alone.
+        recipe.exposure = 0.5;
+        let edited = run(&worker, &rx, 2, &image, &recipe, region);
+        assert_eq!(edited[0].0, RenderStage::Draft);
+        // And Before's Fit is still its own, without drafts.
+        assert_eq!(
+            run_in(&worker, &rx, Pane::Before, 3, &image, &before, None),
+            shown
+        );
+    }
+    #[test]
     fn a_panicking_render_fails_and_the_next_one_succeeds() {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
@@ -658,6 +737,7 @@ mod tests {
         broken.pixels.truncate(10);
         worker.submit(RenderJob {
             id: 1,
+            pane: Pane::After,
             image: Arc::new(broken),
             max_edge: 60,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -674,7 +754,7 @@ mod tests {
         loop {
             match rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap() {
                 Event::Failed { id: 1, task, .. } => {
-                    assert_eq!(task, TaskKind::Render);
+                    assert_eq!(task, TaskKind::Render(Pane::After));
                     break;
                 }
                 Event::Rendered { id: 1, .. } => panic!("the broken image rendered"),
@@ -694,6 +774,7 @@ mod tests {
         let histogram = |id: u64, recipe: &develop::Recipe, region: Option<[u32; 4]>| {
             worker.submit(RenderJob {
                 id,
+                pane: Pane::After,
                 image: image.clone(),
                 max_edge: 60,
                 cancel: Arc::new(AtomicBool::new(false)),
