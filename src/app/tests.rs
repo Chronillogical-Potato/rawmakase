@@ -1762,10 +1762,16 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     // The analysis arrives after the click that chose the mode.
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.recipe.clone();
+    // Copied to Before while the analysis runs: Before gets it too.
+    e.transfer(before_after::Transfer::AfterToBefore);
     let mut corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
     corrections[4][6] = 0.1;
     e.upright_ready(generation, &analysed, Ok(corrections.clone()));
     assert_eq!(e.document.recipe.upright.corrections, corrections);
+    assert_eq!(
+        e.document.before.as_ref().unwrap().upright.corrections,
+        corrections
+    );
     // It is not a step of its own: one undo leaves Upright off, redo brings it back
     // corrected.
     assert_eq!(e.document.history.steps().1, 1);

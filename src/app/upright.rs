@@ -101,6 +101,8 @@ impl Editor {
         let mut issue = None;
         for (i, r) in std::iter::once(&mut self.document.recipe)
             .chain(self.document.history.states_mut())
+            // A Before copied from the edit before the analysis arrived.
+            .chain(self.document.before.as_mut())
             .enumerate()
         {
             if fits(r) {

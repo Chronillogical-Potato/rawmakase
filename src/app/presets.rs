@@ -798,7 +798,10 @@ impl Editor {
                 &self.document.profiles,
                 self.document.full().map(|image| image.as_ref()),
             ) {
-                Ok((recipe, _)) if use_step == LightroomStep::ToBefore => {
+                Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
+                    if !skipped.is_empty() {
+                        self.status = format!("Before · not rendered: {}", skipped.join(", "));
+                    }
                     self.set_before(recipe);
                 }
                 Ok((recipe, skipped)) => {

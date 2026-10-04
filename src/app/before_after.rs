@@ -394,10 +394,12 @@ impl Editor {
             Some(texture) => {
                 painter.image(texture.id(), rect, uv, Color32::WHITE);
             }
-            None => {
+            // Waiting for its first render; a 100% region alone is drawn below.
+            None if before.region.is_none() => {
                 let at = Rect::from_center_size(pane.clip.center(), Vec2::splat(18.));
                 egui::Spinner::new().size(18.).paint_at(ui, at);
             }
+            None => {}
         }
         if let (TextureMode::Region(region), Some(texture), Some((g, _))) =
             (before.mode, &before.region, &geometry)

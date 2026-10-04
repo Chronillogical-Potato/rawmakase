@@ -255,6 +255,11 @@ impl Editor {
                 self.schedule();
             }
         }
+        // Before's own size can need a new render when the edit's does not, e.g. a
+        // Transform of its own; it renders only when its job changes.
+        if self.view.compare.two_up() {
+            self.schedule_before();
+        }
         let region_texture = match self.preview.mode {
             TextureMode::Region(_) => self.preview.region.clone(),
             TextureMode::Whole => None,
