@@ -89,6 +89,11 @@ pub struct Recipe {
     pub saturation: f32,
     pub vibrance: f32,
     pub hsl: [[f32; 3]; 8],
+    /// Lightroom's Point Color swatches, at most eight (`crs:PointColors` and
+    /// `crs:ColorVariance`). Omitted when empty, so releases that predate it read the
+    /// recipe (and keep the swatches when they are set).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub point_colors: Vec<crate::develop::point_color::PointColor>,
     pub grading: [[f32; 3]; 3],
     pub noise_luma: f32,
     pub noise_chroma: f32,
@@ -194,6 +199,7 @@ impl Default for Recipe {
             saturation: 0.,
             vibrance: 0.,
             hsl: [[0.; 3]; 8],
+            point_colors: Vec::new(),
             grading: [[0.; 3]; 3],
             noise_luma: 0.,
             noise_chroma: 0.,

@@ -246,7 +246,10 @@ impl SettingGroup {
                 e.parametric = f.parametric;
                 e.splits = f.splits;
             }
-            ColorAdjustments => to.hsl = from.hsl,
+            ColorAdjustments => {
+                to.hsl = from.hsl;
+                to.point_colors = from.point_colors.clone();
+            }
             BlackWhiteMix => e.gray_mix = f.gray_mix,
             ColorGrading => {
                 to.grading = from.grading;
@@ -552,6 +555,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         saturation: _,
         vibrance: _,
         hsl: _,
+        point_colors: _,
         grading: _,
         noise_luma: _,
         noise_chroma: _,
@@ -642,6 +646,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("saturation", Group(Saturation)),
         ("vibrance", Group(Vibrance)),
         ("hsl", Group(ColorAdjustments)),
+        ("point_colors", Group(ColorAdjustments)),
         ("grading", Group(ColorGrading)),
         ("noise_luma", Group(LuminanceNoiseReduction)),
         ("noise_chroma", Group(ColorNoiseReduction)),

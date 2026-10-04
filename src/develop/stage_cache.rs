@@ -167,6 +167,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         saturation: _,
         vibrance: _,
         hsl: _,
+        point_colors: _,
         grading: _,
         sharpening: _,
         sharpening_radius: _,

@@ -718,3 +718,42 @@ fn rgb_tables_follow_the_colour_controls_on_every_engine() {
         assert!(spread(&mono) < 1e-3, "engine {engine}");
     }
 }
+#[test]
+fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
+    use crate::develop::panels::{Panel, PanelState};
+    use crate::develop::point_color::PointColor;
+    let im = fixture();
+    let plain = Recipe {
+        reference_curves: true,
+        reference_color: true,
+        ..Default::default()
+    };
+    // A swatch whose ranges hold every color, so the fixture's greens change.
+    let mut edited = plain.clone();
+    edited.point_colors = vec![PointColor {
+        shift: [0.5, -0.5, 0.3],
+        hue_range: [0., 0., 1., 1.],
+        saturation_range: [0., 0., 1., 1.],
+        luminance_range: [0., 0., 1., 1.],
+        range: 1.,
+        ..PointColor::sampled([2., 0.5, 0.2])
+    }];
+    let pixels = |r: &Recipe| crate::develop::render(&im, r, 0).map(|out| out.pixels);
+    assert_ne!(pixels(&edited)?, pixels(&plain)?);
+    // Camera Raw leaves Point Color out of black & white.
+    let mono = |r: &Recipe| {
+        let mut r = r.clone();
+        r.effects.monochrome = true;
+        r
+    };
+    assert_eq!(pixels(&mono(&edited))?, pixels(&mono(&plain))?);
+    // The Color Mixer's switch turns it off with the mixer.
+    let mut off = edited.clone();
+    off.panels.set(Panel::ColorMixer, PanelState::Off);
+    assert_eq!(pixels(&off)?, pixels(&plain)?);
+    // Saved with the recipe, and left out while there are none.
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&edited)?)?;
+    assert_eq!(back.point_colors, edited.point_colors);
+    assert!(!serde_json::to_string(&plain)?.contains("point_colors"));
+    Ok(())
+}

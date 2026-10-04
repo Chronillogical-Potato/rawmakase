@@ -151,6 +151,9 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             );
         }
     }
+    if groups.contains(SettingGroup::ColorAdjustments) {
+        super::write::point_colors(&mut out, r, super::write::NoPointColors::EmptySelection);
+    }
     out.push_str("  </rdf:Description>\n");
     xmpmeta(&out)
 }
@@ -183,7 +186,7 @@ pub(crate) fn group_of_key(key: &str) -> Option<SettingGroup> {
         "PerspectiveUpright" => UprightMode,
         "EnableToneCurve" | "CurveRefineSaturation" => ToneCurve,
         "LensManualDistortionAmount" => LensProfileCorrections,
-        "EnableColorAdjustments" => ColorAdjustments,
+        "EnableColorAdjustments" | "PointColors" | "ColorVariance" => ColorAdjustments,
         "EnableGrayscaleMix" => BlackWhiteMix,
         "EnableSplitToning" => ColorGrading,
         "EnableLensCorrections" => LensProfileCorrections,
@@ -306,6 +309,48 @@ mod tests {
             .filter(|k| k != "HasSettings" && group_of_key(k).is_none())
             .collect();
         assert!(unplaced.is_empty(), "{unplaced:?}");
+    }
+
+    #[test]
+    fn color_presets_carry_point_colors_and_clear_them_when_empty() -> anyhow::Result<()> {
+        let mut color = GroupSelection::none();
+        color.set(SettingGroup::ColorAdjustments, GroupInclusion::Included);
+        let info = PresetInfo::new("Warm skin", "User Presets");
+        use crate::develop::point_color::PointColor;
+        let swatch = PointColor {
+            shift: [0.1, -0.2, 0.15],
+            variance: -0.3,
+            ..PointColor::sampled([0.55, 0.39, 0.67])
+        };
+        let r = Recipe {
+            point_colors: vec![swatch],
+            ..Default::default()
+        };
+        let target = Recipe {
+            point_colors: vec![PointColor::sampled([3., 0.5, 0.5])],
+            ..Default::default()
+        };
+        let m = crate::raw::Metadata::default();
+        let applied = crate::xmp::parse(Path::new("Warm.xmp"), &preset(&r, &info, &color))?.apply(
+            &target,
+            &m,
+            &[],
+            None,
+        )?;
+        assert_eq!(applied.point_colors.len(), 1);
+        assert_eq!(applied.point_colors[0].shift, swatch.shift);
+        assert_eq!(applied.point_colors[0].variance, swatch.variance);
+        // Without swatches, Lightroom's empty selection clears the target's.
+        let text = preset(&Recipe::default(), &info, &color);
+        assert!(text.contains("<rdf:li>-1.000000, -1.000000"), "{text}");
+        let cleared =
+            crate::xmp::parse(Path::new("Clear.xmp"), &text)?.apply(&target, &m, &[], None)?;
+        assert!(cleared.point_colors.is_empty());
+        // Other groups leave them alone.
+        let mut exposure = GroupSelection::none();
+        exposure.set(SettingGroup::Exposure, GroupInclusion::Included);
+        assert!(!preset(&r, &info, &exposure).contains("PointColors"));
+        Ok(())
     }
 
     #[test]

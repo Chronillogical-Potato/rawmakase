@@ -133,6 +133,19 @@ pub fn convert_develop(
                     Ok(_) => {}
                     Err(e) => warnings.push(format!("{key}: {e:#}")),
                 }
+            } else if matches!(key.as_str(), "PointColors" | "ColorVariance") {
+                // One quoted string of 19 values per swatch (as in XMP), or bare numbers.
+                let items =
+                    lua_list_items(value).with_context(|| format!("Unsupported {key} encoding"))?;
+                let items = if key == "PointColors" && items.iter().all(|i| !i.contains(',')) {
+                    items.chunks(19).map(|c| c.join(", ")).collect()
+                } else {
+                    items
+                };
+                preset.settings.insert(
+                    key.clone(),
+                    items.join(crate::develop::point_color::LIST_SEPARATOR),
+                );
             } else if key.starts_with("ToneCurve") && !key.contains("Name") {
                 let values = value
                     .trim_matches(['{', '}'])
@@ -261,6 +274,7 @@ pub fn convert_develop(
         ],
         upright,
         gray_mix,
+        vec!["PointColors", "ColorVariance"],
     ] {
         let mut p = preset.clone();
         p.settings.retain(|k, _| keys.contains(&k.as_str()));
@@ -308,6 +322,40 @@ pub fn convert_develop(
     warnings.sort();
     warnings.dedup();
     Ok((recipe, warnings))
+}
+
+/// The items of a flat Lua list (`{ "a", 1, 2.5 }`): strings decoded, numbers as written.
+fn lua_list_items(value: &str) -> Result<Vec<String>> {
+    let body = value
+        .strip_prefix('{')
+        .and_then(|v| v.strip_suffix('}'))
+        .context("Expected a list")?;
+    let mut items = Vec::new();
+    let mut rest = body.trim();
+    while !rest.is_empty() {
+        let (item, tail) = if let Some(quoted) = rest.strip_prefix('"') {
+            let end = quoted
+                .char_indices()
+                .scan(false, |escaped, (i, c)| {
+                    let done = !*escaped && c == '"';
+                    *escaped = !*escaped && c == '\\';
+                    Some((i, done))
+                })
+                .find(|(_, done)| *done)
+                .map(|(i, _)| i + 2)
+                .context("Unterminated string")?;
+            (serde_json::from_str::<String>(&rest[..end])?, &rest[end..])
+        } else {
+            let end = rest.find(',').unwrap_or(rest.len());
+            let number = rest[..end].trim();
+            ensure!(number.parse::<f64>().is_ok(), "Expected a number");
+            (number.to_string(), &rest[end..])
+        };
+        items.push(item);
+        rest = tail.trim_start();
+        rest = rest.strip_prefix(',').unwrap_or(rest).trim_start();
+    }
+    Ok(items)
 }
 
 /// Lightroom's defaults for process version 2003/2010 basic controls.

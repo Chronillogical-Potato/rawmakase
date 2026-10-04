@@ -555,6 +555,75 @@ fn mixer(rgb: vec3<f32>) -> vec3<f32> {
     let c = v * s2;
     return PRO_TO_RGB * (hsv_to_rgb(h2, v, s2) + (max_v * exp2(delta.z) - c));
 }
+// point_color::PointColors, in HSV of linear ProPhoto RGB with hue in radians.
+fn smoothstep01(t: f32) -> f32 {
+    return t * t * (3.0 - 2.0 * t);
+}
+fn point_ramp(x: f32, at: i32, rise: f32, fall: f32) -> f32 {
+    let a = table(at);
+    let b = table(at + 1);
+    let c = table(at + 2);
+    let d = table(at + 3);
+    var up = 1.0;
+    if x < b {
+        up = select(powf(smoothstep01((x - a) / (b - a)), rise), 0.0, x <= a);
+    }
+    var down = 1.0;
+    if x > c {
+        down = select(powf(smoothstep01((d - x) / (d - c)), fall), 0.0, x >= d);
+    }
+    return min(up, down);
+}
+// One swatch at table offset `w`, on linear ProPhoto RGB.
+fn point_color(p0: vec3<f32>, w: i32, base: i32) -> vec3<f32> {
+    let q = max(p0, vec3(0.0));
+    let max_v = max(max(q.x, q.y), q.z);
+    if max_v <= 1e-6 {
+        return p0;
+    }
+    let min_v = min(min(q.x, q.y), q.z);
+    let d0 = max_v - min_v;
+    let h = hue_of(q, max_v, d0) * TAU;
+    let s = d0 / max_v;
+    let v = max_v;
+    let ev = srgb_encode(min(v, 1.0));
+    let hue_ramp = table(base);
+    let hue = table(w);
+    let sat = table(w + 1);
+    let lum = table(w + 2);
+    let d = rem_euclid(h - hue + 3.14159265358979323846, TAU) - 3.14159265358979323846;
+    let weight = point_ramp(d * table(w + 3), w + 6, hue_ramp, hue_ramp)
+        * point_ramp(sat + (s - sat) * table(w + 4), w + 10, table(base + 1), table(base + 2))
+        * point_ramp(lum + (ev - lum) * table(w + 5), w + 14, table(base + 3), table(base + 4))
+        * min(s / table(base + 5), 1.0);
+    if weight <= 0.0 {
+        return p0;
+    }
+    let variance = table(w + 21);
+    let turn = weight * (table(w + 18) + variance * d);
+    var log_s = weight * table(w + 19);
+    var log_v = weight * table(w + 20);
+    if variance != 0.0 {
+        let s2 = clamp(sat + (s - sat) * exp2(table(base + 6) * variance), 1e-4, 1.0);
+        let e2 = clamp(lum + (ev - lum) * exp2(table(base + 7) * variance), 1e-4, 1.0);
+        log_s += weight * log2(s2 / max(s, 1e-4));
+        log_v += weight * log2(srgb_decode(e2) / max(srgb_decode(ev), 1e-6));
+    }
+    let h2 = rem_euclid((h + turn) / TAU, 1.0) * 6.0;
+    let s2 = clamp(s * exp2(log_s), 0.0, 1.0);
+    let v2 = v * exp2(log_v);
+    let out = hsv_to_rgb(h2, v2, s2) + (v2 - v2 * s2);
+    return min(out, max(q, vec3(1.0))) + (p0 - q);
+}
+// Swatches apply in turn, each to the result of the ones before.
+fn point_colors(rgb: vec3<f32>) -> vec3<f32> {
+    let base = offset(P_POINT);
+    var q = RGB_TO_PRO * rgb;
+    for (var i = 0u; i < u32(p(P_POINT + 1u)); i++) {
+        q = point_color(q, base + 8 + i32(i) * 22, base);
+    }
+    return PRO_TO_RGB * q;
+}
 // camera_profiles::rgb_table: a look's RGB table, in its own primaries and encoding.
 fn rgb_encode(v: f32, gamma: u32) -> f32 {
     switch gamma {
@@ -807,6 +876,9 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     rgb = reference_curves(rgb);
     if offset(P_MIXER) >= 0 {
         rgb = mixer(rgb);
+    }
+    if offset(P_POINT) >= 0 {
+        rgb = point_colors(rgb);
     }
     if offset(P_RGB) >= 0 && p(P_RGB + 5u) != 0.0 {
         rgb = rgb_table(rgb);

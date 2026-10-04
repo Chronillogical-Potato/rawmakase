@@ -55,13 +55,7 @@ fn photo_sidecar_empty_point_colors_and_preset_provenance() {
         .apply(&Recipe::default(), &Metadata::default(), &[], None)
         .unwrap();
     assert_eq!(r.exposure, 0.5);
-    let active = text.replacen("-1.000000", "0.25", 1);
-    assert!(
-        !parse(Path::new("active.xmp"), &active)
-            .unwrap()
-            .blockers
-            .is_empty()
-    );
+    assert!(r.point_colors.is_empty());
     let hdr = text.replace("c:HDREditMode=\"0\"", "c:HDREditMode=\"1\"");
     assert!(
         parse(Path::new("hdr.xmp"), &hdr)
@@ -69,6 +63,55 @@ fn photo_sidecar_empty_point_colors_and_preset_provenance() {
             .apply(&Recipe::default(), &Metadata::default(), &[], None)
             .is_err()
     );
+}
+
+/// Swatches as Camera Raw 18.7 stores them: hue in sixths of a turn, then saturation,
+/// value, the three shifts, Range and the hue, saturation and luminance ranges.
+const SWATCH: &str = "0.425300, 0.729800, 0.603400, 0.500000, -0.300000, 0.200000, 0.500000, 0.000000, 0.333333, 0.666667, 1.000000, 0.000000, 0.549800, 0.909800, 1.000000, 0.072700, 0.622700, 0.982700, 1.000000";
+
+#[test]
+fn point_colors_import_and_write_back() {
+    let second = "5.950000, 0.550000, 0.450000, -0.400000, 0.000000, 0.000000, 0.200000, 0.000000, 0.200000, 0.600000, 1.000000, 0.000000, 0.370000, 0.730000, 1.000000, 0.000000, 0.522000, 0.882000, 1.000000";
+    let invalid = SWATCH.replacen("0.425300", "6.100000", 1);
+    let body = format!(
+        "<c:PointColors><r:Seq><r:li>{SWATCH}</r:li><r:li>{invalid}</r:li><r:li>{second}</r:li></r:Seq></c:PointColors><c:ColorVariance><r:Seq><r:li>0.400000</r:li><r:li>0</r:li><r:li>-0.250000</r:li></r:Seq></c:ColorVariance>"
+    );
+    let p = parse(
+        Path::new("photo.xmp"),
+        &xml("c:Exposure2012=\"0.5\"", &body),
+    )
+    .unwrap();
+    assert!(p.blockers.is_empty(), "{:?}", p.blockers);
+    let r = p
+        .apply(&Recipe::default(), &Metadata::default(), &[], None)
+        .unwrap();
+    // Camera Raw drops the swatch whose hue is out of range; variances stay paired.
+    assert_eq!(r.point_colors.len(), 2);
+    let [a, b] = [r.point_colors[0], r.point_colors[1]];
+    assert_eq!(a.source, [0.4253, 0.7298, 0.6034]);
+    assert_eq!(a.shift, [0.5, -0.3, 0.2]);
+    assert_eq!(a.variance, 0.4);
+    assert_eq!((b.source[0], b.range, b.variance), (5.95, 0.2, -0.25));
+    assert_eq!(b.hue_range, [0., 0.2, 0.6, 1.]);
+    // Written back as Camera Raw writes them, and read again unchanged.
+    let photo = crate::xmp::write::Photo {
+        settings: true,
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(
+        packet.contains(&format!("<rdf:li>{SWATCH}</rdf:li>")),
+        "{packet}"
+    );
+    let again = parse(Path::new("again.xmp"), &packet).unwrap();
+    let swatches = crate::develop::point_color::parse_list(
+        &again.settings["PointColors"],
+        again.settings.get("ColorVariance").map(String::as_str),
+    );
+    assert_eq!(swatches.unwrap(), r.point_colors);
+    // A photo without swatches writes none.
+    let none = crate::xmp::write::packet(&Recipe::default(), &Metadata::default(), &photo);
+    assert!(!none.contains("PointColors"));
 }
 
 #[test]

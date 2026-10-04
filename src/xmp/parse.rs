@@ -138,34 +138,23 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         } else if name == "Preset" && sidecar {
             // In a photo sidecar, the nested preset-amount record is provenance.
             // The resolved top-level edits (including curves) remain authoritative.
-        } else if matches!(name, "PointColors" | "ColorVariance") && {
-            // Lightroom 18.5 writes these exact empty-selection sentinels.
-            if name == "PointColors" {
-                is_empty_point_colors(node)
+        } else if matches!(name, "PointColors" | "ColorVariance") {
+            // Lightroom writes an empty selection as 19 values of -1 (and a variance
+            // of -50); `apply` reads both as no swatches.
+            let items: Vec<_> = node
+                .descendants()
+                .filter(|n| n.has_tag_name((RDF, "li")))
+                .map(|n| n.text().unwrap_or("").trim().to_string())
+                .collect();
+            let empty = name == "PointColors" && is_empty_point_colors(node);
+            let value = if empty {
+                String::new()
             } else {
-                let values: Vec<_> = node
-                    .descendants()
-                    .filter(|n| n.has_tag_name((RDF, "li")))
-                    .filter_map(|n| n.text())
-                    .flat_map(|s| s.split(','))
-                    .map(|v| v.trim().parse::<f32>())
-                    .collect();
-                values.len() == 1
-                    && matches!(values[0], Ok(n) if n == -50.)
-                    && description
-                        .children()
-                        .find(|n| n.has_tag_name((CRS, "PointColors")))
-                        .is_some_and(is_empty_point_colors)
-            }
-        } {
-            // No selected point color to adjust.
+                items.join("; ")
+            };
+            settings.insert(name.to_string(), value);
         } else if !LABELS.contains(&name) {
-            let active = node.descendants().any(|n| {
-                n.has_tag_name((RDF, "li")) && n.text().is_some_and(|s| !s.trim().is_empty())
-            });
-            if active || !matches!(name, "PointColors" | "ColorVariance") {
-                blockers.push(format!("Unsupported structured setting: {name}"));
-            }
+            blockers.push(format!("Unsupported structured setting: {name}"));
         }
     }
     let name = child_text(description, "Name")

@@ -258,6 +258,13 @@ fn color_stage(
     // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
+    // Point Color works where the mixer does, in HSV of linear ProPhoto RGB.
+    let rgb = lut.point_colors.as_ref().map_or(rgb, |p| {
+        mul(
+            crate::camera_profiles::PRO_TO_RGB,
+            p.apply_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb)),
+        )
+    });
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
     // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
     // engine 4 the colour controls come later, in Oklab, and the table after them.
@@ -403,6 +410,8 @@ struct CurveSet {
     local: Option<crate::develop::local_tone::LocalToneMap>,
     /// Engine 4 measured color mixer, Saturation and Vibrance.
     mixer: Option<crate::develop::color_mixer::ColorMixer>,
+    /// Engine 4 Point Color swatches.
+    point_colors: Option<crate::develop::point_color::PointColors>,
     /// Engine 4 measured color grading, when its settings are covered by the tables.
     grade: Option<crate::develop::color_grade::ColorGrade>,
     /// Engine 4: the DNG exposure ramp's black point (Adobe's default Shadows of 5).
@@ -449,6 +458,10 @@ impl CurveSet {
             local: None,
             mixer: basic_curves
                 .then(|| crate::develop::color_mixer::ColorMixer::new(r))
+                .flatten(),
+            // Camera Raw leaves Point Color out of black & white renders.
+            point_colors: (basic_curves && !r.effects.monochrome)
+                .then(|| crate::develop::point_color::PointColors::new(&r.point_colors))
                 .flatten(),
             grade: (basic_curves && r.reference_color)
                 .then(|| crate::develop::color_grade::ColorGrade::new(r))
