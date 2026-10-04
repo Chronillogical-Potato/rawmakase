@@ -32,8 +32,9 @@ pub struct Place {
 }
 pub(in crate::app) use cell::copy_suffix;
 pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
-pub use filmstrip::{Module, Pick};
+pub use filmstrip::{DraggedPhoto, Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
+pub(in crate::app) use previews::EditSource;
 pub use quick::CollectionCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
@@ -353,6 +354,22 @@ impl Library {
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
     }
+    /// What photo `id` is developed from, with its edit or else the defaults
+    /// Develop would open it with, and its edit stamp: for Develop's Reference
+    /// View. Why not, for a photo Develop cannot open; None for a photo no
+    /// longer in the catalog.
+    pub(in crate::app) fn develop_source(&self, id: i64) -> Option<Result<DevelopSource, Refusal>> {
+        let photo = self.photo(id)?;
+        if let Some(refusal) = develop_refusal(photo, photo.path.is_file()) {
+            return Some(Err(refusal));
+        }
+        Some(Ok(DevelopSource {
+            path: photo.path.clone(),
+            edit: edit_source(&self.catalog, id)
+                .unwrap_or_else(|| EditSource::Defaults(self.defaults.clone())),
+            stamp: self.catalog.edit_stamp(id).unwrap_or_default(),
+        }))
+    }
     pub fn navigate(&self, id: i64, delta: i32) -> Option<i64> {
         let at = self.visible.iter().position(|i| self.photos[*i].id == id)?;
         let n = (at as i32 + delta).clamp(0, self.visible.len().saturating_sub(1) as i32) as usize;
@@ -636,6 +653,14 @@ impl Refusal {
             ),
         }
     }
+}
+/// A catalog photo as Develop would open it, from `Library::develop_source`.
+#[derive(Clone)]
+pub(in crate::app) struct DevelopSource {
+    pub path: std::path::PathBuf,
+    pub edit: EditSource,
+    /// Changes whenever its edit does (see `Catalog::edit_stamp`).
+    pub stamp: u64,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
 /// `available`.

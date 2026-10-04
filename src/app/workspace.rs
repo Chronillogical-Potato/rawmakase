@@ -98,6 +98,7 @@ impl Editor {
         if self.onboarding.visible {
             self.onboarding_ui(ui);
         } else if self.library_mode {
+            self.left_develop();
             self.library_workspace(ui);
         } else {
             let frame = self.begin_edit_frame();
@@ -798,10 +799,19 @@ impl Editor {
                 {
                     self.redo();
                 }
-                if (i.key_pressed(egui::Key::C) || i.key_pressed(egui::Key::R))
+                // Shift+R is Reference View, below.
+                if (i.key_pressed(egui::Key::C)
+                    || i.key_pressed(egui::Key::R) && !i.modifiers.shift)
                     && !i.modifiers.command
                 {
                     self.view.toggle(Tool::Crop);
+                }
+                if i.key_pressed(egui::Key::R)
+                    && i.modifiers.shift
+                    && !i.modifiers.command
+                    && !i.modifiers.alt
+                {
+                    self.toggle_reference_view();
                 }
                 // Shift+J makes a colour range mask, below.
                 if i.key_pressed(egui::Key::J) && !i.modifiers.any() {
@@ -982,6 +992,10 @@ impl Editor {
             if let Some(crate::app::library::Pick::Show(id)) = strip.pick
                 && library.develop_select(id, current, modifiers)
             {
+                return;
+            }
+            if let Some(crate::app::library::Pick::Reference(id)) = strip.pick {
+                self.set_reference(id);
                 return;
             }
             if let Some(

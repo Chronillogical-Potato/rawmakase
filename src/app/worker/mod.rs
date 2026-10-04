@@ -146,6 +146,11 @@ pub enum Event {
     /// previews were presented into: stop drawing them, then drop this to free them.
     RendererReset(RetiredTextures),
     Exported(String),
+    /// Develop's Reference View photo, developed (half-size, then full), or why not.
+    Reference {
+        ticket: u64,
+        result: Result<Box<ReferenceImage>, String>,
+    },
 }
 /// Textures the renderer registered with the UI and no longer uses. Freed when
 /// dropped, so the UI releases them only once it no longer draws them.
@@ -236,9 +241,11 @@ fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
 
 mod latest;
 mod loader;
+mod reference;
 mod renderer;
 pub use latest::Latest;
 pub(crate) use latest::panic_message;
 pub use loader::loader;
+pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
 pub(super) use renderer::{RenderBackend, renderer_with_backend};
 pub use renderer::{Renderer, renderer};

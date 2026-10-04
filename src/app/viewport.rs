@@ -347,9 +347,12 @@ impl Editor {
         if self.view.compare.before_only() {
             before_after::badge(ui, area, "Before");
         }
-        // A click or drag on Before acts where the same point is on the edit.
+        // A click or drag on Before acts where the same point is on the edit; the
+        // reference photo takes its own (see `reference_pointer`).
         let before_rect = self.before_pane_ui(ui, &panes, rect);
-        let on_after = |pos: Pos2| match (before_rect, panes.before) {
+        let on_reference = self.reference_pointer(ui, &response, &panes, before_rect);
+        let mirrored = before_rect.filter(|_| !self.reference_view());
+        let on_after = |pos: Pos2| match (mirrored, panes.before) {
             (Some(before), Some(pane))
                 if pane.clip.contains(pos) && !panes.after.clip.contains(pos) =>
             {
@@ -383,13 +386,13 @@ impl Editor {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
         let picking = self.view.picks_color() && !space && !self.view.compare.shows_before();
         let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
-        if self.view.zoom.on && hand && response.dragged() {
+        if self.view.zoom.on && hand && response.dragged() && !on_reference {
             let delta = ui.input(|i| i.pointer.delta());
             // Moved by the photo under the hand: Before's when the drag is on it.
             let on_before = response
                 .interact_pointer_pos()
                 .is_some_and(|p| on_after(p) != p);
-            let dragged = before_rect.filter(|_| on_before).unwrap_or(rect);
+            let dragged = mirrored.filter(|_| on_before).unwrap_or(rect);
             let pan = &mut self.view.zoom.pan;
             pan[0] = (pan[0] - delta.x / dragged.width()).clamp(0., 1.);
             pan[1] = (pan[1] - delta.y / dragged.height()).clamp(0., 1.);
@@ -411,21 +414,18 @@ impl Editor {
             && !response.double_clicked()
             && !response.triple_clicked()
             && hand
+            && !on_reference
             && !self.view.is(Tool::Crop)
             && let Some(pos) = response.interact_pointer_pos().map(on_after)
             && rect.contains(pos)
         {
-            if !self.view.zoom.on
-                && let Some(g) = &geometry
-            {
-                let point = (pos - rect.min) / rect.size();
-                let k = self.view.zoom.level / ppp;
-                let size = Vec2::new(g.width as f32 * k, g.height as f32 * k);
-                let origin = pos - point * size;
-                let pan = (area.center() - origin) / size;
-                self.view.zoom.pan = [pan.x.clamp(0., 1.), pan.y.clamp(0., 1.)];
+            match &geometry {
+                Some(g) => {
+                    let size = Vec2::new(g.width as f32, g.height as f32);
+                    self.view.zoom.toggle_at(pos, rect, area, size, ppp);
+                }
+                None => self.view.zoom.on = !self.view.zoom.on,
             }
-            self.view.zoom.on = !self.view.zoom.on;
             self.schedule();
         }
         if self.view.picks_color() {

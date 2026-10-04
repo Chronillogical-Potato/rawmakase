@@ -70,7 +70,12 @@ pub(super) fn in_view(
 pub enum Pick {
     Show(i64),
     Develop(i64),
+    /// Develop's Set as Reference Photo.
+    Reference(i64),
 }
+/// A catalog photo dragged from Develop's filmstrip, e.g. onto Reference View.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DraggedPhoto(pub i64);
 
 impl Library {
     /// The Library's strip: brings the views up to date, draws the strip
@@ -140,6 +145,7 @@ impl Library {
         let id = match pick {
             Pick::Develop(id) => return Action::Develop(id),
             Pick::Show(id) => id,
+            Pick::Reference(_) => return Action::None,
         };
         match self.view() {
             View::Compare => self.compare_pick(id),
@@ -262,7 +268,8 @@ impl Library {
                     } else {
                         Mark::None
                     };
-                    let (pick, edited) = self.strip_cell(ui, at(n), &photo, mark, whole_selection);
+                    let (pick, edited) =
+                        self.strip_cell(ui, at(n), &photo, mark, whole_selection, module);
                     target = pick.or(target);
                     if edited {
                         // Filters may have changed the visible list.
@@ -285,8 +292,14 @@ impl Library {
         photo: &Photo,
         mark: Mark,
         whole_selection: bool,
+        module: Module,
     ) -> (Option<Pick>, bool) {
-        let response = ui.interact(rect, ui.id().with(photo.id), egui::Sense::click());
+        // In Develop a photo can be dragged onto Reference View.
+        let sense = match module {
+            Module::Library => egui::Sense::click(),
+            Module::Develop => egui::Sense::click_and_drag(),
+        };
+        let response = ui.interact(rect, ui.id().with(photo.id), sense);
         self.request_previews(photo, ui.ctx());
         paint_cell(
             ui.painter(),
@@ -296,7 +309,14 @@ impl Library {
             mark,
             response.hovered(),
         );
-        if let Some(menu) = cell::photo_menu(&response, photo, self.is_available(&photo.path)) {
+        if module == Module::Develop {
+            self.drag_source(ui, &response, photo);
+        }
+        let available = self.is_available(&photo.path);
+        if let Some(menu) = cell::photo_menu(&response, photo, available, module) {
+            if matches!(menu, cell::PhotoAction::SetReference) {
+                return (Some(Pick::Reference(photo.id)), false);
+            }
             let edited = matches!(menu, cell::PhotoAction::Edit(_));
             let develop = self.photo_action(ui.ctx(), photo, menu, whole_selection);
             return (develop.map(Pick::Develop), edited);
@@ -306,6 +326,29 @@ impl Library {
             .on_hover_text(format!("{}{}", photo.filename, cell::copy_suffix(photo)))
             .clicked();
         ((clicked && !context).then_some(Pick::Show(photo.id)), false)
+    }
+}
+
+impl Library {
+    /// Lets a strip cell be dragged, its preview following the pointer.
+    fn drag_source(&self, ui: &egui::Ui, response: &egui::Response, photo: &Photo) {
+        response.dnd_set_drag_payload(DraggedPhoto(photo.id));
+        if !response.dragged() {
+            return;
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let (Some(pos), Some(texture)) = (ui.ctx().pointer_latest_pos(), self.texture(photo))
+        else {
+            return;
+        };
+        let size = texture.size_vec2();
+        let size = size * (96. / size.x.max(size.y));
+        let layer = egui::LayerId::new(egui::Order::Tooltip, ui.id().with("dragged-photo"));
+        let rect = egui::Rect::from_min_size(pos + Vec2::splat(8.), size);
+        let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
+        ui.ctx()
+            .layer_painter(layer)
+            .image(texture.id(), rect, uv, Color32::from_white_alpha(220));
     }
 }
 
