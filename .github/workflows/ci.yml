@@ -156,6 +156,51 @@ jobs:
       - if: steps.source.outputs.windows == 'true'
         run: cargo test --locked
 
+  # Without this job the macOS-only code is compiled for the first time by
+  # release.yml, after the release commit is already on main, so a macOS-only
+  # break holds up the release instead of the pull request. Apple Silicon only:
+  # the Intel runner is a second runner for the same sources. fmt is
+  # platform-independent and runs in the lint job.
+  check-macos:
+    name: Test on macOS
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+      - name: Dependencies
+        run: |
+          brew install pkg-config libomp jpeg-turbo
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          # LibRaw and Little CMS are built the way the macOS release builds
+          # them (build.rs wants LibRaw >= 0.22); jpeg-turbo is what LibRaw's
+          # own build links its JPEG decoder against, as macOS has no libjpeg.
+          # build.rs links the OpenMP runtime from LIBOMP_PREFIX.
+          jpeg_prefix=$(brew --prefix jpeg-turbo)
+          {
+            echo "PKG_CONFIG_PATH=$RUNNER_TEMP/native/lib/pkgconfig:$jpeg_prefix/lib/pkgconfig"
+            echo "CPPFLAGS=-I$jpeg_prefix/include"
+            echo "LDFLAGS=-L$jpeg_prefix/lib"
+            echo "LIBOMP_PREFIX=$(brew --prefix libomp)"
+            # LibRaw's decoders are OpenMP-parallel; Little CMS lost its register
+            # keyword to C++17.
+            echo "CXXFLAGS=-DCMS_NO_REGISTER_KEYWORD"
+            # The test binaries load the libraries built above at run time.
+            echo "DYLD_LIBRARY_PATH=$RUNNER_TEMP/native/lib:$(brew --prefix libomp)/lib"
+          } >> "$GITHUB_ENV"
+      # GITHUB_ENV takes effect in the next step, including the JPEG paths
+      # needed by LibRaw's configure script.
+      - name: Build native dependencies
+        run: bash packaging/native-deps.sh "$RUNNER_TEMP/native"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
+      - run: cargo test --locked
+
   package:
     name: Build, install and run Arch package
     runs-on: ubuntu-latest
