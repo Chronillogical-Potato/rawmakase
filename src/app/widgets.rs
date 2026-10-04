@@ -640,11 +640,12 @@ struct FillOrigin {
     value: f32,
     tick: Tick,
 }
-/// A slider below zero, or a coloured one (Temp, Tint), fills from its default and
-/// marks it; one from zero up fills from its start, as Lightroom's Feather, Amount and
-/// Opacity do, so a default in the middle doesn't make it look centred.
+/// A slider from zero up fills from zero, as Lightroom's Feather, Amount and Opacity
+/// do, so a default in the middle doesn't make it look centred. Any other (one below
+/// zero, a coloured one like Temp, or one with a neutral point like Levels' Midtone
+/// or Scale) fills from its default and marks it.
 fn fill_origin(start: f32, default: f32, coloured: bool) -> FillOrigin {
-    if start < 0. || coloured {
+    if start != 0. || coloured {
         FillOrigin {
             value: default,
             tick: Tick::Shown,
@@ -1406,6 +1407,14 @@ mod slider_tests {
             fill_origin(-5., 0., false),
             FillOrigin {
                 value: 0.,
+                tick: Tick::Shown
+            }
+        );
+        // Scale, 50–150% around a neutral 100%, keeps its mark.
+        assert_eq!(
+            fill_origin(0.5, 1., false),
+            FillOrigin {
+                value: 1.,
                 tick: Tick::Shown
             }
         );
