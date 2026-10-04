@@ -76,15 +76,41 @@ impl Editor {
             Target::BlackWhite => black_white,
         }
     }
-    /// Puts the tool away when its panel is no longer the photo's (the Library, or a
-    /// conversion to or from black & white), and drops a drag it leaves behind.
+    /// Whether the sliders `target` moves are on show: the parametric curve, or the
+    /// HSL view with its channel.
+    fn targeted_shown(&self, target: Target) -> bool {
+        let v = &self.view;
+        match target {
+            Target::ToneCurve => v.parametric_curve,
+            Target::Hsl(channel) => {
+                v.mixer_tab == super::state::MixerTab::Mixer
+                    && !v.mixer_color
+                    && (v.mixer_adjust == 3 || v.mixer_adjust == channel.index())
+            }
+            Target::BlackWhite => true,
+        }
+    }
+    /// Puts the tool away when its sliders are no longer shown (the Library, a
+    /// conversion to or from black & white, another view of the panel), and drops a
+    /// drag it leaves behind, or one for another target.
     pub(super) fn keep_targeted_tool(&mut self) {
         if let Tool::Targeted(target) = self.view.tool
-            && (self.library_mode || !self.targeted_available(target))
+            && (self.library_mode
+                || !self.targeted_available(target)
+                || !self.targeted_shown(target))
         {
             self.view.tool = Tool::None;
         }
-        if !matches!(self.view.tool, Tool::Targeted(_)) && self.view.targeted.is_some() {
+        let current = match self.view.tool {
+            Tool::Targeted(target) => Some(target),
+            _ => None,
+        };
+        if self
+            .view
+            .targeted
+            .as_ref()
+            .is_some_and(|d| Some(d.target) != current)
+        {
             self.view.targeted = None;
             self.document.targeted_pick.invalidate();
         }
@@ -204,6 +230,11 @@ impl Editor {
         result: Result<TargetSample, String>,
     ) {
         self.document.targeted_pick.invalidate();
+        // Only where the edit is shown and can be adjusted.
+        if self.library_mode || self.view.compare.shows_before() {
+            self.view.targeted = None;
+            return;
+        }
         let Some(drag) = &mut self.view.targeted else {
             return;
         };
@@ -533,6 +564,19 @@ mod tests {
         assert!(e.view.targeted.is_none());
         e.toggle_targeted(Target::BlackWhite);
         assert_eq!(e.view.tool, Tool::Targeted(Target::BlackWhite));
+        // Hiding the sliders a tool moves puts it away, and another target drops a
+        // drag still waiting for its sample.
+        e.document.recipe.effects.monochrome = false;
+        e.toggle_targeted(Target::ToneCurve);
+        e.view.parametric_curve = false;
+        e.keep_targeted_tool();
+        assert_eq!(e.view.tool, Tool::None);
+        e.toggle_targeted(Target::Hsl(HslChannel::Hue));
+        e.view.mixer_adjust = 3;
+        e.start_targeted_drag(Target::Hsl(HslChannel::Hue), [0.25, 0.5]);
+        e.toggle_targeted(Target::Hsl(HslChannel::Saturation));
+        e.keep_targeted_tool();
+        assert!(e.view.targeted.is_none());
     }
 
     #[test]
