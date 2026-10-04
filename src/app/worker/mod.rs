@@ -96,7 +96,7 @@ pub enum Event {
     Rendered {
         id: u64,
         preview: Preview,
-        histogram: Box<[[u32; 256]; 3]>,
+        histogram: Box<crate::develop::Histogram>,
         /// A reduced copy for the library, without overlays, when the job asked for one.
         thumbnail: Option<image::RgbImage>,
         /// The shown pixels without overlays or monitor profile, when the job asked.
@@ -107,7 +107,7 @@ pub enum Event {
     /// The whole photo's histogram, for a render that showed a 100% region.
     Histogram {
         id: u64,
-        histogram: Box<[[u32; 256]; 3]>,
+        histogram: Box<crate::develop::Histogram>,
     },
     Failed {
         id: u64,
@@ -186,7 +186,8 @@ pub struct RenderJob {
     pub recipe: Recipe,
     pub region: Option<[u32; 4]>,
     pub monitor: Option<PathBuf>,
-    pub clipping: bool,
+    /// The clipping warnings painted over the shown pixels.
+    pub clipping: crate::develop::ClipOverlay,
     /// Update the Navigator (Fit views).
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.

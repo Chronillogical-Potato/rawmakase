@@ -455,7 +455,7 @@ fn stale_preview_results_are_discarded() {
             display_rgb: vec![255; 3],
             navigator: None,
         },
-        histogram: Box::new([[0; 256]; 3]),
+        histogram: Box::new(develop::Histogram::EMPTY),
         thumbnail: None,
         samples: None,
         stage: worker::RenderStage::Fit,
@@ -522,7 +522,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                     display_rgb: vec![128; 3],
                     navigator: None,
                 },
-                histogram: Box::new([[0; 256]; 3]),
+                histogram: Box::new(develop::Histogram::EMPTY),
                 thumbnail: None,
                 samples: None,
                 stage,
@@ -2060,4 +2060,63 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     editor.document.recipe = Recipe::default();
     editor.paste_settings();
     assert_eq!(editor.document.recipe.exposure, 0.6);
+}
+#[test]
+fn j_toggles_both_clipping_warnings_but_not_while_typing() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut text = String::new();
+    let j = || egui::Event::Key {
+        key: egui::Key::J,
+        physical_key: Some(egui::Key::J),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let mut frame = |events: Vec<egui::Event>, typing: bool, e: &mut Editor| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                if typing {
+                    ui.text_edit_singleline(&mut text).request_focus();
+                }
+                e.develop_shortcuts(&ctx);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    frame(vec![], false, &mut e);
+    frame(vec![j()], false, &mut e);
+    let both = develop::ClipOverlay {
+        shadows: true,
+        highlights: true,
+    };
+    assert_eq!(e.view.clipping.overlay(), both);
+    // A J typed into a field stays there.
+    frame(vec![], true, &mut e);
+    frame(vec![j()], true, &mut e);
+    assert_eq!(e.view.clipping.overlay(), both);
+    frame(vec![], false, &mut e);
+    frame(vec![j()], false, &mut e);
+    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
+}
+#[test]
+fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let frame = e.begin_edit_frame();
+    // As the histogram does while its highlight triangle is under the pointer.
+    e.view
+        .clipping
+        .set_hover(Some(super::clipping::ClipSide::Highlights));
+    e.finish_edit_frame(frame, &ctx);
+    assert!(e.view.clipping.overlay().highlights);
+    // The next frame draws no hovered triangle: the warning goes, and nothing
+    // was turned on.
+    let frame = e.begin_edit_frame();
+    e.finish_edit_frame(frame, &ctx);
+    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
 }

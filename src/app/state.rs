@@ -115,7 +115,7 @@ pub(super) struct PreviewState {
     pub(super) region: Option<Picture>,
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<Picture>,
-    pub(super) histogram: [[u32; 256]; 3],
+    pub(super) histogram: crate::develop::Histogram,
     /// The shown pixels of `texture` and `region` while the white balance selector
     /// is active, for its loupe.
     pub(super) samples: Option<image::RgbImage>,
@@ -143,7 +143,7 @@ impl Default for PreviewState {
             texture: None,
             region: None,
             navigator: None,
-            histogram: [[0; 256]; 3],
+            histogram: crate::develop::Histogram::EMPTY,
             samples: None,
             region_samples: None,
             samples_requested: false,
@@ -179,7 +179,8 @@ pub(super) struct ViewState {
     pub(super) zoom: super::navigator::Zoom,
     pub(super) viewport: Vec2,
     pub(super) compare: bool,
-    pub(super) clipping: bool,
+    /// The histogram's clipping warnings.
+    pub(super) clipping: super::clipping::ClippingView,
     pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
@@ -207,7 +208,7 @@ impl Default for ViewState {
             zoom: Default::default(),
             viewport: Vec2::ZERO,
             compare: false,
-            clipping: false,
+            clipping: Default::default(),
             tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
@@ -276,7 +277,7 @@ impl PreviewState {
         self.texture = None;
         self.region = None;
         self.navigator = None;
-        self.histogram = [[0; 256]; 3];
+        self.histogram = crate::develop::Histogram::EMPTY;
         self.status.clear();
         self.last_fit_edge = 0;
         self.last_region = None;

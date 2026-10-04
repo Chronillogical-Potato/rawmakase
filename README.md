@@ -126,7 +126,7 @@ Useful shortcuts:
 | P / X / U | Pick / reject / clear flag |
 | Shift + rating, label or flag key | Apply and advance |
 | R or C | Crop |
-| J | Clipping indicators |
+| J | Shadow and highlight clipping warnings (click a histogram triangle for one) |
 | Backslash | Before / after |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |

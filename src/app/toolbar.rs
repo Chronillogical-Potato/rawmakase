@@ -50,11 +50,11 @@ impl Editor {
                     {
                         self.view.compare = !self.view.compare;
                     }
-                    if toolbar_action(ui, "Clipping", 78., self.view.clipping, true, 0)
-                        .on_hover_text("Highlight clipped shadows and highlights")
+                    if toolbar_action(ui, "Clipping", 78., self.view.clipping.both_on(), true, 0)
+                        .on_hover_text("Show clipped shadows and highlights · J")
                         .clicked()
                     {
-                        self.view.clipping = !self.view.clipping;
+                        self.view.clipping.toggle_both();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if action_button(

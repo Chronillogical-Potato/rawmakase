@@ -44,6 +44,6 @@ pub(crate) use pipeline::{profile_matrix, render_base};
 pub use recipe::{
     LocalEdits, ProfileCorrections, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT,
 };
-pub use rendered::Rendered;
 pub(crate) use rendered::unit_to_u8;
+pub use rendered::{ClipOverlay, Clipped, HIGHLIGHT_CLIP, Histogram, Rendered, SHADOW_CLIP};
 pub use white_balance::{NamedWhiteBalance, TemperatureTint};

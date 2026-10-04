@@ -29,7 +29,7 @@ struct Shown {
     recipe: develop::Recipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
-    clipping: bool,
+    clipping: develop::ClipOverlay,
     monitor: Option<PathBuf>,
     navigator: bool,
     overlay: super::Overlay,
@@ -42,7 +42,7 @@ enum Shot {
         texture: wgpu::Texture,
         generation: u64,
         preview: Presented,
-        histogram: Box<[[u32; 256]; 3]>,
+        histogram: Box<develop::Histogram>,
     },
 }
 impl Shown {
@@ -330,15 +330,7 @@ fn render(
                     }
                 }
             }
-            if job.clipping {
-                for (p, orig) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&out.pixels) {
-                    if orig.iter().any(|v| *v >= 0.999) {
-                        p.copy_from_slice(&[255, 40, 40]);
-                    } else if orig.iter().all(|v| *v <= 0.001) {
-                        p.copy_from_slice(&[40, 80, 255]);
-                    }
-                }
-            }
+            job.clipping.paint(&mut rgb, &out.pixels);
             let navigator = (job.navigator && job.region.is_none())
                 .then(|| reduce(&rgb, NAVIGATOR))
                 .flatten();
@@ -509,7 +501,7 @@ fn render(
     }
 }
 
-type Histogram = Box<[[u32; 256]; 3]>;
+type Histogram = Box<develop::Histogram>;
 
 /// At 100% the view shows a region, but the histogram describes the whole
 /// photo, as Lightroom's does: from the Fit render of the same edit when there
@@ -604,7 +596,7 @@ mod tests {
             recipe: recipe.clone(),
             region,
             monitor: None,
-            clipping: false,
+            clipping: develop::ClipOverlay::NONE,
             navigator: region.is_none(),
             thumbnail: false,
             samples: false,
@@ -672,7 +664,7 @@ mod tests {
             recipe: recipe.clone(),
             region: None,
             monitor: None,
-            clipping: false,
+            clipping: develop::ClipOverlay::NONE,
             navigator: true,
             thumbnail: false,
             samples: false,
@@ -708,7 +700,7 @@ mod tests {
                 recipe: recipe.clone(),
                 region,
                 monitor: None,
-                clipping: false,
+                clipping: develop::ClipOverlay::NONE,
                 navigator: region.is_none(),
                 thumbnail: false,
                 samples: false,

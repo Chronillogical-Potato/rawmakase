@@ -83,7 +83,7 @@ const DEVELOP: [Shortcut; 25] = [
     ("A", "Visualize spots"),
     ("Space", "Pan while a tool is open"),
     ("\\", "Before / after"),
-    ("J", "Show clipping"),
+    ("J", "Show shadow and highlight clipping"),
     ("Z / F", "Toggle zoom / fit"),
     ("Left / Right", "Previous / next photo"),
     ("Cmd+Shift+C / Cmd+Shift+V", "Copy / paste settings"),

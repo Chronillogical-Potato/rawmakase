@@ -464,12 +464,12 @@ impl Editor {
         // stay in Develop.
         if self.view.tool != Tool::None
             || self.view.compare
-            || self.view.clipping
+            || self.view.clipping != Default::default()
             || self.presets.preview.is_some()
         {
             self.view.tool = Tool::None;
             self.view.compare = false;
-            self.view.clipping = false;
+            self.view.clipping.clear();
             self.presets.preview = None;
             self.schedule();
         }
@@ -744,8 +744,9 @@ impl Editor {
                 {
                     self.view.toggle(Tool::Crop);
                 }
-                if i.key_pressed(egui::Key::J) && !i.modifiers.shift {
-                    self.view.clipping = !self.view.clipping;
+                // Shift+J makes a colour range mask, below.
+                if i.key_pressed(egui::Key::J) && !i.modifiers.any() {
+                    self.view.clipping.toggle_both();
                 }
                 if i.key_pressed(egui::Key::Backslash) {
                     self.view.compare = !self.view.compare;

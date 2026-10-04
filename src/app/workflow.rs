@@ -294,7 +294,7 @@ impl Editor {
                 recipe: self.effective_recipe(),
                 region,
                 monitor: self.view.monitor.clone(),
-                clipping: self.view.clipping,
+                clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail: region.is_none() && self.shows_library_edit(),
                 samples: self.view.picks_color(),
