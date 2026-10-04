@@ -72,6 +72,18 @@ impl Panel {
             ],
         }
     }
+    /// Whether `after` differs from `before` only in this panel's settings, as an
+    /// edit in the panel leaves it.
+    pub fn holds_change(self, before: &Recipe, after: &Recipe) -> bool {
+        if before == after {
+            return false;
+        }
+        let defaults = Recipe::default();
+        let (mut a, mut b) = (before.clone(), after.clone());
+        self.bypass(&mut a, &defaults);
+        self.bypass(&mut b, &defaults);
+        a == b
+    }
     /// Sets this panel's settings in `r` to the values of `defaults`.
     fn bypass(self, r: &mut Recipe, defaults: &Recipe) {
         let (e, d) = (&mut r.effects, &defaults.effects);

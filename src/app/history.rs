@@ -283,6 +283,10 @@ impl History {
             self.record(before, current);
         }
     }
+    /// Undo, redo or a History click changed the recipe this frame, not an edit.
+    pub fn is_replaying(&self) -> bool {
+        self.replaying
+    }
     pub fn begin_frame(&mut self) {
         self.replaying = false;
     }

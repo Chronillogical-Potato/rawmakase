@@ -1600,32 +1600,20 @@ fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
         _ => (theme::gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
     }
 }
-/// A panel's switch while its section is drawn. Changing a setting in a panel that
-/// is off turns it back on, as in Lightroom, so the change shows.
+/// A panel's switch while its section is drawn; a click on it is stored after.
 pub(super) struct PanelSwitch {
     panel: Panel,
     pub(super) state: PanelState,
-    /// The recipe before the section, kept only while the panel is off.
-    before: Option<Recipe>,
 }
 impl PanelSwitch {
     pub(super) fn new(r: &Recipe, panel: Panel) -> Self {
-        let state = r.panels.state(panel);
         Self {
             panel,
-            state,
-            before: (state == PanelState::Off).then(|| r.clone()),
+            state: r.panels.state(panel),
         }
     }
-    /// Stores the switch, turned on if the section changed a setting while off.
     pub(super) fn finish(self, r: &mut Recipe) {
-        let edited = self.before.is_some_and(|before| before != *r);
-        let state = if edited && self.state == PanelState::Off {
-            PanelState::On
-        } else {
-            self.state
-        };
-        r.panels.set(self.panel, state);
+        r.panels.set(self.panel, self.state);
     }
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.

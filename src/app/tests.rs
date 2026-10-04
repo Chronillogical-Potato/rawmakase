@@ -3755,22 +3755,36 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
 #[test]
 fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
     use crate::develop::panels::{Panel, PanelState};
-    let mut r = develop::Recipe::default();
-    r.panels.set(Panel::Detail, PanelState::Off);
-    // Drawing it without a change keeps it off.
-    super::inspector::PanelSwitch::new(&r, Panel::Detail).finish(&mut r);
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let frame = |editor: &mut Editor, edit: &dyn Fn(&mut develop::Recipe)| {
+        let started = editor.begin_edit_frame();
+        edit(&mut editor.document.recipe);
+        editor.finish_edit_frame(started, &ctx);
+    };
+    frame(&mut editor, &|r| {
+        r.panels.set(Panel::BlackWhiteMix, PanelState::Off);
+        r.panels.set(Panel::Detail, PanelState::Off);
+    });
+    // An edit made anywhere in the frame, as B&W Auto is after the panel is drawn.
+    frame(&mut editor, &|r| r.effects.gray_mix[0] = 0.3);
+    let r = &editor.document.recipe;
+    assert_eq!(r.panels.state(Panel::BlackWhiteMix), PanelState::On);
+    // Other panels stay off, and render, so export, at their defaults.
     assert_eq!(r.panels.state(Panel::Detail), PanelState::Off);
-    let switch = super::inspector::PanelSwitch::new(&r, Panel::Detail);
-    r.sharpening = 0.6;
-    switch.finish(&mut r);
-    assert_eq!(r.panels.state(Panel::Detail), PanelState::On);
-    // Clicking the switch off stays off.
-    let mut switch = super::inspector::PanelSwitch::new(&r, Panel::Detail);
-    switch.state = PanelState::Off;
-    switch.finish(&mut r);
-    assert_eq!(r.panels.state(Panel::Detail), PanelState::Off);
-    // A switched-off panel renders, and so exports, at its defaults.
-    assert_eq!(r.as_rendered().sharpening, 0.);
+    frame(&mut editor, &|r| r.exposure = 0.5);
+    assert_eq!(
+        editor.document.recipe.panels.state(Panel::Detail),
+        PanelState::Off
+    );
+    // The edit and its switch are one step, undone together.
+    editor.undo();
+    editor.undo();
+    let started = editor.begin_edit_frame();
+    editor.finish_edit_frame(started, &ctx);
+    let r = &editor.document.recipe;
+    assert_eq!(r.effects.gray_mix[0], 0.);
+    assert_eq!(r.panels.state(Panel::BlackWhiteMix), PanelState::Off);
 }
 #[test]
 fn solo_mode_opens_one_panel_per_side_and_is_set_from_the_header_menu() {
@@ -3880,4 +3894,76 @@ fn up_and_down_nudge_the_hovered_slider_but_never_while_typing_or_scrolling() {
         6.,
     );
     assert!((value + 0.09).abs() < 1e-6, "{value}");
+}
+#[test]
+fn a_disabled_slider_ignores_up_and_down() {
+    let ctx = egui::Context::default();
+    let mut value = 0.;
+    let row = std::cell::Cell::new(Rect::NOTHING);
+    let draw = |value: &mut f32, events: Vec<egui::Event>, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let top = ui.cursor().min;
+            ui.add_enabled_ui(false, |ui| {
+                super::widgets::slider(ui, "Contrast", value, -1. ..=1., 0.);
+            });
+            row.set(Rect::from_min_max(
+                top,
+                Pos2::new(ui.max_rect().right(), ui.cursor().top()),
+            ));
+        })
+    };
+    draw(&mut value, vec![], 0.);
+    let over = egui::Event::PointerMoved(row.get().center());
+    draw(&mut value, vec![over], 1.);
+    let up = egui::Event::Key {
+        key: egui::Key::ArrowUp,
+        physical_key: Some(egui::Key::ArrowUp),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    draw(&mut value, vec![up], 2.);
+    assert_eq!(value, 0.);
+}
+#[test]
+fn b_and_w_opens_and_closes_with_the_color_mixer_in_solo_mode() {
+    use super::widgets::{SectionGroup, SectionSide};
+    let ctx = egui::Context::default();
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::solo_sections_id(),
+            std::collections::BTreeSet::from(["develop-right".to_string()]),
+        )
+    });
+    let headers = std::cell::RefCell::new(Vec::new());
+    let draw = |mixer: &str, events, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let _side = SectionSide::enter(ui, SectionGroup::DevelopRight);
+            headers.borrow_mut().clear();
+            for title in ["Tone Curve", mixer] {
+                headers.borrow_mut().push(ui.cursor().top() + 8. + 14.);
+                super::widgets::section(ui, title, false, |ui| {
+                    ui.label(title);
+                });
+            }
+        })
+    };
+    let collapsed = || -> std::collections::BTreeSet<String> {
+        ctx.data(|d| d.get_temp(super::widgets::collapsed_sections_id()))
+            .unwrap_or_default()
+    };
+    draw("Color Mixer", vec![], 0.);
+    // Open Tone Curve alone, then convert to black & white: B&W stays closed.
+    let mixer = Pos2::new(60., headers.borrow()[1]);
+    draw(
+        "Color Mixer",
+        click_at(mixer, egui::PointerButton::Primary),
+        1.,
+    );
+    assert_eq!(collapsed(), ["Color Mixer".to_string()].into());
+    draw("B&W", vec![], 3.);
+    assert_eq!(collapsed(), ["Color Mixer".to_string()].into());
+    // Opening B&W closes Tone Curve, and the Color Mixer comes back open.
+    draw("B&W", click_at(mixer, egui::PointerButton::Primary), 4.);
+    assert_eq!(collapsed(), ["Tone Curve".to_string()].into());
 }

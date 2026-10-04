@@ -252,6 +252,15 @@ fn toggle_solo(ui: &egui::Ui, group: &str, title: &str) {
         close_others(ui, group, title);
     }
 }
+/// The name a section's open state and Solo Mode go by. B&W replaces the Color
+/// Mixer in the same place when a photo is black and white, as in Lightroom, so
+/// they open and close as one panel.
+fn section_key(title: &str) -> &str {
+    match title {
+        "B&W" => "Color Mixer",
+        title => title,
+    }
+}
 fn section_header(
     ui: &mut egui::Ui,
     title: &str,
@@ -261,18 +270,19 @@ fn section_header(
 ) -> bool {
     let resettable = button != HeaderButton::None;
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
+    let key = section_key(title);
     let group = current_group(ui);
     if let Some(group) = group {
         ui.ctx().data_mut(|d| {
             d.get_temp_mut_or_default::<SectionTitles>(section_titles_id())
                 .entry(group.to_string())
                 .or_default()
-                .insert(title.to_string());
+                .insert(key.to_string());
         });
     }
     let mut open = !ui.ctx().data(|d| {
         d.get_temp::<std::collections::BTreeSet<String>>(collapsed_sections_id())
-            .is_some_and(|set| set.contains(title))
+            .is_some_and(|set| set.contains(key))
     });
     ui.add_space(8.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
@@ -386,16 +396,16 @@ fn section_header(
     if let Some(group) = group {
         context_menu(&toggle, |ui| {
             if menu_item(ui, "Solo Mode", "", true, solo(ui, group)) {
-                toggle_solo(ui, group, title);
+                toggle_solo(ui, group, key);
                 ui.close();
             }
         });
     }
     if toggle.clicked() && !context_clicked(&toggle) {
         open = !open;
-        set_open(ui, title, open);
+        set_open(ui, key, open);
         if open && let Some(group) = group.filter(|g| solo(ui, g)) {
-            close_others(ui, group, title);
+            close_others(ui, group, key);
         }
     }
     if button == HeaderButton::Reset && reset.clicked() {
@@ -1067,11 +1077,12 @@ pub(super) fn slider_with(
     event
 }
 /// Steps the Up and Down keys ask of the slider in `row` this frame: +1 or −1 each,
-/// ×10 with Shift. Only while the pointer is over the row and no text field (a
+/// ×10 with Shift. Only while the slider is enabled, the pointer is over the row and no text field (a
 /// slider's number being typed, a search) has the keyboard, which keeps the keys;
 /// Left and Right stay with photo navigation, and scrolling never moves a slider.
 fn hovered_nudge(ui: &egui::Ui, row: Rect) -> Option<f32> {
-    if !ui.rect_contains_pointer(row)
+    if !ui.is_enabled()
+        || !ui.rect_contains_pointer(row)
         || ui.ctx().text_edit_focused()
         || ui.input(|i| i.pointer.any_down())
     {
