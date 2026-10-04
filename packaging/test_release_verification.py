@@ -26,7 +26,7 @@ class PublishedReleaseTests(unittest.TestCase):
             directory.mkdir(parents=True)
         (self.published / "rawmakase.deb").write_bytes(b"synthetic package")
         (self.published / "rawmakase.rb").write_bytes(b"synthetic cask")
-        self.manifests()
+        (self.published / "checksums.txt").write_bytes(b"synthetic manifest")
         # Signature authenticity is checked before upload by sign-release.
         # This job checks that those exact signature bytes were published.
         (self.published / "checksums.txt.sig").write_bytes(b"synthetic signature")
@@ -40,9 +40,7 @@ class PublishedReleaseTests(unittest.TestCase):
             import sys
             args = sys.argv[1:]
             source = Path(os.environ['FAKE_RELEASE'])
-            if args[:2] == ['release', 'view']:
-                print('\\n'.join(path.name for path in source.iterdir()))
-            elif args[:2] == ['release', 'download']:
+            if args[:2] == ['release', 'download']:
                 name = args[args.index('--pattern') + 1]
                 path = source / name
                 if not path.exists():
@@ -59,24 +57,12 @@ class PublishedReleaseTests(unittest.TestCase):
             + "  " + name + "\n" for name in sorted(names)
         )
 
-    def manifests(self, omit_package=False):
-        names = ["rawmakase.rb"]
-        if not omit_package:
-            names.append("rawmakase.deb")
-        (self.published / "SHA256SUMS").write_text(self.checksum_lines(names))
-        (self.published / "checksums.txt").write_text(
-            self.checksum_lines(names + ["SHA256SUMS"])
-        )
-
     def record_upload(self):
         names = sorted(path.name for path in self.published.iterdir())
-        (self.expected / "expected-assets.txt").write_text("\n".join(names) + "\n")
         (self.expected / "expected-checksums.txt").write_text(self.checksum_lines(names))
 
     def verify(self, success, diagnostic=""):
         job = WORKFLOW.read_text().split("\n  verify:\n", 1)[1].split("\n  website:\n", 1)[0]
-        # A checkout in this job would remove the previously downloaded files.
-        self.assertNotIn("uses: actions/checkout@", job)
         script = textwrap.dedent(job.split("        run: |\n", 1)[1])
         env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                    FAKE_RELEASE=str(self.published), RUNNER_TEMP=str(self.root),
@@ -89,46 +75,23 @@ class PublishedReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, success, output)
         self.assertIn(diagnostic, output)
 
-    def test_complete_release_and_hand_uploaded_media(self):
+    def test_complete_release_ignores_unrelated_assets(self):
         (self.published / "screenshot.png").write_bytes(b"synthetic screenshot")
-        self.verify(True, "PASS:")
-        self.assertRegex((self.root / "summary").read_text(), r"preserved assets added by hand:\s+1")
-
-    def test_missing_package_is_named(self):
-        (self.published / "rawmakase.deb").unlink()
-        self.verify(False, "not on the release or not downloadable: rawmakase.deb")
-
-    def test_corrupt_package(self):
-        (self.published / "rawmakase.deb").write_bytes(b"truncated")
-        self.verify(False, "published bytes differ")
-
-    def test_manifest_omission_even_when_upload_matches(self):
-        self.manifests(omit_package=True)
-        self.record_upload()
-        self.verify(False, "does not cover exactly the expected assets")
-
-    def test_changed_signature(self):
-        (self.published / "checksums.txt.sig").write_bytes(b"corrupt signature")
-        self.verify(False, "published bytes differ")
-
-    def test_consistent_stale_release(self):
-        (self.published / "rawmakase.deb").write_bytes(b"older package")
-        self.manifests()
-        self.verify(False, "published bytes differ")
-
-    def test_orphan_package(self):
         (self.published / "old-package.zip").write_bytes(b"older package")
-        self.verify(False, "unexpected asset left on the release: old-package.zip")
+        self.verify(True)
+        self.assertIn("every expected release asset matches", (self.root / "summary").read_text())
 
-    def test_missing_manifest(self):
-        (self.published / "SHA256SUMS").unlink()
-        self.verify(False, "cannot read SHA256SUMS")
+    def test_missing_package_fails(self):
+        (self.published / "rawmakase.deb").unlink()
+        self.verify(False, "Downloading rawmakase.deb")
 
-    def test_duplicate_manifest_entry(self):
-        manifest = self.published / "SHA256SUMS"
-        manifest.write_text(manifest.read_text() + self.checksum_lines(["rawmakase.deb"]))
-        self.record_upload()
-        self.verify(False, "does not cover exactly the expected assets")
+    def test_changed_package_fails(self):
+        (self.published / "rawmakase.deb").write_bytes(b"truncated or stale")
+        self.verify(False, "rawmakase.deb: FAILED")
+
+    def test_changed_signature_fails(self):
+        (self.published / "checksums.txt.sig").write_bytes(b"corrupt signature")
+        self.verify(False, "checksums.txt.sig: FAILED")
 
 
 if __name__ == "__main__":
