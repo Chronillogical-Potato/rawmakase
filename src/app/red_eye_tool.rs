@@ -116,21 +116,22 @@ impl Editor {
         let pointer = response.hover_pos();
         let hovered = pointer.and_then(hit);
 
+        // The selected pet eye's catchlight handle, which can lie outside its ellipse.
+        let selected = self.view.red_eye.selected;
+        let on_catchlight = |pos: Pos2| {
+            selected
+                .and_then(|i| ops.get(i))
+                .and_then(|op| op.catchlight_at(aspect))
+                .is_some_and(|c| to_screen(c).distance(pos) < 7.)
+        };
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
             let at = to_image(origin);
-            let on_catchlight = self
-                .view
-                .red_eye
-                .selected
-                .and_then(|i| ops.get(i))
-                .and_then(|op| op.catchlight_at(aspect))
-                .is_some_and(|c| to_screen(c).distance(origin) < 7.);
             self.view.red_eye.drag = match hit(origin) {
-                _ if on_catchlight => Drag::Catchlight,
+                _ if on_catchlight(origin) => Drag::Catchlight,
                 Some(i) => {
-                    self.view.red_eye.selected = Some(i);
+                    self.select_red_eye(Some(i));
                     Drag::Move(at, ops[i].clone())
                 }
                 None => Drag::Circle(at),
@@ -173,7 +174,8 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
         {
             match hit(pos) {
-                Some(i) => self.view.red_eye.selected = Some(i),
+                _ if on_catchlight(pos) => {}
+                Some(i) => self.select_red_eye(Some(i)),
                 None => {
                     let size = self.view.red_eye.size;
                     self.add_red_eye(to_image(pos), size);
@@ -256,7 +258,7 @@ impl Editor {
                 }
                 self.document.recipe.red_eye.push(op);
                 self.show_red_eye();
-                self.view.red_eye.selected = Some(self.document.recipe.red_eye.len() - 1);
+                self.select_red_eye(Some(self.document.recipe.red_eye.len() - 1));
             }
             // Lightroom's warning.
             Err(_) => {
@@ -265,6 +267,14 @@ impl Editor {
                     kind.name().to_lowercase()
                 )
             }
+        }
+    }
+    /// Selects correction `i`; its type becomes the one new corrections get, as the
+    /// Type menu shows it.
+    pub(super) fn select_red_eye(&mut self, i: Option<usize>) {
+        self.view.red_eye.selected = i;
+        if let Some(op) = i.and_then(|i| self.document.recipe.red_eye.get(i)) {
+            self.view.red_eye.pet = PupilType::of(op.kind);
         }
     }
     /// Turns the Red Eye switch on, so a correction just made or changed shows, as

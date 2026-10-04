@@ -1017,6 +1017,47 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
         }
     );
     assert!((eyes[0].radius[0] * 200. - 10.).abs() < 1.5);
+    // Selecting a correction makes its type the one new corrections get.
+    editor.view.red_eye.pet = red_eye_tool::PupilType::Red;
+    editor.select_red_eye(Some(0));
+    assert_eq!(editor.view.red_eye.pet, red_eye_tool::PupilType::Pet);
+    // A click on the catchlight's handle, even at the pupil's edge outside the
+    // ellipse, is not a new search.
+    editor.document.recipe.red_eye[0].kind = EyeKind::Pet {
+        catchlight: Some([1., 0.]),
+    };
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    editor.view.tool = state::Tool::RedEye;
+    let handle = editor.document.recipe.red_eye[0].catchlight_at(1.).unwrap();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| editor.viewport_ui(ui),
+        );
+        output.textures_delta.clear();
+        editor.document.recipe.red_eye.len()
+    };
+    frame(vec![]);
+    let p = Pos2::new(handle[0] * 200., handle[1] * 200.);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(vec![egui::Event::PointerMoved(p), button(true)]);
+    assert_eq!(frame(vec![button(false)]), 1);
 }
 #[test]
 fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {

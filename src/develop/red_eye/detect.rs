@@ -51,6 +51,8 @@ const MIN_GLOW: f32 = 1.6;
 /// Red must be at least this many times the larger of green and blue at the pupil (in
 /// linear values a brown iris reaches about 2.5, a red pupil 10 or more).
 const MIN_RATIO: f32 = 3.5;
+/// Where a glowing pupil's edge lies, as a fraction of its brightness.
+const GLOW_EDGE: f32 = 0.65;
 /// The largest search radius, in grid cells; larger circles are subsampled.
 const MAX_GRID_RADIUS: f32 = 160.;
 /// Where the pupil's edge lies between the surroundings' redness and the pupil's.
@@ -113,11 +115,13 @@ pub fn find_pupil(
     // The reddest point near the centre, and the redness of the circle's rim.
     let mut seed = None::<(usize, usize, f32)>;
     let mut rim = Vec::new();
+    let mut central = Vec::new();
     for y in 0..gh {
         for x in 0..gw {
             let d = distance(x, y);
             if d <= 0.6 {
                 let v = smooth(x, y);
+                central.push(v);
                 if seed.is_none_or(|s| v > s.2) {
                     seed = Some((x, y, v));
                 }
@@ -127,6 +131,16 @@ pub fn find_pupil(
         }
     }
     let (sx, sy, peak) = seed.ok_or(DetectError::NotRed)?;
+    // A catchlight is the brightest thing in a glowing pupil; the pupil's own level is
+    // taken where the brightest fifth of the centre begins, so the edge found is the
+    // pupil's, not the catchlight's.
+    let peak = match glow {
+        Glow::Red => peak,
+        Glow::Bright => {
+            central.sort_by(f32::total_cmp);
+            central[central.len() * 4 / 5].min(peak)
+        }
+    };
     if rim.is_empty() {
         return Err(DetectError::NotRed);
     }
@@ -136,7 +150,12 @@ pub fn find_pupil(
     if glow == Glow::Red && peak < MIN_RATIO.ln() {
         return Err(DetectError::NotRed);
     }
-    let threshold = around + EDGE * (peak - around);
+    let threshold = match glow {
+        Glow::Red => around + EDGE * (peak - around),
+        // The face around an animal's eye can be brighter than its iris, or even its
+        // pupil: the edge is where the glow falls to `GLOW_EDGE` of the pupil's level.
+        Glow::Bright => peak + GLOW_EDGE.ln(),
+    };
     // The connected area at least that red, within the circle.
     let inside = |x: usize, y: usize| distance(x, y) <= 1.;
     let mut area = vec![false; gw * gh];

@@ -463,3 +463,25 @@ fn catchlights_turn_with_the_camera() {
         assert!(worst < 1e-3, "{worst}");
     }
 }
+#[test]
+fn a_catchlight_in_a_glowing_pupil_is_not_taken_for_it() {
+    let c = [100., 100.];
+    let mut e = eye(c, 16., [0.25, 0.18, 0.05]);
+    // A dim glow, darker than the face around the eye.
+    e.pupil_color = [0.3, 0.45, 0.1];
+    let mut im = image(200, 200, 0, &[e]);
+    for (i, p) in im.pixels.iter_mut().enumerate() {
+        let (x, y) = ((i % 200) as f32, (i / 200) as f32);
+        if (x - 95.).hypot(y - 96.) < 3.5 {
+            *p = [1.; 3];
+        }
+    }
+    let op = pet(&im, c, None);
+    let [x, y] = ImageFrame::new(&im).to_source(op.center);
+    assert!((x - c[0]).abs() < 1. && (y - c[1]).abs() < 1., "{x},{y}");
+    assert!(
+        op.radius.iter().all(|a| (a * 200. - 16.).abs() < 1.5),
+        "{:?}",
+        op.radius.map(|a| a * 200.)
+    );
+}
