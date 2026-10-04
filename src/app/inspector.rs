@@ -805,7 +805,9 @@ impl Editor {
                     );
                 });
                 // Lightroom's Point Curve menu: the built-in curves, saved ones, Save….
-                let shown = crate::presets::curves::shown_name(r, &saved_curves);
+                use crate::presets::curves::ShownCurve;
+                let chosen = ShownCurve::of(r, &saved_curves);
+                let shown = chosen.name(&saved_curves).to_string();
                 control_row(ui, "Point Curve", |ui| {
                     egui::ComboBox::from_id_salt("point-curve")
                         .width(ui.available_width())
@@ -815,7 +817,10 @@ impl Editor {
                             use crate::presets::curves::BuiltinCurve;
                             for curve in BuiltinCurve::ALL {
                                 if ui
-                                    .selectable_label(shown == curve.name(), curve.name())
+                                    .selectable_label(
+                                        chosen == ShownCurve::Builtin(curve),
+                                        curve.name(),
+                                    )
                                     .clicked()
                                 {
                                     curve_choice = Some(CurveChoice::Builtin(curve));
@@ -824,9 +829,9 @@ impl Editor {
                             if !saved_curves.is_empty() {
                                 ui.separator();
                             }
-                            for saved in &saved_curves {
+                            for (i, saved) in saved_curves.iter().enumerate() {
                                 if ui
-                                    .selectable_label(shown == saved.name, &saved.name)
+                                    .selectable_label(chosen == ShownCurve::Saved(i), &saved.name)
                                     .clicked()
                                 {
                                     curve_choice = Some(CurveChoice::Saved(saved.clone()));

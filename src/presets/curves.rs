@@ -144,25 +144,49 @@ pub struct SavedCurve {
     pub curve: PointCurve,
 }
 
-/// The name the Point Curve menu shows for `r`'s curve: a saved curve it has (when
-/// that curve's colors are what sets it apart), a built-in curve its RGB curve
-/// matches, any saved curve it has, or Custom.
+/// The curve the Point Curve menu shows as chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShownCurve {
+    Builtin(BuiltinCurve),
+    /// The saved curve at this index of the list.
+    Saved(usize),
+    Custom,
+}
+
+impl ShownCurve {
+    /// Which curve `r` has: a saved curve it has (when that curve's colors are what
+    /// sets it apart), a built-in curve its RGB curve matches, any saved curve it
+    /// has, or Custom.
+    pub fn of(r: &Recipe, saved: &[SavedCurve]) -> Self {
+        let saved_match = |colored: bool| {
+            saved
+                .iter()
+                .position(|s| s.curve.matches(r) && (!colored || !s.curve.channels_linear()))
+                .map(Self::Saved)
+        };
+        saved_match(true)
+            .or_else(|| {
+                BuiltinCurve::ALL
+                    .into_iter()
+                    .find(|b| same(&b.curve(), &r.curve))
+                    .map(Self::Builtin)
+            })
+            .or_else(|| saved_match(false))
+            .unwrap_or(Self::Custom)
+    }
+    /// Its name in the menu.
+    pub fn name(self, saved: &[SavedCurve]) -> &str {
+        match self {
+            Self::Builtin(b) => b.name(),
+            Self::Saved(i) => saved.get(i).map_or("Custom", |s| s.name.as_str()),
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+/// The name the Point Curve menu shows for `r`'s curve.
 pub fn shown_name(r: &Recipe, saved: &[SavedCurve]) -> String {
-    let saved_match = |colored: bool| {
-        saved
-            .iter()
-            .find(|s| s.curve.matches(r) && (!colored || !s.curve.channels_linear()))
-            .map(|s| s.name.clone())
-    };
-    saved_match(true)
-        .or_else(|| {
-            BuiltinCurve::ALL
-                .into_iter()
-                .find(|b| same(&b.curve(), &r.curve))
-                .map(|b| b.name().to_string())
-        })
-        .or_else(|| saved_match(false))
-        .unwrap_or_else(|| "Custom".into())
+    ShownCurve::of(r, saved).name(saved).to_string()
 }
 
 /// The folder of saved point curves, under the user library.
@@ -216,6 +240,11 @@ impl SavedCurves {
         ensure!(!name.is_empty(), "A curve needs a name");
         let path = self.dir.join(format!("{name}.xmp"));
         let curve = curve.quantized();
+        // Points dragged within one step of each other, end to end, leave no curve.
+        for c in std::iter::once(&curve.rgb).chain(&curve.channels) {
+            c.validate()
+                .context("The curve's points are too close together to save")?;
+        }
         let text = crate::xmp::preset_write::point_curve(&curve.rgb, &curve.channels);
         std::fs::create_dir_all(&self.dir)?;
         crate::storage::write_atomic(&path, Replace::NoClobber, |f| {
@@ -372,6 +401,47 @@ mod tests {
             [[0, 0], [128, 102], [255, 255]]
         );
         Ok(())
+    }
+
+    #[test]
+    fn a_curve_that_collapses_on_the_steps_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let store = SavedCurves {
+            dir: d.path().to_path_buf(),
+        };
+        // A natural curve whose two points were dragged together.
+        let mut r = Recipe::default();
+        r.curve.points = vec![[0.5, 0.2], [0.5005, 0.8]];
+        r.curve.validate().unwrap();
+        let err = store.save("Collapsed", &PointCurve::of(&r)).unwrap_err();
+        assert!(format!("{err:#}").contains("too close"), "{err:#}");
+        assert_eq!(store.list(), SavedCurveList::default());
+    }
+
+    #[test]
+    fn the_menu_marks_the_curve_by_identity_not_by_name() {
+        // A saved curve named like a built-in one, and one named Custom.
+        let saved = |name: &str, lift: f32| SavedCurve {
+            name: name.into(),
+            curve: PointCurve {
+                rgb: ToneCurve {
+                    points: vec![[0., lift], [1., 1.]],
+                    ..ToneCurve::default()
+                },
+                channels: Default::default(),
+            },
+        };
+        let list = [saved("Linear", 20. / 255.), saved("Custom", 40. / 255.)];
+        let mut r = Recipe::default();
+        assert_eq!(
+            ShownCurve::of(&r, &list),
+            ShownCurve::Builtin(BuiltinCurve::Linear)
+        );
+        list[0].curve.apply(&mut r);
+        assert_eq!(ShownCurve::of(&r, &list), ShownCurve::Saved(0));
+        r.curve.points[0][1] = 0.5;
+        assert_eq!(ShownCurve::of(&r, &list), ShownCurve::Custom);
+        assert_ne!(ShownCurve::of(&r, &list), ShownCurve::Saved(1));
     }
 
     #[test]
