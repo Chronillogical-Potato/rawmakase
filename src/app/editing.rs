@@ -18,6 +18,8 @@ struct RenderModes {
     clipping: crate::develop::ClipOverlay,
     compare: bool,
     zoom: bool,
+    /// The swatch Point Color's Visualize Range shows.
+    visualized: Option<usize>,
 }
 impl Editor {
     fn render_modes(&self) -> RenderModes {
@@ -26,6 +28,7 @@ impl Editor {
             clipping: self.view.clipping.overlay(),
             compare: self.view.compare,
             zoom: self.view.zoom.on,
+            visualized: self.visualized_swatch(),
         }
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {

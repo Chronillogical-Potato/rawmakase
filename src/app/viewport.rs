@@ -472,6 +472,24 @@ impl Editor {
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
         }
+        // Point Color's dropper adds a swatch of the color under the pointer and
+        // selects it; the status line says why when it can't.
+        if self.view.is(Tool::PointColor)
+            && picking
+            && response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && rect.contains(pos)
+            && let Some(im) = self.document.full().cloned()
+        {
+            let u = (pos.x - rect.left()) / rect.width();
+            let v = (pos.y - rect.top()) / rect.height();
+            match self.add_point_color_sample(&im, u, v) {
+                Ok(_) => {
+                    super::widgets::name_history_step(ui, "Point Color".into(), "Add Swatch".into())
+                }
+                Err(refusal) => self.status = refusal.message().into(),
+            }
+        }
         // Before shows the unedited photo, so picking there would edit what is not shown.
         if self.view.is(Tool::Defringe)
             && picking

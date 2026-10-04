@@ -235,14 +235,9 @@ fn tone_stage(
     };
     (rgb, clipped_chroma)
 }
-/// Basic curves, point curves, color controls and output encoding.
-fn color_stage(
-    rgb: [f32; 3],
-    clipped_chroma: f32,
-    r: &Recipe,
-    lut: &CurveSet,
-    local: Option<&LocalDelta>,
-) -> [f32; 3] {
+/// The tone curves, the color mixer and Point Color: linear display RGB as Point
+/// Color leaves it.
+fn mixer_stage(rgb: [f32; 3], r: &Recipe, lut: &CurveSet, local: Option<&LocalDelta>) -> [f32; 3] {
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut, local)
     } else if r.wide_gamut_curves {
@@ -259,12 +254,22 @@ fn color_stage(
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     // Point Color works where the mixer does, in HSV of linear ProPhoto RGB.
-    let rgb = lut.point_colors.as_ref().map_or(rgb, |p| {
+    lut.point_colors.as_ref().map_or(rgb, |p| {
         mul(
             crate::camera_profiles::PRO_TO_RGB,
             p.apply_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb)),
         )
-    });
+    })
+}
+/// Basic curves, point curves, color controls and output encoding.
+fn color_stage(
+    rgb: [f32; 3],
+    clipped_chroma: f32,
+    r: &Recipe,
+    lut: &CurveSet,
+    local: Option<&LocalDelta>,
+) -> [f32; 3] {
+    let rgb = mixer_stage(rgb, r, lut, local);
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
     // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
     // engine 4 the colour controls come later, in Oklab, and the table after them.
@@ -688,6 +693,42 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
     }))
     .unwrap_or([l, h, c]);
     r.effects.pick_fringe_hue(hue, chroma)
+}
+/// Point Color's dropper at (`u`, `v`) of the shown photo: the color Point Color sees
+/// there (a 5×5 average of the source, through every stage before Point Color and the
+/// swatches it already has), as a swatch's `source`: HSV of linear ProPhoto RGB, hue
+/// in sixths of a turn.
+pub fn point_color_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
+    let shown = r.as_rendered();
+    let r = shown.resolved(&im.metadata);
+    let g = Geometry::new(im, &r, 0);
+    let [x, y] = g.source(u, v);
+    let mut sum = [0.; 3];
+    for dy in -2..=2 {
+        for dx in -2..=2 {
+            let p = sample(im.into(), x + dx as f32, y + dy as f32);
+            for c in 0..3 {
+                sum[c] += p[c] / 25.;
+            }
+        }
+    }
+    let matrix = profile_matrix(&im.metadata, &r);
+    let lut = CurveSet::for_image(im.into(), &r, matrix, false);
+    let (rgb, _) = tone_stage(sum, &im.metadata, &r, &lut, matrix, None);
+    let rgb = lut
+        .local
+        .as_ref()
+        .map_or(rgb, |map| rgb.map(|c| c * map.gain(x, y, rgb)));
+    let p = mul(
+        crate::camera_profiles::RGB_TO_PRO,
+        mixer_stage(rgb, &r, &lut, None),
+    );
+    let [h, s, v] = crate::develop::point_color::rgb_to_hsv(p.map(|c| c.max(0.)));
+    [
+        (h / std::f32::consts::TAU * 6.).rem_euclid(6.),
+        s.clamp(0., 1.),
+        v.clamp(0., 1.),
+    ]
 }
 pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     let g = Geometry::new(im, r, 0);

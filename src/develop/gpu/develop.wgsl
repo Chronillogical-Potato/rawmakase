@@ -596,6 +596,11 @@ fn point_color(p0: vec3<f32>, w: i32, base: i32) -> vec3<f32> {
         * point_ramp(sat + (s - sat) * table(w + 4), w + 10, table(base + 1), table(base + 2))
         * point_ramp(lum + (ev - lum) * table(w + 5), w + 14, table(base + 3), table(base + 4))
         * min(s / table(base + 5), 1.0);
+    // Visualize Range: the selection in color, the rest gray.
+    if table(w + 22) != 0.0 {
+        let c = v * s * weight;
+        return hsv_to_rgb(rem_euclid(h / TAU, 1.0) * 6.0, v, s * weight) + (v - c) + (p0 - q);
+    }
     if weight <= 0.0 {
         return p0;
     }
@@ -620,7 +625,7 @@ fn point_colors(rgb: vec3<f32>) -> vec3<f32> {
     let base = offset(P_POINT);
     var q = RGB_TO_PRO * rgb;
     for (var i = 0u; i < u32(p(P_POINT + 1u)); i++) {
-        q = point_color(q, base + 8 + i32(i) * 22, base);
+        q = point_color(q, base + POINT_CONSTANTS + i32(i) * POINT_SWATCH, base);
     }
     return PRO_TO_RGB * q;
 }

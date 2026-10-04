@@ -230,6 +230,16 @@ impl Editor {
         }
         r
     }
+    /// The swatch Point Color's Visualize Range shows, while its tab is open on a color
+    /// photo.
+    pub(super) fn visualized_swatch(&self) -> Option<usize> {
+        let pc = &self.view.point_color;
+        let shown = self.view.mixer_tab == super::state::MixerTab::PointColor
+            && pc.visualize
+            && self.document.recipe.treatment() == crate::develop::Treatment::Color;
+        pc.selected
+            .filter(|i| shown && *i < self.document.recipe.point_colors.len())
+    }
     /// What the active tool draws into the rendered preview.
     pub(super) fn overlay(&self) -> super::worker::Overlay {
         use super::{state::Tool, worker::Overlay};
@@ -291,17 +301,27 @@ impl Editor {
                 super::state::TextureMode::Whole,
                 super::state::TextureMode::Region,
             );
+            // Visualize Range renders the selected swatch's selection instead of its
+            // adjustment; never as the photo's thumbnail.
+            let mut recipe = self.effective_recipe();
+            let visualize = self.visualized_swatch().and_then(|i| {
+                crate::develop::point_color::visualize_range(&recipe.point_colors, i)
+            });
+            let thumbnail = region.is_none() && self.shows_library_edit() && visualize.is_none();
+            if let Some(list) = visualize {
+                recipe.point_colors = list;
+            }
             self.renderer.submit(RenderJob {
                 max_edge,
                 cancel,
                 id,
                 image,
-                recipe: self.effective_recipe(),
+                recipe,
                 region,
                 monitor: self.view.monitor.clone(),
                 clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
-                thumbnail: region.is_none() && self.shows_library_edit(),
+                thumbnail,
                 samples: self.view.picks_color(),
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),

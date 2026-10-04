@@ -3559,3 +3559,60 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     assert!(!editor.document.history.in_gesture());
     assert_eq!(editor.document.history.steps().1, 1);
 }
+#[test]
+fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
+    use crate::develop::point_color::SampleRefusal;
+    let ctx = egui::Context::default();
+    let (mut editor, image) =
+        editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
+    editor.view.toggle(state::Tool::PointColor);
+    assert!(editor.view.picks_color());
+    let mut added = None;
+    in_edit_frame(&ctx, &mut editor, |e| {
+        added = Some(e.add_point_color_sample(&image, 0.7, 0.5));
+        e.document
+            .history
+            .label(history::Step::new("Point Color", "Add Swatch"));
+    });
+    assert_eq!(added, Some(Ok(0)));
+    let (steps, _) = editor.document.history.steps();
+    assert_eq!(
+        steps.last().map(|s| (s.name.as_str(), s.value.as_str())),
+        Some(("Point Color", "Add Swatch"))
+    );
+    let swatch = editor.document.recipe.point_colors[0];
+    // The photo is blue: a hue near 4 sixths of a turn, sampled with default ranges.
+    assert!((swatch.source[0] - 4.).abs() < 0.5, "{swatch:?}");
+    assert!(swatch.is_valid());
+    assert_eq!(editor.view.point_color.selected, Some(0));
+    assert_eq!(editor.view.tool, state::Tool::None);
+    // The same color again is refused, and changes nothing.
+    in_edit_frame(&ctx, &mut editor, |e| {
+        added = Some(e.add_point_color_sample(&image, 0.7, 0.5));
+    });
+    assert_eq!(added, Some(Err(SampleRefusal::AlreadySampled)));
+    assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    // Visualize Range shows the selected swatch while the tab is open, on a color photo.
+    assert_eq!(editor.visualized_swatch(), None);
+    editor.view.mixer_tab = state::MixerTab::PointColor;
+    editor.view.point_color.visualize = true;
+    editor.view.point_color.ranges = true;
+    assert_eq!(editor.visualized_swatch(), Some(0));
+    // The whole panel draws, ranges open.
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 1600.))),
+            ..Default::default()
+        },
+        |ui| editor.draw(ui),
+    );
+    output.textures_delta.clear();
+    editor.document.recipe.effects.monochrome = true;
+    assert_eq!(editor.visualized_swatch(), None);
+    editor.document.recipe.effects.monochrome = false;
+    // One History step, which Undo takes back.
+    let mut recipe = editor.document.recipe.clone();
+    assert!(editor.document.history.undo(&mut recipe));
+    assert!(recipe.point_colors.is_empty());
+    assert_eq!(editor.visualized_swatch(), Some(0));
+}

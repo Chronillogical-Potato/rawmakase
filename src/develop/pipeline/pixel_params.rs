@@ -64,15 +64,20 @@ const FIELDS: &[(&str, usize)] = &[
     ("GLOBAL_SH", 2),
 ];
 pub(crate) fn wgsl_prelude() -> String {
+    use crate::develop::point_color::{CONSTANT_PARAMS, SWATCH_PARAMS};
     let mut at = 0;
-    FIELDS
+    let fields: String = FIELDS
         .iter()
         .map(|(name, len)| {
             let line = format!("const P_{name}: u32 = {at}u;\n");
             at += len;
             line
         })
-        .collect()
+        .collect();
+    fields
+        + &format!(
+            "const POINT_CONSTANTS: i32 = {CONSTANT_PARAMS};\nconst POINT_SWATCH: i32 = {SWATCH_PARAMS};\n"
+        )
 }
 pub(crate) struct PixelParams {
     pub(crate) params: Vec<f32>,

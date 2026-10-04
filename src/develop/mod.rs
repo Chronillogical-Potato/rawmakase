@@ -46,7 +46,8 @@ pub use geometry::{Geometry, Transform, Upright, UprightGuide, UprightMode, disp
 pub use image_space::{ImageFrame, ViewMapping};
 pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{
-    neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
+    neutral_pick, pick_fringe, point_color_pick, preview, render, render_legacy, render_region,
+    render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
 pub use recipe::{

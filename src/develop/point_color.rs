@@ -40,6 +40,31 @@ pub struct PointColor {
     /// Variance, −1 to 1 (Lightroom's −100 to 100).
     #[serde(default)]
     pub variance: f32,
+    /// How the swatch renders: its adjustment, or (while Visualize Range is on, never
+    /// saved) its selection.
+    #[serde(skip)]
+    pub view: SwatchView,
+}
+
+/// Point Color's Visualize Range: the selected swatch shows which colors it selects,
+/// in color, with everything else gray.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SwatchView {
+    #[default]
+    Adjust,
+    VisualizeRange,
+}
+
+/// Swatches for a Visualize Range render of the one at `index`: the swatches before it
+/// as they are, then its selection. `None` when there is no such swatch.
+pub fn visualize_range(list: &[PointColor], index: usize) -> Option<Vec<PointColor>> {
+    let selected = list.get(index)?;
+    let mut out = list[..index].to_vec();
+    out.push(PointColor {
+        view: SwatchView::VisualizeRange,
+        ..*selected
+    });
+    Some(out)
 }
 
 impl PointColor {
@@ -54,6 +79,7 @@ impl PointColor {
             saturation_range: around(source[1]),
             luminance_range: around(srgb_encode(source[2])),
             variance: 0.,
+            view: SwatchView::Adjust,
         }
     }
     /// The sampled color as linear ProPhoto RGB.
@@ -88,6 +114,59 @@ impl PointColor {
         self.shift != [0.; 3] || self.variance != 0.
     }
 }
+
+/// Why the dropper did not add a swatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SampleRefusal {
+    /// Saturation below where every selection fades out.
+    TooNeutral,
+    TooDark,
+    /// A swatch of this color is already there.
+    AlreadySampled,
+    /// Eight swatches already.
+    Full,
+}
+
+impl SampleRefusal {
+    /// What the status line says.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::TooNeutral => "Too neutral to sample: click a more colorful area",
+            Self::TooDark => "Too dark to sample: click a brighter area",
+            Self::AlreadySampled => "That color already has a swatch",
+            Self::Full => "Point Color holds up to 8 swatches",
+        }
+    }
+}
+
+/// Adds a swatch of `source` (as `point_color_pick` gives it) with the default
+/// ranges, and returns its index.
+pub fn add_sample(list: &mut Vec<PointColor>, source: [f32; 3]) -> Result<usize, SampleRefusal> {
+    let [h, s, v] = source;
+    if list.len() >= MAX_SWATCHES {
+        return Err(SampleRefusal::Full);
+    }
+    if s < fit::NEUTRAL {
+        return Err(SampleRefusal::TooNeutral);
+    }
+    if srgb_encode(v) < TOO_DARK {
+        return Err(SampleRefusal::TooDark);
+    }
+    let close = |p: &PointColor| {
+        let dh = (p.source[0] - h).rem_euclid(6.);
+        dh.min(6. - dh) < 0.05
+            && (p.source[1] - s).abs() < 0.02
+            && (srgb_encode(p.source[2]) - srgb_encode(v)).abs() < 0.02
+    };
+    if list.iter().any(close) {
+        return Err(SampleRefusal::AlreadySampled);
+    }
+    list.push(PointColor::sampled([h.rem_euclid(6.).min(5.9999), s, v]));
+    Ok(list.len() - 1)
+}
+
+/// Encoded value below which the dropper refuses a color as too dark.
+const TOO_DARK: f32 = 0.06;
 
 /// Separates swatches (and variances) in the text form of `crs:PointColors` and
 /// `crs:ColorVariance` that XMP and catalog imports pass on as one setting each.
@@ -142,6 +221,7 @@ pub fn parse_list(points: &str, variances: Option<&str>) -> anyhow::Result<Vec<P
             saturation_range: [v[11], v[12], v[13], v[14]],
             luminance_range: [v[15], v[16], v[17], v[18]],
             variance: variances.get(i).copied().unwrap_or(0.),
+            view: SwatchView::Adjust,
         };
         if p.is_valid() && out.len() < MAX_SWATCHES {
             out.push(p);
@@ -178,6 +258,10 @@ pub fn format_list(list: &[PointColor]) -> ListText {
         .unzip();
     ListText { points, variances }
 }
+
+/// Half the hue window at Range 50, in radians: where the hue range's outer points
+/// sit by default.
+pub const HUE_WINDOW: f32 = fit::HUE_WINDOW;
 
 /// Fitted constants (docs/color-mixer.md#point-color).
 mod fit {
@@ -220,10 +304,11 @@ pub(crate) struct Swatch {
     log_saturation: f32,
     log_value: f32,
     variance: f32,
+    view: SwatchView,
 }
 
 /// Length of one swatch in `PointColors::params`.
-pub(crate) const SWATCH_PARAMS: usize = 22;
+pub(crate) const SWATCH_PARAMS: usize = 23;
 /// Length of the fitted constants that precede the swatches in `PointColors::params`.
 pub(crate) const CONSTANT_PARAMS: usize = 8;
 
@@ -252,6 +337,7 @@ impl Swatch {
             log_value: (fit::LUMINANCE_SHIFT[0] * l + fit::LUMINANCE_SHIFT[1] * l * l)
                 * dl.signum(),
             variance: p.variance,
+            view: p.view,
         }
     }
     fn params(&self) -> [f32; SWATCH_PARAMS] {
@@ -267,6 +353,10 @@ impl Swatch {
         out[19] = self.log_saturation;
         out[20] = self.log_value;
         out[21] = self.variance;
+        out[22] = match self.view {
+            SwatchView::Adjust => 0.,
+            SwatchView::VisualizeRange => 1.,
+        };
         out
     }
 }
@@ -282,7 +372,7 @@ impl PointColors {
         let swatches: Vec<_> = list
             .iter()
             .take(MAX_SWATCHES)
-            .filter(|p| p.is_valid() && p.is_active())
+            .filter(|p| p.is_valid() && (p.is_active() || p.view == SwatchView::VisualizeRange))
             .map(Swatch::new)
             .collect();
         (!swatches.is_empty()).then_some(Self { swatches })
@@ -339,6 +429,10 @@ impl Swatch {
                 fit::LUMINANCE_RAMP,
             )
             * (s / fit::NEUTRAL).min(1.);
+        if self.view == SwatchView::VisualizeRange {
+            let out = hsv_to_rgb(h, s * weight, v);
+            return std::array::from_fn(|c| out[c] + (p[c] - q[c]));
+        }
         if weight <= 0. {
             return p;
         }
