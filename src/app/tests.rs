@@ -1021,6 +1021,13 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
     editor.view.red_eye.pet = red_eye_tool::PupilType::Red;
     editor.select_red_eye(Some(0));
     assert_eq!(editor.view.red_eye.pet, red_eye_tool::PupilType::Pet);
+    // Even when the remembered type is stale (after an undo, say), a new correction
+    // takes the selected one's type, as the Type menu shows.
+    editor.view.red_eye.pet = red_eye_tool::PupilType::Red;
+    editor.add_red_eye([0.5, 0.5], 0.15);
+    assert_eq!(editor.document.recipe.red_eye.len(), 2);
+    editor.document.recipe.red_eye.pop();
+    editor.select_red_eye(Some(0));
     // A click on the catchlight's handle, even at the pupil's edge outside the
     // ellipse, is not a new search.
     editor.document.recipe.red_eye[0].kind = EyeKind::Pet {

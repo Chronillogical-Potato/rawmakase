@@ -232,7 +232,14 @@ impl Editor {
         let Some(im) = self.document.full() else {
             return;
         };
-        let kind = self.view.red_eye.pet.kind();
+        // The selected correction's type, as the Type menu shows it.
+        let pet = self
+            .view
+            .red_eye
+            .selected
+            .and_then(|i| self.document.recipe.red_eye.get(i))
+            .map_or(self.view.red_eye.pet, |op| PupilType::of(op.kind));
+        let kind = pet.kind();
         match red_eye::find_pupil(im, center, size.min(red_eye::MAX_RADIUS), kind.glow()) {
             Ok(pupil) => {
                 let (pupil_size, darken) = self
@@ -244,7 +251,7 @@ impl Editor {
                         (red_eye::DEFAULT_PUPIL_SIZE, red_eye::DEFAULT_DARKEN),
                         |op| (op.pupil_size, op.darken),
                     );
-                let op = RedEyeOp {
+                let mut op = RedEyeOp {
                     kind,
                     center: pupil.center,
                     radius: pupil.radius,
@@ -252,6 +259,7 @@ impl Editor {
                     pupil_size,
                     darken,
                 };
+                op.fit_catchlight();
                 if let Err(e) = op.validate() {
                     self.status = e.to_string();
                     return;
@@ -323,7 +331,9 @@ impl Editor {
             ) {
                 self.view.red_eye.pet = pet;
                 if let Some(i) = selected {
-                    self.document.recipe.red_eye[i].kind = pet.kind();
+                    let op = &mut self.document.recipe.red_eye[i];
+                    op.kind = pet.kind();
+                    op.fit_catchlight();
                     self.show_red_eye();
                 }
             }
@@ -365,6 +375,7 @@ impl Editor {
                         }
                     }),
                 }
+                op.fit_catchlight();
                 if *op != before {
                     let name = format!("Update {} Correction", op.kind.name());
                     self.show_red_eye();

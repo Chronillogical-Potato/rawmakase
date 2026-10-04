@@ -33,6 +33,15 @@ pub enum EyeKind {
 pub fn catchlight_inside(c: [f32; 2], correlation: f32) -> bool {
     render::mahalanobis2([1., 1.], correlation, c) <= 1. + 1e-4
 }
+/// `c` (in units of the semi-axes), pulled in to an ellipse with `correlation`.
+fn within(c: [f32; 2], correlation: f32) -> [f32; 2] {
+    let length = render::mahalanobis2([1., 1.], correlation, c).sqrt();
+    if length > 1. {
+        c.map(|v| v / length)
+    } else {
+        c
+    }
+}
 /// Lightroom's default catchlight (`highlightX = 0.591, highlightY = 0.424`), as an
 /// offset in units of the semi-axes.
 pub const DEFAULT_CATCHLIGHT: [f32; 2] = [0.182, -0.152];
@@ -154,13 +163,20 @@ impl RedEyeOp {
             (p[0] - self.center[0]) / (self.radius[0] * half * sx),
             (p[1] - self.center[1]) / (self.radius[1] * half * sy),
         ];
-        // Kept within the (possibly tilted) ellipse.
-        let length = render::mahalanobis2([1., 1.], self.correlation, c).sqrt();
-        if length > 1. {
-            c = c.map(|v| v / length);
-        }
+        c = within(c, self.correlation);
         if let EyeKind::Pet { catchlight } = &mut self.kind {
             *catchlight = Some(c);
+        }
+    }
+    /// Pulls the catchlight in to the pupil's edge if it lies beyond it, as Lightroom's
+    /// default can on a strongly tilted pupil.
+    pub fn fit_catchlight(&mut self) {
+        let correlation = self.correlation;
+        if let EyeKind::Pet {
+            catchlight: Some(c),
+        } = &mut self.kind
+        {
+            *c = within(*c, correlation);
         }
     }
     /// Moves the ellipse by `delta` (image space), keeping its centre on the photo.

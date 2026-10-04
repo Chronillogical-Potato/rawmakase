@@ -116,12 +116,14 @@ pub fn find_pupil(
     let mut seed = None::<(usize, usize, f32)>;
     let mut rim = Vec::new();
     let mut central = Vec::new();
+    let mut central_cells = Vec::new();
     for y in 0..gh {
         for x in 0..gw {
             let d = distance(x, y);
             if d <= 0.6 {
                 let v = smooth(x, y);
                 central.push(v);
+                central_cells.push((y * gw + x, v));
                 if seed.is_none_or(|s| v > s.2) {
                     seed = Some((x, y, v));
                 }
@@ -174,6 +176,19 @@ pub fn find_pupil(
                 area[i] = true;
                 stack.push((nx, ny));
             }
+        }
+    }
+    // The bright cells that set a glowing pupil's level must be the pupil found, not a
+    // catchlight in a dark pupil inside a lighter iris.
+    if glow == Glow::Bright {
+        let bright: Vec<usize> = central_cells
+            .iter()
+            .filter(|(_, v)| *v >= peak)
+            .map(|(i, _)| *i)
+            .collect();
+        let found = bright.iter().filter(|i| area[**i]).count();
+        if found * 2 < bright.len() {
+            return Err(DetectError::NotRed);
         }
     }
     // A glowing pupil must stand out from what borders it (the iris, not the face),

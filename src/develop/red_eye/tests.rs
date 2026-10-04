@@ -527,3 +527,38 @@ fn catchlights_stay_inside_tilted_pupils() {
     assert!((m.sqrt() - 1.).abs() < 1e-4, "{c:?} at {}", m.sqrt());
     op.validate().unwrap();
 }
+#[test]
+fn a_dark_pupil_with_a_catchlight_is_not_a_glow() {
+    let c = [100., 100.];
+    let mut e = eye(c, 14., [0.35, 0.25, 0.1]);
+    e.pupil_color = [0.02; 3];
+    let mut im = image(200, 200, 0, &[e]);
+    for p in im.pixels.iter_mut().filter(|p| **p == SKIN) {
+        *p = [0.15, 0.12, 0.1];
+    }
+    for (i, p) in im.pixels.iter_mut().enumerate() {
+        let (x, y) = ((i % 200) as f32, (i / 200) as f32);
+        if (x - 96.).hypot(y - 96.) < 2.5 {
+            *p = [1.; 3];
+        }
+    }
+    let frame = ImageFrame::new(&im);
+    let found = find_pupil(&im, frame.to_image(c[0], c[1]), 60. / 200., Glow::Bright);
+    assert_eq!(found, Err(DetectError::NotRed));
+}
+#[test]
+fn the_default_catchlight_fits_tilted_pupils() {
+    let mut op = RedEyeOp {
+        kind: EyeKind::Pet {
+            catchlight: Some(DEFAULT_CATCHLIGHT),
+        },
+        center: [0.5, 0.5],
+        radius: [0.02, 0.02],
+        correlation: 0.95,
+        pupil_size: 0.5,
+        darken: 0.5,
+    };
+    assert!(op.validate().is_err());
+    op.fit_catchlight();
+    op.validate().unwrap();
+}
