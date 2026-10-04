@@ -220,10 +220,20 @@ impl SavedCurves {
                 return list;
             }
         };
-        for path in entries.flatten().map(|e| e.path()) {
-            if path
-                .extension()
-                .is_none_or(|e| !e.eq_ignore_ascii_case("xmp"))
+        for entry in entries {
+            let path = match entry {
+                Ok(entry) => entry.path(),
+                Err(e) => {
+                    list.errors.push(format!("{}: {e}", self.dir.display()));
+                    continue;
+                }
+            };
+            // Hidden files include the AppleDouble companions macOS leaves on other
+            // file systems ("._Lift.xmp").
+            if crate::storage::is_hidden(&path)
+                || path
+                    .extension()
+                    .is_none_or(|e| !e.eq_ignore_ascii_case("xmp"))
             {
                 continue;
             }
@@ -248,18 +258,24 @@ impl SavedCurves {
             c.validate()
                 .context("The curve's points are too close together to save")?;
         }
+        ensure!(!path.exists(), "A curve named {name} is already saved");
         let text = crate::xmp::preset_write::point_curve(&curve.rgb, &curve.channels);
         std::fs::create_dir_all(&self.dir)?;
+        // No clobbering, should another copy of the app save the name meanwhile.
         crate::storage::write_atomic(&path, Replace::NoClobber, |f| {
             Ok(f.write_all(text.as_bytes())?)
-        })
-        .with_context(|| format!("A curve named {name} is already saved"))?;
+        })?;
         Ok(path)
     }
 }
 
 /// A saved curve file. One without Red, Green and Blue curves sets them linear.
 fn read(path: &Path) -> Result<SavedCurve> {
+    // As the preset library: a large file is no curve, and isn't read whole.
+    ensure!(
+        std::fs::metadata(path)?.len() < 8_000_000,
+        "Too large for a curve file"
+    );
     let text = std::fs::read_to_string(path)?;
     let preset = crate::xmp::parse(path, &text)?;
     let get = |key: &str| preset.curves.get(key).cloned();
@@ -414,6 +430,23 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_save_says_why_rather_than_blaming_the_name() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir()?;
+        let store = SavedCurves {
+            dir: d.path().join("Curves"),
+        };
+        std::fs::create_dir(&store.dir)?;
+        std::fs::set_permissions(&store.dir, std::fs::Permissions::from_mode(0o555))?;
+        let result = store.save("Mine", &PointCurve::of(&Recipe::default()));
+        std::fs::set_permissions(&store.dir, std::fs::Permissions::from_mode(0o755))?;
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(!err.contains("already saved"), "{err}");
+        Ok(())
+    }
+
     #[test]
     fn a_curve_that_collapses_on_the_steps_is_refused() {
         let d = tempfile::tempdir().unwrap();
@@ -474,14 +507,23 @@ mod tests {
 </x:xmpmeta>"#,
         )?;
         std::fs::write(d.path().join("Broken.xmp"), "<not xmp")?;
+        // An AppleDouble companion, left alone.
+        std::fs::write(d.path().join("._Lift.xmp"), [0u8, 5, 22, 7])?;
+        // Too large to be a curve: reported without being read.
+        std::fs::File::create(d.path().join("Huge.xmp"))?.set_len(9_000_000)?;
         std::fs::write(d.path().join("notes.txt"), "ignored")?;
         let list = store.list();
         assert_eq!(list.curves.len(), 1);
         assert_eq!(list.curves[0].name, "Lift");
         assert_eq!(points(&list.curves[0].curve.rgb), [[0, 20], [255, 255]]);
         assert!(list.curves[0].curve.channels_linear());
-        assert_eq!(list.errors.len(), 1);
-        assert!(list.errors[0].contains("Broken.xmp"), "{:?}", list.errors);
+        assert_eq!(list.errors.len(), 2, "{:?}", list.errors);
+        assert!(list.errors[0].contains("Broken.xmp") || list.errors[1].contains("Broken.xmp"));
+        assert!(
+            list.errors
+                .iter()
+                .any(|e| e.contains("Huge.xmp") && e.contains("Too large"))
+        );
         Ok(())
     }
 }
