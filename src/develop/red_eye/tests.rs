@@ -485,3 +485,45 @@ fn a_catchlight_in_a_glowing_pupil_is_not_taken_for_it() {
         op.radius.map(|a| a * 200.)
     );
 }
+#[test]
+fn small_glowing_pupils_are_found_in_wide_circles() {
+    // A circle nearly seven times the pupil's radius.
+    let c = [150., 150.];
+    let mut e = eye(c, 8., [0.25, 0.18, 0.05]);
+    e.pupil_color = [0.5, 0.8, 0.15];
+    let mut im = image(300, 300, 0, &[e]);
+    // Dark fur around a lighter iris.
+    for p in im.pixels.iter_mut().filter(|p| **p == SKIN) {
+        *p = [0.15, 0.12, 0.1];
+    }
+    let frame = ImageFrame::new(&im);
+    let found = find_pupil(&im, frame.to_image(c[0], c[1]), 55. / 300., Glow::Bright)
+        .expect("a glowing pupil");
+    assert!(
+        found.radius.iter().all(|a| (a * 300. - 8.).abs() < 1.5),
+        "{:?}",
+        found.radius.map(|a| a * 300.)
+    );
+}
+#[test]
+fn catchlights_stay_inside_tilted_pupils() {
+    let mut op = RedEyeOp {
+        kind: EyeKind::Pet { catchlight: None },
+        center: [0.5, 0.5],
+        radius: [0.02, 0.02],
+        correlation: 0.8,
+        pupil_size: 0.5,
+        darken: 0.5,
+    };
+    // Dragged far out along x: kept on the tilted ellipse, not the unit circle.
+    op.set_catchlight([0.9, 0.5], 1.);
+    let EyeKind::Pet {
+        catchlight: Some(c),
+    } = op.kind
+    else {
+        panic!()
+    };
+    let m = (c[0] * c[0] - 1.6 * c[0] * c[1] + c[1] * c[1]) / (1. - 0.64);
+    assert!((m.sqrt() - 1.).abs() < 1e-4, "{c:?} at {}", m.sqrt());
+    op.validate().unwrap();
+}

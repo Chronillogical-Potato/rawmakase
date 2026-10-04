@@ -28,6 +28,11 @@ pub enum EyeKind {
     /// y (within the unit circle), or `None`.
     Pet { catchlight: Option<[f32; 2]> },
 }
+/// Whether catchlight offset `c` (in units of the semi-axes) lies within an ellipse
+/// with `correlation`.
+pub fn catchlight_inside(c: [f32; 2], correlation: f32) -> bool {
+    render::mahalanobis2([1., 1.], correlation, c) <= 1. + 1e-4
+}
 /// Lightroom's default catchlight (`highlightX = 0.591, highlightY = 0.424`), as an
 /// offset in units of the semi-axes.
 pub const DEFAULT_CATCHLIGHT: [f32; 2] = [0.182, -0.152];
@@ -91,7 +96,9 @@ impl RedEyeOp {
                 && match self.kind {
                     EyeKind::Pet {
                         catchlight: Some(c),
-                    } => c.iter().all(|v| v.is_finite()) && c[0].hypot(c[1]) <= 1.,
+                    } => {
+                        c.iter().all(|v| v.is_finite()) && catchlight_inside(c, self.correlation)
+                    }
                     _ => true,
                 },
             "Invalid red eye correction"
@@ -147,7 +154,8 @@ impl RedEyeOp {
             (p[0] - self.center[0]) / (self.radius[0] * half * sx),
             (p[1] - self.center[1]) / (self.radius[1] * half * sy),
         ];
-        let length = c[0].hypot(c[1]);
+        // Kept within the (possibly tilted) ellipse.
+        let length = render::mahalanobis2([1., 1.], self.correlation, c).sqrt();
         if length > 1. {
             c = c.map(|v| v / length);
         }

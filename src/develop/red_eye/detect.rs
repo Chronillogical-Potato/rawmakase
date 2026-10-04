@@ -132,13 +132,14 @@ pub fn find_pupil(
     }
     let (sx, sy, peak) = seed.ok_or(DetectError::NotRed)?;
     // A catchlight is the brightest thing in a glowing pupil; the pupil's own level is
-    // taken where the brightest fifth of the centre begins, so the edge found is the
-    // pupil's, not the catchlight's.
+    // taken where the brightest twentieth of the centre begins, so the edge found is
+    // the pupil's, not the catchlight's. A pupil covers more than that of the centre
+    // in circles up to about seven times its radius, a catchlight much less.
     let peak = match glow {
         Glow::Red => peak,
         Glow::Bright => {
             central.sort_by(f32::total_cmp);
-            central[central.len() * 4 / 5].min(peak)
+            central[central.len() * 19 / 20].min(peak)
         }
     };
     if rim.is_empty() {

@@ -486,21 +486,33 @@ fn key_values(text: &str) -> Node {
             .collect(),
     )
 }
+/// The ellipse's correlation in the unrotated frame.
+fn alpha_of(eye: &Node) -> f32 {
+    eye.num("alpha")
+        .unwrap_or(0.)
+        .clamp(-red_eye::MAX_CORRELATION, red_eye::MAX_CORRELATION)
+}
 fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
     let kind = if eye.flag("adaptivePupilColor") == Some(true) {
         // The catchlight: 0.5 is the centre and 0 or 1 a semi-axis away, in the
         // unrotated frame; Camera Raw leaves out one outside the pupil.
         let catchlight = (eye.flag("showPetEyeHighlight") == Some(true))
             .then(|| {
-                let h = [
+                [
                     eye.num("highlightX").unwrap_or(0.591),
                     eye.num("highlightY").unwrap_or(0.424),
-                ];
+                ]
+            })
+            .filter(|h| {
+                let offset = h.map(|v| 2. * (v - 0.5));
+                red_eye::catchlight_inside(offset, alpha_of(eye))
+            })
+            .map(|h| {
+                // Turned with the photo, as positions are.
                 let turned = frame.point(h[0], h[1]);
                 let center = frame.point(0.5, 0.5);
                 [turned[0] - center[0], turned[1] - center[1]].map(|v| 2. * v)
-            })
-            .filter(|c| c[0].hypot(c[1]) <= 1.);
+            });
         EyeKind::Pet { catchlight }
     } else {
         EyeKind::Red

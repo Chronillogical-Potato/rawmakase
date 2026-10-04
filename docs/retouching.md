@@ -105,8 +105,8 @@ Shift+R is its Reference View).
   a red pupil 10 or more); an area reaching most of the rim is refused. On test eyes
   this finds pupils of 3 to 45 pixels within half a pixel, keeps a red-brown iris out,
   and finds tilted pupils whatever the camera orientation. For Pet Eye the score is
-  the log of the largest channel; the pupil's level is where the brightest fifth of
-  the circle's centre begins (so a catchlight isn't taken for the pupil), its edge is
+  the log of the largest channel; the pupil's level is where the brightest twentieth
+  of the circle's centre begins (so a catchlight isn't taken for the pupil), its edge is
   where the glow falls to 65% of that, and it must be at least 1.6 times brighter than
   the second ring of pixels around it (past its anti-aliased edge), so a bright face
   around a dark iris doesn't hide it.
