@@ -58,6 +58,17 @@ impl Editor {
                 {
                     self.point_color_sample_ready(&sampled, result)
                 }
+                Event::TargetedSample {
+                    id,
+                    generation,
+                    sampled,
+                    result,
+                } if id == self.load.id()
+                    && self.document.targeted_pick.is_running()
+                    && self.document.targeted_pick.id() == generation =>
+                {
+                    self.targeted_sample_ready(&sampled, result)
+                }
                 Event::Upright {
                     id,
                     generation,

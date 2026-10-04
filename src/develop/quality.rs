@@ -528,6 +528,59 @@ pub fn point_color_pick(
     v: f32,
     cancel: &AtomicBool,
 ) -> Result<[f32; 3]> {
+    let [mean] = stage_means(
+        im,
+        r,
+        u,
+        v,
+        [develop::pipeline::PixelOutput::PointColor],
+        cancel,
+    )?;
+    let [h, s, v] = develop::point_color::rgb_to_hsv(mean);
+    Ok([
+        (h / std::f32::consts::TAU * 6.).rem_euclid(6.),
+        s.clamp(0., 1.),
+        v.clamp(0., 1.),
+    ])
+}
+/// The Targeted Adjustment Tool at (`u`, `v`) of the shown photo: what the tone
+/// curve, the color mixer and the black & white mix see there, averaged over 5×5
+/// output pixels and rendered as the photo is.
+pub fn targeted_sample(
+    im: &CameraImage,
+    r: &Recipe,
+    u: f32,
+    v: f32,
+    cancel: &AtomicBool,
+) -> Result<develop::targeted::TargetSample> {
+    use develop::pipeline::PixelOutput;
+    let [tone, mixer, color] = stage_means(
+        im,
+        r,
+        u,
+        v,
+        [
+            PixelOutput::CurveInput,
+            PixelOutput::MixerInput,
+            PixelOutput::ColorInput,
+        ],
+        cancel,
+    )?;
+    Ok(develop::targeted::TargetSample {
+        tone: tone[0],
+        mixer,
+        color,
+    })
+}
+/// The mean of 5×5 output pixels around (`u`, `v`) at each of `outputs`' stages.
+fn stage_means<const N: usize>(
+    im: &CameraImage,
+    r: &Recipe,
+    u: f32,
+    v: f32,
+    outputs: [develop::pipeline::PixelOutput; N],
+    cancel: &AtomicBool,
+) -> Result<[[f32; 3]; N]> {
     let shown = r.as_rendered();
     shown.validate()?;
     let effective = shown.resolved(&im.metadata);
@@ -550,16 +603,21 @@ pub fn point_color_pick(
         g.width.min(5),
         g.height.min(5),
     ];
-    let out = develop::pipeline::point_color_samples(&toned, &tonal, &g, region, cancel)?;
-    let n = out.pixels.len() as f32;
-    let mean: [f32; 3] =
-        std::array::from_fn(|c| out.pixels.iter().map(|p| p[c].max(0.)).sum::<f32>() / n);
-    let [h, s, v] = develop::point_color::rgb_to_hsv(mean);
-    Ok([
-        (h / std::f32::consts::TAU * 6.).rem_euclid(6.),
-        s.clamp(0., 1.),
-        v.clamp(0., 1.),
-    ])
+    let mut means = [[0.; 3]; N];
+    for (mean, output) in means.iter_mut().zip(outputs) {
+        use develop::pipeline::PixelOutput;
+        let out = develop::pipeline::stage_samples(&toned, &tonal, &g, region, output, cancel)?;
+        let n = out.pixels.len() as f32;
+        // ProPhoto RGB without negative channels, as Point Color and the mixer see it.
+        let floor = if matches!(output, PixelOutput::PointColor | PixelOutput::MixerInput) {
+            0.
+        } else {
+            f32::NEG_INFINITY
+        };
+        *mean =
+            std::array::from_fn(|c| out.pixels.iter().map(|p| p[c].max(floor)).sum::<f32>() / n);
+    }
+    Ok(means)
 }
 /// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the
 /// camera image, plus the recipe for the per-pixel stage that follows.

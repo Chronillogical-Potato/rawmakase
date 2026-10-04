@@ -442,6 +442,7 @@ mod retouch_tool;
 #[cfg(feature = "telemetry")]
 mod stats;
 mod stroke_outline;
+mod targeted_tool;
 #[cfg(test)]
 mod tests;
 mod undo;

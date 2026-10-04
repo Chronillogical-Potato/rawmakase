@@ -78,47 +78,14 @@ impl ColorMixer {
     }
     /// Trilinear lookup between grid centres; hue wraps.
     fn lookup(&self, h: f32, s: f32, v: f32) -> [f32; 3] {
-        let fh = h.rem_euclid(1.) * HUES as f32 - 0.5;
-        let fs = (s.clamp(0., 1.).sqrt() * SATS as f32 - 0.5).clamp(0., (SATS - 1) as f32);
-        let fv = (v.clamp(0., 1.).powf(0.45) * VALS as f32 - 0.5).clamp(0., (VALS - 1) as f32);
-        let h0 = fh.floor();
-        let (th, ts, tv) = (fh - h0, fs.fract(), fv.fract());
-        let hi = |d: isize| (h0 as isize + d).rem_euclid(HUES as isize) as usize;
-        let (s0, v0) = (fs as usize, fv as usize);
-        let (s1, v1) = ((s0 + 1).min(SATS - 1), (v0 + 1).min(VALS - 1));
-        let mut out = [0.; 3];
-        for (dh, wh) in [(0, 1. - th), (1, th)] {
-            for (si, ws) in [(s0, 1. - ts), (s1, ts)] {
-                for (vi, wv) in [(v0, 1. - tv), (v1, tv)] {
-                    let d = self.delta[(hi(dh) * SATS + si) * VALS + vi];
-                    let w = wh * ws * wv;
-                    for c in 0..3 {
-                        out[c] += d[c] * w;
-                    }
-                }
-            }
-        }
-        out
+        lookup_with(h, s, v, |cell| self.delta[cell])
     }
     /// `rgb` is linear display RGB (sRGB primaries).
     pub(crate) fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
         let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| v.max(0.));
-        let max = p.into_iter().fold(0f32, f32::max);
-        let min = p.into_iter().fold(f32::INFINITY, f32::min);
-        if max <= 1e-6 {
+        let Some([h, s, max]) = hsv(p) else {
             return rgb;
-        }
-        let d = max - min;
-        let h = if d < 1e-9 {
-            0.
-        } else if max == p[0] {
-            ((p[1] - p[2]) / d).rem_euclid(6.) / 6.
-        } else if max == p[1] {
-            ((p[2] - p[0]) / d + 2.) / 6.
-        } else {
-            ((p[0] - p[1]) / d + 4.) / 6.
         };
-        let s = d / max;
         let [dh, ds, dv] = self.lookup(h, s, max);
         let h = (h + dh).rem_euclid(1.) * 6.;
         let s = (s * ds.exp2()).clamp(0., 1.);
@@ -138,6 +105,68 @@ impl ColorMixer {
             q.map(|v| v + (max * dv.exp2()) - c),
         )
     }
+}
+
+/// How strongly each band's `channel` slider (0 hue, 1 saturation, 2 luminance)
+/// changes the color `prophoto` (linear ProPhoto RGB, as the mixer sees it): the
+/// sizes of its measured changes at ±100 there, which are what the slider scales.
+pub(crate) fn band_responses(prophoto: [f32; 3], channel: usize) -> [f32; 8] {
+    let Some([h, s, v]) = hsv(prophoto.map(|c| c.max(0.))) else {
+        return [0.; 8];
+    };
+    std::array::from_fn(|band| {
+        let [minus, plus] = [0, 1].map(|sign| (band * 3 + channel) * 2 + sign);
+        lookup_with(h, s, v, |cell| {
+            let size = value(minus, channel, cell).abs() + value(plus, channel, cell).abs();
+            [size; 3]
+        })[0]
+    })
+}
+
+/// Hue (turns), saturation and value of linear ProPhoto RGB, or `None` for black.
+fn hsv(p: [f32; 3]) -> Option<[f32; 3]> {
+    let max = p.into_iter().fold(0f32, f32::max);
+    let min = p.into_iter().fold(f32::INFINITY, f32::min);
+    if max <= 1e-6 {
+        return None;
+    }
+    let d = max - min;
+    let h = if d < 1e-9 {
+        0.
+    } else if max == p[0] {
+        ((p[1] - p[2]) / d).rem_euclid(6.) / 6.
+    } else if max == p[1] {
+        ((p[2] - p[0]) / d + 2.) / 6.
+    } else {
+        ((p[0] - p[1]) / d + 4.) / 6.
+    };
+    Some([h, d / max, max])
+}
+
+/// Trilinear lookup of the grid `delta` gives for each cell, between grid centres;
+/// hue wraps.
+fn lookup_with(h: f32, s: f32, v: f32, delta: impl Fn(usize) -> [f32; 3]) -> [f32; 3] {
+    let fh = h.rem_euclid(1.) * HUES as f32 - 0.5;
+    let fs = (s.clamp(0., 1.).sqrt() * SATS as f32 - 0.5).clamp(0., (SATS - 1) as f32);
+    let fv = (v.clamp(0., 1.).powf(0.45) * VALS as f32 - 0.5).clamp(0., (VALS - 1) as f32);
+    let h0 = fh.floor();
+    let (th, ts, tv) = (fh - h0, fs.fract(), fv.fract());
+    let hi = |d: isize| (h0 as isize + d).rem_euclid(HUES as isize) as usize;
+    let (s0, v0) = (fs as usize, fv as usize);
+    let (s1, v1) = ((s0 + 1).min(SATS - 1), (v0 + 1).min(VALS - 1));
+    let mut out = [0.; 3];
+    for (dh, wh) in [(0, 1. - th), (1, th)] {
+        for (si, ws) in [(s0, 1. - ts), (s1, ts)] {
+            for (vi, wv) in [(v0, 1. - tv), (v1, tv)] {
+                let d = delta((hi(dh) * SATS + si) * VALS + vi);
+                let w = wh * ws * wv;
+                for c in 0..3 {
+                    out[c] += d[c] * w;
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

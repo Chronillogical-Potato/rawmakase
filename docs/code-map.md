@@ -74,7 +74,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [color_grade.rs](../src/develop/color_grade.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading as measured per-luminance gains, and its tables. |
 | [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
 | [guided.rs](../src/develop/guided.rs) | Guided Upright: solving two to four guides into a correction, and what to say when they can't. See [transform](transform.md#guided-upright). |
-| [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
+| [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering; the Point Color and Targeted Adjustment samples. |
+| [targeted.rs](../src/develop/targeted.rs) | The Targeted Adjustment Tool's targets, and how a drag is shared among the sliders for a sampled color. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
 | [stage_cache.rs](../src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images, geometry samples, mask weights and brush rasters, keyed by the recipe fields each stage reads. |
@@ -210,6 +211,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
 | [color_grading.rs](../src/app/color_grading.rs) | The Color Grading panel: 3-Way and single-wheel views, hue/saturation wheels (Shift constrains, Cmd fine, double-click resets), Luminance, Blending and Balance, over the recipe's grading values. |
+| [targeted_tool.rs](../src/app/targeted_tool.rs) | The Targeted Adjustment Tool over the photo: its drag, the sample off the UI thread, the panels' target buttons and shortcuts. |
 | [point_color_panel.rs](../src/app/point_color_panel.rs) | The Color Mixer's Point Color tab: the dropper, swatches, shifts, Variance, Range, the range handles and Visualize Range. |
 | [tone_drag.rs](../src/app/tone_drag.rs) | Dragging in the histogram: its five regions, the slider each drives, and one History step per drag. |
 | [clipping.rs](../src/app/clipping.rs) | The histogram's clipping triangles: independent shadow and highlight warnings, hover preview, J, and the triangles' channel colours. |

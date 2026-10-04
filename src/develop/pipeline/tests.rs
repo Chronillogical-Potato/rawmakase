@@ -858,3 +858,117 @@ fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Res
     }
     Ok(())
 }
+#[test]
+fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow::Result<()> {
+    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::develop::targeted::{HslChannel, Target, TargetWeights};
+    // Four patches: a dark gray, an orange, a light gray and a blue.
+    let patches = [
+        [0.03, 0.03, 0.03],
+        [0.5, 0.25, 0.08],
+        [0.6, 0.6, 0.6],
+        [0.05, 0.1, 0.4],
+    ];
+    let m = Metadata {
+        width: 40,
+        height: 10,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let im = CameraImage {
+        recovered: Default::default(),
+        width: 40,
+        height: 10,
+        pixels: (0..400).map(|i| patches[(i % 40) / 10]).collect(),
+        metadata: m,
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let r = Recipe {
+        engine: 4,
+        reference_curves: true,
+        reference_color: true,
+        ..Default::default()
+    };
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let u = |patch: usize| (patch as f32 * 10. + 5.) / 40.;
+    let sample = |r: &Recipe, patch| {
+        crate::develop::quality::targeted_sample(&im, r, u(patch), 0.5, &cancel)
+    };
+    // The rendered patch, encoded sRGB.
+    let shown = |r: &Recipe, patch: usize| -> anyhow::Result<[f32; 3]> {
+        let out = crate::develop::render(&im, r, 0)?;
+        Ok(out.pixels[5 * out.width as usize + patch * 10 + 5])
+    };
+    let luma = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+    // Tone Curve: the region chosen is the one whose slider changes the patch most.
+    for patch in [0, 2] {
+        let w = TargetWeights::new(Target::ToneCurve, &sample(&r, patch)?, &r);
+        let chosen = (0..4).find(|i| w.shares[*i] == 1.).unwrap();
+        let change = |region: usize| -> anyhow::Result<f32> {
+            let mut moved = r.clone();
+            moved.effects.parametric[region] = 1.;
+            Ok(luma(shown(&moved, patch)?) - luma(shown(&r, patch)?))
+        };
+        let changes = (0..4).map(change).collect::<anyhow::Result<Vec<_>>>()?;
+        let most = (0..4)
+            .max_by(|a, b| changes[*a].total_cmp(&changes[*b]))
+            .unwrap();
+        assert_eq!(chosen, most, "patch {patch}: {changes:?}");
+    }
+    let dark = sample(&r, 0)?.tone;
+    assert!(dark < 0.25 && sample(&r, 2)?.tone > 0.5, "{dark}");
+    // As rendered: a mask brightening the dark patch raises what the curve sees.
+    let mut masked = r.clone();
+    masked.masks.push(MaskGroup {
+        components: vec![MaskComponent::new(MaskShape::Linear {
+            from: [0.2, 0.5],
+            to: [0.3, 0.5],
+        })],
+        adjust: LocalAdjust {
+            exposure: 2.,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    assert!(sample(&masked, 0)?.tone > dark + 0.1);
+    // Color Mixer: orange leads on the orange patch, blue on the blue one, and a
+    // drag up saturates the patch; the grays have no color to adjust.
+    let saturation = |p: [f32; 3]| {
+        let max = p.into_iter().fold(0f32, f32::max);
+        (max - p.into_iter().fold(1f32, f32::min)) / max
+    };
+    let target = Target::Hsl(HslChannel::Saturation);
+    for (patch, band) in [(1, 1), (3, 5)] {
+        let w = TargetWeights::new(target, &sample(&r, patch)?, &r);
+        assert_eq!(w.shares[band], 1., "patch {patch}: {:?}", w.shares);
+        let mut moved = r.clone();
+        w.apply(&r, 0.5, &mut moved);
+        assert!(
+            saturation(shown(&moved, patch)?) > saturation(shown(&r, patch)?) + 0.02,
+            "patch {patch}"
+        );
+    }
+    assert!(TargetWeights::new(target, &sample(&r, 2)?, &r).is_empty());
+    // Black & white: the mix's own hue weights at the patch, and a drag up brightens it.
+    let mut mono = r.clone();
+    mono.effects.monochrome = true;
+    let s = sample(&mono, 1)?;
+    let w = TargetWeights::new(Target::BlackWhite, &s, &mono);
+    let hue = s.color[2]
+        .atan2(s.color[1])
+        .rem_euclid(std::f32::consts::TAU)
+        / std::f32::consts::TAU;
+    let weights = crate::develop::pipeline::hue_weights(hue);
+    let main = (0..8)
+        .max_by(|a, b| weights[*a].total_cmp(&weights[*b]))
+        .unwrap();
+    assert_eq!(w.shares[main], 1., "{:?} {weights:?}", w.shares);
+    let mut moved = mono.clone();
+    w.apply(&mono, 0.5, &mut moved);
+    assert!(luma(shown(&moved, 1)?) > luma(shown(&mono, 1)?) + 0.02);
+    Ok(())
+}

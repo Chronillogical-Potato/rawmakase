@@ -76,7 +76,7 @@ pub(crate) fn gray_mix_shift(mix: f32, chroma: f32) -> f32 {
 }
 const GRAY_MIX_BRIGHTEN: f32 = 1.78;
 const GRAY_MIX_DARKEN: f32 = 4.37;
-fn hue_weights(hue: f32) -> [f32; 8] {
+pub(crate) fn hue_weights(hue: f32) -> [f32; 8] {
     // Centers correspond to red, orange, yellow, green, cyan, blue, purple, magenta in Oklab.
     const CENTERS: [f32; 8] = [0.081, 0.151, 0.305, 0.395, 0.541, 0.733, 0.815, 0.912];
     let mut weights = [0.; 8];
@@ -243,6 +243,14 @@ fn mixer_stage(
     lut: &CurveSet,
     local: Option<&LocalDelta>,
 ) -> crate::develop::point_color::Rendered {
+    let sampled = |color| crate::develop::point_color::Rendered {
+        color,
+        selection: None,
+    };
+    if lut.output == PixelOutput::CurveInput {
+        let [red, green, blue] = curve_input(rgb, r, lut, local);
+        return sampled([0.299 * red + 0.587 * green + 0.114 * blue; 3]);
+    }
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut, local)
     } else if r.wide_gamut_curves {
@@ -257,6 +265,9 @@ fn mixer_stage(
     // count as shadows.
     // Engine 4: the measured color mixer replaces the Oklab HSL/Saturation/Vibrance below.
     // Applied after the tone curves, which matches Lightroom references with point curves.
+    if lut.output == PixelOutput::MixerInput {
+        return sampled(mul(crate::camera_profiles::RGB_TO_PRO, rgb));
+    }
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     // Point Color works where the mixer does, in HSV of linear ProPhoto RGB.
     match &lut.point_colors {
@@ -283,8 +294,10 @@ fn color_stage(
 ) -> [f32; 3] {
     let mixed = mixer_stage(rgb, r, lut, local);
     let rgb = mixed.color;
-    if lut.output == PixelOutput::PointColor {
-        return mul(crate::camera_profiles::RGB_TO_PRO, rgb);
+    match lut.output {
+        PixelOutput::PointColor => return mul(crate::camera_profiles::RGB_TO_PRO, rgb),
+        PixelOutput::CurveInput | PixelOutput::MixerInput => return rgb,
+        PixelOutput::Display | PixelOutput::ColorInput => {}
     }
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
     // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
@@ -300,6 +313,9 @@ fn color_stage(
     }
     lab[1] *= clipped_chroma;
     lab[2] *= clipped_chroma;
+    if lut.output == PixelOutput::ColorInput {
+        return lab;
+    }
     if lut.color_adjustments {
         let chroma = lab[1].hypot(lab[2]);
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
@@ -436,6 +452,16 @@ pub(crate) enum PixelOutput {
     /// Linear ProPhoto RGB after the swatches already there: what Point Color's
     /// dropper samples.
     PointColor,
+    /// The parametric curve's input, as the luma of the three channels it curves
+    /// (Rec. 601 weights, as Refine Saturation's): what the Tone Curve's Targeted
+    /// Adjustment Tool samples, in every channel.
+    CurveInput,
+    /// Linear ProPhoto RGB where the color mixer works, after the tone curves: what
+    /// the Color Mixer's Targeted Adjustment Tool samples.
+    MixerInput,
+    /// Oklab where the color controls and the black & white mix take a color's hue
+    /// to weigh their bands.
+    ColorInput,
 }
 struct CurveSet {
     /// Where the stage stops.
@@ -533,22 +559,7 @@ fn apply_reference_curves(
     lut: &CurveSet,
     local: Option<&LocalDelta>,
 ) -> [f32; 3] {
-    let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| srgb_encode(v.clamp(0., 1.)));
-    let p = lut.basic.as_ref().map_or(p, |b| b.apply(p));
-    let p = match local {
-        Some(d) if local::uses(d, &local::TONE_SLOTS) => local::tone(d, p),
-        _ => p,
-    };
-    let contrast = if lut.basic_curves { 0. } else { r.contrast };
-    let p = p.map(|v| {
-        let x = ((v - r.black_point) / (r.white_point - r.black_point))
-            .clamp(0., 1.)
-            .powf(1. / r.midtone);
-        let power = 2f32.powf(contrast);
-        let low = x.powf(power);
-        r.effects
-            .parametric(low / (low + (1. - x).powf(power)).max(1e-8))
-    });
+    let p = curve_input(rgb, r, lut, local).map(|x| r.effects.parametric(x));
     let lo = p.into_iter().fold(f32::INFINITY, f32::min);
     let hi = p.into_iter().fold(0f32, f32::max);
     let a = lut.master.evaluate(lo);
@@ -561,6 +572,26 @@ fn apply_reference_curves(
     let master = refine_saturation(p, master, r.curve_saturation);
     let channels = std::array::from_fn(|c| srgb_decode(lut.channels[c].evaluate(master[c])));
     mul(crate::camera_profiles::PRO_TO_RGB, channels)
+}
+
+/// The parametric curve's input in each channel of encoded ProPhoto RGB: the basic
+/// tone curves, a mask's tone, Levels and (before engine 4) Contrast applied.
+fn curve_input(rgb: [f32; 3], r: &Recipe, lut: &CurveSet, local: Option<&LocalDelta>) -> [f32; 3] {
+    let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| srgb_encode(v.clamp(0., 1.)));
+    let p = lut.basic.as_ref().map_or(p, |b| b.apply(p));
+    let p = match local {
+        Some(d) if local::uses(d, &local::TONE_SLOTS) => local::tone(d, p),
+        _ => p,
+    };
+    let contrast = if lut.basic_curves { 0. } else { r.contrast };
+    p.map(|v| {
+        let x = ((v - r.black_point) / (r.white_point - r.black_point))
+            .clamp(0., 1.)
+            .powf(1. / r.midtone);
+        let power = 2f32.powf(contrast);
+        let low = x.powf(power);
+        low / (low + (1. - x).powf(power)).max(1e-8)
+    })
 }
 
 fn apply_curve(encoded: f32, c: usize, r: &Recipe, lut: &CurveSet) -> f32 {
@@ -1421,28 +1452,21 @@ pub(crate) fn develop_samples(
 ) -> Result<Rendered> {
     develop_samples_to(im, r, samples, cancel, weights, PixelOutput::Display)
 }
-/// Point Color's dropper over `region` of the output: each pixel as the dropper
-/// samples it ([`PixelOutput::PointColor`]), through the same sampling, lens
-/// correction, retouching and masks as the render.
-pub(crate) fn point_color_samples(
+/// `region` of the output as a dropper samples it at the stage `output` names,
+/// through the same sampling, lens correction, retouching and masks as the render.
+pub(crate) fn stage_samples(
     toned: &Toned,
     r: &Recipe,
     g: &Geometry,
     region: [u32; 4],
+    output: PixelOutput,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
     let im = toned.source();
     let samples = Arc::new(sample_region(im, r, g, region, 0., cancel)?);
     let weights = mask_weights(toned, r, g, region, 0., Some(&samples), None, cancel)?;
     let samples = detail(toned, r, samples, weights.as_deref(), None, cancel)?;
-    develop_samples_to(
-        im,
-        r,
-        &samples,
-        cancel,
-        weights.as_deref(),
-        PixelOutput::PointColor,
-    )
+    develop_samples_to(im, r, &samples, cancel, weights.as_deref(), output)
 }
 fn develop_samples_to(
     im: Source,

@@ -79,12 +79,7 @@ impl Editor {
         // Named through the frame, as a control's step is, so a wheel resize still
         // pending is recorded under its own name first.
         if *r != before {
-            self.context.data_mut(|d| {
-                d.insert_temp(
-                    super::widgets::history_step_id(),
-                    ("Point Curve".to_string(), name),
-                )
-            });
+            super::widgets::name_frame_step(&self.context, "Point Curve".into(), name);
         }
     }
     /// Whether the Save Point Curve window is open.

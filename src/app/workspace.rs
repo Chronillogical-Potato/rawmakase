@@ -696,6 +696,7 @@ impl Editor {
             let mut treatment = false;
             let mut export = None;
             let mut transfer = None;
+            let mut targeted = None;
             ctx.input(|i| {
                 // Lightroom's Copy After's Settings to Before (←), Copy Before's to
                 // After (→) and Swap (↑), with Cmd+Option+Shift.
@@ -761,8 +762,34 @@ impl Editor {
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::N) {
                     new_preset = true;
                 }
+                // Lightroom's Targeted Adjustment Tools: Cmd+Option+Shift and T (Tone
+                // Curve), H, S, L (the Color Mixer's Hue, Saturation, Luminance) or G
+                // (B&W). Option changes the typed letter on macOS, so match the
+                // physical key too.
+                if i.modifiers.command && i.modifiers.alt && i.modifiers.shift {
+                    use crate::develop::targeted::{HslChannel, Target};
+                    for (key, target) in [
+                        (egui::Key::T, Target::ToneCurve),
+                        (egui::Key::H, Target::Hsl(HslChannel::Hue)),
+                        (egui::Key::S, Target::Hsl(HslChannel::Saturation)),
+                        (egui::Key::L, Target::Hsl(HslChannel::Luminance)),
+                        (egui::Key::G, Target::BlackWhite),
+                    ] {
+                        let pressed = i.events.iter().any(|event| {
+                            matches!(event, egui::Event::Key { key: k, physical_key, pressed: true, repeat: false, .. }
+                                if *k == key || *physical_key == Some(key))
+                        });
+                        if pressed {
+                            targeted = Some(target);
+                        }
+                    }
+                }
                 // Lightroom's Sync Settings.
-                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::S) {
+                if i.modifiers.command
+                    && i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::S)
+                {
                     sync = true;
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
@@ -902,6 +929,9 @@ impl Editor {
             }
             if reset {
                 self.reset_settings();
+            }
+            if let Some(target) = targeted {
+                self.toggle_targeted(target);
             }
             if auto && !self.auto_in_effect() {
                 self.start_auto(super::worker::AutoKind::Settings);

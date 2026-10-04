@@ -44,6 +44,8 @@ pub(super) struct Document {
     pub(super) auto: super::task::Task,
     /// Point Color's dropper sampling the photo, off the UI thread.
     pub(super) point_color_pick: super::task::Task,
+    /// The Targeted Adjustment Tool sampling the photo where a drag started.
+    pub(super) targeted_pick: super::task::Task,
     /// What the running estimate measures: the recipe without the settings Auto sets.
     pub(super) auto_input: Option<Recipe>,
     /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
@@ -212,6 +214,8 @@ pub(super) enum Tool {
     Mask,
     /// The Transform panel's Guided Upright tool.
     Guided,
+    /// The Targeted Adjustment Tool of the Tone Curve, the Color Mixer or B&W.
+    Targeted(crate::develop::targeted::Target),
 }
 /// The Color Mixer's tabs, as in Lightroom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -275,6 +279,8 @@ pub(super) struct ViewState {
     /// The Color Mixer's tab: the mixer or Point Color.
     pub(super) mixer_tab: MixerTab,
     pub(super) point_color: PointColorView,
+    /// A Targeted Adjustment Tool drag in progress.
+    pub(super) targeted: Option<super::targeted_tool::TargetDrag>,
     pub(super) shortcuts: bool,
     pub(super) zoom_key: (bool, f32),
     pub(super) zoom_anim: Option<(f64, egui::Rect)>,
@@ -310,6 +316,7 @@ impl Default for ViewState {
             mixer_adjust: 0,
             mixer_tab: MixerTab::Mixer,
             point_color: Default::default(),
+            targeted: None,
             shortcuts: false,
             zoom_key: (false, 1.),
             zoom_anim: None,
@@ -448,6 +455,7 @@ impl ViewState {
         self.shown_rect = None;
         self.tool = Tool::None;
         self.point_color.selected = None;
+        self.targeted = None;
         self.crop_drag = None;
         self.ruler = Default::default();
         // Ends a histogram drag: the next photo starts from its own values.
