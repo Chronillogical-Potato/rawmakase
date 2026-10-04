@@ -82,6 +82,11 @@ impl Panel {
         let (mut a, mut b) = (before.clone(), after.clone());
         self.bypass(&mut a, &defaults);
         self.bypass(&mut b, &defaults);
+        // The camera's built-in correction stays through the bypass, but Enable
+        // Profile Corrections sets it with the profile, so it is the panel's too.
+        if self == Panel::LensCorrections {
+            a.lens_builtin = b.lens_builtin;
+        }
         a == b
     }
     /// Sets this panel's settings in `r` to the values of `defaults`.
@@ -192,5 +197,26 @@ impl Recipe {
         // The switches stay, so `Recipe::resolved`, which knows the camera, can also
         // turn off lens data that is only on because of the panel.
         std::borrow::Cow::Owned(r)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_inside_one_panel_is_held_by_that_panel_alone() {
+        let before = Recipe::default();
+        let mut after = before.clone();
+        after.effects.gray_mix[0] = 0.3;
+        assert!(Panel::BlackWhiteMix.holds_change(&before, &after));
+        assert!(!Panel::Detail.holds_change(&before, &after));
+        after.exposure = 0.5;
+        assert!(!Panel::BlackWhiteMix.holds_change(&before, &after));
+        // Enable Profile Corrections sets the camera's built-in correction with it.
+        let mut after = before.clone();
+        after.lens_profile = !before.lens_profile;
+        after.lens_builtin = !before.lens_builtin;
+        assert!(Panel::LensCorrections.holds_change(&before, &after));
     }
 }
