@@ -39,6 +39,8 @@ pub struct Editor {
     copy_groups: crate::develop::settings_groups::GroupSelection,
     /// A preset made here being renamed.
     preset_rename: Option<user_presets::PresetRename>,
+    /// The Point Curve menu's saved curves and its Save window.
+    curves: curve_menu::CurveMenu,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     /// The sides in Solo Mode as last saved to the session.
@@ -207,6 +209,7 @@ impl Editor {
             previous_settings: None,
             copy_dialog: None,
             preset_rename: None,
+            curves: Default::default(),
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
@@ -411,6 +414,7 @@ mod catalog;
 mod clipping;
 mod color_grading;
 mod crop_tool;
+mod curve_menu;
 mod dialogs;
 mod export;
 mod guided_tool;

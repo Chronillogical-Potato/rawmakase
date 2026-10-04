@@ -83,7 +83,8 @@ impl Editor {
             || self.not_editable.is_some()
             || self.view.shortcuts
             || self.copy_dialog.is_some()
-            || self.preset_rename.is_some();
+            || self.preset_rename.is_some()
+            || self.curve_save_open();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -130,6 +131,7 @@ impl Editor {
         self.shortcuts_window(&ctx);
         self.copy_dialog_window(&ctx);
         self.preset_rename_window(&ctx);
+        self.curve_save_window(&ctx);
         self.preferences_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);

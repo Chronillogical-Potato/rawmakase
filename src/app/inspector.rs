@@ -479,6 +479,8 @@ impl Editor {
             .as_ref()
             .map(|p| p.treatment);
         let grading_document = self.document.history.id();
+        let saved_curves = self.saved_curves();
+        let mut curve_choice = None;
         let view = &mut self.view;
         let (r, photo) = self.document.recipe_and_colors();
 
@@ -801,6 +803,46 @@ impl Editor {
                         &histogram,
                         view.selected_curve,
                     );
+                });
+                // Lightroom's Point Curve menu: the built-in curves, saved ones, Save….
+                let shown = crate::presets::curves::shown_name(r, &saved_curves);
+                control_row(ui, "Point Curve", |ui| {
+                    egui::ComboBox::from_id_salt("point-curve")
+                        .width(ui.available_width())
+                        .selected_text(&shown)
+                        .show_ui(ui, |ui| {
+                            use super::curve_menu::CurveChoice;
+                            use crate::presets::curves::BuiltinCurve;
+                            for curve in BuiltinCurve::ALL {
+                                if ui
+                                    .selectable_label(shown == curve.name(), curve.name())
+                                    .clicked()
+                                {
+                                    curve_choice = Some(CurveChoice::Builtin(curve));
+                                }
+                            }
+                            if !saved_curves.is_empty() {
+                                ui.separator();
+                            }
+                            for saved in &saved_curves {
+                                if ui
+                                    .selectable_label(shown == saved.name, &saved.name)
+                                    .clicked()
+                                {
+                                    curve_choice = Some(CurveChoice::Saved(saved.clone()));
+                                }
+                            }
+                            ui.separator();
+                            if ui
+                                .selectable_label(false, "Save…")
+                                .on_hover_text(
+                                    "Save the RGB, Red, Green and Blue curves under a name",
+                                )
+                                .clicked()
+                            {
+                                curve_choice = Some(CurveChoice::Save);
+                            }
+                        });
                 });
                 // Lightroom's Refine Saturation, under the RGB point curve it acts on;
                 // the channel curves keep the same height so nothing below moves.
@@ -1487,6 +1529,9 @@ impl Editor {
         }
         if auto_mix_request {
             self.auto_black_white_mix();
+        }
+        if let Some(choice) = curve_choice {
+            self.choose_point_curve(choice);
         }
         if upright_request {
             self.start_upright();
