@@ -279,7 +279,7 @@ impl Library {
                 }
                 // Once per press: a held I must not flicker through them.
                 (Key::I, false) if !press.modifiers.any() && !press.repeat => {
-                    self.loupe_info = self.loupe_info.next()
+                    self.cycle_loupe_info()
                 }
                 _ => {}
             }

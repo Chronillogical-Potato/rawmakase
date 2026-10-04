@@ -142,6 +142,16 @@ impl Overlay {
 }
 
 impl Library {
+    /// I: the Loupe's Info overlay goes to Info 1, Info 2, then off. Develop shows
+    /// the same one over the photo being edited.
+    pub(in crate::app) fn cycle_loupe_info(&mut self) {
+        self.loupe_info = self.loupe_info.next();
+    }
+    /// Which Info overlay shows, by name.
+    #[cfg(test)]
+    pub(in crate::app) fn loupe_info(&self) -> String {
+        format!("{:?}", self.loupe_info)
+    }
     /// Draws the Loupe's Info overlay in the top left of `rect`.
     pub(in crate::app) fn loupe_overlay(&mut self, painter: &egui::Painter, rect: egui::Rect) {
         if self.loupe_info == Overlay::Off {

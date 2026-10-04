@@ -355,6 +355,7 @@ impl Editor {
         if self.view.compare.before_only() {
             before_after::badge(ui, area, "Before");
         }
+        self.develop_info_overlay(ui, panes.after.clip);
         // A click or drag on Before acts where the same point is on the edit; the
         // reference photo takes its own (see `reference_pointer`).
         let before_rect = self.before_pane_ui(ui, &panes, rect);
@@ -436,22 +437,29 @@ impl Editor {
             }
             self.schedule();
         }
-        if self.view.picks_color() {
-            // The loupe reads the shown pixels, which renders keep only while the
-            // selector is active.
+        // The RGB readout follows the pointer over the photo being edited, not over
+        // Before or the reference beside it, nor in the Library's Loupe.
+        let hover = response
+            .hover_pos()
+            .filter(|p| !self.library_mode && panes.after.clip.contains(*p));
+        self.update_readout(hover, rect, region_rect);
+        if self.wants_samples() {
+            // The loupe and the readout read the shown pixels, which renders keep only
+            // while they are wanted.
             if !self.preview.samples_requested {
                 self.preview.samples_requested = true;
                 self.schedule();
-            }
-            if let Some(pos) = response.hover_pos()
-                && rect.contains(pos)
-            {
-                self.white_balance_loupe(ui, pos, rect, region_rect, area);
             }
         } else if self.preview.samples_requested {
             self.preview.samples_requested = false;
             self.preview.samples = None;
             self.preview.region_samples = None;
+        }
+        if self.view.picks_color()
+            && let Some(pos) = response.hover_pos()
+            && rect.contains(pos)
+        {
+            self.white_balance_loupe(ui, pos, rect, region_rect, area);
         }
         if self.view.is(Tool::WhiteBalance)
             && picking
@@ -718,6 +726,19 @@ impl Editor {
         }
         true
     }
+    /// The Loupe's Info overlay (I) over the photo being edited, below the Before,
+    /// After or Active label when there is one. The Library's Loupe draws its own.
+    fn develop_info_overlay(&mut self, ui: &egui::Ui, pane: Rect) {
+        if self.library_mode {
+            return;
+        }
+        let labelled = self.view.compare != before_after::Compare::Off;
+        let top = if labelled { 37. } else { 0. };
+        let at = Rect::from_min_max(pane.min + Vec2::new(0., top), pane.max);
+        if let Some(library) = &mut self.library {
+            library.loupe_overlay(&ui.painter().with_clip_rect(pane), at);
+        }
+    }
     /// Lightroom's white balance selector over the photo: an eyedropper cursor
     /// whose tip is the picked point, and a loupe of the pixels around it with the
     /// values of the one under the tip.
@@ -800,14 +821,11 @@ impl Editor {
             (x >= 0 && y >= 0 && x < w as i32 && y < h as i32)
                 .then(|| samples.get_pixel(x as u32, y as u32).0)
         };
+        // In the readout's Melissa RGB, as Lightroom's loupe.
         let text = pixel(cx, cy).map_or_else(String::new, |p| {
-            let pct = |v: u8| f32::from(v) / 2.55;
-            format!(
-                "R {:.1}   G {:.1}   B {:.1} %",
-                pct(p[0]),
-                pct(p[1]),
-                pct(p[2])
-            )
+            super::readout::text(super::readout::melissa_percent(
+                p.map(|v| f32::from(v) / 255.),
+            ))
         });
         let values =
             painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::gray(225));

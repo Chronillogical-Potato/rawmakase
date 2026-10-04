@@ -239,6 +239,8 @@ pub(super) struct ViewState {
     pub(super) compare: super::before_after::Compare,
     /// The histogram's clipping warnings.
     pub(super) clipping: super::clipping::ClippingView,
+    /// The RGB values under the pointer, shown under the histogram.
+    pub(super) readout: super::readout::Readout,
     /// A drag in the histogram in progress.
     pub(super) tone_drag: Option<super::tone_drag::ToneDrag>,
     pub(super) tool: Tool,
@@ -285,6 +287,7 @@ impl Default for ViewState {
             viewport: Vec2::ZERO,
             compare: Default::default(),
             clipping: Default::default(),
+            readout: Default::default(),
             tone_drag: None,
             tool: Tool::None,
             crop_drag: None,

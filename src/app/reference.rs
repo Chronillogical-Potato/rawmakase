@@ -241,9 +241,10 @@ impl Editor {
         self.reference.clear();
         self.preview.before.clear();
     }
-    /// Leaving Develop: the reference goes unless locked, as in Lightroom, and the
-    /// edit shows alone on return.
+    /// Leaving Develop: the reference goes unless locked, as in Lightroom, the edit
+    /// shows alone on return, and the RGB readout stops.
     pub(super) fn left_develop(&mut self) {
+        self.view.readout = Default::default();
         if self.reference_view() {
             self.view.compare = Compare::Off;
             self.preview.before.clear();

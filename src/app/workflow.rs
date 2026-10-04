@@ -313,7 +313,7 @@ impl Editor {
                 clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail,
-                samples: self.view.picks_color(),
+                samples: self.wants_samples(),
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),
             });
