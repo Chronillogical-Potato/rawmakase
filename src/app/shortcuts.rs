@@ -71,7 +71,7 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 32] = [
+const DEVELOP: [Shortcut; 34] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -105,7 +105,9 @@ const DEVELOP: [Shortcut; 32] = [
     ("V", "Convert to black & white or back to color"),
     ("Cmd+Shift+E", "Export…"),
     ("Cmd+Alt+Shift+E", "Export with previous"),
-    ("double-click", "Reset a slider"),
+    ("double-click", "Reset a slider or grading wheel"),
+    ("Shift+drag", "Grading wheel: hue or saturation only"),
+    ("Cmd+drag", "Grading wheel: fine adjustment"),
     ("E", "Show the photo in the Loupe"),
 ];
 

@@ -477,6 +477,7 @@ impl Editor {
             .pending_treatment
             .as_ref()
             .map(|p| p.treatment);
+        let grading_document = self.document.history.id();
         let view = &mut self.view;
         let (r, photo) = self.document.recipe_and_colors();
 
@@ -974,58 +975,9 @@ impl Editor {
         }
 
         if adjustment_section(ui, "Color Grading", |ui| {
-            ui.horizontal(|ui| {
-                let w = ui.available_width();
-                segmented(
-                    ui,
-                    &mut view.selected_grade,
-                    &[
-                        (0, "Shadows"),
-                        (1, "Midtones"),
-                        (2, "Highlights"),
-                        (3, "Global"),
-                    ],
-                    w,
-                );
+            ui.push_id(grading_document, |ui| {
+                super::color_grading::color_grading_ui(ui, r, &mut view.grading);
             });
-            let i = view.selected_grade;
-            let grade = if i == 3 {
-                &mut r.effects.global_grade
-            } else {
-                &mut r.grading[i]
-            };
-            ui.push_id(("grade", i), |ui| {
-                let mut degrees = grade[0] * 360.;
-                slider(ui, "Hue", &mut degrees, 0. ..=360., 0.);
-                if degrees != grade[0] * 360. {
-                    grade[0] = degrees / 360.;
-                }
-                let tint = crate::develop::color::hue_rgb(grade[0]).map(|v| (v * 180.) as u8);
-                slider_with(
-                    ui,
-                    "Saturation",
-                    &mut grade[1],
-                    0. ..=1.,
-                    0.,
-                    None,
-                    Some((
-                        theme::gray(90),
-                        Color32::from_rgb(tint[0], tint[1], tint[2]),
-                    )),
-                );
-                slider_with(
-                    ui,
-                    "Luminance",
-                    &mut grade[2],
-                    -1. ..=1.,
-                    0.,
-                    None,
-                    Some((theme::gray(25), theme::gray(210))),
-                );
-            });
-            ui.add_space(4.);
-            slider(ui, "Blending", &mut r.effects.blending, 0. ..=1., 0.5);
-            slider(ui, "Balance", &mut r.effects.balance, -1. ..=1., 0.);
         }) {
             r.grading = [[0.; 3]; 3];
             r.effects.global_grade = [0.; 3];
