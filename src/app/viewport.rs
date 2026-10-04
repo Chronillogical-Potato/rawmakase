@@ -326,12 +326,15 @@ impl Editor {
         };
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
         let painter = ui.painter().with_clip_rect(panes.after.clip);
+        // The crop the photo is shown with, and whether the render drawn is for
+        // another one (it lands later): then it sits where its own crop does.
+        let now = geometry
+            .as_ref()
+            .map_or(self.effective_recipe().crop, |g| g.crop());
+        let other_crop = self.preview.crop.is_some_and(|then| then != now);
         if self.preview.texture.is_some() {
             // Opening or leaving the Crop tool changes the crop before the render for
             // it lands: the old render goes where its crop sits, clipped to the new one.
-            let now = geometry
-                .as_ref()
-                .map_or(self.effective_recipe().crop, |g| g.crop());
             match self.preview.crop {
                 Some(then) if then != now && geometry.is_some() => {
                     let size = rect.size() / Vec2::new(now[2] - now[0], now[3] - now[1]);
@@ -443,6 +446,8 @@ impl Editor {
         let hover = response
             .hover_pos()
             .filter(|p| edit_shown && panes.after.clip.contains(*p));
+        // Not over a render for another crop, whose pixels sit elsewhere.
+        let hover = hover.filter(|_| !other_crop);
         self.update_readout(hover, rect, region_rect);
         if self.wants_samples() {
             // The loupe and the readout read the shown pixels, which renders keep only
