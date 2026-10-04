@@ -464,6 +464,13 @@ pub fn transfer(
             }
         }
     }
+    // A Custom lens profile this camera can't use (not imported, or made for a smaller
+    // sensor) is kept as the edit names it, and said, as on import.
+    if selection.contains(SettingGroup::LensProfileCorrections)
+        && recipe.lens_profile_in_use(m).missing.is_some()
+    {
+        notes.extend(recipe.missing_lens_profile(m));
+    }
     // The baseline depends on both the profile and the process version.
     if selection.contains(SettingGroup::TreatmentAndProfile)
         || selection.contains(SettingGroup::ProcessVersion)

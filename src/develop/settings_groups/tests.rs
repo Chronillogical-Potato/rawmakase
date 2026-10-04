@@ -597,3 +597,52 @@ fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
         crate::develop::Treatment::BlackWhite
     );
 }
+
+#[test]
+fn a_lens_profile_the_target_cannot_use_is_reported() {
+    use crate::lens::choice::{LensProfileSetup, tests};
+    let m = tests::photo();
+    let mut source = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    let other = &m
+        .lens_profiles
+        .all()
+        .iter()
+        .find(|c| c.profile.filename == tests::OTHER)
+        .unwrap()
+        .profile;
+    source.lens_profile_choice.choose(other);
+    let target = |m| Target {
+        metadata: m,
+        profiles: &[],
+    };
+    let out = transfer(
+        from(&source, &m),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        target(&m),
+    );
+    assert!(out.notes.is_empty(), "{:?}", out.notes);
+    // A photo without that profile keeps the choice and says so.
+    let mut bare = m.clone();
+    bare.lens_profiles = Default::default();
+    let out = transfer(
+        from(&source, &m),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        target(&bare),
+    );
+    assert_eq!(
+        out.recipe.lens_profile_choice.setup,
+        LensProfileSetup::Custom
+    );
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n.contains("Adobe (Lensco 50mm F1.4)")),
+        "{:?}",
+        out.notes
+    );
+}
