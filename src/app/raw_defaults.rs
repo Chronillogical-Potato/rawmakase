@@ -39,16 +39,23 @@ impl Editor {
             return;
         };
         let resolved = self.raw_defaults.resolve(m, &self.document.profiles);
+        let before_changed =
+            self.document.defaults.as_ref().map(|d| &d.recipe) != Some(&resolved.recipe);
+        let mut changed = before_changed && self.view.compare;
         if self.follows_defaults() {
             if let Some(note) = &resolved.note {
                 self.status = note.clone();
             }
             if self.document.recipe != resolved.recipe {
                 self.document.recipe = resolved.recipe.clone();
-                self.schedule();
+                changed = true;
             }
         }
+        // Stored first, so Before renders the new defaults.
         self.document.defaults = Some(resolved);
+        if changed {
+            self.schedule();
+        }
     }
     /// Whether the open photo has no edit, so it shows the raw defaults: none
     /// when it opened, none begun since, and none saved (export options alone
@@ -515,6 +522,21 @@ mod tests {
             Recipe::with_profiles(&m, &profiles(&m))
         );
         Ok(())
+    }
+
+    #[test]
+    fn before_shows_new_defaults_at_once() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+        let m = x100f();
+        editor.document.profiles = profiles(&m);
+        editor.document.metadata = Some(m.clone());
+        editor.document.origin = EditOrigin::Saved;
+        editor.refresh_photo_defaults();
+        editor.view.compare = true;
+        editor.set_raw_defaults(lighten());
+        let lightened = editor.raw_defaults.resolve(&m, &profiles(&m)).recipe;
+        assert_eq!(editor.effective_recipe().curve, lightened.curve);
     }
 
     #[test]
