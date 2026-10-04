@@ -1,5 +1,5 @@
 use crate::develop::Recipe;
-use crate::xmp::look::{LookAmount, LookUse};
+use crate::xmp::look::LookAmount;
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;
 /// Parse Lightroom's serialized Lua table as data only. No interpreter is used.
@@ -106,29 +106,24 @@ pub fn convert_develop(
         if value.starts_with('{') {
             if key == "Look" && !value[1..value.len() - 1].trim().is_empty() {
                 let look = develop_fields(&format!("s = {value}"))?;
-                // An amount RAWmakase cannot render is reported, and the rest of the
-                // edit still applies; Lightroom's record stays in its catalog.
-                let shown = match look.get("Amount").map(|a| LookAmount::parse(a)) {
+                if let Some(name) = look.get("Name") {
+                    preset.look = serde_json::from_str(name)?;
+                }
+                if let Some(uuid) = look.get("UUID") {
+                    preset
+                        .settings
+                        .insert("RAWmakaseLookUUID".into(), serde_json::from_str(uuid)?);
+                }
+                // An amount Lightroom can't store is reported, and the look renders
+                // at 100%.
+                match look.get("Amount").map(|a| LookAmount::parse(a)) {
                     Some(Ok(amount)) => {
-                        let rendering = amount.rendering();
-                        warnings.extend(rendering.warning);
-                        rendering.look
-                    }
-                    Some(Err(e)) => {
-                        warnings.push(format!("{e:#}; rendered at 100%"));
-                        LookUse::Apply
-                    }
-                    None => LookUse::Apply,
-                };
-                if shown == LookUse::Apply {
-                    if let Some(name) = look.get("Name") {
-                        preset.look = serde_json::from_str(name)?;
-                    }
-                    if let Some(uuid) = look.get("UUID") {
                         preset
                             .settings
-                            .insert("RAWmakaseLookUUID".into(), serde_json::from_str(uuid)?);
+                            .insert(crate::xmp::look::SETTING.into(), amount.0.to_string());
                     }
+                    Some(Err(e)) => warnings.push(format!("{e:#}; rendered at 100%")),
+                    None => {}
                 }
             } else if crate::xmp::local::KEYS.contains(&key.as_str()) {
                 match crate::xmp::local::Node::from_lua(value) {
@@ -216,6 +211,7 @@ pub fn convert_develop(
         ));
         preset.look.clear();
         preset.settings.remove("RAWmakaseLookUUID");
+        preset.settings.remove(crate::xmp::look::SETTING);
     }
     // Spots and masks convert on their own and report what they skip.
     let local_settings = std::mem::take(&mut preset.local);

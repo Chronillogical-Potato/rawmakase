@@ -977,6 +977,139 @@
     "PostCropVignetteStyle": "3",
     "PostCropVignetteRoundness": "+100"
    }
+  },
+  {
+   "name": "amount-look-0",
+   "look": {
+    "file": "synthetic-look.xmp",
+    "amount": 0
+   }
+  },
+  {
+   "name": "amount-look-50",
+   "look": {
+    "file": "synthetic-look.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-look-100",
+   "look": {
+    "file": "synthetic-look.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "amount-look-150",
+   "look": {
+    "file": "synthetic-look.xmp",
+    "amount": 1.5
+   }
+  },
+  {
+   "name": "amount-look-200",
+   "look": {
+    "file": "synthetic-look.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-mono-0",
+   "look": {
+    "file": "synthetic-mono.xmp",
+    "amount": 0
+   }
+  },
+  {
+   "name": "amount-mono-50",
+   "look": {
+    "file": "synthetic-mono.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-mono-100",
+   "look": {
+    "file": "synthetic-mono.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "amount-mono-200",
+   "look": {
+    "file": "synthetic-mono.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-table-50",
+   "look": {
+    "file": "synthetic-table.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-table-200",
+   "look": {
+    "file": "synthetic-table.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-curve-50",
+   "look": {
+    "file": "synthetic-curve.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-curve-200",
+   "look": {
+    "file": "synthetic-curve.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-tones-50",
+   "look": {
+    "file": "synthetic-tones.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-tones-200",
+   "look": {
+    "file": "synthetic-tones.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-contrast-50",
+   "look": {
+    "file": "synthetic-contrast.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-contrast-200",
+   "look": {
+    "file": "synthetic-contrast.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "amount-table-v1-50",
+   "look": {
+    "file": "synthetic-table-v1.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "amount-table-v1-200",
+   "look": {
+    "file": "synthetic-table-v1.xmp",
+    "amount": 2
+   }
   }
  ]
 }

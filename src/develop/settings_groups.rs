@@ -231,6 +231,7 @@ impl SettingGroup {
             Saturation => to.saturation = from.saturation,
             TreatmentAndProfile => {
                 to.profile = from.profile.clone();
+                to.profile_amount = from.profile_amount;
                 e.monochrome = f.monochrome;
             }
             ToneCurve => {
@@ -450,6 +451,7 @@ pub fn transfer(
             None if profile.ensure_camera(m).is_ok() => {}
             None => {
                 recipe.profile = to.profile.clone();
+                recipe.profile_amount = to.profile_amount;
                 notes.push(format!(
                     "{name} isn't available for this camera; kept its profile"
                 ));
@@ -521,6 +523,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         preset_name: _,
         preset_settings: _,
         profile: _,
+        profile_amount: _,
         sharpening_radius: _,
         sharpening_detail: _,
         sharpening_masking: _,
@@ -609,6 +612,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("preset_name", PhotosOwn),
         ("preset_settings", PhotosOwn),
         ("profile", Group(TreatmentAndProfile)),
+        ("profile_amount", Group(TreatmentAndProfile)),
         ("sharpening_radius", Group(Sharpening)),
         ("sharpening_detail", Group(Sharpening)),
         ("sharpening_masking", Group(Sharpening)),

@@ -266,49 +266,68 @@ fn missing_profiles_unknown_settings_and_looks_never_partially_apply() -> Result
     Ok(())
 }
 #[test]
-fn profile_amount_blocks_strict_presets_and_lenient_application_reports_it() -> Result<()> {
-    let base = Recipe {
-        exposure: 1.,
+fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
+    use crate::camera_profiles::{CameraProfile, open};
+    let m = Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
         ..Default::default()
     };
-    let p = parse(
-        Path::new("look.xmp"),
-        &xml(
-            r#"c:Exposure2012="2""#,
-            r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="0.5"/></c:Look>"#,
-        ),
-    )?;
-    assert!(
-        p.blockers.iter().any(|b| b.contains("Profile Amount 50%")),
-        "{:?}",
-        p.blockers
-    );
-    assert!(p.apply(&base, &Metadata::default(), &[], None).is_err());
-    // An amount Lightroom cannot store is malformed.
-    assert!(
+    let profiles: Vec<_> = [
+        open::standard(&m),
+        open::color(&m),
+        Some(CameraProfile::creative_for_test(&m)),
+    ]
+    .into_iter()
+    .flatten()
+    .map(std::sync::Arc::new)
+    .collect();
+    let base = Recipe::with_profiles(&m, &profiles);
+    let preset = |look: &str, amount: &str| {
         parse(
             Path::new("look.xmp"),
             &xml(
                 r#"c:Exposure2012="2""#,
-                r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="-1"/></c:Look>"#,
+                &format!(
+                    r#"<c:Look><r:Description c:Name="{look}" c:Amount="{amount}"/></c:Look>"#
+                ),
             ),
         )
-        .is_err()
-    );
-    // At 0% the look does nothing, so nothing blocks.
-    let p = parse(
+    };
+    // Presets with an Amount are no longer blocked, and apply it.
+    let p = preset("Test Creative", "0.5")?;
+    assert!(p.blockers.is_empty(), "{:?}", p.blockers);
+    assert!(p.look_available(&m, &profiles));
+    let r = p.apply(&base, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
+    assert_eq!((r.profile_amount, r.exposure), (0.5, 2.));
+    // 0% keeps the look, at no strength.
+    let r = preset("Test Creative", "0")?.apply(&base, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
+    assert_eq!(r.profile_amount, 0.);
+    // A look without an Amount renders at 100%; a preset that names another profile
+    // resets an earlier Amount.
+    let earlier = Recipe {
+        profile_amount: 0.3,
+        ..base.clone()
+    };
+    let r = parse(
         Path::new("look.xmp"),
         &xml(
-            r#"c:Exposure2012="2""#,
-            r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="0"/></c:Look>"#,
+            &format!(r#"c:CameraProfile="{}""#, open::STANDARD),
+            &format!(
+                r#"<c:Look><r:Description c:Name="{}" c:Amount="0.5"/></c:Look>"#,
+                open::COLOR
+            ),
         ),
-    )?;
-    assert!(p.blockers.is_empty(), "{:?}", p.blockers);
-    assert!(p.look.is_empty());
-    assert_eq!(
-        p.apply(&base, &Metadata::default(), &[], None)?.exposure,
-        2.
-    );
+    )?
+    .apply(&earlier, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, open::COLOR);
+    assert_eq!(r.profile_amount, 1.);
+    // An amount Lightroom cannot store is malformed.
+    assert!(preset("Test Creative", "-1").is_err());
+    assert!(preset("Test Creative", "2.5").is_err());
     Ok(())
 }
 #[test]

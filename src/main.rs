@@ -254,6 +254,8 @@ fn main() -> Result<()> {
             }
             if let Some(p) = profile {
                 edit.profile = Some(rawmakase::camera_profiles::load(&p, &r.metadata)?);
+                // A chosen profile starts at 100%, as in the app.
+                edit.profile_amount = 1.;
                 edit.engine = edit.engine.max(3);
                 edit.profile_tone = true;
                 edit.reference_curves = true;

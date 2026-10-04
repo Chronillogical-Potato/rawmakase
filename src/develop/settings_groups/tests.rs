@@ -96,6 +96,7 @@ fn everything_changed() -> Recipe {
     });
     r.panels.set(Panel::Detail, PanelState::Off);
     r.curve_saturation = 0.4;
+    r.profile_amount = 0.6;
     r.unknown
         .insert("from_a_newer_release".into(), Value::Bool(true));
     let e = &mut r.effects;
@@ -277,12 +278,16 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
     let sony = camera("Sony", "ILCE-7M2");
     let source = Recipe {
         profile: open::color(&fuji).map(Arc::new),
+        profile_amount: 0.5,
         temperature: 4200.,
         tint: 8.,
         ..Default::default()
     };
     let sony_profiles: Vec<_> = open::color(&sony).map(Arc::new).into_iter().collect();
-    let to = Recipe::default();
+    let to = Recipe {
+        profile_amount: 1.2,
+        ..Default::default()
+    };
     let out = transfer(
         from(&source, &m),
         &to,
@@ -311,7 +316,11 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
             profiles: &[],
         },
     );
-    assert_eq!(out.recipe.profile, to.profile);
+    // Its own profile keeps its own Amount.
+    assert_eq!(
+        (&out.recipe.profile, out.recipe.profile_amount),
+        (&to.profile, 1.2)
+    );
     assert!(
         out.notes.iter().any(|n| n.contains(open::COLOR)),
         "{:?}",

@@ -29,16 +29,34 @@ Both are embedded in the recipe like any other profile, so later changes to the 
 
 An enhanced XMP profile is resolved against its matching camera DCP. The profile name remains, for example, **Adobe Color**, but the combined rendering contains that camera's matrices and calibration tables plus the XMP look's table and curve. Camera matching is mandatory.
 
+Creative looks (Lightroom's B&W and Modern groups) name no base profile. RAWmakase puts them over the camera's Adobe Standard when it is imported, as Lightroom does, else over the DNG's own profile, else over RAWmakase Standard. They import without a DCP.
+
 Supported enhanced-profile features:
 
 - Adobe DNG SDK-format HSV big tables, versions 1/2, decoded from Adobe base85 and zlib, with bounded input/output sizes and validation.
 - Linear and sRGB value indexing, interpolated hue/saturation/value corrections.
 - A profile-specific master tone curve, applied separately from the user's point curve. Identity per-channel profile curves are accepted; nonidentity profile channel curves are reported as unsupported.
-- Profile-internal Highlights, Shadows and Clarity adjustments, plus monochrome conversion. These use RAWmakase's existing approximate operators without moving the user's sliders.
-- The six Adobe Raw looks: Color, Portrait, Neutral, Landscape, Vivid and Monochrome, at their normal 100% strength.
+- Profile-internal Highlights, Shadows, Clarity, Contrast and Blacks adjustments, plus monochrome conversion. These use RAWmakase's existing approximate operators without moving the user's sliders.
+- The six Adobe Raw looks: Color, Portrait, Neutral, Landscape, Vivid and Monochrome (these have no Amount), and the creative looks B&W 01, B&W 03 to 12 and Modern 01.
+- Profile Amount for looks that have one (`crs:SupportsAmount`), described below.
 - XMP sidecars/presets and Lightroom catalog `Look` records resolve imported profiles by name, UUID when supplied, and camera model.
 
-The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. RGB-table creative profiles, adaptive/AI profiles, unsupported profile settings, and unsupported DCP variants fail explicitly. A look's Profile Amount renders only at 0% or 100%: an imported Lightroom edit at another Amount keeps the rest of the edit, renders the look at the nearer of the two and reports it, and a preset with one is listed as unavailable. This is not universal Lightroom profile support or pixel-identical Lightroom development.
+The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. RGB-table creative profiles (Artistic, Vintage, most of Modern, the B&W filter v2 looks and the Camera Matching XMPs), adaptive/AI profiles, looks with settings RAWmakase doesn't apply inside a profile (B&W 02's white balance, the B&W filters' mix, Modern 03 and 04's color and effects settings), and unsupported DCP variants fail explicitly. This is not universal Lightroom profile support or pixel-identical Lightroom development.
+
+## Profile Amount
+
+The **Amount** slider under the profile is Lightroom's Profile Amount, 0–200%. It is enabled for looks that support it and shown dimmed at 100% for every other profile, as in Lightroom; choosing a profile sets it back to 100%. It reads and writes `crs:Look`'s `Amount` in XMP sidecars, presets and Lightroom catalogs, travels with the Treatment & Profile group in Copy, Paste, Sync and presets, and is its own History step. Amounts outside 0–200% in imported edits are reported and render at 100%.
+
+The rule was measured with Camera Raw 18.7 on the synthetic chart and seven synthetic looks (`tests/corpus/looks`, written by `scripts/corpus/synthetic-looks.py`), each isolating one part, at 0, 50, 100, 150 and 200%:
+
+| Part | Camera Raw's rule | RAWmakase |
+|---|---|---|
+| Look table | Hue shifts and saturation/value scales grow in proportion to the Amount, also above 100%, within the amount bounds a version 2 table stores. A version 1 table stays at 100% at any Amount. | Same; the table is scaled when the recipe is resolved, so the CPU and GPU paths read one table. |
+| Look curve | Up to 100% a blend of no change and the curve; above, the curve is applied a second time at the excess (200% is the curve applied twice). | Same. |
+| Internal settings (Shadows, Highlights, Contrast, Blacks, Clarity) | In proportion up to 100%, half as fast above: +40 Shadows is +60 at 200%, matching Camera Raw's render with user sliders at +60 within ΔE00 0.14. | Same, added to the user's sliders without moving them. |
+| Black & white | A B&W look stays black and white at 0%. | Same. |
+
+The look goes in the same place as at 100%: the table after the camera profile's tables, the curve after its tone curve, the internal settings with the user's. On the chart the `amount-*` cases sit at mean ΔE00 0.7–1.4 from Camera Raw for the table, B&W and internal-settings looks at 50%, and 1.3–2.8 at 200% (RAWmakase's default render is 0.9). What remains comes from existing operators rather than the Amount: RAWmakase's Shadows lifts a gray ramp less than Camera Raw's (+25 Shadows raises middle gray by 13 levels in Camera Raw and 2 here), its Clarity has no global part, and Contrast with Blacks is 2.2 off at 100%. A look combining a curve with internal Shadows and Clarity is therefore 2.8 off at 100% and 4.7 at 200%.
 
 Schema/pipeline 5 embeds the resolved camera profile, enhanced color table, sampled curve, identity and copyright in the recipe. Reopening does not require the source XMP or DCP to remain available. Old schema 1–4 recipes migrate without changing their prior look. Older RAWmakase versions reject version 5 instead of silently dropping enhanced-profile data.
 

@@ -1,7 +1,7 @@
 //! RAWmakase JSON recipes, including migration of earlier pipeline versions.
 use crate::{
     develop::Recipe,
-    storage::{PIPELINE, SCHEMA, atomic_json, migrate_recipe},
+    storage::{atomic_json, migrate_recipe, saved_version},
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,8 @@ pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     atomic_json(
         path,
         &Preset {
-            schema: SCHEMA,
-            pipeline: PIPELINE,
+            schema: saved_version(&recipe),
+            pipeline: saved_version(&recipe),
             recipe,
             masks: local.masks,
         },

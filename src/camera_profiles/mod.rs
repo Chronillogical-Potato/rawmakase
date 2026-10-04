@@ -92,6 +92,24 @@ impl Table {
         );
         Ok(())
     }
+    /// The table's hue shifts and saturation and value scales at `strength` of
+    /// their effect (1 unchanged, 0 none).
+    fn scaled(&self, strength: f32) -> Self {
+        Self {
+            data: self
+                .data
+                .iter()
+                .map(|[h, s, v]| {
+                    [
+                        h * strength,
+                        (1. + (s - 1.) * strength).max(0.),
+                        (1. + (v - 1.) * strength).max(0.),
+                    ]
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
     fn lookup(&self, h: f32, s: f32, v: f32) -> [f32; 3] {
         let [nh, ns, nv] = self.dims;
         let coords = [
@@ -167,6 +185,28 @@ impl Table {
     }
 }
 impl CameraProfile {
+    /// This profile with its look at a Profile Amount (see `Enhanced::at_amount`).
+    pub fn at_amount(&self, amount: f32) -> Self {
+        Self {
+            enhanced: self.enhanced.as_ref().map(|look| look.at_amount(amount)),
+            ..self.clone()
+        }
+    }
+    /// The camera part of the profile, without its look: what the stages before the
+    /// per-pixel color stage read.
+    pub(crate) fn camera_part(self: &std::sync::Arc<Self>) -> std::sync::Arc<Self> {
+        if self.enhanced.is_none() {
+            return self.clone();
+        }
+        std::sync::Arc::new(Self {
+            enhanced: None,
+            ..(**self).clone()
+        })
+    }
+    /// Whether this is a look with Lightroom's Profile Amount.
+    pub fn supports_amount(&self) -> bool {
+        self.enhanced.as_ref().is_some_and(|e| e.amount.is_some())
+    }
     pub fn validate(&self) -> Result<()> {
         if let Some(look) = &self.enhanced {
             look.validate()?;
@@ -409,6 +449,18 @@ impl CameraProfile {
             exposure_scale: 2f32.powf(self.exposure),
         }
     }
+    /// RAWmakase Color as a creative look with Lightroom's Profile Amount, named
+    /// "Test Creative", for tests.
+    #[cfg(test)]
+    pub(crate) fn creative_for_test(m: &Metadata) -> Self {
+        let mut p = open::color(m).unwrap();
+        p.name = "Test Creative".into();
+        p.enhanced.as_mut().unwrap().amount = Some(enhanced::AmountRange {
+            table_min: 0.,
+            table_max: 2.,
+        });
+        p
+    }
     /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
     #[cfg(test)]
     pub(crate) fn with_test_tables(mut self) -> Self {
@@ -499,7 +551,10 @@ mod enhanced;
 mod library;
 pub mod open;
 pub use dcp::{d65_color_matrix, from_bytes};
-pub use library::{adobe_installed, builtin, import_files, installed, library_dirs, load};
+pub use enhanced::AmountRange;
+pub use library::{
+    adobe_installed, builtin, compose_look, import_files, installed, library_dirs, load,
+};
 #[cfg(test)]
 mod tests;
 

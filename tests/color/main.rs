@@ -123,6 +123,38 @@ pub struct Case {
     /// Also rendered on the private real photos.
     #[serde(default)]
     pub photos: bool,
+    /// A look profile from `looks/`, applied at a Profile Amount.
+    #[serde(default)]
+    pub look: Option<CaseLook>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct CaseLook {
+    /// File name in tests/corpus/looks.
+    pub file: String,
+    /// Lightroom's `Amount`: 1 is 100%.
+    pub amount: f32,
+}
+
+impl CaseLook {
+    pub fn path(&self) -> PathBuf {
+        corpus().join("looks").join(&self.file)
+    }
+    /// The look's name and UUID, as a sidecar's `crs:Look` names it.
+    fn identity(&self) -> (String, String) {
+        let text = std::fs::read_to_string(self.path()).unwrap();
+        let attribute = |key: &str| {
+            let start = text
+                .find(key)
+                .unwrap_or_else(|| panic!("{}: {key}", self.file))
+                + key.len();
+            text[start..start + text[start..].find(['"', '<']).unwrap()].to_string()
+        };
+        (
+            attribute(r#"<rdf:li xml:lang="x-default">"#),
+            attribute(r#"crs:UUID=""#),
+        )
+    }
 }
 
 impl Case {
@@ -148,6 +180,13 @@ impl Case {
             xml += &format!(r#" crs:{k}="{v}""#);
         }
         xml += ">";
+        if let Some(look) = &self.look {
+            let (name, uuid) = look.identity();
+            xml += &format!(
+                r#"<crs:Look><rdf:Description crs:Name="{name}" crs:Amount="{}" crs:UUID="{uuid}"/></crs:Look>"#,
+                look.amount
+            );
+        }
         for (name, points) in &self.curves {
             xml += &format!("<crs:{name}><rdf:Seq>");
             for p in points {
@@ -327,6 +366,19 @@ pub fn render_chart(
             None => c.applies(chart),
         })
         .map(|c| {
+            let mut profiles = profiles.clone();
+            if let Some(look) = &c.look {
+                // Composed over the chart's own profile, as the app does without
+                // Adobe Standard.
+                match rawmakase::camera_profiles::compose_look(
+                    &look.path(),
+                    &profiles,
+                    rawmakase::camera_profiles::builtin(&im.metadata).as_deref(),
+                ) {
+                    Ok(p) => profiles.push(Arc::new(p)),
+                    Err(e) => return (c.name.clone(), Err(format!("{}: {e:#}", look.file))),
+                }
+            }
             let result = render(&im, &profiles, &c.xmp(&cases.base, extra), 0)
                 .map_err(|e| e.to_string())
                 .and_then(|out| {

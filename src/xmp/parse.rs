@@ -128,17 +128,9 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
                 .map(str::to_string)
                 .or_else(|| child_text(d, "Name"))
                 .unwrap_or_default();
-            let rendering = d
-                .attribute((CRS, "Amount"))
-                .map(|amount| super::look::LookAmount::parse(amount).map(|a| a.rendering()))
-                .transpose()?;
-            // A strict preset stays atomic: an amount other than 0 or 100% blocks
-            // `apply`, and lenient application reports it.
-            if let Some(rendering) = rendering {
-                blockers.extend(rendering.warning);
-                if rendering.look == super::look::LookUse::Omit {
-                    look.clear();
-                }
+            if let Some(amount) = d.attribute((CRS, "Amount")) {
+                let amount = super::look::LookAmount::parse(amount)?;
+                settings.insert(super::look::SETTING.into(), amount.0.to_string());
             }
             if let Some(uuid) = d.attribute((CRS, "UUID")).filter(|_| !look.is_empty()) {
                 settings.insert("RAWmakaseLookUUID".into(), uuid.into());
