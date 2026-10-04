@@ -79,9 +79,9 @@ def look_xmp(look):
     text = (CORPUS / 'looks' / look['file']).read_text()
     attributes = dict(re.findall(r'crs:(\w+)="([^"]*)"', text))
     name = re.search(r'xml:lang="x-default">([^<]*)<', text).group(1)
+    meta = ('PresetType', 'Cluster', 'UUID', 'CameraModelRestriction', 'Copyright', 'ContactInfo')
     parameters = ' '.join(f'crs:{k}="{v}"' for k, v in attributes.items()
-                          if k in ('Version', 'ProcessVersion', 'ConvertToGrayscale', 'LookTable', 'RGBTable', 'RGBTableAmount')
-                          or k.endswith('2012'))
+                          if k not in meta and not k.startswith(('Supports', 'Table_')))
     curves = ''.join(re.findall(r'(<crs:ToneCurvePV2012\w*>.*?</crs:ToneCurvePV2012\w*>)', text, re.S))
     element = (f'<crs:Look><rdf:Description crs:Name="{name}" crs:Amount="{look["amount"]}"'
                f' crs:UUID="{attributes["UUID"]}" crs:SupportsAmount="{attributes["SupportsAmount"].lower()}"'

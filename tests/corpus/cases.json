@@ -1419,6 +1419,154 @@
    "settings": {
     "Saturation": "-100"
    }
+  },
+  {
+   "name": "look-color-50",
+   "look": {
+    "file": "synthetic-color.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "look-color-100",
+   "look": {
+    "file": "synthetic-color.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "look-color-200",
+   "look": {
+    "file": "synthetic-color.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "look-split-50",
+   "look": {
+    "file": "synthetic-split.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "look-split-100",
+   "look": {
+    "file": "synthetic-split.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "look-split-200",
+   "look": {
+    "file": "synthetic-split.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "look-parametric-50",
+   "look": {
+    "file": "synthetic-parametric.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "look-parametric-100",
+   "look": {
+    "file": "synthetic-parametric.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "look-parametric-200",
+   "look": {
+    "file": "synthetic-parametric.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "look-exposure-50",
+   "look": {
+    "file": "synthetic-exposure.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "look-exposure-100",
+   "look": {
+    "file": "synthetic-exposure.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "look-exposure-200",
+   "look": {
+    "file": "synthetic-exposure.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "look-vignette-50",
+   "look": {
+    "file": "synthetic-vignette.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "look-vignette-100",
+   "look": {
+    "file": "synthetic-vignette.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "look-vignette-200",
+   "look": {
+    "file": "synthetic-vignette.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "look-color-saturation+30",
+   "look": {
+    "file": "synthetic-color.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "Saturation": "+30",
+    "SaturationAdjustmentOrange": "+20"
+   }
+  },
+  {
+   "name": "look-split-grading-shadows-h30",
+   "look": {
+    "file": "synthetic-split.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "SplitToningShadowHue": "30",
+    "SplitToningShadowSaturation": "50"
+   }
+  },
+  {
+   "name": "look-parametric-darks+30",
+   "look": {
+    "file": "synthetic-parametric.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "ParametricDarks": "+30"
+   }
+  },
+  {
+   "name": "look-vignette-user-20",
+   "look": {
+    "file": "synthetic-vignette.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "PostCropVignetteAmount": "-20",
+    "PostCropVignetteStyle": "1"
+   }
   }
  ]
 }
