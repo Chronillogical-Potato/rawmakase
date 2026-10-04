@@ -29,11 +29,12 @@ impl PointCurve {
     }
     /// The curve on the 0–255 steps a curve file stores. Points that land on the same
     /// input there are merged, keeping the end points, so the file reads back.
-    fn quantized(&self) -> Self {
-        Self {
-            rgb: quantize(&self.rgb),
-            channels: self.channels.each_ref().map(quantize),
-        }
+    fn quantized(&self) -> Option<Self> {
+        let [red, green, blue] = self.channels.each_ref().map(quantize);
+        Some(Self {
+            rgb: quantize(&self.rgb)?,
+            channels: [red?, green?, blue?],
+        })
     }
     /// Whether the Red, Green and Blue curves leave colors as they are.
     fn channels_linear(&self) -> bool {
@@ -51,14 +52,19 @@ impl PointCurve {
 }
 
 /// `c` on the 0–255 steps a curve file stores. Points that land on the same input
-/// there are merged, keeping the end points, as saving does.
-fn quantize(c: &ToneCurve) -> ToneCurve {
+/// there are merged, keeping the end points, as saving does; `None` when that would
+/// drop a point whose output differs by more than a step, which would change the
+/// curve.
+fn quantize(c: &ToneCurve) -> Option<ToneCurve> {
     let mut points: Vec<[f32; 2]> = Vec::with_capacity(c.points.len());
     let last = c.points.len().saturating_sub(1);
     for (i, p) in c.points.iter().enumerate() {
         let p = p.map(|v| (v * 255.).round() / 255.);
         match points.last_mut() {
             Some(previous) if previous[0] == p[0] => {
+                if (previous[1] - p[1]).abs() > 1.5 / 255. {
+                    return None;
+                }
                 if i == last {
                     *previous = p;
                 }
@@ -66,15 +72,27 @@ fn quantize(c: &ToneCurve) -> ToneCurve {
             _ => points.push(p),
         }
     }
-    ToneCurve {
+    Some(ToneCurve {
         points,
         ..c.clone()
-    }
+    })
 }
 
 /// Whether two curves are the same once saved: the same points on the 0–255 steps.
 fn same(a: &ToneCurve, b: &ToneCurve) -> bool {
-    quantize(a).points == quantize(b).points
+    match (quantize(a), quantize(b)) {
+        (Some(a), Some(b)) => a.points == b.points,
+        // A curve saving can't keep is compared point by point.
+        _ => {
+            let steps = |c: &ToneCurve| -> Vec<[i32; 2]> {
+                c.points
+                    .iter()
+                    .map(|p| p.map(|v| (v * 255.).round() as i32))
+                    .collect()
+            };
+            steps(a) == steps(b)
+        }
+    }
 }
 
 /// Lightroom's built-in point curves.
@@ -252,13 +270,26 @@ impl SavedCurves {
         let name = super::user::file_name(name.trim());
         ensure!(!name.is_empty(), "A curve needs a name");
         let path = self.dir.join(format!("{name}.xmp"));
-        let curve = curve.quantized();
-        // Points dragged within one step of each other, end to end, leave no curve.
+        // Points dragged within one step of each other can't be told apart in the file.
+        let too_close = "The curve's points are too close together to save";
+        let curve = curve.quantized().context(too_close)?;
         for c in std::iter::once(&curve.rgb).chain(&curve.channels) {
-            c.validate()
-                .context("The curve's points are too close together to save")?;
+            c.validate().context(too_close)?;
         }
-        ensure!(!path.exists(), "A curve named {name} is already saved");
+        // Whatever the case of its extension, as listing reads it.
+        let taken = std::fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .any(|p| {
+                p.file_stem().is_some_and(|s| *s == *name.as_str())
+                    && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
+            });
+        ensure!(
+            !taken && !path.exists(),
+            "A curve named {name} is already saved"
+        );
         let text = crate::xmp::preset_write::point_curve(&curve.rgb, &curve.channels);
         std::fs::create_dir_all(&self.dir)?;
         // No clobbering, should another copy of the app save the name meanwhile.
@@ -414,9 +445,16 @@ mod tests {
         let store = SavedCurves {
             dir: d.path().to_path_buf(),
         };
-        // Two points dragged together, 0.0005 apart, and one beside the white end.
+        // Two points dragged together, 0.0005 apart at nearly the same output, and one
+        // beside the white end.
         let mut r = Recipe::default();
-        r.curve.points = vec![[0., 0.], [0.5, 0.4], [0.5005, 0.45], [0.999, 0.9], [1., 1.]];
+        r.curve.points = vec![
+            [0., 0.],
+            [0.5, 0.4],
+            [0.5005, 0.401],
+            [0.999, 0.998],
+            [1., 1.],
+        ];
         r.curve.validate()?;
         store.save("Close", &PointCurve::of(&r))?;
         let list = store.list();
@@ -450,6 +488,27 @@ mod tests {
         let err = format!("{:#}", result.unwrap_err());
         assert!(!err.contains("already saved"), "{err}");
         Ok(())
+    }
+
+    #[test]
+    fn a_step_hidden_between_close_points_is_refused_and_not_taken_for_linear() {
+        let d = tempfile::tempdir().unwrap();
+        let store = SavedCurves {
+            dir: d.path().to_path_buf(),
+        };
+        // A jump to white just past black: valid, but one step can't hold it.
+        let mut r = Recipe::default();
+        r.curve.points = vec![[0., 0.], [0.0005, 1.], [1., 1.]];
+        r.curve.validate().unwrap();
+        let err = store.save("Jump", &PointCurve::of(&r)).unwrap_err();
+        assert!(format!("{err:#}").contains("too close"), "{err:#}");
+        assert_eq!(ShownCurve::of(&r, &[]), ShownCurve::Custom);
+        // A name saved with an upper-case extension is taken too.
+        std::fs::write(d.path().join("Foo.XMP"), "").unwrap();
+        let err = store
+            .save("Foo", &PointCurve::of(&Recipe::default()))
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("already saved"), "{err:#}");
     }
 
     #[test]
