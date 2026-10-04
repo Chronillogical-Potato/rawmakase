@@ -27,6 +27,33 @@ impl PointCurve {
         r.curve = self.rgb.clone();
         r.effects.channels = self.channels.clone();
     }
+    /// The curve on the 0–255 steps a curve file stores. Points that land on the same
+    /// input there are merged, keeping the end points, so the file reads back.
+    fn quantized(&self) -> Self {
+        let quantize = |c: &ToneCurve| {
+            let mut points: Vec<[f32; 2]> = Vec::with_capacity(c.points.len());
+            let last = c.points.len().saturating_sub(1);
+            for (i, p) in c.points.iter().enumerate() {
+                let p = p.map(|v| (v * 255.).round() / 255.);
+                match points.last_mut() {
+                    Some(previous) if previous[0] == p[0] => {
+                        if i == last {
+                            *previous = p;
+                        }
+                    }
+                    _ => points.push(p),
+                }
+            }
+            ToneCurve {
+                points,
+                ..c.clone()
+            }
+        };
+        Self {
+            rgb: quantize(&self.rgb),
+            channels: self.channels.each_ref().map(quantize),
+        }
+    }
     /// Whether the Red, Green and Blue curves leave colors as they are.
     fn channels_linear(&self) -> bool {
         self.channels.iter().all(|c| same(c, &ToneCurve::default()))
@@ -188,6 +215,7 @@ impl SavedCurves {
         let name = super::user::file_name(name.trim());
         ensure!(!name.is_empty(), "A curve needs a name");
         let path = self.dir.join(format!("{name}.xmp"));
+        let curve = curve.quantized();
         let text = crate::xmp::preset_write::point_curve(&curve.rgb, &curve.channels);
         std::fs::create_dir_all(&self.dir)?;
         crate::storage::write_atomic(&path, Replace::NoClobber, |f| {
@@ -323,6 +351,26 @@ mod tests {
         assert_eq!(shown_name(&other, &list.curves), "faded-blue");
         // A linear saved curve is still Linear: the built-in name comes first.
         assert_eq!(shown_name(&Recipe::default(), &list.curves), "Linear");
+        Ok(())
+    }
+
+    #[test]
+    fn points_closer_than_a_step_are_merged_so_the_file_reads_back() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let store = SavedCurves {
+            dir: d.path().to_path_buf(),
+        };
+        // Two points dragged together, 0.0005 apart, and one beside the white end.
+        let mut r = Recipe::default();
+        r.curve.points = vec![[0., 0.], [0.5, 0.4], [0.5005, 0.45], [0.999, 0.9], [1., 1.]];
+        r.curve.validate()?;
+        store.save("Close", &PointCurve::of(&r))?;
+        let list = store.list();
+        assert!(list.errors.is_empty(), "{:?}", list.errors);
+        assert_eq!(
+            points(&list.curves[0].curve.rgb),
+            [[0, 0], [128, 102], [255, 255]]
+        );
         Ok(())
     }
 

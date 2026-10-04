@@ -2,7 +2,7 @@
 //! Strong Contrast, the curves saved here, and Save… to save the photo's whole point
 //! curve under a name. Choosing a curve is one History step.
 use super::widgets::{modal_frame, primary_button};
-use super::{Editor, history::Step, theme};
+use super::{Editor, theme};
 use crate::develop::panels::{Panel, PanelState};
 use crate::presets::curves::{BuiltinCurve, PointCurve, SavedCurve, SavedCurves};
 use eframe::egui::{self, Color32, Vec2};
@@ -76,8 +76,15 @@ impl Editor {
         // this one.
         r.panels.set(Panel::ToneCurve, PanelState::On);
         // A choice that changes nothing is no step, and must not name the next one.
+        // Named through the frame, as a control's step is, so a wheel resize still
+        // pending is recorded under its own name first.
         if *r != before {
-            self.document.history.label(Step::new("Point Curve", name));
+            self.context.data_mut(|d| {
+                d.insert_temp(
+                    super::widgets::history_step_id(),
+                    ("Point Curve".to_string(), name),
+                )
+            });
         }
     }
     /// Whether the Save Point Curve window is open.
