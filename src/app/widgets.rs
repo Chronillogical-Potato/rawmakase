@@ -628,6 +628,35 @@ pub(super) enum SliderEvent {
     Reset,
 }
 /// `display` overrides the shown scale and decimals, e.g. Sharpening's 0–150.
+/// Whether a slider shows a tick at its fill's origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tick {
+    Shown,
+    Hidden,
+}
+/// Where a slider's fill starts, and whether it is marked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FillOrigin {
+    value: f32,
+    tick: Tick,
+}
+/// A slider from zero up fills from zero, as Lightroom's Feather, Amount and Opacity
+/// do, so a default in the middle doesn't make it look centred. Any other (one below
+/// zero, a coloured one like Temp, or one with a neutral point like Levels' Midtone
+/// or Scale) fills from its default and marks it.
+fn fill_origin(start: f32, default: f32, coloured: bool) -> FillOrigin {
+    if start != 0. || coloured {
+        FillOrigin {
+            value: default,
+            tick: Tick::Shown,
+        }
+    } else {
+        FillOrigin {
+            value: start,
+            tick: Tick::Hidden,
+        }
+    }
+}
 pub(super) fn slider_with(
     ui: &mut egui::Ui,
     label: &str,
@@ -649,6 +678,11 @@ pub(super) fn slider_with(
         (1., 2)
     });
     let signed = start < 0. && default == 0.;
+    let origin = fill_origin(
+        start,
+        default,
+        gradient.is_some() || label == "Temp" || label == "Tint",
+    );
     // Like Lightroom, Temp moves evenly in mireds rather than kelvin.
     let reciprocal = label == "Temp" && start > 0.;
     // Dragging Exposure moves in Lightroom's 0.05 EV steps; typed values stay exact.
@@ -767,14 +801,18 @@ pub(super) fn slider_with(
         } else {
             ui.painter().rect_filled(rail, 1., theme::gray(83));
         }
-        let neutral = to_rail(default, rail);
-        ui.painter().line_segment(
-            [
-                Pos2::new(neutral, area.center().y - 4.),
-                Pos2::new(neutral, area.center().y + 4.),
-            ],
-            Stroke::new(1., theme::gray(115)),
-        );
+        // A tick where a centred slider rests, or a coloured one's default (Temp's As
+        // Shot); a slider from zero up, like Feather, fills from its left end.
+        let neutral = to_rail(origin.value, rail);
+        if origin.tick == Tick::Shown {
+            ui.painter().line_segment(
+                [
+                    Pos2::new(neutral, area.center().y - 4.),
+                    Pos2::new(neutral, area.center().y + 4.),
+                ],
+                Stroke::new(1., theme::gray(115)),
+            );
+        }
         if response.double_clicked() {
             *value = default.clamp(start, end);
             event = SliderEvent::Reset;
@@ -1347,5 +1385,46 @@ pub(super) fn pretty_path(path: &std::path::Path) -> String {
             format!("~{}", &text[home.len()..])
         }
         _ => text,
+    }
+}
+
+#[cfg(test)]
+mod slider_tests {
+    use super::*;
+
+    #[test]
+    fn a_slider_from_zero_fills_from_its_left_end_with_no_centre_mark() {
+        // Feather, 0–100 with 50 as its default: not a centred slider.
+        assert_eq!(
+            fill_origin(0., 0.5, false),
+            FillOrigin {
+                value: 0.,
+                tick: Tick::Hidden
+            }
+        );
+        // Exposure, centred on 0.
+        assert_eq!(
+            fill_origin(-5., 0., false),
+            FillOrigin {
+                value: 0.,
+                tick: Tick::Shown
+            }
+        );
+        // Scale, 50–150% around a neutral 100%, keeps its mark.
+        assert_eq!(
+            fill_origin(0.5, 1., false),
+            FillOrigin {
+                value: 1.,
+                tick: Tick::Shown
+            }
+        );
+        // Temp keeps its As Shot mark.
+        assert_eq!(
+            fill_origin(2000., 5500., true),
+            FillOrigin {
+                value: 5500.,
+                tick: Tick::Shown
+            }
+        );
     }
 }
