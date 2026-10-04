@@ -190,7 +190,10 @@ jobs:
             # The test binaries load the libraries built above at run time.
             echo "DYLD_LIBRARY_PATH=$RUNNER_TEMP/native/lib:$(brew --prefix libomp)/lib"
           } >> "$GITHUB_ENV"
-          bash packaging/native-deps.sh "$RUNNER_TEMP/native"
+      # GITHUB_ENV takes effect in the next step, including the JPEG paths
+      # needed by LibRaw's configure script.
+      - name: Build native dependencies
+        run: bash packaging/native-deps.sh "$RUNNER_TEMP/native"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
