@@ -486,6 +486,7 @@ impl Editor {
                         self.refresh_photo_defaults();
                         self.refresh_preset_support();
                     }
+                    self.refresh_library_defaults();
                 }
                 ImportKind::LensProfiles => {
                     // Lens profiles are matched when a photo opens: reopen it.

@@ -82,10 +82,15 @@ impl Editor {
         }
         self.raw_defaults = Arc::new(defaults);
         let _ = self.save_session();
+        self.refresh_library_defaults();
+        self.refresh_photo_defaults();
+    }
+    /// Renders the Library's previews of photos without an edit again, e.g. as
+    /// imported camera profiles change what the defaults resolve to.
+    pub(super) fn refresh_library_defaults(&mut self) {
         if let Some(library) = &mut self.library {
             library.set_defaults(self.raw_defaults.clone());
         }
-        self.refresh_photo_defaults();
     }
     /// Lists the cameras to choose from, when Preferences opens.
     pub(super) fn measure_raw_defaults(&mut self) {
