@@ -329,3 +329,26 @@ fn picking_one_of_two_files_with_the_same_name_records_its_file() {
     assert_eq!(used(&c, &m).as_deref(), Some("b.lcp"));
     assert_eq!(c.id.as_ref().unwrap().digest, "0123ABCD");
 }
+
+#[test]
+fn entries_without_a_model_do_not_outrank_usable_ones() {
+    // The photo's lens profiled on this make without a model, and on another make
+    // with one: the usable entry corrects.
+    let empty = test_profile("Testcam", "35mm F2", "Adobe (Testcam 35mm F2)", 0., 0.).replace(
+        r#"<stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="0">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="0"/>
+ </rdf:Description></stCamera:PerspectiveModel>"#,
+        "",
+    );
+    let other_make = test_profile("Lensco", "35mm F2", "Adobe (Testcam 35mm F2)", 0., -0.5);
+    let entry = |t: &str| {
+        let start = t.find("<rdf:li>").unwrap();
+        let end = t.rfind("</rdf:li>").unwrap() + "</rdf:li>".len();
+        t[start..end].to_string()
+    };
+    let both = other_make.replace(&entry(&other_make), &(entry(&empty) + &entry(&other_make)));
+    let mut m = photo();
+    m.lens_profiles = Library::from_texts([("both.lcp", both.as_str())]).for_photo(&m);
+    let auto = m.lens_profiles.auto(&m).expect("the usable entry matches");
+    assert!(auto.correction(&m).unwrap().vignetting_gain(1.) > 1.01);
+}

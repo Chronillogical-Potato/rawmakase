@@ -274,7 +274,7 @@ pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
 fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Option<LensCorrection> {
     let mut found: Vec<&Entry> = entries
         .iter()
-        .filter(|e| which == LensEntries::Any || lens_matches(e, m))
+        .filter(|e| e.has_model() && (which == LensEntries::Any || lens_matches(e, m)))
         .collect();
     match (found.iter().filter_map(|e| make_rank(e, m)).min(), which) {
         (Some(best), _) => found.retain(|e| make_rank(e, m) == Some(best)),

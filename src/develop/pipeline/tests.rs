@@ -1157,3 +1157,13 @@ fn a_missing_named_lens_profile_is_reported() {
             .is_none()
     );
 }
+/// Changing the lens profile choice is an edit of the Lens Corrections panel, so a
+/// switched-off panel turns on with it.
+#[test]
+fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
+    use crate::develop::panels::Panel;
+    use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    let before = profile_recipe(LensProfileSetup::Auto, "");
+    let after = profile_recipe(LensProfileSetup::Custom, MINE);
+    assert!(Panel::LensCorrections.holds_change(&before, &after));
+}

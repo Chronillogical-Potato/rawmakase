@@ -10,6 +10,9 @@ use eframe::egui;
 /// Draws the menus, or the profile in use as text when no imported profile fits.
 pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metadata>) {
     let Some(m) = m.filter(|m| !m.lens_profiles.all().is_empty()) else {
+        // Setup stays, so an edit naming a profile that isn't imported can go back to
+        // Default or Auto.
+        ui.add_enabled_ui(r.lens_profile && r.engine >= 4, |ui| setup_row(ui, r, None));
         let builtin = m.and_then(|m| m.lens.as_ref());
         control_row(ui, "Profile", |ui| {
             muted(
@@ -30,20 +33,7 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
     let menus = ProfileMenus::new(&m.lens_profiles);
     let enabled = r.lens_profile && r.engine >= 4;
     ui.add_enabled_ui(enabled, |ui| {
-        control_row(ui, "Setup", |ui| {
-            let mut setup = r.lens_profile_choice.setup;
-            egui::ComboBox::from_id_salt("lens-profile-setup")
-                .width(ui.available_width())
-                .selected_text(setup.label())
-                .show_ui(ui, |ui| {
-                    for s in LensProfileSetup::ALL {
-                        ui.selectable_value(&mut setup, s, s.label());
-                    }
-                });
-            if setup != r.lens_profile_choice.setup {
-                r.lens_profile_choice.set_setup(setup, in_use.as_deref());
-            }
-        });
+        setup_row(ui, r, in_use.as_deref());
         let (make, model, name) = match (&in_use, &named) {
             (Some(p), _) => (p.lens_make.as_str(), p.lens_model.as_str(), p.name.as_str()),
             (None, Some(named)) => ("", "", named.as_str()),
@@ -93,6 +83,28 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
         });
         if let Some(p) = chosen {
             r.lens_profile_choice.choose(p);
+        }
+    });
+}
+
+/// Lightroom's Setup menu: Default, Auto or Custom.
+fn setup_row(
+    ui: &mut egui::Ui,
+    r: &mut Recipe,
+    in_use: Option<&crate::lens::lcp::ImportedProfile>,
+) {
+    control_row(ui, "Setup", |ui| {
+        let mut setup = r.lens_profile_choice.setup;
+        egui::ComboBox::from_id_salt("lens-profile-setup")
+            .width(ui.available_width())
+            .selected_text(setup.label())
+            .show_ui(ui, |ui| {
+                for s in LensProfileSetup::ALL {
+                    ui.selectable_value(&mut setup, s, s.label());
+                }
+            });
+        if setup != r.lens_profile_choice.setup {
+            r.lens_profile_choice.set_setup(setup, in_use);
         }
     });
 }
