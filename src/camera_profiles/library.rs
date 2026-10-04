@@ -17,7 +17,7 @@ pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
     {
         let look = LookFile::read(path)?;
         let (profiles, _) = installed(m);
-        let base = look_base(&look, &profiles)
+        let base = look_base(&look, &profiles, builtin(m).as_deref())
             .context("Unsupported XMP look or missing matching base camera profile")?;
         return Ok(Arc::new(look.compose(base)?));
     }
@@ -89,7 +89,7 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
     let bases = profiles.clone();
     for path in looks {
         let composed = LookFile::read(&path).and_then(|look| {
-            let base = look_base(&look, &bases).with_context(|| {
+            let base = look_base(&look, &bases, builtin(m).as_deref()).with_context(|| {
                 let name = match &look.base {
                     LookBase::Named(name) => name.as_str(),
                     LookBase::Any => "",
@@ -116,18 +116,23 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
     (profiles, errors)
 }
 /// A look profile file over the profile it builds on among `bases` (see `look_base`),
-/// without the user's library.
-pub fn compose_look(path: &Path, bases: &[Arc<CameraProfile>]) -> Result<CameraProfile> {
+/// without the user's library. `own` is the file's embedded profile, if any.
+pub fn compose_look(
+    path: &Path,
+    bases: &[Arc<CameraProfile>],
+    own: Option<&CameraProfile>,
+) -> Result<CameraProfile> {
     let look = LookFile::read(path)?;
-    look.compose(look_base(&look, bases).context("Missing matching base camera profile")?)
+    look.compose(look_base(&look, bases, own).context("Missing matching base camera profile")?)
 }
 /// The profile a look goes over: the one it names, or for a creative look, which
-/// names none, Adobe Standard as Lightroom uses, else the first that fits, which in
-/// `installed`'s order is the file's own profile, then RAWmakase Standard. A look
-/// restricted to another camera fits none.
+/// names none, Adobe Standard as Lightroom uses, else the file's own profile (`own`),
+/// else RAWmakase Standard, else any that fits. A look restricted to another camera
+/// fits none.
 pub(super) fn look_base<'a>(
     look: &LookFile,
     bases: &'a [Arc<CameraProfile>],
+    own: Option<&CameraProfile>,
 ) -> Option<&'a CameraProfile> {
     let fitting = || {
         bases
@@ -136,8 +141,11 @@ pub(super) fn look_base<'a>(
     };
     match &look.base {
         LookBase::Named(_) => fitting().next(),
-        LookBase::Any => fitting()
-            .find(|b| b.name == "Adobe Standard")
+        LookBase::Any => ["Adobe Standard"]
+            .into_iter()
+            .chain(own.map(|p| p.name.as_str()))
+            .chain([super::open::STANDARD])
+            .find_map(|name| fitting().find(|b| b.name == name))
             .or_else(|| fitting().next()),
     }
     .map(|b| &**b)

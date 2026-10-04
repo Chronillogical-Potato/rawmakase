@@ -652,17 +652,30 @@ mod tests {
             p.name = name.into();
             std::sync::Arc::new(p)
         };
+        // Listed by name, as `installed` returns them.
+        let own = named("Zeta embedded");
         let mut bases = vec![
             std::sync::Arc::new(composed.clone()),
-            named("Embedded"),
+            named("Camera Standard"),
             named(super::super::open::STANDARD),
+            own.clone(),
         ];
-        let base_of = |bases: &[std::sync::Arc<CameraProfile>]| {
-            super::super::library::look_base(&file, bases).map(|b| b.name.clone())
+        let base_of = |bases: &[std::sync::Arc<CameraProfile>], own: Option<&CameraProfile>| {
+            super::super::library::look_base(&file, bases, own).map(|b| b.name.clone())
         };
-        assert_eq!(base_of(&bases).as_deref(), Some("Embedded"));
+        assert_eq!(
+            base_of(&bases, Some(&own)).as_deref(),
+            Some("Zeta embedded")
+        );
+        assert_eq!(
+            base_of(&bases, None).as_deref(),
+            Some(super::super::open::STANDARD)
+        );
         bases.push(named("Adobe Standard"));
-        assert_eq!(base_of(&bases).as_deref(), Some("Adobe Standard"));
+        assert_eq!(
+            base_of(&bases, Some(&own)).as_deref(),
+            Some("Adobe Standard")
+        );
         Ok(())
     }
 }

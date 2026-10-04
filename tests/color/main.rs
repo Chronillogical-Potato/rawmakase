@@ -370,7 +370,11 @@ pub fn render_chart(
             if let Some(look) = &c.look {
                 // Composed over the chart's own profile, as the app does without
                 // Adobe Standard.
-                match rawmakase::camera_profiles::compose_look(&look.path(), &profiles) {
+                match rawmakase::camera_profiles::compose_look(
+                    &look.path(),
+                    &profiles,
+                    rawmakase::camera_profiles::builtin(&im.metadata).as_deref(),
+                ) {
                     Ok(p) => profiles.push(Arc::new(p)),
                     Err(e) => return (c.name.clone(), Err(format!("{}: {e:#}", look.file))),
                 }
