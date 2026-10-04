@@ -158,7 +158,7 @@ impl UprightMode {
 /// Lightroom's Upright: the chosen mode and the correction for each mode, as Lightroom
 /// stores them so that switching modes needs no new analysis.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, from = "StoredUpright")]
 pub struct Upright {
     pub mode: UprightMode,
     /// Forward (source-to-output) homographies indexed by [`UprightMode::code`], row
@@ -175,6 +175,49 @@ pub struct Upright {
     /// kept to write back unchanged.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub lightroom: std::collections::BTreeMap<String, String>,
+}
+/// [`Upright`] as saved. Edits saved before guides were editable kept Lightroom's
+/// guides among its other settings; they become guides when read.
+#[derive(Deserialize)]
+#[serde(default)]
+#[derive(Default)]
+struct StoredUpright {
+    mode: UprightMode,
+    corrections: Vec<[f32; 9]>,
+    guides: Vec<UprightGuide>,
+    lightroom: std::collections::BTreeMap<String, String>,
+}
+impl From<StoredUpright> for Upright {
+    fn from(s: StoredUpright) -> Self {
+        let StoredUpright {
+            mode,
+            corrections,
+            mut guides,
+            mut lightroom,
+        } = s;
+        if guides.is_empty() {
+            let mut found: Vec<(usize, UprightGuide)> = lightroom
+                .iter()
+                .filter_map(|(key, value)| {
+                    let i = key.strip_prefix("UprightFourSegments_")?.parse().ok()?;
+                    Some((i, super::guided::parse_guide(value)?))
+                })
+                .collect();
+            found.sort_by_key(|(i, _)| *i);
+            guides = found
+                .into_iter()
+                .map(|(_, g)| g)
+                .take(super::guided::MAX_GUIDES)
+                .collect();
+        }
+        lightroom.retain(|key, _| !key.starts_with("UprightFourSegments"));
+        Self {
+            mode,
+            corrections,
+            guides,
+            lightroom,
+        }
+    }
 }
 /// A Guided Upright guide: a line drawn along an edge that should be vertical or
 /// horizontal. Its ends are in 0–1 coordinates of the photo as recorded, where Upright

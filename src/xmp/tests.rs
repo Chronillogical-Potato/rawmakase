@@ -899,13 +899,14 @@ fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
     ));
     let back = parse(Path::new("export.xmp"), &packet)?.apply(&Recipe::default(), &m, &[], None)?;
     assert_eq!(back.upright, r.upright);
-    // Guides without a stored correction: solved on the photo rather than refused.
+    // Guides without a stored correction are still reported: renders outside the
+    // editor (the command line, Library previews) have no analysis to solve them beside.
     let attrs = r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:PerspectiveUpright="5" c:UprightFourSegmentsCount="2" c:UprightFourSegments_0="0.3,0.1,0.25,0.9" c:UprightFourSegments_1="0.7,0.1,0.75,0.9""#;
-    let r =
-        parse(Path::new("photo.xmp"), &xml(attrs, ""))?.apply(&Recipe::default(), &m, &[], None)?;
-    assert_eq!(r.upright.mode, UprightMode::Guided);
-    assert_eq!(r.upright.guides.len(), 2);
-    assert!(r.upright.needs_analysis());
+    assert!(
+        parse(Path::new("photo.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &m, &[], None)
+            .is_err()
+    );
     // A broken guide is refused, not guessed at.
     let attrs = r#"c:PerspectiveUpright="5" c:UprightFourSegmentsCount="1" c:UprightFourSegments_0="0.3 0.1 0.25 0.9""#;
     assert!(

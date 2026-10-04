@@ -953,23 +953,12 @@ impl Preset {
                     .ok()
                     .filter(|&i| i < crate::develop::guided::MAX_GUIDES)
                     .with_context(|| format!("Unsupported {key}"))?;
-                let v: Vec<f32> = value
-                    .split(',')
-                    .map(|x| x.trim().parse::<f32>())
-                    .collect::<Result<_, _>>()
-                    .with_context(|| format!("Invalid {key}"))?;
-                let [x1, y1, x2, y2]: [f32; 4] = v
-                    .try_into()
-                    .ok()
-                    .filter(|v: &[f32; 4]| v.iter().all(|x| x.is_finite()))
+                let guide = crate::develop::guided::parse_guide(value)
                     .with_context(|| format!("Invalid {key}"))?;
                 if guides.len() <= i {
                     guides.resize(i + 1, None);
                 }
-                guides[i] = Some(crate::develop::UprightGuide {
-                    a: [x1, y1],
-                    b: [x2, y2],
-                });
+                guides[i] = Some(guide);
                 continue;
             }
             let Some(i) = name.strip_prefix("Transform_") else {
@@ -1012,11 +1001,7 @@ impl Preset {
             .with_context(|| format!("Unsupported PerspectiveUpright {code}"))?;
         // A preset names only the mode; the app analyses each photo it is applied to.
         // A photo's own settings always carry Lightroom's corrections.
-        // Guided with its guides is solved on the photo when Lightroom's correction is
-        // missing.
-        let stored = mode == UprightMode::Off
-            || mode.code() < corrections.len()
-            || (mode == UprightMode::Guided && !guides.is_empty());
+        let stored = mode == UprightMode::Off || mode.code() < corrections.len();
         ensure!(
             stored || !self.photo_settings,
             "PerspectiveUpright without Lightroom's stored correction is not supported yet"

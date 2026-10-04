@@ -2540,4 +2540,10 @@ fn guided_upright_gestures_are_one_history_step_each() {
     e.undo();
     assert_eq!(e.document.recipe.upright.guides.len(), 2);
     assert!(e.document.recipe.upright.correction().is_some());
+    // Leaving Guided by any route closes the tool, so a drag can't switch it back.
+    e.view.tool = state::Tool::Guided;
+    let edit = e.begin_edit_frame();
+    e.document.recipe.upright = Default::default();
+    e.finish_edit_frame(edit, &ctx);
+    assert!(!e.view.is(state::Tool::Guided));
 }

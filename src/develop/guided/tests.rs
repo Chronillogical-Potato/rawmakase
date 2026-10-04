@@ -305,3 +305,28 @@ fn storing_waits_for_the_analysis() {
     assert_eq!(store(&mut r, &m), None);
     assert_eq!(r.upright.corrections.len(), 2);
 }
+
+/// Edits saved before guides could be edited kept Lightroom's guides among its other
+/// Upright settings; they read back as guides.
+#[test]
+fn earlier_saved_guides_read_back_as_guides() {
+    let saved = r#"{"mode":"guided","corrections":[],"lightroom":{"UprightFourSegmentsCount":"2","UprightFourSegments_1":"0.7,0.1,0.75,0.9","UprightFourSegments_0":"0.3,0.1,0.25,0.9","UprightVersion":"151388160"}}"#;
+    let u: Upright = serde_json::from_str(saved).expect("reads");
+    assert_eq!(
+        u.guides,
+        [
+            UprightGuide {
+                a: [0.3, 0.1],
+                b: [0.25, 0.9]
+            },
+            UprightGuide {
+                a: [0.7, 0.1],
+                b: [0.75, 0.9]
+            },
+        ]
+    );
+    assert_eq!(u.lightroom.keys().collect::<Vec<_>>(), ["UprightVersion"]);
+    // And what is saved now reads back unchanged.
+    let back: Upright = serde_json::from_str(&serde_json::to_string(&u).unwrap()).unwrap();
+    assert_eq!(back, u);
+}

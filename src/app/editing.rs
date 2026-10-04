@@ -59,6 +59,13 @@ impl Editor {
         if frame.aspect != self.view.aspect {
             self.fit_aspect();
         }
+        // The Guided tool goes with the mode, however it was left: a reset, an undo, a
+        // preset, with the Transform panel open or not.
+        if self.view.is(super::state::Tool::Guided)
+            && self.document.recipe.upright.mode != crate::develop::UprightMode::Guided
+        {
+            self.view.tool = super::state::Tool::None;
+        }
         let edited = self.document.history.observe(
             frame.recipe,
             &self.document.recipe,
