@@ -1277,6 +1277,12 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(r#"crs:LensProfileName="Camera Settings""#),
         "{packet}"
     );
+    // Lightroom's other boolean spelling.
+    let one = apply(
+        r#"c:LensProfileSetup="LensDefaults" c:LensProfileName="Camera Settings" c:LensProfileIsEmbedded="1""#,
+        &Recipe::default(),
+    )?;
+    assert!(one.lens_profile_choice.id.unwrap().embedded);
     // Under Auto, a named profile that isn't imported stays named.
     let gone = apply(
         r#"c:LensProfileEnable="1" c:LensProfileSetup="Auto" c:LensProfileName="Adobe (Gone 24mm)" c:LensProfileFilename="Gone (24mm) - RAW.lcp""#,

@@ -183,7 +183,13 @@ impl LensProfileChoice {
             }
             (_, named) => Resolved {
                 used: profiles.auto(m),
-                missing: named.and_then(|(id, found)| found.is_none().then_some(id)),
+                // A named profile that isn't imported, or can't correct this photo,
+                // stays named and is reported.
+                missing: named.and_then(|(id, found)| {
+                    found
+                        .is_none_or(|c| c.correction(m).is_none())
+                        .then_some(id)
+                }),
             },
         }
     }

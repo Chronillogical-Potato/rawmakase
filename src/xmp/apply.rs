@@ -905,6 +905,7 @@ impl Preset {
         ] {
             settings.seen.insert(key.into());
         }
+        let embedded = boolean(v, "LensProfileIsEmbedded")?.unwrap_or(false);
         let text = |key: &str| v.get(key).map(|s| s.trim().to_string()).unwrap_or_default();
         let (name, filename) = (text("LensProfileName"), text("LensProfileFilename"));
         let id = (!name.is_empty() || !filename.is_empty()).then(|| {
@@ -912,7 +913,7 @@ impl Preset {
                 name,
                 filename,
                 digest: text("LensProfileDigest"),
-                embedded: text("LensProfileIsEmbedded").eq_ignore_ascii_case("true"),
+                embedded,
             }
         });
         if let Some(setup) = v.get("LensProfileSetup") {

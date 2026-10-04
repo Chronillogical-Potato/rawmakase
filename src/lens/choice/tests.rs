@@ -377,4 +377,7 @@ fn profiles_whose_correction_does_not_validate_are_not_offered() {
     assert!(menus.profiles("Testcam", "Testcam 28mm F2").is_empty());
     assert!(menus.first_of_make("Testcam").is_none());
     assert!(menus.models("Testcam").is_empty());
+    // Named under Auto, it is reported, not silently replaced.
+    let named = choice(LensProfileSetup::Auto, id("wild.lcp"));
+    assert!(named.resolve(&m.lens_profiles, &m).missing.is_some());
 }
