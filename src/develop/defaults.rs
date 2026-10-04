@@ -1,0 +1,475 @@
+//! Raw defaults, as in Lightroom Classic's Preferences > Presets > Raw Defaults: the
+//! settings a photo without an edit starts from, and what Reset returns to. A
+//! master choice applies to every camera unless a camera has its own.
+//!
+//! Only photos without a RAWmakase or Lightroom edit follow these. Lightroom edits
+//! are stored relative to Adobe's defaults, so they always convert from Adobe
+//! Default, and a saved edit stays as it is until Reset.
+use crate::{
+    camera_profiles::CameraProfile,
+    develop::{ProfilePreference, Recipe},
+    raw::Metadata,
+    xmp::Preset,
+};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::sync::Arc;
+
+/// The raw defaults as chosen in Preferences and kept in the session.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RawDefaults {
+    #[serde(deserialize_with = "lenient")]
+    pub master: DefaultChoice,
+    /// "Override global setting for specific camera". Off keeps the cameras' own
+    /// choices without using them, as Lightroom does.
+    pub camera_overrides: bool,
+    #[serde(deserialize_with = "lenient_list")]
+    pub cameras: Vec<CameraDefault>,
+}
+/// What a photo starts from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DefaultChoice {
+    /// Lightroom's Adobe Default: Adobe Color, else Adobe Standard, else the
+    /// DNG's own profile, else RAWmakase Color.
+    #[default]
+    Adobe,
+    /// The same settings with RAWmakase Color wherever it fits the camera.
+    Rawmakase,
+    /// A Develop preset applied over Adobe Default.
+    Preset {
+        /// `Preset::id`: "builtin:<UUID>" or the installed file's path.
+        id: String,
+        /// Shown while the preset cannot be found.
+        name: String,
+    },
+}
+impl DefaultChoice {
+    pub fn label(&self) -> String {
+        match self {
+            DefaultChoice::Adobe => "Adobe Default".into(),
+            DefaultChoice::Rawmakase => "RAWmakase Default".into(),
+            DefaultChoice::Preset { name, .. } => crate::presets::display_name(name),
+        }
+    }
+    pub fn preset(preset: &Preset) -> Self {
+        DefaultChoice::Preset {
+            id: preset.id.clone(),
+            name: preset.name.clone(),
+        }
+    }
+}
+/// A camera's own choice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraDefault {
+    /// As Lightroom names the camera (see [`camera_name`]).
+    pub camera: String,
+    pub choice: DefaultChoice,
+}
+impl RawDefaults {
+    /// The camera's own choice, when overrides are on, else the master.
+    pub fn choice_for(&self, m: &Metadata) -> &DefaultChoice {
+        self.camera_overrides
+            .then(|| self.cameras.iter().find(|c| same_camera(&c.camera, m)))
+            .flatten()
+            .map_or(&self.master, |c| &c.choice)
+    }
+    /// Sets `camera`'s own choice, replacing any it had.
+    pub fn set_camera(&mut self, camera: &str, choice: DefaultChoice) {
+        match self.cameras.iter_mut().find(|c| c.camera == camera) {
+            Some(c) => c.choice = choice,
+            None => {
+                self.cameras.push(CameraDefault {
+                    camera: camera.into(),
+                    choice,
+                });
+                self.cameras.sort_by(|a, b| a.camera.cmp(&b.camera));
+            }
+        }
+    }
+    fn choices(&self) -> impl Iterator<Item = &DefaultChoice> {
+        std::iter::once(&self.master).chain(self.cameras.iter().map(|c| &c.choice))
+    }
+}
+
+/// A camera as Lightroom names it: the model, after the make unless the model
+/// already names it ("Canon EOS R5", "Fujifilm X100F").
+pub fn camera_name(m: &Metadata) -> String {
+    let (make, model) = (m.make.trim(), m.model.trim());
+    let brand = make.split(' ').next().unwrap_or_default();
+    if model.is_empty() {
+        make.into()
+    } else if make.is_empty() || model.to_lowercase().starts_with(&brand.to_lowercase()) {
+        model.into()
+    } else {
+        format!("{make} {model}")
+    }
+}
+/// Whether `name`, from this catalog or Lightroom's, is the photo's camera. Lightroom
+/// names some cameras by model alone ("ILCE-7CR"), others with the make.
+pub fn same_camera(name: &str, m: &Metadata) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && [
+            camera_name(m),
+            m.model.trim().to_string(),
+            format!("{} {}", m.make.trim(), m.model.trim()),
+        ]
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(name))
+}
+
+/// The raw defaults ready to apply: the choices, with the presets they name read.
+/// Cheap to share between threads behind an `Arc`.
+#[derive(Clone, Debug, Default)]
+pub struct DevelopDefaults {
+    settings: RawDefaults,
+    presets: Vec<Preset>,
+}
+/// A photo's starting settings, which choice they came from, and why they are
+/// Adobe Default instead of the preset asked for, if they are.
+#[derive(Clone, Debug)]
+pub struct Resolved {
+    pub recipe: Recipe,
+    pub name: String,
+    pub note: Option<String>,
+}
+impl PartialEq for DevelopDefaults {
+    fn eq(&self, other: &Self) -> bool {
+        // A preset file can change under the same id.
+        let read = |d: &Self| {
+            d.presets
+                .iter()
+                .map(|p| format!("{p:?}"))
+                .collect::<Vec<_>>()
+        };
+        self.settings == other.settings && read(self) == read(other)
+    }
+}
+impl DevelopDefaults {
+    /// Reads the presets `settings` names from the preset library.
+    pub fn load(settings: RawDefaults) -> Self {
+        Self::with_presets(settings, crate::presets::find_preset)
+    }
+    /// As [`load`](Self::load), finding presets with `find`.
+    pub fn with_presets(settings: RawDefaults, find: impl Fn(&str) -> Option<Preset>) -> Self {
+        let mut presets: Vec<Preset> = Vec::new();
+        for choice in settings.choices() {
+            if let DefaultChoice::Preset { id, .. } = choice
+                && !presets.iter().any(|p| p.id == *id)
+                && let Some(p) = find(id)
+            {
+                presets.push(p);
+            }
+        }
+        Self { settings, presets }
+    }
+    pub fn settings(&self) -> &RawDefaults {
+        &self.settings
+    }
+    /// What a photo from this camera starts from. Never fails: a preset that is
+    /// missing or does not apply leaves Adobe Default, with a note saying so.
+    pub fn resolve(&self, m: &Metadata, profiles: &[Arc<CameraProfile>]) -> Resolved {
+        let choice = self.settings.choice_for(m);
+        let adobe = || Recipe::with_profiles(m, profiles);
+        let fallback = |note: String| Resolved {
+            recipe: adobe(),
+            name: DefaultChoice::Adobe.label(),
+            note: Some(note),
+        };
+        match choice {
+            DefaultChoice::Adobe => Resolved {
+                recipe: adobe(),
+                name: choice.label(),
+                note: None,
+            },
+            DefaultChoice::Rawmakase => Resolved {
+                recipe: Recipe::with_profile_preference(m, profiles, ProfilePreference::Rawmakase),
+                name: choice.label(),
+                note: None,
+            },
+            DefaultChoice::Preset { id, .. } => {
+                let Some(preset) = self.presets.iter().find(|p| p.id == *id) else {
+                    return fallback(format!(
+                        "Raw default preset ‘{}’ is missing; using Adobe Default",
+                        choice.label()
+                    ));
+                };
+                // No photo: Auto settings in a default are not measured, so the
+                // photo opens, resets and previews the same everywhere.
+                match preset.apply(&adobe(), m, profiles, None) {
+                    Ok(recipe) => Resolved {
+                        recipe,
+                        name: choice.label(),
+                        note: None,
+                    },
+                    Err(e) => fallback(format!(
+                        "Raw default ‘{}’ doesn't apply to this photo ({e:#}); using Adobe Default",
+                        choice.label()
+                    )),
+                }
+            }
+        }
+    }
+}
+
+/// A value that no longer reads (from a newer release, say) is the default,
+/// rather than losing the whole session.
+fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned + Default>(
+    d: D,
+) -> Result<T, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+/// Entries that no longer read are left out; the rest are kept.
+fn lenient_list<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    d: D,
+) -> Result<Vec<T>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    let serde_json::Value::Array(items) = value else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
+}
+/// For the session: raw defaults that no longer read are the out-of-the-box ones.
+pub fn lenient_settings<'de, D: Deserializer<'de>>(d: D) -> Result<RawDefaults, D::Error> {
+    lenient(d)
+}
+
+/// A synthetic preset that raises Exposure by 0.7, with this id.
+#[cfg(test)]
+pub(crate) fn brighter_preset(id: &str) -> Preset {
+    let text = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:PresetType="Normal" crs:Version="15.0" crs:Exposure2012="+0.70"><crs:Name><rdf:Alt><rdf:li xml:lang="x-default">Brighter</rdf:li></rdf:Alt></crs:Name></rdf:Description></rdf:RDF></x:xmpmeta>"#;
+    let mut p = crate::xmp::parse(std::path::Path::new(id), text).unwrap();
+    p.id = id.into();
+    p
+}
+/// Raw defaults whose master is that preset.
+#[cfg(test)]
+pub(crate) fn brighter_defaults() -> DevelopDefaults {
+    DevelopDefaults::with_presets(
+        RawDefaults {
+            master: DefaultChoice::Preset {
+                id: "brighter".into(),
+                name: "Brighter".into(),
+            },
+            ..Default::default()
+        },
+        |id| (id == "brighter").then(|| brighter_preset(id)),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::camera_profiles::open;
+
+    #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
+    fn x100f() -> Metadata {
+        Metadata {
+            make: "Fujifilm".into(),
+            model: "X100F".into(),
+            wb: [2.0198677, 1., 1.8874172],
+            cam_xyz: [
+                [1.1434, -0.4948, -0.121],
+                [-0.3746, 1.2042, 0.1903],
+                [-0.0666, 0.1479, 0.5235],
+            ],
+            ..Default::default()
+        }
+    }
+    fn other_camera() -> Metadata {
+        Metadata {
+            make: "Canon".into(),
+            model: "EOS R5".into(),
+            ..x100f()
+        }
+    }
+    /// RAWmakase's own profiles, and Adobe Color made from one of them.
+    fn profiles(m: &Metadata) -> Vec<Arc<CameraProfile>> {
+        let mut adobe = open::standard(m).unwrap();
+        adobe.name = "Adobe Color".into();
+        [open::standard(m), open::color(m), Some(adobe)]
+            .into_iter()
+            .flatten()
+            .map(Arc::new)
+            .collect()
+    }
+    fn preset_choice(id: &str) -> DefaultChoice {
+        DefaultChoice::Preset {
+            id: id.into(),
+            name: "Brighter".into(),
+        }
+    }
+    fn load(settings: RawDefaults) -> DevelopDefaults {
+        DevelopDefaults::with_presets(settings, |id| {
+            (id == "brighter").then(|| brighter_preset(id))
+        })
+    }
+
+    #[test]
+    fn out_of_the_box_defaults_are_adobe_default() {
+        let m = x100f();
+        let profiles = profiles(&m);
+        let r = DevelopDefaults::default().resolve(&m, &profiles);
+        assert_eq!(r.recipe, Recipe::with_profiles(&m, &profiles));
+        assert_eq!(r.recipe.profile.unwrap().name, "Adobe Color");
+        assert_eq!(r.name, "Adobe Default");
+        assert!(r.note.is_none());
+    }
+
+    #[test]
+    fn rawmakase_default_uses_rawmakase_color_even_with_adobe_profiles() {
+        let m = x100f();
+        let profiles = profiles(&m);
+        let defaults = load(RawDefaults {
+            master: DefaultChoice::Rawmakase,
+            ..Default::default()
+        });
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe.profile.as_ref().unwrap().name, open::COLOR);
+        // Only the profile differs from Adobe Default.
+        let adobe = Recipe::with_profiles(&m, &profiles);
+        assert_eq!(
+            Recipe {
+                profile: adobe.profile.clone(),
+                ..r.recipe
+            },
+            adobe
+        );
+        // Without RAWmakase Color for this camera, as Adobe Default.
+        let only_adobe: Vec<_> = profiles
+            .iter()
+            .filter(|p| p.name != open::COLOR)
+            .cloned()
+            .collect();
+        let r = defaults.resolve(&m, &only_adobe);
+        assert_eq!(r.recipe.profile.unwrap().name, "Adobe Color");
+    }
+
+    #[test]
+    fn a_camera_override_beats_the_master_while_overrides_are_on() {
+        let (m, other) = (x100f(), other_camera());
+        let mut settings = RawDefaults {
+            master: DefaultChoice::Rawmakase,
+            camera_overrides: true,
+            ..Default::default()
+        };
+        settings.set_camera("Fujifilm X100F", preset_choice("brighter"));
+        let defaults = load(settings.clone());
+        let r = defaults.resolve(&m, &profiles(&m));
+        assert_eq!(r.name, "Brighter");
+        assert_eq!(r.recipe.exposure, 0.7);
+        assert_eq!(r.recipe.profile.unwrap().name, "Adobe Color");
+        // Another camera has the master.
+        let r = defaults.resolve(&other, &profiles(&other));
+        assert_eq!(r.name, "RAWmakase Default");
+        assert_eq!(r.recipe.exposure, 0.);
+        // Overrides off: the master for every camera, the camera's choice kept.
+        settings.camera_overrides = false;
+        let defaults = load(settings);
+        assert_eq!(
+            defaults.resolve(&m, &profiles(&m)).name,
+            "RAWmakase Default"
+        );
+        assert_eq!(defaults.settings().cameras.len(), 1);
+    }
+
+    #[test]
+    fn a_missing_or_unusable_preset_falls_back_to_adobe_default_with_a_note() {
+        let m = x100f();
+        let profiles = profiles(&m);
+        let adobe = Recipe::with_profiles(&m, &profiles);
+        let defaults = load(RawDefaults {
+            master: preset_choice("gone"),
+            ..Default::default()
+        });
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe, adobe);
+        assert_eq!(r.name, "Adobe Default");
+        assert!(r.note.unwrap().contains("‘Brighter’ is missing"));
+        // A preset for another camera only.
+        let mut restricted = brighter_preset("brighter");
+        restricted
+            .blockers
+            .push("This preset is for another camera".into());
+        let defaults = DevelopDefaults::with_presets(
+            RawDefaults {
+                master: preset_choice("brighter"),
+                ..Default::default()
+            },
+            |_| Some(restricted.clone()),
+        );
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe, adobe);
+        assert!(r.note.unwrap().contains("another camera"));
+    }
+
+    #[test]
+    fn cameras_match_by_lightroom_name_or_model() {
+        let m = x100f();
+        assert_eq!(camera_name(&m), "Fujifilm X100F");
+        assert_eq!(camera_name(&other_camera()), "Canon EOS R5");
+        let sony = Metadata {
+            make: "Sony".into(),
+            model: "ILCE-7CR".into(),
+            ..Default::default()
+        };
+        assert!(same_camera("ILCE-7CR", &sony));
+        assert!(same_camera("sony ilce-7cr", &sony));
+        assert!(same_camera("Canon EOS R5", &other_camera()));
+        assert!(!same_camera("Canon EOS R6", &other_camera()));
+        assert!(!same_camera("", &Metadata::default()));
+    }
+
+    #[test]
+    fn settings_round_trip_and_read_old_or_newer_files() {
+        let mut settings = RawDefaults {
+            master: preset_choice("brighter"),
+            camera_overrides: true,
+            ..Default::default()
+        };
+        settings.set_camera("Canon EOS R5", DefaultChoice::Rawmakase);
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RawDefaults>(&json).unwrap(),
+            settings
+        );
+        // Before raw defaults: none.
+        assert_eq!(
+            serde_json::from_str::<RawDefaults>("{}").unwrap(),
+            RawDefaults::default()
+        );
+        // A choice from a newer release is Adobe Default; its camera entries that
+        // don't read are left out, the rest kept.
+        let newer = r#"{"master":{"kind":"camera_settings"},"camera_overrides":true,
+            "cameras":[{"camera":"A","choice":{"kind":"hdr"}},
+                       {"camera":"B","choice":{"kind":"rawmakase"}}],"later":1}"#;
+        let read: RawDefaults = serde_json::from_str(newer).unwrap();
+        assert_eq!(read.master, DefaultChoice::Adobe);
+        assert_eq!(read.cameras.len(), 1);
+        assert_eq!(read.cameras[0].camera, "B");
+        // A session from before raw defaults, or with ones that don't read, keeps
+        // everything else.
+        let old: crate::storage::Session =
+            serde_json::from_str(r#"{"last_path":null,"monitor":null,"auto_advance":true}"#)
+                .unwrap();
+        assert_eq!(old.raw_defaults, RawDefaults::default());
+        let odd: crate::storage::Session = serde_json::from_str(
+            r#"{"last_path":null,"monitor":null,"auto_advance":true,"raw_defaults":7}"#,
+        )
+        .unwrap();
+        assert!(odd.auto_advance);
+        assert_eq!(odd.raw_defaults, RawDefaults::default());
+        let session = crate::storage::Session {
+            raw_defaults: settings.clone(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let back: crate::storage::Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.raw_defaults, settings);
+    }
+}

@@ -71,6 +71,18 @@ pub fn load_library() -> Library {
     library.errors.extend(errors);
     library
 }
+/// The preset `id` names (see `Preset::id`): a built-in one, or an installed
+/// file. `None` once it is gone or no longer reads.
+pub fn find_preset(id: &str) -> Option<Preset> {
+    if id.starts_with("builtin:") {
+        return super::builtin::presets().0.into_iter().find(|p| p.id == id);
+    }
+    let path = Path::new(id);
+    if std::fs::metadata(path).ok()?.len() >= 8_000_000 {
+        return None;
+    }
+    parse(path, &std::fs::read_to_string(path).ok()?).ok()
+}
 pub fn favorite_path() -> PathBuf {
     crate::storage::data_dir().join("preset-favorites.json")
 }

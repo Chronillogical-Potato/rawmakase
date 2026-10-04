@@ -69,6 +69,7 @@ impl Editor {
                 } if id == self.load.id() => {
                     self.document.profiles = profiles;
                     self.document.profile_errors = errors;
+                    self.refresh_photo_defaults();
                     self.refresh_preset_support();
                     if std::mem::take(&mut self.document.pending_lightroom) {
                         self.apply_lightroom_edits();
@@ -220,7 +221,7 @@ impl Editor {
     fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
         match result {
-            Ok(l) => {
+            Ok(mut l) => {
                 self.load.invalidate();
                 // The photo being left is Previous, as when moving between photos.
                 if let Some(settings) = self.current_settings() {
@@ -244,6 +245,7 @@ impl Editor {
                 if !reloaded {
                     self.undo_log.clear();
                 }
+                l.set_defaults(self.raw_defaults.clone());
                 self.library = Some(l);
                 self.library_mode = true;
                 // On launch, return to the folder, photo and module of last time.
@@ -298,6 +300,7 @@ impl Editor {
             self.document.snapshots.list = l.catalog.snapshots(photo).unwrap_or_default();
             match l.catalog.load_edit(photo, &p) {
                 Ok(Some(saved)) => {
+                    self.document.origin = super::state::EditOrigin::Saved;
                     self.document.recipe = saved.recipe;
                     self.document.export = saved.export;
                     // A History that cannot be read leaves the edit as it is.
@@ -316,8 +319,13 @@ impl Editor {
                     // Lightroom shows it, once camera profiles are known.
                     self.document.pending_lightroom =
                         l.photo(photo).is_some_and(|p| p.has_lightroom_edits);
+                    if self.document.pending_lightroom {
+                        self.document.origin = super::state::EditOrigin::Lightroom;
+                    }
                 }
                 Err(e) => {
+                    // Unreadable is not unedited: it must not follow the defaults.
+                    self.document.origin = super::state::EditOrigin::Saved;
                     self.document.save.protect(e.to_string());
                     self.document.lightroom_notice = e.to_string();
                 }

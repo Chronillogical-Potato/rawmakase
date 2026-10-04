@@ -11,6 +11,7 @@ use crate::{
     catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory},
     develop::{
         Recipe,
+        defaults::DevelopDefaults,
         settings_groups::{self, GroupSelection, Source, Target},
     },
     export::ExportOptions,
@@ -136,6 +137,7 @@ pub(super) fn synchronize(
     source: &Settings,
     change: &BatchChange,
     targets: &[SyncTarget],
+    defaults: &DevelopDefaults,
 ) -> SyncResult {
     let mut result = SyncResult {
         change: change.clone(),
@@ -144,7 +146,7 @@ pub(super) fn synchronize(
     };
     let mut prepared = Vec::new();
     for target in targets {
-        match prepare(catalog, source, change, target) {
+        match prepare(catalog, source, change, target, defaults) {
             Ok(p) => {
                 result.notes.extend(p.notes.iter().map(|note| SyncNote {
                     name: target.name.clone(),
@@ -206,6 +208,7 @@ fn prepare(
     source: &Settings,
     change: &BatchChange,
     target: &SyncTarget,
+    defaults: &DevelopDefaults,
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
@@ -217,7 +220,7 @@ fn prepare(
     let (before, export) = match catalog.load_edit(target.id, &target.path)? {
         Some(saved) => (EditBefore::Saved(Box::new(saved.recipe)), saved.export),
         None => {
-            let start = starting_edit(catalog, target, &metadata, &profiles)?;
+            let start = starting_edit(catalog, target, &metadata, &profiles, defaults)?;
             starting_warnings = start.warnings;
             (
                 EditBefore::None {
@@ -321,19 +324,22 @@ fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<
     Some((source.recipe.exposure + difference).clamp(-5., 5.))
 }
 
-/// The edit Develop opens a photo with when RAWmakase has none: its Lightroom edit,
-/// else the camera defaults. A Lightroom edit that cannot be read fails the photo
-/// rather than losing its unsynchronized settings.
+/// The edit Develop opens a photo with when RAWmakase has none: its Lightroom edit
+/// (converted from Adobe Default, as Lightroom stores it), else the raw defaults. A
+/// Lightroom edit that cannot be read fails the photo rather than losing its
+/// unsynchronized settings.
 fn starting_edit(
     catalog: &Catalog,
     target: &SyncTarget,
     metadata: &crate::raw::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+    defaults: &DevelopDefaults,
 ) -> Result<Starting> {
     if target.start == StartingEdit::Defaults {
+        let resolved = defaults.resolve(metadata, profiles);
         return Ok(Starting {
-            recipe: Recipe::with_profiles(metadata, profiles),
-            warnings: Vec::new(),
+            recipe: resolved.recipe,
+            warnings: resolved.note.into_iter().collect(),
         });
     }
     let text = catalog
@@ -501,6 +507,7 @@ impl Editor {
         };
         let catalog = library.catalog.path.clone();
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
+        let defaults = self.raw_defaults.clone();
         // Moving to another photo or catalog waits, so neither can see an edit change
         // underneath it.
         if !self.activity.begin_sync() {
@@ -514,7 +521,8 @@ impl Editor {
         std::thread::spawn(move || {
             // A panic (in Upright's analysis, say) still finishes the Sync.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Catalog::open(&catalog).map(|c| synchronize(&c, &source, &change, &targets))
+                Catalog::open(&catalog)
+                    .map(|c| synchronize(&c, &source, &change, &targets, &defaults))
             }))
             .unwrap_or_else(|_| Err(anyhow::anyhow!("the Sync failed unexpectedly")))
             .unwrap_or_else(|e| SyncResult {
@@ -635,6 +643,7 @@ mod tests {
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
+            &DevelopDefaults::default(),
         );
         // The file that isn't a photo is reported; the two charts are saved.
         assert_eq!(result.synced.len(), 2);
@@ -699,6 +708,7 @@ mod tests {
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..1],
+            &DevelopDefaults::default(),
         );
         assert_eq!(again.synced.len(), 1);
         restore(&c, &again.synced, SyncSide::Before, path)?;
@@ -711,6 +721,7 @@ mod tests {
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..2],
+            &DevelopDefaults::default(),
         );
         assert!(again.synced.is_empty() && again.failed.is_empty());
         // A file changed while it had no edit is not given the old settings again.
@@ -763,6 +774,7 @@ mod tests {
             &source,
             &BatchChange::MatchTotalExposures,
             &[target(photos[1].0, &photos[1].1)],
+            &DevelopDefaults::default(),
         );
         assert!(result.synced.is_empty());
         assert!(
@@ -812,6 +824,7 @@ mod tests {
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
+            &DevelopDefaults::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert_eq!(c.load_edit(id, &path)?.unwrap().recipe.exposure, 0.);
@@ -838,6 +851,7 @@ mod tests {
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
+            &DevelopDefaults::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert!(result.failed[0].reason.contains("Lightroom edit"));
@@ -849,6 +863,62 @@ mod tests {
             "{:?}",
             result.notes
         );
+        Ok(())
+    }
+
+    #[test]
+    fn photos_without_an_edit_start_from_the_raw_defaults_and_lightroom_edits_from_adobe_default()
+    -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: c,
+            photos,
+        } = catalog()?;
+        let lightroom_text = "s = { Exposure2012 = 0.25 }";
+        rusqlite::Connection::open(&c.path)?.execute(
+            "UPDATE photos SET lightroom_develop=? WHERE id=?",
+            rusqlite::params![lightroom_text, photos[1].0],
+        )?;
+        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let (profiles, _) = crate::camera_profiles::installed(&metadata);
+        let mut source = Recipe::with_profiles(&metadata, &profiles);
+        source.effects.clarity = 0.2;
+        let source = Settings {
+            recipe: source,
+            metadata: metadata.clone(),
+        };
+        let mut lightroom = target(photos[1].0, &photos[1].1);
+        lightroom.start = StartingEdit::Lightroom;
+        let targets = [lightroom, target(photos[2].0, &photos[2].1)];
+        let mut clarity = GroupSelection::none();
+        clarity.set(
+            settings_groups::SettingGroup::Clarity,
+            settings_groups::GroupInclusion::Included,
+        );
+        let defaults = crate::develop::defaults::brighter_defaults();
+        let result = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(clarity),
+            &targets,
+            &defaults,
+        );
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        let starting = |id: i64| match &result.synced.iter().find(|s| s.id == id).unwrap().before {
+            EditBefore::None { starting } => (**starting).clone(),
+            EditBefore::Saved(_) => panic!("photo {id} had no edit"),
+        };
+        // The Lightroom edit is relative to Adobe Default, whatever the raw defaults.
+        let converted =
+            crate::catalog::convert_develop(lightroom_text, &metadata, &profiles, None)?.0;
+        assert_eq!(starting(photos[1].0), converted);
+        assert_eq!(converted.exposure, 0.25);
+        // The photo without one starts from the raw defaults.
+        let start = starting(photos[2].0);
+        assert_eq!(start, defaults.resolve(&metadata, &profiles).recipe);
+        assert_eq!(start.exposure, 0.7);
+        let saved = c.load_edit(photos[2].0, &photos[2].1)?.unwrap().recipe;
+        assert_eq!((saved.exposure, saved.effects.clarity), (0.7, 0.2));
         Ok(())
     }
 }

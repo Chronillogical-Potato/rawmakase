@@ -198,6 +198,14 @@ impl Default for Recipe {
         }
     }
 }
+/// Which profile a photo's starting settings use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfilePreference {
+    /// Adobe Color, else Adobe Standard, else the DNG's own, else RAWmakase Color.
+    Adobe,
+    /// RAWmakase Color wherever it fits the camera, else as `Adobe`.
+    Rawmakase,
+}
 impl Recipe {
     /// Profile-internal controls are evaluated without changing the user's sliders.
     pub(crate) fn with_profile_adjustments(&self) -> std::borrow::Cow<'_, Self> {
@@ -228,9 +236,18 @@ impl Recipe {
             ..Default::default()
         }
     }
+    /// Lightroom's Adobe Default: the settings a photo starts from.
     pub fn with_profiles(
         m: &Metadata,
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+    ) -> Self {
+        Self::with_profile_preference(m, profiles, ProfilePreference::Adobe)
+    }
+    /// The starting settings, with the profile `preference` picks.
+    pub fn with_profile_preference(
+        m: &Metadata,
+        profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+        preference: ProfilePreference,
     ) -> Self {
         let mut recipe = Self::for_metadata(m);
         let find = |name: &str| {
@@ -238,9 +255,14 @@ impl Recipe {
                 .iter()
                 .find(|p| p.name == name && p.ensure_camera(m).is_ok())
         };
+        let own = match preference {
+            ProfilePreference::Adobe => None,
+            ProfilePreference::Rawmakase => find(crate::camera_profiles::open::COLOR),
+        };
         // As in Lightroom: Adobe Color, else Adobe Standard. Without those, a DNG
         // keeps the profile it embeds, and any other file gets RAWmakase Color.
-        if let Some(profile) = find("Adobe Color")
+        if let Some(profile) = own
+            .or_else(|| find("Adobe Color"))
             .or_else(|| find("Adobe Standard"))
             .or_else(|| {
                 recipe

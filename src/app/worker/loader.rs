@@ -1,7 +1,6 @@
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     decode_cache::DecodeCache,
-    develop::Recipe,
     export::ExportOptions,
     raw::{self, thumbnail},
 };
@@ -123,8 +122,9 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
             let mut raw = raw::Raw::open(&path)?;
             let metadata = raw.metadata.clone();
             let (profiles, warnings) = crate::camera_profiles::installed(&metadata);
-            // The catalog's edit replaces this once the header is installed.
-            let recipe = Recipe::with_profiles(&metadata, &profiles);
+            // The raw defaults; the catalog's edit replaces them once the header
+            // is installed.
+            let recipe = job.defaults.resolve(&metadata, &profiles).recipe;
             send(
                 &tx,
                 &ctx,

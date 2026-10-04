@@ -47,6 +47,19 @@ impl Catalog {
             )
             .optional()?)
     }
+    /// The cameras the catalog's photos were taken with, as photo info names
+    /// them, in alphabetical order.
+    pub fn cameras(&self) -> Result<Vec<String>> {
+        Ok(self
+            .db
+            .prepare(
+                "SELECT DISTINCT camera FROM photo_info
+                 WHERE camera IS NOT NULL AND camera != ''
+                 ORDER BY camera COLLATE NOCASE",
+            )?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
     /// Masters with no info yet, whose files may have it.
     pub fn photos_without_info(&self) -> Result<Vec<i64>> {
         Ok(self

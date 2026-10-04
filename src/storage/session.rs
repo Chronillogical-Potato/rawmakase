@@ -48,6 +48,12 @@ pub struct Session {
     /// The Crop tool's guide overlay.
     #[serde(default)]
     pub crop_guides: CropGuideLayout,
+    /// Preferences > Raw Defaults: what photos without an edit start from.
+    #[serde(
+        default,
+        deserialize_with = "crate::develop::defaults::lenient_settings"
+    )]
+    pub raw_defaults: crate::develop::defaults::RawDefaults,
 }
 
 /// The Crop tool's guide overlay, which way round it is and when it shows, by stable

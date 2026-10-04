@@ -196,6 +196,14 @@ impl ScreenPreviews {
         // Renders on their way may fail as these did: asked for afresh.
         self.pending.clear();
     }
+    /// Forgets every preview, e.g. as the raw defaults changed; renders on
+    /// their way are dropped when they arrive.
+    pub(super) fn clear(&mut self) {
+        self.textures.clear();
+        self.order.clear();
+        self.failed.clear();
+        self.pending.clear();
+    }
     /// Forgets `id`'s previews, as it was removed.
     pub(super) fn forget(&mut self, id: i64) {
         self.textures.retain(|key, _| key.0 != id);

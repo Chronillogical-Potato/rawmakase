@@ -9,6 +9,7 @@ mod color_grade_data;
 mod color_mixer;
 mod crop_constraint;
 pub mod curve;
+pub mod defaults;
 pub mod effects;
 mod geometry;
 pub mod gpu;
@@ -44,7 +45,8 @@ pub use pipeline::{
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
 pub use recipe::{
-    LocalEdits, ProfileCorrections, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT,
+    LocalEdits, ProfileCorrections, ProfilePreference, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN,
+    TINT_LIMIT,
 };
 pub(crate) use rendered::unit_to_u8;
 pub use rendered::{ClipOverlay, Clipped, HIGHLIGHT_CLIP, Histogram, Rendered, SHADOW_CLIP};
