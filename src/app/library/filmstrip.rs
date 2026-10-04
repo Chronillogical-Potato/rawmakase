@@ -198,8 +198,18 @@ impl Library {
                             p.filename,
                             cell::copy_suffix(p)
                         )));
-                        ui.add_space((ui.available_width() - 250.).max(8.));
+                        // Right-aligned by the width the controls took last frame, so
+                        // the row never runs past the window and widens the strip.
+                        let width_id = ui.id().with("controls-width");
+                        let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
+                        ui.add_space((ui.available_width() - width).max(8.));
+                        let start = ui.cursor().left();
                         changed = self.metadata_controls(ui, p.id, whole_selection);
+                        let taken = ui.min_rect().right() - start;
+                        if (taken - width).abs() > 0.5 {
+                            ui.data_mut(|d| d.insert_temp(width_id, taken));
+                            ui.ctx().request_repaint();
+                        }
                     }
                 });
             });
