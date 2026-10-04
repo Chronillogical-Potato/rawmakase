@@ -6,7 +6,7 @@ use super::state::EditOrigin;
 use super::widgets::form_row;
 use crate::app::theme;
 use crate::develop::defaults::{
-    DefaultChoice, DevelopDefaults, RawDefaults, Resolved, camera_name, same_camera,
+    DefaultChoice, DevelopDefaults, RawDefaults, Resolved, camera_name, same_camera, same_name,
 };
 use crate::xmp::Preset;
 use eframe::egui;
@@ -39,11 +39,7 @@ impl Editor {
             return;
         };
         let resolved = self.raw_defaults.resolve(m, &self.document.profiles);
-        let unedited = self.document.origin == EditOrigin::Defaults
-            && self.document.history.steps().0.is_empty()
-            && !self.document.save.needs_save()
-            && !self.document.save.is_protected();
-        if unedited {
+        if self.follows_defaults() {
             if let Some(note) = &resolved.note {
                 self.status = note.clone();
             }
@@ -53,6 +49,29 @@ impl Editor {
             }
         }
         self.document.defaults = Some(resolved);
+    }
+    /// Whether the open photo has no edit, so it shows the raw defaults: none
+    /// when it opened, none begun since, and none saved (export options alone
+    /// make a saved edit too).
+    fn follows_defaults(&self) -> bool {
+        let saved = match (&self.library, self.document.catalog_photo) {
+            (Some(l), Some(id)) => l
+                .catalog
+                .edit_texts(id)
+                .map_or(true, |(recipe, _)| recipe.is_some()),
+            _ => false,
+        };
+        self.document.origin == EditOrigin::Defaults
+            && self.document.history.steps().0.is_empty()
+            && !self.document.save.needs_save()
+            && !self.document.save.is_protected()
+            && !saved
+    }
+    /// Why the open photo shows Adobe Default instead of the raw default chosen
+    /// for it, while it has no edit.
+    pub(super) fn defaults_note(&self) -> Option<String> {
+        let note = self.document.defaults.as_ref()?.note.clone()?;
+        self.follows_defaults().then_some(note)
     }
     /// Makes `settings` the raw defaults, saved with the session, and shows
     /// photos without an edit with them.
@@ -82,7 +101,7 @@ impl Editor {
             cameras.push(camera_name(m));
         }
         for c in &self.raw_defaults.settings().cameras {
-            if !cameras.contains(&c.camera) {
+            if !cameras.iter().any(|n| same_name(n, &c.camera)) {
                 cameras.push(c.camera.clone());
             }
         }
@@ -98,14 +117,8 @@ impl Editor {
             form.camera = open.or(cameras.first()).cloned().unwrap_or_default();
         }
         // Shows the camera's own choice, ready to update.
-        if let Some(own) = self
-            .raw_defaults
-            .settings()
-            .cameras
-            .iter()
-            .find(|c| c.camera == form.camera)
-        {
-            form.choice = own.choice.clone();
+        if let Some(own) = self.raw_defaults.settings().camera_choice(&form.camera) {
+            form.choice = own.clone();
         }
         form.cameras = cameras;
     }
@@ -126,11 +139,7 @@ impl Editor {
         });
         let form = &mut self.preferences.raw_defaults;
         let on = settings.camera_overrides;
-        let existing = settings
-            .cameras
-            .iter()
-            .find(|c| c.camera == form.camera)
-            .map(|c| c.choice.clone());
+        let existing = settings.camera_choice(&form.camera).cloned();
         form_row(ui, "Camera", |ui| {
             ui.add_enabled_ui(on && !form.cameras.is_empty(), |ui| {
                 let shown = if form.camera.is_empty() {
@@ -149,9 +158,9 @@ impl Editor {
                     });
                 // Picking a camera shows its own choice, to update.
                 if form.camera != before
-                    && let Some(own) = settings.cameras.iter().find(|c| c.camera == form.camera)
+                    && let Some(own) = settings.camera_choice(&form.camera)
                 {
-                    form.choice = own.choice.clone();
+                    form.choice = own.clone();
                 }
             });
         });
@@ -406,6 +415,96 @@ mod tests {
         let library = editor.library.as_ref().unwrap();
         assert_eq!(library.catalog.load_edit(id, &raw)?.unwrap().recipe, edited);
         Ok(())
+    }
+
+    #[test]
+    fn export_options_alone_make_a_saved_edit_that_defaults_leave_alone() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let raw = dir.path().join("photo.ARW");
+        std::fs::write(&raw, b"identity fixture")?;
+        let path = dir.path().join("photos.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&path)?;
+        catalog.add_folder(dir.path())?;
+        let id = catalog.photos()?[0].id;
+        drop(catalog);
+        let ctx = egui::Context::default();
+        let m = x100f();
+        let adobe = Recipe::with_profiles(&m, &profiles(&m));
+        let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+        editor.library = Some(Box::new(crate::app::library::Library::load(
+            &path,
+            ctx.clone(),
+        )?));
+        editor.document.reset(Some(id));
+        let (generation, _) = editor.load.start();
+        editor
+            .tx
+            .send(Event::Header(Box::new(LoadedHeader {
+                id: generation,
+                path: raw.clone(),
+                metadata: m.clone(),
+                recipe: adobe.clone(),
+                export: Default::default(),
+                protected: false,
+                status: "Original".into(),
+            })))
+            .unwrap();
+        editor.events(&ctx);
+        editor.document.export.quality = 50;
+        editor.document.save.mark_changed();
+        assert!(editor.flush());
+        editor.set_raw_defaults(lighten());
+        assert_eq!(editor.document.recipe, adobe);
+        Ok(())
+    }
+
+    #[test]
+    fn a_fallback_note_outlasts_the_decode_status() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+        let m = x100f();
+        editor.document.profiles = profiles(&m);
+        editor.document.metadata = Some(m);
+        editor.raw_defaults = Arc::new(DevelopDefaults::with_presets(
+            RawDefaults {
+                master: DefaultChoice::Preset {
+                    id: "gone".into(),
+                    name: "Gone".into(),
+                },
+                ..Default::default()
+            },
+            |_| None,
+        ));
+        editor.refresh_photo_defaults();
+        let (generation, _) = editor.load.start();
+        editor
+            .tx
+            .send(Event::Ready {
+                id: generation,
+                full: Arc::new(crate::raw::CameraImage {
+                    recovered: Default::default(),
+                    width: 12,
+                    height: 8,
+                    pixels: vec![[0.1; 3]; 96],
+                    metadata: Metadata {
+                        width: 12,
+                        height: 8,
+                        ..x100f()
+                    },
+                    fast: false,
+                    scale_factor: 1.,
+                    scale_clipped: 0,
+                }),
+                status: "Developed in 0.20s".into(),
+            })
+            .unwrap();
+        editor.events(&ctx);
+        assert!(editor.status.starts_with("Developed in 0.20s · "));
+        assert!(
+            editor.status.contains("‘Gone’ is missing"),
+            "{}",
+            editor.status
+        );
     }
 
     #[test]

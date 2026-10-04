@@ -127,7 +127,11 @@ impl Editor {
                     // An Upright mode chosen before the photo decoded still needs analysing.
                     self.ensure_upright();
                     if !self.document.save.is_protected() {
-                        self.status = status;
+                        // A raw default that could not be used stays explained.
+                        self.status = match self.defaults_note() {
+                            Some(note) => format!("{status} · {note}"),
+                            None => status,
+                        };
                     }
                     self.schedule();
                 }

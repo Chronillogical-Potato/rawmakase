@@ -480,8 +480,10 @@ impl Editor {
                         let (profiles, errors) = crate::camera_profiles::installed(m);
                         self.document.profiles = profiles;
                         self.document.profile_errors = errors;
-                        // Importing never changes the active edit: the user picks
-                        // a profile, and new photos use the imported default.
+                        // Importing never changes an edit: the user picks a
+                        // profile. A photo without one follows the raw defaults,
+                        // which may now resolve to an imported profile.
+                        self.refresh_photo_defaults();
                         self.refresh_preset_support();
                     }
                 }

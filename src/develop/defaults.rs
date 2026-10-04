@@ -74,10 +74,14 @@ impl RawDefaults {
             .flatten()
             .map_or(&self.master, |c| &c.choice)
     }
-    /// Sets `camera`'s own choice, replacing any it had.
+    /// Sets `camera`'s own choice, replacing any it had under this name or
+    /// another for the same camera ("ILCE-7CR" and "Sony ILCE-7CR").
     pub fn set_camera(&mut self, camera: &str, choice: DefaultChoice) {
-        match self.cameras.iter_mut().find(|c| c.camera == camera) {
-            Some(c) => c.choice = choice,
+        match self.camera(camera) {
+            Some(c) => {
+                c.camera = camera.into();
+                c.choice = choice;
+            }
             None => {
                 self.cameras.push(CameraDefault {
                     camera: camera.into(),
@@ -86,6 +90,18 @@ impl RawDefaults {
                 self.cameras.sort_by(|a, b| a.camera.cmp(&b.camera));
             }
         }
+    }
+    fn camera(&mut self, camera: &str) -> Option<&mut CameraDefault> {
+        self.cameras
+            .iter_mut()
+            .find(|c| same_name(&c.camera, camera))
+    }
+    /// `camera`'s own choice, under this name or another for the same camera.
+    pub fn camera_choice(&self, camera: &str) -> Option<&DefaultChoice> {
+        self.cameras
+            .iter()
+            .find(|c| same_name(&c.camera, camera))
+            .map(|c| &c.choice)
     }
     fn choices(&self) -> impl Iterator<Item = &DefaultChoice> {
         std::iter::once(&self.master).chain(self.cameras.iter().map(|c| &c.choice))
@@ -104,6 +120,13 @@ pub fn camera_name(m: &Metadata) -> String {
     } else {
         format!("{make} {model}")
     }
+}
+/// Whether two camera names are the same camera: equal, or one the other after
+/// the make ("ILCE-7CR", "Sony ILCE-7CR").
+pub fn same_name(a: &str, b: &str) -> bool {
+    let (a, b) = (a.trim().to_lowercase(), b.trim().to_lowercase());
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    !short.is_empty() && (short == long || long.ends_with(&format!(" {short}")))
 }
 /// Whether `name`, from this catalog or Lightroom's, is the photo's camera. Lightroom
 /// names some cameras by model alone ("ILCE-7CR"), others with the make.
@@ -198,11 +221,18 @@ impl DevelopDefaults {
                 // No photo: Auto settings in a default are not measured, so the
                 // photo opens, resets and previews the same everywhere.
                 match preset.apply(&adobe(), m, profiles, None) {
-                    Ok(recipe) => Resolved {
-                        recipe,
-                        name: choice.label(),
-                        note: None,
-                    },
+                    Ok(mut recipe) => {
+                        // Upright would need analysing on each photo; a default
+                        // leaves it off, so every view renders the same.
+                        if recipe.upright.corrections.len() <= recipe.upright.mode.code() {
+                            recipe.upright = Default::default();
+                        }
+                        Resolved {
+                            recipe,
+                            name: choice.label(),
+                            note: None,
+                        }
+                    }
                     Err(e) => fallback(format!(
                         "Raw default ‘{}’ doesn't apply to this photo ({e:#}); using Adobe Default",
                         choice.label()
@@ -406,6 +436,46 @@ mod tests {
         let r = defaults.resolve(&m, &profiles);
         assert_eq!(r.recipe, adobe);
         assert!(r.note.unwrap().contains("another camera"));
+    }
+
+    #[test]
+    fn a_camera_has_one_default_whichever_name_it_was_set_under() {
+        let mut settings = RawDefaults::default();
+        settings.set_camera("ILCE-7CR", DefaultChoice::Rawmakase);
+        settings.set_camera("Sony ILCE-7CR", preset_choice("brighter"));
+        assert_eq!(settings.cameras.len(), 1);
+        assert_eq!(settings.cameras[0].camera, "Sony ILCE-7CR");
+        assert_eq!(
+            settings.camera_choice("ilce-7cr"),
+            Some(&preset_choice("brighter"))
+        );
+        settings.set_camera("ILCE-7C", DefaultChoice::Rawmakase);
+        assert_eq!(settings.cameras.len(), 2);
+    }
+
+    #[test]
+    fn a_default_preset_leaves_upright_off() {
+        let m = x100f();
+        let profiles = profiles(&m);
+        let mut upright = brighter_preset("upright");
+        upright
+            .settings
+            .insert("PerspectiveUpright".into(), "1".into());
+        // The preset itself sets Auto Upright, to be analysed on the photo.
+        let applied = upright
+            .apply(&Recipe::with_profiles(&m, &profiles), &m, &profiles, None)
+            .unwrap();
+        assert_ne!(applied.upright.mode, crate::develop::UprightMode::Off);
+        let defaults = DevelopDefaults::with_presets(
+            RawDefaults {
+                master: preset_choice("upright"),
+                ..Default::default()
+            },
+            |_| Some(upright.clone()),
+        );
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe.upright, Default::default());
+        assert_eq!(r.recipe.exposure, 0.7);
     }
 
     #[test]

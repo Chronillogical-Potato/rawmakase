@@ -1401,6 +1401,7 @@ impl Editor {
                     let (profiles, errors) = crate::camera_profiles::installed(&m);
                     self.document.profiles = profiles;
                     self.document.profile_errors = errors;
+                    self.refresh_photo_defaults();
                     self.refresh_preset_support();
                     self.status = format!(
                         "Imported {} Adobe profiles for {} {}. Choose one from the Profile menu.",
