@@ -2911,8 +2911,12 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     // A request lapses when the recipe changes otherwise before the photo decodes.
     let (mut editor, image) =
         editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+    let before_exposure = editor.document.recipe.exposure;
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     in_edit_frame(&ctx, &mut editor, |e| e.document.recipe.exposure = 0.5);
+    // Undone again before it decodes: the request still lapsed.
+    in_edit_frame(&ctx, &mut editor, Editor::undo);
+    assert_eq!(editor.document.recipe.exposure, before_exposure);
     editor.document.set_image(image);
     in_edit_frame(&ctx, &mut editor, Editor::finish_pending_treatment);
     assert!(!editor.document.recipe.effects.monochrome);

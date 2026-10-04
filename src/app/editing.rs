@@ -73,6 +73,9 @@ impl Editor {
         );
         if edited {
             self.document.save.mark_changed();
+            // A conversion waiting for the photo lapses with any other edit, Undo
+            // included.
+            self.document.pending_treatment = None;
         }
         if edited || frame.modes != self.render_modes() || frame.overlay != self.overlay() {
             self.schedule();
