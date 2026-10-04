@@ -467,11 +467,14 @@ jobs:
       - name: Record the published asset list
         run: |
           ls -1 dist > "$RUNNER_TEMP/expected-assets.txt"
+          (cd dist && sha256sum -- *) > "$RUNNER_TEMP/expected-checksums.txt"
           cat "$RUNNER_TEMP/expected-assets.txt"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: expected-assets
-          path: ${{ runner.temp }}/expected-assets.txt
+          path: |
+            ${{ runner.temp }}/expected-assets.txt
+            ${{ runner.temp }}/expected-checksums.txt
           if-no-files-found: error
 
   # Users and coding agents install from the release page, so the release is
@@ -490,18 +493,13 @@ jobs:
         with:
           name: expected-assets
           path: expected
-      # The updater's trusted key comes from the tagged source, like in publish.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          sparse-checkout: assets
-          persist-credentials: false
       - name: Verify the published downloads
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
+          export LC_ALL=C
           work="$RUNNER_TEMP/verify"
           assets="$work/assets"
           mkdir -p "$assets"
@@ -523,6 +521,28 @@ jobs:
               failures=$((failures + 1))
             fi
           done < "$work/expected.txt"
+          # Compare every downloaded file (including the signature) with the
+          # exact bytes from publish, independently of the release manifests.
+          if ! (cd "$assets" && sha256sum --check --strict "$GITHUB_WORKSPACE/expected/expected-checksums.txt"); then
+            echo "::error::published bytes differ from this run's upload"
+            failures=$((failures + 1))
+          fi
+          # A valid manifest can still omit a package. Require exact coverage,
+          # excluding only manifests/signature that do not exist at generation.
+          for manifest in SHA256SUMS checksums.txt; do
+            sed '/^checksums\.txt$/d; /^checksums\.txt\.sig$/d' "$work/expected.txt" > "$work/coverage.txt"
+            if [ "$manifest" = SHA256SUMS ]; then
+              sed '/^SHA256SUMS$/d' "$work/coverage.txt" > "$work/coverage.tmp"
+              mv "$work/coverage.tmp" "$work/coverage.txt"
+            fi
+            if ! cut -c 67- "$assets/$manifest" | sort > "$work/listed.txt"; then
+              echo "::error::cannot read $manifest"
+              failures=$((failures + 1))
+            elif ! diff -u "$work/coverage.txt" "$work/listed.txt"; then
+              echo "::error::$manifest does not cover exactly the expected assets"
+              failures=$((failures + 1))
+            fi
+          done
           # --strict, without --ignore-missing: every asset the manifests name
           # has to be present with the published bytes. checksums.txt covers
           # SHA256SUMS as well, so a stale manifest cannot pass either.
@@ -565,7 +585,7 @@ jobs:
             echo "- preserved assets added by hand: $(wc -l < "$work/preserved.txt")"
             if [ "$failures" -eq 0 ]; then
               echo
-              echo "PASS: every published asset downloads and matches both manifests."
+              echo "PASS: every expected asset matches the upload and both manifests have complete, valid checksums."
             else
               echo
               echo "FAIL: $failures problem(s) with the published release."
@@ -575,7 +595,7 @@ jobs:
             echo "::error::$failures problem(s) with the published $RELEASE_TAG; see the errors above."
             exit 1
           fi
-          echo "PASS: every asset of $RELEASE_TAG downloads, matches SHA256SUMS and checksums.txt, and signs correctly."
+          echo "PASS: every expected asset of $RELEASE_TAG matches the uploaded bytes; both manifests have complete, valid checksums."
 
   website:
     name: Update website downloads
