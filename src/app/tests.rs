@@ -3093,6 +3093,29 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0);
     assert!(editor.presets.amount.is_some());
+    // A preset with only choices that aren't numbers looks the same at every Amount
+    // above 0: moving it is no step, and leaves no name for the next one.
+    editor.presets.library = Arc::new(crate::presets::Library {
+        presets: vec![preset_from(
+            "Mono",
+            r#"crs:SupportsAmount="True" crs:ConvertToGrayscale="True""#,
+        )],
+        errors: Vec::new(),
+    });
+    let frame = editor.begin_edit_frame();
+    editor.apply_preset(0);
+    editor.finish_edit_frame(frame, &ctx);
+    let frame = editor.begin_edit_frame();
+    editor.set_preset_amount(0.5);
+    editor.finish_edit_frame(frame, &ctx);
+    let frame = editor.begin_edit_frame();
+    editor.document.recipe.exposure = 0.9;
+    editor.finish_edit_frame(frame, &ctx);
+    editor.end_stale_preset_amount();
+    assert!(editor.presets.amount.is_none());
+    editor.apply_preset(0);
+    let (steps, applied) = editor.document.history.steps();
+    assert_ne!(steps[applied - 1].name, "Preset Amount");
     // Undo ends it too.
     let mut recipe = editor.document.recipe.clone();
     editor.document.history.undo(&mut recipe);

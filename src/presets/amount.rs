@@ -159,8 +159,12 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.reference_color = full.reference_color;
 }
 
-/// A slider between `a` and `b`, kept within `lo..=hi`.
+/// A slider between `a` and `b`, kept within `lo..=hi`. One the preset leaves alone
+/// stays as it was, even outside the slider's range (an imported Exposure of +6).
 fn lerp(a: f32, b: f32, t: f32, lo: f32, hi: f32) -> f32 {
+    if a == b {
+        return a;
+    }
     (a + (b - a) * t).clamp(lo, hi)
 }
 fn lerp_all<const N: usize>(a: [f32; N], b: [f32; N], t: f32, lo: f32, hi: f32) -> [f32; N] {
@@ -274,13 +278,23 @@ fn effects(a: &Effects, b: &Effects, t: f32) -> Effects {
         chroma_detail,
         chroma_smoothness,
     } = b;
-    let splits = {
-        let s = lerp_all(a.splits, *splits, t, 0.01, 0.99);
-        if s[0] < s[1] && s[1] < s[2] {
-            s
-        } else {
-            *splits
+    // Region boundaries stay in order: past the Amount where two would meet, they stop
+    // there rather than jump back.
+    let ordered = |s: [f32; 3]| s[0] < s[1] && s[1] < s[2];
+    let splits_at = |t: f32| lerp_all(a.splits, *splits, t, 0.01, 0.99);
+    let splits = if ordered(splits_at(t)) {
+        splits_at(t)
+    } else {
+        let (mut good, mut bad) = (t.min(1.), t);
+        for _ in 0..24 {
+            let mid = (good + bad) / 2.;
+            if ordered(splits_at(mid)) {
+                good = mid;
+            } else {
+                bad = mid;
+            }
         }
+        splits_at(good)
     };
     Effects {
         channels: std::array::from_fn(|i| curve(&a.channels[i], &channels[i], t)),

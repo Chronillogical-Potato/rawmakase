@@ -404,11 +404,15 @@ impl Editor {
         };
         session.amount = amount;
         session.shown = session.scale.at(amount, m);
-        self.document.recipe = session.shown.clone();
-        self.document.history.label(super::history::Step::new(
-            "Preset Amount",
-            format!("{:.0}", amount * 100.),
-        ));
+        // Named only when it changes the photo: a label left over would name the
+        // next edit.
+        if session.shown != self.document.recipe {
+            self.document.recipe = session.shown.clone();
+            self.document.history.label(super::history::Step::new(
+                "Preset Amount",
+                format!("{:.0}", amount * 100.),
+            ));
+        }
     }
     /// Ends the Amount once anything else has changed the photo, as Lightroom hides it.
     pub(super) fn end_stale_preset_amount(&mut self) {

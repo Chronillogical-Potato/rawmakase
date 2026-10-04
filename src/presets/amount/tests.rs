@@ -308,3 +308,39 @@ fn every_amount_is_a_valid_recipe_at_the_extremes() {
         }
     }
 }
+
+/// A setting the preset leaves alone keeps its value, even outside the slider's range.
+#[test]
+fn settings_the_preset_leaves_alone_stay_as_they_were() {
+    let m = metadata();
+    let before = Recipe {
+        exposure: 6.,
+        ..Default::default()
+    };
+    let full = Recipe {
+        contrast: 0.4,
+        ..before.clone()
+    };
+    for t in [0.5, 2.] {
+        assert_eq!(amount(&before, &full).at(t, &m).exposure, 6.);
+    }
+}
+
+/// Parametric region boundaries stop where two would meet rather than jump back.
+#[test]
+fn parametric_splits_keep_growing_until_they_would_cross() {
+    let m = metadata();
+    let before = Recipe::default();
+    let mut full = before.clone();
+    full.effects.splits = [0.1, 0.2, 0.3];
+    let a = amount(&before, &full);
+    let mut last = full.effects.splits[2];
+    for t in [1., 1.2, 1.5, 1.7, 1.9, 2.] {
+        let r = a.at(t, &m);
+        r.validate().unwrap();
+        let top = r.effects.splits[2];
+        assert!(top <= last + 1e-6, "{t}: {top} after {last}");
+        last = top;
+    }
+    assert!(last < 0.2);
+}
