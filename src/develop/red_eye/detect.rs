@@ -236,7 +236,22 @@ pub fn find_pupil(
     if on_rim * 2 > rim_pixels {
         return Err(DetectError::NoEdge);
     }
+    let before = area.clone();
     fill_holes(&mut area, gw, gh);
+    // A glow is a disc, perhaps with a small catchlight in it; a ring around something
+    // darker at its middle (a light iris around an ordinary pupil) is not.
+    if glow == Glow::Bright {
+        let cells: Vec<usize> = (0..gw * gh).filter(|i| area[*i]).collect();
+        let hole = cells.iter().filter(|i| !before[**i]).count();
+        let (mx, my) = cells.iter().fold((0., 0.), |(x, y), i| {
+            (x + (i % gw) as f32, y + (i / gw) as f32)
+        });
+        let n = cells.len().max(1) as f32;
+        let middle = (my / n).round() as usize * gw + (mx / n).round() as usize;
+        if hole * 12 > cells.len() && !before[middle] {
+            return Err(DetectError::NotRed);
+        }
+    }
     // Second moments of the filled area.
     let (mut n, mut mx, mut my) = (0f64, 0f64, 0f64);
     for i in (0..gw * gh).filter(|i| area[*i]) {
