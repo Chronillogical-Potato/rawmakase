@@ -81,6 +81,20 @@ pub(super) fn brush_cursor(painter: &Painter, at: Pos2, radius: f32, feather: f3
     }
     painter.circle_filled(at, 1.5, Color32::WHITE);
 }
+/// A brush stroke along `points` (screen space) as Lightroom draws one: the outline of
+/// everything within `radius` of the path, round at its ends and corners.
+pub(super) fn stroke_outline(painter: &Painter, points: &[Pos2], radius: f32, width: f32) {
+    let edges = super::stroke_outline::outline(points, radius, 2.);
+    for [a, b] in &edges {
+        painter.line_segment(
+            [*a, *b],
+            Stroke::new(width + 1.5, Color32::from_black_alpha(110)),
+        );
+    }
+    for [a, b] in edges {
+        painter.line_segment([a, b], Stroke::new(width, Color32::from_white_alpha(230)));
+    }
+}
 /// A path drawn as a thin outlined line.
 pub(super) fn path(painter: &Painter, points: Vec<Pos2>, color: Color32) {
     painter.add(egui::Shape::line(

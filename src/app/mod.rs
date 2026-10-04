@@ -420,6 +420,7 @@ mod red_eye_tool;
 mod retouch_tool;
 #[cfg(feature = "telemetry")]
 mod stats;
+mod stroke_outline;
 #[cfg(test)]
 mod tests;
 mod undo;
