@@ -354,20 +354,33 @@ impl Library {
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
     }
-    /// What photo `id` is developed from, with its edit or else the defaults
-    /// Develop would open it with, and its edit stamp: for Develop's Reference
-    /// View. Why not, for a photo Develop cannot open; None for a photo no
-    /// longer in the catalog.
+    /// What photo `id` is developed from, as Develop would open it: its saved edit
+    /// (checked as Develop checks it), else its Lightroom edit, else the defaults;
+    /// for Develop's Reference View. Why not, for a photo Develop cannot open; None
+    /// for a photo no longer in the catalog.
     pub(in crate::app) fn develop_source(&self, id: i64) -> Option<Result<DevelopSource, Refusal>> {
         let photo = self.photo(id)?;
         if let Some(refusal) = develop_refusal(photo, photo.path.is_file()) {
             return Some(Err(refusal));
         }
+        let edit = match self.catalog.load_edit(id, &photo.path) {
+            Ok(Some(saved)) => serde_json::to_string(&saved.recipe)
+                .ok()
+                .map(EditSource::Recipe),
+            Ok(None) => self
+                .catalog
+                .edit_texts(id)
+                .ok()
+                .and_then(|(_, lightroom)| lightroom)
+                .map(EditSource::Lightroom),
+            // A protected edit: Develop shows the defaults too.
+            Err(_) => None,
+        }
+        .unwrap_or_else(|| EditSource::Defaults(self.defaults.clone()));
         Some(Ok(DevelopSource {
             path: photo.path.clone(),
-            edit: edit_source(&self.catalog, id)
-                .unwrap_or_else(|| EditSource::Defaults(self.defaults.clone())),
-            stamp: self.catalog.edit_stamp(id).unwrap_or_default(),
+            tag: edit.tag(),
+            edit,
         }))
     }
     pub fn navigate(&self, id: i64, delta: i32) -> Option<i64> {
@@ -659,8 +672,8 @@ impl Refusal {
 pub(in crate::app) struct DevelopSource {
     pub path: std::path::PathBuf,
     pub edit: EditSource,
-    /// Changes whenever its edit does (see `Catalog::edit_stamp`).
-    pub stamp: u64,
+    /// Identifies `edit`, the defaults included: it changes whenever the edit does.
+    pub tag: String,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
 /// `available`.

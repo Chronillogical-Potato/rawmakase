@@ -419,6 +419,8 @@ impl Editor {
             Ok(master) => {
                 self.status = library.message.clone();
                 self.undo_log.forget_photo(id);
+                // The reference, when it was this copy, goes with it.
+                self.load_reference();
                 if self.document.catalog_photo == Some(id) {
                     // Removed from Develop: show its master there instead.
                     if let Some(master) = master

@@ -265,7 +265,15 @@ impl Editor {
             TextureMode::Whole => None,
         };
         let Some(texture) = self.preview.texture.clone().or(region_texture.clone()) else {
-            self.loading_placeholder(ui, whole);
+            // The reference stays on screen, and takes drops, while the Active photo
+            // loads.
+            if self.reference_view() {
+                self.loading_placeholder(ui, panes.after.clip);
+                let reference = self.before_pane_ui(ui, &panes, panes.after.area);
+                self.reference_pointer(ui, &response, &panes, reference);
+            } else {
+                self.loading_placeholder(ui, whole);
+            }
             return;
         };
         let geometry = self

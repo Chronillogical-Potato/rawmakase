@@ -34,8 +34,8 @@ pub(super) struct ReferenceView {
     pub(super) zoom: Zoom,
     /// The reference as developed, once it is.
     loaded: Option<Loaded>,
-    /// The photo and edit being developed, and its generation.
-    pending: Option<(i64, u64)>,
+    /// The photo and edit being developed.
+    pending: Option<(i64, String)>,
     load: super::task::Task,
     /// Why the reference could not be shown.
     pub(super) error: Option<String>,
@@ -57,8 +57,8 @@ impl Default for ReferenceView {
 /// The reference photo as developed.
 struct Loaded {
     photo: i64,
-    /// Its edit stamp then: a later edit develops it again.
-    stamp: u64,
+    /// Its edit's tag then: another edit, or other defaults, develop it again.
+    tag: String,
     image: Arc<CameraImage>,
     recipe: Recipe,
 }
@@ -142,15 +142,16 @@ impl Editor {
             }
             Some(Ok(source)) => source,
         };
-        let wanted = (id, source.stamp);
         let developed = self
             .reference
             .loaded
             .as_ref()
-            .is_some_and(|l| (l.photo, l.stamp) == wanted);
-        if developed || self.reference.pending == Some(wanted) {
+            .is_some_and(|l| l.photo == id && l.tag == source.tag);
+        let pending = self.reference.pending.as_ref();
+        if developed || pending.is_some_and(|(p, tag)| *p == id && *tag == source.tag) {
             return;
         }
+        let wanted = (id, source.tag);
         let (ticket, cancel) = self.reference.load.start();
         self.reference.pending = Some(wanted);
         self.reference.error = None;
@@ -170,7 +171,7 @@ impl Editor {
         if ticket != self.reference.load.id() {
             return;
         }
-        let Some((photo, stamp)) = self.reference.pending else {
+        let Some((photo, tag)) = self.reference.pending.clone() else {
             return;
         };
         match result {
@@ -181,7 +182,7 @@ impl Editor {
                 }
                 self.reference.loaded = Some(Loaded {
                     photo,
-                    stamp,
+                    tag,
                     image: developed.image,
                     recipe: developed.recipe,
                 });
@@ -503,6 +504,55 @@ mod tests {
         editor.preview.before.texture = Some(shown);
         editor.develop_catalog_photo(open);
         assert!(editor.preview.before.texture.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn the_reference_follows_its_edit_the_defaults_and_its_copy() -> anyhow::Result<()> {
+        let mut fixture = fixture()?;
+        let (open, other) = (fixture.open, fixture.other);
+        let editor = &mut fixture.editor;
+        // An unedited reference follows the raw defaults, as Develop does.
+        editor.document.reset(Some(other));
+        editor.set_reference(open);
+        wait_for_reference(editor);
+        editor.set_raw_defaults(crate::develop::defaults::RawDefaults {
+            master: crate::develop::defaults::DefaultChoice::Rawmakase,
+            ..Default::default()
+        })?;
+        assert!(editor.reference.loading());
+        wait_for_reference(editor);
+        // A saved edit is checked as Develop checks it: once the file is replaced,
+        // the edit is protected and the reference shows the defaults.
+        editor.document.reset(Some(open));
+        editor.set_reference(other);
+        wait_for_reference(editor);
+        assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
+        let path = editor
+            .library
+            .as_ref()
+            .unwrap()
+            .photo(other)
+            .unwrap()
+            .path
+            .clone();
+        let replacement =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/charts/synthetic-a.dng");
+        std::fs::copy(replacement, &path)?;
+        editor.load_reference();
+        wait_for_reference(editor);
+        assert_eq!(editor.reference_side().unwrap().recipe.exposure, 0.);
+        // A virtual copy as the reference goes when the copy is removed.
+        let copy = editor
+            .library
+            .as_mut()
+            .unwrap()
+            .create_virtual_copy(other)?;
+        editor.set_reference(copy);
+        wait_for_reference(editor);
+        editor.remove_virtual_copy(copy);
+        assert_eq!(editor.reference.photo, None);
+        assert!(editor.reference_side().is_none());
         Ok(())
     }
 
