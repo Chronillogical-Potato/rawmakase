@@ -2351,3 +2351,36 @@ fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
     let busy = size(&mut e, 320.);
     assert_eq!(plain.size(), busy.size());
 }
+#[test]
+fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"gesture fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
+    let id = l.photos[0].id;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    // A slider still held down when Left or Right leaves the photo.
+    let before = editor.document.recipe.clone();
+    editor.document.recipe.exposure = 0.6;
+    editor
+        .document
+        .history
+        .observe(before, &editor.document.recipe, true);
+    editor.document.save.mark_changed();
+    assert!(editor.flush());
+    assert!(!editor.document.history.in_gesture());
+    let library = editor.library.as_ref().unwrap();
+    let history = library.catalog.load_history(id)?.unwrap();
+    assert_eq!(history.applied, 1);
+    assert_eq!(history.steps.len(), 1);
+    assert_eq!(history.steps[0].recipe.exposure, 0.6);
+    Ok(())
+}
