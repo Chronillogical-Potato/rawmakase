@@ -208,13 +208,26 @@ fn visualize_range_shows_the_selection_in_color_and_the_rest_gray() {
     assert_eq!(list[0], first);
     assert_eq!(list[1].view, SwatchView::VisualizeRange);
     let op = PointColors::new(&list).unwrap();
-    // The sampled color keeps its color; a green turns gray at its own value.
+    // The colors stay; the selection says how much of each shows: the sampled color all
+    // of it, a green none.
     let selected = second.source_prophoto();
-    let kept = op.apply_prophoto(selected);
-    assert!(kept.iter().zip(selected).all(|(a, b)| (a - b).abs() < 1e-4));
+    let shown = op.render_prophoto(selected);
+    assert_eq!(
+        shown.color,
+        PointColors::new(&[first]).unwrap().apply_prophoto(selected)
+    );
+    assert!(shown.selection.is_some_and(|w| w > 0.99));
     let green = [0.05, 0.3, 0.04];
-    let gray = op.apply_prophoto(green);
-    assert!(gray.iter().all(|v| (v - 0.3).abs() < 1e-4), "{gray:?}");
+    assert_eq!(op.render_prophoto(green).selection, Some(0.));
+    // On the finished color: gray where nothing is selected.
+    let out = visualize([0.8, 0.4, 0.2], 0.);
+    assert!(out.iter().all(|v| (v - out[0]).abs() < 1e-6));
+    let full = visualize([0.8, 0.4, 0.2], 1.);
+    assert!(
+        full.iter()
+            .zip([0.8, 0.4, 0.2])
+            .all(|(a, b)| (a - b).abs() < 1e-6)
+    );
     assert!(visualize_range(&list, 2).is_none());
     // Never saved: a saved swatch reads back as an adjustment.
     let back: PointColor = serde_json::from_str(&serde_json::to_string(&list[1]).unwrap()).unwrap();

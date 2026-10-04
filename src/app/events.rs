@@ -42,6 +42,11 @@ impl Editor {
                 Event::Auto { id, kind, result } if id == self.load.id() => {
                     self.auto_ready(kind, result)
                 }
+                Event::PointColorSample {
+                    id,
+                    sampled,
+                    result,
+                } if id == self.load.id() => self.point_color_sample_ready(&sampled, result),
                 Event::Upright {
                     id,
                     generation,

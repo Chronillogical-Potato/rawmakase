@@ -65,6 +65,13 @@ pub enum Event {
         errors: Vec<String>,
     },
     PresetLoad(PathBuf),
+    /// Point Color's dropper sample for the photo loaded as `id`, taken with
+    /// `sampled`: a swatch's `source`, or what to say instead.
+    PointColorSample {
+        id: u64,
+        sampled: Box<crate::develop::Recipe>,
+        result: Result<[f32; 3], String>,
+    },
     /// An Auto estimate for the photo loaded as `id`.
     Auto {
         id: u64,

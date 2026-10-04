@@ -22,22 +22,76 @@ impl super::Editor {
             && r.treatment() == crate::develop::Treatment::Color
             && renders_point_color(r)
     }
-    /// Point Color's dropper at (`u`, `v`) of the shown photo: adds a swatch of the
-    /// color there, selects it and puts the dropper away. The error is what the status
-    /// line says.
-    pub(super) fn add_point_color_sample(
+    /// Point Color's dropper at (`u`, `v`) of the shown photo: samples the color there
+    /// off the UI thread (the render it needs can take a while on a large photo); the
+    /// sample arrives as [`Event::PointColorSample`]. Ignored while one is running.
+    ///
+    /// [`Event::PointColorSample`]: super::worker::Event::PointColorSample
+    pub(super) fn start_point_color_sample(&mut self, u: f32, v: f32) {
+        let Some(im) = self.document.full().cloned() else {
+            return;
+        };
+        if self.document.point_color_pick.is_running() {
+            return;
+        }
+        self.document.point_color_pick.start();
+        let id = self.load.id();
+        let sampled = self.document.recipe.clone();
+        let tx = self.tx.clone();
+        let ctx = self.context.clone();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::develop::quality::point_color_pick(&im, &sampled, u, v)
+            }))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("sampling failed unexpectedly")))
+            .map_err(|e| format!("Cannot sample a color: {e:#}"));
+            let sampled = Box::new(sampled);
+            let _ = tx.send(super::worker::Event::PointColorSample {
+                id,
+                sampled,
+                result,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Adds the sampled swatch as one History step, selects it and puts the dropper
+    /// away; or says why not. A sample of a photo edited since is dropped.
+    pub(super) fn point_color_sample_ready(
         &mut self,
-        im: &crate::raw::CameraImage,
-        u: f32,
-        v: f32,
-    ) -> Result<usize, String> {
-        let source = crate::develop::quality::point_color_pick(im, &self.document.recipe, u, v)
-            .map_err(|e| format!("Cannot sample a color: {e:#}"))?;
-        let i = add_sample(&mut self.document.recipe.point_colors, source)
-            .map_err(|refusal| refusal.message().to_string())?;
-        self.view.point_color.selected = Some(i);
-        self.view.tool = Tool::None;
-        Ok(i)
+        sampled: &crate::develop::Recipe,
+        result: Result<[f32; 3], String>,
+    ) {
+        self.document.point_color_pick.invalidate();
+        if *sampled != self.document.recipe {
+            self.status = "The photo changed while sampling; pick the color again".into();
+            return;
+        }
+        let source = match result {
+            Ok(source) => source,
+            Err(e) => {
+                self.status = e;
+                return;
+            }
+        };
+        // A drag still under way is recorded first, so undoing it keeps the swatch.
+        if self.document.history.in_gesture() {
+            self.document.history.finish_gesture(&self.document.recipe);
+            self.document.save.mark_changed();
+        }
+        let old = self.document.recipe.clone();
+        match add_sample(&mut self.document.recipe.point_colors, source) {
+            Ok(i) => {
+                self.view.point_color.selected = Some(i);
+                self.view.tool = Tool::None;
+                self.document
+                    .history
+                    .label(super::history::Step::new("Point Color", "Add Swatch"));
+                self.history(old);
+                self.schedule();
+            }
+            Err(refusal) => self.status = refusal.message().into(),
+        }
     }
 }
 

@@ -403,16 +403,26 @@ impl PointColors {
     /// the ones before, as Camera Raw's do: a second swatch selects the color the
     /// first has made.
     pub(crate) fn apply_prophoto(&self, p: [f32; 3]) -> [f32; 3] {
-        self.swatches.iter().fold(p, |p, w| w.apply(p))
+        self.render_prophoto(p).color
     }
 }
 
+/// A color as one swatch sees it, and how much the swatch selects it.
+struct Selected {
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    encoded_value: f32,
+    /// Hue distance from the swatch, radians.
+    distance: f32,
+    weight: f32,
+}
+
 impl Swatch {
-    fn apply(&self, p: [f32; 3]) -> [f32; 3] {
-        let q = p.map(|v| v.max(0.));
-        let max = q.into_iter().fold(0f32, f32::max);
-        if max <= 1e-6 {
-            return p;
+    /// `None` for black, which no swatch selects.
+    fn select(&self, q: [f32; 3]) -> Option<Selected> {
+        if q.into_iter().fold(0f32, f32::max) <= 1e-6 {
+            return None;
         }
         let [h, s, v] = rgb_to_hsv(q);
         let ev = srgb_encode(v.min(1.));
@@ -429,13 +439,28 @@ impl Swatch {
                 fit::LUMINANCE_RAMP,
             )
             * (s / fit::NEUTRAL).min(1.);
-        if self.view == SwatchView::VisualizeRange {
-            let out = hsv_to_rgb(h, s * weight, v);
-            return std::array::from_fn(|c| out[c] + (p[c] - q[c]));
-        }
-        if weight <= 0. {
+        Some(Selected {
+            hue: h,
+            saturation: s,
+            value: v,
+            encoded_value: ev,
+            distance: d,
+            weight,
+        })
+    }
+    fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        let q = p.map(|v| v.max(0.));
+        let Some(Selected {
+            hue: h,
+            saturation: s,
+            value: v,
+            encoded_value: ev,
+            distance: d,
+            weight,
+        }) = self.select(q).filter(|x| x.weight > 0.)
+        else {
             return p;
-        }
+        };
         let turn = weight * (self.hue_turn + self.variance * d);
         let mut log_s = weight * self.log_saturation;
         let mut log_v = weight * self.log_value;
@@ -453,6 +478,46 @@ impl Swatch {
         // offset.
         std::array::from_fn(|c| out[c].min(q[c].max(1.)) + (p[c] - q[c]))
     }
+}
+
+/// A pixel after Point Color: its color and, for Visualize Range, how much the
+/// visualized swatch selects it (the finished color is grayed by the rest, see
+/// [`visualize`]).
+pub(crate) struct Rendered {
+    pub(crate) color: [f32; 3],
+    pub(crate) selection: Option<f32>,
+}
+
+impl PointColors {
+    /// As [`Self::apply_prophoto`], noting the visualized swatch's selection instead
+    /// of applying that swatch.
+    pub(crate) fn render_prophoto(&self, p: [f32; 3]) -> Rendered {
+        let mut color = p;
+        let mut selection = None;
+        for w in &self.swatches {
+            match w.view {
+                SwatchView::Adjust => color = w.apply(color),
+                SwatchView::VisualizeRange => {
+                    let q = color.map(|v| v.max(0.));
+                    selection = Some(w.select(q).map_or(0., |x| x.weight));
+                }
+            }
+        }
+        Rendered { color, selection }
+    }
+}
+
+/// Visualize Range on a finished, encoded color: gray where the swatch selects
+/// nothing, the color where it selects all, so later color controls don't tint what
+/// it leaves out.
+pub(crate) fn visualize(out: [f32; 3], selection: f32) -> [f32; 3] {
+    let y: f32 = [0.2126, 0.7152, 0.0722]
+        .iter()
+        .zip(out)
+        .map(|(k, v)| k * srgb_decode(v))
+        .sum();
+    let gray = srgb_encode(y);
+    out.map(|v| gray + (v - gray) * selection)
 }
 
 /// Hue difference in radians, −π to π.

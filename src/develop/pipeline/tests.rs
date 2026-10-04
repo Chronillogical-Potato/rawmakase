@@ -795,3 +795,26 @@ fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
     assert!(pick(&edited)?[1] < 0.6 * before[1]);
     Ok(())
 }
+#[test]
+fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow::Result<()> {
+    use crate::develop::point_color::{PointColor, visualize_range};
+    let im = fixture();
+    let mut r = Recipe {
+        reference_curves: true,
+        reference_color: true,
+        ..Default::default()
+    };
+    // Color grading tints everything after Point Color.
+    r.effects.global_grade = [0.6, 0.5, 0.];
+    // A magenta swatch, which none of the fixture's greens is.
+    r.point_colors = vec![PointColor::sampled([5., 0.8, 0.3])];
+    r.point_colors = visualize_range(&r.point_colors, 0).unwrap();
+    let out = crate::develop::render(&im, &r, 0)?;
+    for p in &out.pixels {
+        assert!(
+            (p[0] - p[1]).abs() < 2e-3 && (p[1] - p[2]).abs() < 2e-3,
+            "{p:?}"
+        );
+    }
+    Ok(())
+}

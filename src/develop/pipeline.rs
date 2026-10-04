@@ -236,8 +236,13 @@ fn tone_stage(
     (rgb, clipped_chroma)
 }
 /// The tone curves, the color mixer and Point Color: linear display RGB as Point
-/// Color leaves it.
-fn mixer_stage(rgb: [f32; 3], r: &Recipe, lut: &CurveSet, local: Option<&LocalDelta>) -> [f32; 3] {
+/// Color leaves it, and Visualize Range's selection.
+fn mixer_stage(
+    rgb: [f32; 3],
+    r: &Recipe,
+    lut: &CurveSet,
+    local: Option<&LocalDelta>,
+) -> crate::develop::point_color::Rendered {
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut, local)
     } else if r.wide_gamut_curves {
@@ -254,12 +259,19 @@ fn mixer_stage(rgb: [f32; 3], r: &Recipe, lut: &CurveSet, local: Option<&LocalDe
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     // Point Color works where the mixer does, in HSV of linear ProPhoto RGB.
-    lut.point_colors.as_ref().map_or(rgb, |p| {
-        mul(
-            crate::camera_profiles::PRO_TO_RGB,
-            p.apply_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb)),
-        )
-    })
+    match &lut.point_colors {
+        Some(p) => {
+            let out = p.render_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb));
+            crate::develop::point_color::Rendered {
+                color: mul(crate::camera_profiles::PRO_TO_RGB, out.color),
+                selection: out.selection,
+            }
+        }
+        None => crate::develop::point_color::Rendered {
+            color: rgb,
+            selection: None,
+        },
+    }
 }
 /// Basic curves, point curves, color controls and output encoding.
 fn color_stage(
@@ -269,7 +281,8 @@ fn color_stage(
     lut: &CurveSet,
     local: Option<&LocalDelta>,
 ) -> [f32; 3] {
-    let rgb = mixer_stage(rgb, r, lut, local);
+    let mixed = mixer_stage(rgb, r, lut, local);
+    let rgb = mixed.color;
     if lut.output == PixelOutput::PointColor {
         return mul(crate::camera_profiles::RGB_TO_PRO, rgb);
     }
@@ -337,7 +350,12 @@ fn color_stage(
         lab = legacy_rgb_table(lab, lut);
         lab[0] = lab[0].clamp(0., 1.);
     }
-    finish_color(lab, r, lut)
+    let out = finish_color(lab, r, lut);
+    // Visualize Range grays what the swatch leaves out after every color control, so
+    // none of them tints it.
+    mixed
+        .selection
+        .map_or(out, |w| crate::develop::point_color::visualize(out, w))
 }
 /// Before engine 4 the colour controls run in Oklab, after the place of the measured
 /// mixer: a look's RGB table follows them there, before Monochrome. Engine 3's point

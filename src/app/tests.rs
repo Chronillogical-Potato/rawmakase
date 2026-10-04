@@ -3563,25 +3563,31 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
 fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     use crate::develop::point_color::SampleRefusal;
     let ctx = egui::Context::default();
-    let (mut editor, image) =
-        editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
+    let (mut editor, _) = editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
     // The current process, which renders Point Color.
     editor.document.recipe.reference_curves = true;
     editor.document.recipe.reference_color = true;
+    editor.view.mixer_tab = state::MixerTab::PointColor;
     editor.view.toggle(state::Tool::PointColor);
     assert!(editor.view.picks_color());
-    let mut added = None;
-    in_edit_frame(&ctx, &mut editor, |e| {
-        added = Some(e.add_point_color_sample(&image, 0.7, 0.5));
-        e.document
-            .history
-            .label(history::Step::new("Point Color", "Add Swatch"));
-    });
-    assert_eq!(added, Some(Ok(0)));
-    let (steps, _) = editor.document.history.steps();
+    // Sampled off the UI thread; a second click while it runs is ignored.
+    let sample = |editor: &mut Editor| {
+        editor.start_point_color_sample(0.7, 0.5);
+        assert!(editor.document.point_color_pick.is_running());
+        editor.start_point_color_sample(0.1, 0.5);
+        let start = std::time::Instant::now();
+        while editor.document.point_color_pick.is_running() {
+            assert!(start.elapsed().as_secs() < 60, "sampling did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            editor.events(&ctx);
+        }
+    };
+    sample(&mut editor);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(applied, 1);
     assert_eq!(
-        steps.last().map(|s| (s.name.as_str(), s.value.as_str())),
-        Some(("Point Color", "Add Swatch"))
+        (steps[0].name.as_str(), steps[0].value.as_str()),
+        ("Point Color", "Add Swatch")
     );
     let swatch = editor.document.recipe.point_colors[0];
     // The photo is blue: a hue near 4 sixths of a turn, sampled with default ranges.
@@ -3590,14 +3596,17 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     assert_eq!(editor.view.point_color.selected, Some(0));
     assert_eq!(editor.view.tool, state::Tool::None);
     // The same color again is refused, and changes nothing.
-    in_edit_frame(&ctx, &mut editor, |e| {
-        added = Some(e.add_point_color_sample(&image, 0.7, 0.5));
-    });
-    assert_eq!(
-        added,
-        Some(Err(SampleRefusal::AlreadySampled.message().to_string()))
-    );
+    editor.view.toggle(state::Tool::PointColor);
+    sample(&mut editor);
+    assert_eq!(editor.status, SampleRefusal::AlreadySampled.message());
     assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    // A sample of a photo edited meanwhile is dropped.
+    let mut changed = editor.document.recipe.clone();
+    changed.exposure = 1.;
+    editor.point_color_sample_ready(&changed, Ok([2., 0.6, 0.3]));
+    assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    editor.view.tool = state::Tool::None;
+    editor.view.mixer_tab = state::MixerTab::Mixer;
     // Visualize Range shows the selected swatch while the tab is open, on a color photo.
     assert_eq!(editor.visualized_swatch(), None);
     editor.view.mixer_tab = state::MixerTab::PointColor;

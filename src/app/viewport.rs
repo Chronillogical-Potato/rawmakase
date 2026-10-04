@@ -473,21 +473,20 @@ impl Editor {
             self.view.tool = Tool::None;
         }
         // Point Color's dropper adds a swatch of the color under the pointer and
-        // selects it; the status line says why when it can't.
+        // selects it; the status line says why when it can't. The preview must show the
+        // settings the sample is taken with, or the clicked color isn't the one sampled.
         if self.view.is(Tool::PointColor)
             && picking
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
-            && let Some(im) = self.document.full().cloned()
         {
-            let u = (pos.x - rect.left()) / rect.width();
-            let v = (pos.y - rect.top()) / rect.height();
-            match self.add_point_color_sample(&im, u, v) {
-                Ok(_) => {
-                    super::widgets::name_history_step(ui, "Point Color".into(), "Add Swatch".into())
-                }
-                Err(message) => self.status = message,
+            if self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe()) {
+                let u = (pos.x - rect.left()) / rect.width();
+                let v = (pos.y - rect.top()) / rect.height();
+                self.start_point_color_sample(u, v);
+            } else {
+                self.status = "Wait for the preview to update, then pick again".into();
             }
         }
         // Before shows the unedited photo, so picking there would edit what is not shown.

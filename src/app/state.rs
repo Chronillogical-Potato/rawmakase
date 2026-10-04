@@ -39,6 +39,8 @@ pub(super) struct Document {
     pub(super) profile_errors: Vec<String>,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
     pub(super) auto: super::task::Task,
+    /// Point Color's dropper sampling the photo, off the UI thread.
+    pub(super) point_color_pick: super::task::Task,
     /// What the running estimate measures: the recipe without the settings Auto sets.
     pub(super) auto_input: Option<Recipe>,
     /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
