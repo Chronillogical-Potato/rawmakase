@@ -30,8 +30,12 @@ def main():
     shutil.copytree(args.native_prefix / "notices", licenses)
     for source, target in [(root / "LICENSE", licenses / "LICENSE"),
                            (root / "licenses/Adobe-DNG-SDK.txt", licenses / "Adobe-DNG-SDK.txt"),
+                           (root / "licenses/Hack-MIT-BitstreamVera.txt", licenses / "Hack-MIT-BitstreamVera.txt"),
                            (root / "licenses/Inter-OFL.txt", licenses / "Inter-OFL.txt"),
                            (root / "licenses/Lucide-ISC.txt", licenses / "Lucide-ISC.txt"),
+                           (root / "licenses/NotoEmoji-OFL.txt", licenses / "NotoEmoji-OFL.txt"),
+                           (root / "licenses/Ubuntu-UFL.txt", licenses / "Ubuntu-UFL.txt"),
+                           (root / "licenses/emoji-icon-font-MIT.txt", licenses / "emoji-icon-font-MIT.txt"),
                            (root / "packaging/applications/rawmakase.desktop", stage / "usr/share/applications/rawmakase.desktop"),
                            (root / "packaging/icons/rawmakase.svg", stage / "usr/share/icons/hicolor/scalable/apps/rawmakase.svg")]:
         target.parent.mkdir(parents=True, exist_ok=True)

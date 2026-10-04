@@ -30,8 +30,12 @@ cp "target/$profile/rawmakase" "$bundle/Contents/MacOS/rawmakase"
 cp packaging/macos/Info.plist "$bundle/Contents/Info.plist"
 cp LICENSE "$bundle/Contents/Resources/licenses/RAWmakase.txt"
 cp licenses/Adobe-DNG-SDK.txt "$bundle/Contents/Resources/licenses/Adobe-DNG-SDK.txt"
+cp licenses/Hack-MIT-BitstreamVera.txt "$bundle/Contents/Resources/licenses/Hack-MIT-BitstreamVera.txt"
 cp licenses/Inter-OFL.txt "$bundle/Contents/Resources/licenses/Inter-OFL.txt"
 cp licenses/Lucide-ISC.txt "$bundle/Contents/Resources/licenses/Lucide-ISC.txt"
+cp licenses/NotoEmoji-OFL.txt "$bundle/Contents/Resources/licenses/NotoEmoji-OFL.txt"
+cp licenses/Ubuntu-UFL.txt "$bundle/Contents/Resources/licenses/Ubuntu-UFL.txt"
+cp licenses/emoji-icon-font-MIT.txt "$bundle/Contents/Resources/licenses/emoji-icon-font-MIT.txt"
 # The app icon, rendered as packaging/macos/bundle.py does.
 if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
     iconset="target/$profile/rawmakase.iconset"

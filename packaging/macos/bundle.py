@@ -75,8 +75,12 @@ def main():
     shutil.copytree(args.native_prefix / "notices", notices)
     shutil.copy2(root / "LICENSE", notices / "RAWmakase.txt")
     shutil.copy2(root / "licenses/Adobe-DNG-SDK.txt", notices)
+    shutil.copy2(root / "licenses/Hack-MIT-BitstreamVera.txt", notices)
     shutil.copy2(root / "licenses/Inter-OFL.txt", notices)
     shutil.copy2(root / "licenses/Lucide-ISC.txt", notices)
+    shutil.copy2(root / "licenses/NotoEmoji-OFL.txt", notices)
+    shutil.copy2(root / "licenses/Ubuntu-UFL.txt", notices)
+    shutil.copy2(root / "licenses/emoji-icon-font-MIT.txt", notices)
 
     # Resolve the original dependency graph before rewriting any load commands.
     copies = {args.binary.resolve(): executable}
