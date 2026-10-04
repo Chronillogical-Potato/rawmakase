@@ -66,6 +66,8 @@ pub struct TargetSample {
 /// Below this Oklab chroma a color has no hue to speak of, and the color controls
 /// change it little: the tool leaves such colors alone.
 const NEUTRAL_CHROMA: f32 = 0.01;
+/// The same for the measured mixer, as HSV saturation of its linear ProPhoto input.
+const NEUTRAL_SATURATION: f32 = 0.02;
 /// Bands changing a color less than this share of the most involved band are left
 /// alone, so measurement noise in unrelated bands doesn't move them.
 const MIN_SHARE: f32 = 0.1;
@@ -81,7 +83,15 @@ pub struct TargetWeights {
 impl TargetWeights {
     /// The shares for `sample`, rendered with `r`.
     pub fn new(target: Target, sample: &TargetSample, r: &Recipe) -> Self {
-        let neutral = sample.color[1].hypot(sample.color[2]) < NEUTRAL_CHROMA;
+        // Neutral where the shares come from: the measured mixer's input, or the
+        // Oklab color the hue weights take.
+        let neutral = if matches!(target, Target::Hsl(_)) && measured_mixer(r) {
+            let max = sample.mixer.into_iter().fold(0f32, f32::max);
+            let min = sample.mixer.into_iter().fold(f32::INFINITY, f32::min);
+            max <= 1e-6 || (max - min) / max < NEUTRAL_SATURATION
+        } else {
+            sample.color[1].hypot(sample.color[2]) < NEUTRAL_CHROMA
+        };
         let shares = match target {
             Target::Hsl(_) | Target::BlackWhite if neutral => [0.; 8],
             Target::ToneCurve => {
@@ -315,6 +325,14 @@ mod tests {
         };
         let w = TargetWeights::new(Target::Hsl(HslChannel::Saturation), &gray, &r);
         assert!(w.is_empty(), "{:?}", w.shares);
+        // Neutrality is judged where the mixer looks: a skin tone whose finished color
+        // an earlier Saturation −100 grayed is still adjustable.
+        let grayed = TargetSample {
+            mixer: skin,
+            ..sample([0.6, 0.001, 0.])
+        };
+        let w = TargetWeights::new(Target::Hsl(HslChannel::Saturation), &grayed, &r);
+        assert_eq!(w.shares[1], 1., "{:?}", w.shares);
     }
 
     #[test]

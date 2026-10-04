@@ -113,6 +113,8 @@ impl Editor {
             self.drag_targeted(-response.drag_delta().y);
         }
         if response.drag_stopped() {
+            // Travel made while the sample was on its way lands even without a last move.
+            self.drag_targeted(0.);
             self.release_targeted();
         }
         if let Some(drag) = &self.view.targeted {
@@ -161,19 +163,20 @@ impl Editor {
         let Some(drag) = &mut self.view.targeted else {
             return;
         };
-        if up == 0. {
-            return;
-        }
         drag.travel += up;
         if let Some(weights) = drag.weights.filter(|w| !w.is_empty()) {
+            let before = self.document.recipe.clone();
             weights.apply(
                 &drag.start,
                 drag.travel * DRAG_RATE,
                 &mut self.document.recipe,
             );
-            // Named through the frame, as a slider's drag is.
-            let (name, value) = weights.step(&self.document.recipe);
-            super::widgets::name_frame_step(&self.context, name, value);
+            // Named through the frame, as a slider's drag is; only when it moved, so
+            // the name never lands on another edit.
+            if self.document.recipe != before {
+                let (name, value) = weights.step(&self.document.recipe);
+                super::widgets::name_frame_step(&self.context, name, value);
+            }
         }
     }
     /// The button is up. A drag whose sample is in is done (the gesture records it);
@@ -195,7 +198,9 @@ impl Editor {
         let Some(drag) = &mut self.view.targeted else {
             return;
         };
-        if *sampled != drag.start {
+        // Taken from the edit the drag started on, and nothing (Auto finishing, say)
+        // has changed it since.
+        if *sampled != drag.start || self.document.recipe != drag.start {
             self.view.targeted = None;
             return;
         }
@@ -461,6 +466,32 @@ mod tests {
         assert!(steps[0].name.starts_with("Region "), "{}", steps[0].name);
         e.undo();
         assert_eq!(e.document.recipe, before);
+    }
+
+    #[test]
+    fn travel_before_the_sample_lands_when_released_without_moving_again() {
+        let ctx = egui::Context::default();
+        let mut e = editor(&ctx);
+        e.toggle_targeted(Target::ToneCurve);
+        e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
+        e.drag_targeted(25.);
+        // The sample arrives while the button is still down; then it is released.
+        wait_for_sample(&ctx, &mut e);
+        assert!(e.view.targeted.is_some());
+        e.drag_targeted(0.);
+        e.release_targeted();
+        assert!((e.document.recipe.effects.parametric.iter().sum::<f32>() - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_sample_is_dropped_when_the_edit_changed_meanwhile() {
+        let ctx = egui::Context::default();
+        let mut e = editor(&ctx);
+        e.toggle_targeted(Target::ToneCurve);
+        e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
+        e.document.recipe.exposure = 0.7;
+        wait_for_sample(&ctx, &mut e);
+        assert!(e.view.targeted.is_none());
     }
 
     #[test]
