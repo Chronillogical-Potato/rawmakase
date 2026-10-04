@@ -85,6 +85,11 @@ pub(super) fn brush_cursor(painter: &Painter, at: Pos2, radius: f32, feather: f3
 /// everything within `radius` of the path, round at its ends and corners.
 pub(super) fn stroke_outline(painter: &Painter, points: &[Pos2], radius: f32, width: f32) {
     let edges = super::stroke_outline::outline(points, radius, 2.);
+    // A brush too thin to outline shows as its path.
+    if edges.is_empty() {
+        path(painter, points.to_vec(), Color32::from_white_alpha(230));
+        return;
+    }
     for [a, b] in &edges {
         painter.line_segment(
             [*a, *b],

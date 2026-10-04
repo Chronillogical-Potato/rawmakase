@@ -8,6 +8,7 @@ const MAX_CELLS: f32 = 240.;
 
 /// The outline of the area within `radius` of the path through `points` (screen
 /// space), as line segments about `step` points long or longer for large strokes.
+/// A brush too thin for the grid gets no outline; the caller draws its path instead.
 pub(super) fn outline(points: &[Pos2], radius: f32, step: f32) -> Vec<[Pos2; 2]> {
     if points.is_empty() || radius <= 0. {
         return Vec::new();
@@ -21,60 +22,127 @@ pub(super) fn outline(points: &[Pos2], radius: f32, step: f32) -> Vec<[Pos2; 2]>
     let (min, max) = (min - pad, max + pad);
     let size = max - min;
     let step = step.max(size.x.max(size.y) / MAX_CELLS);
-    let (nx, ny) = (
-        (size.x / step).ceil() as usize + 1,
-        (size.y / step).ceil() as usize + 1,
-    );
-    // Distance from each grid point to the path, less the radius: negative inside.
-    let mut field = vec![f32::INFINITY; nx * ny];
-    let at = |i: usize, j: usize| min + Vec2::new(i as f32 * step, j as f32 * step);
+    if radius < step {
+        return Vec::new();
+    }
+    let grid = Grid {
+        min,
+        step,
+        nx: (size.x / step).ceil() as usize + 1,
+        ny: (size.y / step).ceil() as usize + 1,
+    };
     let segments: Vec<(Pos2, Pos2)> = if points.len() == 1 {
         vec![(points[0], points[0])]
     } else {
         points.windows(2).map(|w| (w[0], w[1])).collect()
     };
-    for (a, b) in segments {
-        let lo = a.min(b) - Vec2::splat(radius + 2. * step) - min;
-        let hi = a.max(b) + Vec2::splat(radius + 2. * step) - min;
-        let i0 = (lo.x / step).floor().max(0.) as usize;
-        let j0 = (lo.y / step).floor().max(0.) as usize;
-        let i1 = ((hi.x / step).ceil() as usize).min(nx - 1);
-        let j1 = ((hi.y / step).ceil() as usize).min(ny - 1);
-        for j in j0..=j1 {
-            for i in i0..=i1 {
-                let d = distance_to_segment(at(i, j), a, b) - radius;
-                let cell = &mut field[j * nx + i];
-                *cell = cell.min(d);
-            }
-        }
+    let field = grid.distance_field(&segments, radius);
+    grid.contour(&field)
+}
+
+/// A sampling grid over the stroke, `step` points apart.
+struct Grid {
+    min: Pos2,
+    step: f32,
+    nx: usize,
+    ny: usize,
+}
+impl Grid {
+    fn at(&self, i: usize, j: usize) -> Pos2 {
+        self.min + Vec2::new(i as f32 * self.step, j as f32 * self.step)
     }
-    // Marching squares: where the field crosses zero along each cell edge.
-    let mut out = Vec::new();
-    let cross = |p: Pos2, q: Pos2, dp: f32, dq: f32| p + (q - p) * (dp / (dp - dq));
-    for j in 0..ny - 1 {
-        for i in 0..nx - 1 {
-            let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
-            let d = corners.map(|(i, j)| field[j * nx + i]);
-            let p = corners.map(|(i, j)| at(i, j));
-            let mut crossings = Vec::with_capacity(4);
-            for k in 0..4 {
-                let n = (k + 1) % 4;
-                if (d[k] < 0.) != (d[n] < 0.) && d[k].is_finite() && d[n].is_finite() {
-                    crossings.push(cross(p[k], p[n], d[k], d[n]));
+    /// Each grid point's distance to the path, less `radius`: negative inside. The
+    /// nearest segment is found by seeding the cells along each segment and passing
+    /// nearest segments to neighbours (two raster sweeps), so the work grows with the
+    /// grid and the path's length, not with how often the path covers one place.
+    fn distance_field(&self, segments: &[(Pos2, Pos2)], radius: f32) -> Vec<f32> {
+        let (nx, ny) = (self.nx, self.ny);
+        let mut nearest: Vec<Option<usize>> = vec![None; nx * ny];
+        let mut dist = vec![f32::INFINITY; nx * ny];
+        let mut offer = |i: usize, j: usize, s: usize, nearest: &mut Vec<Option<usize>>| {
+            let (a, b) = segments[s];
+            let d = distance_to_segment(self.at(i, j), a, b);
+            if d < dist[j * nx + i] {
+                dist[j * nx + i] = d;
+                nearest[j * nx + i] = Some(s);
+            }
+        };
+        for (s, &(a, b)) in segments.iter().enumerate() {
+            let samples = ((b - a).length() / (0.5 * self.step)).ceil().max(1.) as usize;
+            for k in 0..=samples {
+                let p = a + (b - a) * (k as f32 / samples as f32) - self.min;
+                let (ci, cj) = ((p.x / self.step).floor(), (p.y / self.step).floor());
+                for (di, dj) in [(0., 0.), (1., 0.), (0., 1.), (1., 1.)] {
+                    let (i, j) = ((ci + di) as usize, (cj + dj) as usize);
+                    if i < nx && j < ny {
+                        offer(i, j, s, &mut nearest);
+                    }
                 }
             }
-            match crossings.len() {
-                2 => out.push([crossings[0], crossings[1]]),
-                // A saddle: pair the crossings so the inside stays joined.
-                4 => {
-                    out.push([crossings[0], crossings[1]]);
-                    out.push([crossings[2], crossings[3]]);
+        }
+        let neighbours_forward = [(-1, -1), (0, -1), (1, -1), (-1, 0)];
+        let neighbours_back = [(1, 1), (0, 1), (-1, 1), (1, 0)];
+        let mut sweep = |order: Vec<(usize, usize)>, from: [(isize, isize); 4]| {
+            for (i, j) in order {
+                for (di, dj) in from {
+                    let (ni, nj) = (i as isize + di, j as isize + dj);
+                    if ni < 0 || nj < 0 || ni as usize >= nx || nj as usize >= ny {
+                        continue;
+                    }
+                    if let Some(s) = nearest[nj as usize * nx + ni as usize] {
+                        offer(i, j, s, &mut nearest);
+                    }
                 }
-                _ => {}
+            }
+        };
+        let forward: Vec<(usize, usize)> =
+            (0..ny).flat_map(|j| (0..nx).map(move |i| (i, j))).collect();
+        let back: Vec<(usize, usize)> = forward.iter().rev().copied().collect();
+        sweep(forward, neighbours_forward);
+        sweep(back, neighbours_back);
+        dist.iter().map(|d| d - radius).collect()
+    }
+    /// Marching squares: where the field crosses zero along each cell edge.
+    fn contour(&self, field: &[f32]) -> Vec<[Pos2; 2]> {
+        let nx = self.nx;
+        let mut out = Vec::new();
+        let cross = |p: Pos2, q: Pos2, dp: f32, dq: f32| p + (q - p) * (dp / (dp - dq));
+        for j in 0..self.ny - 1 {
+            for i in 0..nx - 1 {
+                // Corners clockwise from the top left; edge k joins corner k to k + 1.
+                let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
+                let d = corners.map(|(i, j)| field[j * nx + i]);
+                let p = corners.map(|(i, j)| self.at(i, j));
+                let mut crossings = Vec::with_capacity(4);
+                for k in 0..4 {
+                    let n = (k + 1) % 4;
+                    if (d[k] < 0.) != (d[n] < 0.) && d[k].is_finite() && d[n].is_finite() {
+                        crossings.push(cross(p[k], p[n], d[k], d[n]));
+                    }
+                }
+                match crossings.len() {
+                    2 => out.push([crossings[0], crossings[1]]),
+                    // A saddle: cut off the two corners on the other side from the
+                    // cell's centre, so what the centre joins stays joined.
+                    4 => {
+                        let centre_inside = d.iter().sum::<f32>() < 0.;
+                        let corner_0_inside = d[0] < 0.;
+                        if centre_inside == corner_0_inside {
+                            // Corners 1 and 3 are cut off.
+                            out.push([crossings[0], crossings[1]]);
+                            out.push([crossings[2], crossings[3]]);
+                        } else {
+                            // Corners 0 and 2 are cut off.
+                            out.push([crossings[3], crossings[0]]);
+                            out.push([crossings[1], crossings[2]]);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
+        out
     }
-    out
 }
 
 fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -126,6 +194,37 @@ mod tests {
                 let d = distance_to_path(*p, &path);
                 assert!((d - r).abs() < 1., "{p:?} is {d} from the path, not {r}");
             }
+        }
+    }
+
+    #[test]
+    fn a_brush_thinner_than_the_grid_has_no_outline_to_draw() {
+        assert!(outline(&[Pos2::new(0., 0.), Pos2::new(50., 0.)], 1., 2.).is_empty());
+    }
+
+    #[test]
+    fn a_dense_scribble_takes_work_bounded_by_the_grid() {
+        // Back and forth 4096 times over one place with a wide brush: still quick.
+        let path: Vec<Pos2> = (0..4096)
+            .map(|k| Pos2::new(if k % 2 == 0 { 100. } else { 400. }, 100. + (k % 7) as f32))
+            .collect();
+        let started = std::time::Instant::now();
+        let edges = outline(&path, 250., 2.);
+        assert!(!edges.is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    }
+
+    #[test]
+    fn two_strokes_touching_diagonally_stay_one_shape() {
+        // Two dots overlapping corner to corner, in both diagonal directions.
+        for (a, b) in [
+            (Pos2::new(100., 100.), Pos2::new(127., 127.)),
+            (Pos2::new(127., 100.), Pos2::new(100., 127.)),
+        ] {
+            let edges = outline(&[a, b], 20., 2.);
+            let mid = a + (b - a) * 0.5;
+            // No edge crosses the middle of the joined shape.
+            assert!(edges.iter().flatten().all(|p| p.distance(mid) > 5.));
         }
     }
 
