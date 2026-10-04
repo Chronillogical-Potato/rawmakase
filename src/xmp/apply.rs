@@ -1031,7 +1031,7 @@ impl Preset {
         Ok(())
     }
 
-    /// Lightroom's spot removal and masks, replacing the recipe's when the settings
+    /// Lightroom's spot removal, red eye corrections and masks, replacing the recipe's when the settings
     /// have them; returns what could not be converted.
     fn apply_local(&self, r: &mut Recipe, m: &Metadata) -> Vec<String> {
         if self.local.is_empty() {
@@ -1040,6 +1040,9 @@ impl Preset {
         let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
         if let Some(retouch) = edits.retouch {
             r.retouch = retouch;
+        }
+        if let Some(red_eye) = edits.red_eye {
+            r.red_eye = red_eye.into();
         }
         if let Some(masks) = edits.masks {
             r.masks = masks;

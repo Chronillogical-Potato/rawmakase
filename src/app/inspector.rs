@@ -186,18 +186,20 @@ impl Editor {
                 .on_hover_text("Output histogram of the whole photo");
         });
     }
-    /// Lightroom's tool strip: Crop, Remove and Masking, with the open tool's drawer
-    /// below it.
+    /// Lightroom's tool strip: Crop, Remove, Red Eye and Masking, with the open tool's
+    /// drawer below it.
     pub(super) fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.);
-        const TOOLS: [(Tool, &str, &str); 3] = [
+        // Red Eye has no shortcut, as in Lightroom.
+        const TOOLS: [(Tool, &str, &str); 4] = [
             (Tool::Crop, "Crop", "Crop & Straighten · R"),
             (Tool::Remove, "Remove", "Spot Removal: Heal and Clone · Q"),
+            (Tool::RedEye, "Red Eye", "Red Eye Correction"),
             (Tool::Mask, "Masking", "Masking · Shift+W"),
         ];
         let (strip, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-        let width = (strip.width() - 8.) / 3.;
+        let width = (strip.width() - 12.) / 4.;
         for (k, (tool, label, tip)) in TOOLS.into_iter().enumerate() {
             let rect = Rect::from_min_size(
                 strip.min + Vec2::new(k as f32 * (width + 4.), 0.),
@@ -222,6 +224,7 @@ impl Editor {
             match tool {
                 Tool::Crop => crop_icon(ui.painter(), icon, active),
                 Tool::Remove => heal_icon(ui.painter(), icon, active),
+                Tool::RedEye => eye_icon(ui.painter(), icon, active),
                 _ => mask_icon(ui.painter(), icon, active),
             }
             ui.painter().text(
@@ -257,13 +260,19 @@ impl Editor {
         match self.view.tool {
             Tool::Remove => {
                 return drawer(ui, &mut |ui| {
-                    experimental(ui);
+                    experimental(ui, UNMEASURED);
                     self.retouch_panel(ui)
+                });
+            }
+            Tool::RedEye => {
+                return drawer(ui, &mut |ui| {
+                    experimental(ui, RED_EYE_NOTE);
+                    self.red_eye_panel(ui)
                 });
             }
             Tool::Mask => {
                 return drawer(ui, &mut |ui| {
-                    experimental(ui);
+                    experimental(ui, UNMEASURED);
                     self.mask_panel(ui)
                 });
             }
@@ -1644,7 +1653,12 @@ fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
 }
 /// The line that opens the Remove and Masking drawers: both tools are new.
-fn experimental(ui: &mut egui::Ui) {
+/// What the experimental label's tooltip says about a tool.
+const UNMEASURED: &str = "Not yet measured against Lightroom. Spots and masks are saved apart \
+     from the rest of the edit, so older RAWmakase releases open the photo without them.";
+const RED_EYE_NOTE: &str = "Fitted to Camera Raw on synthetic eyes. Corrections are saved apart \
+     from the rest of the edit, so older RAWmakase releases open the photo without them.";
+fn experimental(ui: &mut egui::Ui, note: &str) {
     ui.horizontal(|ui| {
         ui.add_space(83.);
         ui.label(
@@ -1652,10 +1666,7 @@ fn experimental(ui: &mut egui::Ui) {
                 .size(10.)
                 .color(theme::warning()),
         )
-        .on_hover_text(
-            "Not yet measured against Lightroom. Spots and masks are saved apart from the \
-             rest of the edit, so older RAWmakase releases open the photo without them.",
-        );
+        .on_hover_text(note);
     });
 }
 /// A circle with an arrow leaving it: the Remove tool.
@@ -1665,6 +1676,22 @@ fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     painter.line_segment([c + Vec2::new(1.5, -1.5), c + Vec2::new(6., -6.)], stroke);
     painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(2.5, -6.)], stroke);
     painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(6., -2.5)], stroke);
+}
+/// An eye: the Red Eye tool.
+fn eye_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
+    let color = theme::gray(if strong { 240 } else { 170 });
+    let stroke = Stroke::new(1.4, color);
+    let lid = |sign: f32| -> Vec<Pos2> {
+        (0..=12)
+            .map(|i| {
+                let t = i as f32 / 12. * std::f32::consts::PI;
+                c + Vec2::new(-6.5 * t.cos(), sign * 4. * t.sin())
+            })
+            .collect()
+    };
+    painter.add(egui::Shape::line(lid(1.), stroke));
+    painter.add(egui::Shape::line(lid(-1.), stroke));
+    painter.circle_filled(c, 2.2, color);
 }
 /// A dashed circle over a square: the Masking tool.
 fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {

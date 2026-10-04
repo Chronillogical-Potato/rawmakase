@@ -127,8 +127,7 @@ impl Panel {
                 e.shadow_tint = d.shadow_tint;
             }
             Panel::SpotRemoval => r.retouch.clear(),
-            // RAWmakase has no red-eye correction; the switch is kept for Lightroom.
-            Panel::RedEye => {}
+            Panel::RedEye => r.red_eye.clear(),
             Panel::Masks => r.masks.clear(),
         }
     }

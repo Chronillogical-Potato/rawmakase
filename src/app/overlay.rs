@@ -25,6 +25,10 @@ impl Editor {
                 self.retouch_overlay(ui, response, rect);
                 true
             }
+            Tool::RedEye => {
+                self.red_eye_overlay(ui, response, rect);
+                true
+            }
             Tool::Mask => self.mask_overlay(ui, response, rect),
             Tool::Guided => {
                 self.guided_overlay(ui, response, rect, area);

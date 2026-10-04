@@ -1,11 +1,18 @@
-//! The retouched camera image: the highlight-recovered image with every operation
-//! applied in order. Previews keep it between renders and, when operations change,
-//! recompute only the 256-pixel tiles those changes reach; exports build it at once.
+//! The retouched camera image: the highlight-recovered image with every red eye
+//! correction, then every Heal and Clone operation, applied in order. Previews keep it
+//! between renders and, when operations change, recompute only the 256-pixel tiles
+//! those changes reach; exports build it at once.
 use super::{
     RetouchOp,
-    heal::{self, PixelRect, Placed},
+    heal::{self, PixelRect},
 };
-use crate::{develop::ImageFrame, raw::CameraImage};
+use crate::{
+    develop::{
+        ImageFrame,
+        red_eye::{self, RedEyeOp},
+    },
+    raw::CameraImage,
+};
 use anyhow::{Result, ensure};
 use std::{
     collections::BTreeSet,
@@ -17,13 +24,97 @@ use std::{
 
 const TILE: i32 = 256;
 
-/// `base` with `ops` applied, built from scratch (exports).
-pub(crate) fn apply(base: &CameraImage, ops: &[RetouchOp]) -> CameraImage {
+/// The operations that change the camera image's pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Retouching<'a> {
+    pub(crate) red_eye: &'a [RedEyeOp],
+    pub(crate) retouch: &'a [RetouchOp],
+}
+impl<'a> Retouching<'a> {
+    pub(crate) fn of(r: &'a crate::develop::Recipe) -> Self {
+        Self {
+            red_eye: &r.red_eye,
+            retouch: &r.retouch,
+        }
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.red_eye.is_empty() && self.retouch.is_empty()
+    }
+    /// Every operation placed on one image, in the order they apply: red eye first, so
+    /// a heal copying from an eye copies the corrected pupil.
+    fn steps(&self, frame: &ImageFrame) -> Vec<Step> {
+        let eyes = self
+            .red_eye
+            .iter()
+            .map(|op| Step::Eye(red_eye::Placed::new(op, frame)));
+        let heals = self
+            .retouch
+            .iter()
+            .map(|op| Step::Heal(heal::Placed::new(op, frame)));
+        eyes.chain(heals).collect()
+    }
+    /// Destination rectangles of the operations that differ between `self` and
+    /// `other`, compared position by position within each list.
+    fn changed(&self, other: &Retouching, frame: &ImageFrame) -> Vec<PixelRect> {
+        fn diff<T: PartialEq>(a: &[T], b: &[T], dest: impl Fn(&T) -> PixelRect) -> Vec<PixelRect> {
+            (0..a.len().max(b.len()))
+                .filter(|i| a.get(*i) != b.get(*i))
+                .flat_map(|i| {
+                    [a.get(i), b.get(i)]
+                        .into_iter()
+                        .flatten()
+                        .map(&dest)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        }
+        let mut rects = diff(self.red_eye, other.red_eye, |op| {
+            red_eye::Placed::new(op, frame).dest()
+        });
+        rects.extend(diff(self.retouch, other.retouch, |op| {
+            heal::Placed::new(op, frame).dest()
+        }));
+        rects
+    }
+}
+/// One operation placed on an image.
+enum Step {
+    Eye(red_eye::Placed),
+    Heal(heal::Placed),
+}
+impl Step {
+    /// Pixels the operation writes.
+    fn dest(&self) -> PixelRect {
+        match self {
+            Step::Eye(p) => p.dest(),
+            Step::Heal(p) => p.dest(),
+        }
+    }
+    /// Pixels the operation reads.
+    fn reads(&self) -> [PixelRect; 2] {
+        match self {
+            // Each pixel is corrected from its own value.
+            Step::Eye(p) => [p.dest(); 2],
+            Step::Heal(p) => p.reads(),
+        }
+    }
+    fn apply(&self, im: &mut CameraImage) {
+        match self {
+            Step::Eye(p) => p.apply(im),
+            Step::Heal(p) => {
+                heal::apply(im, p);
+            }
+        }
+    }
+}
+
+/// `base` with the operations applied, built from scratch (exports).
+pub(crate) fn apply(base: &CameraImage, ops: Retouching) -> CameraImage {
     let frame = ImageFrame::new(base);
     let mut out = base.clone();
     out.recovered = Default::default();
-    for op in ops {
-        heal::apply(&mut out, &Placed::new(op, &frame));
+    for step in ops.steps(&frame) {
+        step.apply(&mut out);
     }
     out
 }
@@ -42,20 +133,14 @@ fn touches(dirty: &BTreeSet<(i32, i32)>, rect: &PixelRect) -> bool {
 /// operations that touch them in order, gives the same image as starting over.
 pub(crate) fn dirty_tiles(
     frame: &ImageFrame,
-    before: &[RetouchOp],
-    after: &[RetouchOp],
+    before: Retouching,
+    after: Retouching,
 ) -> BTreeSet<(i32, i32)> {
     let mut dirty = BTreeSet::new();
-    for i in 0..before.len().max(after.len()) {
-        let (b, a) = (before.get(i), after.get(i));
-        if b != a {
-            for op in [b, a].into_iter().flatten() {
-                let rect = Placed::new(op, frame).dest();
-                dirty.extend(tiles(&rect));
-            }
-        }
+    for rect in before.changed(&after, frame) {
+        dirty.extend(tiles(&rect));
     }
-    let placed: Vec<Placed> = after.iter().map(|op| Placed::new(op, frame)).collect();
+    let placed = after.steps(frame);
     loop {
         let size = dirty.len();
         for p in &placed {
@@ -88,6 +173,7 @@ fn tile_rects(tiles: &BTreeSet<(i32, i32)>, width: u32, height: u32) -> Vec<Pixe
 pub(crate) struct RetouchCache {
     base: Option<Arc<CameraImage>>,
     ops: Vec<RetouchOp>,
+    red_eye: Vec<RedEyeOp>,
     image: Option<Arc<CameraImage>>,
     /// The previous image (weakly, so its pixels are freed) and the rectangles where
     /// the current one differs from it.
@@ -99,21 +185,24 @@ impl RetouchCache {
     pub(crate) fn get(
         &mut self,
         base: &Arc<CameraImage>,
-        ops: &[RetouchOp],
+        ops: Retouching,
         cancel: &AtomicBool,
     ) -> Result<Arc<CameraImage>> {
         let same_base = self.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base));
         let previous = self.image.clone().unwrap_or_else(|| base.clone());
         let previous_ops = if same_base {
-            self.ops.clone()
+            Retouching {
+                red_eye: &self.red_eye,
+                retouch: &self.ops,
+            }
         } else {
-            Vec::new()
+            Retouching::default()
         };
         if same_base && previous_ops == ops {
             return Ok(previous);
         }
         let frame = ImageFrame::new(base);
-        let dirty = dirty_tiles(&frame, &previous_ops, ops);
+        let dirty = dirty_tiles(&frame, previous_ops, ops);
         let rects = tile_rects(&dirty, base.width, base.height);
         let image = if ops.is_empty() {
             base.clone()
@@ -130,11 +219,10 @@ impl RetouchCache {
                     out.pixels[a..b].copy_from_slice(&base.pixels[a..b]);
                 }
             }
-            for op in ops {
+            for step in ops.steps(&frame) {
                 ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-                let placed = Placed::new(op, &frame);
-                if placed.reads().iter().any(|r| touches(&dirty, r)) {
-                    heal::apply(&mut out, &placed);
+                if step.reads().iter().any(|r| touches(&dirty, r)) {
+                    step.apply(&mut out);
                 }
             }
             Arc::new(out)
@@ -142,7 +230,8 @@ impl RetouchCache {
         // Another photo's image shares nothing with this one.
         self.change = same_base.then(|| (Arc::downgrade(&previous), rects));
         self.base = Some(base.clone());
-        self.ops = ops.to_vec();
+        self.ops = ops.retouch.to_vec();
+        self.red_eye = ops.red_eye.to_vec();
         self.image = Some(image.clone());
         Ok(image)
     }

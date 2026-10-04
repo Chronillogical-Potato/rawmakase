@@ -114,6 +114,12 @@ pub struct Recipe {
     /// [`LocalEdits`]); omitted from recipe JSON when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    /// Red eye corrections, in order; saved apart, as `retouch`.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank"
+    )]
+    pub red_eye: crate::develop::red_eye::RedEyeList,
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
@@ -124,22 +130,25 @@ pub struct Recipe {
     #[serde(flatten)]
     pub unknown: std::collections::BTreeMap<String, serde_json::Value>,
 }
-/// A recipe's spot removal and masks (experimental). They are saved beside the recipe,
+/// A recipe's spot removal, red eye corrections and masks (experimental). They are saved beside the recipe,
 /// not in it, so releases that predate them still read every other setting.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LocalEdits {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    #[serde(skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank")]
+    pub red_eye: crate::develop::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
 }
 impl LocalEdits {
     pub fn is_empty(&self) -> bool {
-        self.retouch.is_empty() && self.masks.is_empty()
+        self.retouch.is_empty() && self.red_eye.is_blank() && self.masks.is_empty()
     }
     pub fn validate(&self) -> Result<()> {
         crate::develop::retouch::validate(&self.retouch)?;
+        crate::develop::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)
     }
 }
@@ -198,6 +207,7 @@ impl Default for Recipe {
             flip_x: false,
             flip_y: false,
             retouch: Vec::new(),
+            red_eye: Default::default(),
             masks: Vec::new(),
             panels: PanelSwitches::default(),
             unknown: Default::default(),
@@ -403,6 +413,7 @@ impl Recipe {
         );
         // Every other number is range-checked above, which also rejects NaN.
         crate::develop::retouch::validate(&self.retouch)?;
+        crate::develop::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)?;
         Ok(())
     }
@@ -411,6 +422,7 @@ impl Recipe {
         let mut saved = self.clone();
         let local = LocalEdits {
             retouch: std::mem::take(&mut saved.retouch),
+            red_eye: std::mem::take(&mut saved.red_eye),
             masks: std::mem::take(&mut saved.masks),
         };
         (saved, local)
@@ -420,6 +432,9 @@ impl Recipe {
     pub fn with_local(mut self, local: LocalEdits) -> Recipe {
         if !local.retouch.is_empty() {
             self.retouch = local.retouch;
+        }
+        if !local.red_eye.is_blank() {
+            self.red_eye = local.red_eye;
         }
         if !local.masks.is_empty() {
             self.masks = local.masks;

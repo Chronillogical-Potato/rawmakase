@@ -430,6 +430,13 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         "Transform"
     } else if a.retouch != b.retouch {
         return Step::new(retouch_step(b, a), "");
+    } else if a.red_eye != b.red_eye {
+        let name = match a.red_eye.len().cmp(&b.red_eye.len()) {
+            std::cmp::Ordering::Greater => "Add Red Eye Correction",
+            std::cmp::Ordering::Less => "Delete Red Eye Correction",
+            std::cmp::Ordering::Equal => "Update Red Eye Correction",
+        };
+        return Step::new(name, "");
     } else if a.masks != b.masks {
         return mask_step(b, a);
     } else {

@@ -307,6 +307,9 @@ pub fn convert_develop(
     if let Some(retouch) = local.retouch {
         recipe.retouch = retouch;
     }
+    if let Some(red_eye) = local.red_eye {
+        recipe.red_eye = red_eye.into();
+    }
     if let Some(masks) = local.masks {
         recipe.masks = masks;
     }

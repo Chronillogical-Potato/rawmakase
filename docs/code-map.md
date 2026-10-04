@@ -56,7 +56,10 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [image_space.rs](../src/develop/image_space.rs) | Image space, where spots and masks keep positions (oriented photo before lens correction, Transform and crop), and its mapping to and from the view, including the lens distortion inverse. |
 | [retouch/mod.rs](../src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
 | [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
-| [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image: built at once for exports, updated in dirty 256-pixel tiles for previews. |
+| [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image (red eye corrections, then Heal and Clone): built at once for exports, updated in dirty 256-pixel tiles for previews. |
+| [red_eye/mod.rs](../src/develop/red_eye/mod.rs) | Red eye corrections (Lightroom's ellipse with semi-axes and correlation), validation, and reading saved ones leniently. |
+| [red_eye/detect.rs](../src/develop/red_eye/detect.rs) | Finding the red pupil inside the circle dragged over an eye. |
+| [red_eye/render.rs](../src/develop/red_eye/render.rs) | Rendering one correction on linear camera pixels, fitted to Camera Raw 18.7. |
 | [retouch/search.rs](../src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
 | [masks/mod.rs](../src/develop/masks/mod.rs) | Mask groups, components (brush, gradients, ranges), local adjustments, validation and the overlay weights. |
 | [masks/eval.rs](../src/develop/masks/eval.rs) | Mask weights for a rendered region: tracing pixels to image space, combining components, caching brush rasters. |
@@ -124,7 +127,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
 | [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
 | [ns.rs](../src/xmp/ns.rs), [xml.rs](../src/xmp/xml.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
-| [local.rs](../src/xmp/local.rs) | Lightroom's spot removal and masks (`RetouchAreas`, legacy `RetouchInfo`, mask correction lists) from XMP or a catalog, as retouch operations and masks; import only. |
+| [local.rs](../src/xmp/local.rs) | Lightroom's spot removal, red eye and masks (`RetouchAreas`, legacy `RetouchInfo`, `RedEyeInfo`, mask correction lists) from XMP or a catalog, as retouch operations, red eye corrections and masks; import only. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
 | [builtin.rs](../src/presets/builtin.rs) | Built-in presets embedded from `assets/presets`, their group order and ids. |
@@ -206,6 +209,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [guided_tool.rs](../src/app/guided_tool.rs) | The Guided Upright tool (Shift+T): drawing, moving, selecting and deleting guides, its loupe and grid. See [transform](transform.md#guided-upright). |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
+| [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size and Darken. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application and temporary hover previews. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
@@ -276,7 +280,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | Original RAW and Lightroom catalog | User-selected source files; treated as read-only. |
 | Legacy sidecar edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks, or identity-keyed JSON under the data directory's `sidecars/`, saved by releases before 0.1.8. Imported into the catalog when their folder is added and left on disk unchanged. |
-| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots and masks are in the `local_edits` table, Develop History in `develop_history`, raster data in `bitmaps`. |
+| Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots, red eye corrections and masks are in the `local_edits` table, Develop History in `develop_history`, raster data in `bitmaps`. |
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF destination. |
 | Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |
@@ -338,7 +342,7 @@ the validation docs.
 | [macOS / Lightroom validation](macos-lightroom-validation.md) | Dated photographic comparisons and platform validation results. |
 | [Parity gaps](parity-gaps.md) | Known differences and work still needed for Lightroom parity. |
 | [Tone controls](tone-controls.md), [color mixer](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md), [demosaic](demosaic.md) | How each engine 4 stage was measured against Camera Raw and what it does. |
-| [Retouching](retouching.md), [masking](masking.md) | The Remove and Masking tools: use, rendering and what is not implemented. |
+| [Retouching](retouching.md), [masking](masking.md) | The Remove, Red Eye and Masking tools: use, rendering, Camera Raw measurements and what is not implemented. |
 | [Lightroom profiles](lightroom-profiles.md) | RAWmakase's own profiles, importing Adobe and third-party profiles, and supported profile features. |
 
 When adding or moving a module, update its entry here. Put API contracts in Rust

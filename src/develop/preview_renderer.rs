@@ -584,6 +584,107 @@ mod tests {
         let dusty = quality::render(&im, &Recipe::default(), 0, Some([300, 200, 1, 1])).unwrap();
         assert!(healed.pixels[0][1] > dusty.pixels[0][1] + 0.2);
     }
+    /// A red eye correction stays on its eye through crop, straightening, rotation and
+    /// flips, and renders the same in Fit, regions and exports.
+    #[test]
+    fn red_eye_follows_geometry_and_agrees_between_previews_and_export() {
+        use crate::develop::{ViewMapping, red_eye::RedEyeOp};
+        let (w, h) = (480, 320);
+        let mut im = image(w, h, 0.);
+        let eye = [300., 120.];
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            *p = if (x - eye[0]).hypot(y - eye[1]) < 12. {
+                [0.6, 0.03, 0.03]
+            } else {
+                [0.5, 0.33, 0.25]
+            };
+        }
+        let frame = crate::develop::ImageFrame::new(&im);
+        let op = RedEyeOp {
+            kind: Default::default(),
+            center: frame.to_image(eye[0], eye[1]),
+            radius: [12. / 480.; 2],
+            correlation: 0.,
+            pupil_size: 0.5,
+            darken: 0.5,
+        };
+        let cancel = AtomicBool::new(false);
+        let mut warm = PreviewRenderer::default();
+        for (rotation, flip_x, straighten, crop) in [
+            (0, false, 0., [0., 0., 1., 1.]),
+            (1, false, 4., [0.3, 0.1, 0.95, 0.8]),
+            (3, true, -6., [0.4, 0., 1., 0.7]),
+        ] {
+            let mut r = Recipe {
+                rotation,
+                flip_x,
+                straighten,
+                crop,
+                ..Default::default()
+            };
+            let at = |r: &Recipe| {
+                let full = quality::render(&im, r, 0, None).unwrap();
+                let [u, v] = ViewMapping::new(&im, r).to_view(op.center);
+                let (x, y) = (
+                    (u * full.width as f32) as usize,
+                    (v * full.height as f32) as usize,
+                );
+                full.pixels[y * full.width as usize + x]
+            };
+            let red = at(&r);
+            r.red_eye = vec![op.clone()].into();
+            let fixed = at(&r);
+            assert!(red[0] > 3. * red[1], "{rotation}: red before {red:?}");
+            assert!(
+                fixed[0] < 1.3 * fixed[1] && fixed[0] < 0.5 * red[0],
+                "{rotation}: {fixed:?} from {red:?}"
+            );
+            let fit = warm.render(&im, &r, 150, None, &cancel).unwrap();
+            let fresh = PreviewRenderer::default()
+                .render(&im, &r, 150, None, &cancel)
+                .unwrap();
+            assert_eq!(fit.pixels, fresh.pixels, "{rotation}: stale pyramid");
+            let region = [40, 30, 60, 50];
+            let tile = warm.render(&im, &r, 0, Some(region), &cancel).unwrap();
+            let full = quality::render(&im, &r, 0, Some(region)).unwrap();
+            assert_eq!(tile.pixels, full.pixels);
+        }
+        // Older process versions render it too, in previews, regions and exports.
+        let legacy = |red_eye: Vec<RedEyeOp>| Recipe {
+            engine: 2,
+            red_eye: red_eye.into(),
+            ..Default::default()
+        };
+        let [x, y] = [eye[0] as u32, eye[1] as u32];
+        for (before, after) in [
+            (
+                super::super::render_legacy(&im, &legacy(vec![]), 0).unwrap(),
+                super::super::render_legacy(&im, &legacy(vec![op.clone()]), 0).unwrap(),
+            ),
+            (
+                warm.render(&im, &legacy(vec![]), 0, Some([x, y, 1, 1]), &cancel)
+                    .unwrap(),
+                warm.render(
+                    &im,
+                    &legacy(vec![op.clone()]),
+                    0,
+                    Some([x, y, 1, 1]),
+                    &cancel,
+                )
+                .unwrap(),
+            ),
+        ] {
+            let i = if before.width == 1 {
+                0
+            } else {
+                (y * w + x) as usize
+            };
+            let (red, fixed) = (before.pixels[i], after.pixels[i]);
+            assert!(red[0] > 3. * red[1], "{red:?}");
+            assert!(fixed[0] < 1.3 * fixed[1], "legacy: {fixed:?} from {red:?}");
+        }
+    }
     /// Mask edits (sliders, shapes, ranges, visibility) never reuse stale weights.
     #[test]
     fn cached_mask_weights_follow_every_edit() {

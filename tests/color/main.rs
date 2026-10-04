@@ -14,6 +14,7 @@ mod chart;
 mod dng;
 mod measure;
 mod private;
+mod red_eye;
 mod retouch;
 
 use chart::{Camera, Illuminant, Layout, Patch};

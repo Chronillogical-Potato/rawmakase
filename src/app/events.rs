@@ -29,13 +29,8 @@ impl Editor {
                 Event::PresetLoad(p) => {
                     self.activity.finish_dialog();
                     match crate::presets::load_preset(&p) {
-                        Ok(mut r) => {
-                            // Presets never carry spot removal; their masks replace the
-                            // photo's only when they have any, as in Lightroom.
-                            r.retouch = self.document.recipe.retouch.clone();
-                            if r.masks.is_empty() {
-                                r.masks = self.document.recipe.masks.clone();
-                            }
+                        Ok(r) => {
+                            let r = crate::presets::applied_to(r, &self.document.recipe);
                             let old = std::mem::replace(&mut self.document.recipe, r);
                             self.history(old);
                             self.ensure_upright();

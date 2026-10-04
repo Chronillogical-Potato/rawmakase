@@ -28,6 +28,7 @@ pub mod upright;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
+pub mod red_eye;
 mod rendered;
 pub mod retouch;
 mod stage_cache;

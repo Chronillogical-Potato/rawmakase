@@ -78,7 +78,7 @@ const DEVELOP: [Shortcut; 30] = [
     ("O / Shift+O", "Next crop overlay / turn it"),
     ("Cmd+drag", "Straighten along a line"),
     ("Shift+T", "Guided Upright: draw guides"),
-    ("Delete", "Delete the selected guide"),
+    ("Delete", "Delete the selected spot, guide or red eye"),
     ("Q", "Spot removal"),
     ("Shift+W", "Masking"),
     ("W", "White balance selector"),

@@ -118,6 +118,14 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
         },
         ..Default::default()
     });
+    r.red_eye.push(crate::develop::red_eye::RedEyeOp {
+        kind: Default::default(),
+        center: [0.3, 0.4],
+        radius: [0.01, 0.012],
+        correlation: -0.2,
+        pupil_size: 0.6,
+        darken: 0.4,
+    });
     let p = save_at(&raw, &r, &ExportOptions::default(), &store)?;
     let v: serde_json::Value = serde_json::from_reader(File::open(&p)?)?;
     assert_eq!(
@@ -125,7 +133,11 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
         (Some(6), Some(6))
     );
     let recipe = v["recipe"].as_object().unwrap();
-    assert!(!recipe.contains_key("retouch") && !recipe.contains_key("masks"));
+    assert!(
+        !recipe.contains_key("retouch")
+            && !recipe.contains_key("masks")
+            && !recipe.contains_key("red_eye")
+    );
     assert_eq!(recipe["exposure"], 0.4);
     assert!(local_path(&raw).exists());
     assert_eq!(load_at(&raw, &store)?.unwrap().recipe, r);

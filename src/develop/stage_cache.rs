@@ -144,6 +144,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         shadows: _,
         highlights: _,
         retouch: _,
+        red_eye: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         profile_tone: _,
         // The look's strength; its Shadows, Highlights and Clarity are keyed by

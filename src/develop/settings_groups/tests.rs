@@ -88,6 +88,14 @@ fn everything_changed() -> Recipe {
         opacity: 1.,
         offset: [0.02, 0.],
     });
+    r.red_eye.push(crate::develop::red_eye::RedEyeOp {
+        kind: Default::default(),
+        center: [0.4, 0.4],
+        radius: [0.01; 2],
+        correlation: 0.,
+        pupil_size: 0.5,
+        darken: 0.5,
+    });
     r.masks.push(MaskGroup {
         components: vec![MaskComponent::new(MaskShape::Brush {
             strokes: Vec::new(),
@@ -260,6 +268,8 @@ fn nothing_selected_changes_nothing_and_the_photos_own_settings_never_move() {
         "flip_y",
         "preset_name",
         "preset_settings",
+        // Red eye corrections belong to their photo; Lightroom never copies them.
+        "red_eye",
     ] {
         assert!(!changed(&to, &all).contains(key), "{key}");
     }

@@ -807,6 +807,208 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
     assert!((source(&ops[0])[0] - source(&before)[0]).abs() < 1e-5);
 }
 #[test]
+fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let eyes = [([100., 100.], 10.), ([300., 260.], 8.)];
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: (0..160000)
+            .map(|i| {
+                let (x, y) = ((i % 400) as f32, (i / 400) as f32);
+                let red = eyes.iter().any(|(c, r)| (x - c[0]).hypot(y - c[1]) <= *r);
+                if red {
+                    [0.6, 0.03, 0.03]
+                } else {
+                    [0.55, 0.35, 0.25]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    editor.view.tool = state::Tool::RedEye;
+    let mut frame = |events: Vec<egui::Event>| {
+        let edit = editor.begin_edit_frame();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ctx.input(|i| editor.red_eye_keys(i));
+                editor.viewport_ui(ui)
+            },
+        );
+        editor.finish_edit_frame(edit, &ctx);
+        output.textures_delta.clear();
+        let (steps, applied) = editor.document.history.steps();
+        let names: Vec<String> = steps[..applied].iter().map(|s| s.name.clone()).collect();
+        (
+            editor.document.recipe.red_eye.clone(),
+            names,
+            editor.status.to_string(),
+        )
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(vec![]);
+    // Dragging from the first eye's centre outward finds its pupil: one step.
+    let (a, b) = (Pos2::new(50., 50.), Pos2::new(62., 50.));
+    frame(vec![egui::Event::PointerMoved(a), button(a, true)]);
+    for k in 1..=6 {
+        frame(vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 6.)]);
+    }
+    let (ops, names, _) = frame(vec![button(b, false)]);
+    assert_eq!(ops.len(), 1);
+    assert!((ops[0].center[0] - 0.25).abs() < 0.005 && (ops[0].center[1] - 0.25).abs() < 0.005);
+    assert!(
+        (ops[0].radius[0] * 400. - 10.).abs() < 1.5,
+        "{:?}",
+        ops[0].radius
+    );
+    assert_eq!(names, ["Add Red Eye Correction"]);
+    // A click on the second eye uses the last size.
+    let c = Pos2::new(150., 130.);
+    frame(vec![egui::Event::PointerMoved(c), button(c, true)]);
+    let (ops, names, _) = frame(vec![button(c, false)]);
+    assert_eq!(ops.len(), 2);
+    assert!((ops[1].center[0] - 0.75).abs() < 0.005 && (ops[1].center[1] - 0.65).abs() < 0.005);
+    assert_eq!(names.len(), 2);
+    // A click on nothing red adds nothing and says why.
+    let d = Pos2::new(180., 20.);
+    frame(vec![egui::Event::PointerMoved(d), button(d, true)]);
+    let (ops, names, status) = frame(vec![button(d, false)]);
+    assert_eq!((ops.len(), names.len()), (2, 2));
+    assert!(status.contains("Unable to find red eye"), "{status}");
+    // Dragging the first correction moves it in one step.
+    let e = Pos2::new(70., 60.);
+    frame(vec![egui::Event::PointerMoved(a), button(a, true)]);
+    for k in 1..=5 {
+        frame(vec![egui::Event::PointerMoved(a + (e - a) * k as f32 / 5.)]);
+    }
+    let (ops, names, _) = frame(vec![button(e, false)]);
+    assert!((ops[0].center[0] - 0.35).abs() < 0.005);
+    assert_eq!(names.last().unwrap(), "Update Red Eye Correction");
+    assert_eq!(names.len(), 3);
+    // Delete removes the selected correction.
+    let key = egui::Event::Key {
+        key: egui::Key::Delete,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (ops, names, _) = frame(vec![key]);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(names.last().unwrap(), "Delete Red Eye Correction");
+    // Undo brings it back where it was.
+    let mut recipe = editor.document.recipe.clone();
+    assert!(editor.document.history.undo(&mut recipe));
+    assert_eq!(recipe.red_eye.len(), 2);
+    assert!((recipe.red_eye[0].center[0] - 0.35).abs() < 0.005);
+}
+#[test]
+fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
+    use crate::develop::panels::{Panel, PanelState};
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 200,
+        height: 200,
+        pixels: (0..40000)
+            .map(|i| {
+                let (x, y) = ((i % 200) as f32, (i / 200) as f32);
+                if (x - 100.).hypot(y - 100.) <= 8. {
+                    [0.6, 0.03, 0.03]
+                } else {
+                    [0.55, 0.35, 0.25]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 200,
+            height: 200,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    let panels = &mut editor.document.recipe.panels;
+    panels.set(Panel::RedEye, PanelState::Off);
+    editor.add_red_eye([0.5, 0.5], 0.1);
+    assert_eq!(editor.document.recipe.red_eye.len(), 1);
+    assert_eq!(
+        editor.document.recipe.panels.state(Panel::RedEye),
+        PanelState::On
+    );
+}
+#[test]
+fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: (0..160000)
+            .map(|i| {
+                let (x, y) = ((i % 400) as f32, (i / 400) as f32);
+                if (x - 200.).hypot(y - 200.) <= 150. {
+                    [0.6, 0.03, 0.03]
+                } else {
+                    [0.55, 0.35, 0.25]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.add_red_eye([0.5, 0.5], 0.48);
+    assert!(editor.document.recipe.red_eye.is_empty());
+    assert!(
+        editor.status.contains("Unable to find red eye"),
+        "{}",
+        editor.status
+    );
+    editor.document.recipe.validate().unwrap();
+}
+#[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     use crate::develop::masks::MaskShape;
     let ctx = egui::Context::default();

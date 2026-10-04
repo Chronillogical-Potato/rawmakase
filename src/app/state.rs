@@ -191,6 +191,8 @@ pub(super) enum Tool {
     Defringe,
     /// Spot removal: Heal and Clone.
     Remove,
+    /// Red Eye Correction.
+    RedEye,
     Mask,
     /// The Transform panel's Guided Upright tool.
     Guided,
@@ -217,6 +219,8 @@ pub(super) struct ViewState {
     pub(super) ruler: super::crop_tool::Ruler,
     /// Spot removal settings, selection and drag in progress.
     pub(super) retouch: super::retouch_tool::RetouchTool,
+    /// Red Eye Correction's selection, last size and drag in progress.
+    pub(super) red_eye: super::red_eye_tool::RedEyeTool,
     /// Masking panel state.
     pub(super) masking: super::mask_tool::MaskTool,
     /// The Guided Upright tool's selection, drag and view options.
@@ -249,6 +253,7 @@ impl Default for ViewState {
             crop_guides_changed: None,
             ruler: Default::default(),
             retouch: Default::default(),
+            red_eye: Default::default(),
             masking: Default::default(),
             guided: Default::default(),
             monitor: None,
@@ -367,6 +372,7 @@ impl ViewState {
         // Ends a histogram drag: the next photo starts from its own values.
         self.tone_drag = None;
         self.retouch.clear_document();
+        self.red_eye.clear_document();
         self.masking.clear_document();
         self.guided.clear_document();
         self.compare = false;
