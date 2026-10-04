@@ -56,6 +56,37 @@ impl Zoom {
         );
         egui::Rect::from_min_size(min, size)
     }
+    /// The 1:1 region `[x, y, w, h]` of a photo `width` × `height` image pixels
+    /// that a view `viewport` pixels in size shows when zoomed to 100% or more;
+    /// None below 100%, where the whole photo is rendered at the zoomed size.
+    pub fn region(&self, viewport: Vec2, width: u32, height: u32) -> Option<[u32; 4]> {
+        if !self.on || self.level < 1. {
+            return None;
+        }
+        let z = self.level;
+        let w = ((viewport.x / z).ceil() as u32).clamp(1, width);
+        let h = ((viewport.y / z).ceil() as u32).clamp(1, height);
+        let x = (self.pan[0] * width as f32 - w as f32 / 2.)
+            .round()
+            .clamp(0., (width - w) as f32) as u32;
+        let y = (self.pan[1] * height as f32 - h as f32 / 2.)
+            .round()
+            .clamp(0., (height - h) as f32) as u32;
+        Some([x, y, w, h])
+    }
+    /// Lightroom's click on the photo: from Fit, zooms in keeping `pos` (on the
+    /// photo drawn at `rect` in `area`, `size` image pixels) under the pointer;
+    /// zoomed in, back to Fit.
+    pub fn toggle_at(&mut self, pos: Pos2, rect: Rect, area: Rect, size: Vec2, ppp: f32) {
+        if !self.on {
+            let point = (pos - rect.min) / rect.size();
+            let size = size * (self.level / ppp);
+            let origin = pos - point * size;
+            let pan = (area.center() - origin) / size;
+            self.pan = [pan.x.clamp(0., 1.), pan.y.clamp(0., 1.)];
+        }
+        self.on = !self.on;
+    }
     /// The level shown, 0 for Fit.
     pub fn shown(&self) -> f32 {
         if self.on { self.level } else { 0. }

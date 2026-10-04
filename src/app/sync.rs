@@ -560,6 +560,8 @@ impl Editor {
         if let Some(library) = &mut self.library {
             library.edits_changed(result.synced.iter().map(|e| e.id));
         }
+        // The reference photo may be among them.
+        self.load_reference();
         if done > 0 {
             self.undo_log
                 .push(super::undo::Command::Sync(Box::new(SyncCommand {

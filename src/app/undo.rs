@@ -148,11 +148,15 @@ impl Editor {
     pub(super) fn undo(&mut self) {
         if !self.activity.is_syncing() {
             self.step(Direction::Undo);
+            // A Library command (a Sync, a metadata read) may have changed the
+            // reference photo's edit.
+            self.load_reference();
         }
     }
     pub(super) fn redo(&mut self) {
         if !self.activity.is_syncing() {
             self.step(Direction::Redo);
+            self.load_reference();
         }
     }
     /// Reverses the latest command, or makes the latest reversed one again.

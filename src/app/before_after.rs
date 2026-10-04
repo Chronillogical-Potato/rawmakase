@@ -8,6 +8,9 @@
 //! and pan, and Before is framed with the edit's crop and orientation so the two line
 //! up. Before renders in its own lane of the renderer, once per view: editing After
 //! does not render it again.
+//!
+//! Reference View (see `reference`) is laid out as a side-by-side view, with the
+//! reference photo in Before's place, rendered in the same lane.
 use super::state::{Picture, TextureMode};
 use super::{Editor, history::Step};
 use crate::develop::{ClipOverlay, Geometry, Recipe};
@@ -27,6 +30,8 @@ pub(super) enum Compare {
     SideBySide(Axis),
     /// One photo, Before on one side of a line and After on the other.
     Split(Axis),
+    /// Lightroom's Reference View: another photo, the reference, beside the edit.
+    Reference(Axis),
 }
 /// Which way the two sides are laid out: Before left or on top.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,15 +52,25 @@ pub(super) const VIEWS: [(Compare, &str); 5] = [
 impl Compare {
     /// Before is on screen, alone or with the edit.
     pub(super) fn shows_before(self) -> bool {
-        self != Self::Off
+        matches!(
+            self,
+            Self::BeforeOnly | Self::SideBySide(_) | Self::Split(_)
+        )
+    }
+    /// Reference View.
+    pub(super) fn reference(self) -> bool {
+        matches!(self, Self::Reference(_))
     }
     /// Before alone: the panels are disabled, as nothing they change is shown.
     pub(super) fn before_only(self) -> bool {
         self == Self::BeforeOnly
     }
-    /// Before beside the edit, rendered separately.
+    /// Before, or the reference photo, beside the edit, rendered separately.
     pub(super) fn two_up(self) -> bool {
-        matches!(self, Self::SideBySide(_) | Self::Split(_))
+        matches!(
+            self,
+            Self::SideBySide(_) | Self::Split(_) | Self::Reference(_)
+        )
     }
     /// `view`, or back to the edit alone when `view` is already shown: what its key
     /// does, as Y, Alt+Y, Shift+Y and \ do in Lightroom.
@@ -102,7 +117,7 @@ pub(super) fn panes(compare: Compare, area: Rect) -> Panes {
             after: whole,
             before: None,
         },
-        Compare::SideBySide(axis) => {
+        Compare::SideBySide(axis) | Compare::Reference(axis) => {
             let (before, after) = halves(axis, GAP);
             let pane = |r| Pane { area: r, clip: r };
             Panes {
@@ -175,6 +190,11 @@ impl BeforePreview {
         self.mode = TextureMode::Whole;
         self.submitted = None;
     }
+    /// The render asked for last is a 100% region.
+    #[cfg(test)]
+    pub(super) fn zoomed(&self) -> bool {
+        matches!(self.pending_mode, TextureMode::Region(_))
+    }
     /// Asks for its job again on the next schedule, e.g. after its textures were lost.
     pub(super) fn forget_job(&mut self) {
         self.submitted = None;
@@ -234,7 +254,14 @@ impl Editor {
         if view.two_up() {
             self.view.tool = super::state::Tool::None;
         }
+        // Before and the reference share a lane: neither shows the other's render.
+        if view.reference() != self.view.compare.reference() {
+            self.preview.before.clear();
+        }
         self.view.compare = view;
+        if view.reference() {
+            self.load_reference();
+        }
     }
     /// A tool opened while Before is beside the edit goes back to the edit alone.
     pub(super) fn leave_compare_for_tools(&mut self) {
@@ -277,7 +304,7 @@ impl Editor {
         self.schedule();
     }
     /// Before as rendered: switched-off panels left out, as the edit's.
-    fn before_render_recipe(&self) -> Recipe {
+    fn before_settings_rendered(&self) -> Recipe {
         let r = self.before_settings();
         if r.panels.all_on() {
             r
@@ -285,26 +312,47 @@ impl Editor {
             r.as_rendered().into_owned()
         }
     }
-    /// Renders Before beside the edit when its view changed; edits to After alone do
-    /// not render it again. Leaving the side-by-side views frees its textures.
+    /// What the side beside the edit renders: Before, or the reference photo, with
+    /// the zoom it is shown at.
+    fn second_side(&self) -> Option<(Arc<CameraImage>, Recipe, super::navigator::Zoom)> {
+        if !self.view.compare.two_up() {
+            return None;
+        }
+        let (image, recipe, zoom) = if self.view.compare.reference() {
+            let side = self.reference_side()?;
+            (side.image, side.recipe, self.reference.zoom)
+        } else {
+            let image = self.document.full()?.clone();
+            (image, self.before_settings(), self.view.zoom)
+        };
+        // Switched-off panels left out, as the edit's.
+        let recipe = if recipe.panels.all_on() {
+            recipe
+        } else {
+            recipe.as_rendered().into_owned()
+        };
+        Some((image, recipe, zoom))
+    }
+    /// Renders Before (or the reference) beside the edit when its view changed;
+    /// edits to After alone do not render it again. Leaving the side-by-side views
+    /// frees its textures.
     pub(super) fn schedule_before(&mut self) {
-        let image = self
-            .document
-            .full()
-            .filter(|_| self.view.compare.two_up())
-            .cloned();
-        let Some(image) = image else {
+        let Some((image, recipe, zoom)) = self.second_side() else {
             let before = &self.preview.before;
-            if before.submitted.is_some() || before.texture.is_some() || before.region.is_some() {
+            if !self.view.compare.reference()
+                && (before.submitted.is_some()
+                    || before.texture.is_some()
+                    || before.region.is_some())
+            {
                 self.preview.before.clear();
             }
             return;
         };
-        let recipe = self.before_render_recipe();
         let geometry = Geometry::new(&image, &recipe, 0);
+        let viewport = self.view.viewport;
         let job = BeforeJob {
-            region: self.region_in(&geometry),
-            max_edge: self.render_edges(&geometry).max_edge,
+            region: zoom.region(viewport, geometry.width, geometry.height),
+            max_edge: super::workflow::render_edges(&zoom, viewport, &geometry).max_edge,
             image,
             recipe,
             monitor: self.view.monitor.clone(),
@@ -371,9 +419,12 @@ impl Editor {
     /// `panes.after`, and labels both sides. Returns where Before's photo is drawn.
     pub(super) fn before_pane_ui(&self, ui: &egui::Ui, panes: &Panes, after: Rect) -> Option<Rect> {
         let pane = panes.before?;
+        if self.view.compare.reference() {
+            return self.reference_pane_ui(ui, panes, pane);
+        }
         let geometry = self.document.full().map(|im| {
             (
-                Geometry::new(im, &self.before_render_recipe(), 0),
+                Geometry::new(im, &self.before_settings_rendered(), 0),
                 Geometry::new(im, &self.effective_recipe(), 0),
             )
         });
@@ -387,24 +438,8 @@ impl Editor {
             let ppp = ui.ctx().pixels_per_point();
             self.view.zoom.photo_rect(pane.area, size, ppp)
         });
-        let painter = ui.painter().with_clip_rect(pane.clip);
-        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
-        let before = &self.preview.before;
-        match &before.texture {
-            Some(texture) => {
-                painter.image(texture.id(), rect, uv, Color32::WHITE);
-            }
-            // Waiting for its first render; a 100% region alone is drawn below.
-            None if before.region.is_none() => {
-                let at = Rect::from_center_size(pane.clip.center(), Vec2::splat(18.));
-                egui::Spinner::new().size(18.).paint_at(ui, at);
-            }
-            None => {}
-        }
-        if let (TextureMode::Region(region), Some(texture), Some((g, _))) =
-            (before.mode, &before.region, &geometry)
-        {
-            painter.image(texture.id(), region_on(rect, g, region), uv, Color32::WHITE);
+        if let Some((g, _)) = &geometry {
+            self.paint_second_side(ui, pane, rect, g);
         }
         if matches!(self.view.compare, Compare::Split(_)) {
             let line = match self.view.compare {
@@ -420,6 +455,27 @@ impl Editor {
         badge(ui, pane.clip, "Before");
         badge(ui, panes.after.clip, "After");
         Some(rect)
+    }
+    /// Draws the render of the side beside the edit, the whole photo at `rect` and a
+    /// 100% region over it, or a spinner while it has none.
+    pub(super) fn paint_second_side(&self, ui: &egui::Ui, pane: Pane, rect: Rect, g: &Geometry) {
+        let painter = ui.painter().with_clip_rect(pane.clip);
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+        let before = &self.preview.before;
+        match &before.texture {
+            Some(texture) => {
+                painter.image(texture.id(), rect, uv, Color32::WHITE);
+            }
+            // Waiting for its first render; a 100% region alone is drawn below.
+            None if before.region.is_none() => {
+                let at = Rect::from_center_size(pane.clip.center(), Vec2::splat(18.));
+                egui::Spinner::new().size(18.).paint_at(ui, at);
+            }
+            None => {}
+        }
+        if let (TextureMode::Region(region), Some(texture)) = (before.mode, &before.region) {
+            painter.image(texture.id(), region_on(rect, g, region), uv, Color32::WHITE);
+        }
     }
     /// An edit is about to render: a Before render still running would hold it up
     /// on the renderer's one thread, so it is cancelled and asked for again behind it.
@@ -446,16 +502,16 @@ pub(super) fn region_on(rect: Rect, g: &Geometry, [x, y, w, h]: [u32; 4]) -> Rec
 
 /// "Before" or "After" in the top-left corner of a side, as Lightroom labels them.
 pub(super) fn badge(ui: &egui::Ui, side: Rect, text: &str) {
-    let rect = Rect::from_min_size(side.left_top() + Vec2::splat(12.), Vec2::new(62., 25.));
     let painter = ui.painter().with_clip_rect(side);
-    painter.rect_filled(rect, 3., Color32::from_black_alpha(190));
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
         egui::FontId::proportional(12.),
         Color32::WHITE,
     );
+    let width = (galley.size().x + 20.).max(62.);
+    let rect = Rect::from_min_size(side.left_top() + Vec2::splat(12.), Vec2::new(width, 25.));
+    painter.rect_filled(rect, 3., Color32::from_black_alpha(190));
+    painter.galley(rect.center() - galley.size() / 2., galley, Color32::WHITE);
 }
 
 #[cfg(test)]
@@ -502,6 +558,12 @@ mod tests {
         assert_eq!(before.clip.right(), p.after.clip.left());
         assert_eq!(before.clip.width() + p.after.clip.width(), a.width());
         assert_eq!(panes(Compare::BeforeOnly, a).before, None);
+        // Reference View: the reference where Before is, left or on top.
+        for axis in [Axis::LeftRight, Axis::TopBottom] {
+            let reference = Compare::Reference(axis);
+            assert_eq!(panes(reference, a), panes(Compare::SideBySide(axis), a));
+            assert!(reference.two_up() && reference.reference() && !reference.shows_before());
+        }
     }
 
     #[test]

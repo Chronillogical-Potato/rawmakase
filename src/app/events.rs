@@ -146,6 +146,7 @@ impl Editor {
                     }
                     self.schedule();
                 }
+                Event::Reference { ticket, result } => self.reference_ready(ticket, result),
                 Event::Rendered {
                     id,
                     pane: Pane::Before,
@@ -289,6 +290,8 @@ impl Editor {
                     .is_some_and(|old| old.catalog.path == l.catalog.path);
                 if !reloaded {
                     self.undo_log.clear();
+                    // Photo ids belong to their catalog, and so does the reference.
+                    self.clear_reference();
                 }
                 l.set_defaults(self.raw_defaults.clone());
                 self.library = Some(l);

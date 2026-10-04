@@ -2,7 +2,7 @@ use super::Editor;
 use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
 use crate::develop::{Geometry, Recipe};
-use eframe::egui;
+use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 
 impl Editor {
@@ -61,7 +61,14 @@ impl Editor {
         }
         self.document.reset(photo);
         let (id, cancel) = self.load.start();
+        // The reference photo stays on screen from photo to photo; Before goes.
+        let reference = self
+            .reference_view()
+            .then(|| std::mem::take(&mut self.preview.before));
         self.preview.clear_document();
+        if let Some(reference) = reference {
+            self.preview.before = reference;
+        }
         self.presets.clear_document();
         self.view.clear_document();
         self.status = "Reading RAW…".into();
@@ -72,6 +79,8 @@ impl Editor {
             prefetch,
             defaults: self.raw_defaults.clone(),
         });
+        // The photo left may be the reference, or its edit may have changed.
+        self.load_reference();
         true
     }
     /// The photo to decode ahead of time while `id` is shown: the next one in
@@ -262,19 +271,7 @@ impl Editor {
     }
     /// The 1:1 region of a photo with geometry `g` that the view shows, as `region`.
     pub(super) fn region_in(&self, g: &Geometry) -> Option<[u32; 4]> {
-        if !self.view.zoom.on || self.view.zoom.level < 1. {
-            return None;
-        }
-        let z = self.view.zoom.level;
-        let w = ((self.view.viewport.x / z).ceil() as u32).clamp(1, g.width);
-        let h = ((self.view.viewport.y / z).ceil() as u32).clamp(1, g.height);
-        let x = (self.view.zoom.pan[0] * g.width as f32 - w as f32 / 2.)
-            .round()
-            .clamp(0., (g.width - w) as f32) as u32;
-        let y = (self.view.zoom.pan[1] * g.height as f32 - h as f32 / 2.)
-            .round()
-            .clamp(0., (g.height - h) as f32) as u32;
-        Some([x, y, w, h])
+        self.view.zoom.region(self.view.viewport, g.width, g.height)
     }
     pub(super) fn schedule(&mut self) {
         let image = self.document.full().cloned();
@@ -326,17 +323,7 @@ impl Editor {
     /// The long edge a Fit render of a photo with geometry `g` needs in the view,
     /// and the one to render at the current zoom.
     pub(super) fn render_edges(&self, g: &Geometry) -> RenderEdges {
-        let fit = crate::develop::quality::fit_edge(
-            g.width,
-            g.height,
-            [self.view.viewport.x as u32, self.view.viewport.y as u32],
-        );
-        let max_edge = if self.view.zoom.on && self.view.zoom.level < 1. {
-            (g.width.max(g.height) as f32 * self.view.zoom.level).round() as u32
-        } else {
-            fit
-        };
-        RenderEdges { fit, max_edge }
+        render_edges(&self.view.zoom, self.view.viewport, g)
     }
     /// A CPU render: the whole photo, or a 100% region drawn over it.
     pub(super) fn set_pixels(
@@ -393,6 +380,25 @@ impl Editor {
     }
 }
 
+/// The long edges a render of a photo with geometry `g` needs in a view of
+/// `viewport` pixels at `zoom`.
+pub(super) fn render_edges(
+    zoom: &super::navigator::Zoom,
+    viewport: Vec2,
+    g: &Geometry,
+) -> RenderEdges {
+    let fit = crate::develop::quality::fit_edge(
+        g.width,
+        g.height,
+        [viewport.x as u32, viewport.y as u32],
+    );
+    let max_edge = if zoom.on && zoom.level < 1. {
+        (g.width.max(g.height) as f32 * zoom.level).round() as u32
+    } else {
+        fit
+    };
+    RenderEdges { fit, max_edge }
+}
 /// The long edges of a render, from `Editor::render_edges`.
 pub(super) struct RenderEdges {
     /// The view's Fit size.

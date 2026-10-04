@@ -208,7 +208,7 @@ pub(super) fn photo_cell(
         };
         footer_badges(painter, cell, footer, photo, badges);
     }
-    let action = photo_menu(&response, photo, available);
+    let action = photo_menu(&response, photo, available, super::Module::Library);
     (response, action)
 }
 /// What a cell's footer shows besides the photo's own flag and rating.
@@ -321,6 +321,8 @@ pub(in crate::app) enum PhotoAction {
     Copy(super::CopyAction),
     /// Read Metadata from Files.
     ReadMetadata,
+    /// Develop's Set as Reference Photo.
+    SetReference,
 }
 /// Create Virtual Copy's shortcut, as Lightroom shows it.
 pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
@@ -330,11 +332,13 @@ pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "maco
 };
 /// The right-click menu shared by grid cells and the Develop filmstrip.
 /// Open in Develop is greyed out for a photo Develop cannot open, e.g. one
-/// not `available`, with the reason in place of its shortcut.
+/// not `available`, with the reason in place of its shortcut. In Develop's
+/// filmstrip it starts with Set as Reference Photo, as in Lightroom.
 pub(in crate::app) fn photo_menu(
     response: &egui::Response,
     photo: &Photo,
     available: bool,
+    module: super::Module,
 ) -> Option<PhotoAction> {
     use crate::app::photo_metadata::{Edit, LABELS};
     use crate::app::widgets::{menu_item, menu_separator, submenu_style};
@@ -343,6 +347,13 @@ pub(in crate::app) fn photo_menu(
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
         let refusal = super::develop_refusal(photo, available);
+        if module == super::Module::Develop {
+            if menu_item(ui, "Set as Reference Photo", "", refusal.is_none(), false) {
+                action = Some(PhotoAction::SetReference);
+                ui.close();
+            }
+            menu_separator(ui);
+        }
         let shortcut = refusal.as_ref().map_or("D".into(), super::Refusal::label);
         if menu_item(ui, "Open in Develop", &shortcut, refusal.is_none(), false) {
             action = Some(PhotoAction::Develop);

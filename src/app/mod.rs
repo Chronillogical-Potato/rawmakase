@@ -31,6 +31,9 @@ pub struct Editor {
     rx: Receiver<Event>,
     loader: Latest<LoadJob>,
     renderer: worker::Renderer,
+    /// Develop's Reference View, and the worker developing its photo.
+    reference: reference::ReferenceView,
+    reference_loader: Latest<worker::ReferenceJob>,
     clipboard: Option<settings_transfer::Clipboard>,
     /// The settings of the photo open before this one, for Paste from Previous.
     previous_settings: Option<settings_transfer::Settings>,
@@ -183,6 +186,7 @@ impl Editor {
         let (tx, rx) = mpsc::channel();
         let loader = worker::loader(tx.clone(), ctx.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
+        let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
         let mut app = Self {
             activity: Default::default(),
             load: Default::default(),
@@ -205,6 +209,8 @@ impl Editor {
             rx,
             loader,
             renderer,
+            reference: Default::default(),
+            reference_loader,
             clipboard: None,
             previous_settings: None,
             copy_dialog: None,
@@ -430,6 +436,7 @@ mod preferences;
 mod presets;
 mod raw_defaults;
 mod red_eye_tool;
+mod reference;
 mod retouch_tool;
 #[cfg(feature = "telemetry")]
 mod stats;

@@ -32,8 +32,9 @@ pub struct Place {
 }
 pub(in crate::app) use cell::copy_suffix;
 pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
-pub use filmstrip::{Module, Pick};
+pub use filmstrip::{DraggedPhoto, Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
+pub(in crate::app) use previews::EditSource;
 pub use quick::CollectionCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
@@ -353,6 +354,39 @@ impl Library {
     pub fn photo(&self, id: i64) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
     }
+    /// What photo `id` is developed from, as Develop would open it: its saved edit
+    /// (checked as Develop checks it), else its Lightroom edit, else the defaults;
+    /// for Develop's Reference View. Why not, for a photo Develop cannot open; None
+    /// for a photo no longer in the catalog.
+    pub(in crate::app) fn develop_source(&self, id: i64) -> Option<Result<DevelopSource, Refusal>> {
+        let photo = self.photo(id)?;
+        if let Some(refusal) = develop_refusal(photo, photo.path.is_file()) {
+            return Some(Err(refusal));
+        }
+        let edit = match self.catalog.load_edit(id, &photo.path) {
+            Ok(Some(saved)) => serde_json::to_string(&saved.recipe)
+                .ok()
+                .map(EditSource::Recipe),
+            Ok(None) => self
+                .catalog
+                .edit_texts(id)
+                .ok()
+                .and_then(|(_, lightroom)| lightroom)
+                .map(EditSource::Lightroom),
+            // A protected edit: Develop shows the defaults too.
+            Err(_) => None,
+        }
+        .unwrap_or_else(|| EditSource::Defaults(self.defaults.clone()));
+        // The file and the demosaic too: a RAW replaced in place, or decoded another
+        // way, is developed again.
+        let file = crate::storage::Stamp::read(&photo.path).ok();
+        let demosaic = crate::raw::demosaic();
+        Some(Ok(DevelopSource {
+            path: photo.path.clone(),
+            tag: format!("{}-{file:?}-{demosaic:?}", edit.tag()),
+            edit,
+        }))
+    }
     pub fn navigate(&self, id: i64, delta: i32) -> Option<i64> {
         let at = self.visible.iter().position(|i| self.photos[*i].id == id)?;
         let n = (at as i32 + delta).clamp(0, self.visible.len().saturating_sub(1) as i32) as usize;
@@ -636,6 +670,15 @@ impl Refusal {
             ),
         }
     }
+}
+/// A catalog photo as Develop would open it, from `Library::develop_source`.
+#[derive(Clone)]
+pub(in crate::app) struct DevelopSource {
+    pub path: std::path::PathBuf,
+    pub edit: EditSource,
+    /// Identifies `edit` (the defaults included), the file and the demosaic: it
+    /// changes whenever any of them does.
+    pub tag: String,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
 /// `available`.

@@ -196,6 +196,8 @@ impl Library {
         use cell::PhotoAction;
         match action {
             PhotoAction::Develop => return Some(photo.id),
+            // Taken by Develop's filmstrip before it gets here.
+            PhotoAction::SetReference => {}
             PhotoAction::Reveal => {
                 if let Err(e) = crate::platform::reveal::reveal(&photo.path) {
                     self.message = format!("Could not show {}: {e}", photo.filename);

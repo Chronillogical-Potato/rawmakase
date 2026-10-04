@@ -82,7 +82,7 @@ fn spawn_with(
 
 /// What an edited preview is rendered from.
 #[derive(Clone)]
-pub(super) enum EditSource {
+pub(in crate::app) enum EditSource {
     /// A saved RAWmakase recipe, as JSON.
     Recipe(String),
     /// Lightroom develop settings from an imported catalog.
