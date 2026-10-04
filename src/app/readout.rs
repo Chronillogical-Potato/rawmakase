@@ -158,6 +158,8 @@ mod tests {
         );
         // Another photo: no values until its pixels arrive.
         e.view.clear_document();
+        e.preview.clear_document();
+        assert!(e.preview.samples.is_none() && e.preview.region_samples.is_none());
         assert_eq!(e.view.readout.text(), None);
         // Off the photo: the readout goes, and so do the renders' pixels.
         e.update_readout(Some(Pos2::new(250., 50.)), rect, None);
@@ -177,8 +179,10 @@ mod tests {
         let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
         let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
         e.library = Some(Box::new(library));
-        // Each frame's I events: pressed, released or both.
-        let mut frame = |events: &[bool]| {
+        let none = eframe::egui::Modifiers::NONE;
+        // Each frame's I events: pressed, released or both, with the modifiers held
+        // for them.
+        let mut frame = |events: &[bool], modifiers: eframe::egui::Modifiers| {
             let events = events
                 .iter()
                 .map(|&pressed| eframe::egui::Event::Key {
@@ -186,7 +190,7 @@ mod tests {
                     physical_key: Some(eframe::egui::Key::I),
                     pressed,
                     repeat: false,
-                    modifiers: Default::default(),
+                    modifiers,
                 })
                 .collect();
             let input = eframe::egui::RawInput {
@@ -197,12 +201,15 @@ mod tests {
             output.textures_delta.clear();
             e.library.as_ref().unwrap().loupe_info()
         };
-        assert_eq!(frame(&[true, false]), "Info1");
-        assert_eq!(frame(&[true]), "Info2");
+        assert_eq!(frame(&[true, false], none), "Info1");
+        assert_eq!(frame(&[true], none), "Info2");
         // Held down, it repeats without flickering through them.
-        assert_eq!(frame(&[true]), "Info2");
-        assert_eq!(frame(&[false]), "Info2");
-        assert_eq!(frame(&[true, false]), "Off");
+        assert_eq!(frame(&[true], none), "Info2");
+        assert_eq!(frame(&[false], none), "Info2");
+        assert_eq!(frame(&[true, false], none), "Off");
+        // Cmd+I is not I, even when Cmd is let go in the same frame.
+        let cmd = eframe::egui::Modifiers::COMMAND;
+        assert_eq!(frame(&[true, false], cmd), "Off");
         Ok(())
     }
 }

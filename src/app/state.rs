@@ -374,6 +374,11 @@ impl PreviewState {
         self.mode = TextureMode::Whole;
         self.crop = None;
         self.before.clear();
+        // The pixels the readout and loupes read belong to the photo left.
+        self.samples = None;
+        self.region_samples = None;
+        self.samples_recipe = None;
+        self.samples_requested = false;
     }
     /// Textures the renderer presented into that the viewport draws.
     pub fn presented(&self) -> Vec<egui::TextureId> {
