@@ -189,7 +189,7 @@ impl SettingGroup {
     }
     /// The panel whose switch travels with this group: every group of a panel with a
     /// switch carries it.
-    fn panel(self) -> Option<Panel> {
+    pub(crate) fn panel(self) -> Option<Panel> {
         use SettingGroup::*;
         Some(match self {
             ToneCurve => Panel::ToneCurve,

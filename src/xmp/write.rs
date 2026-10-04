@@ -72,7 +72,7 @@ fn number(value: f32, decimals: usize, signed: bool) -> String {
     }
 }
 
-struct Settings(Vec<(String, String)>);
+pub(super) struct Settings(pub(super) Vec<(String, String)>);
 impl Settings {
     /// `value` in recipe units, written as `value / scale`.
     fn put(&mut self, key: &str, value: f32, scale: f32, decimals: usize, signed: bool) {
@@ -84,7 +84,7 @@ impl Settings {
     }
 }
 
-fn settings(r: &Recipe, m: &Metadata) -> Settings {
+pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
     if let Some(profile) = &r.profile {
@@ -385,11 +385,13 @@ fn settings(r: &Recipe, m: &Metadata) -> Settings {
         s.text(key, value.clone());
     }
     // With Constrain Crop, the crop as rendered: Camera Raw renders the stored crop as it
-    // is, and Lightroom stores the crop it constrained.
-    let crop = if r.constrain_crop {
-        crate::develop::Geometry::for_metadata(m, &r.as_rendered()).crop()
-    } else {
-        r.crop
+    // is, and Lightroom stores the crop it constrained. Without the photo (a preset),
+    // the crop as drawn, which the photo it is applied to constrains again.
+    let crop = match m {
+        Some(m) if r.constrain_crop => {
+            crate::develop::Geometry::for_metadata(m, &r.as_rendered()).crop()
+        }
+        _ => r.crop,
     };
     for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
         s.put(&format!("Crop{name}"), crop[i], 1., 6, false);
@@ -405,7 +407,7 @@ fn settings(r: &Recipe, m: &Metadata) -> Settings {
     s
 }
 
-fn curve(out: &mut String, name: &str, c: &ToneCurve) {
+pub(super) fn curve(out: &mut String, name: &str, c: &ToneCurve) {
     let _ = write!(out, "   <crs:{name}>\n    <rdf:Seq>\n");
     for [x, y] in &c.points {
         let _ = writeln!(
@@ -519,7 +521,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
             attributes.push(("crs:RawFileName".into(), photo.raw_name.clone()));
         }
         attributes.extend(
-            settings(r, m)
+            settings(r, Some(m))
                 .0
                 .into_iter()
                 .map(|(k, v)| (format!("crs:{k}"), v)),

@@ -29,6 +29,23 @@ pub(super) struct Clipboard {
 pub(super) struct CopyDialog {
     pub(super) purpose: Transfer,
     pub(super) groups: GroupSelection,
+    /// New Develop Preset's name and group.
+    pub(super) preset: PresetForm,
+}
+
+/// What New Develop Preset asks for beside the settings.
+#[derive(Clone, Debug)]
+pub(super) struct PresetForm {
+    pub(super) name: String,
+    pub(super) group: String,
+}
+impl Default for PresetForm {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            group: "User Presets".into(),
+        }
+    }
 }
 
 /// Where the chosen groups go: the clipboard, or the other selected photos.
@@ -36,18 +53,22 @@ pub(super) struct CopyDialog {
 pub(super) enum Transfer {
     Copy,
     Sync,
+    /// New Develop Preset: the chosen groups as a preset in the user library.
+    NewPreset,
 }
 impl Transfer {
     fn title(self) -> &'static str {
         match self {
             Transfer::Copy => "Copy Settings",
             Transfer::Sync => "Synchronize Settings",
+            Transfer::NewPreset => "New Develop Preset",
         }
     }
     fn button(self) -> &'static str {
         match self {
             Transfer::Copy => "Copy",
             Transfer::Sync => "Synchronize",
+            Transfer::NewPreset => "Create",
         }
     }
 }
@@ -87,6 +108,7 @@ impl Editor {
         self.copy_dialog = Some(CopyDialog {
             purpose,
             groups: self.copy_groups.clone(),
+            preset: PresetForm::default(),
         });
     }
     /// Lightroom's Copy Settings: a checkbox per group, under its section.
@@ -106,6 +128,10 @@ impl Editor {
                         .color(theme::gray(235)),
                 );
                 ui.add_space(14.);
+                if dialog.purpose == Transfer::NewPreset {
+                    preset_fields(ui, &mut dialog.preset, &self.presets.library);
+                    ui.add_space(10.);
+                }
                 // Sections fill the left column, then the right, in Lightroom's order.
                 // They scroll in a short window, so the buttons stay in view.
                 let (left, right) = SettingGroup::SECTIONS.split_at(LEFT_SECTIONS);
@@ -155,7 +181,8 @@ impl Editor {
         }
     }
     /// Copy keeps the groups chosen for Paste, and Synchronize applies them to the
-    /// other selected photos; both start the next dialog from that choice.
+    /// other selected photos; both start the next dialog from that choice. A new
+    /// preset's groups are its own and leave that choice as it was.
     pub(super) fn close_copy_dialog(&mut self, choice: CopyChoice) {
         let Some(dialog) = self.copy_dialog.take() else {
             return;
@@ -163,11 +190,14 @@ impl Editor {
         if choice == CopyChoice::Cancel {
             return;
         }
-        self.copy_groups = dialog.groups.clone();
-        let _ = self.save_session();
+        if dialog.purpose != Transfer::NewPreset {
+            self.copy_groups = dialog.groups.clone();
+            let _ = self.save_session();
+        }
         match dialog.purpose {
             Transfer::Copy => self.copy_settings(dialog.groups),
             Transfer::Sync => self.start_sync(super::sync::BatchChange::Settings(dialog.groups)),
+            Transfer::NewPreset => self.create_preset(&dialog.preset, &dialog.groups),
         }
     }
     /// Pastes the copied settings. Spot removal and masks belong to their photo and
@@ -261,4 +291,34 @@ fn section_checkboxes(
         });
     }
     ui.add_space(6.);
+}
+
+/// New Develop Preset's name and group, as form rows; the group can be typed or picked
+/// from the groups presets already use.
+fn preset_fields(ui: &mut egui::Ui, form: &mut PresetForm, library: &crate::presets::Library) {
+    super::widgets::form_row(ui, "Preset Name", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(260.));
+    });
+    super::widgets::form_row(ui, "Group", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut form.group).desired_width(220.));
+        let mut groups: Vec<&str> = library
+            .presets
+            .iter()
+            .filter(|p| !p.builtin)
+            .map(|p| p.group.as_str())
+            .filter(|g| !g.is_empty())
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        egui::ComboBox::from_id_salt("preset-group")
+            .selected_text("")
+            .width(24.)
+            .show_ui(ui, |ui| {
+                for group in groups {
+                    if ui.selectable_label(form.group == group, group).clicked() {
+                        form.group = group.to_string();
+                    }
+                }
+            });
+    });
 }

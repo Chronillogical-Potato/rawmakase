@@ -5,6 +5,7 @@ pub mod local;
 pub(crate) mod look;
 pub mod ns;
 mod parse;
+pub mod preset_write;
 pub mod write;
 pub(crate) mod xml;
 use crate::develop::curve::ToneCurve;

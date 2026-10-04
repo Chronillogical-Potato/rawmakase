@@ -246,6 +246,20 @@ pub(super) struct PresetBrowser {
     pub(super) list: Option<super::presets::PresetList>,
     /// Counts changes to `favorites` and `issues`, which the list depends on.
     pub(super) revision: u64,
+    /// Numbers library scans, so only the latest one is shown.
+    pub(super) scans: u64,
+}
+
+impl PresetBrowser {
+    /// Starts counting a new library scan.
+    pub(super) fn next_scan(&mut self) -> u64 {
+        self.scans += 1;
+        self.scans
+    }
+    /// Whether `scan` is the latest one started.
+    pub(super) fn is_latest(&self, scan: u64) -> bool {
+        scan == self.scans
+    }
 }
 
 impl Document {

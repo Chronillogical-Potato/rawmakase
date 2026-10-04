@@ -19,6 +19,12 @@ The hover text and status line say when a fallback is used. Another camera's pro
 
 To add one, drop an `.xmp` into a group folder, list it in `src/presets/builtin.rs`, give it a new `crs:UUID` and `crs:Copyright="RAWmakase contributors, MIT licence"`, and run the preset tests; they check that every file is listed, parses, applies without imported profiles and names no other profile.
 
+## Making presets
+
+Settings › New Develop Preset… (Shift+Cmd+N) saves the open photo's settings as a Lightroom XMP preset, with Lightroom's dialog: a name, a group (typed or picked from the groups presets already use) and the setting groups to include, the same groups Copy Settings lists. The file goes to `User Presets/<group>/<name>.xmp` in the user library (see above), laid out as Lightroom writes presets (`PresetType="Normal"`, a fresh `UUID`, `HasSettings`, the name and group as language alternatives), so Lightroom and Camera Raw can read it; this was checked with ExifTool and RAWmakase's own parser, not yet by loading one into Lightroom. Only the chosen groups' settings are written; spots and masks are not.
+
+A preset made here has Update with Current Settings, Rename… and Delete in its menu. Update keeps its name, group, UUID and the groups it holds. Imported and built-in presets cannot be changed from the app. Save Preset File… and Load Preset File… still write and read RAWmakase's own JSON preset files.
+
 ## Implemented settings
 
 - White balance, exposure, contrast, highlights, shadows, whites, blacks, saturation and vibrance.

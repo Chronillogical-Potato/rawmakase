@@ -159,11 +159,18 @@ impl Editor {
                                 ui.close();
                             }
                             menu_separator(ui);
-                            if menu_item(ui, "Save Preset…", "", true, false) {
+                            let new_preset = format!("{cmd}{shift}N");
+                            if menu_item(ui, "New Develop Preset…", &new_preset, true, false) {
+                                self.open_copy_dialog(
+                                    super::settings_transfer::Transfer::NewPreset,
+                                );
+                                ui.close();
+                            }
+                            if menu_item(ui, "Save Preset File…", "", true, false) {
                                 self.dialog(FileDialog::SavePreset, &ctx);
                                 ui.close();
                             }
-                            if menu_item(ui, "Load Preset…", "", true, false) {
+                            if menu_item(ui, "Load Preset File…", "", true, false) {
                                 self.dialog(FileDialog::LoadPreset, &ctx);
                                 ui.close();
                             }

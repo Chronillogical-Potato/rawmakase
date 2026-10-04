@@ -53,10 +53,7 @@ impl Editor {
                     analysed,
                     result,
                 } if id == self.load.id() => self.upright_ready(generation, &analysed, result),
-                Event::XmpLibrary(library) => {
-                    self.presets.library = library;
-                    self.refresh_preset_support();
-                }
+                Event::XmpLibrary { scan, library } => self.presets_scanned(scan, library),
                 Event::Profiles {
                     id,
                     profiles,

@@ -10,14 +10,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl Editor {
-    pub(super) fn reload_presets(&self, ctx: &egui::Context) {
+    pub(super) fn reload_presets(&mut self, ctx: &egui::Context) {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
+        let scan = self.presets.next_scan();
         std::thread::spawn(move || {
-            let library = crate::presets::load_library();
-            let _ = tx.send(Event::XmpLibrary(Arc::new(library)));
+            let library = Arc::new(crate::presets::load_library());
+            let _ = tx.send(Event::XmpLibrary { scan, library });
             ctx.request_repaint();
         });
+    }
+    /// A finished library scan, unless a later one has started since: scans run in
+    /// parallel and may finish in any order.
+    pub(super) fn presets_scanned(&mut self, scan: u64, library: Arc<crate::presets::Library>) {
+        if self.presets.is_latest(scan) {
+            self.presets.library = library;
+            self.refresh_preset_support();
+        }
     }
     pub(super) fn refresh_preset_support(&mut self) {
         let had_preview = self.presets.preview.take().is_some();
@@ -56,6 +65,8 @@ impl Editor {
         let library = self.presets.library.clone();
         let mut clicked = None;
         let mut hovered = None;
+        let mut user_action = None;
+        let user = crate::presets::user::UserPresets::default();
         let mut import = None;
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
@@ -247,6 +258,21 @@ impl Editor {
                             if enabled && response.clicked() {
                                 clicked = Some(i);
                             }
+                            // Presets made here can be changed, as Lightroom's own.
+                            if user.owns(p) {
+                                response.context_menu(|ui| {
+                                    use super::user_presets::PresetAction;
+                                    if ui.button("Update with Current Settings").clicked() {
+                                        user_action = Some(PresetAction::Update(i));
+                                    }
+                                    if ui.button("Rename…").clicked() {
+                                        user_action = Some(PresetAction::StartRename(i));
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        user_action = Some(PresetAction::Delete(i));
+                                    }
+                                });
+                            }
                             if response.hovered() && enabled {
                                 hovered = Some(i);
                             }
@@ -264,6 +290,9 @@ impl Editor {
             });
         if let Some(dialog) = import {
             self.dialog(dialog, &ui.ctx().clone());
+        }
+        if let Some(action) = user_action {
+            self.preset_action(action);
         }
         if let Some(i) = clicked {
             self.presets.preview = None;
