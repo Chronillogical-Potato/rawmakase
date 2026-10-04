@@ -1012,6 +1012,21 @@ mod constrain_crop_tests {
         // The photo covers the right 0.189 of the frame.
         assert!((right - l - 0.189).abs() < 2e-3, "{:?}", g.crop());
     }
+    /// Switching the Transform panel off bypasses its Constrain Crop too, so manual
+    /// Distortion alone renders the stored crop.
+    #[test]
+    fn transform_panel_off_bypasses_constrain_crop() {
+        use crate::develop::panels::{Panel, PanelState};
+        let mut r = Recipe {
+            constrain_crop: true,
+            lens_manual_distortion: 0.5,
+            ..Default::default()
+        };
+        assert_ne!(Geometry::new(&photo(), &r, 0).crop(), r.crop);
+        r.panels.set(Panel::Transform, PanelState::Off);
+        let shown = r.as_rendered();
+        assert_eq!(Geometry::new(&photo(), &shown, 0).crop(), r.crop);
+    }
     #[test]
     fn constrain_crop_keeps_crops_with_nothing_white() {
         let im = photo();
