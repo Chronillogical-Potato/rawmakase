@@ -65,7 +65,7 @@ impl super::Editor {
     ) {
         self.document.point_color_pick.invalidate();
         // The dropper was put away meanwhile (another tab or module, or clicked off).
-        if !self.view.is(Tool::PointColor) {
+        if !self.view.is(Tool::PointColor) || !self.point_color_tab_shown() {
             return;
         }
         if *sampled != self.document.recipe {

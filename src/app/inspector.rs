@@ -993,10 +993,10 @@ impl Editor {
         }) {
             if black_white {
                 r.effects.gray_mix = [0.; 8];
-            } else if view.mixer_tab == MixerTab::PointColor {
-                r.point_colors.clear();
             } else {
+                // Both tabs: the mixer and Point Color.
                 r.hsl = [[0.; 3]; 8];
+                r.point_colors.clear();
             }
         }
 
