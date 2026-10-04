@@ -1,14 +1,24 @@
 # cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
 
 [graph]
+# The platforms we ship: the two Linux packages, both macOS architectures and
+# the Windows installer. Windows and macOS crates are target-specific, so leaving
+# their targets out drops four windows-sys versions and the objc2 bindings from
+# the graph and audits nothing for those builds.
 targets = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
 ]
 
 [advisories]
 # Unmaintained crates deep in the GUI/GPU stacks are reported, but only for direct dependencies.
 unmaintained = "workspace"
+# A yanked version is withdrawn after the fact; depending on one is a mistake,
+# not a warning to note and build anyway.
+yanked = "deny"
 
 [licenses]
 # Permissive licenses, plus the OFL/Ubuntu font licenses of egui's bundled default fonts
@@ -34,9 +44,18 @@ allow = [
 confidence-threshold = 0.9
 
 [bans]
-multiple-versions = "allow"
+# Duplicate versions are reported, not denied: the GUI and GPU stacks carry
+# several that only their upstream can resolve, and the report is what makes a
+# new one visible.
+multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
+# windows-sys is the one crate whose duplicates are expected rather than
+# surprising: it is foundational and bumps far too frequently for its dependents
+# to follow. Every other duplicate still reports.
+skip = [
+    { crate = "windows-sys", reason = "a foundational crate that bumps far too frequently to ever have a shared version" },
+]
 
 [sources]
 unknown-registry = "deny"
