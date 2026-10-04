@@ -420,8 +420,9 @@ pub struct Vanishing {
     pub vertical: Option<[f32; 3]>,
     /// Direction of horizontal lines, orthogonal to `vertical`.
     pub horizontal: Option<[f32; 3]>,
-    /// Roll angle of the horizon in radians, for Level when there is no vertical.
-    pub horizon: f32,
+    /// Roll angle of the horizon in radians, for Level when there is no vertical; None
+    /// without enough long near-horizontal edges to go by.
+    pub horizon: Option<f32>,
 }
 /// Minimum support of a vanishing direction; below it Lightroom corrects nothing.
 const MIN_SUPPORT: f32 = 0.01;
@@ -486,11 +487,7 @@ pub fn vanishing_points(segments: &[Segment], f: f32) -> Vanishing {
     Vanishing {
         vertical,
         horizontal,
-        horizon: if weight >= MIN_SUPPORT {
-            sum / weight
-        } else {
-            0.
-        },
+        horizon: (weight >= MIN_SUPPORT).then(|| sum / weight),
     }
 }
 
@@ -507,7 +504,7 @@ fn auto_tilt_share(tilt: f32) -> f32 {
 fn level_roll(v: &Vanishing) -> f32 {
     match v.vertical {
         Some(d) => d[0].atan2(d[1]),
-        None => -v.horizon,
+        None => -v.horizon.unwrap_or(0.),
     }
 }
 
@@ -518,7 +515,7 @@ fn level_roll(v: &Vanishing) -> f32 {
 pub fn straighten_angle(im: &CameraImage, r: &Recipe) -> Option<f32> {
     let (image, w, h) = analysis_image(im, r);
     let found = vanishing_points(&segments(&image, w, h), focal(&im.metadata));
-    if found.vertical.is_none() && found.horizon == 0. {
+    if found.vertical.is_none() && found.horizon.is_none() {
         return None;
     }
     // Both turn the photo clockwise for a positive angle.
@@ -856,7 +853,8 @@ mod tests {
             wb: [1.; 3],
             ..Default::default()
         };
-        for tilt in [-4f32, 3.] {
+        // A level horizon is an angle of 0, not nothing found.
+        for tilt in [-4f32, 0., 3.] {
             let im = tilted_horizon(tilt);
             let angle = straighten_angle(&im, &neutral).expect("an angle");
             assert!((angle + tilt).abs() < 0.2, "{tilt}°: {angle}");

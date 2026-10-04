@@ -529,7 +529,7 @@ impl Editor {
                     Color32::WHITE,
                 );
             }
-            let ruling = self.straighten_ruler(ui, &response);
+            let ruling = self.straighten_ruler(ui, &response, rect);
             if !ruling
                 && response.drag_started()
                 && let Some(p) = response.interact_pointer_pos()
@@ -630,16 +630,19 @@ impl Editor {
     /// The Straighten ruler on the Crop tool: picked in the panel, or a Cmd-drag as in
     /// Lightroom. Releasing it sets the angle that makes the line level or plumb, as one
     /// History step. Returns whether it has the drag, which then moves no crop.
-    fn straighten_ruler(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
+    fn straighten_ruler(&mut self, ui: &egui::Ui, response: &egui::Response, photo: Rect) -> bool {
         let cmd = ui.input(|i| i.modifiers.command);
         let ready = self.view.ruler == Ruler::Armed || cmd;
         let drawing = matches!(self.view.ruler, Ruler::Drawing { .. });
-        if response.hovered() && (ready || drawing) && self.view.crop_drag.is_none() {
+        let over_photo = response.hover_pos().is_some_and(|p| photo.contains(p));
+        if (over_photo && ready || drawing) && self.view.crop_drag.is_none() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         }
+        // Started on the photo, not the backdrop around it; it may then run off it.
         if response.drag_started()
             && ready
             && let Some(p) = response.interact_pointer_pos()
+            && photo.contains(p)
         {
             self.view.ruler = Ruler::Drawing { from: p, to: p };
         }
