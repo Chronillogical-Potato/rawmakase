@@ -500,8 +500,9 @@ pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<Cam
     let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
-/// The recovered image with the recipe's spot removal applied: from the preview's
-/// cache, updated where the operations changed, or built at once (exports).
+/// The recovered image with the recipe's red eye corrections and spot removal applied:
+/// from the preview's cache, updated where the operations changed, or built at once
+/// (exports).
 pub(crate) fn retouched(
     im: &CameraImage,
     r: &Recipe,
@@ -509,10 +510,11 @@ pub(crate) fn retouched(
     cache: Option<&mut develop::retouch::RetouchCache>,
 ) -> Result<Arc<CameraImage>> {
     let recovered = recovered(im, cancel)?;
+    let ops = develop::retouch::Retouching::of(r);
     match cache {
-        Some(cache) => cache.get(&recovered, &r.retouch, cancel),
-        None if r.retouch.is_empty() => Ok(recovered),
-        None => Ok(Arc::new(develop::retouch::apply(&recovered, &r.retouch))),
+        Some(cache) => cache.get(&recovered, ops, cancel),
+        None if ops.is_empty() => Ok(recovered),
+        None => Ok(Arc::new(develop::retouch::apply(&recovered, ops))),
     }
 }
 /// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the

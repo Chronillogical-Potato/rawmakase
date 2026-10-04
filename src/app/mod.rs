@@ -406,6 +406,7 @@ mod photo_metadata;
 mod preferences;
 mod presets;
 mod raw_defaults;
+mod red_eye_tool;
 mod retouch_tool;
 #[cfg(feature = "telemetry")]
 mod stats;

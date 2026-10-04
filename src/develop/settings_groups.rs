@@ -563,6 +563,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         flip_x: _,
         flip_y: _,
         retouch: _,
+        red_eye: _,
         masks: _,
         panels: _,
         unknown: _,
@@ -653,6 +654,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("flip_x", PhotosOwn),
         ("flip_y", PhotosOwn),
         ("retouch", Group(SpotRemoval)),
+        // As in Lightroom, whose Copy Settings has no red eye group.
+        ("red_eye", PhotosOwn),
         ("masks", Group(Masking)),
         // Each switch travels with its panel's groups.
         ("panels", Derived),

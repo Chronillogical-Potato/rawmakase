@@ -1,6 +1,6 @@
-//! Lightroom's spot removal and masks (`RetouchAreas`, the legacy `RetouchInfo`, and
-//! the mask correction lists) from XMP or a Lightroom catalog, as retouch operations
-//! and masks.
+//! Lightroom's spot removal, red eye corrections and masks (`RetouchAreas`, the legacy
+//! `RetouchInfo`, `RedEyeInfo` and the mask correction lists) from XMP or a Lightroom
+//! catalog, as retouch operations, red eye corrections and masks.
 //!
 //! Conventions, checked against Camera Raw 18.6 renders of a landscape photo and of
 //! the same photo tagged as portrait: positions are normalised to the camera's default
@@ -11,15 +11,24 @@
 use crate::develop::{
     ImageFrame,
     masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape},
+    red_eye::{self, EyeKind, RedEyeOp},
     retouch::{RetouchMode, RetouchOp, RetouchShape},
 };
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::BTreeMap;
 
 /// The Lightroom settings this module reads.
-pub(crate) const KEYS: [&str; 6] = [
+pub(crate) const KEYS: [&str; 7] = [
     "RetouchAreas",
     "RetouchInfo",
+    "RedEyeInfo",
+    "MaskGroupBasedCorrections",
+    "PaintBasedCorrections",
+    "GradientBasedCorrections",
+    "CircularGradientBasedCorrections",
+];
+/// The mask correction lists among [`KEYS`].
+const MASK_KEYS: [&str; 4] = [
     "MaskGroupBasedCorrections",
     "PaintBasedCorrections",
     "GradientBasedCorrections",
@@ -242,6 +251,8 @@ impl Lua<'_> {
 pub struct ConvertedLocal {
     /// `None` when the settings have no spot removal.
     pub retouch: Option<Vec<RetouchOp>>,
+    /// `None` when the settings have no red eye corrections.
+    pub red_eye: Option<Vec<RedEyeOp>>,
     /// `None` when the settings have no masks.
     pub masks: Option<Vec<MaskGroup>>,
     /// What could not be converted, for the user.
@@ -275,9 +286,12 @@ pub fn convert(local: &BTreeMap<String, Node>, image: ImageFrame) -> ConvertedLo
     } else if let Some(info) = local.get("RetouchInfo").filter(|n| !n.is_empty()) {
         edits.retouch = Some(retouch_info(info, &frame, &mut edits.skipped));
     }
+    if let Some(info) = local.get("RedEyeInfo").filter(|n| !n.is_empty()) {
+        edits.red_eye = Some(red_eye_info(info, &frame, &mut edits.skipped));
+    }
     let mut groups = Vec::new();
     let mut any = false;
-    for key in &KEYS[2..] {
+    for key in &MASK_KEYS {
         if let Some(list) = local.get(*key).filter(|n| !n.is_empty()) {
             any = true;
             for c in list.items() {
@@ -412,6 +426,95 @@ fn retouch_info(info: &Node, frame: &Frame, skipped: &mut Vec<String>) -> Vec<Re
         }
     }
     ops
+}
+/// Red eye corrections. XMP writes each as text (Camera Raw 18.7):
+/// `x = 0.52, y = 0.34, width = 0.013, height = 0.019, alpha = 0, density = …,
+/// strength = …, redBias = …, pupilSize = 0.5, pupilDarkenAmount = 0.5,
+/// adaptivePupilColor = 0, gammaEncodeCorrection = 1, showPetEyeHighlight = 1,
+/// highlightX = 0.591, highlightY = 0.424`; a catalog as a table with the ellipse in
+/// `pupil.ellipse` (`centerX`, `centerY`, `sizeX`, `sizeY`, `alpha`).
+///
+/// Measured on Camera Raw renders: the centre is in the unrotated frame like spots;
+/// `width` and `height` are semi-axes as fractions of that frame's width and height;
+/// `alpha` is the correlation of x and y over the ellipse (|alpha| < 1), which tilts
+/// it. `adaptivePupilColor = 1` marks Pet Eye. `density`, `strength` and `redBias`
+/// record Lightroom's detection and did not change the render.
+fn red_eye_info(info: &Node, frame: &Frame, skipped: &mut Vec<String>) -> Vec<RedEyeOp> {
+    let mut ops = Vec::new();
+    for (i, item) in info.items().iter().enumerate() {
+        let eye = match item {
+            Node::Text(text) => key_values(text),
+            Node::Record(_) => {
+                let pupil = item.get("pupil");
+                let ellipse = pupil.and_then(|p| p.get("ellipse"));
+                let mut record = BTreeMap::new();
+                for (to, node, from) in [
+                    ("x", ellipse, "centerX"),
+                    ("y", ellipse, "centerY"),
+                    ("width", ellipse, "sizeX"),
+                    ("height", ellipse, "sizeY"),
+                    ("alpha", ellipse, "alpha"),
+                    ("pupilSize", Some(item), "pupilSize"),
+                    ("pupilDarkenAmount", Some(item), "pupilDarkenAmount"),
+                    ("adaptivePupilColor", Some(item), "adaptivePupilColor"),
+                ] {
+                    if let Some(v) = node.and_then(|n| n.text(from)) {
+                        record.insert(to.to_string(), Node::Text(v.to_string()));
+                    }
+                }
+                Node::Record(record)
+            }
+            Node::List(_) => Node::Record(BTreeMap::new()),
+        };
+        match red_eye(&eye, frame) {
+            Ok(op) => ops.push(op),
+            Err(e) => skipped.push(format!("Red eye {}: {e:#}", i + 1)),
+        }
+    }
+    ops
+}
+/// `key = value, key = value` as a record.
+fn key_values(text: &str) -> Node {
+    Node::Record(
+        text.split(',')
+            .filter_map(|pair| pair.split_once('='))
+            .map(|(k, v)| (k.trim().to_string(), Node::Text(v.trim().to_string())))
+            .collect(),
+    )
+}
+fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
+    if eye.flag("adaptivePupilColor") == Some(true) {
+        bail!("Pet Eye corrections are not supported yet");
+    }
+    let num = |k: &str| eye.num(k).with_context(|| format!("No {k}"));
+    let (x, y) = (num("x")?, num("y")?);
+    // Semi-axes as long-edge fractions in the unrotated frame.
+    let rx = num("width")? * frame.scale[0];
+    let ry = num("height")? * frame.scale[1];
+    let alpha = eye.num("alpha").unwrap_or(0.);
+    ensure!(alpha.abs() < 1., "Invalid red eye shape");
+    // A quarter turn of the camera swaps the axes and mirrors the tilt.
+    let (radius, correlation) = if frame.image.turns % 2 == 1 {
+        ([ry, rx], -alpha)
+    } else {
+        ([rx, ry], alpha)
+    };
+    let op = RedEyeOp {
+        kind: EyeKind::Red,
+        center: frame.point(x, y),
+        radius,
+        correlation: correlation.clamp(-red_eye::MAX_CORRELATION, red_eye::MAX_CORRELATION),
+        pupil_size: eye
+            .num("pupilSize")
+            .unwrap_or(red_eye::DEFAULT_PUPIL_SIZE)
+            .clamp(0., 1.),
+        darken: eye
+            .num("pupilDarkenAmount")
+            .unwrap_or(red_eye::DEFAULT_DARKEN)
+            .clamp(0., 1.),
+    };
+    op.validate()?;
+    Ok(op)
 }
 /// A paint mask's dabs as strokes of equal radius (Lightroom changes the radius with
 /// "r" entries, e.g. for pen pressure), and the largest radius.

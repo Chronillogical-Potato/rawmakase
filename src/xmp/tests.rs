@@ -935,3 +935,76 @@ fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
     );
     Ok(())
 }
+#[test]
+fn red_eye_corrections_import_from_camera_raw_and_catalogs() -> Result<()> {
+    // As Camera Raw 18.7 writes them (synthetic values).
+    let red = "x = 0.520833, y = 0.341797, width = 0.013021, height = 0.019531, alpha = 0.200000, density = 0.750000, strength = 0.080000, redBias = 0.200000, pupilSize = 0.300000, pupilDarkenAmount = 0.700000, adaptivePupilColor = 0, gammaEncodeCorrection = 1, showPetEyeHighlight = 1, highlightX = 0.591000, highlightY = 0.424000";
+    let pet = "x = 0.2, y = 0.3, width = 0.01, height = 0.015, alpha = 0.000000, density = 0, strength = 0, redBias = 0, pupilSize = 0.5, pupilDarkenAmount = 0.5, adaptivePupilColor = 1, gammaEncodeCorrection = 1, showPetEyeHighlight = 1, highlightX = 0.591000, highlightY = 0.424000";
+    let body =
+        format!("<c:RedEyeInfo><r:Seq><r:li>{red}</r:li><r:li>{pet}</r:li></r:Seq></c:RedEyeInfo>");
+    let preset = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:EnableRedEye="True""#, &body),
+    )?;
+    let landscape = Metadata {
+        width: 1536,
+        height: 1024,
+        ..Default::default()
+    };
+    let (r, warnings) = preset.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
+    assert!(
+        warnings.iter().any(|w| w.contains("Pet Eye")),
+        "{warnings:?}"
+    );
+    assert_eq!(r.red_eye.len(), 1);
+    let eye = &r.red_eye[0];
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    assert!(near(eye.center[0], 0.520833) && near(eye.center[1], 0.341797));
+    // Semi-axes of the frame's width and height: a 20-pixel circle.
+    assert!(near(eye.radius[0], 20. / 1536.) && near(eye.radius[1], 20. / 1536.));
+    assert!(near(eye.correlation, 0.2));
+    assert!(near(eye.pupil_size, 0.3) && near(eye.darken, 0.7));
+    // A portrait photo: the centre turns, the axes swap and the tilt mirrors.
+    let portrait = Metadata {
+        flip: 6,
+        ..landscape.clone()
+    };
+    let (r, _) = preset.apply_lenient(&Recipe::default(), &portrait, &[], None)?;
+    let eye = &r.red_eye[0];
+    assert!(near(eye.center[0], 1. - 0.341797) && near(eye.center[1], 0.520833));
+    assert!(near(eye.correlation, -0.2));
+    // The switch turned off keeps the corrections but renders without them.
+    let off = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:EnableRedEye="False""#, &body),
+    )?;
+    let (r, _) = off.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
+    assert_eq!(r.red_eye.len(), 1);
+    assert!(r.as_rendered().red_eye.is_empty());
+    Ok(())
+}
+#[test]
+fn red_eye_catalog_tables_parse_as_data() -> Result<()> {
+    use super::local::Node;
+    // Lightroom Classic's catalog form (synthetic values).
+    let text = r#"{ { adaptivePupilColor = 0, gammaEncodeCorrection = 1, highlightX = 0.591,
+        highlightY = 0.424, pupil = { density = 0.7, ellipse = { alpha = -0.1, centerX = 0.5,
+        centerY = 0.4, sizeX = 0.001, sizeY = 0.0015 }, redBias = 0.2, strength = 0.05 },
+        pupilDarkenAmount = 0.5, pupilSize = 0.5, showPetEyeHighlight = 1 } }"#;
+    let mut local = std::collections::BTreeMap::new();
+    local.insert("RedEyeInfo".to_string(), Node::from_lua(text)?);
+    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+        width: 6000,
+        height: 4000,
+        ..Default::default()
+    });
+    let edits = local::convert(&local, frame);
+    assert!(edits.skipped.is_empty(), "{:?}", edits.skipped);
+    let eyes = edits.red_eye.unwrap();
+    assert_eq!(eyes.len(), 1);
+    assert_eq!(eyes[0].center, [0.5, 0.4]);
+    // 6 pixels each way: a circle.
+    assert!((eyes[0].radius[0] - 0.001).abs() < 1e-7 && (eyes[0].radius[1] - 0.001).abs() < 1e-7);
+    assert_eq!(eyes[0].correlation, -0.1);
+    Ok(())
+}

@@ -111,6 +111,7 @@ pub fn auto_tone_basis(r: &Recipe) -> Recipe {
         sharpening_detail: d.sharpening_detail,
         sharpening_masking: d.sharpening_masking,
         retouch: Vec::new(),
+        red_eye: Vec::new(),
         masks: Vec::new(),
         // Bookkeeping that does not render.
         preset_name: d.preset_name,

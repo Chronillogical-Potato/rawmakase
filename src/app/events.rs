@@ -30,9 +30,10 @@ impl Editor {
                     self.activity.finish_dialog();
                     match crate::presets::load_preset(&p) {
                         Ok(mut r) => {
-                            // Presets never carry spot removal; their masks replace the
-                            // photo's only when they have any, as in Lightroom.
+                            // Presets never carry spot removal or red eye; their masks
+                            // replace the photo's only when they have any, as in Lightroom.
                             r.retouch = self.document.recipe.retouch.clone();
+                            r.red_eye = self.document.recipe.red_eye.clone();
                             if r.masks.is_empty() {
                                 r.masks = self.document.recipe.masks.clone();
                             }

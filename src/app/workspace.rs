@@ -780,6 +780,9 @@ impl Editor {
                 if self.view.is(Tool::Remove) {
                     self.retouch_keys(i);
                 }
+                if self.view.is(Tool::RedEye) {
+                    self.red_eye_keys(i);
+                }
                 if self.view.is(Tool::Mask) {
                     self.mask_keys(i);
                 }

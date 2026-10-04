@@ -1,4 +1,4 @@
-# Spot removal
+# Spot removal and red eye
 
 Status: experimental and early. It works, but none of it is measured against
 Lightroom yet, and details may change.
@@ -64,3 +64,94 @@ Paste Settings and presets leave a photo's spots alone, as Lightroom's defaults 
   Raw.
 - Previews keep one full-resolution retouched copy of the photo in memory while it
   has spots.
+
+# Red eye
+
+Status: experimental. The correction is fitted to Camera Raw 18.7 on synthetic eyes;
+Pet Eye is not implemented yet.
+
+## Using it
+
+The **Red Eye** tool sits between Remove and Masking, as in Lightroom Classic. Like
+Lightroom's, it has no keyboard shortcut (Lightroom's menu leaves it unassigned, and
+Shift+R is its Reference View).
+
+- **Drag** from the centre of an eye outward to a circle that covers the whole eye:
+  RAWmakase finds the red pupil inside it and corrects it. **Click** to search a circle
+  of the last size. If nothing red enough is found, the status line says "Unable to
+  find red eye", as Lightroom does.
+- Click a correction to select it; drag it to move it. **Delete** removes the selected
+  one, and Reset removes them all.
+- **Pupil Size** and **Darken** change the selected correction (both 50 by default).
+- Each drag, click or slider change is one History step: "Add Red Eye Correction",
+  "Update Red Eye Correction", "Delete Red Eye Correction".
+- Copy, Paste, Sync and presets leave red eye corrections alone: Lightroom's Copy
+  Settings has no group for them. The panel switch (`EnableRedEye`) turns them off.
+
+## How it works
+
+- **Finding the pupil:** redness is the log ratio of red to the larger of green and
+  blue in the linear camera image. The pupil is the connected area around the reddest
+  point near the circle's centre whose redness is more than half-way from the circle's
+  rim (the face) to that point, with any catchlight inside filled in. Its ellipse has
+  the area's centre and, from its second moments, semi-axes and a tilt. Red must reach
+  3.5 times the larger of green and blue (a brown iris is about 2.5 in linear values,
+  a red pupil 10 or more); an area reaching most of the rim is refused. On test eyes
+  this finds pupils of 3 to 45 pixels within half a pixel, keeps a red-brown iris out,
+  and finds tilted pupils whatever the camera orientation.
+- **Storage:** corrections are parameters beside the recipe, like spots (`red_eye` in
+  the catalog's `local_edits`), in image space, so they stay on the eye through crop,
+  straightening, Transform, rotation and flips. Releases that predate them open the
+  photo without them, and a correction of a kind a later release adds is skipped
+  rather than stopping the photo's other spots and masks from loading.
+- **Rendering:** on the linear camera image, before Heal and Clone (so a heal copying
+  from an eye copies the corrected pupil), with previews recomputing only the tiles a
+  change reaches. Inside a soft ellipse every pixel moves towards a dark neutral, as
+  Camera Raw's does: the level is the mean of green and blue in `v^(1/2.4)` encoding
+  (red counts −0.11), scaled by a gain of 1.28, 0.90 and 0.39 at Darken 0, 50 and 100
+  (quadratic between), keeping 2.2% of the original colour's log ratios, and blended
+  with the falloff in the same encoding. The falloff is full to 0.55 and gone at 1.42
+  times the half-way distance, which is 0.585 + 0.975 × Pupil Size times the ellipse.
+
+## Measured against Camera Raw 18.7
+
+Synthetic DNGs (the colour charts' invented camera, with red pupils, irises, grey
+ramps and colour patches) were opened in Camera Raw with `crs:RedEyeInfo` written by
+hand, and rendered to 16-bit sRGB.
+
+- **Format:** XMP holds an `rdf:Seq` with one text item per eye:
+  `x = 0.520833, y = 0.341797, width = 0.013021, height = 0.019531, alpha = 0.000000,
+  density = 0.750000, strength = 0.080000, redBias = 0.200000, pupilSize = 0.500000,
+  pupilDarkenAmount = 0.500000, adaptivePupilColor = 0, gammaEncodeCorrection = 1,
+  showPetEyeHighlight = 1, highlightX = 0.591000, highlightY = 0.424000`. Camera Raw
+  also reads the first ten fields alone. A Lightroom catalog keeps the same values as a
+  table, the ellipse in `pupil.ellipse` (`centerX`, `centerY`, `sizeX`, `sizeY`,
+  `alpha`).
+- **Coordinates:** the centre is normalised to the unrotated sensor frame, as spots
+  are (checked on a photo tagged as portrait). `width` and `height` are semi-axes as
+  fractions of that frame's width and height. `alpha` is not an angle but the
+  correlation of x and y over the ellipse: 0.5 tilted a 150 × 60 pixel ellipse by 12.6°
+  and kept its extent along x and y; Camera Raw refuses `alpha = 1`.
+- `density`, `strength` and `redBias` record Lightroom's detection; changing them did
+  not change the render. `adaptivePupilColor = 1` is Pet Eye (it renders a black
+  pupil, with a catchlight when `showPetEyeHighlight = 1`); imports report and skip
+  Pet Eye. `gammaEncodeCorrection = 0`, an older rendering, is read as 1.
+- **Falloff:** on grey, the correction is half applied at 0.59 times the ellipse at
+  Pupil Size 0, growing by 0.97 per unit of Pupil Size, and fades from 0.69 to 1.46
+  times that; RAWmakase's falloff matches within an RMS weight of 0.02–0.03.
+- **Colour:** on 25 in-gamut reds, browns, skin and greys and on grey ramps at five
+  Darken values, RAWmakase's corrected pixels sit a mean ΔE76 of 1.8 from Camera Raw's
+  (grey ramps 0.5–1.4, patches 2.6–3.4), after taking out the difference between the
+  two renders without the correction. Saturated reds that Camera Raw clips render
+  differently without the correction too, and were left out.
+
+## Not like Lightroom
+
+- Camera Raw also desaturates strongly red pixels joined to the pupil beyond the
+  ellipse: a red-orange iris around a 20-pixel ellipse changed out to its edge at 78
+  pixels, and saturated red patches kept 30–55% of the correction to twice the
+  ellipse's size. RAWmakase corrects only within the ellipse, so a reddish iris keeps
+  its colour; on brown irises and skin the two agree (under 7% in Camera Raw).
+- Lightroom's own detection is not public; RAWmakase's finds a similar ellipse but not
+  the same one, and does not try again with a larger area when the first fails.
+- Pet Eye and its catchlight are not implemented.

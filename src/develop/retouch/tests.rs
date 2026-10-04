@@ -1,5 +1,6 @@
 use super::heal::{self, Placed};
 use super::*;
+use crate::develop::red_eye::RedEyeOp;
 use crate::raw::CameraImage;
 use std::sync::atomic::AtomicBool;
 
@@ -62,7 +63,7 @@ fn heal_of_a_constant_field_is_exact() {
         }
     }
     let op = spot(RetouchMode::Heal, &im, [25., 40.], 8., [55., 0.]);
-    let healed = apply(&dusty, &[op]);
+    let healed = apply(&dusty, heals(&[op]));
     assert!(
         max_error(&healed, &im) < 1e-4,
         "{}",
@@ -84,7 +85,7 @@ fn heal_reproduces_linear_gradients() {
     // removes. Linear values would make it exact; the log values heal uses stay within
     // 1% (0.01 EV), and keep textures right (see the next test).
     let op = spot(RetouchMode::Heal, &im, [80., 60.], 14., [-40., 20.]);
-    let healed = apply(&dusty, &[op]);
+    let healed = apply(&dusty, heals(&[op]));
     let error = im
         .pixels
         .iter()
@@ -95,7 +96,7 @@ fn heal_reproduces_linear_gradients() {
     assert!(error < 0.01, "{error}");
     // Clone copies the other part of the gradient unchanged.
     let op = spot(RetouchMode::Clone, &im, [80., 60.], 12., [-40., 0.]);
-    let cloned = apply(&dusty, &[op]);
+    let cloned = apply(&dusty, heals(&[op]));
     let i = 60 * 160 + 80;
     assert!((cloned.pixels[i][0] - gradient(40., 60.)[0]).abs() < 1e-4);
 }
@@ -212,8 +213,8 @@ fn incremental_tiles_match_a_full_rebuild() {
     let cancel = AtomicBool::new(false);
     let mut cache = RetouchCache::default();
     let check = |cache: &mut RetouchCache, ops: &[RetouchOp]| {
-        let incremental = cache.get(&base, ops, &cancel).unwrap();
-        let full = apply(&base, ops);
+        let incremental = cache.get(&base, heals(ops), &cancel).unwrap();
+        let full = apply(&base, heals(ops));
         assert_eq!(incremental.pixels, full.pixels);
     };
     check(&mut cache, &ops);
@@ -223,9 +224,9 @@ fn incremental_tiles_match_a_full_rebuild() {
     check(&mut cache, &ops);
     ops[2].translate([0.01, 0.02]);
     check(&mut cache, &ops);
-    let before = cache.get(&base, &ops, &cancel).unwrap();
+    let before = cache.get(&base, heals(&ops), &cancel).unwrap();
     ops.push(spot(RetouchMode::Clone, &im, [650., 60.], 10., [-40., 0.]));
-    let after = cache.get(&base, &ops, &cancel).unwrap();
+    let after = cache.get(&base, heals(&ops), &cancel).unwrap();
     // Only tiles near the new spot changed.
     let rects = cache.changed_from(&before).unwrap();
     assert!(rects.iter().all(|r| r[0] >= 512 && r[3] <= 256));
@@ -240,6 +241,43 @@ fn incremental_tiles_match_a_full_rebuild() {
         }
     }
     check(&mut cache, &[]);
+
+    // Red eye corrections apply first; a heal copying from one sees the corrected eye.
+    let eye = |x: f32, y: f32, r: f32| RedEyeOp {
+        kind: Default::default(),
+        center: frame_of(&im).to_image(x, y),
+        radius: [r / 700.; 2],
+        correlation: 0.,
+        pupil_size: 0.5,
+        darken: 0.5,
+    };
+    let mut eyes = vec![eye(160., 100., 12.), eye(400., 400., 20.)];
+    let mut heal_ops = vec![spot(RetouchMode::Heal, &im, [100., 100.], 20., [60., 0.])];
+    let both = |cache: &mut RetouchCache, eyes: &[RedEyeOp], ops: &[RetouchOp]| {
+        let ops = Retouching {
+            red_eye: eyes,
+            retouch: ops,
+        };
+        let incremental = cache.get(&base, ops, &cancel).unwrap();
+        assert_eq!(incremental.pixels, apply(&base, ops).pixels);
+    };
+    both(&mut cache, &eyes, &heal_ops);
+    eyes[0].darken = 1.;
+    both(&mut cache, &eyes, &heal_ops);
+    eyes[1].translate([0.05, 0.]);
+    both(&mut cache, &eyes, &heal_ops);
+    eyes.remove(0);
+    heal_ops[0].offset[1] += 0.01;
+    both(&mut cache, &eyes, &heal_ops);
+}
+fn heals(ops: &[RetouchOp]) -> Retouching<'_> {
+    Retouching {
+        red_eye: &[],
+        retouch: ops,
+    }
+}
+fn frame_of(im: &CameraImage) -> crate::develop::ImageFrame {
+    crate::develop::ImageFrame::new(im)
 }
 #[test]
 fn automatic_source_avoids_texture_edges_and_asks_again_for_the_next() {
@@ -266,7 +304,7 @@ fn automatic_source_avoids_texture_edges_and_asks_again_for_the_next() {
     let src = [(0.5 + offset[0]) * 400., (0.5 + offset[1]) * 300.];
     assert!((src[0] - 200.).hypot(src[1] - 150.) >= 14.);
     assert!(!(235. ..285.).contains(&src[0]), "{src:?}");
-    let healed = apply(&dusty, &[op.clone()]);
+    let healed = apply(&dusty, heals(&[op.clone()]));
     assert!(
         max_error(&healed, &im) < 0.01,
         "{}",
