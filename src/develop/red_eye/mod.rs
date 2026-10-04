@@ -1,5 +1,6 @@
 //! Lightroom's Red Eye Correction: an ellipse over a pupil whose colour is replaced by
-//! a dark neutral, with Pupil Size and Darken sliders. Corrections are stored as
+//! a dark neutral, with Pupil Size and Darken sliders, or for Pet Eye by black with
+//! an optional catchlight. Corrections are stored as
 //! parameters beside the recipe, like spot removal, and render on the linear camera
 //! image before Heal and Clone, so every later edit and export sees them.
 //!
@@ -13,14 +14,52 @@ mod render;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub use detect::{DetectError, Pupil, find_pupil};
+pub use detect::{DetectError, Glow, Pupil, find_pupil};
 pub(crate) use render::Placed;
 
-/// Lightroom's Type menu. Pet Eye is not supported yet.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// Lightroom's Type menu.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum EyeKind {
+    /// A red pupil, made a dark neutral.
     #[default]
     Red,
+    /// An animal's glowing pupil, made black, with Lightroom's Add Catchlight: the
+    /// catchlight's offset from the centre in units of the semi-axes along image x and
+    /// y (within the unit circle), or `None`.
+    Pet { catchlight: Option<[f32; 2]> },
+}
+/// Whether catchlight offset `c` (in units of the semi-axes) lies within an ellipse
+/// with `correlation`.
+pub fn catchlight_inside(c: [f32; 2], correlation: f32) -> bool {
+    render::mahalanobis2([1., 1.], correlation, c) <= 1. + 1e-4
+}
+/// `c` (in units of the semi-axes), pulled in to an ellipse with `correlation`.
+fn within(c: [f32; 2], correlation: f32) -> [f32; 2] {
+    let length = render::mahalanobis2([1., 1.], correlation, c).sqrt();
+    if length > 1. {
+        c.map(|v| v / length)
+    } else {
+        c
+    }
+}
+/// Lightroom's default catchlight (`highlightX = 0.591, highlightY = 0.424`), as an
+/// offset in units of the semi-axes.
+pub const DEFAULT_CATCHLIGHT: [f32; 2] = [0.182, -0.152];
+impl EyeKind {
+    /// What the pupil glows like, for finding it.
+    pub fn glow(self) -> Glow {
+        match self {
+            EyeKind::Red => Glow::Red,
+            EyeKind::Pet { .. } => Glow::Bright,
+        }
+    }
+    /// Lightroom's name for it, as in "Add Red Eye Correction".
+    pub fn name(self) -> &'static str {
+        match self {
+            EyeKind::Red => "Red Eye",
+            EyeKind::Pet { .. } => "Pet Eye",
+        }
+    }
 }
 
 /// One corrected eye. Corrections apply in list order.
@@ -62,7 +101,15 @@ impl RedEyeOp {
                 && self.correlation.is_finite()
                 && self.correlation.abs() <= MAX_CORRELATION
                 && unit(self.pupil_size)
-                && unit(self.darken),
+                && unit(self.darken)
+                && match self.kind {
+                    EyeKind::Pet {
+                        catchlight: Some(c),
+                    } => {
+                        c.iter().all(|v| v.is_finite()) && catchlight_inside(c, self.correlation)
+                    }
+                    _ => true,
+                },
             "Invalid red eye correction"
         );
         Ok(())
@@ -91,6 +138,46 @@ impl RedEyeOp {
         let (sx, sy) = crate::develop::retouch::radii(1., aspect);
         let d = [(p[0] - self.center[0]) / sx, (p[1] - self.center[1]) / sy];
         render::mahalanobis2(self.radius, self.correlation, d) <= 1.
+    }
+    /// The catchlight's image-space position, for a photo whose width is `aspect` times
+    /// its height.
+    pub fn catchlight_at(&self, aspect: f32) -> Option<[f32; 2]> {
+        let EyeKind::Pet {
+            catchlight: Some(c),
+        } = self.kind
+        else {
+            return None;
+        };
+        let (sx, sy) = crate::develop::retouch::radii(1., aspect);
+        let half = render::half(self);
+        Some([
+            self.center[0] + c[0] * self.radius[0] * half * sx,
+            self.center[1] + c[1] * self.radius[1] * half * sy,
+        ])
+    }
+    /// Places the catchlight at image-space position `p`, kept within the pupil.
+    pub fn set_catchlight(&mut self, p: [f32; 2], aspect: f32) {
+        let (sx, sy) = crate::develop::retouch::radii(1., aspect);
+        let half = render::half(self);
+        let mut c = [
+            (p[0] - self.center[0]) / (self.radius[0] * half * sx),
+            (p[1] - self.center[1]) / (self.radius[1] * half * sy),
+        ];
+        c = within(c, self.correlation);
+        if let EyeKind::Pet { catchlight } = &mut self.kind {
+            *catchlight = Some(c);
+        }
+    }
+    /// Pulls the catchlight in to the pupil's edge if it lies beyond it, as Lightroom's
+    /// default can on a strongly tilted pupil.
+    pub fn fit_catchlight(&mut self) {
+        let correlation = self.correlation;
+        if let EyeKind::Pet {
+            catchlight: Some(c),
+        } = &mut self.kind
+        {
+            *c = within(*c, correlation);
+        }
     }
     /// Moves the ellipse by `delta` (image space), keeping its centre on the photo.
     pub fn translate(&mut self, delta: [f32; 2]) {

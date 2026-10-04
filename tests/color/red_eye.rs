@@ -5,7 +5,7 @@ use crate::{chart_path, develop, embedded_profiles, measure};
 use rawmakase::{
     develop::{
         ImageFrame, Recipe, ViewMapping,
-        red_eye::{RedEyeOp, find_pupil},
+        red_eye::{Glow, RedEyeOp, find_pupil},
         render,
     },
     raw::CameraImage,
@@ -43,6 +43,7 @@ fn red_pupil_turns_dark_and_neutral_and_the_iris_stays() {
         &im,
         frame.to_image(c[0], c[1]),
         3. * PUPIL / frame.long_edge(),
+        Glow::Red,
     )
     .expect("a pupil");
     let recipe = Recipe::with_profiles(&im.metadata, &embedded_profiles(&im));

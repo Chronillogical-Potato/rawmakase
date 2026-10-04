@@ -1,11 +1,12 @@
 //! Red Eye Correction (Lightroom's tool between Remove and Masking): drag from the
-//! centre of an eye outward, or click to use the last size; the red pupil found inside
-//! that circle gets a correction. Drag a correction to move it; Pupil Size and Darken
+//! centre of an eye outward, or click to use the last size; the red (or, for Pet Eye,
+//! glowing) pupil found inside that circle gets a correction. Drag a correction to move
+//! it, and a pet eye's catchlight to place it; Pupil Size, Darken and Add Catchlight
 //! change the selected one; Delete removes it.
 use super::Editor;
 use super::retouch_tool::{hint, indented};
 use super::theme;
-use super::widgets::slider_with;
+use super::widgets::{segmented, slider_with};
 use crate::develop::{
     ViewMapping,
     red_eye::{self, EyeKind, RedEyeOp},
@@ -14,6 +15,8 @@ use crate::develop::{
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 pub(super) struct RedEyeTool {
+    /// The Type menu: what a new correction corrects.
+    pub(super) pet: PupilType,
     /// Index into the recipe's red eye corrections.
     pub(super) selected: Option<usize>,
     /// The last circle's radius, as a fraction of the long edge, for clicks.
@@ -23,9 +26,33 @@ pub(super) struct RedEyeTool {
 impl Default for RedEyeTool {
     fn default() -> Self {
         Self {
+            pet: PupilType::Red,
             selected: None,
             size: 0.02,
             drag: Drag::None,
+        }
+    }
+}
+/// Lightroom's Type menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PupilType {
+    Red,
+    Pet,
+}
+impl PupilType {
+    fn of(kind: EyeKind) -> Self {
+        match kind {
+            EyeKind::Red => PupilType::Red,
+            EyeKind::Pet { .. } => PupilType::Pet,
+        }
+    }
+    /// A new correction's kind: a pet eye has Lightroom's catchlight.
+    fn kind(self) -> EyeKind {
+        match self {
+            PupilType::Red => EyeKind::Red,
+            PupilType::Pet => EyeKind::Pet {
+                catchlight: Some(red_eye::DEFAULT_CATCHLIGHT),
+            },
         }
     }
 }
@@ -38,6 +65,8 @@ enum Drag {
     /// Moving a correction; image-space pointer position at the start and the
     /// correction then.
     Move([f32; 2], RedEyeOp),
+    /// Placing the selected pet eye's catchlight.
+    Catchlight,
 }
 impl RedEyeTool {
     pub(super) fn clear_document(&mut self) {
@@ -87,13 +116,22 @@ impl Editor {
         let pointer = response.hover_pos();
         let hovered = pointer.and_then(hit);
 
+        // The selected pet eye's catchlight handle, which can lie outside its ellipse.
+        let selected = self.view.red_eye.selected;
+        let on_catchlight = |pos: Pos2| {
+            selected
+                .and_then(|i| ops.get(i))
+                .and_then(|op| op.catchlight_at(aspect))
+                .is_some_and(|c| to_screen(c).distance(pos) < 7.)
+        };
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
             let at = to_image(origin);
             self.view.red_eye.drag = match hit(origin) {
+                _ if on_catchlight(origin) => Drag::Catchlight,
                 Some(i) => {
-                    self.view.red_eye.selected = Some(i);
+                    self.select_red_eye(Some(i));
                     Drag::Move(at, ops[i].clone())
                 }
                 None => Drag::Circle(at),
@@ -109,6 +147,15 @@ impl Editor {
             let mut op = original.clone();
             op.translate([at[0] - start[0], at[1] - start[1]]);
             self.document.recipe.red_eye[i] = op;
+            self.show_red_eye();
+        }
+        if response.dragged()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Drag::Catchlight = self.view.red_eye.drag
+            && let Some(i) = self.view.red_eye.selected
+            && i < self.document.recipe.red_eye.len()
+        {
+            self.document.recipe.red_eye[i].set_catchlight(to_image(pos), aspect);
             self.show_red_eye();
         }
         if response.drag_stopped() {
@@ -127,7 +174,8 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
         {
             match hit(pos) {
-                Some(i) => self.view.red_eye.selected = Some(i),
+                _ if on_catchlight(pos) => {}
+                Some(i) => self.select_red_eye(Some(i)),
                 None => {
                     let size = self.view.red_eye.size;
                     self.add_red_eye(to_image(pos), size);
@@ -149,6 +197,11 @@ impl Editor {
             outline(&painter, points, width);
             if selected {
                 crosshair(&painter, to_screen(op.center));
+                if let Some(c) = op.catchlight_at(aspect) {
+                    let c = to_screen(c);
+                    painter.circle_stroke(c, 4., Stroke::new(2.5, Color32::from_black_alpha(110)));
+                    painter.circle_stroke(c, 4., Stroke::new(1., Color32::WHITE));
+                }
             }
         }
         if let Drag::Circle(center) = &tool.drag
@@ -169,8 +222,8 @@ impl Editor {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
         }
     }
-    /// Corrects the red pupil found within `size` (long-edge fraction) of image
-    /// position `center`, or says none was found.
+    /// Corrects the pupil (red, or glowing for Pet Eye) found within `size` (long-edge
+    /// fraction) of image position `center`, or says none was found.
     pub(super) fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
         if self.document.recipe.red_eye.len() >= red_eye::MAX_OPS {
             self.status = "Too many red eye corrections on this photo".into();
@@ -179,7 +232,15 @@ impl Editor {
         let Some(im) = self.document.full() else {
             return;
         };
-        match red_eye::find_pupil(im, center, size.min(red_eye::MAX_RADIUS)) {
+        // The selected correction's type, as the Type menu shows it.
+        let pet = self
+            .view
+            .red_eye
+            .selected
+            .and_then(|i| self.document.recipe.red_eye.get(i))
+            .map_or(self.view.red_eye.pet, |op| PupilType::of(op.kind));
+        let kind = pet.kind();
+        match red_eye::find_pupil(im, center, size.min(red_eye::MAX_RADIUS), kind.glow()) {
             Ok(pupil) => {
                 let (pupil_size, darken) = self
                     .view
@@ -190,23 +251,38 @@ impl Editor {
                         (red_eye::DEFAULT_PUPIL_SIZE, red_eye::DEFAULT_DARKEN),
                         |op| (op.pupil_size, op.darken),
                     );
-                let op = RedEyeOp {
-                    kind: EyeKind::Red,
+                let mut op = RedEyeOp {
+                    kind,
                     center: pupil.center,
                     radius: pupil.radius,
                     correlation: pupil.correlation,
                     pupil_size,
                     darken,
                 };
+                op.fit_catchlight();
                 if let Err(e) = op.validate() {
                     self.status = e.to_string();
                     return;
                 }
                 self.document.recipe.red_eye.push(op);
                 self.show_red_eye();
-                self.view.red_eye.selected = Some(self.document.recipe.red_eye.len() - 1);
+                self.select_red_eye(Some(self.document.recipe.red_eye.len() - 1));
             }
-            Err(e) => self.status = e.to_string(),
+            // Lightroom's warning.
+            Err(_) => {
+                self.status = format!(
+                    "Unable to find {}. Be sure to use an area that includes the entire eye.",
+                    kind.name().to_lowercase()
+                )
+            }
+        }
+    }
+    /// Selects correction `i`; its type becomes the one new corrections get, as the
+    /// Type menu shows it.
+    pub(super) fn select_red_eye(&mut self, i: Option<usize>) {
+        self.view.red_eye.selected = i;
+        if let Some(op) = i.and_then(|i| self.document.recipe.red_eye.get(i)) {
+            self.view.red_eye.pet = PupilType::of(op.kind);
         }
     }
     /// Turns the Red Eye switch on, so a correction just made or changed shows, as
@@ -243,17 +319,29 @@ impl Editor {
             .selected
             .filter(|i| *i < self.document.recipe.red_eye.len());
         super::retouch_tool::control_label(ui, "Type", |ui| {
-            ui.label(
-                egui::RichText::new("Red Eye")
-                    .size(12.)
-                    .color(theme::gray(220)),
-            )
-            .on_hover_text("Pet Eye is not supported yet");
+            let mut pet = selected.map_or(self.view.red_eye.pet, |i| {
+                PupilType::of(self.document.recipe.red_eye[i].kind)
+            });
+            let w = ui.available_width();
+            if segmented(
+                ui,
+                &mut pet,
+                &[(PupilType::Red, "Red Eye"), (PupilType::Pet, "Pet Eye")],
+                w,
+            ) {
+                self.view.red_eye.pet = pet;
+                if let Some(i) = selected {
+                    let op = &mut self.document.recipe.red_eye[i];
+                    op.kind = pet.kind();
+                    op.fit_catchlight();
+                    self.show_red_eye();
+                }
+            }
         });
         match selected {
             Some(i) => {
                 let op = &mut self.document.recipe.red_eye[i];
-                let before = (op.pupil_size, op.darken);
+                let before = op.clone();
                 slider_with(
                     ui,
                     "Pupil Size",
@@ -263,28 +351,38 @@ impl Editor {
                     Some((100., 0)),
                     None,
                 );
-                slider_with(
-                    ui,
-                    "Darken",
-                    &mut op.darken,
-                    0. ..=1.,
-                    red_eye::DEFAULT_DARKEN,
-                    Some((100., 0)),
-                    None,
-                );
-                if (op.pupil_size, op.darken) != before {
+                match &mut op.kind {
+                    // Camera Raw's Pet Eye is black whatever Darken says.
+                    EyeKind::Red => {
+                        slider_with(
+                            ui,
+                            "Darken",
+                            &mut op.darken,
+                            0. ..=1.,
+                            red_eye::DEFAULT_DARKEN,
+                            Some((100., 0)),
+                            None,
+                        );
+                    }
+                    EyeKind::Pet { catchlight } => indented(ui, |ui| {
+                        let mut on = catchlight.is_some();
+                        if ui
+                            .checkbox(&mut on, "Add Catchlight")
+                            .on_hover_text("Drag the catchlight to place it")
+                            .changed()
+                        {
+                            *catchlight = on.then_some(red_eye::DEFAULT_CATCHLIGHT);
+                        }
+                    }),
+                }
+                op.fit_catchlight();
+                if *op != before {
+                    let name = format!("Update {} Correction", op.kind.name());
                     self.show_red_eye();
-                    super::widgets::name_history_step(
-                        ui,
-                        "Update Red Eye Correction".into(),
-                        String::new(),
-                    );
+                    super::widgets::name_history_step(ui, name, String::new());
                 }
             }
-            None => hint(
-                ui,
-                "Select a correction to change its Pupil Size and Darken",
-            ),
+            None => hint(ui, "Select a correction to change it"),
         }
         ui.add_space(4.);
         hint(
