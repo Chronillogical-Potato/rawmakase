@@ -440,6 +440,11 @@ mod tests {
         };
         std::fs::create_dir(&store.dir)?;
         std::fs::set_permissions(&store.dir, std::fs::Permissions::from_mode(0o555))?;
+        // Running as root (as CI does), the folder stays writable: nothing to test.
+        if std::fs::write(store.dir.join("probe"), "").is_ok() {
+            std::fs::set_permissions(&store.dir, std::fs::Permissions::from_mode(0o755))?;
+            return Ok(());
+        }
         let result = store.save("Mine", &PointCurve::of(&Recipe::default()));
         std::fs::set_permissions(&store.dir, std::fs::Permissions::from_mode(0o755))?;
         let err = format!("{:#}", result.unwrap_err());

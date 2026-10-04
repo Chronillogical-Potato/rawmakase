@@ -162,8 +162,15 @@ impl Editor {
         let curve = PointCurve::of(&self.document.recipe);
         match store.save(name, &curve) {
             Ok(_) => {
+                let saved = format!("Point curve {} saved", name.trim());
+                self.status.clear();
                 self.reload_saved_curves(store);
-                self.status = format!("Point curve {} saved", name.trim());
+                // A curve the reload could not read is said too.
+                self.status = if self.status.is_empty() {
+                    saved
+                } else {
+                    format!("{saved}. {}", self.status)
+                };
             }
             Err(e) => self.status = format!("Point curve not saved: {e:#}"),
         }
@@ -244,6 +251,16 @@ mod tests {
         let saved = e.saved_curves();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].name, "Green Lift");
+        // A curve file that can't be read is still said after a save.
+        std::fs::write(store.dir.join("Broken.xmp"), "<not xmp").unwrap();
+        e.save_point_curve(&store, "Other");
+        assert!(
+            e.status.starts_with("Point curve Other saved"),
+            "{}",
+            e.status
+        );
+        assert!(e.status.contains("Broken.xmp"), "{}", e.status);
+        std::fs::remove_file(store.dir.join("Broken.xmp")).unwrap();
         // Saving again under the same name keeps the first.
         e.save_point_curve(&store, "Green Lift");
         assert!(e.status.contains("already saved"), "{}", e.status);
