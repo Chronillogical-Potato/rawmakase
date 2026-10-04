@@ -55,16 +55,21 @@ pub enum SwatchView {
     VisualizeRange,
 }
 
-/// Swatches for a Visualize Range render of the one at `index`: the swatches before it
-/// as they are, then its selection. `None` when there is no such swatch.
+/// Swatches for a Visualize Range render of the one at `index`: every swatch as it
+/// is, the selected one also showing its selection. `None` when there is no such
+/// swatch.
 pub fn visualize_range(list: &[PointColor], index: usize) -> Option<Vec<PointColor>> {
-    let selected = list.get(index)?;
-    let mut out = list[..index].to_vec();
-    out.push(PointColor {
-        view: SwatchView::VisualizeRange,
-        ..*selected
-    });
+    list.get(index)?;
+    let mut out = list.to_vec();
+    out[index].view = SwatchView::VisualizeRange;
     Some(out)
+}
+
+/// The swatches as they adjust the photo, without Visualize Range.
+pub fn without_visualization(list: &mut [PointColor]) {
+    for p in list {
+        p.view = SwatchView::Adjust;
+    }
 }
 
 impl PointColor {
@@ -489,19 +494,17 @@ pub(crate) struct Rendered {
 }
 
 impl PointColors {
-    /// As [`Self::apply_prophoto`], noting the visualized swatch's selection instead
-    /// of applying that swatch.
+    /// As [`Self::apply_prophoto`], also noting the visualized swatch's selection of
+    /// the color it sees.
     pub(crate) fn render_prophoto(&self, p: [f32; 3]) -> Rendered {
         let mut color = p;
         let mut selection = None;
         for w in &self.swatches {
-            match w.view {
-                SwatchView::Adjust => color = w.apply(color),
-                SwatchView::VisualizeRange => {
-                    let q = color.map(|v| v.max(0.));
-                    selection = Some(w.select(q).map_or(0., |x| x.weight));
-                }
+            if w.view == SwatchView::VisualizeRange {
+                let q = color.map(|v| v.max(0.));
+                selection = Some(w.select(q).map_or(0., |x| x.weight));
             }
+            color = w.apply(color);
         }
         Rendered { color, selection }
     }

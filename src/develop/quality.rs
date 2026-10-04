@@ -521,8 +521,13 @@ pub(crate) fn retouched(
 /// there, averaged over 5×5 output pixels, rendered as the photo is (lens corrections,
 /// retouching, masks and the swatches already there included), as a swatch's
 /// `source`: HSV of linear ProPhoto RGB with the hue in sixths of a turn.
-pub fn point_color_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> Result<[f32; 3]> {
-    let cancel = AtomicBool::new(false);
+pub fn point_color_pick(
+    im: &CameraImage,
+    r: &Recipe,
+    u: f32,
+    v: f32,
+    cancel: &AtomicBool,
+) -> Result<[f32; 3]> {
     let shown = r.as_rendered();
     shown.validate()?;
     let effective = shown.resolved(&im.metadata);
@@ -530,9 +535,9 @@ pub fn point_color_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> Result<
     if r.lens_ca {
         crate::lens::auto_ca::prime(im);
     }
-    let source = retouched(im, r, &cancel, None)?;
+    let source = retouched(im, r, cancel, None)?;
     let g = Geometry::new(&source, r, 0);
-    let (toned, tonal) = local_stage(&source, r, 1., &cancel, None)?;
+    let (toned, tonal) = local_stage(&source, r, 1., cancel, None)?;
     let at = |t: f32, size: u32| {
         let c = (t.clamp(0., 1.) * size as f32) as u32;
         c.saturating_sub(2).min(size.saturating_sub(5))
@@ -543,7 +548,7 @@ pub fn point_color_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> Result<
         g.width.min(5),
         g.height.min(5),
     ];
-    let out = develop::pipeline::point_color_samples(&toned, &tonal, &g, region, &cancel)?;
+    let out = develop::pipeline::point_color_samples(&toned, &tonal, &g, region, cancel)?;
     let n = out.pixels.len() as f32;
     let mean: [f32; 3] =
         std::array::from_fn(|c| out.pixels.iter().map(|p| p[c].max(0.)).sum::<f32>() / n);

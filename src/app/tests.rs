@@ -3600,6 +3600,17 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     sample(&mut editor);
     assert_eq!(editor.status, SampleRefusal::AlreadySampled.message());
     assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    // A sample still being taken when the dropper is put away is dropped.
+    assert_eq!(editor.view.tool, state::Tool::PointColor);
+    in_edit_frame(&ctx, &mut editor, |e| {
+        e.start_point_color_sample(0.2, 0.5);
+        e.view.toggle(state::Tool::PointColor);
+    });
+    assert!(!editor.document.point_color_pick.is_running());
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    editor.events(&ctx);
+    assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    editor.view.toggle(state::Tool::PointColor);
     // A sample of a photo edited meanwhile is dropped.
     let mut changed = editor.document.recipe.clone();
     changed.exposure = 1.;

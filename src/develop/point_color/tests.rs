@@ -202,23 +202,27 @@ fn the_dropper_adds_up_to_eight_distinct_colorful_swatches() {
 fn visualize_range_shows_the_selection_in_color_and_the_rest_gray() {
     let mut first = PointColor::sampled([3.5, 0.5, 0.3]);
     first.shift = [0.5, 0., 0.];
-    let second = PointColor::sampled([1., 0.6, 0.3]);
+    let mut second = PointColor::sampled([1., 0.6, 0.3]);
+    second.shift = [0., 0.4, 0.];
     let list = visualize_range(&[first, second], 1).unwrap();
     assert_eq!(list.len(), 2);
     assert_eq!(list[0], first);
     assert_eq!(list[1].view, SwatchView::VisualizeRange);
+    assert!(visualize_range(&list, 2).is_none());
     let op = PointColors::new(&list).unwrap();
-    // The colors stay; the selection says how much of each shows: the sampled color all
-    // of it, a green none.
+    // The colors render as without Visualize Range; the selection says how much of
+    // each shows: the sampled color all of it, a green none.
     let selected = second.source_prophoto();
     let shown = op.render_prophoto(selected);
-    assert_eq!(
-        shown.color,
-        PointColors::new(&[first]).unwrap().apply_prophoto(selected)
-    );
+    let plain = PointColors::new(&[first, second]).unwrap();
+    assert_eq!(shown.color, plain.apply_prophoto(selected));
     assert!(shown.selection.is_some_and(|w| w > 0.99));
     let green = [0.05, 0.3, 0.04];
     assert_eq!(op.render_prophoto(green).selection, Some(0.));
+    assert_eq!(plain.render_prophoto(green).selection, None);
+    let mut cleared = list.clone();
+    without_visualization(&mut cleared);
+    assert_eq!(cleared, vec![first, second]);
     // On the finished color: gray where nothing is selected.
     let out = visualize([0.8, 0.4, 0.2], 0.);
     assert!(out.iter().all(|v| (v - out[0]).abs() < 1e-6));
@@ -228,7 +232,6 @@ fn visualize_range_shows_the_selection_in_color_and_the_rest_gray() {
             .zip([0.8, 0.4, 0.2])
             .all(|(a, b)| (a - b).abs() < 1e-6)
     );
-    assert!(visualize_range(&list, 2).is_none());
     // Never saved: a saved swatch reads back as an adjustment.
     let back: PointColor = serde_json::from_str(&serde_json::to_string(&list[1]).unwrap()).unwrap();
     assert_eq!(back.view, SwatchView::Adjust);

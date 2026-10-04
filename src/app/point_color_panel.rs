@@ -34,20 +34,21 @@ impl super::Editor {
         if self.document.point_color_pick.is_running() {
             return;
         }
-        self.document.point_color_pick.start();
+        let (generation, cancel) = self.document.point_color_pick.start();
         let id = self.load.id();
         let sampled = self.document.recipe.clone();
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::develop::quality::point_color_pick(&im, &sampled, u, v)
+                crate::develop::quality::point_color_pick(&im, &sampled, u, v, &cancel)
             }))
             .unwrap_or_else(|_| Err(anyhow::anyhow!("sampling failed unexpectedly")))
             .map_err(|e| format!("Cannot sample a color: {e:#}"));
             let sampled = Box::new(sampled);
             let _ = tx.send(super::worker::Event::PointColorSample {
                 id,
+                generation,
                 sampled,
                 result,
             });
@@ -63,6 +64,10 @@ impl super::Editor {
         result: Result<[f32; 3], String>,
     ) {
         self.document.point_color_pick.invalidate();
+        // The dropper was put away meanwhile (another tab or module, or clicked off).
+        if !self.view.is(Tool::PointColor) {
+            return;
+        }
         if *sampled != self.document.recipe {
             self.status = "The photo changed while sampling; pick the color again".into();
             return;

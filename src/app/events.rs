@@ -44,9 +44,15 @@ impl Editor {
                 }
                 Event::PointColorSample {
                     id,
+                    generation,
                     sampled,
                     result,
-                } if id == self.load.id() => self.point_color_sample_ready(&sampled, result),
+                } if id == self.load.id()
+                    && self.document.point_color_pick.is_running()
+                    && self.document.point_color_pick.id() == generation =>
+                {
+                    self.point_color_sample_ready(&sampled, result)
+                }
                 Event::Upright {
                     id,
                     generation,

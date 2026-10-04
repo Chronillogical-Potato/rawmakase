@@ -767,7 +767,8 @@ fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
         reference_color: true,
         ..Default::default()
     };
-    let pick = |r: &Recipe| crate::develop::quality::point_color_pick(&im, r, 0.05, 0.5);
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let pick = |r: &Recipe| crate::develop::quality::point_color_pick(&im, r, 0.05, 0.5, &cancel);
     let before = pick(&plain)?;
     // A mask brightening the left of the photo: the dropper sees it, as the photo
     // shows it.
@@ -814,6 +815,45 @@ fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow
         assert!(
             (p[0] - p[1]).abs() < 2e-3 && (p[1] - p[2]).abs() < 2e-3,
             "{p:?}"
+        );
+    }
+    Ok(())
+}
+#[test]
+fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Result<()> {
+    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::develop::point_color::{PointColor, visualize, visualize_range};
+    let im = fixture();
+    let mut r = Recipe {
+        reference_curves: true,
+        reference_color: true,
+        ..Default::default()
+    };
+    // A magenta swatch, which none of the fixture's greens is.
+    r.point_colors = vec![PointColor::sampled([5., 0.8, 0.3])];
+    // A Color Range mask on the fixture's own green brightens it.
+    let green = crate::develop::render(&im, &r, 0)?.pixels[40];
+    r.masks.push(MaskGroup {
+        components: vec![MaskComponent::new(MaskShape::ColorRange {
+            samples: vec![srgb_to_lab(green.map(srgb_decode))],
+            amount: 0.5,
+        })],
+        adjust: LocalAdjust {
+            exposure: 1.,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let shown = crate::develop::render(&im, &r, 0)?;
+    let mut visualized = r.clone();
+    visualized.point_colors = visualize_range(&r.point_colors, 0).unwrap();
+    let gray = crate::develop::render(&im, &visualized, 0)?;
+    // The mask still brightens the greens: Visualize Range only grays them.
+    for (a, b) in shown.pixels.iter().zip(&gray.pixels) {
+        let expected = visualize(*a, 0.);
+        assert!(
+            (0..3).all(|c| (expected[c] - b[c]).abs() < 2e-3),
+            "{a:?} {b:?}"
         );
     }
     Ok(())

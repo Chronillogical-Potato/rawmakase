@@ -90,6 +90,12 @@ impl Editor {
         if self.view.is(super::state::Tool::PointColor) && !self.point_color_tab_shown() {
             self.view.tool = super::state::Tool::None;
         }
+        // A sample still being taken is dropped with the dropper.
+        if !self.view.is(super::state::Tool::PointColor)
+            && self.document.point_color_pick.is_running()
+        {
+            self.document.point_color_pick.invalidate();
+        }
         // A conversion waiting for the photo, once it is decoded and nothing else
         // changed this frame (any edit drops it below).
         if self.document.recipe == frame.recipe {

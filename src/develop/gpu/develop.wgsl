@@ -610,7 +610,6 @@ fn point_color(p0: vec3<f32>, w: i32, base: i32) -> vec3<f32> {
     // Visualize Range: note the selection; the finished color is grayed by the rest.
     if table(w + 22) != 0.0 {
         point_selection = weight;
-        return p0;
     }
     if weight <= 0.0 {
         return p0;

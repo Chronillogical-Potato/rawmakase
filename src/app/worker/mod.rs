@@ -69,6 +69,9 @@ pub enum Event {
     /// `sampled`: a swatch's `source`, or what to say instead.
     PointColorSample {
         id: u64,
+        /// The sampling task's generation; a later sample or a put-away dropper
+        /// supersedes it.
+        generation: u64,
         sampled: Box<crate::develop::Recipe>,
         result: Result<[f32; 3], String>,
     },
