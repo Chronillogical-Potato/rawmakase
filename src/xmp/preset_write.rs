@@ -83,7 +83,7 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         let mut mono = r.clone();
         mono.effects.monochrome = true;
         attributes.extend(
-            settings(&mono)
+            settings(&mono, None)
                 .0
                 .into_iter()
                 .filter(|(key, _)| key.starts_with("GrayMixer")),
