@@ -127,7 +127,8 @@ Useful shortcuts:
 | Shift + rating, label or flag key | Apply and advance |
 | R or C | Crop |
 | J | Shadow and highlight clipping warnings (click a histogram triangle for one) |
-| Backslash | Before / after |
+| Backslash | Before alone |
+| Y / Option+Y / Shift+Y | Before and after: left and right / top and bottom / split |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |
 

@@ -37,7 +37,16 @@ impl RenderStage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskKind {
     Load,
-    Render,
+    Render(Pane),
+}
+/// Which view of the edit a render is for: the edit itself, or the Before beside it
+/// in Lightroom's Before/After views. Each has its own render lane and caches, so an
+/// edit renders only the After.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pane {
+    #[default]
+    After,
+    Before,
 }
 
 /// What an Auto request sets.
@@ -113,6 +122,7 @@ pub enum Event {
     },
     Rendered {
         id: u64,
+        pane: Pane,
         preview: Preview,
         histogram: Box<crate::develop::Histogram>,
         /// A reduced copy for the library, without overlays, when the job asked for one.
@@ -200,6 +210,7 @@ pub enum Overlay {
 }
 pub struct RenderJob {
     pub id: u64,
+    pub pane: Pane,
     pub image: Arc<CameraImage>,
     pub max_edge: u32,
     pub cancel: Arc<AtomicBool>,
@@ -229,5 +240,5 @@ mod renderer;
 pub use latest::Latest;
 pub(crate) use latest::panic_message;
 pub use loader::loader;
-pub use renderer::renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};
+pub use renderer::{Renderer, renderer};

@@ -41,7 +41,7 @@ impl Editor {
         let resolved = self.raw_defaults.resolve(m, &self.document.profiles);
         let before_changed =
             self.document.defaults.as_ref().map(|d| &d.recipe) != Some(&resolved.recipe);
-        let mut changed = before_changed && self.view.compare;
+        let mut changed = before_changed && self.view.compare.shows_before();
         if self.follows_defaults() {
             if let Some(note) = &resolved.note {
                 self.status = note.clone();
@@ -554,7 +554,7 @@ mod tests {
         editor.document.metadata = Some(m.clone());
         editor.document.origin = EditOrigin::Saved;
         editor.refresh_photo_defaults();
-        editor.view.compare = true;
+        editor.view.compare = crate::app::before_after::Compare::BeforeOnly;
         editor.set_raw_defaults(lighten()).unwrap();
         let lightened = editor.raw_defaults.resolve(&m, &profiles(&m)).recipe;
         assert_eq!(editor.effective_recipe().curve, lightened.curve);

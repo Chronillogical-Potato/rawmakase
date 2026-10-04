@@ -36,6 +36,8 @@ enum SnapshotAction {
     StartRename(i64),
     Rename(i64, String),
     Delete(i64),
+    /// Copy Snapshot Settings to Before.
+    ToBefore(i64),
 }
 
 impl Editor {
@@ -101,6 +103,9 @@ impl Editor {
                         if ui.button("Update with Current Settings").clicked() {
                             actions.push(SnapshotAction::Update(snapshot.id));
                         }
+                        if ui.button("Copy Snapshot Settings to Before").clicked() {
+                            actions.push(SnapshotAction::ToBefore(snapshot.id));
+                        }
                         if ui.button("Rename").clicked() {
                             actions.push(SnapshotAction::StartRename(snapshot.id));
                         }
@@ -157,6 +162,12 @@ impl Editor {
                 }
             }
             SnapshotAction::Delete(id) => catalog.delete_snapshot(*id),
+            SnapshotAction::ToBefore(id) => {
+                if let Some(recipe) = self.snapshot_settings(*id) {
+                    self.set_before(recipe);
+                }
+                return;
+            }
             SnapshotAction::Apply(id) => {
                 self.apply_snapshot(*id);
                 return;
@@ -178,15 +189,30 @@ impl Editor {
     }
     /// Applies a snapshot as one History step, as Lightroom does.
     fn apply_snapshot(&mut self, id: i64) {
-        let Some(snapshot) = self.snapshot(id).cloned() else {
+        let Some(name) = self.snapshot(id).map(|s| s.name.clone()) else {
             return;
         };
+        let Some(recipe) = self.snapshot_settings(id) else {
+            return;
+        };
+        // Already the edit: nothing to record, and no label left for the next step.
+        if recipe == self.document.recipe {
+            return;
+        }
+        self.document
+            .history
+            .label(Step::new(format!("Snapshot: {name}"), ""));
+        self.document.recipe = recipe;
+        self.ensure_upright();
+    }
+    /// A snapshot's settings for this photo; one from Lightroom is converted, and
+    /// what it could not render is said in the status line.
+    fn snapshot_settings(&mut self, id: i64) -> Option<crate::develop::Recipe> {
+        let snapshot = self.snapshot(id).cloned()?;
         let recipe = match snapshot.settings {
             SnapshotSettings::Recipe(recipe) => *recipe,
             SnapshotSettings::Lightroom(text) => {
-                let Some(m) = &self.document.metadata else {
-                    return;
-                };
+                let m = self.document.metadata.as_ref()?;
                 match crate::catalog::convert_develop(
                     &text,
                     m,
@@ -202,20 +228,12 @@ impl Editor {
                     }
                     Err(e) => {
                         self.status = format!("Snapshot not applied: {e:#}");
-                        return;
+                        return None;
                     }
                 }
             }
         };
-        // Already the edit: nothing to record, and no label left for the next step.
-        if recipe == self.document.recipe {
-            return;
-        }
-        self.document
-            .history
-            .label(Step::new(format!("Snapshot: {}", snapshot.name), ""));
-        self.document.recipe = recipe;
-        self.ensure_upright();
+        Some(recipe)
     }
 }
 

@@ -34,6 +34,28 @@ impl Default for Zoom {
     }
 }
 impl Zoom {
+    /// Screen rectangle of a whole photo of `size` image pixels laid out in `area`:
+    /// fitted in Fit, otherwise `level` screen pixels per image pixel around `pan`,
+    /// centred when smaller than `area`. `ppp` is pixels per point.
+    pub fn photo_rect(&self, area: egui::Rect, size: egui::Vec2, ppp: f32) -> egui::Rect {
+        if !self.on {
+            let k = (area.width() / size.x).min(area.height() / size.y);
+            return egui::Rect::from_center_size(area.center(), size * k);
+        }
+        let size = size * (self.level / ppp);
+        let place = |pan: f32, lo: f32, len: f32, size: f32| {
+            if size <= len {
+                lo + (len - size) / 2.
+            } else {
+                (lo + len / 2. - pan * size).clamp(lo + len - size, lo)
+            }
+        };
+        let min = egui::Pos2::new(
+            place(self.pan[0], area.left(), area.width(), size.x),
+            place(self.pan[1], area.top(), area.height(), size.y),
+        );
+        egui::Rect::from_min_size(min, size)
+    }
     /// The level shown, 0 for Fit.
     pub fn shown(&self) -> f32 {
         if self.on { self.level } else { 0. }

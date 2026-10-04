@@ -702,24 +702,40 @@ impl Editor {
             return;
         }
         let mut go_to = None;
+        let mut to_before = None;
         let mut lightroom = None;
         let (steps, applied) = self.document.history.steps();
+        // A click goes to the step; its menu copies it to Before, as in Lightroom.
+        let mut row = |ui: &mut egui::Ui, n: usize, name: &str, value: &str| {
+            let response = history_row(ui, name, value, n == applied, n > applied);
+            if response.clicked() && !super::widgets::context_clicked(&response) {
+                go_to = Some(n);
+            }
+            super::widgets::context_menu(&response, |ui| {
+                ui.set_width(270.);
+                if super::widgets::menu_item(
+                    ui,
+                    "Copy History Step Settings to Before",
+                    "",
+                    true,
+                    false,
+                ) {
+                    to_before = Some(n);
+                    ui.close();
+                }
+            });
+        };
         section(ui, "History", false, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             for (i, step) in steps.iter().enumerate().rev() {
-                let n = i + 1;
-                if history_row(ui, &step.name, &step.value, n == applied, n > applied).clicked() {
-                    go_to = Some(n);
-                }
+                row(ui, i + 1, &step.name, &step.value);
             }
             let opened = if self.document.lightroom_history.is_empty() {
                 "Opened"
             } else {
                 "Opened with Lightroom edit"
             };
-            if history_row(ui, opened, "", applied == 0, false).clicked() {
-                go_to = Some(0);
-            }
+            row(ui, 0, opened, "");
             if self.document.lightroom_history.is_empty() {
                 return;
             }
@@ -743,11 +759,27 @@ impl Editor {
                         .on_hover_text(format!("{} UTC", format_unix(s as i64 + 978_307_200))),
                     None => response,
                 };
-                if response.clicked() {
-                    lightroom = Some(i);
+                if response.clicked() && !super::widgets::context_clicked(&response) {
+                    lightroom = Some((i, LightroomStep::Apply));
                 }
+                super::widgets::context_menu(&response, |ui| {
+                    ui.set_width(270.);
+                    if super::widgets::menu_item(
+                        ui,
+                        "Copy History Step Settings to Before",
+                        "",
+                        true,
+                        false,
+                    ) {
+                        lightroom = Some((i, LightroomStep::ToBefore));
+                        ui.close();
+                    }
+                });
             }
         });
+        if let Some(n) = to_before {
+            self.before_from_history(n);
+        }
         if let Some(n) = go_to {
             // A resize still being grouped is a step before the jump, so it isn't lost.
             self.finish_wheel_gesture();
@@ -756,7 +788,7 @@ impl Editor {
                 self.ensure_upright();
             }
         }
-        if let Some(i) = lightroom
+        if let Some((i, use_step)) = lightroom
             && let Some(m) = &self.document.metadata
         {
             let step = &self.document.lightroom_history[i];
@@ -766,6 +798,12 @@ impl Editor {
                 &self.document.profiles,
                 self.document.full().map(|image| image.as_ref()),
             ) {
+                Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
+                    if !skipped.is_empty() {
+                        self.status = format!("Before · not rendered: {}", skipped.join(", "));
+                    }
+                    self.set_before(recipe);
+                }
                 Ok((recipe, skipped)) => {
                     let name = format!("Lightroom: {}", step.name);
                     self.status = if skipped.is_empty() {
@@ -782,6 +820,14 @@ impl Editor {
             }
         }
     }
+}
+/// What a click on a Lightroom History step asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LightroomStep {
+    /// Apply it to the edit, as a step.
+    Apply,
+    /// Copy History Step Settings to Before.
+    ToBefore,
 }
 /// A preset's Upright mode, with this photo's own corrections rather than any the preset
 /// carries from the photo it was saved from; a mode without one is analysed on apply.

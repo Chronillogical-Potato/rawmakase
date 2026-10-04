@@ -1,10 +1,13 @@
-//! Single-slot mailbox: pending work is replaced by the latest request.
+//! Single-slot mailbox: pending work is replaced by the latest request. A mailbox
+//! can have several lanes, each keeping its own latest request; the worker takes
+//! the first lane's work first.
 use std::sync::{
     Arc, Condvar, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 struct Slot<T> {
-    job: Mutex<Option<T>>,
+    /// The latest job of each lane.
+    jobs: Mutex<Vec<Option<T>>>,
     wake: Condvar,
     stopped: AtomicBool,
 }
@@ -12,23 +15,27 @@ pub struct Latest<T> {
     slot: Arc<Slot<T>>,
 }
 impl<T: Send + 'static> Latest<T> {
-    pub fn new(mut run: impl FnMut(T) + Send + 'static) -> Self {
+    pub fn new(run: impl FnMut(T) + Send + 'static) -> Self {
+        Self::with_lanes(1, run)
+    }
+    /// A mailbox with `lanes` lanes, which `submit_to` addresses.
+    pub fn with_lanes(lanes: usize, mut run: impl FnMut(T) + Send + 'static) -> Self {
         let slot = Arc::new(Slot {
-            job: Mutex::new(None),
+            jobs: Mutex::new((0..lanes.max(1)).map(|_| None).collect()),
             wake: Condvar::new(),
             stopped: AtomicBool::new(false),
         });
         let thread = slot.clone();
         std::thread::spawn(move || {
             loop {
-                let mut lock = thread.job.lock().unwrap();
-                while lock.is_none() && !thread.stopped.load(Ordering::Relaxed) {
+                let mut lock = thread.jobs.lock().unwrap();
+                while lock.iter().all(Option::is_none) && !thread.stopped.load(Ordering::Relaxed) {
                     lock = thread.wake.wait(lock).unwrap();
                 }
                 if thread.stopped.load(Ordering::Relaxed) {
                     break;
                 }
-                let job = lock.take().unwrap();
+                let job = lock.iter_mut().find_map(Option::take).unwrap();
                 drop(lock);
                 // A panic must not end the thread, or later jobs would wait forever.
                 // Workers with state catch their own panics to report and rebuild it.
@@ -38,7 +45,14 @@ impl<T: Send + 'static> Latest<T> {
         Self { slot }
     }
     pub fn submit(&self, job: T) {
-        *self.slot.job.lock().unwrap() = Some(job);
+        self.submit_to(0, job);
+    }
+    /// Replaces the pending job of `lane`, leaving the other lanes' work queued.
+    pub fn submit_to(&self, lane: usize, job: T) {
+        let mut jobs = self.slot.jobs.lock().unwrap();
+        let last = jobs.len() - 1;
+        jobs[lane.min(last)] = Some(job);
+        drop(jobs);
         self.slot.wake.notify_one();
     }
 }
@@ -52,7 +66,7 @@ pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
 }
 impl<T> Drop for Latest<T> {
     fn drop(&mut self) {
-        let _guard = self.slot.job.lock().unwrap();
+        let _guard = self.slot.jobs.lock().unwrap();
         self.slot.stopped.store(true, Ordering::Relaxed);
         self.slot.wake.notify_one();
     }
@@ -81,6 +95,31 @@ mod tests {
                 .unwrap(),
             3
         );
+    }
+    #[test]
+    fn each_lane_keeps_its_latest_job_and_the_first_lane_goes_first() {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = Latest::with_lanes(2, move |i: u32| {
+            started_tx.send(i).unwrap();
+            if i == 1 {
+                release_rx.recv().unwrap();
+            }
+        });
+        worker.submit_to(0, 1);
+        assert_eq!(started_rx.recv().unwrap(), 1);
+        // Queued while 1 runs: lane 1's job is not replaced by lane 0's.
+        worker.submit_to(1, 10);
+        worker.submit_to(0, 2);
+        worker.submit_to(0, 3);
+        release_tx.send(()).unwrap();
+        let next = || {
+            started_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+        };
+        assert_eq!(next(), 3);
+        assert_eq!(next(), 10);
     }
     #[test]
     fn a_panicking_job_does_not_stop_the_worker() {

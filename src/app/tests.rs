@@ -373,7 +373,7 @@ fn compact_inspector_keeps_canvas_and_before_preserves_edits() {
             "Inspector consumed canvas on frame {frame}"
         );
     }
-    assert!(editor.view.compare);
+    assert_eq!(editor.view.compare, before_after::Compare::BeforeOnly);
     assert_eq!(editor.document.recipe, saved);
     assert_eq!(editor.effective_recipe().crop, saved.crop);
     assert_eq!(editor.effective_recipe().exposure, 0.);
@@ -446,6 +446,7 @@ fn stale_preview_results_are_discarded() {
     e.preview.task.start();
     e.tx.send(Event::Rendered {
         id: old,
+        pane: worker::Pane::After,
         preview: worker::Preview::Pixels {
             image: develop::Rendered {
                 width: 1,
@@ -467,6 +468,125 @@ fn stale_preview_results_are_discarded() {
 }
 
 #[test]
+fn before_and_after_renders_go_to_their_own_side() {
+    use worker::Pane;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    // Each side counts its renders from the same start: ids alone do not tell them apart.
+    let (after, _) = e.preview.task.start();
+    let (before, _) = e.preview.before.task.start();
+    assert_eq!(after, before);
+    let rendered = |pane, value: u8| Event::Rendered {
+        id: after,
+        pane,
+        preview: worker::Preview::Pixels {
+            image: develop::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![value; 3],
+            navigator: None,
+        },
+        histogram: Box::new(develop::Histogram::EMPTY),
+        thumbnail: None,
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: "rendered".into(),
+    };
+    e.tx.send(rendered(Pane::Before, 10)).unwrap();
+    e.events(&ctx);
+    assert!(e.preview.texture.is_none());
+    assert!(e.preview.before.texture.is_some());
+    assert!(!e.preview.before.task.is_running());
+    assert!(e.preview.task.is_running());
+    e.tx.send(rendered(Pane::After, 200)).unwrap();
+    e.events(&ctx);
+    assert!(e.preview.texture.is_some());
+    assert!(!e.preview.task.is_running());
+}
+
+#[test]
+fn a_failed_before_render_renders_the_edit_again_but_not_before() {
+    use worker::{Pane, TaskKind};
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 2,
+        height: 2,
+        pixels: vec![[0.2; 3]; 4],
+        metadata: Metadata {
+            width: 2,
+            height: 2,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.set_compare(before_after::Compare::SideBySide(
+        before_after::Axis::LeftRight,
+    ));
+    e.schedule();
+    let after = e.preview.task.id();
+    e.preview.task.finish(after);
+    let before = e.preview.before.task.id();
+    // The renderer reset after a panic: the edit's textures are gone as well.
+    e.preview.texture = None;
+    e.tx.send(Event::Failed {
+        id: before,
+        task: TaskKind::Render(Pane::Before),
+        error: "Rendering failed".into(),
+    })
+    .unwrap();
+    e.events(&ctx);
+    assert!(e.preview.task.id() > after);
+    assert!(e.preview.task.is_running());
+    // Before's failed job is not asked for again.
+    assert_eq!(e.preview.before.task.id(), before);
+}
+
+#[test]
+fn a_failed_edit_render_renders_before_again_but_not_the_edit() {
+    use worker::{Pane, TaskKind};
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 2,
+        height: 2,
+        pixels: vec![[0.2; 3]; 4],
+        metadata: Metadata {
+            width: 2,
+            height: 2,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.set_compare(before_after::Compare::Split(before_after::Axis::LeftRight));
+    e.schedule();
+    let before = e.preview.before.task.id();
+    e.preview.before.task.finish(before);
+    let after = e.preview.task.id();
+    // The renderer reset after a panic: Before's textures are gone as well.
+    e.preview.before.texture = None;
+    e.tx.send(Event::Failed {
+        id: after,
+        task: TaskKind::Render(Pane::After),
+        error: "Rendering failed".into(),
+    })
+    .unwrap();
+    e.events(&ctx);
+    assert!(e.preview.before.task.id() > before);
+    assert_eq!(e.preview.task.id(), after);
+}
+
+#[test]
 fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
     use worker::{RenderStage, TaskKind};
     let ctx = egui::Context::default();
@@ -477,7 +597,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
         .tx
         .send(Event::Failed {
             id: render_id,
-            task: TaskKind::Render,
+            task: TaskKind::Render(worker::Pane::After),
             error: "render failed".into(),
         })
         .unwrap();
@@ -490,7 +610,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
         .tx
         .send(Event::Failed {
             id: render_id,
-            task: TaskKind::Render,
+            task: TaskKind::Render(worker::Pane::After),
             error: "stale failure".into(),
         })
         .unwrap();
@@ -513,6 +633,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
             .tx
             .send(Event::Rendered {
                 id: current,
+                pane: worker::Pane::After,
                 preview: worker::Preview::Pixels {
                     image: develop::Rendered {
                         width: 1,
@@ -1641,10 +1762,16 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     // The analysis arrives after the click that chose the mode.
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.recipe.clone();
+    // Copied to Before while the analysis runs: Before gets it too.
+    e.transfer(before_after::Transfer::AfterToBefore);
     let mut corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
     corrections[4][6] = 0.1;
     e.upright_ready(generation, &analysed, Ok(corrections.clone()));
     assert_eq!(e.document.recipe.upright.corrections, corrections);
+    assert_eq!(
+        e.document.before.as_ref().unwrap().upright.corrections,
+        corrections
+    );
     // It is not a step of its own: one undo leaves Upright off, redo brings it back
     // corrected.
     assert_eq!(e.document.history.steps().1, 1);
@@ -3614,7 +3741,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     // Nor when the Library or Before opens meanwhile: the sample stops at once.
     for leave in [
         (|e: &mut Editor| e.library_mode = true) as fn(&mut Editor),
-        |e: &mut Editor| e.view.compare = true,
+        |e: &mut Editor| e.view.compare = before_after::Compare::BeforeOnly,
     ] {
         in_edit_frame(&ctx, &mut editor, |e| e.start_point_color_sample(0.2, 0.5));
         leave(&mut editor);
@@ -3624,7 +3751,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
         editor.events(&ctx);
         assert_eq!(editor.document.recipe.point_colors.len(), 1);
         editor.library_mode = false;
-        editor.view.compare = false;
+        editor.view.compare = before_after::Compare::Off;
         editor.view.tool = state::Tool::PointColor;
     }
     // A sample of a photo edited meanwhile is dropped.
@@ -3661,9 +3788,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     );
     assert_ne!(Some(pending), Some(&editor.effective_recipe()));
     // Not in Before, which shows the photo's defaults.
-    editor.view.compare = true;
+    editor.view.compare = before_after::Compare::BeforeOnly;
     assert_eq!(editor.visualized_swatch(), None);
-    editor.view.compare = false;
+    editor.view.compare = before_after::Compare::Off;
     // Not while an eyedropper is out, which samples the photo as it renders.
     editor.view.toggle(state::Tool::Defringe);
     assert_eq!(editor.visualized_swatch(), None);

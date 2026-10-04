@@ -203,15 +203,8 @@ impl Editor {
         }
     }
     pub(super) fn effective_recipe(&self) -> Recipe {
-        let mut r = if self.view.compare {
-            // Before: the raw defaults.
-            let mut r = self.photo_defaults().map(|d| d.recipe).unwrap_or_default();
-            r.crop = self.document.recipe.crop;
-            r.rotation = self.document.recipe.rotation;
-            r.flip_x = self.document.recipe.flip_x;
-            r.flip_y = self.document.recipe.flip_y;
-            r.straighten = self.document.recipe.straighten;
-            r
+        let mut r = if self.view.compare.before_only() {
+            self.before_settings()
         } else {
             self.presets
                 .preview
@@ -239,7 +232,7 @@ impl Editor {
         let shown = pc.visualize
             && self.point_color_tab_shown()
             && !self.view.picks_color()
-            && !self.view.compare;
+            && !self.view.compare.before_only();
         pc.selected
             .filter(|i| shown && *i < self.document.recipe.point_colors.len())
     }
@@ -264,11 +257,14 @@ impl Editor {
     /// The 1:1 region to render when zoomed to 100% or more; below 100% the
     /// whole photo is rendered at the zoomed size instead.
     pub(super) fn region(&self) -> Option<[u32; 4]> {
+        let im = self.document.full()?;
+        self.region_in(&Geometry::new(im, &self.effective_recipe(), 0))
+    }
+    /// The 1:1 region of a photo with geometry `g` that the view shows, as `region`.
+    pub(super) fn region_in(&self, g: &Geometry) -> Option<[u32; 4]> {
         if !self.view.zoom.on || self.view.zoom.level < 1. {
             return None;
         }
-        let im = self.document.full()?;
-        let g = Geometry::new(im, &self.effective_recipe(), 0);
         let z = self.view.zoom.level;
         let w = ((self.view.viewport.x / z).ceil() as u32).clamp(1, g.width);
         let h = ((self.view.viewport.y / z).ceil() as u32).clamp(1, g.height);
@@ -283,21 +279,13 @@ impl Editor {
     pub(super) fn schedule(&mut self) {
         let image = self.document.full().cloned();
         if let Some(image) = image {
+            self.yield_before();
             let (id, cancel) = self.preview.task.start();
             let region = self.region();
             self.preview.last_region = region;
             let geometry = Geometry::new(&image, &self.effective_recipe(), 0);
-            let fit = crate::develop::quality::fit_edge(
-                geometry.width,
-                geometry.height,
-                [self.view.viewport.x as u32, self.view.viewport.y as u32],
-            );
+            let RenderEdges { fit, max_edge } = self.render_edges(&geometry);
             self.preview.last_fit_edge = fit;
-            let max_edge = if self.view.zoom.on && self.view.zoom.level < 1. {
-                (geometry.width.max(geometry.height) as f32 * self.view.zoom.level).round() as u32
-            } else {
-                fit
-            };
             self.preview.pending_crop = geometry.crop();
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,
@@ -317,6 +305,7 @@ impl Editor {
             // a picker never takes a gray preview for the photo.
             self.preview.pending_recipe = Some(recipe.clone());
             self.renderer.submit(RenderJob {
+                pane: super::worker::Pane::After,
                 max_edge,
                 cancel,
                 id,
@@ -332,6 +321,22 @@ impl Editor {
                 drawn: self.preview.presented(),
             });
         }
+        self.schedule_before();
+    }
+    /// The long edge a Fit render of a photo with geometry `g` needs in the view,
+    /// and the one to render at the current zoom.
+    pub(super) fn render_edges(&self, g: &Geometry) -> RenderEdges {
+        let fit = crate::develop::quality::fit_edge(
+            g.width,
+            g.height,
+            [self.view.viewport.x as u32, self.view.viewport.y as u32],
+        );
+        let max_edge = if self.view.zoom.on && self.view.zoom.level < 1. {
+            (g.width.max(g.height) as f32 * self.view.zoom.level).round() as u32
+        } else {
+            fit
+        };
+        RenderEdges { fit, max_edge }
     }
     /// A CPU render: the whole photo, or a 100% region drawn over it.
     pub(super) fn set_pixels(
@@ -386,4 +391,12 @@ impl Editor {
             self.develop_catalog_photo(next);
         }
     }
+}
+
+/// The long edges of a render, from `Editor::render_edges`.
+pub(super) struct RenderEdges {
+    /// The view's Fit size.
+    pub(super) fit: u32,
+    /// What to render at the current zoom: Fit, or smaller zoomed out.
+    pub(super) max_edge: u32,
 }
