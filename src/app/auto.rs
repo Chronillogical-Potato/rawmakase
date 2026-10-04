@@ -4,7 +4,7 @@ use super::{
     history::Step,
     worker::{AutoKind, Event},
 };
-use crate::develop::Recipe;
+use crate::develop::{AutoTone, Recipe};
 
 /// Everything an estimate of `kind` was fitted against: `r` without the settings it
 /// chooses. Auto tone measures the photo before its adjustments, as its profile, white
@@ -23,8 +23,8 @@ fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
 }
 
 impl Editor {
-    /// Whether the tone sliders and Vibrance are as Auto last set them and nothing Auto measures has
-    /// changed since, so running it again would change nothing. Adjustments Auto does not
+    /// Whether the tone sliders, Vibrance and Saturation are as Auto last set them and
+    /// nothing Auto measures has changed since, so running it again would change nothing. Adjustments Auto does not
     /// measure (curves, presence, color and the like) leave it in effect.
     pub(super) fn auto_in_effect(&self) -> bool {
         let r = &self.document.recipe;
@@ -34,23 +34,8 @@ impl Editor {
             return *in_effect;
         }
         let in_effect = self.document.auto_applied.as_ref().is_some_and(|a| {
-            [
-                a.exposure,
-                a.contrast,
-                a.highlights,
-                a.shadows,
-                a.whites,
-                a.blacks,
-                a.vibrance,
-            ] == [
-                r.exposure,
-                r.contrast,
-                r.highlights,
-                r.shadows,
-                r.whites,
-                r.blacks,
-                r.vibrance,
-            ] && inputs(AutoKind::Settings, a) == inputs(AutoKind::Settings, r)
+            AutoTone::of(a) == AutoTone::of(r)
+                && inputs(AutoKind::Settings, a) == inputs(AutoKind::Settings, r)
         });
         *self.document.auto_effect.borrow_mut() = Some((r.clone(), in_effect));
         in_effect
@@ -119,13 +104,7 @@ impl Editor {
         let r = &mut self.document.recipe;
         let step = match kind {
             AutoKind::Settings => {
-                r.exposure = auto.exposure;
-                r.contrast = auto.contrast;
-                r.highlights = auto.highlights;
-                r.shadows = auto.shadows;
-                r.whites = auto.whites;
-                r.blacks = auto.blacks;
-                r.vibrance = auto.vibrance;
+                AutoTone::of(&auto).apply(r);
                 self.document.auto_applied = Some(r.clone());
                 self.document.auto_effect.take();
                 Step::new("Auto Settings", "")

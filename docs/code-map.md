@@ -94,7 +94,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
 | [white_balance.rs](../src/develop/white_balance.rs) | Fallback illuminant and as-shot temperature estimation. |
 | [black_white.rs](../src/develop/black_white.rs) | Treatment (Color or Black & White, kept with black & white profiles) and the Auto black & white mix, fitted to Camera Raw's Auto. See [color mixer](color-mixer.md#black--white). |
-| [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders and Vibrance predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
+| [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders, Vibrance and Saturation predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
 
 ## Camera profiles
 

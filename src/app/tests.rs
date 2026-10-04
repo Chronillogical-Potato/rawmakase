@@ -1490,12 +1490,13 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
         scale_factor: 1.,
         scale_clipped: 0,
     }));
+    editor.document.recipe.saturation = 0.25;
     let before = editor.document.recipe.clone();
     editor.start_auto(worker::AutoKind::Settings);
     assert!(editor.document.auto.is_running());
     // A second request while the first runs is ignored.
     editor.start_auto(worker::AutoKind::Settings);
-    editor.document.recipe.saturation = 0.25;
+    editor.document.recipe.effects.clarity = 0.25;
     let start = std::time::Instant::now();
     while editor.document.auto.is_running() {
         assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
@@ -1504,20 +1505,22 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     }
     let auto = editor.document.recipe.clone();
     assert!(auto.exposure > 1., "exposure {}", auto.exposure);
-    // Auto sets the tone sliders and Vibrance, as Lightroom's does; white balance is the
-    // WB menu's Auto.
+    // Auto sets the tone sliders, Vibrance and Saturation, as Lightroom's does; white
+    // balance is the WB menu's Auto.
     assert!(auto.vibrance > 0., "vibrance {}", auto.vibrance);
+    assert_ne!(auto.saturation, before.saturation);
     assert_eq!(
         (auto.wb, auto.temperature, auto.tint),
         (before.wb, before.temperature, before.tint)
     );
-    assert_eq!(auto.saturation, 0.25);
+    // An edit made while it ran is kept.
+    assert_eq!(auto.effects.clarity, 0.25);
     let (steps, applied) = editor.document.history.steps();
     assert_eq!(applied, 1);
     assert_eq!(steps[0].name, "Auto Settings");
     editor.undo();
     let mut expected = before;
-    expected.saturation = 0.25;
+    expected.effects.clarity = 0.25;
     assert_eq!(editor.document.recipe, expected);
     editor.redo();
     assert_eq!(editor.document.recipe, auto);
@@ -1724,14 +1727,20 @@ fn auto_is_off_while_its_settings_stand() {
     let mut auto = editor.document.recipe.clone();
     auto.exposure = 1.;
     auto.vibrance = 0.15;
+    auto.saturation = 0.02;
     editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
     assert_eq!(editor.document.recipe.vibrance, 0.15);
+    assert_eq!(editor.document.recipe.saturation, 0.02);
     assert!(editor.auto_in_effect());
     // Any change, to a slider Auto sets or to what it measured, turns it back on, and
     // so does undoing Auto.
     editor.document.recipe.vibrance = 0.;
     assert!(!editor.auto_in_effect());
     editor.document.recipe.vibrance = 0.15;
+    assert!(editor.auto_in_effect());
+    editor.document.recipe.saturation = 0.;
+    assert!(!editor.auto_in_effect());
+    editor.document.recipe.saturation = 0.02;
     assert!(editor.auto_in_effect());
     editor.document.recipe.exposure = 0.5;
     assert!(!editor.auto_in_effect());
