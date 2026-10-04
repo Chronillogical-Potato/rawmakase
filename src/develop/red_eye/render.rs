@@ -18,6 +18,13 @@ type PixelRect = [i32; 4];
 /// its growth to Pupil Size 1 (measured: 0.59 and 1.56).
 const HALF_AT: f32 = 0.585;
 const HALF_GROWTH: f32 = 0.975;
+/// Pet Eye's half-way distance relative to Red Eye's (measured: 102 against 107 pixels).
+const PET_HALF: f32 = 0.953;
+/// The catchlight: full up to `CATCHLIGHT_INNER` times the half-way distance from its
+/// centre, none beyond `CATCHLIGHT_OUTER` (measured: half at 0.094), and its value.
+const CATCHLIGHT_INNER: f32 = 0.06;
+const CATCHLIGHT_OUTER: f32 = 0.17;
+const CATCHLIGHT: f32 = 0.5;
 /// The falloff: full up to `INNER` times the half-way distance, none beyond `OUTER`.
 const INNER: f32 = 0.55;
 const OUTER: f32 = 1.42;
@@ -41,6 +48,14 @@ pub(crate) const MODEL: Model = Model {
     keep: 0.022,
 };
 
+/// The half-way distance of `op`'s falloff, in units of its ellipse.
+pub(crate) fn half(op: &RedEyeOp) -> f32 {
+    let half = HALF_AT + HALF_GROWTH * op.pupil_size;
+    match op.kind {
+        EyeKind::Red => half,
+        EyeKind::Pet { .. } => half * PET_HALF,
+    }
+}
 /// `d`'s squared distance from the centre of the ellipse with semi-axes `radius` and
 /// `correlation`, in units of the ellipse.
 pub(crate) fn mahalanobis2(radius: [f32; 2], correlation: f32, d: [f32; 2]) -> f32 {
@@ -59,6 +74,8 @@ pub(crate) struct Placed {
     /// Half-way distance of the falloff, in units of the ellipse.
     half: f32,
     darken: f32,
+    /// The catchlight's centre in decoded pixels.
+    catchlight: Option<[f32; 2]>,
 }
 impl Placed {
     pub(crate) fn new(op: &RedEyeOp, frame: &ImageFrame) -> Self {
@@ -70,13 +87,31 @@ impl Placed {
         } else {
             ([rx, ry], op.correlation)
         };
+        let center = frame.to_source(op.center);
+        let half = half(op);
+        // The catchlight's offset turns with the image (as positions do), in units of
+        // the decoded semi-axes.
+        let catchlight = match op.kind {
+            EyeKind::Pet {
+                catchlight: Some(c),
+            } => {
+                let o = crate::develop::image_space::turn(frame.turns, 0.5 + c[0], 0.5 + c[1]);
+                let o = [o[0] - 0.5, o[1] - 0.5];
+                Some([
+                    center[0] + o[0] * radius[0] * half,
+                    center[1] + o[1] * radius[1] * half,
+                ])
+            }
+            _ => None,
+        };
         Self {
             kind: op.kind,
-            center: frame.to_source(op.center),
+            center,
             radius,
             correlation,
-            half: HALF_AT + HALF_GROWTH * op.pupil_size,
+            half,
             darken: op.darken,
+            catchlight,
         }
     }
     /// Pixels the correction writes (and reads).
@@ -108,17 +143,28 @@ impl Placed {
         for y in y0..y1 {
             for x in x0..x1 {
                 let a = self.weight(x as f32, y as f32);
+                // Blended in encoded values, as the falloff was measured.
+                let (e, d) = (
+                    |v: f32| v.max(0.).powf(1. / model.gamma),
+                    |v: f32| v.powf(model.gamma),
+                );
+                let p = &mut im.pixels[(y * w + x) as usize];
                 if a > 0. {
-                    let p = &mut im.pixels[(y * w + x) as usize];
                     let target = match self.kind {
                         EyeKind::Red => red_pupil(*p, self.darken, model),
+                        EyeKind::Pet { .. } => [0.; 3],
                     };
-                    // Blended in encoded values, as the falloff was measured.
-                    let (e, d) = (
-                        |v: f32| v.max(0.).powf(1. / model.gamma),
-                        |v: f32| v.powf(model.gamma),
-                    );
                     *p = std::array::from_fn(|c| d(e(p[c]) + (e(target[c]) - e(p[c])) * a));
+                }
+                if let Some(at) = self.catchlight {
+                    let offset = [x as f32 - at[0], y as f32 - at[1]];
+                    let rho = mahalanobis2(self.radius, 0., offset).sqrt() / self.half;
+                    // It fades with the pupil's correction towards the ellipse's edge.
+                    let a = profile(rho, CATCHLIGHT_INNER, CATCHLIGHT_OUTER) * a;
+                    if a > 0. {
+                        let white = e(CATCHLIGHT);
+                        *p = p.map(|v| d(e(v) + (white - e(v)) * a));
+                    }
                 }
             }
         }

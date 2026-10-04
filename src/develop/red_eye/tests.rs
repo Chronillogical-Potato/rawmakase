@@ -62,8 +62,13 @@ fn image(width: u32, height: u32, flip: i32, eyes: &[Eye]) -> CameraImage {
 /// position `at`.
 fn correct(im: &CameraImage, at: [f32; 2], search: f32) -> RedEyeOp {
     let frame = ImageFrame::new(im);
-    let pupil =
-        find_pupil(im, frame.to_image(at[0], at[1]), search / frame.long_edge()).expect("a pupil");
+    let pupil = find_pupil(
+        im,
+        frame.to_image(at[0], at[1]),
+        search / frame.long_edge(),
+        Glow::Red,
+    )
+    .expect("a pupil");
     RedEyeOp {
         kind: EyeKind::Red,
         center: pupil.center,
@@ -178,11 +183,11 @@ fn no_red_eye_is_reported() {
     e.pupil_color = [0.02, 0.02, 0.02];
     let im = image(200, 200, 0, &[e]);
     let frame = ImageFrame::new(&im);
-    let found = find_pupil(&im, frame.to_image(100., 100.), 35. / 200.);
+    let found = find_pupil(&im, frame.to_image(100., 100.), 35. / 200., Glow::Red);
     assert_eq!(found, Err(DetectError::NotRed));
     // A circle inside a red area finds no pupil edge.
     let im = image(200, 200, 0, &[eye([100., 100.], 80., BROWN_IRIS)]);
-    let found = find_pupil(&im, frame.to_image(100., 100.), 30. / 200.);
+    let found = find_pupil(&im, frame.to_image(100., 100.), 30. / 200., Glow::Red);
     assert_eq!(found, Err(DetectError::NoEdge));
 }
 #[test]
@@ -333,4 +338,128 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     // Through the recipe too.
     let recipe = crate::develop::Recipe::default().with_local(edited.clone());
     assert_eq!(recipe.split_local().1, edited);
+}
+
+/// Glowing pet pupils (yellow-green, white, cyan) inside darker irises.
+fn pets() -> (CameraImage, Vec<[f32; 2]>) {
+    let glows = [[0.5, 0.8, 0.15], [0.9, 0.9, 0.8], [0.07, 0.6, 0.6]];
+    let centers = vec![[80., 80.], [220., 80.], [150., 200.]];
+    let eyes: Vec<Eye> = centers
+        .iter()
+        .zip(glows)
+        .map(|(c, glow)| Eye {
+            center: *c,
+            pupil: 18.,
+            iris: 40.,
+            iris_color: [0.25, 0.18, 0.05],
+            pupil_color: glow,
+        })
+        .collect();
+    (image(300, 280, 0, &eyes), centers)
+}
+fn pet(im: &CameraImage, at: [f32; 2], catchlight: Option<[f32; 2]>) -> RedEyeOp {
+    let frame = ImageFrame::new(im);
+    let pupil = find_pupil(
+        im,
+        frame.to_image(at[0], at[1]),
+        50. / frame.long_edge(),
+        Glow::Bright,
+    )
+    .unwrap_or_else(|e| panic!("at {at:?}: {e:?}"));
+    RedEyeOp {
+        kind: EyeKind::Pet { catchlight },
+        center: pupil.center,
+        radius: pupil.radius,
+        correlation: pupil.correlation,
+        pupil_size: DEFAULT_PUPIL_SIZE,
+        darken: DEFAULT_DARKEN,
+    }
+}
+#[test]
+fn finds_glowing_pet_pupils_of_any_colour() {
+    let (im, centers) = pets();
+    let frame = ImageFrame::new(&im);
+    for c in centers {
+        let op = pet(&im, c, None);
+        let [x, y] = frame.to_source(op.center);
+        assert!((x - c[0]).abs() < 0.6 && (y - c[1]).abs() < 0.6, "{x},{y}");
+        assert!(
+            op.radius.iter().all(|a| (a * 300. - 18.).abs() < 1.5),
+            "{:?}",
+            op.radius
+        );
+        // Not red, so Red Eye finds nothing there.
+        let red = find_pupil(&im, op.center, 50. / 300., Glow::Red);
+        assert_eq!(red, Err(DetectError::NotRed));
+    }
+    // A dull eye has no glow to find.
+    let mut e = eye([100., 100.], 15., BROWN_IRIS);
+    e.pupil_color = [0.02; 3];
+    let dull = image(200, 200, 0, &[e]);
+    let found = find_pupil(&dull, [0.5, 0.5], 40. / 200., Glow::Bright);
+    assert_eq!(found, Err(DetectError::NotRed));
+}
+#[test]
+fn pet_pupils_turn_black_with_a_catchlight_where_it_is_put() {
+    let (im, centers) = pets();
+    let c = centers[1];
+    let plain = pet(&im, c, None);
+    let out = rendered(&im, std::slice::from_ref(&plain));
+    let centre = pixel(&out, c[0], c[1]);
+    assert!(centre.iter().all(|v| *v < 1e-3), "black: {centre:?}");
+    // Darken doesn't change a pet eye.
+    let darker = RedEyeOp {
+        darken: 1.,
+        ..plain.clone()
+    };
+    assert_eq!(rendered(&im, &[darker]).pixels, out.pixels);
+    // A catchlight up and to the right, half a semi-axis away (and the falloff's
+    // half-way distance: 0.585 + 0.975 × 0.5, × 0.953 for Pet Eye).
+    let lit = pet(&im, c, Some([0.5, -0.5]));
+    let out = rendered(&im, std::slice::from_ref(&lit));
+    let half = (0.585 + 0.975 * 0.5) * 0.953;
+    let at = [c[0] + 0.5 * 18. * half, c[1] - 0.5 * 18. * half];
+    let light = pixel(&out, at[0].round(), at[1].round());
+    assert!(light.iter().all(|v| *v > 0.2), "catchlight: {light:?}");
+    let mirrored = pixel(&out, (2. * c[0] - at[0]).round(), at[1].round());
+    assert!(mirrored.iter().all(|v| *v < 0.02), "{mirrored:?}");
+    assert!(lit.catchlight_at(300. / 280.).is_some());
+    // Placed outside the pupil, it is kept on its edge.
+    let mut moved = lit.clone();
+    moved.set_catchlight([lit.center[0] + 0.5, lit.center[1]], 300. / 280.);
+    let EyeKind::Pet {
+        catchlight: Some(m),
+    } = moved.kind
+    else {
+        panic!()
+    };
+    assert!((m[0] - 1.).abs() < 1e-5 && m[1].abs() < 1e-5, "{m:?}");
+    moved.validate().unwrap();
+}
+#[test]
+fn catchlights_turn_with_the_camera() {
+    // The same decoded pupil under each camera orientation: its catchlight lands on
+    // the same decoded pixel.
+    let mut results = Vec::new();
+    for flip in [0, 6, 3, 5] {
+        let mut e = eye([150., 100.], 20., [0.25, 0.18, 0.05]);
+        e.pupil_color = [0.9, 0.9, 0.8];
+        let im = image(300, 200, flip, &[e]);
+        let frame = ImageFrame::new(&im);
+        // A decoded offset up and to the right, as an image-space one.
+        let op = pet(&im, [150., 100.], Some([0., 0.]));
+        let half = (0.585 + 0.975 * 0.5) * 0.953;
+        let target = frame.to_image(150. + 0.6 * 20. * half, 100. - 0.3 * 20. * half);
+        let mut op = op;
+        op.set_catchlight(target, frame.aspect());
+        results.push(rendered(&im, &[op]).pixels);
+    }
+    for r in &results[1..] {
+        let worst = r
+            .iter()
+            .zip(&results[0])
+            .flat_map(|(p, q)| (0..3).map(move |i| (p[i] - q[i]).abs()))
+            .fold(0., f32::max);
+        assert!(worst < 1e-3, "{worst}");
+    }
 }

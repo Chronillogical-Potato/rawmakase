@@ -986,11 +986,21 @@ fn red_eye_corrections_import_from_camera_raw_and_catalogs() -> Result<()> {
         ..Default::default()
     };
     let (r, warnings) = preset.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(r.red_eye.len(), 2);
+    // Pet Eye, with Lightroom's default catchlight: 0.5 is the centre and 0 or 1 a
+    // semi-axis away.
+    use crate::develop::red_eye::EyeKind;
+    let EyeKind::Pet {
+        catchlight: Some(c),
+    } = r.red_eye[1].kind
+    else {
+        panic!("{:?}", r.red_eye[1].kind)
+    };
     assert!(
-        warnings.iter().any(|w| w.contains("Pet Eye")),
-        "{warnings:?}"
+        (c[0] - 0.182).abs() < 1e-5 && (c[1] + 0.152).abs() < 1e-5,
+        "{c:?}"
     );
-    assert_eq!(r.red_eye.len(), 1);
     let eye = &r.red_eye[0];
     let near = |a: f32, b: f32| (a - b).abs() < 1e-5;
     assert!(near(eye.center[0], 0.520833) && near(eye.center[1], 0.341797));
@@ -1007,13 +1017,40 @@ fn red_eye_corrections_import_from_camera_raw_and_catalogs() -> Result<()> {
     let eye = &r.red_eye[0];
     assert!(near(eye.center[0], 1. - 0.341797) && near(eye.center[1], 0.520833));
     assert!(near(eye.correlation, -0.2));
+    // The catchlight turns with the photo.
+    let EyeKind::Pet {
+        catchlight: Some(c),
+    } = r.red_eye[1].kind
+    else {
+        panic!()
+    };
+    assert!(
+        (c[0] - 0.152).abs() < 1e-5 && (c[1] - 0.182).abs() < 1e-5,
+        "{c:?}"
+    );
+    // Without Add Catchlight, or with it outside the pupil, there is none.
+    for highlight in [
+        "showPetEyeHighlight = 0, highlightX = 0.591000, highlightY = 0.424000",
+        "showPetEyeHighlight = 1, highlightX = 0.9, highlightY = 0.1",
+    ] {
+        let pet = format!(
+            "x = 0.2, y = 0.3, width = 0.01, height = 0.015, alpha = 0, pupilSize = 0.5, pupilDarkenAmount = 0.5, adaptivePupilColor = 1, gammaEncodeCorrection = 1, {highlight}"
+        );
+        let body = format!("<c:RedEyeInfo><r:Seq><r:li>{pet}</r:li></r:Seq></c:RedEyeInfo>");
+        let preset = parse(
+            Path::new("photo.xmp"),
+            &xml(r#"c:EnableRedEye="True""#, &body),
+        )?;
+        let (r, _) = preset.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
+        assert_eq!(r.red_eye[0].kind, EyeKind::Pet { catchlight: None });
+    }
     // The switch turned off keeps the corrections but renders without them.
     let off = parse(
         Path::new("photo.xmp"),
         &xml(r#"c:EnableRedEye="False""#, &body),
     )?;
     let (r, _) = off.apply_lenient(&Recipe::default(), &landscape, &[], None)?;
-    assert_eq!(r.red_eye.len(), 1);
+    assert_eq!(r.red_eye.len(), 2);
     assert!(r.as_rendered().red_eye.is_empty());
     Ok(())
 }

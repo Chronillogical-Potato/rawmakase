@@ -971,6 +971,54 @@ fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
     );
 }
 #[test]
+fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
+    use crate::develop::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 200,
+        height: 200,
+        pixels: (0..40000)
+            .map(|i| {
+                let d = ((i % 200) as f32 - 100.).hypot((i / 200) as f32 - 100.);
+                if d <= 10. {
+                    [0.5, 0.8, 0.15]
+                } else if d <= 24. {
+                    [0.25, 0.18, 0.05]
+                } else {
+                    [0.3, 0.25, 0.2]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 200,
+            height: 200,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    // Red Eye finds nothing red there.
+    editor.add_red_eye([0.5, 0.5], 0.15);
+    assert!(editor.document.recipe.red_eye.is_empty());
+    assert!(editor.status.contains("Unable to find red eye"));
+    editor.view.red_eye.pet = red_eye_tool::PupilType::Pet;
+    editor.add_red_eye([0.5, 0.5], 0.15);
+    let eyes = &editor.document.recipe.red_eye;
+    assert_eq!(eyes.len(), 1);
+    assert_eq!(
+        eyes[0].kind,
+        EyeKind::Pet {
+            catchlight: Some(DEFAULT_CATCHLIGHT)
+        }
+    );
+    assert!((eyes[0].radius[0] * 200. - 10.).abs() < 1.5);
+}
+#[test]
 fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     let ctx = egui::Context::default();
     let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);

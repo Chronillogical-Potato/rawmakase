@@ -67,8 +67,8 @@ Paste Settings and presets leave a photo's spots alone, as Lightroom's defaults 
 
 # Red eye
 
-Status: experimental. The correction is fitted to Camera Raw 18.7 on synthetic eyes;
-Pet Eye is not implemented yet.
+Status: experimental. Red Eye and Pet Eye are fitted to Camera Raw 18.7 on synthetic
+eyes.
 
 ## Using it
 
@@ -82,9 +82,15 @@ Shift+R is its Reference View).
   find red eye", as Lightroom does.
 - Click a correction to select it; drag it to move it. **Delete** removes the selected
   one, and Reset removes them all.
+- **Type** picks Red Eye or Pet Eye for new corrections, and changes the selected one.
+  Pet Eye finds a pupil that glows brighter than the iris around it, whatever its
+  colour, and turns it black.
 - **Pupil Size** and **Darken** change the selected correction (both 50 by default).
+  A pet eye has no Darken (Camera Raw makes it black whatever Darken says) but has
+  **Add Catchlight**, on by default at Lightroom's place; drag the small circle to move
+  the catchlight. It stays within the pupil.
 - Each drag, click or slider change is one History step: "Add Red Eye Correction",
-  "Update Red Eye Correction", "Delete Red Eye Correction".
+  "Update Pet Eye Correction", "Delete Red Eye Correction" and so on.
 - Copy, Paste, Sync and presets leave red eye corrections alone: Lightroom's Copy
   Settings has no group for them. The panel switch (`EnableRedEye`) turns them off.
 
@@ -98,7 +104,10 @@ Shift+R is its Reference View).
   3.5 times the larger of green and blue (a brown iris is about 2.5 in linear values,
   a red pupil 10 or more); an area reaching most of the rim is refused. On test eyes
   this finds pupils of 3 to 45 pixels within half a pixel, keeps a red-brown iris out,
-  and finds tilted pupils whatever the camera orientation.
+  and finds tilted pupils whatever the camera orientation. For Pet Eye the score is
+  the log of the largest channel, and the pupil must be at least 1.6 times brighter
+  than the second ring of pixels around it (past its anti-aliased edge), so a bright
+  face around a dark iris doesn't hide it.
 - **Storage:** corrections are parameters beside the recipe, like spots (`red_eye` in
   the catalog's `local_edits`), in image space, so they stay on the eye through crop,
   straightening, Transform, rotation and flips. Releases that predate them open the
@@ -113,6 +122,11 @@ Shift+R is its Reference View).
   (quadratic between), keeping 2.2% of the original colour's log ratios, and blended
   with the falloff in the same encoding. The falloff is full to 0.55 and gone at 1.42
   times the half-way distance, which is 0.585 + 0.975 × Pupil Size times the ellipse.
+- **Pet Eye** blends towards black with the same falloff at 0.953 times the distance.
+  Its catchlight is stored as an offset in units of the semi-axes along x and y
+  (Lightroom's `highlightX`/`highlightY` minus 0.5, doubled), times the half-way
+  distance; it is full to 0.06 and gone at 0.17 of that distance, blends towards a
+  linear 0.5, and fades with the pupil's correction towards the ellipse's edge.
 
 ## Measured against Camera Raw 18.7
 
@@ -134,9 +148,17 @@ hand, and rendered to 16-bit sRGB.
   correlation of x and y over the ellipse: 0.5 tilted a 150 × 60 pixel ellipse by 12.6°
   and kept its extent along x and y; Camera Raw refuses `alpha = 1`.
 - `density`, `strength` and `redBias` record Lightroom's detection; changing them did
-  not change the render. `adaptivePupilColor = 1` is Pet Eye (it renders a black
-  pupil, with a catchlight when `showPetEyeHighlight = 1`); imports report and skip
-  Pet Eye. `gammaEncodeCorrection = 0`, an older rendering, is read as 1.
+  not change the render. `adaptivePupilColor = 1` is Pet Eye: a black pupil whatever
+  Darken says, with a catchlight when `showPetEyeHighlight = 1`. `highlightX` and
+  `highlightY` put it at 2 × (h − 0.5) of the falloff's half-way distance along each
+  axis (0.5 is the centre); one placed outside the pupil, such as 0.9, 0.1, is not
+  drawn. `gammaEncodeCorrection = 0`, an older rendering, is read as 1.
+- **Pet Eye against Camera Raw:** the falloff's half-way point is within a pixel or
+  two at Pupil Size 0, 50 and 100 on 15–60 pixel pupils. The catchlight's centre is
+  within 0.05 of the pupil's radius of Camera Raw's and its area within 7%; its
+  brightness is 234–252 against 232–245 (8-bit). Camera Raw renders the pupil at 3
+  against RAWmakase's 0, and near the pupil's edge Camera Raw dims the catchlight
+  more (152 against 214 at `highlightX = 0.2`).
 - **Falloff:** on grey, the correction is half applied at 0.59 times the ellipse at
   Pupil Size 0, growing by 0.97 per unit of Pupil Size, and fades from 0.69 to 1.46
   times that; RAWmakase's falloff matches within an RMS weight of 0.02–0.03.
@@ -155,4 +177,6 @@ hand, and rendered to 16-bit sRGB.
   its colour; on brown irises and skin the two agree (under 7% in Camera Raw).
 - Lightroom's own detection is not public; RAWmakase's finds a similar ellipse but not
   the same one, and does not try again with a larger area when the first fails.
-- Pet Eye and its catchlight are not implemented.
+- Camera Raw's catchlight sits slightly further from the centre vertically than
+  horizontally for the same offset (0.196 against 0.186 of the radius for Lightroom's
+  default); RAWmakase treats both axes alike.

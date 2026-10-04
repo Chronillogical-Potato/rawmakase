@@ -437,7 +437,8 @@ fn retouch_info(info: &Node, frame: &Frame, skipped: &mut Vec<String>) -> Vec<Re
 /// Measured on Camera Raw renders: the centre is in the unrotated frame like spots;
 /// `width` and `height` are semi-axes as fractions of that frame's width and height;
 /// `alpha` is the correlation of x and y over the ellipse (|alpha| < 1), which tilts
-/// it. `adaptivePupilColor = 1` marks Pet Eye. `density`, `strength` and `redBias`
+/// it. `adaptivePupilColor = 1` marks Pet Eye, with a catchlight at `highlightX`,
+/// `highlightY` when `showPetEyeHighlight = 1`. `density`, `strength` and `redBias`
 /// record Lightroom's detection and did not change the render.
 fn red_eye_info(info: &Node, frame: &Frame, skipped: &mut Vec<String>) -> Vec<RedEyeOp> {
     let mut ops = Vec::new();
@@ -457,6 +458,9 @@ fn red_eye_info(info: &Node, frame: &Frame, skipped: &mut Vec<String>) -> Vec<Re
                     ("pupilSize", Some(item), "pupilSize"),
                     ("pupilDarkenAmount", Some(item), "pupilDarkenAmount"),
                     ("adaptivePupilColor", Some(item), "adaptivePupilColor"),
+                    ("showPetEyeHighlight", Some(item), "showPetEyeHighlight"),
+                    ("highlightX", Some(item), "highlightX"),
+                    ("highlightY", Some(item), "highlightY"),
                 ] {
                     if let Some(v) = node.and_then(|n| n.text(from)) {
                         record.insert(to.to_string(), Node::Text(v.to_string()));
@@ -483,9 +487,24 @@ fn key_values(text: &str) -> Node {
     )
 }
 fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
-    if eye.flag("adaptivePupilColor") == Some(true) {
-        bail!("Pet Eye corrections are not supported yet");
-    }
+    let kind = if eye.flag("adaptivePupilColor") == Some(true) {
+        // The catchlight: 0.5 is the centre and 0 or 1 a semi-axis away, in the
+        // unrotated frame; Camera Raw leaves out one outside the pupil.
+        let catchlight = (eye.flag("showPetEyeHighlight") == Some(true))
+            .then(|| {
+                let h = [
+                    eye.num("highlightX").unwrap_or(0.591),
+                    eye.num("highlightY").unwrap_or(0.424),
+                ];
+                let turned = frame.point(h[0], h[1]);
+                let center = frame.point(0.5, 0.5);
+                [turned[0] - center[0], turned[1] - center[1]].map(|v| 2. * v)
+            })
+            .filter(|c| c[0].hypot(c[1]) <= 1.);
+        EyeKind::Pet { catchlight }
+    } else {
+        EyeKind::Red
+    };
     let num = |k: &str| eye.num(k).with_context(|| format!("No {k}"));
     let (x, y) = (num("x")?, num("y")?);
     // Semi-axes as long-edge fractions in the unrotated frame.
@@ -500,7 +519,7 @@ fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
         ([rx, ry], alpha)
     };
     let op = RedEyeOp {
-        kind: EyeKind::Red,
+        kind,
         center: frame.point(x, y),
         radius,
         correlation: correlation.clamp(-red_eye::MAX_CORRELATION, red_eye::MAX_CORRELATION),

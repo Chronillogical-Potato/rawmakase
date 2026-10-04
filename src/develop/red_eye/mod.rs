@@ -1,5 +1,6 @@
 //! Lightroom's Red Eye Correction: an ellipse over a pupil whose colour is replaced by
-//! a dark neutral, with Pupil Size and Darken sliders. Corrections are stored as
+//! a dark neutral, with Pupil Size and Darken sliders, or for Pet Eye by black with
+//! an optional catchlight. Corrections are stored as
 //! parameters beside the recipe, like spot removal, and render on the linear camera
 //! image before Heal and Clone, so every later edit and export sees them.
 //!
@@ -13,14 +14,38 @@ mod render;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub use detect::{DetectError, Pupil, find_pupil};
+pub use detect::{DetectError, Glow, Pupil, find_pupil};
 pub(crate) use render::Placed;
 
-/// Lightroom's Type menu. Pet Eye is not supported yet.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// Lightroom's Type menu.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum EyeKind {
+    /// A red pupil, made a dark neutral.
     #[default]
     Red,
+    /// An animal's glowing pupil, made black, with Lightroom's Add Catchlight: the
+    /// catchlight's offset from the centre in units of the semi-axes along image x and
+    /// y (within the unit circle), or `None`.
+    Pet { catchlight: Option<[f32; 2]> },
+}
+/// Lightroom's default catchlight (`highlightX = 0.591, highlightY = 0.424`), as an
+/// offset in units of the semi-axes.
+pub const DEFAULT_CATCHLIGHT: [f32; 2] = [0.182, -0.152];
+impl EyeKind {
+    /// What the pupil glows like, for finding it.
+    pub fn glow(self) -> Glow {
+        match self {
+            EyeKind::Red => Glow::Red,
+            EyeKind::Pet { .. } => Glow::Bright,
+        }
+    }
+    /// Lightroom's name for it, as in "Add Red Eye Correction".
+    pub fn name(self) -> &'static str {
+        match self {
+            EyeKind::Red => "Red Eye",
+            EyeKind::Pet { .. } => "Pet Eye",
+        }
+    }
 }
 
 /// One corrected eye. Corrections apply in list order.
@@ -62,7 +87,13 @@ impl RedEyeOp {
                 && self.correlation.is_finite()
                 && self.correlation.abs() <= MAX_CORRELATION
                 && unit(self.pupil_size)
-                && unit(self.darken),
+                && unit(self.darken)
+                && match self.kind {
+                    EyeKind::Pet {
+                        catchlight: Some(c),
+                    } => c.iter().all(|v| v.is_finite()) && c[0].hypot(c[1]) <= 1.,
+                    _ => true,
+                },
             "Invalid red eye correction"
         );
         Ok(())
@@ -91,6 +122,38 @@ impl RedEyeOp {
         let (sx, sy) = crate::develop::retouch::radii(1., aspect);
         let d = [(p[0] - self.center[0]) / sx, (p[1] - self.center[1]) / sy];
         render::mahalanobis2(self.radius, self.correlation, d) <= 1.
+    }
+    /// The catchlight's image-space position, for a photo whose width is `aspect` times
+    /// its height.
+    pub fn catchlight_at(&self, aspect: f32) -> Option<[f32; 2]> {
+        let EyeKind::Pet {
+            catchlight: Some(c),
+        } = self.kind
+        else {
+            return None;
+        };
+        let (sx, sy) = crate::develop::retouch::radii(1., aspect);
+        let half = render::half(self);
+        Some([
+            self.center[0] + c[0] * self.radius[0] * half * sx,
+            self.center[1] + c[1] * self.radius[1] * half * sy,
+        ])
+    }
+    /// Places the catchlight at image-space position `p`, kept within the pupil.
+    pub fn set_catchlight(&mut self, p: [f32; 2], aspect: f32) {
+        let (sx, sy) = crate::develop::retouch::radii(1., aspect);
+        let half = render::half(self);
+        let mut c = [
+            (p[0] - self.center[0]) / (self.radius[0] * half * sx),
+            (p[1] - self.center[1]) / (self.radius[1] * half * sy),
+        ];
+        let length = c[0].hypot(c[1]);
+        if length > 1. {
+            c = c.map(|v| v / length);
+        }
+        if let EyeKind::Pet { catchlight } = &mut self.kind {
+            *catchlight = Some(c);
+        }
     }
     /// Moves the ellipse by `delta` (image space), keeping its centre on the photo.
     pub fn translate(&mut self, delta: [f32; 2]) {

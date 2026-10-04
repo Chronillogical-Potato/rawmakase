@@ -431,12 +431,7 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
     } else if a.retouch != b.retouch {
         return Step::new(retouch_step(b, a), "");
     } else if a.red_eye != b.red_eye {
-        let name = match a.red_eye.len().cmp(&b.red_eye.len()) {
-            std::cmp::Ordering::Greater => "Add Red Eye Correction",
-            std::cmp::Ordering::Less => "Delete Red Eye Correction",
-            std::cmp::Ordering::Equal => "Update Red Eye Correction",
-        };
-        return Step::new(name, "");
+        return Step::new(red_eye_step(b, a), "");
     } else if a.masks != b.masks {
         return mask_step(b, a);
     } else {
@@ -445,6 +440,23 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
     Step::new(name, "")
 }
 
+/// Lightroom names red eye edits by what happened and the type: "Add Red Eye
+/// Correction", "Update Pet Eye Correction", "Delete Red Eye Correction".
+fn red_eye_step(before: &Recipe, after: &Recipe) -> String {
+    let (b, a) = (&before.red_eye, &after.red_eye);
+    // The first correction that differs, from the list that has it.
+    let changed = (0..a.len().max(b.len())).find(|i| a.get(*i) != b.get(*i));
+    let kind = |list: &[crate::develop::red_eye::RedEyeOp]| {
+        changed.and_then(|i| list.get(i)).map(|op| op.kind)
+    };
+    let (verb, kind) = match a.len().cmp(&b.len()) {
+        std::cmp::Ordering::Greater => ("Add", a.last().map(|op| op.kind)),
+        std::cmp::Ordering::Less => ("Delete", kind(b)),
+        std::cmp::Ordering::Equal => ("Update", kind(a)),
+    };
+    let name = kind.unwrap_or_default().name();
+    format!("{verb} {name} Correction")
+}
 /// Lightroom names spot edits by mode: "Spot Removal", "Clone", "Delete Spot".
 fn retouch_step(before: &Recipe, after: &Recipe) -> &'static str {
     use crate::develop::retouch::RetouchMode;
@@ -578,6 +590,31 @@ mod tests {
         assert!(!history.in_gesture());
         assert!(!history.can_undo());
         assert!(!history.can_redo());
+    }
+    #[test]
+    fn red_and_pet_eye_edits_have_lightroom_names() {
+        use crate::develop::red_eye::{EyeKind, RedEyeOp};
+        let eye = |kind| RedEyeOp {
+            kind,
+            center: [0.5, 0.5],
+            radius: [0.01; 2],
+            correlation: 0.,
+            pupil_size: 0.5,
+            darken: 0.5,
+        };
+        let before = Recipe::default();
+        let mut red = before.clone();
+        red.red_eye.push(eye(EyeKind::Red));
+        let mut pet = red.clone();
+        pet.red_eye.push(eye(EyeKind::Pet { catchlight: None }));
+        assert_eq!(describe(&before, &red).name, "Add Red Eye Correction");
+        assert_eq!(describe(&red, &pet).name, "Add Pet Eye Correction");
+        assert_eq!(describe(&pet, &red).name, "Delete Pet Eye Correction");
+        let mut moved = pet.clone();
+        moved.red_eye[1].kind = EyeKind::Pet {
+            catchlight: Some([0.2, 0.]),
+        };
+        assert_eq!(describe(&pet, &moved).name, "Update Pet Eye Correction");
     }
     #[test]
     fn retouch_and_mask_edits_have_lightroom_names() {

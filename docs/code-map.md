@@ -58,8 +58,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
 | [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image (red eye corrections, then Heal and Clone): built at once for exports, updated in dirty 256-pixel tiles for previews. |
 | [red_eye/mod.rs](../src/develop/red_eye/mod.rs) | Red eye corrections (Lightroom's ellipse with semi-axes and correlation), validation, and reading saved ones leniently. |
-| [red_eye/detect.rs](../src/develop/red_eye/detect.rs) | Finding the red pupil inside the circle dragged over an eye. |
-| [red_eye/render.rs](../src/develop/red_eye/render.rs) | Rendering one correction on linear camera pixels, fitted to Camera Raw 18.7. |
+| [red_eye/detect.rs](../src/develop/red_eye/detect.rs) | Finding the red (or, for Pet Eye, glowing) pupil inside the circle dragged over an eye. |
+| [red_eye/render.rs](../src/develop/red_eye/render.rs) | Rendering one correction on linear camera pixels (Red Eye's dark neutral, Pet Eye's black and catchlight), fitted to Camera Raw 18.7. |
 | [retouch/search.rs](../src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
 | [masks/mod.rs](../src/develop/masks/mod.rs) | Mask groups, components (brush, gradients, ranges), local adjustments, validation and the overlay weights. |
 | [masks/eval.rs](../src/develop/masks/eval.rs) | Mask weights for a rendered region: tracing pixels to image space, combining components, caching brush rasters. |
@@ -212,7 +212,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [guided_tool.rs](../src/app/guided_tool.rs) | The Guided Upright tool (Shift+T): drawing, moving, selecting and deleting guides, its loupe and grid. See [transform](transform.md#guided-upright). |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
-| [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size and Darken. |
+| [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: Red Eye and Pet Eye, finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size, Darken and the pet eye's catchlight. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application and temporary hover previews. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
