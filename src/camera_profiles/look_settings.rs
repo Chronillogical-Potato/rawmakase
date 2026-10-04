@@ -131,10 +131,6 @@ impl LookSettings {
                 s.splits[i] = v;
             }
         }
-        ensure!(
-            s.splits[0] <= s.splits[1] && s.splits[1] <= s.splits[2],
-            "Invalid profile parametric splits"
-        );
         let hue = |key: &str| number(key, 360., [0., 1.]);
         let saturation = |key: &str| number(key, 100., [0., 1.]);
         let toning = Toning {
@@ -155,7 +151,8 @@ impl LookSettings {
             && amount != 0.
         {
             let style = match attr("PostCropVignetteStyle") {
-                "" | "1" => 1,
+                // 0 is how older Lightroom versions store highlight priority.
+                "" | "0" | "1" => 1,
                 "2" => 2,
                 "3" => 3,
                 other => bail!("Unsupported profile vignette style {other}"),
@@ -173,6 +170,7 @@ impl LookSettings {
                 style,
             });
         }
+        s.validate()?;
         Ok(s)
     }
     pub fn is_default(&self) -> bool {
@@ -198,6 +196,13 @@ impl LookSettings {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        // As `Effects` requires: increasing, strictly inside 0–1.
+        ensure!(
+            self.splits[0] > 0.
+                && self.splits[2] < 1.
+                && self.splits.windows(2).all(|p| p[0] < p[1]),
+            "Invalid profile parametric splits"
+        );
         let sliders = [self.saturation]
             .into_iter()
             .chain(self.hsl.iter().flatten().copied())
@@ -268,6 +273,14 @@ mod tests {
             ])
             .is_err()
         );
+        let style0 = parse(&[
+            ("PostCropVignetteAmount", "-10"),
+            ("PostCropVignetteStyle", "0"),
+        ])?;
+        assert_eq!(style0.vignette.unwrap().style, 1);
+        // Splits must stay strictly inside 0–1 and increasing.
+        assert!(parse(&[("ParametricShadowSplit", "0")]).is_err());
+        assert!(parse(&[("ParametricMidtoneSplit", "75")]).is_err());
         Ok(())
     }
     #[test]
