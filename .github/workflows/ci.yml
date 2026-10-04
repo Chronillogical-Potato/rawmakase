@@ -50,12 +50,17 @@ jobs:
     name: Lint and test
     runs-on: ubuntu-latest
     container: archlinux:base-devel
-    timeout-minutes: 45
+    # The MSRV is compiled in this job as well, which is a second full
+    # dependency build, so 45 minutes no longer covers it.
+    timeout-minutes: 60
     steps:
+      # rustup replaces Arch's rolling rust package: the lints a clippy release
+      # adds would otherwise break the lint job on an ordinary day. rustup
+      # conflicts with the rust package, so it takes its place here.
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          rust git libraw lcms2 pkgconf desktop-file-utils perl-image-exiftool
+          rustup git libraw lcms2 pkgconf desktop-file-utils perl-image-exiftool
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
@@ -64,11 +69,21 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
-      - name: Check minimum Rust version
+      # The stable toolchain AGENTS.md tells contributors to use ("Before every
+      # push"), so the lint job and the local checks agree on the lints.
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+      # Compiling the declared MSRV is what makes it a minimum: comparing
+      # version strings only proves this job is not older than the claim, and
+      # compared nothing at all while Cargo.toml carried no rust-version.
+      - name: Build with the minimum Rust version
         run: |
           msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
-          have=$(rustc --version | cut -d' ' -f2)
-          printf '%s\n%s\n' "$msrv" "$have" | sort -VC || { echo "rustc $have < MSRV $msrv"; exit 1; }
+          test -n "$msrv" || { echo "Cargo.toml declares no rust-version"; exit 1; }
+          rustup toolchain install "$msrv" --profile minimal
+          cargo +"$msrv" check --locked --all-targets
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
