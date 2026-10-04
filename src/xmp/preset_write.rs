@@ -77,18 +77,30 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             // from this photo, so a preset names only the mode, as Lightroom's do.
             .filter(|(key, _)| !key.starts_with("Enable") && !key.starts_with("Upright")),
     );
-    // The mix is written only for black-and-white photos; a preset made from a
-    // color one still carries the mix it was asked for.
-    if groups.contains(SettingGroup::BlackWhiteMix) && !r.effects.monochrome {
-        let mut mono = r.clone();
-        mono.effects.monochrome = true;
-        attributes.extend(
-            settings(&mono, None)
-                .0
-                .into_iter()
-                .filter(|(key, _)| key.starts_with("GrayMixer")),
-        );
+    // Some controls are written only while they take effect: the mix for black-and-
+    // white photos, grain and vignette shapes while their amount isn't zero. A preset
+    // still carries every control of its groups, so applying or later raising the
+    // amount gives the source photo's look.
+    let mut active = r.clone();
+    active.effects.monochrome = true;
+    if active.effects.grain == 0. {
+        active.effects.grain = 1.;
     }
+    if active.effects.vignette == 0. {
+        active.effects.vignette = -1.;
+    }
+    let dormant: Vec<_> = settings(&active, None)
+        .0
+        .into_iter()
+        .filter(|(key, _)| {
+            key.starts_with("GrayMixer")
+                || key.starts_with("Grain")
+                || key.starts_with("PostCropVignette")
+        })
+        .filter(|(key, _)| group_of_key(key).is_some_and(|g| groups.contains(g)))
+        .filter(|(key, _)| !attributes.iter().any(|(k, _)| k == key))
+        .collect();
+    attributes.extend(dormant);
     // Each chosen panel's switch as the photo has it, on or off, so applying the
     // preset also sets that panel the same way.
     for panel in crate::develop::panels::Panel::ALL {
@@ -335,6 +347,21 @@ mod tests {
         let text = preset(&color, &info, &mix);
         assert!(text.contains(r#"crs:GrayMixerRed="+30""#), "{text}");
         assert!(!text.contains("ConvertToGrayscale"), "{text}");
+        // Grain and vignette shapes travel with their groups at a zero amount.
+        let mut effects = GroupSelection::none();
+        effects.set(SettingGroup::Grain, GroupInclusion::Included);
+        effects.set(SettingGroup::PostCropVignetting, GroupInclusion::Included);
+        let mut quiet = Recipe::default();
+        quiet.effects.grain_size = 0.6;
+        quiet.effects.vignette_roundness = 0.4;
+        let text = preset(&quiet, &info, &effects);
+        assert!(text.contains(r#"crs:GrainAmount="0""#), "{text}");
+        assert!(text.contains(r#"crs:GrainSize="60""#), "{text}");
+        assert!(text.contains(r#"crs:PostCropVignetteAmount="0""#), "{text}");
+        assert!(
+            text.contains(r#"crs:PostCropVignetteRoundness="+40""#),
+            "{text}"
+        );
         assert_eq!(
             all.panels.state(crate::develop::panels::Panel::Effects),
             crate::develop::panels::PanelState::Off
