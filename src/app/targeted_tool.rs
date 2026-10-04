@@ -19,6 +19,8 @@ pub(super) struct TargetDrag {
     at: [f32; 2],
     /// The edit when it started, which the sliders move from.
     start: Recipe,
+    /// The edit as the drag last left it; anything else changing it ends the drag.
+    last: Recipe,
     /// Points dragged up (down is negative).
     travel: f32,
     /// How the drag is shared among the sliders, once the sample is in.
@@ -128,6 +130,7 @@ impl Editor {
             target,
             at,
             start: self.document.recipe.clone(),
+            last: self.document.recipe.clone(),
             travel: 0.,
             weights: None,
             pointer: Pointer::Down,
@@ -163,6 +166,11 @@ impl Editor {
         let Some(drag) = &mut self.view.targeted else {
             return;
         };
+        // Changed by something else (Auto finishing, say): the sample no longer holds.
+        if self.document.recipe != drag.last {
+            self.view.targeted = None;
+            return;
+        }
         drag.travel += up;
         if let Some(weights) = drag.weights.filter(|w| !w.is_empty()) {
             let before = self.document.recipe.clone();
@@ -177,6 +185,7 @@ impl Editor {
                 let (name, value) = weights.step(&self.document.recipe);
                 super::widgets::name_frame_step(&self.context, name, value);
             }
+            drag.last = self.document.recipe.clone();
         }
     }
     /// The button is up. A drag whose sample is in is done (the gesture records it);
@@ -492,6 +501,15 @@ mod tests {
         e.document.recipe.exposure = 0.7;
         wait_for_sample(&ctx, &mut e);
         assert!(e.view.targeted.is_none());
+        // Or after it arrived, while the drag goes on.
+        e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
+        wait_for_sample(&ctx, &mut e);
+        e.drag_targeted(10.);
+        e.document.recipe.exposure = 0.2;
+        let changed = e.document.recipe.clone();
+        e.drag_targeted(10.);
+        assert!(e.view.targeted.is_none());
+        assert_eq!(e.document.recipe, changed);
     }
 
     #[test]

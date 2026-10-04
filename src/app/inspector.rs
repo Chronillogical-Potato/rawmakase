@@ -1085,6 +1085,8 @@ impl Editor {
                         w,
                     );
                 });
+                // Again after the tabs, which may have just changed.
+                let all = view.mixer_adjust == 3;
                 let channels = if all {
                     0..3
                 } else {
