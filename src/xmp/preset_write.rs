@@ -7,7 +7,7 @@ use super::{
 };
 use crate::develop::{
     Recipe,
-    settings_groups::{GroupSelection, SettingGroup},
+    settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
 };
 use std::fmt::Write;
 
@@ -48,6 +48,11 @@ fn new_uuid() -> String {
 
 /// The preset for `r`'s settings in `groups`.
 pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String {
+    // A preset never carries one photo's Upright correction, so Upright Transforms
+    // brings nothing, not even the Transform panel's switch.
+    let mut groups = groups.clone();
+    groups.set(SettingGroup::UprightTransforms, GroupInclusion::Excluded);
+    let groups = &groups;
     let mut attributes: Vec<(String, String)> = [
         ("PresetType", "Normal"),
         ("Cluster", ""),
@@ -339,6 +344,14 @@ mod tests {
         let text = preset(&upright, &info, &GroupSelection::all());
         assert!(text.contains("crs:PerspectiveUpright"));
         assert!(!text.contains("UprightTransform"), "{text}");
+        // Upright Transforms alone, left over from a Copy selection, brings nothing.
+        let mut transforms = GroupSelection::none();
+        transforms.set(SettingGroup::UprightTransforms, GroupInclusion::Included);
+        let text = preset(&upright, &info, &transforms);
+        assert!(
+            !text.contains("Transform") && !text.contains("Upright"),
+            "{text}"
+        );
         // A color photo's Black & White mix is still written when the group is chosen.
         let mut mix = GroupSelection::none();
         mix.set(SettingGroup::BlackWhiteMix, GroupInclusion::Included);

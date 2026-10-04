@@ -192,6 +192,8 @@ pub(super) enum Tool {
     /// Spot removal: Heal and Clone.
     Remove,
     Mask,
+    /// The Transform panel's Guided Upright tool.
+    Guided,
 }
 pub(super) struct ViewState {
     /// Fit or a zoom level, and where; Develop's and the Library's.
@@ -217,6 +219,8 @@ pub(super) struct ViewState {
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Masking panel state.
     pub(super) masking: super::mask_tool::MaskTool,
+    /// The Guided Upright tool's selection, drag and view options.
+    pub(super) guided: super::guided_tool::GuidedTool,
     pub(super) monitor: Option<PathBuf>,
     pub(super) selected_band: usize,
     pub(super) selected_grade: usize,
@@ -246,6 +250,7 @@ impl Default for ViewState {
             ruler: Default::default(),
             retouch: Default::default(),
             masking: Default::default(),
+            guided: Default::default(),
             monitor: None,
             selected_band: 0,
             selected_grade: 1,
@@ -350,6 +355,7 @@ impl ViewState {
             self.aspect_read = false;
         }
         self.ruler = Default::default();
+        self.guided.drag = None;
     }
     pub fn clear_document(&mut self) {
         self.zoom.on = false;
@@ -362,6 +368,7 @@ impl ViewState {
         self.tone_drag = None;
         self.retouch.clear_document();
         self.masking.clear_document();
+        self.guided.clear_document();
         self.compare = false;
     }
 }

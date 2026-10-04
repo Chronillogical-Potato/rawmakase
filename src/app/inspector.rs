@@ -456,7 +456,7 @@ impl Editor {
         // Upright analyses the decoded photo once and keeps a correction for every mode.
         let upright_ready = self.document.full().is_some() && !self.document.upright.is_running();
         let mut upright_request = false;
-        let mut guided_unavailable = false;
+        let mut guided_action = None;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -1188,8 +1188,12 @@ impl Editor {
                 // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Guided has nothing to analyse until guides can be drawn.
-                        let analysed = !matches!(r.upright.mode, UprightMode::Off | UprightMode::Guided);
+                        // Guided solves its guides again; without guides it has nothing to go by.
+                        let analysed = match r.upright.mode {
+                            UprightMode::Off => false,
+                            UprightMode::Guided => !r.upright.guides.is_empty(),
+                            _ => true,
+                        };
                         if ui
                             .add_enabled(upright_ready && analysed, egui::Button::new("Update"))
                             .on_hover_text("Analyse the photo again, e.g. after changing lens corrections")
@@ -1209,14 +1213,47 @@ impl Editor {
                     segmented(ui, &mut u.mode, &row, w);
                 }
                 if u.mode != before {
-                    if u.mode == UprightMode::Guided && u.corrections.len() <= u.mode.code() {
-                        // Guided needs guides drawn on the photo, which isn't built yet;
-                        // a photo imported with Guided keeps Lightroom's correction.
-                        u.mode = before;
-                        guided_unavailable = true;
+                    if u.mode == UprightMode::Guided {
+                        // As in Lightroom, choosing Guided picks up its tool.
+                        guided_action = Some(GuidedAction::Choose);
                     } else if u.mode != UprightMode::Off && u.corrections.len() <= u.mode.code() {
                         upright_request = true;
                     }
+                }
+                if u.mode == UprightMode::Guided {
+                    let count = u.guides.len();
+                    control_row(ui, "Guides", |ui| {
+                        let drawing = view.is(Tool::Guided);
+                        if ui
+                            .selectable_label(drawing, "Draw")
+                            .on_hover_text("Draw up to four guides along verticals and horizontals · Shift+T")
+                            .clicked()
+                        {
+                            guided_action = Some(GuidedAction::Toggle);
+                        }
+                        ui.label(
+                            egui::RichText::new(format!("{count} of {}", crate::develop::guided::MAX_GUIDES))
+                                .color(theme::gray(170)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_enabled(count > 0, egui::Button::new("Clear"))
+                                .on_hover_text("Remove every guide")
+                                .clicked()
+                            {
+                                guided_action = Some(GuidedAction::Clear);
+                            }
+                        });
+                    });
+                    if view.is(Tool::Guided) {
+                        control_row(ui, "", |ui| {
+                            ui.checkbox(&mut view.guided.loupe, "Show Loupe")
+                                .on_hover_text("Magnify the photo while placing a guide's end");
+                            ui.checkbox(&mut view.guided.grid, "Grid");
+                        });
+                    }
+                } else if view.is(Tool::Guided) {
+                    view.tool = Tool::None;
                 }
                 control_row(ui, "", |ui| {
                     ui.checkbox(&mut r.constrain_crop, "Constrain Crop")
@@ -1379,8 +1416,20 @@ impl Editor {
         if upright_request {
             self.start_upright();
         }
-        if guided_unavailable {
-            self.status = "Guided Upright isn't available yet".into();
+        match guided_action {
+            Some(GuidedAction::Choose) => {
+                if self.view.is(Tool::Guided) {
+                    self.choose_guided();
+                } else {
+                    self.toggle_guided_tool();
+                }
+            }
+            Some(GuidedAction::Toggle) => self.toggle_guided_tool(),
+            Some(GuidedAction::Clear) => {
+                self.view.guided.selected = None;
+                self.set_guides(Vec::new(), "Clear Guides");
+            }
+            None => {}
         }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());
@@ -1620,4 +1669,14 @@ fn hint_row(ui: &mut egui::Ui, text: &str) {
         ui.add_space(88.);
         ui.label(egui::RichText::new(text).size(11.).color(theme::gray(140)));
     });
+}
+
+/// What the Transform panel asks of the Guided Upright tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GuidedAction {
+    /// Guided was chosen among the modes.
+    Choose,
+    /// Draw: open or close the tool.
+    Toggle,
+    Clear,
 }

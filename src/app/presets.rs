@@ -663,7 +663,7 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
     }
     use crate::develop::upright::LensInputs;
     if LensInputs::of(r) != LensInputs::of(current) {
-        r.upright.clear_analysis();
+        r.upright.analyse_again();
     }
 }
 /// A History row: the step on the left, its value on the right. The current

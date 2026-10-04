@@ -32,7 +32,33 @@ Lightroom stores the correction for every mode, `crs:UprightTransform_0` to `_5`
 
 Checked against Camera Raw renders of five photos (Sony A7 II and Fujifilm X100F; landscape, both portrait orientations; Level, Vertical and Full; with and without lens profiles): the stored matrices reproduce Camera Raw's geometry within 0.0002 of the image size, and RAWmakase's renders within 1.3 px at 2000 px, the same as the untransformed renders.
 
-A preset that names only an Upright mode applies, and the app analyses each photo it is applied to. A photo's own settings (sidecar or catalog) without Lightroom's stored corrections, and Guided without a stored correction, are reported as unsupported.
+A preset that names only an Upright mode applies, and the app analyses each photo it is applied to. A photo's own settings (sidecar or catalog) without Lightroom's stored corrections, and Guided without a stored correction, are reported as unsupported. Guided edits are made in RAWmakase as [described below](#guided-upright).
+
+## Guided Upright
+
+Guided (Shift+T, or Guided among the Upright modes, which picks up the tool as in Lightroom) corrects the photo along guides drawn on it. The Transform panel's Guides row shows how many there are, Draw opens or closes the tool, and Clear removes them all; Show Loupe and Grid sit below it while the tool is open. Enter or Escape closes the tool.
+
+- **Drawing**: a drag on the photo draws a guide; one shorter than 10 points is not a guide. There can be four, as in Lightroom; a fifth is refused in the status line. Dragging a guide's end moves it, a click selects a guide, and Delete or Backspace removes the selected one.
+- **Loupe and grid**: while a guide or an end is being placed, a loupe beside the pointer shows the photo magnified 4× with a cross on the point (Show Loupe, on by default). Grid lays a square grid over the photo to judge the result by.
+- **History**: each gesture is one History step: Add Guide, Move Guide, Delete Guide, Clear Guides. The correction is solved again when the gesture ends.
+
+**Solving.** A guide nearer upright than level is a vertical, otherwise a horizontal. Each guide is the plane through the camera that holds its edge, at the photo's focal length (as for the other modes). Two or more verticals meet at a vanishing point, and the camera turns the least that makes that direction plumb, as Vertical does; two or more horizontals likewise make theirs level. With guides of both kinds both directions are fixed: the verticals exactly, then the horizontals as nearly as they allow at right angles to them (with only one vertical, the horizontals come first). One vertical and one horizontal leave a turn free; the smallest turn that makes both right is taken. The correction is framed as the other modes are (enlarged to fill when that takes at most 110%, otherwise fitted to the width) and stored as `UprightTransform_5`. The Transform sliders apply after it, as with every mode.
+
+On synthetic photos of converging edges (camera tilted 1–12°, panned up to 20°, rolled 2–3°; 3000 × 2000), every vertical and horizontal of the scene, not only the guided ones, ends within 1 px per 1000 px of plumb or level for two verticals, two horizontals, three and four guides, and one of each.
+
+**When guides can't be used** nothing crashes, and the status line says why:
+
+- fewer than two guides: nothing is corrected ("draw two or more guides");
+- a guide shorter than 2% of the long edge (or broken coordinates from a file) is left out;
+- two guides of one kind along one line count as one;
+- guides calling for a turn of more than 60°, or one that would put a corner of the photo behind the camera (lines crossing inside the photo, say), correct nothing;
+- guides that ask for more than one turn can give (a horizontal drawn off its edge, say) are corrected as nearly as they allow, verticals first, and the status line says so.
+
+**Where guides live.** Guides are kept in Upright's own frame: 0–1 coordinates of the photo as recorded, after lens corrections and before Upright, the Transform sliders, rotation, flips and the crop. So a guide stays on the edge it was drawn along however the correction moves it on screen. The crop leaves guides and correction alone. Rotate and Flip keep the correction, as they do for the other modes; a guide edited after a quarter turn is solved on the turned photo, and the same edges come out straight (now level), giving the same correction within 0.001. Lens corrections apply before Upright, so changing them keeps the guides where they are in the corrected photo; Update in the Upright row, a Paste of new lens settings or a preset analyses the photo again and solves the guides afresh. A change of distortion correction moves the photo's edges a little under guides that stay put; draw them again if one has slipped off its edge.
+
+**XMP.** Camera Raw 18.7 stores the guides as `crs:UprightFourSegmentsCount` (how many) and `crs:UprightFourSegments_0` to `_3`, each `"x1,y1,x2,y2"`: the two ends in 0–1 coordinates, nine decimals, comma separated (captured from the settings Camera Raw kept for a synthetic DNG given two guides; space-separated values were dropped, leaving a count of 0). The correction itself is `UprightTransform_5` with `PerspectiveUpright` 5, and `UprightGuidedDependentDigest` records what Lightroom solved it from. RAWmakase reads the guides into the edit and writes them back the same way, beside its own `UprightTransform_5`; once guides are edited, Lightroom's digest is dropped with the guides it described. Camera Raw renders the stored `UprightTransform_5` and does not solve guides on its own: a render with guides and no stored correction is identical to one without Upright. So the frame of the guide coordinates could not be measured from renders; RAWmakase assumes the frame Lightroom's corrections use (the photo as recorded, after lens corrections), which only a real Lightroom Guided edit can confirm. A Guided sidecar with guides but no stored correction is still reported as unsupported: renders outside the editor (the command line, Library previews) have no analysis to solve them beside.
+
+**Copy, Sync and presets.** Guides belong to the photo they were drawn on. Upright Mode copies the mode only: a photo with guides of its own solves them, and one without is left Off with a note, as before. Upright Transforms (in the Transform section of Copy Settings and Sync, off by default as in Lightroom) copies the correction exactly as solved or analysed on the source, guides and Lightroom's analysis details included, without analysing the target; it is for photos framed alike, such as a tripod series. Presets never carry one photo's correction or guides: they name the mode, and the New Develop Preset dialog leaves Upright Transforms out.
 
 ## Upright analysis
 

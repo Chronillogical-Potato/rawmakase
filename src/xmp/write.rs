@@ -381,6 +381,17 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
         let m: Vec<String> = m.iter().map(|x| format!("{x:.9}")).collect();
         s.text(&format!("UprightTransform_{i}"), m.join(","));
     }
+    // Guided's guides as Camera Raw writes them: "x1,y1,x2,y2" with nine decimals.
+    if !u.guides.is_empty() {
+        s.text("UprightFourSegmentsCount", u.guides.len().to_string());
+    }
+    for (i, g) in u.guides.iter().enumerate() {
+        // The shortest decimal that reads back as the same number, so 0.7 is written
+        // 0.700000000 rather than its nearest single-precision value.
+        let fixed = |v: f32| format!("{:.9}", v.to_string().parse::<f64>().unwrap_or(0.));
+        let ends = [g.a[0], g.a[1], g.b[0], g.b[1]].map(fixed);
+        s.text(&format!("UprightFourSegments_{i}"), ends.join(","));
+    }
     for (key, value) in &u.lightroom {
         s.text(key, value.clone());
     }

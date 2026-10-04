@@ -13,6 +13,7 @@ pub mod defaults;
 pub mod effects;
 mod geometry;
 pub mod gpu;
+pub mod guided;
 mod image_space;
 mod local_tone;
 mod local_tone_data;
@@ -37,7 +38,7 @@ pub use auto::{
     auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,
 };
-pub use geometry::{Geometry, Transform, Upright, UprightMode, display_axes};
+pub use geometry::{Geometry, Transform, Upright, UprightGuide, UprightMode, display_axes};
 pub use image_space::{ImageFrame, ViewMapping};
 pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{

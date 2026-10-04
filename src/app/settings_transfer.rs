@@ -147,7 +147,12 @@ impl Editor {
                                     ui.vertical(|ui| {
                                         ui.set_width(COLUMN);
                                         for section in column {
-                                            section_checkboxes(ui, section, &mut dialog.groups);
+                                            section_checkboxes(
+                                                ui,
+                                                section,
+                                                &mut dialog.groups,
+                                                dialog.purpose,
+                                            );
                                         }
                                     });
                                 });
@@ -256,28 +261,32 @@ fn section_checkboxes(
     ui: &mut egui::Ui,
     section: &settings_groups::Section,
     groups: &mut GroupSelection,
+    purpose: Transfer,
 ) {
-    let chosen = section
+    // A preset never carries one photo's Upright correction: it names the mode only.
+    let shown: Vec<SettingGroup> = section
         .groups
         .iter()
-        .filter(|g| groups.contains(**g))
-        .count();
-    let mut all = chosen == section.groups.len();
+        .copied()
+        .filter(|g| purpose != Transfer::NewPreset || *g != SettingGroup::UprightTransforms)
+        .collect();
+    let chosen = shown.iter().filter(|g| groups.contains(**g)).count();
+    let mut all = chosen == shown.len();
     let checkbox = egui::Checkbox::new(&mut all, section.title)
-        .indeterminate(chosen > 0 && chosen < section.groups.len());
+        .indeterminate(chosen > 0 && chosen < shown.len());
     if ui.add(checkbox).changed() {
         let inclusion = if all {
             GroupInclusion::Included
         } else {
             GroupInclusion::Excluded
         };
-        for group in section.groups {
+        for group in &shown {
             groups.set(*group, inclusion);
         }
     }
-    if let [_, _, ..] = section.groups {
+    if let [_, _, ..] = shown[..] {
         ui.indent(section.title, |ui| {
-            for group in section.groups {
+            for group in &shown {
                 let mut on = groups.contains(*group);
                 if ui.checkbox(&mut on, group.label()).changed() {
                     let inclusion = if on {

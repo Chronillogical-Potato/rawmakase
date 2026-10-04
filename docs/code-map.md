@@ -69,6 +69,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [color_mixer.rs](../src/develop/color_mixer.rs), [color_mixer.bin](../src/develop/color_mixer.bin) | Engine 4 HSL mixer, Saturation and Vibrance as measured hue/saturation/value lookups. See [color mixer](color-mixer.md). |
 | [color_grade.rs](../src/develop/color_grade.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading as measured per-luminance gains, and its tables. |
 | [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
+| [guided.rs](../src/develop/guided.rs) | Guided Upright: solving two to four guides into a correction, and what to say when they can't. See [transform](transform.md#guided-upright). |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
@@ -202,6 +203,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [clipping.rs](../src/app/clipping.rs) | The histogram's clipping triangles: independent shadow and highlight warnings, hover preview, J, and the triangles' channel colours. |
 | [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop (with its guide overlay and Straighten ruler) and white-balance picking; hands the pointer to the active tool. |
 | [crop_tool.rs](../src/app/crop_tool.rs) | The Crop tool's guide overlays (O, Shift+O), Straighten ruler, portrait/landscape swap (X) and Auto straighten. See [transform](transform.md#crop-and-straighten). |
+| [guided_tool.rs](../src/app/guided_tool.rs) | The Guided Upright tool (Shift+T): drawing, moving, selecting and deleting guides, its loupe and grid. See [transform](transform.md#guided-upright). |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |

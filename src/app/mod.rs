@@ -395,6 +395,7 @@ mod clipping;
 mod crop_tool;
 mod dialogs;
 mod export;
+mod guided_tool;
 mod inspector;
 pub mod library;
 mod mask_tool;

@@ -832,3 +832,87 @@ fn constrain_crop_imports() -> Result<()> {
     assert!(!apply(r#"c:CropConstrainToUnitSquare="1""#, &Recipe::default())?.constrain_crop);
     Ok(())
 }
+/// Guided Upright's guides as Camera Raw 18.7 serializes them (captured from its own
+/// settings for a synthetic DNG): `UprightFourSegmentsCount` and, per guide,
+/// `UprightFourSegments_N` = "x1,y1,x2,y2" with nine decimals. They import as guides,
+/// write back the same way, and a Guided sidecar with guides but no stored correction
+/// opens to be solved on the photo.
+#[test]
+fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
+    use crate::develop::{UprightGuide, UprightMode};
+    let identity = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,1.000000000";
+    let guided = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.100000000,1.000000000";
+    let attrs = format!(
+        r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:PerspectiveUpright="5" c:UprightTransformCount="6" c:UprightTransform_0="{identity}" c:UprightTransform_1="{identity}" c:UprightTransform_2="{identity}" c:UprightTransform_3="{identity}" c:UprightTransform_4="{identity}" c:UprightTransform_5="{guided}" c:UprightGuidedDependentDigest="0123456789ABCDEF0123456789ABCDEF" c:UprightFourSegmentsCount="2" c:UprightFourSegments_0="0.300000000,0.100000000,0.250000000,0.900000000" c:UprightFourSegments_1="0.700000000,0.100000000,0.750000000,0.900000000""#
+    );
+    // Enough of a camera for the written white balance to read back.
+    let m = Metadata {
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let r = parse(Path::new("photo.xmp"), &xml(&attrs, ""))?.apply(
+        &Recipe::default(),
+        &m,
+        &[],
+        None,
+    )?;
+    let u = &r.upright;
+    assert_eq!(u.mode, UprightMode::Guided);
+    assert_eq!(
+        u.guides,
+        [
+            UprightGuide {
+                a: [0.3, 0.1],
+                b: [0.25, 0.9]
+            },
+            UprightGuide {
+                a: [0.7, 0.1],
+                b: [0.75, 0.9]
+            },
+        ]
+    );
+    assert!(
+        u.lightroom
+            .keys()
+            .all(|k| !k.starts_with("UprightFourSegments"))
+    );
+    assert_eq!(
+        u.lightroom["UprightGuidedDependentDigest"],
+        "0123456789ABCDEF0123456789ABCDEF"
+    );
+    let photo = crate::xmp::write::Photo {
+        raw_name: "IMG.ARW".into(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:UprightFourSegmentsCount="2""#),
+        "{packet}"
+    );
+    assert!(packet.contains(
+        r#"crs:UprightFourSegments_1="0.700000000,0.100000000,0.750000000,0.900000000""#
+    ));
+    let back = parse(Path::new("export.xmp"), &packet)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert_eq!(back.upright, r.upright);
+    // Guides without a stored correction are still reported: renders outside the
+    // editor (the command line, Library previews) have no analysis to solve them beside.
+    let attrs = r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:PerspectiveUpright="5" c:UprightFourSegmentsCount="2" c:UprightFourSegments_0="0.3,0.1,0.25,0.9" c:UprightFourSegments_1="0.7,0.1,0.75,0.9""#;
+    assert!(
+        parse(Path::new("photo.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &m, &[], None)
+            .is_err()
+    );
+    // A broken guide is refused, not guessed at.
+    let attrs = r#"c:PerspectiveUpright="5" c:UprightFourSegmentsCount="1" c:UprightFourSegments_0="0.3 0.1 0.25 0.9""#;
+    assert!(
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &m, &[], None)
+            .is_err()
+    );
+    Ok(())
+}
