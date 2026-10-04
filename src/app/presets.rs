@@ -759,9 +759,22 @@ impl Editor {
                         .on_hover_text(format!("{} UTC", format_unix(s as i64 + 978_307_200))),
                     None => response,
                 };
-                if response.clicked() {
-                    lightroom = Some(i);
+                if response.clicked() && !super::widgets::context_clicked(&response) {
+                    lightroom = Some((i, LightroomStep::Apply));
                 }
+                super::widgets::context_menu(&response, |ui| {
+                    ui.set_width(270.);
+                    if super::widgets::menu_item(
+                        ui,
+                        "Copy History Step Settings to Before",
+                        "",
+                        true,
+                        false,
+                    ) {
+                        lightroom = Some((i, LightroomStep::ToBefore));
+                        ui.close();
+                    }
+                });
             }
         });
         if let Some(n) = to_before {
@@ -775,7 +788,7 @@ impl Editor {
                 self.ensure_upright();
             }
         }
-        if let Some(i) = lightroom
+        if let Some((i, use_step)) = lightroom
             && let Some(m) = &self.document.metadata
         {
             let step = &self.document.lightroom_history[i];
@@ -785,6 +798,9 @@ impl Editor {
                 &self.document.profiles,
                 self.document.full().map(|image| image.as_ref()),
             ) {
+                Ok((recipe, _)) if use_step == LightroomStep::ToBefore => {
+                    self.set_before(recipe);
+                }
                 Ok((recipe, skipped)) => {
                     let name = format!("Lightroom: {}", step.name);
                     self.status = if skipped.is_empty() {
@@ -801,6 +817,14 @@ impl Editor {
             }
         }
     }
+}
+/// What a click on a Lightroom History step asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LightroomStep {
+    /// Apply it to the edit, as a step.
+    Apply,
+    /// Copy History Step Settings to Before.
+    ToBefore,
 }
 /// A preset's Upright mode, with this photo's own corrections rather than any the preset
 /// carries from the photo it was saved from; a mode without one is analysed on apply.

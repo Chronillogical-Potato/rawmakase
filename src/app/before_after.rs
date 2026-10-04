@@ -175,6 +175,10 @@ impl BeforePreview {
         self.mode = TextureMode::Whole;
         self.submitted = None;
     }
+    /// Asks for its job again on the next schedule, e.g. after its textures were lost.
+    pub(super) fn forget_job(&mut self) {
+        self.submitted = None;
+    }
     /// The textures it draws.
     pub(super) fn pictures(&mut self) -> [&mut Option<Picture>; 2] {
         [&mut self.texture, &mut self.region]
@@ -285,7 +289,8 @@ impl Editor {
             .filter(|_| self.view.compare.two_up())
             .cloned();
         let Some(image) = image else {
-            if self.preview.before.submitted.is_some() || self.preview.before.texture.is_some() {
+            let before = &self.preview.before;
+            if before.submitted.is_some() || before.texture.is_some() || before.region.is_some() {
                 self.preview.before.clear();
             }
             return;
@@ -680,10 +685,14 @@ mod tests {
             e.preview.before.pending_mode,
             TextureMode::Region(_)
         ));
-        // Back to the edit alone: Before's render is dropped.
+        // Back to the edit alone: Before's render is dropped, a lone 100% region too.
+        e.preview.before.texture = None;
+        e.preview.before.region = Some(Picture::presented(egui::TextureId::Managed(1), [1, 1]));
+        e.preview.before.forget_job();
         e.set_compare(Compare::Off);
         e.schedule();
         assert!(e.preview.before.submitted.is_none());
+        assert!(e.preview.before.region.is_none());
     }
 
     #[test]

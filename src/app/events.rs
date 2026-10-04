@@ -228,6 +228,13 @@ impl Editor {
                 } if id == self.preview.task.id() => {
                     self.status = error;
                     self.preview.task.finish(id);
+                    // A failed render on the GPU retires Before's textures too: render
+                    // Before again, not the edit that failed.
+                    let before = &mut self.preview.before;
+                    if before.texture.is_none() && before.region.is_none() {
+                        before.forget_job();
+                        self.schedule_before();
+                    }
                 }
                 Event::Failed {
                     id,

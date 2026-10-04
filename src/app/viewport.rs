@@ -380,8 +380,14 @@ impl Editor {
         let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
         if self.view.zoom.on && hand && response.dragged() {
             let delta = ui.input(|i| i.pointer.delta());
-            self.view.zoom.pan[0] = (self.view.zoom.pan[0] - delta.x / rect.width()).clamp(0., 1.);
-            self.view.zoom.pan[1] = (self.view.zoom.pan[1] - delta.y / rect.height()).clamp(0., 1.);
+            // Moved by the photo under the hand: Before's when the drag is on it.
+            let on_before = response
+                .interact_pointer_pos()
+                .is_some_and(|p| on_after(p) != p);
+            let dragged = before_rect.filter(|_| on_before).unwrap_or(rect);
+            let pan = &mut self.view.zoom.pan;
+            pan[0] = (pan[0] - delta.x / dragged.width()).clamp(0., 1.);
+            pan[1] = (pan[1] - delta.y / dragged.height()).clamp(0., 1.);
         }
         if response.hovered() && hand && !self.view.is(Tool::Crop) {
             ui.ctx().set_cursor_icon(if self.view.zoom.on {

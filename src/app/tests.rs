@@ -549,6 +549,44 @@ fn a_failed_before_render_renders_the_edit_again_but_not_before() {
 }
 
 #[test]
+fn a_failed_edit_render_renders_before_again_but_not_the_edit() {
+    use worker::{Pane, TaskKind};
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 2,
+        height: 2,
+        pixels: vec![[0.2; 3]; 4],
+        metadata: Metadata {
+            width: 2,
+            height: 2,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.set_compare(before_after::Compare::Split(before_after::Axis::LeftRight));
+    e.schedule();
+    let before = e.preview.before.task.id();
+    e.preview.before.task.finish(before);
+    let after = e.preview.task.id();
+    // The renderer reset after a panic: Before's textures are gone as well.
+    e.preview.before.texture = None;
+    e.tx.send(Event::Failed {
+        id: after,
+        task: TaskKind::Render(Pane::After),
+        error: "Rendering failed".into(),
+    })
+    .unwrap();
+    e.events(&ctx);
+    assert!(e.preview.before.task.id() > before);
+    assert_eq!(e.preview.task.id(), after);
+}
+
+#[test]
 fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
     use worker::{RenderStage, TaskKind};
     let ctx = egui::Context::default();
