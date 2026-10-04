@@ -13,10 +13,13 @@ impl Editor {
         }
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
         let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
+        // With the Crop tool open, X swaps the crop's orientation instead of rejecting.
+        let cropping = !self.library_mode && self.view.is(Tool::Crop);
         let auto_advance = self.auto_advance;
         let shortcut = crate::app::photo_metadata::shortcut(ctx)
             .filter(|(e, _)| {
                 !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
+                    && !(cropping && matches!(e, crate::app::photo_metadata::Edit::Flag(-1)))
             })
             // Photo > Auto Advance: every key moves on, as Shift does.
             .map(|(edit, shift)| (edit, shift || auto_advance));
@@ -765,6 +768,9 @@ impl Editor {
                 }
                 if i.key_pressed(egui::Key::Escape) {
                     self.view.tool = Tool::None;
+                }
+                if self.view.is(Tool::Crop) {
+                    self.crop_keys(i);
                 }
                 if self.view.is(Tool::Remove) {
                     self.retouch_keys(i);

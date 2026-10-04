@@ -1,6 +1,7 @@
 use super::Editor;
 use super::bulk_import::ImportKind;
 use super::clipping::{self, ClipSide};
+use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
@@ -140,7 +141,7 @@ impl Editor {
     }
     /// Lightroom's tool strip: Crop, Remove and Masking, with the open tool's drawer
     /// below it.
-    fn tool_strip(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.);
         const TOOLS: [(Tool, &str, &str); 3] = [
             (Tool::Crop, "Crop", "Crop & Straighten · R"),
@@ -223,6 +224,9 @@ impl Editor {
             _ => return,
         }
         ui.add_space(4.);
+        let mut action = None;
+        let mut guides = self.view.crop_guides;
+        let analysing = self.document.straighten.is_running();
         let r = &mut self.document.recipe;
         egui::Frame::new()
             .fill(theme::gray(40))
@@ -236,21 +240,44 @@ impl Editor {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
                 control_row(ui, "Aspect", |ui| {
+                    let swap = 26.;
                     egui::ComboBox::from_id_salt("crop-aspect")
-                        .width(ui.available_width())
-                        .selected_text(
-                            ASPECTS
-                                .iter()
-                                .find(|(a, _)| *a == self.view.aspect)
-                                .map_or("Custom", |(_, name)| *name),
-                        )
+                        .width(ui.available_width() - swap - 4.)
+                        .selected_text(aspect_name(self.view.aspect))
                         .show_ui(ui, |ui| {
                             for (aspect, name) in ASPECTS {
                                 ui.selectable_value(&mut self.view.aspect, aspect, name);
                             }
                         });
+                    if ui
+                        .add_sized([swap, 20.], egui::Button::new("⇄"))
+                        .on_hover_text("Swap portrait and landscape · X")
+                        .clicked()
+                    {
+                        action = Some(CropAction::Swap);
+                    }
                 });
                 slider(ui, "Angle", &mut r.straighten, -45. ..=45., 0.);
+                control_row(ui, "Straighten", |ui| {
+                    let w = (ui.available_width() - 4.) / 2.;
+                    let armed = self.view.ruler == Ruler::Armed;
+                    if ui
+                        .add_sized([w, 20.], egui::Button::new("Ruler").selected(armed))
+                        .on_hover_text(
+                            "Drag along a horizon or vertical to level it · or Cmd-drag on the photo",
+                        )
+                        .clicked()
+                    {
+                        self.view.ruler = if armed { Ruler::Off } else { Ruler::Armed };
+                    }
+                    if ui
+                        .add_enabled(!analysing, egui::Button::new("Auto").min_size(Vec2::new(w, 20.)))
+                        .on_hover_text("Level the photo as Upright's Level would, by its angle alone")
+                        .clicked()
+                    {
+                        action = Some(CropAction::AutoStraighten);
+                    }
+                });
                 control_row(ui, "Orientation", |ui| {
                     let w = ui.available_width();
                     let mut none = usize::MAX;
@@ -265,19 +292,43 @@ impl Editor {
                         ],
                         w,
                     );
+                    use crate::develop::{Mirror, QuarterTurn, mirror, turn};
                     match none {
-                        0 => {
-                            r.rotation = (r.rotation + 3) % 4;
-                            r.crop = [0., 0., 1., 1.];
-                        }
-                        1 => {
-                            r.rotation = (r.rotation + 1) % 4;
-                            r.crop = [0., 0., 1., 1.];
-                        }
-                        2 => r.flip_x = !r.flip_x,
-                        3 => r.flip_y = !r.flip_y,
+                        0 => turn(r, QuarterTurn::Left),
+                        1 => turn(r, QuarterTurn::Right),
+                        2 => mirror(r, Mirror::Horizontal),
+                        3 => mirror(r, Mirror::Vertical),
                         _ => {}
                     }
+                });
+                control_row(ui, "Overlay", |ui| {
+                    let show = 78.;
+                    egui::ComboBox::from_id_salt("crop-guide")
+                        .width(ui.available_width() - show - 4.)
+                        .selected_text(guides.guide.name())
+                        .show_ui(ui, |ui| {
+                            for guide in Guide::ALL {
+                                if ui
+                                    .selectable_label(guides.guide == guide, guide.name())
+                                    .clicked()
+                                {
+                                    guides.guide = guide;
+                                    guides.orientation = 0;
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("O cycles the overlays, Shift+O turns them");
+                    egui::ComboBox::from_id_salt("crop-guide-show")
+                        .width(show)
+                        .selected_text(guides.show.name())
+                        .show_ui(ui, |ui| {
+                            for when in GuideShow::ALL {
+                                ui.selectable_value(&mut guides.show, when, when.name());
+                            }
+                        })
+                        .response
+                        .on_hover_text("When the overlay shows: always, while dragging, or never");
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(83.);
@@ -316,6 +367,12 @@ impl Editor {
                     }
                 });
             });
+        self.set_crop_guides(guides);
+        match action {
+            Some(CropAction::Swap) => self.swap_crop_orientation(),
+            Some(CropAction::AutoStraighten) => self.start_auto_straighten(),
+            None => {}
+        }
     }
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
@@ -1309,6 +1366,23 @@ impl Editor {
             }
         }
     }
+}
+
+/// A Crop panel button that acts once the panel is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CropAction {
+    Swap,
+    AutoStraighten,
+}
+
+/// The aspect menu's name for `aspect`: a preset either way round (X swaps them),
+/// Original or Free, or Custom.
+fn aspect_name(aspect: f32) -> &'static str {
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    ASPECTS
+        .iter()
+        .find(|(a, _)| near(*a, aspect) || (*a > 0. && near(1. / *a, aspect)))
+        .map_or("Custom", |(_, name)| *name)
 }
 
 /// The crop's aspect presets, long side over short.

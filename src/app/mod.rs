@@ -181,6 +181,7 @@ impl Editor {
             },
             view: ViewState {
                 monitor: session.monitor,
+                crop_guides: crop_tool::CropGuides::from_session(&session.crop_guides),
                 ..Default::default()
             },
             preview: Default::default(),
@@ -274,6 +275,7 @@ impl Editor {
                     auto_advance: self.auto_advance,
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
+                    crop_guides: self.view.crop_guides.to_session(),
                 },
             )?;
         }
@@ -383,6 +385,7 @@ mod auto;
 mod bulk_import;
 mod catalog;
 mod clipping;
+mod crop_tool;
 mod dialogs;
 mod export;
 mod inspector;

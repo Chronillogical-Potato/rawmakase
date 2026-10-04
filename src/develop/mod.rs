@@ -16,6 +16,7 @@ mod image_space;
 mod local_tone;
 mod local_tone_data;
 pub mod masks;
+mod orientation;
 pub mod panels;
 mod pipeline;
 mod preview_renderer;
@@ -37,6 +38,7 @@ pub use auto::{
 };
 pub use geometry::{Geometry, Transform, Upright, UprightMode, display_axes};
 pub use image_space::{ImageFrame, ViewMapping};
+pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{
     neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
 };

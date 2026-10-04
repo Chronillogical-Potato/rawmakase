@@ -2120,3 +2120,234 @@ fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
     e.finish_edit_frame(frame, &ctx);
     assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
 }
+#[test]
+fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result<()> {
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    let session = d.path().join("session.json");
+    e.session_file = Some(session.clone());
+    e.library_mode = false;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    let crop = [0.1, 0.2, 0.5, 0.6];
+    e.document.recipe.crop = crop;
+    e.view.toggle(state::Tool::Crop);
+    let ctx = e.context.clone();
+    let press = |e: &mut Editor, key: egui::Key, shift: bool, typing: bool| {
+        let modifiers = egui::Modifiers {
+            shift,
+            ..Default::default()
+        };
+        let mut text = String::new();
+        // A text field takes focus in one frame and has it for the keys in the next.
+        for events in [vec![], vec![true, false]] {
+            let input = egui::RawInput {
+                events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                    .chain(events.into_iter().map(|pressed| egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed,
+                        repeat: false,
+                        modifiers,
+                    }))
+                    .collect(),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                if typing {
+                    ui.text_edit_singleline(&mut text).request_focus();
+                }
+                e.metadata_shortcuts(&ctx);
+                e.develop_shortcuts(&ctx);
+            });
+            output.textures_delta.clear();
+        }
+    };
+    // Typing an X or an O in a field changes nothing.
+    press(&mut e, egui::Key::X, false, true);
+    press(&mut e, egui::Key::O, false, true);
+    assert_eq!(e.document.recipe.crop, crop);
+    assert_eq!(e.view.crop_guides, Default::default());
+    // X swaps the 120 × 80 crop to 80 × 120 about its centre, and rejects nothing.
+    press(&mut e, egui::Key::X, false, false);
+    let c = e.document.recipe.crop;
+    assert!(
+        ((c[2] - c[0]) * 300. - 80.).abs() < 1e-3 && ((c[3] - c[1]) * 200. - 120.).abs() < 1e-3,
+        "{c:?}"
+    );
+    assert!(((c[0] + c[2]) / 2. - 0.3).abs() < 1e-6 && ((c[1] + c[3]) / 2. - 0.4).abs() < 1e-6);
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, 0);
+    // O cycles the overlay and Shift+O turns it; both are kept in the session.
+    use super::crop_tool::Guide;
+    press(&mut e, egui::Key::O, false, false);
+    assert_eq!(e.view.crop_guides.guide, Guide::Diagonal);
+    press(&mut e, egui::Key::O, false, false);
+    press(&mut e, egui::Key::O, true, false);
+    assert_eq!(
+        (e.view.crop_guides.guide, e.view.crop_guides.orientation),
+        (Guide::Triangle, 1)
+    );
+    // Shift released before the frame is drawn: the press still had it.
+    let shifted = egui::Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(shifted),
+                egui::Event::Key {
+                    key: egui::Key::O,
+                    physical_key: Some(egui::Key::O),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: shifted,
+                },
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        },
+        |_| e.develop_shortcuts(&ctx),
+    );
+    output.textures_delta.clear();
+    assert_eq!(
+        (e.view.crop_guides.guide, e.view.crop_guides.orientation),
+        (Guide::Triangle, 0)
+    );
+    press(&mut e, egui::Key::O, true, false);
+    let saved: crate::storage::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
+    assert_eq!(saved.crop_guides.guide, "triangle");
+    assert_eq!(saved.crop_guides.orientation, 1);
+    // Outside the Crop tool X rejects as before.
+    e.view.tool = state::Tool::None;
+    press(&mut e, egui::Key::X, false, false);
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, -1);
+    Ok(())
+}
+
+#[test]
+fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_turn() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    // Stripes falling 3° to the right.
+    let (w, h) = (600usize, 400usize);
+    let (s, c) = 3f32.to_radians().sin_cos();
+    let pixels = (0..w * h)
+        .map(|i| {
+            // Supersampled, so edges are smooth rather than pixel steps.
+            let mut sum = 0.;
+            for j in 0..4 {
+                let x = (i % w) as f32 + (j % 2) as f32 * 0.5 - 299.75;
+                let y = (i / w) as f32 + (j / 2) as f32 * 0.5 - 199.75;
+                let across = -s * x + c * y;
+                sum += if (across / 70.).rem_euclid(2.) < 1. {
+                    0.78
+                } else {
+                    0.1
+                };
+            }
+            [sum / 4.; 3]
+        })
+        .collect();
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: w as u32,
+        height: h as u32,
+        pixels,
+        metadata: Metadata {
+            width: w as u32,
+            height: h as u32,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.document.recipe.wb = [1.; 3];
+    let upright = e.document.recipe.upright.clone();
+    let next = |e: &mut Editor| loop {
+        match e.rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(worker::Event::Straighten {
+                generation,
+                analysed,
+                result,
+                ..
+            }) => break (generation, analysed, result),
+            Ok(_) => continue,
+            Err(err) => panic!("no Auto straighten result: {err}"),
+        }
+    };
+    e.start_auto_straighten();
+    assert!(e.document.straighten.is_running());
+    // Measured before the photo was turned: it is measured again, and nothing changes yet.
+    let (generation, analysed, result) = next(&mut e);
+    crate::develop::turn(&mut e.document.recipe, crate::develop::QuarterTurn::Right);
+    crate::develop::turn(&mut e.document.recipe, crate::develop::QuarterTurn::Left);
+    e.document.recipe.flip_x = true;
+    e.auto_straighten_ready(generation, &analysed, result);
+    assert_eq!(e.document.recipe.straighten, 0.);
+    assert!(e.document.straighten.is_running(), "measured again");
+    e.document.recipe.flip_x = false;
+    let (generation, analysed, result) = next(&mut e);
+    e.auto_straighten_ready(generation, &analysed, result);
+    // The stale analysis restarted once more for the flip back; take its result.
+    let (generation, analysed, result) = next(&mut e);
+    e.auto_straighten_ready(generation, &analysed, result);
+    let angle = e.document.recipe.straighten;
+    assert!((angle + 3.).abs() < 0.2, "{angle}");
+    let (steps, applied) = e.document.history.steps();
+    assert_eq!(applied, 1);
+    assert_eq!(
+        (steps[0].name.as_str(), steps[0].value.as_str()),
+        ("Straighten", "Auto")
+    );
+    // Upright is left as it was.
+    assert_eq!(e.document.recipe.upright, upright);
+    e.undo();
+    assert_eq!(e.document.recipe.straighten, 0.);
+}
+
+#[test]
+fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
+    let ctx = egui::Context::default();
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.view.tool = state::Tool::Crop;
+    let size = |e: &mut Editor, width: f32| {
+        let mut rect = Rect::NOTHING;
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(width);
+                    rect = ui.scope(|ui| e.tool_strip(ui)).response.rect;
+                },
+            );
+            output.textures_delta.clear();
+        }
+        rect
+    };
+    let plain = size(&mut e, 320.);
+    e.view.ruler = super::crop_tool::Ruler::Armed;
+    let _ = e.document.straighten.start();
+    e.view.aspect = 0.8;
+    e.view.crop_guides.guide = super::crop_tool::Guide::GoldenSpiral;
+    let busy = size(&mut e, 320.);
+    assert_eq!(plain.size(), busy.size());
+}

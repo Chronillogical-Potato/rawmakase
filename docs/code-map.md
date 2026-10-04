@@ -51,6 +51,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [develop/mod.rs](../src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
 | [recipe.rs](../src/develop/recipe.rs) | Serialized adjustment model, defaults, validation, rendering-engine compatibility and profile selection. |
 | [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
+| [orientation.rs](../src/develop/orientation.rs) | Rotate and Flip on the photo as shown, keeping the crop and straightening on the same part of the photo. |
 | [image_space.rs](../src/develop/image_space.rs) | Image space, where spots and masks keep positions (oriented photo before lens correction, Transform and crop), and its mapping to and from the view, including the lens distortion inverse. |
 | [retouch/mod.rs](../src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
 | [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
@@ -66,7 +67,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [local_tone.rs](../src/develop/local_tone.rs), [local_tone_data.rs](../src/develop/local_tone_data.rs) | Engine 4 Shadows and Highlights: an edge-aware local operator fitted to Camera Raw, and its tables. |
 | [color_mixer.rs](../src/develop/color_mixer.rs), [color_mixer.bin](../src/develop/color_mixer.bin) | Engine 4 HSL mixer, Saturation and Vibrance as measured hue/saturation/value lookups. See [color mixer](color-mixer.md). |
 | [color_grade.rs](../src/develop/color_grade.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading as measured per-luminance gains, and its tables. |
-| [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto. See [transform](transform.md). |
+| [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
 | [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
@@ -196,7 +197,8 @@ above rather than implementing SQL, file formats or pixel processing.
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
 | [clipping.rs](../src/app/clipping.rs) | The histogram's clipping triangles: independent shadow and highlight warnings, hover preview, J, and the triangles' channel colours. |
-| [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking; hands the pointer to the active tool. |
+| [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop (with its guide overlay and Straighten ruler) and white-balance picking; hands the pointer to the active tool. |
+| [crop_tool.rs](../src/app/crop_tool.rs) | The Crop tool's guide overlays (O, Shift+O), Straighten ruler, portrait/landscape swap (X) and Auto straighten. See [transform](transform.md#crop-and-straighten). |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
