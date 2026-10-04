@@ -716,8 +716,9 @@ fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Res
     Ok(())
 }
 /// Lightroom writes `AutoGrayscaleMix` with the mixer it resolved: stored mixer values
-/// win, as in Camera Raw. Auto without values (a preset) keeps the current mix, and
-/// only lenient application accepts that, reporting it.
+/// win, as in Camera Raw. Auto without values (a preset) is estimated from the photo;
+/// without one it keeps the current mix, which only lenient application accepts,
+/// reporting it.
 #[test]
 fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> {
     let m = Metadata::default();
@@ -764,6 +765,41 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
     assert_eq!(r.effects.gray_mix, base.effects.gray_mix);
     assert_eq!(skipped.len(), 1, "{skipped:?}");
     assert!(skipped[0].contains("Auto black & white mix"), "{skipped:?}");
+    // With the photo, Auto alone is estimated from it, as the B&W panel's Auto does.
+    let (width, height) = (16u32, 8u32);
+    let photo_metadata = Metadata {
+        width,
+        height,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let im = crate::raw::CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.05 + 0.3 * (i % width) as f32 / width as f32;
+                [v, v, 2. * v]
+            })
+            .collect(),
+        metadata: photo_metadata.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let r = auto.apply(&base, &photo_metadata, &[], Some(&im))?;
+    let spread = crate::develop::ColorSpread::measure(&im);
+    let expected = crate::develop::AutoMix {
+        spread: &spread,
+        metadata: &photo_metadata,
+    }
+    .for_recipe(&r);
+    assert!(r.effects.monochrome);
+    assert_ne!(expected, base.effects.gray_mix);
+    assert_eq!(r.effects.gray_mix, expected);
     // A monochrome profile makes the result black & white as well.
     let m = Metadata {
         cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],

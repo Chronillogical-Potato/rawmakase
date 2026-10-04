@@ -670,6 +670,7 @@ impl Editor {
             let mut match_exposures = false;
             let mut new_preset = false;
             let mut auto = false;
+            let mut treatment = false;
             let mut export = None;
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowRight) {
@@ -712,6 +713,10 @@ impl Editor {
                 }
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
+                }
+                // Lightroom's Convert to Black & White.
+                if i.key_pressed(egui::Key::V) && !i.modifiers.any() {
+                    treatment = true;
                 }
                 // Lightroom's Auto Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
@@ -824,6 +829,9 @@ impl Editor {
             }
             if auto && !self.auto_in_effect() {
                 self.start_auto(super::worker::AutoKind::Settings);
+            }
+            if treatment {
+                self.toggle_treatment();
             }
             match export {
                 Some(true) => self.export_with_previous(),

@@ -430,6 +430,25 @@ impl Editor {
         // First, as in Lightroom's Presets preferences.
         self.raw_defaults_block(ui);
         gap(ui);
+        group(ui, "Black & white");
+        form_row(ui, "", |ui| {
+            let mut auto = self.first_conversion == super::treatment::FirstConversion::AutoMix;
+            if ui
+                .checkbox(
+                    &mut auto,
+                    "Apply auto mix when first converting to black and white",
+                )
+                .changed()
+            {
+                self.first_conversion = if auto {
+                    super::treatment::FirstConversion::AutoMix
+                } else {
+                    super::treatment::FirstConversion::KeepMix
+                };
+                let _ = self.save_session();
+            }
+        });
+        gap(ui);
         let usage = &self.preferences.usage;
         let (cameras, lenses) = (usage.camera_profiles, usage.lens_profiles);
         let presets = self.presets.library.presets.len();

@@ -71,7 +71,7 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 30] = [
+const DEVELOP: [Shortcut; 31] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -98,6 +98,7 @@ const DEVELOP: [Shortcut; 30] = [
     ("Cmd+Shift+N", "New Develop Preset"),
     ("Cmd+Shift+R", "Reset all settings"),
     ("Cmd+Shift+U", "Auto tone"),
+    ("V", "Convert to black & white or back to color"),
     ("Cmd+Shift+E", "Export…"),
     ("Cmd+Alt+Shift+E", "Export with previous"),
     ("double-click", "Reset a slider"),

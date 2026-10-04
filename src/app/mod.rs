@@ -78,6 +78,9 @@ pub struct Editor {
     undo_log: undo::UndoLog,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
+    /// Preferences: whether converting to black & white applies the Auto mix to a
+    /// mix never set, as Lightroom's preference of that name (on by default).
+    first_conversion: treatment::FirstConversion,
     /// The RAW the Loupe last started loading, so one that fails is not
     /// loaded again every frame.
     loupe_tried: Option<i64>,
@@ -239,6 +242,11 @@ impl Editor {
             not_editable: None,
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
+            first_conversion: if session.no_auto_black_white_mix {
+                treatment::FirstConversion::KeepMix
+            } else {
+                treatment::FirstConversion::AutoMix
+            },
             loupe_tried: None,
             raw_defaults: std::sync::Arc::new(crate::develop::defaults::DevelopDefaults::load(
                 session.raw_defaults.clone(),
@@ -279,6 +287,8 @@ impl Editor {
                     theme: self.themes.chosen().flatten(),
                     theme_chosen: self.themes.chosen().is_some(),
                     auto_advance: self.auto_advance,
+                    no_auto_black_white_mix: self.first_conversion
+                        == treatment::FirstConversion::KeepMix,
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
                     crop_guides: self.view.crop_guides.to_session(),
@@ -442,6 +452,7 @@ mod sync;
 mod theme;
 mod tone_drag;
 mod toolbar;
+mod treatment;
 mod updates;
 mod user_presets;
 

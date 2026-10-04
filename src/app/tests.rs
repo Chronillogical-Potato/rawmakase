@@ -2749,3 +2749,108 @@ fn guided_upright_gestures_are_one_history_step_each() {
     e.finish_edit_frame(edit, &ctx);
     assert!(!e.view.is(state::Tool::Guided));
 }
+
+/// A small photo of colors spread along blue, decoded and with its metadata.
+fn editor_with_blue_photo(ctx: &egui::Context, session: crate::storage::Session) -> Editor {
+    let mut editor = Editor::with_context(ctx, None, session, None);
+    let (width, height) = (32u32, 24u32);
+    let metadata = Metadata {
+        width,
+        height,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    editor.document.metadata = Some(metadata.clone());
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.05 + 0.3 * (i % width) as f32 / width as f32;
+                [v, v, 2. * v]
+            })
+            .collect(),
+        metadata,
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    editor
+}
+#[test]
+fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
+    let ctx = egui::Context::default();
+    let mut editor = editor_with_blue_photo(&ctx, crate::storage::Session::default());
+    let before = editor.document.recipe.clone();
+    let press_v = |editor: &mut Editor| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                events: vec![egui::Event::Key {
+                    key: egui::Key::V,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| editor.develop_shortcuts(ui.ctx()),
+        );
+        output.textures_delta.clear();
+    };
+    press_v(&mut editor);
+    let auto = editor
+        .photo_colors()
+        .unwrap()
+        .auto_mix()
+        .for_recipe(&editor.document.recipe);
+    let r = &editor.document.recipe;
+    assert!(r.effects.monochrome);
+    assert_ne!(auto, [0.; 8]);
+    assert_eq!(r.effects.gray_mix, auto);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(
+        (applied, steps[0].name.as_str()),
+        (1, "Convert to Black & White")
+    );
+    // Back to color keeps the mix for the next conversion, as Lightroom does.
+    press_v(&mut editor);
+    assert!(!editor.document.recipe.effects.monochrome);
+    assert_eq!(editor.document.recipe.effects.gray_mix, auto);
+    assert_eq!(
+        editor.document.history.steps().0[1].name,
+        "Convert to Color"
+    );
+    editor.undo();
+    editor.undo();
+    assert_eq!(editor.document.recipe, before);
+
+    // The B&W panel's Auto brings back the Auto mix after a slider moved, as one step.
+    editor.redo();
+    editor.document.recipe.effects.gray_mix[3] = 0.6;
+    editor.auto_black_white_mix();
+    assert_eq!(editor.document.recipe.effects.gray_mix, auto);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(
+        (
+            steps[applied - 1].name.as_str(),
+            steps[applied - 1].value.as_str()
+        ),
+        ("Black & White Mix", "Auto")
+    );
+    // With the preference off, the first conversion keeps the mix at zero.
+    let mut editor = editor_with_blue_photo(
+        &ctx,
+        crate::storage::Session {
+            no_auto_black_white_mix: true,
+            ..Default::default()
+        },
+    );
+    editor.toggle_treatment();
+    assert!(editor.document.recipe.effects.monochrome);
+    assert_eq!(editor.document.recipe.effects.gray_mix, [0.; 8]);
+}

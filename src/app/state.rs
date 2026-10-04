@@ -14,6 +14,9 @@ pub(super) struct Document {
     pub(super) path: Option<PathBuf>,
     pub(super) metadata: Option<Metadata>,
     image: Option<Arc<CameraImage>>,
+    /// How the decoded photo's colors spread, for Auto black & white; measured on
+    /// first use.
+    color_spread: std::cell::OnceCell<crate::develop::ColorSpread>,
     pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
@@ -395,5 +398,15 @@ impl Document {
     }
     pub fn set_image(&mut self, full: Arc<CameraImage>) {
         self.image = Some(full);
+        self.color_spread = Default::default();
+    }
+    /// How the decoded photo's colors spread, once it is decoded.
+    pub(super) fn color_spread(&self) -> Option<crate::develop::ColorSpread> {
+        let im = self.image.as_ref()?;
+        Some(
+            *self
+                .color_spread
+                .get_or_init(|| crate::develop::ColorSpread::measure(im)),
+        )
     }
 }
