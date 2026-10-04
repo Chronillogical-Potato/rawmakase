@@ -240,6 +240,12 @@ fn default_and_auto_render_alike() {
         choice(LensProfileSetup::Default, id(MINE)).rendering(),
         choice(LensProfileSetup::Auto, id(MINE)).rendering()
     );
+    let mut digest = id(MINE);
+    digest.as_mut().unwrap().digest = "0123ABCD".into();
+    assert_eq!(
+        choice(LensProfileSetup::Custom, digest).rendering(),
+        choice(LensProfileSetup::Custom, id(MINE)).rendering()
+    );
     assert_ne!(
         choice(LensProfileSetup::Auto, id(MINE)).rendering(),
         choice(LensProfileSetup::Custom, id(MINE)).rendering()

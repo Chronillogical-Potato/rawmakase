@@ -111,14 +111,18 @@ impl LensProfileChoice {
             .filter(|id| profile.is(&id.filename, &id.name))
             .unwrap_or_else(|| LensProfileId::of(profile))
     }
-    /// The choice as it renders: Default and Auto match alike.
+    /// The choice as it renders: Default and Auto match alike, and the digest is left out.
     pub fn rendering(&self) -> Self {
         Self {
             setup: match self.setup {
                 LensProfileSetup::Default => LensProfileSetup::Auto,
                 setup => setup,
             },
-            id: self.id.clone(),
+            // Adobe's digest names the same file; it does not change the render.
+            id: self.id.clone().map(|id| LensProfileId {
+                digest: String::new(),
+                ..id
+            }),
         }
     }
     /// Picking a Setup. Custom keeps the profile in use; Default and Auto match again.

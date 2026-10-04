@@ -166,8 +166,8 @@ fn crop_factor(m: &Metadata) -> Option<f32> {
     (m.focal > 0. && m.focal_35mm > 0.).then(|| m.focal_35mm / m.focal)
 }
 /// How well the profile fits the photo's camera: 0 made on the same make, 1 on a
-/// make sharing a lens mount, 2 on any other; None when a profile from another make
-/// was made on a smaller sensor and does not cover the photo. Adobe profiles
+/// make sharing a lens mount, 2 on any other; None when the profile was made on a
+/// smaller sensor and does not cover the photo. Adobe profiles
 /// third-party lenses on one body per mount (a Sigma L-mount lens on a Sigma fp),
 /// and Lightroom applies them to other makes too.
 fn make_rank(e: &Entry, m: &Metadata) -> Option<u8> {
@@ -176,11 +176,13 @@ fn make_rank(e: &Entry, m: &Metadata) -> Option<u8> {
         &["olympus", "om digital", "panasonic"],
     ];
     let (profile, camera) = (key(&e.make), key(&m.make));
-    if profile.is_empty() || profile == camera || camera.contains(&profile) {
-        return Some(0);
-    }
+    // Same make or not, a profile made on a smaller sensor does not cover this one
+    // (a Micro Four Thirds profile on a full-frame Lumix).
     if crop_factor(m).is_some_and(|c| e.sensor_factor > c * 1.1) {
         return None;
+    }
+    if profile.is_empty() || profile == camera || camera.contains(&profile) {
+        return Some(0);
     }
     Some(
         if MOUNTS.iter().any(|makes| {
@@ -733,6 +735,11 @@ mod tests {
             ..entry("OLYMPUS")
         };
         assert_eq!(make_rank(&mft, &lumix), None);
+        let panasonic_mft = Entry {
+            sensor_factor: 2.,
+            ..entry("Panasonic")
+        };
+        assert_eq!(make_rank(&panasonic_mft, &lumix), None);
         // A full-frame profile on an APS-C body is scaled to the smaller sensor:
         // the APS-C corner sits at 2/3 of the full-frame radius.
         let mut aps_c = a7ii(1.8);
