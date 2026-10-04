@@ -1233,5 +1233,15 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(&format!(r#"crs:LensProfileFilename="{}""#, tests::ADOBE)),
         "{packet}"
     );
+    // Under Auto, a named profile that isn't imported stays named.
+    let gone = apply(
+        r#"c:LensProfileEnable="1" c:LensProfileSetup="Auto" c:LensProfileName="Adobe (Gone 24mm)" c:LensProfileFilename="Gone (24mm) - RAW.lcp""#,
+        &Recipe::default(),
+    )?;
+    let packet = crate::xmp::write::packet(&gone, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:LensProfileFilename="Gone (24mm) - RAW.lcp""#),
+        "{packet}"
+    );
     Ok(())
 }

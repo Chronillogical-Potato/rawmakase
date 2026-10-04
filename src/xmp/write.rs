@@ -109,10 +109,14 @@ pub(super) fn look_element(r: &Recipe) -> Option<String> {
 fn lens_profile(s: &mut Settings, r: &Recipe, m: Option<&Metadata>) {
     let choice = &r.lens_profile_choice;
     s.text("LensProfileSetup", choice.setup.xmp());
-    let in_use = m.and_then(|m| r.lens_profile_in_use(m).used);
+    let resolved = m.map(|m| r.lens_profile_in_use(m));
+    let in_use = resolved.as_ref().and_then(|r| r.used);
+    let missing = resolved.as_ref().is_some_and(|r| r.missing.is_some());
     let id = match (in_use, &choice.id) {
-        // The digest the edit recorded still describes the same file.
-        (Some(c), Some(id)) if c.profile.is(&id.filename, &id.name) => id.clone(),
+        // A profile the edit names that isn't imported stays named, so the edit
+        // finds it again once it is; the digest the edit recorded still describes
+        // the same file.
+        (Some(c), Some(id)) if missing || c.profile.is(&id.filename, &id.name) => id.clone(),
         (Some(c), _) => crate::lens::choice::LensProfileId::of(&c.profile),
         (None, Some(id)) => id.clone(),
         (None, None) => return,
