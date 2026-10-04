@@ -131,7 +131,7 @@ Useful shortcuts:
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |
 
-Double-click a slider to reset it, or type its value for precision.
+Double-click a slider to reset it, or type its value for precision. Drag sideways in the histogram to move Blacks, Shadows, Exposure, Highlights or Whites, whichever region you start in.
 
 ### Camera profiles
 

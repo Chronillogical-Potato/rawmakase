@@ -430,6 +430,7 @@ mod shortcuts;
 mod snapshots;
 mod sync;
 mod theme;
+mod tone_drag;
 mod toolbar;
 mod updates;
 mod user_presets;
