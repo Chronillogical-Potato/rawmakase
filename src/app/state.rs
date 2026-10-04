@@ -39,6 +39,8 @@ pub(super) struct Document {
     pub(super) profile_errors: Vec<String>,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
     pub(super) auto: super::task::Task,
+    /// Point Color's dropper sampling the photo, off the UI thread.
+    pub(super) point_color_pick: super::task::Task,
     /// What the running estimate measures: the recipe without the settings Auto sets.
     pub(super) auto_input: Option<Recipe>,
     /// The recipe as Auto last left it; while it is unchanged, Auto has nothing to do.
@@ -195,6 +197,8 @@ pub(super) enum Tool {
     WhiteBalance,
     /// Defringe's Fringe Color Selector.
     Defringe,
+    /// Point Color's dropper, which adds a swatch.
+    PointColor,
     /// Spot removal: Heal and Clone.
     Remove,
     /// Red Eye Correction.
@@ -202,6 +206,22 @@ pub(super) enum Tool {
     Mask,
     /// The Transform panel's Guided Upright tool.
     Guided,
+}
+/// The Color Mixer's tabs, as in Lightroom.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum MixerTab {
+    #[default]
+    Mixer,
+    PointColor,
+}
+/// Point Color's panel: the selected swatch and the view options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct PointColorView {
+    pub(super) selected: Option<usize>,
+    /// Visualize Range: the selected swatch's selection in color, the rest gray.
+    pub(super) visualize: bool,
+    /// The Hue, Saturation and Luminance range controls are shown.
+    pub(super) ranges: bool,
 }
 pub(super) struct ViewState {
     /// Fit or a zoom level, and where; Develop's and the Library's.
@@ -241,6 +261,9 @@ pub(super) struct ViewState {
     pub(super) parametric_curve: bool,
     pub(super) mixer_color: bool,
     pub(super) mixer_adjust: usize,
+    /// The Color Mixer's tab: the mixer or Point Color.
+    pub(super) mixer_tab: MixerTab,
+    pub(super) point_color: PointColorView,
     pub(super) shortcuts: bool,
     pub(super) zoom_key: (bool, f32),
     pub(super) zoom_anim: Option<(f64, egui::Rect)>,
@@ -273,6 +296,8 @@ impl Default for ViewState {
             parametric_curve: false,
             mixer_color: false,
             mixer_adjust: 0,
+            mixer_tab: MixerTab::Mixer,
+            point_color: Default::default(),
             shortcuts: false,
             zoom_key: (false, 1.),
             zoom_anim: None,
@@ -360,9 +385,21 @@ impl ViewState {
     pub fn is(&self, tool: Tool) -> bool {
         self.tool == tool
     }
-    /// An eyedropper is active: the White Balance or Fringe Color Selector.
+    /// An eyedropper is active: White Balance, the Fringe Color Selector or Point
+    /// Color's dropper.
     pub fn picks_color(&self) -> bool {
-        matches!(self.tool, Tool::WhiteBalance | Tool::Defringe)
+        matches!(
+            self.tool,
+            Tool::WhiteBalance | Tool::Defringe | Tool::PointColor
+        )
+    }
+    /// What the eyedropper's loupe asks for.
+    pub fn loupe_prompt(&self) -> &'static str {
+        match self.tool {
+            Tool::Defringe => "Pick a purple or green fringe",
+            Tool::PointColor => "Pick a color to adjust",
+            _ => "Pick a target neutral",
+        }
     }
     /// Opens `tool`, or closes it when it is already open.
     pub fn toggle(&mut self, tool: Tool) {
@@ -379,6 +416,7 @@ impl ViewState {
         self.zoom_anim = None;
         self.shown_rect = None;
         self.tool = Tool::None;
+        self.point_color.selected = None;
         self.crop_drag = None;
         self.ruler = Default::default();
         // Ends a histogram drag: the next photo starts from its own values.

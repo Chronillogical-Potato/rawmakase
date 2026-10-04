@@ -18,6 +18,8 @@ struct RenderModes {
     clipping: crate::develop::ClipOverlay,
     compare: bool,
     zoom: bool,
+    /// The swatch Point Color's Visualize Range shows.
+    visualized: Option<usize>,
 }
 impl Editor {
     fn render_modes(&self) -> RenderModes {
@@ -26,6 +28,7 @@ impl Editor {
             clipping: self.view.clipping.overlay(),
             compare: self.view.compare,
             zoom: self.view.zoom.on,
+            visualized: self.visualized_swatch(),
         }
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
@@ -81,6 +84,17 @@ impl Editor {
             && self.document.recipe.upright.mode != crate::develop::UprightMode::Guided
         {
             self.view.tool = super::state::Tool::None;
+        }
+        // Point Color's dropper goes with its tab: another tab, black & white, an older
+        // process or the Library put it away, so a click never adds a hidden swatch.
+        if self.view.is(super::state::Tool::PointColor) && !self.point_color_tab_shown() {
+            self.view.tool = super::state::Tool::None;
+        }
+        // A sample still being taken is dropped with the dropper.
+        if !self.view.is(super::state::Tool::PointColor)
+            && self.document.point_color_pick.is_running()
+        {
+            self.document.point_color_pick.invalidate();
         }
         // A conversion waiting for the photo, once it is decoded and nothing else
         // changed this frame (any edit drops it below).

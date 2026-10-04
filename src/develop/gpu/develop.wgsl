@@ -574,11 +574,22 @@ fn point_ramp(x: f32, at: i32, rise: f32, fall: f32) -> f32 {
     }
     return min(up, down);
 }
+// Visualize Range's selection of this pixel, or -1 without it.
+var<private> point_selection: f32;
+// point_color::visualize, on the finished color.
+fn visualize(out: vec3<f32>) -> vec3<f32> {
+    let y = 0.2126 * srgb_decode(out.x) + 0.7152 * srgb_decode(out.y) + 0.0722 * srgb_decode(out.z);
+    let gray = srgb_encode(y);
+    return vec3(gray) + (out - vec3(gray)) * point_selection;
+}
 // One swatch at table offset `w`, on linear ProPhoto RGB.
 fn point_color(p0: vec3<f32>, w: i32, base: i32) -> vec3<f32> {
     let q = max(p0, vec3(0.0));
     let max_v = max(max(q.x, q.y), q.z);
     if max_v <= 1e-6 {
+        if table(w + 22) != 0.0 {
+            point_selection = 0.0;
+        }
         return p0;
     }
     let min_v = min(min(q.x, q.y), q.z);
@@ -596,6 +607,10 @@ fn point_color(p0: vec3<f32>, w: i32, base: i32) -> vec3<f32> {
         * point_ramp(sat + (s - sat) * table(w + 4), w + 10, table(base + 1), table(base + 2))
         * point_ramp(lum + (ev - lum) * table(w + 5), w + 14, table(base + 3), table(base + 4))
         * min(s / table(base + 5), 1.0);
+    // Visualize Range: note the selection; the finished color is grayed by the rest.
+    if table(w + 22) != 0.0 {
+        point_selection = weight;
+    }
     if weight <= 0.0 {
         return p0;
     }
@@ -620,7 +635,7 @@ fn point_colors(rgb: vec3<f32>) -> vec3<f32> {
     let base = offset(P_POINT);
     var q = RGB_TO_PRO * rgb;
     for (var i = 0u; i < u32(p(P_POINT + 1u)); i++) {
-        q = point_color(q, base + 8 + i32(i) * 22, base);
+        q = point_color(q, base + POINT_CONSTANTS + i32(i) * POINT_SWATCH, base);
     }
     return PRO_TO_RGB * q;
 }
@@ -834,6 +849,7 @@ fn adjust(lab_in: vec3<f32>) -> vec3<f32> {
     return lab;
 }
 fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
+    point_selection = -1.0;
     // tone_stage
     var wb = vec3(1.0);
     if masked {
@@ -917,6 +933,9 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     var out: vec3<f32>;
     for (var k = 0; k < 3; k++) {
         out[k] = clamp(srgb_encode(gray + (rgb[k] - gray) * gamut), 0.0, 1.0);
+    }
+    if point_selection >= 0.0 {
+        out = visualize(out);
     }
     return out;
 }

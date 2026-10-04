@@ -209,6 +209,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
 | [color_grading.rs](../src/app/color_grading.rs) | The Color Grading panel: 3-Way and single-wheel views, hue/saturation wheels (Shift constrains, Cmd fine, double-click resets), Luminance, Blending and Balance, over the recipe's grading values. |
+| [point_color_panel.rs](../src/app/point_color_panel.rs) | The Color Mixer's Point Color tab: the dropper, swatches, shifts, Variance, Range, the range handles and Visualize Range. |
 | [tone_drag.rs](../src/app/tone_drag.rs) | Dragging in the histogram: its five regions, the slider each drives, and one History step per drag. |
 | [clipping.rs](../src/app/clipping.rs) | The histogram's clipping triangles: independent shadow and highlight warnings, hover preview, J, and the triangles' channel colours. |
 | [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop (with its guide overlay and Straighten ruler) and white-balance picking; hands the pointer to the active tool. |

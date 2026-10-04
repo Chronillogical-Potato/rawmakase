@@ -415,6 +415,7 @@ mod navigator;
 mod onboarding;
 mod overlay;
 mod photo_metadata;
+mod point_color_panel;
 mod preferences;
 mod presets;
 mod raw_defaults;

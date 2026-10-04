@@ -472,6 +472,26 @@ impl Editor {
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
         }
+        // Point Color's dropper adds a swatch of the color under the pointer and
+        // selects it; the status line says why when it can't. The preview must show the
+        // settings the sample is taken with, or the clicked color isn't the one sampled.
+        if self.view.is(Tool::PointColor)
+            && picking
+            && response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && rect.contains(pos)
+        {
+            // And the final render, not a reduced draft of it.
+            if self.preview.samples_recipe.as_ref() == Some(&self.effective_recipe())
+                && !self.preview.task.is_running()
+            {
+                let u = (pos.x - rect.left()) / rect.width();
+                let v = (pos.y - rect.top()) / rect.height();
+                self.start_point_color_sample(u, v);
+            } else {
+                self.status = "Wait for the preview to update, then pick again".into();
+            }
+        }
         // Before shows the unedited photo, so picking there would edit what is not shown.
         if self.view.is(Tool::Defringe)
             && picking
@@ -826,7 +846,7 @@ impl Editor {
         painter.text(
             Pos2::new(frame.center().x, frame.top() + line / 2.),
             egui::Align2::CENTER_CENTER,
-            "Pick a target neutral",
+            self.view.loupe_prompt(),
             egui::FontId::proportional(12.),
             theme::gray(215),
         );

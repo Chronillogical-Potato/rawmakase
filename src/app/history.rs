@@ -410,10 +410,9 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
         || a.effects.parametric != b.effects.parametric
     {
         "Tone Curve"
-    } else if a.hsl != b.hsl
-        || a.point_colors != b.point_colors
-        || a.effects.gray_mix != b.effects.gray_mix
-    {
+    } else if a.point_colors != b.point_colors {
+        "Point Color"
+    } else if a.hsl != b.hsl || a.effects.gray_mix != b.effects.gray_mix {
         "HSL / Color"
     } else if a.grading != b.grading || a.effects.global_grade != b.effects.global_grade {
         "Color Grading"

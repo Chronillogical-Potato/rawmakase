@@ -230,6 +230,19 @@ impl Editor {
         }
         r
     }
+    /// The swatch Point Color's Visualize Range shows, while its tab is open on a color
+    /// photo in Develop.
+    /// Not while an eyedropper is out, which samples the photo as it renders, nor in
+    /// Before, which shows the photo's defaults.
+    pub(super) fn visualized_swatch(&self) -> Option<usize> {
+        let pc = &self.view.point_color;
+        let shown = pc.visualize
+            && self.point_color_tab_shown()
+            && !self.view.picks_color()
+            && !self.view.compare;
+        pc.selected
+            .filter(|i| shown && *i < self.document.recipe.point_colors.len())
+    }
     /// What the active tool draws into the rendered preview.
     pub(super) fn overlay(&self) -> super::worker::Overlay {
         use super::{state::Tool, worker::Overlay};
@@ -286,22 +299,34 @@ impl Editor {
                 fit
             };
             self.preview.pending_crop = geometry.crop();
-            self.preview.pending_recipe = Some(self.effective_recipe());
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,
                 super::state::TextureMode::Region,
             );
+            // Visualize Range renders the selected swatch's selection instead of its
+            // adjustment; never as the photo's thumbnail.
+            let mut recipe = self.effective_recipe();
+            let visualize = self.visualized_swatch().and_then(|i| {
+                crate::develop::point_color::visualize_range(&recipe.point_colors, i)
+            });
+            let thumbnail = region.is_none() && self.shows_library_edit() && visualize.is_none();
+            if let Some(list) = visualize {
+                recipe.point_colors = list;
+            }
+            // What the shown pixels were rendered with, Visualize Range included, so
+            // a picker never takes a gray preview for the photo.
+            self.preview.pending_recipe = Some(recipe.clone());
             self.renderer.submit(RenderJob {
                 max_edge,
                 cancel,
                 id,
                 image,
-                recipe: self.effective_recipe(),
+                recipe,
                 region,
                 monitor: self.view.monitor.clone(),
                 clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
-                thumbnail: region.is_none() && self.shows_library_edit(),
+                thumbnail,
                 samples: self.view.picks_color(),
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),

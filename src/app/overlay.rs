@@ -20,7 +20,9 @@ impl Editor {
             return false;
         }
         match self.view.tool {
-            Tool::None | Tool::Crop | Tool::WhiteBalance | Tool::Defringe => false,
+            Tool::None | Tool::Crop | Tool::WhiteBalance | Tool::Defringe | Tool::PointColor => {
+                false
+            }
             Tool::Remove => {
                 self.retouch_overlay(ui, response, rect);
                 true

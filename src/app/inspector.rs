@@ -3,7 +3,7 @@ use super::bulk_import::ImportKind;
 use super::clipping::{self, ClipSide};
 use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
-use super::state::Tool;
+use super::state::{MixerTab, Tool};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
     SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
@@ -891,6 +891,30 @@ impl Editor {
                 }
                 return;
             }
+            // Lightroom's tabs: the HSL and Color mixer, and Point Color.
+            ui.horizontal(|ui| {
+                let w = ui.available_width();
+                segmented(
+                    ui,
+                    &mut view.mixer_tab,
+                    &[
+                        (MixerTab::Mixer, "Mixer"),
+                        (MixerTab::PointColor, "Point Color"),
+                    ],
+                    w,
+                );
+            });
+            if view.mixer_tab == MixerTab::PointColor {
+                // Only the current process renders Point Color.
+                let supported = super::point_color_panel::renders_point_color(r);
+                if !supported {
+                    hint_row(ui, "Update the process in Calibration to use Point Color.");
+                }
+                ui.add_enabled_ui(supported, |ui| {
+                    super::point_color_panel::point_color_panel(ui, &mut r.point_colors, view)
+                });
+                return;
+            }
             control_row(ui, "Mixer", |ui| {
                 let w = ui.available_width();
                 segmented(
@@ -970,7 +994,9 @@ impl Editor {
             if black_white {
                 r.effects.gray_mix = [0.; 8];
             } else {
+                // Both tabs: the mixer and Point Color.
                 r.hsl = [[0.; 3]; 8];
+                r.point_colors.clear();
             }
         }
 

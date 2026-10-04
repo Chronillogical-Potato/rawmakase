@@ -235,14 +235,14 @@ fn tone_stage(
     };
     (rgb, clipped_chroma)
 }
-/// Basic curves, point curves, color controls and output encoding.
-fn color_stage(
+/// The tone curves, the color mixer and Point Color: linear display RGB as Point
+/// Color leaves it, and Visualize Range's selection.
+fn mixer_stage(
     rgb: [f32; 3],
-    clipped_chroma: f32,
     r: &Recipe,
     lut: &CurveSet,
     local: Option<&LocalDelta>,
-) -> [f32; 3] {
+) -> crate::develop::point_color::Rendered {
     let rgb = if r.reference_curves {
         apply_reference_curves(rgb, r, lut, local)
     } else if r.wide_gamut_curves {
@@ -259,12 +259,33 @@ fn color_stage(
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     // Point Color works where the mixer does, in HSV of linear ProPhoto RGB.
-    let rgb = lut.point_colors.as_ref().map_or(rgb, |p| {
-        mul(
-            crate::camera_profiles::PRO_TO_RGB,
-            p.apply_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb)),
-        )
-    });
+    match &lut.point_colors {
+        Some(p) => {
+            let out = p.render_prophoto(mul(crate::camera_profiles::RGB_TO_PRO, rgb));
+            crate::develop::point_color::Rendered {
+                color: mul(crate::camera_profiles::PRO_TO_RGB, out.color),
+                selection: out.selection,
+            }
+        }
+        None => crate::develop::point_color::Rendered {
+            color: rgb,
+            selection: None,
+        },
+    }
+}
+/// Basic curves, point curves, color controls and output encoding.
+fn color_stage(
+    rgb: [f32; 3],
+    clipped_chroma: f32,
+    r: &Recipe,
+    lut: &CurveSet,
+    local: Option<&LocalDelta>,
+) -> [f32; 3] {
+    let mixed = mixer_stage(rgb, r, lut, local);
+    let rgb = mixed.color;
+    if lut.output == PixelOutput::PointColor {
+        return mul(crate::camera_profiles::RGB_TO_PRO, rgb);
+    }
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
     // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
     // engine 4 the colour controls come later, in Oklab, and the table after them.
@@ -329,7 +350,12 @@ fn color_stage(
         lab = legacy_rgb_table(lab, lut);
         lab[0] = lab[0].clamp(0., 1.);
     }
-    finish_color(lab, r, lut)
+    let out = finish_color(lab, r, lut);
+    // Visualize Range grays what the swatch leaves out after every color control, so
+    // none of them tints it.
+    mixed
+        .selection
+        .map_or(out, |w| crate::develop::point_color::visualize(out, w))
 }
 /// Before engine 4 the colour controls run in Oklab, after the place of the measured
 /// mixer: a look's RGB table follows them there, before Monochrome. Engine 3's point
@@ -401,7 +427,19 @@ fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f32; 3] {
     })
 }
 
+/// What the per-pixel stage hands back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PixelOutput {
+    /// The finished, encoded color.
+    #[default]
+    Display,
+    /// Linear ProPhoto RGB after the swatches already there: what Point Color's
+    /// dropper samples.
+    PointColor,
+}
 struct CurveSet {
+    /// Where the stage stops.
+    output: PixelOutput,
     exposure_gain: f32,
     /// Engine 4: Contrast, Whites and Blacks as measured Lightroom curves.
     basic_curves: bool,
@@ -443,6 +481,7 @@ impl CurveSet {
     fn new(r: &Recipe) -> Self {
         let basic_curves = r.engine >= 4 && r.reference_curves;
         Self {
+            output: PixelOutput::Display,
             exposure_gain: 2f32.powf(r.exposure + r.camera_exposure),
             basic_curves,
             basic: basic_curves
@@ -1246,6 +1285,9 @@ pub(crate) fn mask_weights(
         };
         let mut plain = r.clone();
         plain.masks.clear();
+        // Range masks select from the photo as it renders, never as Visualize Range
+        // grays it.
+        crate::develop::point_color::without_visualization(&mut plain.point_colors);
         let im = toned.source();
         let gpu = stages.as_deref_mut().and_then(|s| {
             let params = pixel_params::pixel_params(im, &plain)?;
@@ -1377,9 +1419,43 @@ pub(crate) fn develop_samples(
     cancel: &std::sync::atomic::AtomicBool,
     weights: Option<&MaskWeights>,
 ) -> Result<Rendered> {
+    develop_samples_to(im, r, samples, cancel, weights, PixelOutput::Display)
+}
+/// Point Color's dropper over `region` of the output: each pixel as the dropper
+/// samples it ([`PixelOutput::PointColor`]), through the same sampling, lens
+/// correction, retouching and masks as the render.
+pub(crate) fn point_color_samples(
+    toned: &Toned,
+    r: &Recipe,
+    g: &Geometry,
+    region: [u32; 4],
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Rendered> {
+    let im = toned.source();
+    let samples = Arc::new(sample_region(im, r, g, region, 0., cancel)?);
+    let weights = mask_weights(toned, r, g, region, 0., Some(&samples), None, cancel)?;
+    let samples = detail(toned, r, samples, weights.as_deref(), None, cancel)?;
+    develop_samples_to(
+        im,
+        r,
+        &samples,
+        cancel,
+        weights.as_deref(),
+        PixelOutput::PointColor,
+    )
+}
+fn develop_samples_to(
+    im: Source,
+    r: &Recipe,
+    samples: &Samples,
+    cancel: &std::sync::atomic::AtomicBool,
+    weights: Option<&MaskWeights>,
+    output: PixelOutput,
+) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
     let local_tone = weights.is_some_and(|w| w.uses(&[slot::SHADOWS, slot::HIGHLIGHTS]));
-    let lut = CurveSet::for_image(im, r, matrix, local_tone);
+    let mut lut = CurveSet::for_image(im, r, matrix, local_tone);
+    lut.output = output;
     let math = weights.map(|_| LocalMath::new(&im.metadata, r));
     let mut pixels = vec![[0.; 3]; samples.pixels.len()];
     pixels.par_iter_mut().enumerate().for_each(|(i, out)| {

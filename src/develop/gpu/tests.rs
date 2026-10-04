@@ -277,6 +277,11 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.point_colors = vec![warm, red, cool];
     let point_colors = recipes.len();
     recipes.push(r.clone());
+    // Visualize Range of the second swatch.
+    let mut visualized = r.clone();
+    visualized.point_colors =
+        crate::develop::point_color::visualize_range(&r.point_colors, 1).unwrap();
+    recipes.push(visualized);
     r.effects.defringe = [0.5, 0.3];
     recipes.push(r.clone());
     r.effects.monochrome = true;
