@@ -309,3 +309,23 @@ fn a_profile_whose_entries_for_this_lens_have_no_model_is_not_its_match() {
     let candidate = custom.resolve(&m.lens_profiles, &m).used.unwrap();
     assert!(candidate.correction(&m).is_some());
 }
+
+#[test]
+fn picking_one_of_two_files_with_the_same_name_records_its_file() {
+    let text = test_profile("Testcam", "35mm F2", "Adobe (Testcam 35mm F2)", -0.05, -0.5);
+    let mut m = photo();
+    m.lens_profiles =
+        Library::from_texts([("a.lcp", text.as_str()), ("b.lcp", text.as_str())]).for_photo(&m);
+    let b = &m.lens_profiles.all()[1].profile;
+    let mut c = choice(
+        LensProfileSetup::Auto,
+        Some(LensProfileId {
+            name: b.name.clone(),
+            digest: "0123ABCD".into(),
+            ..Default::default()
+        }),
+    );
+    c.choose(b);
+    assert_eq!(used(&c, &m).as_deref(), Some("b.lcp"));
+    assert_eq!(c.id.as_ref().unwrap().digest, "0123ABCD");
+}

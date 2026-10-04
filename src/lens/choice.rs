@@ -115,6 +115,11 @@ impl LensProfileChoice {
             .take()
             // The camera's own profile is not an imported file, whatever its name.
             .filter(|id| !id.embedded && profile.is(&id.filename, &id.name))
+            // A name alone may fit several files: record the one picked.
+            .map(|id| LensProfileId {
+                filename: profile.filename.clone(),
+                ..id
+            })
             .unwrap_or_else(|| LensProfileId::of(profile))
     }
     /// The choice as it renders: Default and Auto match alike, and the digest is left out.
