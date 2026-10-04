@@ -843,7 +843,7 @@ impl Editor {
         painter.text(
             Pos2::new(frame.center().x, frame.top() + line / 2.),
             egui::Align2::CENTER_CENTER,
-            "Pick a target neutral",
+            self.view.loupe_prompt(),
             egui::FontId::proportional(12.),
             theme::gray(215),
         );

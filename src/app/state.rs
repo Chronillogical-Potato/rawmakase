@@ -393,6 +393,14 @@ impl ViewState {
             Tool::WhiteBalance | Tool::Defringe | Tool::PointColor
         )
     }
+    /// What the eyedropper's loupe asks for.
+    pub fn loupe_prompt(&self) -> &'static str {
+        match self.tool {
+            Tool::Defringe => "Pick a purple or green fringe",
+            Tool::PointColor => "Pick a color to adjust",
+            _ => "Pick a target neutral",
+        }
+    }
     /// Opens `tool`, or closes it when it is already open.
     pub fn toggle(&mut self, tool: Tool) {
         self.tool = if self.tool == tool { Tool::None } else { tool };

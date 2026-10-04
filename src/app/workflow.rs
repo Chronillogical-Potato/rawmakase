@@ -232,12 +232,10 @@ impl Editor {
     }
     /// The swatch Point Color's Visualize Range shows, while its tab is open on a color
     /// photo in Develop.
-    /// Not while the dropper is out, which samples the photo as it renders.
+    /// Not while an eyedropper is out, which samples the photo as it renders.
     pub(super) fn visualized_swatch(&self) -> Option<usize> {
         let pc = &self.view.point_color;
-        let shown = pc.visualize
-            && self.point_color_tab_shown()
-            && !self.view.is(super::state::Tool::PointColor);
+        let shown = pc.visualize && self.point_color_tab_shown() && !self.view.picks_color();
         pc.selected
             .filter(|i| shown && *i < self.document.recipe.point_colors.len())
     }
@@ -297,7 +295,6 @@ impl Editor {
                 fit
             };
             self.preview.pending_crop = geometry.crop();
-            self.preview.pending_recipe = Some(self.effective_recipe());
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,
                 super::state::TextureMode::Region,
@@ -312,6 +309,9 @@ impl Editor {
             if let Some(list) = visualize {
                 recipe.point_colors = list;
             }
+            // What the shown pixels were rendered with, Visualize Range included, so
+            // a picker never takes a gray preview for the photo.
+            self.preview.pending_recipe = Some(recipe.clone());
             self.renderer.submit(RenderJob {
                 max_edge,
                 cancel,

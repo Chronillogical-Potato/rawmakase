@@ -3636,9 +3636,21 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.document.recipe.effects.monochrome = true;
     assert_eq!(editor.visualized_swatch(), None);
     editor.document.recipe.effects.monochrome = false;
-    // Not while the dropper is out, which samples the photo as it renders.
+    // The preview's identity includes it, so a picker never takes it for the photo.
+    editor.schedule();
+    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    assert_eq!(
+        pending.point_colors[0].view,
+        crate::develop::point_color::SwatchView::VisualizeRange
+    );
+    assert_ne!(Some(pending), Some(&editor.effective_recipe()));
+    // Not while an eyedropper is out, which samples the photo as it renders.
+    editor.view.toggle(state::Tool::Defringe);
+    assert_eq!(editor.visualized_swatch(), None);
+    assert_eq!(editor.view.loupe_prompt(), "Pick a purple or green fringe");
     editor.view.toggle(state::Tool::PointColor);
     assert_eq!(editor.visualized_swatch(), None);
+    assert_eq!(editor.view.loupe_prompt(), "Pick a color to adjust");
     // The dropper goes with the tab: on the Mixer tab a click adds no hidden swatch.
     in_edit_frame(&ctx, &mut editor, |e| {
         e.view.mixer_tab = state::MixerTab::Mixer
