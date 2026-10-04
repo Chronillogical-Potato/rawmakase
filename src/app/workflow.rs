@@ -279,6 +279,7 @@ impl Editor {
     pub(super) fn schedule(&mut self) {
         let image = self.document.full().cloned();
         if let Some(image) = image {
+            self.yield_before();
             let (id, cancel) = self.preview.task.start();
             let region = self.region();
             self.preview.last_region = region;

@@ -205,14 +205,20 @@ fn framed_like(mut before: Recipe, edit: &Recipe) -> Recipe {
 
 impl Editor {
     /// The settings Before shows: those copied to it, else the photo's starting
-    /// settings (its raw defaults), framed as the edit is.
+    /// settings (its raw defaults), framed as the edit on screen is (a hovered
+    /// preset's crop included).
     pub(super) fn before_settings(&self) -> Recipe {
         let before = self
             .document
             .before
             .clone()
             .unwrap_or_else(|| self.photo_defaults().map(|d| d.recipe).unwrap_or_default());
-        framed_like(before, &self.document.recipe)
+        let shown = self
+            .presets
+            .preview
+            .as_ref()
+            .unwrap_or(&self.document.recipe);
+        framed_like(before, shown)
     }
     /// Shows `view`, closing any tool when Before goes beside the edit: tools work on
     /// the edit alone, as in Lightroom.
@@ -352,11 +358,9 @@ impl Editor {
         }
     }
     /// Draws Before in its pane beside the edit, whose photo sits at `after` in
-    /// `panes.after`, and labels both sides.
-    pub(super) fn before_pane_ui(&self, ui: &egui::Ui, panes: &Panes, after: Rect) {
-        let Some(pane) = panes.before else {
-            return;
-        };
+    /// `panes.after`, and labels both sides. Returns where Before's photo is drawn.
+    pub(super) fn before_pane_ui(&self, ui: &egui::Ui, panes: &Panes, after: Rect) -> Option<Rect> {
+        let pane = panes.before?;
         let geometry = self.document.full().map(|im| {
             (
                 Geometry::new(im, &self.before_render_recipe(), 0),
@@ -403,6 +407,16 @@ impl Editor {
         }
         badge(ui, pane.clip, "Before");
         badge(ui, panes.after.clip, "After");
+        Some(rect)
+    }
+    /// An edit is about to render: a Before render still running would hold it up
+    /// on the renderer's one thread, so it is cancelled and asked for again behind it.
+    pub(super) fn yield_before(&mut self) {
+        let before = &mut self.preview.before;
+        if before.task.is_running() {
+            before.task.invalidate();
+            before.submitted = None;
+        }
     }
 }
 
@@ -626,7 +640,17 @@ mod tests {
         e.view.viewport = Vec2::new(120., 80.);
         e.set_compare(Compare::SideBySide(Axis::LeftRight));
         e.schedule();
+        // A Before render still running gives way to the edit's, and is asked for
+        // again behind it.
+        assert!(e.preview.before.task.is_running());
+        let running = e.preview.before.task.id();
+        e.document.recipe.exposure = 0.5;
+        e.schedule();
+        assert!(e.preview.before.task.id() > running);
+        assert!(e.preview.before.submitted.is_some());
+        // Once Before has rendered, edits leave it alone.
         let rendered = e.preview.before.task.id();
+        e.preview.before.task.finish(rendered);
         let shown = e.before_settings();
         // Edits change After alone; Before is neither changed nor rendered again.
         e.document.recipe.exposure = 1.;
@@ -634,7 +658,14 @@ mod tests {
         e.schedule();
         assert_eq!(e.before_settings(), shown);
         assert_eq!(e.preview.before.task.id(), rendered);
-        // A crop changes what both sides frame: Before follows it.
+        // A crop changes what both sides frame: Before follows it, a hovered
+        // preset's too.
+        e.presets.preview = Some(Recipe {
+            crop: [0.1, 0.3, 0.6, 0.9],
+            ..Default::default()
+        });
+        assert_eq!(e.before_settings().crop, [0.1, 0.3, 0.6, 0.9]);
+        e.presets.preview = None;
         e.document.recipe.crop = [0.2, 0.2, 0.8, 0.8];
         e.schedule();
         assert_eq!(e.before_settings().crop, e.document.recipe.crop);
@@ -642,6 +673,7 @@ mod tests {
         assert!(e.preview.before.task.id() > rendered);
         // So does zooming in, which renders a 100% region of each.
         let reframed = e.preview.before.task.id();
+        e.preview.before.task.finish(reframed);
         e.set_zoom(1.);
         assert!(e.preview.before.task.id() > reframed);
         assert!(matches!(

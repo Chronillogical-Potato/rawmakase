@@ -342,9 +342,8 @@ impl Editor {
         if self.view.compare.before_only() {
             before_after::badge(ui, area, "Before");
         }
-        self.before_pane_ui(ui, &panes, rect);
         // A click or drag on Before acts where the same point is on the edit.
-        let before_rect = before_after::before_rect(rect, &panes, true);
+        let before_rect = self.before_pane_ui(ui, &panes, rect);
         let on_after = |pos: Pos2| match (before_rect, panes.before) {
             (Some(before), Some(pane))
                 if pane.clip.contains(pos) && !panes.after.clip.contains(pos) =>
@@ -359,7 +358,7 @@ impl Editor {
         // tool draws it; not over Before, which can't be edited.
         // Not while Space holds the Hand tool, which hides the brush.
         let hand_held = ui.input(|i| i.key_down(egui::Key::Space));
-        if !self.view.compare
+        if !self.view.compare.shows_before()
             && !hand_held
             && response.hovered()
             && ui.rect_contains_pointer(rect)

@@ -236,6 +236,11 @@ impl Editor {
                 } if id == self.preview.before.task.id() => {
                     self.status = format!("Before: {error}");
                     self.preview.before.task.finish(id);
+                    // A failed render on the GPU retires the edit's textures too: render
+                    // the edit again. Before keeps its failed job, so it is not retried.
+                    if self.preview.texture.is_none() && self.preview.region.is_none() {
+                        self.schedule();
+                    }
                 }
                 Event::RendererReset(retired) => {
                     self.preview.forget_presented();
