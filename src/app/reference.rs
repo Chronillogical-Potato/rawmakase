@@ -130,6 +130,8 @@ impl Editor {
             return;
         };
         if self.document.catalog_photo == Some(id) {
+            // Shown live: open, so whatever kept it from loading is past.
+            self.reference.error = None;
             return;
         }
         let source = self.library.as_ref().and_then(|l| l.develop_source(id));
@@ -187,13 +189,16 @@ impl Editor {
         };
         match result {
             Ok(developed) => {
-                if developed.resolution == Resolution::Full {
+                // Only the full decode counts as developed: after a half-size one
+                // alone (the full one failed), it is developed again when asked.
+                let full = developed.resolution == Resolution::Full;
+                if full {
                     self.reference.load.finish(ticket);
                     self.reference.pending = None;
                 }
                 self.reference.loaded = Some(Loaded {
                     photo,
-                    tag,
+                    tag: if full { tag } else { String::new() },
                     image: developed.image,
                     recipe: developed.recipe,
                 });
@@ -211,9 +216,13 @@ impl Editor {
     /// edited, live, when it is the reference.
     pub(super) fn reference_side(&self) -> Option<ReferenceSide> {
         let id = self.reference.photo?;
-        if self.document.catalog_photo == Some(id) {
+        // The photo being edited, live, once it is decoded; until then, as it was
+        // last developed as the reference.
+        if self.document.catalog_photo == Some(id)
+            && let Some(image) = self.document.full()
+        {
             return Some(ReferenceSide {
-                image: self.document.full()?.clone(),
+                image: image.clone(),
                 recipe: self.document.recipe.clone(),
             });
         }
@@ -505,9 +514,13 @@ mod tests {
         let shown = super::super::state::Picture::presented(egui::TextureId::Managed(1), [1, 1]);
         editor.preview.before.texture = Some(shown);
         // Left/Right moves the Active photo; the reference stays where it was.
+        editor.reference.error = Some("was offline".into());
         editor.develop_catalog_photo(other);
         assert_eq!(editor.document.catalog_photo, Some(other));
         assert!(editor.preview.before.texture.is_some());
+        // Open now, it can't be offline; until it decodes, it shows as developed.
+        assert_eq!(editor.reference.error, None);
+        assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
         assert_eq!(editor.view.compare, Compare::Reference(Axis::LeftRight));
         // Before beside the edit belongs to the photo, and goes with it.
         editor.set_compare(Compare::SideBySide(Axis::LeftRight));
@@ -578,6 +591,30 @@ mod tests {
         editor.remove_virtual_copy(copy);
         assert_eq!(editor.reference.photo, None);
         assert!(editor.reference_side().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn a_reference_whose_full_decode_failed_is_developed_again() -> anyhow::Result<()> {
+        let mut fixture = fixture()?;
+        let other = fixture.other;
+        let editor = &mut fixture.editor;
+        editor.set_reference(other);
+        wait_for_reference(editor);
+        let image = editor.reference_side().unwrap().image;
+        editor.reload_reference();
+        let ticket = editor.reference.load.id();
+        let half = ReferenceImage {
+            image,
+            recipe: Recipe::default(),
+            resolution: Resolution::Half,
+        };
+        editor.reference_ready(ticket, Ok(Box::new(half)));
+        editor.reference_ready(ticket, Err("full decode failed".into()));
+        assert!(!editor.reference.loading());
+        editor.load_reference();
+        assert!(editor.reference.loading());
+        wait_for_reference(editor);
         Ok(())
     }
 
