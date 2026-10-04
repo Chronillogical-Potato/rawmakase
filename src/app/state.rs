@@ -451,6 +451,8 @@ impl ViewState {
         self.red_eye.clear_document();
         self.masking.clear_document();
         self.guided.clear_document();
+        // The next photo's values come with its first render.
+        self.readout.values = None;
         // Before alone is left with the photo; Before beside the edit stays, as
         // Lightroom keeps its Before/After view from photo to photo.
         if self.compare.before_only() {

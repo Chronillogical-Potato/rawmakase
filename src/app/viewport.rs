@@ -438,10 +438,11 @@ impl Editor {
             self.schedule();
         }
         // The RGB readout follows the pointer over the photo being edited, not over
-        // Before or the reference beside it, nor in the Library's Loupe.
+        // Before (alone or beside it) or the reference, nor in the Library's Loupe.
+        let edit_shown = !self.library_mode && !self.view.compare.before_only();
         let hover = response
             .hover_pos()
-            .filter(|p| !self.library_mode && panes.after.clip.contains(*p));
+            .filter(|p| edit_shown && panes.after.clip.contains(*p));
         self.update_readout(hover, rect, region_rect);
         if self.wants_samples() {
             // The loupe and the readout read the shown pixels, which renders keep only

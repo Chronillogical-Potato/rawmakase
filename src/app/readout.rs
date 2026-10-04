@@ -76,18 +76,11 @@ impl Editor {
         pixel_at(self.preview.samples.as_ref()?, rect, pos)
     }
     /// Follows the pointer over the photo being edited (`hover`, on the photo drawn
-    /// at `rect`): asks for renders that keep their pixels when it arrives, and reads
-    /// the values under it.
+    /// at `rect`): renders keep their pixels while it is there (the viewport asks for
+    /// one when they start to), and reads the values under it.
     pub(super) fn update_readout(&mut self, hover: Option<Pos2>, rect: Rect, region: Option<Rect>) {
         let hover = hover.filter(|p| rect.contains(*p));
-        let hovering = hover.is_some();
-        if hovering != self.view.readout.hovering {
-            let had = self.wants_samples();
-            self.view.readout.hovering = hovering;
-            if !had && self.wants_samples() {
-                self.schedule();
-            }
-        }
+        self.view.readout.hovering = hover.is_some();
         let values = hover
             .and_then(|pos| self.shown_pixel(pos, rect, region))
             .map(melissa_percent);
@@ -163,6 +156,9 @@ mod tests {
             e.view.readout.text().as_deref(),
             Some("R 100.0   G 100.0   B 100.0 %")
         );
+        // Another photo: no values until its pixels arrive.
+        e.view.clear_document();
+        assert_eq!(e.view.readout.text(), None);
         // Off the photo: the readout goes, and so do the renders' pixels.
         e.update_readout(Some(Pos2::new(250., 50.)), rect, None);
         assert_eq!(e.view.readout, Readout::default());
