@@ -47,6 +47,15 @@ pub struct Entry {
     blue: Option<Chromatic>,
 }
 
+impl Entry {
+    /// Whether the entry describes any correction this reader applies.
+    fn has_model(&self) -> bool {
+        self.distortion.is_some()
+            || self.vignette.is_some()
+            || (self.red.is_some() && self.blue.is_some())
+    }
+}
+
 fn attr(node: roxmltree::Node, name: &str) -> Option<String> {
     node.attribute((ST_CAMERA, name))
         .map(str::to_string)
@@ -450,7 +459,10 @@ impl Library {
         let fits: Vec<&Arc<ImportedProfile>> = self
             .profiles
             .iter()
-            .filter(|p| p.usable().any(|e| make_rank(e, m).is_some()))
+            .filter(|p| {
+                p.usable()
+                    .any(|e| e.has_model() && make_rank(e, m).is_some())
+            })
             .collect();
         let shadowed = |p: &ImportedProfile| {
             !p.has_raw()
@@ -481,21 +493,44 @@ impl Library {
     }
 }
 
-/// The imported profiles, cached while the profile folders are unchanged.
+/// What the library was read from: each folder and every LCP file in it, with
+/// modification times and sizes, so a file replaced in place is read again.
+type Stamp = Vec<(PathBuf, Option<SystemTime>, u64)>;
+fn stamp(dirs: &[PathBuf]) -> Stamp {
+    let mut out = Stamp::new();
+    for dir in dirs {
+        let modified = |m: &std::fs::Metadata| m.modified().ok();
+        out.push((
+            dir.clone(),
+            std::fs::metadata(dir).ok().as_ref().and_then(modified),
+            0,
+        ));
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        let mut files: Stamp = entries
+            .flatten()
+            .filter(|f| {
+                f.path()
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("lcp"))
+            })
+            .filter_map(|f| {
+                let m = f.metadata().ok()?;
+                Some((f.path(), modified(&m), m.len()))
+            })
+            .collect();
+        files.sort();
+        out.extend(files);
+    }
+    out
+}
+
+/// The imported profiles, cached while the profile files are unchanged.
 pub fn library() -> Arc<Library> {
-    type Stamp = Vec<(PathBuf, Option<SystemTime>)>;
     static CACHE: Mutex<Option<(Stamp, Arc<Library>)>> = Mutex::new(None);
     let dirs = library_dirs();
-    // Adding, replacing or removing a file changes its folder's modification time.
-    let stamp: Stamp = dirs
-        .iter()
-        .map(|d| {
-            (
-                d.clone(),
-                std::fs::metadata(d).and_then(|m| m.modified()).ok(),
-            )
-        })
-        .collect();
+    let stamp = stamp(&dirs);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((s, library)) = cache.as_ref()
         && *s == stamp
@@ -720,5 +755,15 @@ mod tests {
         let bad = d.path().join("b.lcp");
         std::fs::write(&bad, "not xml").unwrap();
         assert!(import_into(&[bad], &dst).is_err());
+    }
+    #[test]
+    fn library_stamp_follows_files_replaced_in_place() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("a.lcp");
+        std::fs::write(&file, SAMPLE).unwrap();
+        let dirs = [d.path().to_path_buf()];
+        let before = stamp(&dirs);
+        std::fs::write(&file, format!("{SAMPLE} ")).unwrap();
+        assert_ne!(stamp(&dirs), before);
     }
 }

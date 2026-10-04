@@ -203,3 +203,58 @@ fn profiles_that_do_not_fit_the_camera_are_not_offered() {
         .collect();
     assert_eq!(names, ["raw.lcp"]);
 }
+
+#[test]
+fn switching_to_custom_keeps_the_digest_of_the_same_profile() {
+    let m = photo();
+    let adobe = &m.lens_profiles.auto(&m).unwrap().profile;
+    let recorded = LensProfileId {
+        name: adobe.name.clone(),
+        filename: adobe.filename.clone(),
+        digest: "0123ABCD".into(),
+    };
+    let mut c = choice(LensProfileSetup::Auto, Some(recorded.clone()));
+    c.set_setup(LensProfileSetup::Custom, Some(adobe));
+    assert_eq!(c.id.as_ref(), Some(&recorded));
+    // Picking the profile already named keeps it too; another one does not.
+    c.choose(adobe);
+    assert_eq!(c.id.as_ref(), Some(&recorded));
+    let mine = &m
+        .lens_profiles
+        .all()
+        .iter()
+        .find(|c| c.profile.filename == MINE)
+        .unwrap()
+        .profile;
+    c.choose(mine);
+    assert!(c.id.as_ref().unwrap().digest.is_empty());
+}
+
+#[test]
+fn default_and_auto_render_alike() {
+    assert_eq!(
+        choice(LensProfileSetup::Default, None).rendering(),
+        choice(LensProfileSetup::Auto, None).rendering()
+    );
+    assert_eq!(
+        choice(LensProfileSetup::Default, id(MINE)).rendering(),
+        choice(LensProfileSetup::Auto, id(MINE)).rendering()
+    );
+    assert_ne!(
+        choice(LensProfileSetup::Auto, id(MINE)).rendering(),
+        choice(LensProfileSetup::Custom, id(MINE)).rendering()
+    );
+}
+
+#[test]
+fn profiles_without_a_correction_model_are_not_offered() {
+    let empty = test_profile("Testcam", "28mm F2", "Adobe (Testcam 28mm F2)", 0., 0.).replace(
+        r#"<stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="0">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="0"/>
+ </rdf:Description></stCamera:PerspectiveModel>"#,
+        "",
+    );
+    assert!(!empty.contains("PerspectiveModel"));
+    let library = Library::from_texts([("empty.lcp", empty.as_str())]);
+    assert!(library.for_photo(&photo()).all().is_empty());
+}

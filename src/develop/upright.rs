@@ -32,7 +32,7 @@ impl LensInputs {
             builtin: shown.lens_builtin,
             profile: shown.lens_profile,
             profile_choice: if shown.lens_profile {
-                shown.lens_profile_choice.clone()
+                shown.lens_profile_choice.rendering()
             } else {
                 Default::default()
             },

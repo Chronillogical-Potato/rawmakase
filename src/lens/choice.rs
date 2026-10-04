@@ -101,17 +101,34 @@ impl LensProfileChoice {
     /// Picking a profile in the Make, Model or Profile menu, which sets Custom.
     pub fn choose(&mut self, profile: &ImportedProfile) {
         self.setup = LensProfileSetup::Custom;
-        self.id = Some(LensProfileId::of(profile));
+        self.id = Some(self.id_for(profile));
+    }
+    /// The identity to record for `profile`: the edit's own when it names the same
+    /// file, which keeps Adobe's digest.
+    fn id_for(&mut self, profile: &ImportedProfile) -> LensProfileId {
+        self.id
+            .take()
+            .filter(|id| profile.is(&id.filename, &id.name))
+            .unwrap_or_else(|| LensProfileId::of(profile))
+    }
+    /// The choice as it renders: Default and Auto match alike.
+    pub fn rendering(&self) -> Self {
+        Self {
+            setup: match self.setup {
+                LensProfileSetup::Default => LensProfileSetup::Auto,
+                setup => setup,
+            },
+            id: self.id.clone(),
+        }
     }
     /// Picking a Setup. Custom keeps the profile in use; Default and Auto match again.
     pub fn set_setup(&mut self, setup: LensProfileSetup, in_use: Option<&ImportedProfile>) {
         self.setup = setup;
         self.id = match setup {
-            LensProfileSetup::Custom => self
-                .id
-                .take()
-                .filter(|_| in_use.is_none())
-                .or_else(|| in_use.map(LensProfileId::of)),
+            LensProfileSetup::Custom => match in_use {
+                Some(profile) => Some(self.id_for(profile)),
+                None => self.id.take(),
+            },
             LensProfileSetup::Default | LensProfileSetup::Auto => None,
         };
     }
