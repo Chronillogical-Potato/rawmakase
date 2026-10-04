@@ -565,14 +565,17 @@ fn the_default_catchlight_fits_tilted_pupils() {
 #[test]
 fn a_light_iris_around_a_dark_pupil_is_not_a_glow() {
     let c = [100., 100.];
-    let mut e = eye(c, 10., [0.6, 0.5, 0.3]);
-    e.iris = 24.;
-    e.pupil_color = [0.02; 3];
-    let mut im = image(200, 200, 0, &[e]);
-    for p in im.pixels.iter_mut().filter(|p| **p == SKIN) {
-        *p = [0.15, 0.12, 0.1];
+    // Wide and constricted pupils alike.
+    for pupil in [10., 5.] {
+        let mut e = eye(c, pupil, [0.6, 0.5, 0.3]);
+        e.iris = 24.;
+        e.pupil_color = [0.02; 3];
+        let mut im = image(200, 200, 0, &[e]);
+        for p in im.pixels.iter_mut().filter(|p| **p == SKIN) {
+            *p = [0.15, 0.12, 0.1];
+        }
+        let frame = ImageFrame::new(&im);
+        let found = find_pupil(&im, frame.to_image(c[0], c[1]), 45. / 200., Glow::Bright);
+        assert_eq!(found, Err(DetectError::NotRed), "pupil {pupil}");
     }
-    let frame = ImageFrame::new(&im);
-    let found = find_pupil(&im, frame.to_image(c[0], c[1]), 45. / 200., Glow::Bright);
-    assert_eq!(found, Err(DetectError::NotRed));
 }

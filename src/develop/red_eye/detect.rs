@@ -238,17 +238,25 @@ pub fn find_pupil(
     }
     let before = area.clone();
     fill_holes(&mut area, gw, gh);
-    // A glow is a disc, perhaps with a small catchlight in it; a ring around something
-    // darker at its middle (a light iris around an ordinary pupil) is not.
+    // A glow is a disc, perhaps with a catchlight in it, brighter than the glow; a ring
+    // around something darker at its middle (a light iris around an ordinary pupil,
+    // however small) is not.
     if glow == Glow::Bright {
         let cells: Vec<usize> = (0..gw * gh).filter(|i| area[*i]).collect();
-        let hole = cells.iter().filter(|i| !before[**i]).count();
         let (mx, my) = cells.iter().fold((0., 0.), |(x, y), i| {
             (x + (i % gw) as f32, y + (i / gw) as f32)
         });
         let n = cells.len().max(1) as f32;
         let middle = (my / n).round() as usize * gw + (mx / n).round() as usize;
-        if hole * 12 > cells.len() && !before[middle] {
+        let mean = |inside: bool| {
+            let values: Vec<f32> = cells
+                .iter()
+                .filter(|i| before[**i] == inside)
+                .map(|i| redness[*i])
+                .collect();
+            values.iter().sum::<f32>() / values.len().max(1) as f32
+        };
+        if !before[middle] && mean(false) < mean(true) {
             return Err(DetectError::NotRed);
         }
     }
