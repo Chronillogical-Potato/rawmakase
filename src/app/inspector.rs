@@ -4,6 +4,7 @@ use super::clipping::{self, ClipSide};
 use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
 use super::state::Tool;
+use super::tone_drag::tone_drag_ui;
 use super::widgets::{
     SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
     slider_with, tone_curve_ui, toolbar_action,
@@ -17,6 +18,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 impl Editor {
     /// Lightroom-style histogram: filled channels whose overlaps mix to
     /// cyan, magenta, yellow and gray, with clipping indicators in the corners.
+    /// Dragging in it moves Blacks, Shadows, Exposure, Highlights or Whites.
     pub(super) fn histogram_ui(&mut self, ui: &mut egui::Ui) {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 96.), Sense::hover());
@@ -75,6 +77,25 @@ impl Editor {
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
+        // After the bars, so the region shows over them; before the triangles,
+        // so their clicks stay theirs.
+        let region = tone_drag_ui(
+            ui,
+            rect,
+            &mut self.view.tone_drag,
+            &mut self.document.recipe,
+        );
+        if let Some(region) = region {
+            let [from, to] = region.span();
+            painter.rect_filled(
+                Rect::from_x_y_ranges(
+                    rect.left() + from * rect.width()..=rect.left() + to * rect.width(),
+                    rect.y_range(),
+                ),
+                0.,
+                Color32::from_white_alpha(14),
+            );
+        }
         // Clipping triangles, as Lightroom's: each lit in the colours of the
         // channels clipping at its end; a click toggles its warning, hovering
         // shows it while the pointer stays, and J toggles both.
@@ -117,23 +138,32 @@ impl Editor {
                 },
             ));
         }
-        let exif = self
-            .document
-            .metadata
-            .as_ref()
-            .map_or_else(String::new, |m| {
-                let info = crate::catalog::PhotoInfo::from_metadata(m);
-                [
-                    info.iso_text(),
-                    info.focal_text(),
-                    info.aperture_text(),
-                    info.shutter_text(),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join("     ")
-            });
+        // The region and its value take the EXIF line's place, as in Lightroom.
+        let region_text = region.map(|region| {
+            format!(
+                "{}   {}",
+                region.label(),
+                region.display(region.value(&self.document.recipe))
+            )
+        });
+        let exif = region_text.unwrap_or_else(|| {
+            self.document
+                .metadata
+                .as_ref()
+                .map_or_else(String::new, |m| {
+                    let info = crate::catalog::PhotoInfo::from_metadata(m);
+                    [
+                        info.iso_text(),
+                        info.focal_text(),
+                        info.aperture_text(),
+                        info.shutter_text(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("     ")
+                })
+        });
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
                 .on_hover_text("Output histogram of the whole photo");

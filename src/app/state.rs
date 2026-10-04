@@ -183,6 +183,8 @@ pub(super) struct ViewState {
     pub(super) compare: bool,
     /// The histogram's clipping warnings.
     pub(super) clipping: super::clipping::ClippingView,
+    /// A drag in the histogram in progress.
+    pub(super) tone_drag: Option<super::tone_drag::ToneDrag>,
     pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
@@ -215,6 +217,7 @@ impl Default for ViewState {
             viewport: Vec2::ZERO,
             compare: false,
             clipping: Default::default(),
+            tone_drag: None,
             tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
