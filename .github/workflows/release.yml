@@ -446,6 +446,10 @@ jobs:
         uses: crmne/native-packages/.github/actions/attest@999768410cf53cdc68c8679c09cb14de1a6bca7b # v0.8.1
         with:
           subject-path: dist/*
+      # Preserve the exact bytes prepared for upload, including the signed
+      # manifests, independently of what the release page serves.
+      - name: Record uploaded checksums
+        run: (cd dist && sha256sum -- *) > "$RUNNER_TEMP/expected-checksums.txt"
       - name: Attach packages to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -459,6 +463,41 @@ jobs:
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "RAWmakase ${RELEASE_TAG#v}" --notes-file release-notes/notes.md
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: expected-checksums
+          path: ${{ runner.temp }}/expected-checksums.txt
+          if-no-files-found: error
+
+  verify:
+    name: Verify the published downloads
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: expected-checksums
+          path: expected
+      - name: Verify the published downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/verify"
+          mkdir -p "$assets"
+          expected="$GITHUB_WORKSPACE/expected/expected-checksums.txt"
+          while read -r _ name; do
+            echo "Downloading $name"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --dir "$assets" --pattern "$name"
+          done < "$expected"
+          (cd "$assets" && sha256sum --check --strict "$expected")
+          echo "Verified: every expected release asset matches the uploaded bytes." >> "$GITHUB_STEP_SUMMARY"
 
   website:
     name: Update website downloads
