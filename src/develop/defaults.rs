@@ -103,6 +103,19 @@ impl RawDefaults {
             .find(|c| same_name(&c.camera, camera))
             .map(|c| &c.choice)
     }
+    /// Follows a preset that moved to `id` (renamed), wherever it is chosen.
+    pub fn rename_preset(&mut self, old: &str, id: &str, name: &str) {
+        let choices =
+            std::iter::once(&mut self.master).chain(self.cameras.iter_mut().map(|c| &mut c.choice));
+        for choice in choices {
+            if matches!(choice, DefaultChoice::Preset { id: was, .. } if was == old) {
+                *choice = DefaultChoice::Preset {
+                    id: id.into(),
+                    name: name.into(),
+                };
+            }
+        }
+    }
     fn choices(&self) -> impl Iterator<Item = &DefaultChoice> {
         std::iter::once(&self.master).chain(self.cameras.iter().map(|c| &c.choice))
     }
@@ -451,6 +464,27 @@ mod tests {
         );
         settings.set_camera("ILCE-7C", DefaultChoice::Rawmakase);
         assert_eq!(settings.cameras.len(), 2);
+    }
+
+    #[test]
+    fn a_renamed_preset_stays_the_default() {
+        let mut settings = RawDefaults {
+            master: preset_choice("a.xmp"),
+            ..Default::default()
+        };
+        settings.set_camera("Canon EOS R5", preset_choice("a.xmp"));
+        settings.set_camera("Fujifilm X100F", preset_choice("other.xmp"));
+        settings.rename_preset("a.xmp", "b.xmp", "Brightest");
+        let renamed = DefaultChoice::Preset {
+            id: "b.xmp".into(),
+            name: "Brightest".into(),
+        };
+        assert_eq!(settings.master, renamed);
+        assert_eq!(settings.camera_choice("Canon EOS R5"), Some(&renamed));
+        assert_eq!(
+            settings.camera_choice("Fujifilm X100F"),
+            Some(&preset_choice("other.xmp"))
+        );
     }
 
     #[test]

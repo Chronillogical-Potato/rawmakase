@@ -155,6 +155,10 @@ impl Editor {
                     self.presets.revision += 1;
                     let _ = crate::presets::save_favorites(&self.presets.favorites);
                 }
+                // So does a raw default.
+                let mut defaults = self.raw_defaults.settings().clone();
+                defaults.rename_preset(&old, &path.to_string_lossy(), rename.name.trim());
+                self.set_raw_defaults(defaults);
                 self.status = format!("Preset renamed to {}", rename.name.trim());
                 self.reload_presets(ctx);
             }

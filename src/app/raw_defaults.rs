@@ -464,6 +464,58 @@ mod tests {
     }
 
     #[test]
+    fn a_lightroom_edit_that_cannot_be_read_leaves_adobe_default() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let raw = dir.path().join("photo.ARW");
+        std::fs::write(&raw, b"identity fixture")?;
+        let path = dir.path().join("photos.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&path)?;
+        catalog.add_folder(dir.path())?;
+        let id = catalog.photos()?[0].id;
+        drop(catalog);
+        rusqlite::Connection::open(&path)?.execute(
+            "UPDATE photos SET lightroom_develop='s = { Exposure2012 = ' WHERE id=?",
+            [id],
+        )?;
+        let ctx = egui::Context::default();
+        let m = x100f();
+        let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+        editor.library = Some(Box::new(crate::app::library::Library::load(
+            &path,
+            ctx.clone(),
+        )?));
+        editor.raw_defaults = Arc::new(crate::develop::defaults::brighter_defaults());
+        editor.document.reset(Some(id));
+        let (generation, _) = editor.load.start();
+        for event in [
+            Event::Header(Box::new(LoadedHeader {
+                id: generation,
+                path: raw.clone(),
+                metadata: m.clone(),
+                // As the loader resolves it.
+                recipe: editor.raw_defaults.resolve(&m, &profiles(&m)).recipe,
+                export: Default::default(),
+                protected: false,
+                status: "Original".into(),
+            })),
+            Event::Profiles {
+                id: generation,
+                profiles: profiles(&m),
+                errors: Vec::new(),
+            },
+        ] {
+            editor.tx.send(event).unwrap();
+        }
+        editor.events(&ctx);
+        assert!(editor.document.lightroom_notice.contains("not applied"));
+        assert_eq!(
+            editor.document.recipe,
+            Recipe::with_profiles(&m, &profiles(&m))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn a_fallback_note_outlasts_the_decode_status() {
         let ctx = egui::Context::default();
         let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
