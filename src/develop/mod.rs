@@ -39,7 +39,7 @@ mod white_balance;
 
 pub use crate::color_math::{mul, srgb_encode};
 pub use auto::{
-    auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
+    AutoTone, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,
 };
 pub use black_white::{AutoMix, ColorSpread, Treatment, is_monochrome};

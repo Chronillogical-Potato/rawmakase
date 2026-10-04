@@ -1,8 +1,8 @@
 //! One-click Auto: the Basic tone sliders, and white balance, chosen for a photo.
 //!
-//! White balance is estimated from the camera pixels. The tone sliders and Vibrance
-//! are predicted from a reduced render of the photo before its adjustments, by linear
-//! fits to Lightroom's own Auto values.
+//! White balance is estimated from the camera pixels. The tone sliders, Vibrance and
+//! Saturation are predicted from a reduced render of the photo before its adjustments,
+//! by linear fits to Lightroom's own Auto values.
 use super::{
     Recipe,
     pipeline::{preview, render},
@@ -24,9 +24,14 @@ const TONE_EDGE: u32 = 1024;
 /// Largest long edge of the reduced photo either is cropped from, so a tight crop never
 /// copies a full-size photo (about 34 MB at 2048 × 1365).
 const ANALYSIS_SOURCE_MAX: u32 = 2048;
-/// Vibrance Lightroom's Auto gives nearly every photo (median +15, half of photos
-/// within ±2; see docs/tone-controls.md).
+/// Vibrance Lightroom's Auto gives nearly every photo (+15 for most, nearly all within
+/// ±2; see docs/tone-controls.md).
 const AUTO_VIBRANCE: f32 = 0.15;
+/// Contrast Lightroom's current Auto gives every photo (+5 to +7).
+const AUTO_CONTRAST: f32 = 0.06;
+/// Below this brightest channel a pixel counts as without colour, as its hue is mostly
+/// noise.
+const CHROMA_FLOOR: f32 = 0.02;
 
 /// `base` with white balance chosen so the photo's near-neutral areas render neutral.
 pub fn auto_white_balance(im: &CameraImage, base: &Recipe) -> Result<Recipe> {
@@ -66,15 +71,8 @@ pub fn auto_tone_cancellable(
 ) -> Result<Recipe> {
     let t = auto_tone_basis(base);
     let small = tone_copy(im, &t, cancel)?;
-    let tone = Tone::of(&Measure::of(&small, &t, cancel)?);
     let mut r = base.clone();
-    r.exposure = tone.exposure;
-    r.contrast = tone.contrast;
-    r.highlights = tone.highlights;
-    r.shadows = tone.shadows;
-    r.whites = tone.whites;
-    r.blacks = tone.blacks;
-    r.vibrance = AUTO_VIBRANCE;
+    AutoTone::predict(&Measure::of(&small, &t, cancel)?).apply(&mut r);
     r.validate()?;
     Ok(r)
 }
@@ -235,10 +233,13 @@ fn gray_world(pixels: &[[f32; 3]]) -> Result<[f32; 3]> {
     Ok(std::array::from_fn(|c| (sum[1] / sum[c]) as f32))
 }
 
-/// Sorted luminance and brightest-channel values of a render, in display encoding.
+/// Sorted luminance, brightest-channel and chroma values of a render, in display
+/// encoding. Chroma is the spread of a pixel's channels relative to its brightest one,
+/// 0 for gray and 1 for a fully saturated colour.
 struct Measure {
     luma: Vec<f32>,
     peak: Vec<f32>,
+    chroma: Vec<f32>,
 }
 impl Measure {
     fn of(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Self> {
@@ -247,14 +248,22 @@ impl Measure {
         ensure!(!out.pixels.is_empty(), "Nothing to measure for Auto");
         let mut luma = Vec::with_capacity(out.pixels.len());
         let mut peak = Vec::with_capacity(out.pixels.len());
+        let mut chroma = Vec::with_capacity(out.pixels.len());
         for p in &out.pixels {
             let p = p.map(|v| if v.is_finite() { v.clamp(0., 1.) } else { 0. });
+            let (max, min) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
             luma.push(0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]);
-            peak.push(p[0].max(p[1]).max(p[2]));
+            peak.push(max);
+            chroma.push(if max > CHROMA_FLOOR {
+                (max - min) / max
+            } else {
+                0.
+            });
         }
         luma.sort_by(f32::total_cmp);
         peak.sort_by(f32::total_cmp);
-        Ok(Self { luma, peak })
+        chroma.sort_by(f32::total_cmp);
+        Ok(Self { luma, peak, chroma })
     }
     fn luma(&self, q: f32) -> f32 {
         percentile(&self.luma, q)
@@ -262,48 +271,83 @@ impl Measure {
     fn peak(&self, q: f32) -> f32 {
         percentile(&self.peak, q)
     }
+    fn chroma(&self, q: f32) -> f32 {
+        percentile(&self.chroma, q)
+    }
 }
 fn percentile(sorted: &[f32], q: f32) -> f32 {
     sorted[((sorted.len() - 1) as f32 * q.clamp(0., 1.)).round() as usize]
 }
 
-/// The tone sliders Auto sets, in slider units (Exposure in EV, the rest −1 to 1).
-struct Tone {
-    exposure: f32,
-    contrast: f32,
-    highlights: f32,
-    shadows: f32,
-    whites: f32,
-    blacks: f32,
+/// The settings Auto chooses, in slider units (Exposure in EV, the rest −1 to 1): the
+/// six Tone sliders, Vibrance and Saturation, which Lightroom's Auto sets too.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AutoTone {
+    pub exposure: f32,
+    pub contrast: f32,
+    pub highlights: f32,
+    pub shadows: f32,
+    pub whites: f32,
+    pub blacks: f32,
+    pub vibrance: f32,
+    pub saturation: f32,
 }
-impl Tone {
+impl AutoTone {
+    /// The settings of `r` Auto chooses.
+    pub fn of(r: &Recipe) -> Self {
+        Self {
+            exposure: r.exposure,
+            contrast: r.contrast,
+            highlights: r.highlights,
+            shadows: r.shadows,
+            whites: r.whites,
+            blacks: r.blacks,
+            vibrance: r.vibrance,
+            saturation: r.saturation,
+        }
+    }
+
+    /// Sets these in `r`, leaving every other setting as it is.
+    pub fn apply(self, r: &mut Recipe) {
+        r.exposure = self.exposure;
+        r.contrast = self.contrast;
+        r.highlights = self.highlights;
+        r.shadows = self.shadows;
+        r.whites = self.whites;
+        r.blacks = self.blacks;
+        r.vibrance = self.vibrance;
+        r.saturation = self.saturation;
+    }
+
     /// Lightroom's Auto values predicted from the photo rendered with its tone sliders
     /// at 0. Each slider is a linear fit, to Lightroom Classic's own Auto results, of
-    /// the one or two percentiles that predicted it best on held-out photos (see
-    /// docs/tone-controls.md). Lightroom's Auto is a learned estimate rather than a
-    /// target it solves for: it lifts a dark photo only part of the way to middle gray,
-    /// and nearly always pulls Highlights down and opens Shadows.
-    fn of(m: &Measure) -> Self {
+    /// the one or two percentiles that predicted it best on held-out photos, with the
+    /// level of Lightroom's Auto since mid-2019 (see docs/tone-controls.md). Lightroom's
+    /// Auto is a learned estimate rather than a target it solves for: it lifts a dark
+    /// photo only part of the way to middle gray, and nearly always pulls Highlights
+    /// down and opens Shadows.
+    fn predict(m: &Measure) -> Self {
         // Brighter midtones and highlights both take Exposure down.
         let exposure = 2.22 - 2.13 * m.luma(0.4) - 1.52 * m.luma(0.99);
-        // Lightroom's Contrast barely follows the photo: about −10, raised for photos
-        // whose darkest tones are lifted.
-        let contrast = -10.8 + 54.8 * m.luma(0.01);
         // About −65; more for bright highlights, less for photos with bright shadows.
-        let highlights = -34.6 - 51.1 * m.luma(0.9) + 27. * m.peak(0.25);
-        // About +45; less as the shadows brighten.
-        let shadows = 52. - 40.2 * m.peak(0.1);
+        let highlights = -36. - 51.9 * m.luma(0.9) + 26.9 * m.peak(0.25);
+        // About +50; less as the shadows brighten.
+        let shadows = 54.4 - 41.5 * m.peak(0.1);
         // Raised the more the brightest channel falls short of white.
         let whites = 67.5 - 52.2 * m.peak(0.998);
-        // About −15, from the darkest 1% in stops: deep shadows are darkened less.
-        let blacks = -35.3 - 1.91 * srgb_decode(m.luma(0.01)).max(1e-4).log2();
+        // About −20, from the darkest 1% in stops: deep shadows are darkened less.
+        let blacks = -38. - 1.86 * srgb_decode(m.luma(0.01)).max(1e-4).log2();
+        // +2 for a photo without colour, less the more colourful its duller part is.
+        let saturation = 2.07 - 10.2 * m.chroma(0.35);
         Self {
             exposure: round(exposure.clamp(-5., 5.), 100.),
-            contrast: round(contrast.clamp(-100., 100.), 1.) / 100.,
+            contrast: AUTO_CONTRAST,
             highlights: round(highlights.clamp(-100., 0.), 1.) / 100.,
             shadows: round(shadows.clamp(0., 100.), 1.) / 100.,
             whites: round(whites.clamp(-100., 100.), 1.) / 100.,
             blacks: round(blacks.clamp(-100., 0.), 1.) / 100.,
+            vibrance: AUTO_VIBRANCE,
+            saturation: round(saturation.clamp(-100., 100.), 1.) / 100.,
         }
     }
 }
@@ -695,8 +739,9 @@ mod tests {
     #[test]
     fn auto_sets_sliders_as_lightrooms_auto_does() {
         // An evenly lit mid-tone photo. Lightroom's Auto pulls Highlights well down,
-        // opens Shadows, darkens Blacks and adds Vibrance (see docs/tone-controls.md);
-        // these are the fitted model's values, so a change to it shows here.
+        // opens Shadows, darkens Blacks, sets Contrast to +6 and adds Vibrance and, for a
+        // photo without colour, Saturation (see docs/tone-controls.md); these are the
+        // fitted model's values, so a change to it shows here.
         let auto = auto_tone(&scene([1.; 3], 0.5), &Recipe::default()).unwrap();
         let got = [
             auto.exposure,
@@ -706,12 +751,35 @@ mod tests {
             auto.whites,
             auto.blacks,
             auto.vibrance,
+            auto.saturation,
         ];
-        let expected = [0.5, -0.05, -0.59, 0.46, 0.33, -0.23, AUTO_VIBRANCE];
+        let expected = [0.5, 0.06, -0.61, 0.49, 0.33, -0.26, AUTO_VIBRANCE, 0.02];
         assert!(
             got.iter().zip(expected).all(|(g, e)| (g - e).abs() < 0.015),
             "{got:?} vs {expected:?}"
         );
+    }
+
+    #[test]
+    fn contrast_is_the_same_for_every_photo_as_in_lightroom() {
+        // Lightroom's current Auto gives Contrast +5 to +7 whatever the photo.
+        for (cast, level) in [([1.; 3], 0.04), ([1.; 3], 3.), ([1.6, 1., 0.4], 0.5)] {
+            let auto = auto_tone(&scene(cast, level), &Recipe::default()).unwrap();
+            assert_eq!(auto.contrast, AUTO_CONTRAST, "{cast:?} at {level}");
+        }
+    }
+
+    #[test]
+    fn muted_photos_get_more_saturation_than_colourful_ones() {
+        let saturation = |cast| {
+            auto_tone(&scene(cast, 0.5), &Recipe::default())
+                .unwrap()
+                .saturation
+        };
+        let gray = saturation([1.; 3]);
+        let colourful = saturation([1.6, 1., 0.4]);
+        assert_eq!(gray, 0.02);
+        assert!(colourful < 0., "{colourful}");
     }
 
     #[test]
@@ -746,7 +814,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_tone_sets_only_the_tone_sliders_and_vibrance() {
+    fn auto_tone_sets_only_the_tone_sliders_vibrance_and_saturation() {
         let im = scene([1.2, 1., 0.8], 0.1);
         let mut base = Recipe {
             saturation: 0.3,
@@ -771,6 +839,7 @@ mod tests {
         expected.whites = base.whites;
         expected.blacks = base.blacks;
         expected.vibrance = base.vibrance;
+        expected.saturation = base.saturation;
         assert_eq!(expected, base);
         // Estimates are independent of the tone sliders they replace.
         let untouched = Recipe {
@@ -801,17 +870,7 @@ mod tests {
         adjusted.effects.vignette = -0.5;
         let a = auto_tone(&im, &plain).unwrap();
         let b = auto_tone(&im, &adjusted).unwrap();
-        let tone = |r: &Recipe| {
-            [
-                r.exposure,
-                r.contrast,
-                r.highlights,
-                r.shadows,
-                r.whites,
-                r.blacks,
-            ]
-        };
-        assert_eq!(tone(&a), tone(&b));
+        assert_eq!(AutoTone::of(&a), AutoTone::of(&b));
         // The adjustments themselves are kept.
         assert_eq!(b.curve, adjusted.curve);
         assert_eq!(b.effects, adjusted.effects);

@@ -59,36 +59,38 @@ The Tone Curve's target button (top left of the panel) or Cmd+Option+Shift+T ope
 
 ## Auto
 
-The Basic panel's **Auto** (the button at the top of the Basic panel, above Treatment, or Cmd/Ctrl+Shift+U) sets the six Tone sliders and Vibrance, and keeps white balance, including a manual one, as Lightroom's does; **Auto** in the WB menu sets white balance alone, and the menu shows Auto while the photo keeps that result. `rawmakase render --auto` applies Auto tone from the command line (it sets Exposure, so it does not combine with `--exposure`), and `--auto-wb` applies Auto white balance first. The implementation is `src/develop/auto.rs`; it keeps every other setting, and the app runs it off the UI thread and records one History step. Like Lightroom's, Auto tone measures the photo before its adjustments: as the profile, white balance, calibration, lens corrections and crop render it, without the tone sliders, curves and Levels, presence, color mixer, B&W, grading, detail, effects, spots and masks. So a film-look curve that lifts the blacks, or a color edit, does not change what Auto chooses. In a Lightroom catalog's history, photos whose point curve lifted black to 30/255 or more still got ordinary Auto Blacks (median −10, as against −17 without such a curve), which measuring through the curve could not give. Like Lightroom's, it also sets Vibrance (below). Auto is greyed out (and its shortcut does nothing) while running it again would change nothing: the six Tone sliders and Vibrance are as Auto set them and nothing Auto measures (profile, white balance, calibration, lens corrections, crop) has changed. Moving a Tone slider or Vibrance, changing one of those, undoing Auto or opening another photo turns it back on; adjustments Auto ignores, such as a curve, Clarity or the color mixer, leave it greyed out.
+The Basic panel's **Auto** (the button at the top of the Basic panel, above Treatment, or Cmd/Ctrl+Shift+U) sets the six Tone sliders, Vibrance and Saturation, and keeps white balance, including a manual one, as Lightroom's does; **Auto** in the WB menu sets white balance alone, and the menu shows Auto while the photo keeps that result. `rawmakase render --auto` applies Auto tone from the command line (it sets Exposure, so it does not combine with `--exposure`), and `--auto-wb` applies Auto white balance first. The implementation is `src/develop/auto.rs`; it keeps every other setting, and the app runs it off the UI thread and records one History step. Like Lightroom's, Auto tone measures the photo before its adjustments: as the profile, white balance, calibration, lens corrections and crop render it, without the tone sliders, curves and Levels, presence, color mixer, B&W, grading, detail, effects, spots and masks. So a film-look curve that lifts the blacks, or a color edit, does not change what Auto chooses. In a Lightroom catalog's history, photos whose point curve lifted black to 30/255 or more still got ordinary Auto Blacks (median −10, as against −17 without such a curve), which measuring through the curve could not give. Like Lightroom's, it also sets Vibrance and Saturation (below). Auto is greyed out (and its shortcut does nothing) while running it again would change nothing: the six Tone sliders, Vibrance and Saturation are as Auto set them and nothing Auto measures (profile, white balance, calibration, lens corrections, crop) has changed. Moving a Tone slider, Vibrance or Saturation, changing one of those, undoing Auto or opening another photo turns it back on; adjustments Auto ignores, such as a curve, Clarity or the color mixer, leave it greyed out.
 
 - **White balance** follows Lightroom's Auto as measured: gray world (the average of the camera pixels in the crop made neutral; pixels near clipping or in the noise floor are ignored), then 23 mired warmer and 3 Tint greener, limited to 2850–7500 K and Tint 0 to +30, the range Lightroom's Auto keeps to. The camera pixels are the decoded ones, before highlight recovery invents colour. XMP presets and settings with `WhiteBalance="Auto"` and no resolved Temperature/Tint use the same estimate. On 133 photos from three cameras with Lightroom's or Camera Raw 18.6's Auto values (A7 II from a Lightroom catalog, A7CR and X100F from Camera Raw, all with Adobe Standard), the estimate is within a median of 2.7 mired of Adobe's (90% within 5.5, worst 27, on an A7CR neon night scene) and 1 Tint; the earlier near-neutral search was 24 mired off (worst 183) and averaged 20 mired cooler. The tuning photos are private.
-- **Tone** is predicted from one render of the photo before its adjustments, reduced so the crop's long edge is about 1024 px, with every tone slider at 0. Lightroom's Auto behaves like a learned estimate rather than a target it solves for: it lifts a dark photo only part of the way to middle gray, holds Exposure back for bright highlights, and nearly always pulls Highlights down (median −65) and opens Shadows (+47). So each slider is a linear fit, to Lightroom Classic's own Auto values, of the one or two display-encoded percentiles of luminance (L) or of the brightest channel (P) that predicted it best on held-out photos:
+- **Tone** is predicted from one render of the photo before its adjustments, reduced so the crop's long edge is about 1024 px, with every tone slider at 0. Lightroom's Auto behaves like a learned estimate rather than a target it solves for: it lifts a dark photo only part of the way to middle gray, holds Exposure back for bright highlights, and nearly always pulls Highlights down (median −65) and opens Shadows (+47). So each slider is a linear fit, to Lightroom Classic's own Auto values, of the one or two display-encoded percentiles of luminance (L), of the brightest channel (P) or of chroma (C, a pixel's channel spread relative to its brightest channel, 0 for gray and pixels darker than 2%) that predicted it best on held-out photos:
 
   | Slider | Fit |
   |---|---|
   | Exposure | 2.22 − 2.13 L40 − 1.52 L99 (EV) |
-  | Contrast | −10.8 + 54.8 L1 |
-  | Highlights | −34.6 − 51.1 L90 + 27 P25 |
-  | Shadows | 52 − 40.2 P10 |
+  | Contrast | +6 |
+  | Highlights | −36 − 51.9 L90 + 26.9 P25 |
+  | Shadows | 54.4 − 41.5 P10 |
   | Whites | 67.5 − 52.2 P99.8 |
-  | Blacks | −35.3 − 1.91 log2(linear L1) |
+  | Blacks | −38 − 1.86 log2(linear L1) |
   | Vibrance | +15 |
+  | Saturation | 2.07 − 10.2 C35 |
 
-  Lightroom's Auto overwrites Vibrance and Saturation too. Vibrance is nearly constant (median +15, half of photos within ±2, all within +7…+21), so Auto sets +15 and leaves Saturation alone: Lightroom's Saturation splits between about −1 and +4 in a way no percentile or colourfulness measure predicted (a constant +2 would cut its error only from 2.9 to 2.4).
+  Lightroom changed its Auto in mid-2019, and the catalog's history shows both versions. The earlier one gave Contrast about −17, Saturation +4 and Vibrance +17 under process version 10; the current one gives every photo Contrast +5 to +7 (so a constant +6 is within 1 of it), Vibrance +15 (+14 or +15 for four photos in five) and a Saturation mostly from −4 to +3 that follows how colourful the photo's duller part is: a gray photo gets +2, a colourful one less or a negative value. It also sets Blacks about 5 lower and Shadows about 3 higher. The sliders' dependence on the photo is the same in both, so the slopes are fitted on every photo and the levels, Contrast, Vibrance and Saturation on the current Auto alone. Lightroom's Saturation is overwritten by its Auto, so Auto here sets it too.
 
-  The fit uses 253 Auto Settings steps on 246 photos from a Lightroom Classic catalog (mostly two cameras, process versions 10 and 11), comparing each step's result with Auto run on the settings just before it; steps followed directly by a preset, paste or reset are left out, as is any slider the next step changed. Every fifth photo was held out of the fit. Mean absolute error on those 49 held-out photos, before (the earlier solve-for-targets Auto) and after (the fits applied to each photo's measured render; Auto run on such a photo gives the same values):
+  The fit uses 452 Auto Settings steps on 439 photos from a Lightroom Classic catalog (mostly two cameras, process versions 10 and 11; 124 photos are from the current Auto), comparing each step's result with Auto run on the settings just before it. Lightroom records Auto's values in the step after it, so steps followed by a reset, paste or sync are left out, as is any slider the next step changed; after a preset, only the sliders that preset is never seen to change in the catalog are used. Every fifth photo was held out of the fit. Absolute error on the held-out photos from the current Auto (18 to 25 per slider), median and 90th percentile, before (the fit that treated both versions as one, which left Saturation as it was) and after; Auto run on a photo gives exactly these values:
 
-  | Slider | Before | After |
-  |---|---|---|
-  | Exposure | 0.53 EV | 0.25 EV |
-  | Contrast | 14.2 | 13.4 |
-  | Highlights | 33.3 | 6.5 |
-  | Shadows | 25.7 | 8.0 |
-  | Whites | 19.7 | 12.2 |
-  | Blacks | 16.3 | 4.7 |
-  | Vibrance | 15.1 | 2.2 |
+  | Slider | Before median | Before p90 | After median | After p90 |
+  |---|---|---|---|---|
+  | Exposure | 0.21 EV | 0.46 EV | 0.21 EV | 0.46 EV |
+  | Contrast | 15.5 | 16 | 1 | 1 |
+  | Highlights | 6 | 14.6 | 7 | 15.8 |
+  | Shadows | 8 | 25.3 | 6.5 | 23.3 |
+  | Whites | 8 | 29.8 | 8 | 29.8 |
+  | Blacks | 2.5 | 11 | 4 | 8 |
+  | Vibrance | 0 | 5 | 0 | 5 |
+  | Saturation | 2 | 3.4 | 1 | 2.4 |
 
-  On the photos it was fitted to, the errors are 0.27 EV, 11.1, 6.0, 7.6, 11.5, 4.8 and 2.0, close to the held-out ones, so the fit carries over to photos it has not seen. Contrast is barely predictable (a constant does as well), and Whites only somewhat. The earlier Auto placed the median at 18% gray, Whites and Blacks at fixed end points, and capped Highlights at −60 and Shadows at +50, which made it 32 too weak on Highlights, 21 on Shadows and 16 on Blacks on average. The tuning photos are private.
+  The averaged error falls from 15 to 0.7 on Contrast, 10.3 to 9.3 on Shadows, 7.7 to 7.2 on Highlights and 2.1 to 1.2 on Saturation, and the bias of Blacks (+3.4) and Shadows (−8.9, −2.2 on the fitted photos) goes. On the 60 to 99 current-Auto photos it was fitted to, the medians and 90th percentiles are 0.21 and 0.55 EV, 1 and 1, 5 and 14.5, 7 and 18, 10 and 33, 4 and 11, 0 and 2, 1 and 3, so the fit carries over to photos it has not seen. Whites is predicted only somewhat. Fits of three percentiles, or of colourfulness, gained at most 0.02 EV on Exposure and 1 on Whites and Vibrance in cross-validation on the current Auto's photos, too little to trust on this few. The earlier Auto's photos are now further off on Contrast (median 24) and Saturation, as intended. The tuning photos are private.
 
 A photo takes one render of the reduced copy, after highlight recovery and the reduction itself.
 
@@ -96,5 +98,5 @@ A photo takes one render of the reduced copy, after highlight recovery and the r
 
 - Positive Whites needs the image-adaptive white point. The table is a median, which is poor on photos with dim highlights at +100.
 - Contrast's photo-dependent pivot is not yet modeled. The averaged curve already matches within about 0.005.
-- Auto's Contrast and Saturation: Lightroom's choices did not follow any measured percentile or colourfulness, so Contrast is close to a constant and Saturation is left alone.
+- Auto's Whites: Lightroom's choice follows the brightest percentiles only loosely (90th percentile error about 30).
 - Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.
