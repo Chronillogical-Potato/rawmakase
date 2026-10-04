@@ -31,11 +31,12 @@ After a preset that supports it is applied, an **Amount** slider (0–200%, 100%
 
 The settings before the preset and the preset's result are kept once, when it is applied, and every Amount is worked out from those two again, so dragging back and forth never drifts. Nothing about the Amount is saved: the photo keeps the resulting settings, as Lightroom does. Likewise a Lightroom edit or sidecar is read from its settings alone; the preset it came from and its Amount are never applied again.
 
-A preset offers an Amount when its file says so (`crs:SupportsAmount="True"`, as most of Adobe's do) and it changes nothing that doesn't scale: lens profile corrections, chromatic aberration, crop and straighten, Transform, Upright, spots and masks. Adobe's own presets with lens or chromatic aberration corrections don't offer one either. Built-in presets offer one, except Curve › Linear, which resets the curve as Adobe's “None” presets do. A preset made with New Develop Preset… offers one when none of those groups is among its settings.
+A preset offers an Amount when its file says so (`crs:SupportsAmount="True"`, as most of Adobe's do) and it changes nothing that doesn't scale: lens profile corrections, chromatic aberration, crop and straighten, Transform, Upright, spots, masks, and Point Color swatches added or taken away (a preset with Color Adjustments clears a photo's swatches, so it has no Amount on a photo that has some). Adobe's own presets with lens or chromatic aberration corrections don't offer one either. Built-in presets offer one, except Curve › Linear, which resets the curve as Adobe's “None” presets do. A preset made with New Develop Preset… offers one when none of those groups is among its settings.
 
 Adobe doesn't document how each setting scales, and Camera Raw offers the slider only in its own window rather than through the settings a script can hand it, so RAWmakase's rule is not yet measured against Lightroom:
 
 - Sliders move in a straight line from their value before the preset to the preset's, continuing past it above 100%, within the slider's range.
+- Point Color swatches the photo already has scale their Hue, Saturation and Luminance shifts.
 - Temperature moves evenly in mireds, as its slider does; Tint in a straight line.
 - Point curves blend their outputs at the points of both curves. When the curve before is straight, as it usually is, that is exactly the blended curve.
 - Color Grading hues take the shorter way round the wheel, or the preset's hue straight away where there was no saturation before.

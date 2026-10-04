@@ -376,3 +376,24 @@ fn parametric_splits_keep_growing_until_they_would_cross() {
     }
     assert!(last < 0.2);
 }
+
+/// Point Color swatches scale their shifts; swatches added or taken away don't scale.
+#[test]
+fn point_color_shifts_scale_and_new_swatches_dont() {
+    use crate::develop::point_color::PointColor;
+    let m = metadata();
+    let before = Recipe {
+        point_colors: vec![PointColor::sampled([0.6, 0.4, 0.2])],
+        ..Default::default()
+    };
+    let mut full = before.clone();
+    full.point_colors[0].shift = [0.2, -0.4, 0.];
+    let half = amount(&before, &full).at(0.5, &m);
+    assert_eq!(half.point_colors[0].shift, [0.1, -0.2, 0.]);
+    half.validate().unwrap();
+    let cleared = Recipe::default();
+    assert_eq!(
+        PresetAmount::new(&preset("True"), before, cleared),
+        Err(NoAmount::Changes(SettingGroup::ColorAdjustments))
+    );
+}

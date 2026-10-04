@@ -17,7 +17,8 @@
 //!   a Profile Amount scales it from 0 instead;
 //! - the process version follows the preset at every Amount, as applying does.
 //!
-//! Lens corrections, chromatic aberration, crop, geometry, Upright, spots and masks
+//! Point Color swatches scale their shifts. Lens corrections, chromatic aberration,
+//! crop, geometry, Upright, spots, masks and Point Color swatches added or taken away
 //! don't scale: a preset that changes any of them gets no Amount.
 use crate::{
     develop::{
@@ -143,11 +144,27 @@ fn fixed_change(a: &Recipe, b: &Recipe) -> Option<SettingGroup> {
             SpotRemoval,
         ),
         (a.masks != b.masks, Masking),
+        (!same_swatches(a, b), ColorAdjustments),
         // Settings from a newer release: their kind is unknown.
         (a.unknown != b.unknown, ProcessVersion),
     ]
     .into_iter()
     .find_map(|(changed, group)| changed.then_some(group))
+}
+
+/// Whether both have the same Point Color swatches, apart from their shifts, which
+/// scale. Swatches added or taken away don't.
+fn same_swatches(a: &Recipe, b: &Recipe) -> bool {
+    let unshifted = |r: &Recipe| {
+        r.point_colors
+            .iter()
+            .map(|p| crate::develop::point_color::PointColor {
+                shift: [0.; 3],
+                ..*p
+            })
+            .collect::<Vec<_>>()
+    };
+    unshifted(a) == unshifted(b)
 }
 
 fn process_version(r: &mut Recipe, full: &Recipe) {
@@ -379,6 +396,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         saturation,
         vibrance,
         hsl,
+        point_colors,
         grading,
         noise_luma,
         noise_chroma,
@@ -461,6 +479,16 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         saturation: lerp(a.saturation, *saturation, t, -1., 1.),
         vibrance: lerp(a.vibrance, *vibrance, t, -1., 1.),
         hsl: std::array::from_fn(|i| lerp_all(a.hsl[i], hsl[i], t, -1., 1.)),
+        // `same_swatches` holds: only the shifts differ.
+        point_colors: a
+            .point_colors
+            .iter()
+            .zip(point_colors)
+            .map(|(a, b)| crate::develop::point_color::PointColor {
+                shift: lerp_all(a.shift, b.shift, t, -1., 1.),
+                ..*b
+            })
+            .collect(),
         grading: std::array::from_fn(|i| wheel(a.grading[i], grading[i], t)),
         noise_luma: lerp(a.noise_luma, *noise_luma, t, 0., 1.),
         noise_chroma: lerp(a.noise_chroma, *noise_chroma, t, 0., 1.),
