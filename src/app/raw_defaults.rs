@@ -81,16 +81,18 @@ impl Editor {
         self.follows_defaults().then_some(note)
     }
     /// Makes `settings` the raw defaults, saved with the session, and shows
-    /// photos without an edit with them.
-    pub(super) fn set_raw_defaults(&mut self, settings: RawDefaults) {
+    /// photos without an edit with them. They apply even when the session
+    /// cannot be saved, which is returned.
+    pub(super) fn set_raw_defaults(&mut self, settings: RawDefaults) -> anyhow::Result<()> {
         let defaults = DevelopDefaults::load(settings);
         if defaults == *self.raw_defaults {
-            return;
+            return Ok(());
         }
         self.raw_defaults = Arc::new(defaults);
-        let _ = self.save_session();
+        let saved = self.save_session();
         self.refresh_library_defaults();
         self.refresh_photo_defaults();
+        saved
     }
     /// Renders the Library's previews of photos without an edit again, e.g. as
     /// imported camera profiles change what the defaults resolve to.
@@ -225,12 +227,14 @@ impl Editor {
             );
         });
         if settings != *self.raw_defaults.settings() {
-            self.set_raw_defaults(settings);
             // Replaces any earlier choice's note.
-            self.status = self
-                .photo_defaults()
-                .and_then(|d| d.note)
-                .unwrap_or_else(|| "Raw defaults saved".into());
+            self.status = match self.set_raw_defaults(settings) {
+                Err(e) => format!("Raw defaults not saved: {e:#}"),
+                Ok(()) => self
+                    .photo_defaults()
+                    .and_then(|d| d.note)
+                    .unwrap_or_else(|| "Raw defaults saved".into()),
+            };
         }
     }
 }
@@ -406,7 +410,7 @@ mod tests {
         open(&mut editor);
         assert_eq!(editor.document.recipe, adobe);
         // Changing the defaults changes the photo without an edit, and saves nothing.
-        editor.set_raw_defaults(lighten());
+        editor.set_raw_defaults(lighten()).unwrap();
         let lightened = editor.raw_defaults.resolve(&m, &profiles(&m)).recipe;
         assert_ne!(lightened, adobe);
         assert_eq!(editor.document.recipe, lightened);
@@ -420,11 +424,11 @@ mod tests {
         editor.history(before);
         assert!(editor.flush());
         let edited = editor.document.recipe.clone();
-        editor.set_raw_defaults(RawDefaults::default());
+        editor.set_raw_defaults(RawDefaults::default()).unwrap();
         assert_eq!(editor.document.recipe, edited);
         open(&mut editor);
         assert_eq!(editor.document.recipe, edited);
-        editor.set_raw_defaults(lighten());
+        editor.set_raw_defaults(lighten()).unwrap();
         assert_eq!(editor.document.recipe, edited);
         let library = editor.library.as_ref().unwrap();
         assert_eq!(library.catalog.load_edit(id, &raw)?.unwrap().recipe, edited);
@@ -467,7 +471,7 @@ mod tests {
         editor.document.export.quality = 50;
         editor.document.save.mark_changed();
         assert!(editor.flush());
-        editor.set_raw_defaults(lighten());
+        editor.set_raw_defaults(lighten()).unwrap();
         assert_eq!(editor.document.recipe, adobe);
         Ok(())
     }
@@ -525,6 +529,23 @@ mod tests {
     }
 
     #[test]
+    fn raw_defaults_that_cannot_be_saved_say_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("file");
+        std::fs::write(&blocker, b"").unwrap();
+        let ctx = egui::Context::default();
+        let mut editor = Editor::with_context(
+            &ctx,
+            None,
+            Default::default(),
+            Some(blocker.join("session.json")),
+        );
+        assert!(editor.set_raw_defaults(lighten()).is_err());
+        // Still in use until the app quits.
+        assert_eq!(*editor.raw_defaults.settings(), lighten());
+    }
+
+    #[test]
     fn before_shows_new_defaults_at_once() {
         let ctx = egui::Context::default();
         let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
@@ -534,7 +555,7 @@ mod tests {
         editor.document.origin = EditOrigin::Saved;
         editor.refresh_photo_defaults();
         editor.view.compare = true;
-        editor.set_raw_defaults(lighten());
+        editor.set_raw_defaults(lighten()).unwrap();
         let lightened = editor.raw_defaults.resolve(&m, &profiles(&m)).recipe;
         assert_eq!(editor.effective_recipe().curve, lightened.curve);
     }

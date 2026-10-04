@@ -235,11 +235,10 @@ impl DevelopDefaults {
                 // photo opens, resets and previews the same everywhere.
                 match preset.apply(&adobe(), m, profiles, None) {
                     Ok(mut recipe) => {
-                        // Upright would need analysing on each photo; a default
-                        // leaves it off, so every view renders the same.
-                        if recipe.upright.corrections.len() <= recipe.upright.mode.code() {
-                            recipe.upright = Default::default();
-                        }
+                        // Upright is worked out for one photo: analysed on each
+                        // (which every view would have to wait for) or stored from
+                        // the preset's own. A default leaves it off.
+                        recipe.upright = Default::default();
                         Resolved {
                             recipe,
                             name: choice.label(),

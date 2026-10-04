@@ -26,7 +26,9 @@ impl Editor {
         if self.presets.is_latest(scan) {
             self.presets.library = library;
             // A preset named as a raw default may have been imported or changed.
-            self.set_raw_defaults(self.raw_defaults.settings().clone());
+            if let Err(e) = self.set_raw_defaults(self.raw_defaults.settings().clone()) {
+                self.status = format!("Raw defaults not saved: {e:#}");
+            }
             self.refresh_preset_support();
         }
     }
