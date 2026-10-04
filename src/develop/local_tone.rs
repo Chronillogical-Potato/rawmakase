@@ -179,6 +179,12 @@ impl LocalToneMap {
         bilinear(&self.a) * luminance(rgb).log2() + bilinear(&self.b)
     }
 }
+/// The measured positions a slider is bracketed in, as `Curve::new` builds them: each
+/// position with its table, and the identity at 0 in slot `IDENTITY`.
+type Points<'a> = [(f32, Option<&'a [f32; 48]>); SLIDER_VALUES.len() + 1];
+/// Slot the identity takes, after the negative slider positions.
+const IDENTITY: usize = 3;
+
 /// A family's log2 gain at slider `s` and base level `base`, as `Curve::new(..).eval`
 /// without building the table.
 fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
@@ -191,12 +197,15 @@ fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
         let i = (x as usize).min(46);
         t[i] + (t[i + 1] - t[i]) * (x - i as f32)
     };
-    let mut points: Vec<(f32, Option<&[f32; 48]>)> = SLIDER_VALUES
-        .iter()
-        .zip(&f.tables)
-        .map(|(v, t)| (*v, Some(t)))
-        .collect();
-    points.insert(3, (0., None));
+    // On the stack: this bracket is built per pixel, for both families.
+    let points: Points = std::array::from_fn(|slot| {
+        if slot == IDENTITY {
+            (0., None)
+        } else {
+            let i = if slot < IDENTITY { slot } else { slot - 1 };
+            (SLIDER_VALUES[i], Some(&f.tables[i]))
+        }
+    });
     let j = points
         .windows(2)
         .position(|w| s <= w[1].0)
