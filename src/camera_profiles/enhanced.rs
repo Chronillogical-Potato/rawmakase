@@ -645,6 +645,24 @@ mod tests {
         assert!(composed.supports_amount());
         // A look never goes over another look.
         assert!(file.compose(&composed).is_err());
+        // Over Adobe Standard when there is one, else the first profile that fits:
+        // the file's own, listed before RAWmakase Standard.
+        let named = |name: &str| {
+            let mut p = base.clone();
+            p.name = name.into();
+            std::sync::Arc::new(p)
+        };
+        let mut bases = vec![
+            std::sync::Arc::new(composed.clone()),
+            named("Embedded"),
+            named(super::super::open::STANDARD),
+        ];
+        let base_of = |bases: &[std::sync::Arc<CameraProfile>]| {
+            super::super::library::look_base(&file, bases).map(|b| b.name.clone())
+        };
+        assert_eq!(base_of(&bases).as_deref(), Some("Embedded"));
+        bases.push(named("Adobe Standard"));
+        assert_eq!(base_of(&bases).as_deref(), Some("Adobe Standard"));
         Ok(())
     }
 }

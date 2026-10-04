@@ -122,9 +122,13 @@ pub fn compose_look(path: &Path, bases: &[Arc<CameraProfile>]) -> Result<CameraP
     look.compose(look_base(&look, bases).context("Missing matching base camera profile")?)
 }
 /// The profile a look goes over: the one it names, or for a creative look, which
-/// names none, Adobe Standard as Lightroom uses, else the file's own profile, else
-/// RAWmakase Standard. A look restricted to another camera fits none.
-fn look_base<'a>(look: &LookFile, bases: &'a [Arc<CameraProfile>]) -> Option<&'a CameraProfile> {
+/// names none, Adobe Standard as Lightroom uses, else the first that fits, which in
+/// `installed`'s order is the file's own profile, then RAWmakase Standard. A look
+/// restricted to another camera fits none.
+pub(super) fn look_base<'a>(
+    look: &LookFile,
+    bases: &'a [Arc<CameraProfile>],
+) -> Option<&'a CameraProfile> {
     let fitting = || {
         bases
             .iter()
@@ -132,9 +136,8 @@ fn look_base<'a>(look: &LookFile, bases: &'a [Arc<CameraProfile>]) -> Option<&'a
     };
     match &look.base {
         LookBase::Named(_) => fitting().next(),
-        LookBase::Any => ["Adobe Standard", super::open::STANDARD]
-            .into_iter()
-            .find_map(|name| fitting().find(|b| b.name == name))
+        LookBase::Any => fitting()
+            .find(|b| b.name == "Adobe Standard")
             .or_else(|| fitting().next()),
     }
     .map(|b| &**b)
@@ -229,8 +232,11 @@ fn import_into(
             let look =
                 LookFile::parse(std::str::from_utf8(bytes)?).with_context(|| format!("{file}"))?;
             if let LookBase::Named(name) = &look.base {
+                // The base must also be for the camera the look is restricted to.
                 ensure!(
-                    bases.iter().any(|base| look.fits(base)),
+                    bases
+                        .iter()
+                        .any(|base| look.fits(base) && look.compose(base).is_ok()),
                     "{file}: Missing base camera profile {name}. Import its matching base DCP together with the XMP profile",
                 );
             }

@@ -437,6 +437,7 @@ pub fn transfer(
             None if profile.ensure_camera(m).is_ok() => {}
             None => {
                 recipe.profile = to.profile.clone();
+                recipe.profile_amount = to.profile_amount;
                 notes.push(format!(
                     "{name} isn't available for this camera; kept its profile"
                 ));
