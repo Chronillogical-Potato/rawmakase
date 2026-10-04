@@ -138,6 +138,12 @@ impl Editor {
             self.undo_log.push(command);
         }
     }
+    /// Records a drag still in progress as a step, in the log, so it is undone in
+    /// its place; the rest of the drag becomes a step of its own.
+    pub(super) fn finish_gesture(&mut self) {
+        self.document.history.finish_gesture(&self.document.recipe);
+        self.sync_undo();
+    }
     /// Waits while Sync writes edits, which Undo could otherwise race.
     pub(super) fn undo(&mut self) {
         if !self.activity.is_syncing() {
@@ -156,7 +162,8 @@ impl Editor {
         if !self.commit_library_drafts() {
             return;
         }
-        self.sync_undo();
+        // A drag still held is the latest change, so it is what Undo takes back.
+        self.finish_gesture();
         let log = &mut self.undo_log;
         let command = match direction {
             Direction::Undo => log.undo.pop_back(),
