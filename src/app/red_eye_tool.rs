@@ -109,6 +109,7 @@ impl Editor {
             let mut op = original.clone();
             op.translate([at[0] - start[0], at[1] - start[1]]);
             self.document.recipe.red_eye[i] = op;
+            self.show_red_eye();
         }
         if response.drag_stopped() {
             if let Drag::Circle(center) = std::mem::take(&mut self.view.red_eye.drag)
@@ -202,10 +203,20 @@ impl Editor {
                     return;
                 }
                 self.document.recipe.red_eye.push(op);
+                self.show_red_eye();
                 self.view.red_eye.selected = Some(self.document.recipe.red_eye.len() - 1);
             }
             Err(e) => self.status = e.to_string(),
         }
+    }
+    /// Turns the Red Eye switch on, so a correction just made or changed shows, as
+    /// Lightroom does.
+    fn show_red_eye(&mut self) {
+        use crate::develop::panels::{Panel, PanelState};
+        self.document
+            .recipe
+            .panels
+            .set(Panel::RedEye, PanelState::On);
     }
     /// The Red Eye tool's keys: Delete removes the selected correction.
     pub(super) fn red_eye_keys(&mut self, i: &egui::InputState) {
@@ -262,6 +273,7 @@ impl Editor {
                     None,
                 );
                 if (op.pupil_size, op.darken) != before {
+                    self.show_red_eye();
                     super::widgets::name_history_step(
                         ui,
                         "Update Red Eye Correction".into(),

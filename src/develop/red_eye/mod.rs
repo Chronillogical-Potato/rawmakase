@@ -92,9 +92,12 @@ impl RedEyeOp {
         let d = [(p[0] - self.center[0]) / sx, (p[1] - self.center[1]) / sy];
         render::mahalanobis2(self.radius, self.correlation, d) <= 1.
     }
-    /// Moves the ellipse by `delta` (image space).
+    /// Moves the ellipse by `delta` (image space), keeping its centre on the photo.
     pub fn translate(&mut self, delta: [f32; 2]) {
-        self.center = [self.center[0] + delta[0], self.center[1] + delta[1]];
+        self.center = [
+            (self.center[0] + delta[0]).clamp(0., 1.),
+            (self.center[1] + delta[1]).clamp(0., 1.),
+        ];
     }
 }
 
@@ -106,12 +109,14 @@ pub fn validate(ops: &[RedEyeOp]) -> Result<()> {
 /// A photo's red eye corrections, as a list of [`RedEyeOp`]s.
 ///
 /// Corrections this release cannot read (a type a later release adds) are kept aside
-/// as they were saved and written back after the others, so they never stop the
-/// photo's other local edits from loading and are not lost when it is edited here.
+/// as they were saved, with their place in the list, and written back there, so they
+/// never stop the photo's other local edits from loading and are not lost or reordered
+/// when it is edited here.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RedEyeList {
     ops: Vec<RedEyeOp>,
-    later: Vec<serde_json::Value>,
+    /// Unreadable corrections and their positions in the saved list, in order.
+    later: Vec<(usize, serde_json::Value)>,
 }
 impl RedEyeList {
     /// No corrections at all, readable or not.
@@ -142,11 +147,18 @@ impl Serialize for RedEyeList {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
         let mut seq = s.serialize_seq(Some(self.ops.len() + self.later.len()))?;
-        for op in &self.ops {
-            seq.serialize_element(op)?;
-        }
-        for value in &self.later {
-            seq.serialize_element(value)?;
+        let mut ops = self.ops.iter();
+        let mut later = self.later.iter().peekable();
+        for at in 0.. {
+            if let Some((_, value)) = later.next_if(|(i, _)| *i <= at) {
+                seq.serialize_element(value)?;
+            } else if let Some(op) = ops.next() {
+                seq.serialize_element(op)?;
+            } else if let Some((_, value)) = later.next() {
+                seq.serialize_element(value)?;
+            } else {
+                break;
+            }
         }
         seq.end()
     }
@@ -154,10 +166,13 @@ impl Serialize for RedEyeList {
 impl<'de> Deserialize<'de> for RedEyeList {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut list = Self::default();
-        for value in Vec::<serde_json::Value>::deserialize(d)? {
+        for (i, value) in Vec::<serde_json::Value>::deserialize(d)?
+            .into_iter()
+            .enumerate()
+        {
             match serde_json::from_value(value.clone()) {
                 Ok(op) => list.ops.push(op),
-                Err(_) => list.later.push(value),
+                Err(_) => list.later.push((i, value)),
             }
         }
         Ok(list)

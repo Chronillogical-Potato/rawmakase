@@ -932,6 +932,45 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
     assert!((recipe.red_eye[0].center[0] - 0.35).abs() < 0.005);
 }
 #[test]
+fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
+    use crate::develop::panels::{Panel, PanelState};
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 200,
+        height: 200,
+        pixels: (0..40000)
+            .map(|i| {
+                let (x, y) = ((i % 200) as f32, (i / 200) as f32);
+                if (x - 100.).hypot(y - 100.) <= 8. {
+                    [0.6, 0.03, 0.03]
+                } else {
+                    [0.55, 0.35, 0.25]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 200,
+            height: 200,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    let panels = &mut editor.document.recipe.panels;
+    panels.set(Panel::RedEye, PanelState::Off);
+    editor.add_red_eye([0.5, 0.5], 0.1);
+    assert_eq!(editor.document.recipe.red_eye.len(), 1);
+    assert_eq!(
+        editor.document.recipe.panels.state(Panel::RedEye),
+        PanelState::On
+    );
+}
+#[test]
 fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     let ctx = egui::Context::default();
     let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);

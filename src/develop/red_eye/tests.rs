@@ -253,6 +253,20 @@ fn darken_and_pupil_size() {
     assert!(chroma(large) < chroma(small));
 }
 #[test]
+fn moving_a_correction_keeps_it_on_the_photo() {
+    let mut op = RedEyeOp {
+        kind: EyeKind::Red,
+        center: [0.9, 0.1],
+        radius: [0.01; 2],
+        correlation: 0.,
+        pupil_size: 0.5,
+        darken: 0.5,
+    };
+    op.translate([5., -7.]);
+    assert_eq!(op.center, [1., 0.]);
+    op.validate().unwrap();
+}
+#[test]
 fn outline_lies_on_the_ellipse() {
     let op = RedEyeOp {
         kind: EyeKind::Red,
@@ -291,6 +305,18 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     assert!(text.contains("\"Cat\""), "{text}");
     let back: crate::develop::LocalEdits = serde_json::from_str(&text).unwrap();
     assert_eq!(back, edited);
+    // A later correction between two of ours keeps its place.
+    let json = r#"[
+        {"kind": "Red", "center": [0.5, 0.5], "radius": [0.01, 0.01], "pupil_size": 0.5, "darken": 0.5},
+        {"kind": "Cat", "center": [0.2, 0.5]},
+        {"kind": "Red", "center": [0.7, 0.5], "radius": [0.01, 0.01], "pupil_size": 0.5, "darken": 0.5}
+    ]"#;
+    let list: RedEyeList = serde_json::from_str(json).unwrap();
+    assert_eq!(list.len(), 2);
+    let back: Vec<serde_json::Value> =
+        serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+    assert_eq!(back[1]["kind"], "Cat");
+    assert_eq!(back[2]["center"][0], 0.7);
     // Through the recipe too.
     let recipe = crate::develop::Recipe::default().with_local(edited.clone());
     assert_eq!(recipe.split_local().1, edited);
