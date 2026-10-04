@@ -411,14 +411,18 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
         HueSat::NEUTRAL.store(grade);
         drag = None;
     } else if let Some(pointer) = response.interact_pointer_pos() {
+        let on_puck = |p: Pos2| (to_offset(p) - before.offset()).length() * radius <= PUCK_GRAB;
         let mut delta = response.drag_delta() / radius;
+        // A plain click away from the puck moves it there, as in Lightroom.
+        if response.clicked() && modifiers.is_none() && !on_puck(pointer) {
+            HueSat::at(to_offset(pointer), before.hue).store(grade);
+        }
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
-            let on_puck = (to_offset(origin) - before.offset()).length() * radius <= PUCK_GRAB;
-            // A plain press away from the puck moves it there, as in Lightroom; a
-            // press on it, or with Shift or Cmd held, keeps its color to start from.
-            let grab = if on_puck || !modifiers.is_none() {
+            // A plain press away from the puck moves it there too; a press on it, or
+            // with Shift or Cmd held, keeps its color to start from.
+            let grab = if on_puck(origin) || !modifiers.is_none() {
                 before.offset() - to_offset(origin)
             } else {
                 Vec2::ZERO
@@ -824,6 +828,23 @@ mod tests {
         assert_eq!(grade[0], 210. / 360.);
         assert!(grade[1] > 0.55 && grade[1] < 0.65, "{grade:?}");
         assert_eq!(step.map(|s| s.0), Some("Shadow Saturation".into()));
+        // A plain click moves the puck under the pointer.
+        let left = h.at(Vec2::new(-0.3, 0.));
+        let press = |pressed| egui::Event::PointerButton {
+            pos: left,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(
+            &mut grade,
+            vec![egui::Event::PointerMoved(left)],
+            egui::Modifiers::NONE,
+        );
+        h.frame(&mut grade, vec![press(true)], egui::Modifiers::NONE);
+        h.time -= 0.45;
+        h.frame(&mut grade, vec![press(false)], egui::Modifiers::NONE);
+        assert_eq!((grade[0], grade[1]), (0.5, 0.3));
         // Double-click resets hue and saturation, not Luminance.
         let at = h.at(Vec2::ZERO);
         let click = |pressed| egui::Event::PointerButton {
