@@ -17,6 +17,10 @@ impl Editor {
     ) -> bool {
         // Holding Space pans instead, as in Lightroom.
         if ui.input(|i| i.key_down(egui::Key::Space)) || self.view.compare.shows_before() {
+            // A targeted drag the hand or Before takes over ends where it is.
+            if self.view.targeted.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+                self.end_targeted_drag();
+            }
             return false;
         }
         match self.view.tool {

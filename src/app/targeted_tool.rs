@@ -46,6 +46,10 @@ impl Editor {
     /// Opens the tool for `target`, or puts it away when it is open, and shows the
     /// sliders it moves.
     pub(super) fn toggle_targeted(&mut self, target: Target) {
+        if !super::point_color_panel::renders_point_color(&self.document.recipe) {
+            self.status = "Update the process in Calibration to use targeted adjustments".into();
+            return;
+        }
         if !self.targeted_available(target) {
             self.status = match target {
                 Target::BlackWhite => "The B&W mix adjusts black & white photos".into(),
@@ -67,9 +71,14 @@ impl Editor {
             Target::BlackWhite => {}
         }
     }
-    /// Whether the panel `target` adjusts is the one this photo shows.
+    /// Whether the panel `target` adjusts is the one this photo shows, on the current
+    /// process (as Point Color, older processes render the curves elsewhere).
     pub(super) fn targeted_available(&self, target: Target) -> bool {
-        let black_white = self.document.recipe.treatment() == Treatment::BlackWhite;
+        let r = &self.document.recipe;
+        if !super::point_color_panel::renders_point_color(r) {
+            return false;
+        }
+        let black_white = r.treatment() == Treatment::BlackWhite;
         match target {
             Target::ToneCurve => true,
             Target::Hsl(_) => !black_white,
@@ -94,6 +103,11 @@ impl Editor {
     /// conversion to or from black & white, another view of the panel), and drops a
     /// drag it leaves behind, or one for another target.
     pub(super) fn keep_targeted_tool(&mut self) {
+        // Before shown: a drag still waiting for its sample is dropped.
+        if self.view.compare.shows_before() && self.view.targeted.is_some() {
+            self.view.targeted = None;
+            self.document.targeted_pick.invalidate();
+        }
         if let Tool::Targeted(target) = self.view.tool
             && (self.library_mode
                 || !self.targeted_available(target)
@@ -213,6 +227,11 @@ impl Editor {
             }
             drag.last = self.document.recipe.clone();
         }
+    }
+    /// Ends a drag whose button came up elsewhere (Space or Before took over).
+    pub(super) fn end_targeted_drag(&mut self) {
+        self.drag_targeted(0.);
+        self.release_targeted();
     }
     /// The button is up. A drag whose sample is in is done (the gesture records it);
     /// one still waiting is finished when the sample arrives.
@@ -506,6 +525,16 @@ mod tests {
         assert!(steps[0].name.starts_with("Region "), "{}", steps[0].name);
         e.undo();
         assert_eq!(e.document.recipe, before);
+    }
+
+    #[test]
+    fn older_processes_get_no_targeted_tool() {
+        let ctx = egui::Context::default();
+        let mut e = editor(&ctx);
+        e.document.recipe.reference_curves = false;
+        e.toggle_targeted(Target::ToneCurve);
+        assert_eq!(e.view.tool, Tool::None);
+        assert!(e.status.contains("Update the process"), "{}", e.status);
     }
 
     #[test]
