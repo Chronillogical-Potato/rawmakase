@@ -61,6 +61,10 @@ enum Drag {
     Manual,
 }
 impl RetouchTool {
+    /// Whether a spot, its source or a brush stroke is being dragged.
+    pub(super) fn is_dragging(&self) -> bool {
+        !matches!(self.drag, Drag::None)
+    }
     pub(super) fn clear_document(&mut self) {
         self.selected = None;
         self.drag = Drag::None;

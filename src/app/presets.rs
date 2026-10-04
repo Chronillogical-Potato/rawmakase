@@ -749,6 +749,8 @@ impl Editor {
             }
         });
         if let Some(n) = go_to {
+            // A resize still being grouped is a step before the jump, so it isn't lost.
+            self.finish_wheel_gesture();
             let current = &mut self.document.recipe;
             if self.document.history.jump(n, current) {
                 self.ensure_upright();

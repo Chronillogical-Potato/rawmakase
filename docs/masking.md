@@ -20,7 +20,8 @@ implemented yet.
 - **Brush:** drag to paint; hold **Option/Alt** (or pick Erase) to erase. Size,
   Feather, Flow and Density per brush, brushes **A** and **B** (**/** switches),
   **Auto Mask** keeps the brush to colours like the one under its centre, **[ ]**
-  size, **Shift+[ ]** feather.
+  or the mouse wheel over the photo size (with **Option/Alt**, the Erase brush),
+  **Shift+[ ]** or Shift-scroll feather.
 - **Gradients:** drag a linear gradient's ends to size and turn it, its middle to
   move it; drag a radial gradient's centre to move it and its edge handles to size
   and turn it. Its Feather slider sets the soft edge.

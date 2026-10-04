@@ -376,6 +376,25 @@ impl Editor {
         }
         // A tool that owns the pointer (spots, brushes, gradients) takes drags and
         // clicks; the hand tool pans only when no tool claims them.
+        // The wheel over the photo sizes the brush, spot or red eye circle, before the
+        // tool draws it; not over Before, which can't be edited.
+        // Not while Space holds the Hand tool, which hides the brush.
+        let hand_held = ui.input(|i| i.key_down(egui::Key::Space));
+        if !self.view.compare
+            && !hand_held
+            && response.hovered()
+            && ui.rect_contains_pointer(rect)
+            && self.tool_has_size()
+        {
+            let scrolls = ui.input(super::brush_scroll::Scroll::read);
+            for scroll in &scrolls {
+                self.scroll_tool_size(*scroll);
+            }
+            // The panel's Size and Feather were drawn before this; show the new ones.
+            if !scrolls.is_empty() {
+                ui.ctx().request_repaint();
+            }
+        }
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
         // Holding Space pans while an eyedropper is open, as in Lightroom.
         let space = ui.input(|i| i.key_down(egui::Key::Space));
