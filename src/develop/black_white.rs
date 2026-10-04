@@ -240,7 +240,11 @@ impl Recipe {
         first: Option<AutoMix>,
     ) {
         if is_monochrome(self.profile.as_deref()) {
-            self.set_treatment(Treatment::BlackWhite, first);
+            // From one black & white profile to another the photo was black & white
+            // already: its mix stays as it is.
+            if !is_monochrome(old) {
+                self.set_treatment(Treatment::BlackWhite, first);
+            }
         } else if is_monochrome(old) {
             self.set_treatment(Treatment::Color, first);
         }
@@ -425,6 +429,15 @@ mod tests {
         r.profile = color.clone();
         r.follow_profile_treatment(Some(&mono), auto);
         assert_eq!(r.treatment(), Treatment::Color);
+        // From one black & white profile to another, a mix never set stays so.
+        let mut r = Recipe::with_profiles(&m, &[]);
+        r.engine = r.engine.max(3);
+        r.profile = Some(mono.clone());
+        let other = monochrome_profile(&m);
+        r.profile = Some(other.clone());
+        r.follow_profile_treatment(Some(&mono), auto);
+        assert_eq!(r.treatment(), Treatment::BlackWhite);
+        assert_eq!(r.effects.gray_mix, [0.; 8]);
         // A color profile change leaves a black & white treatment alone.
         r.set_treatment(Treatment::BlackWhite, auto);
         r.follow_profile_treatment(color.as_deref(), auto);

@@ -2766,6 +2766,7 @@ fn editor_with_blue_photo(
         wb: [1.; 3],
         daylight_wb: [1.; 3],
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
     editor.document.metadata = Some(metadata.clone());
@@ -2907,4 +2908,25 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
         (applied, steps[0].name.as_str()),
         (1, "Convert to Black & White")
     );
+    // A black & white profile chosen while decoding converts at once; its Auto mix
+    // follows the decode.
+    let (mut editor, image) =
+        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+    let m = editor.document.metadata.clone().unwrap();
+    let mut mono = crate::camera_profiles::CameraProfile::camera_matrix_default(&m)
+        .unwrap()
+        .with_test_tables();
+    mono.enhanced.as_mut().unwrap().monochrome = true;
+    let mono = Arc::new(mono);
+    in_edit_frame(&ctx, &mut editor, |e| {
+        let old = e.document.recipe.profile.clone();
+        e.document.recipe.engine = e.document.recipe.engine.max(3);
+        e.document.recipe.profile = Some(mono.clone());
+        e.follow_profile_treatment(old.as_deref());
+    });
+    assert!(editor.document.recipe.effects.monochrome);
+    assert_eq!(editor.document.recipe.effects.gray_mix, [0.; 8]);
+    editor.document.set_image(image);
+    in_edit_frame(&ctx, &mut editor, Editor::finish_pending_treatment);
+    assert_ne!(editor.document.recipe.effects.gray_mix, [0.; 8]);
 }

@@ -84,10 +84,17 @@ impl Editor {
     /// Converts as asked while the photo was decoding, once it is decoded. Called
     /// during an edit frame.
     pub(super) fn finish_pending_treatment(&mut self) {
-        if self.document.full().is_some()
-            && let Some(treatment) = self.document.pending_treatment.take()
-        {
+        if self.document.full().is_none() {
+            return;
+        }
+        if let Some(treatment) = self.document.pending_treatment.take() {
             self.set_treatment(treatment);
+        }
+        if std::mem::take(&mut self.document.pending_auto_mix)
+            && self.document.recipe.treatment() == Treatment::BlackWhite
+            && self.document.recipe.effects.gray_mix == [0.; 8]
+        {
+            self.auto_black_white_mix();
         }
     }
 
@@ -100,7 +107,15 @@ impl Editor {
     ) {
         let colors = self.first_conversion_colors();
         let first = colors.as_ref().map(PhotoColors::auto_mix);
+        let was = self.document.recipe.effects.monochrome;
         self.document.recipe.follow_profile_treatment(old, first);
+        // Converted before the photo decoded: the Auto mix follows once it has.
+        let r = &self.document.recipe;
+        self.document.pending_auto_mix = !was
+            && r.effects.monochrome
+            && r.effects.gray_mix == [0.; 8]
+            && self.first_conversion == FirstConversion::AutoMix
+            && colors.is_none();
     }
 
     /// V: switches between Color and Black & White.

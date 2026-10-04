@@ -471,13 +471,10 @@ impl Editor {
         let mut treatment_request = None;
         let mut auto_mix_request = false;
         let mut profile_changed_from = None;
-        // Auto black & white for the photo, measured (once) only while the B&W panel
-        // shows.
-        let colors = (self.document.recipe.treatment() == Treatment::BlackWhite)
-            .then(|| self.photo_colors())
-            .flatten();
+        // A conversion to black & white waiting for the photo to decode.
+        let pending_treatment = self.document.pending_treatment;
         let view = &mut self.view;
-        let r = &mut self.document.recipe;
+        let (r, photo) = self.document.recipe_and_colors();
 
         if adjustment_section(ui, "Basic", |ui| {
             let shortcut = if cfg!(target_os = "macos") {
@@ -506,7 +503,9 @@ impl Editor {
                 },
             );
             // Lightroom's Treatment, above the profile; V switches it.
-            let mut treatment = r.treatment();
+            // A conversion waiting for the photo to decode shows as made.
+            let shown = pending_treatment.unwrap_or_else(|| r.treatment());
+            let mut treatment = shown;
             control_row(ui, "Treatment", |ui| {
                 let w = ui.available_width();
                 segmented(
@@ -519,7 +518,7 @@ impl Editor {
                     w,
                 );
             });
-            if treatment != r.treatment() {
+            if treatment != shown {
                 treatment_request = Some(treatment);
             }
             let old_profile = r.profile.clone();
@@ -843,7 +842,17 @@ impl Editor {
         if adjustment_section(ui, mixer_title, |ui| {
             if black_white {
                 let heading = subheading(ui, "Black & White Mix");
-                let auto_mix = colors.as_ref().map(|c| c.auto_mix().for_recipe(r));
+                // Measured (once) only while this panel is open.
+                let auto_mix = photo
+                    .spread()
+                    .zip(photo.metadata)
+                    .map(|(spread, metadata)| {
+                        crate::develop::AutoMix {
+                            spread: &spread,
+                            metadata,
+                        }
+                        .for_recipe(r)
+                    });
                 let button = Rect::from_min_size(
                     Pos2::new(heading.right() - 52., heading.top() - 4.),
                     Vec2::new(52., 24.),
