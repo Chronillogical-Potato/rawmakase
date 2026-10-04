@@ -212,17 +212,21 @@ impl Editor {
     /// settings (its raw defaults), framed as the edit on screen is (a hovered
     /// preset's crop included).
     pub(super) fn before_settings(&self) -> Recipe {
-        let before = self
-            .document
-            .before
-            .clone()
-            .unwrap_or_else(|| self.photo_defaults().map(|d| d.recipe).unwrap_or_default());
         let shown = self
             .presets
             .preview
             .as_ref()
             .unwrap_or(&self.document.recipe);
-        framed_like(before, shown)
+        self.before_framed_by(shown)
+    }
+    /// Before's settings framed as `edit` is.
+    fn before_framed_by(&self, edit: &Recipe) -> Recipe {
+        let before = self
+            .document
+            .before
+            .clone()
+            .unwrap_or_else(|| self.photo_defaults().map(|d| d.recipe).unwrap_or_default());
+        framed_like(before, edit)
     }
     /// Shows `view`, closing any tool when Before goes beside the edit: tools work on
     /// the edit alone, as in Lightroom.
@@ -240,7 +244,8 @@ impl Editor {
     }
     /// Copy or swap settings between Before and After.
     pub(super) fn transfer(&mut self, transfer: Transfer) {
-        let before = self.before_settings();
+        // Framed as the edit itself, never by a preset only hovered.
+        let before = self.before_framed_by(&self.document.recipe);
         let after = self.document.recipe.clone();
         let (step, edit) = match transfer {
             Transfer::AfterToBefore => {
@@ -609,6 +614,15 @@ mod tests {
         e.transfer(Transfer::AfterToBefore);
         e.transfer(Transfer::BeforeToAfter);
         e.history(before);
+        // A preset only hovered lends Before its framing on screen, not to the edit.
+        e.presets.preview = Some(Recipe {
+            crop: [0.3, 0.3, 0.7, 0.7],
+            ..Default::default()
+        });
+        e.transfer(Transfer::Swap);
+        assert_eq!(e.document.recipe.crop, edited.crop);
+        e.presets.preview = None;
+        e.transfer(Transfer::Swap);
         // Exposure and the swap; the undone copy went with the swap.
         assert_eq!(e.document.history.steps().0.len(), 2);
     }
