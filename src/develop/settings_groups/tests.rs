@@ -31,6 +31,13 @@ fn everything_changed() -> Recipe {
         engine: 3,
         lens_builtin: false,
         lens_profile: true,
+        lens_profile_choice: crate::lens::choice::LensProfileChoice {
+            setup: crate::lens::choice::LensProfileSetup::Custom,
+            id: Some(crate::lens::choice::LensProfileId {
+                name: "Adobe (Test 35mm)".into(),
+                ..Default::default()
+            }),
+        },
         lens_distortion: 0.5,
         lens_vignetting: 1.5,
         lens_manual_distortion: -0.2,

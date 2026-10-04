@@ -276,6 +276,7 @@ impl SettingGroup {
             LensProfileCorrections => {
                 to.lens_builtin = from.lens_builtin;
                 to.lens_profile = from.lens_profile;
+                to.lens_profile_choice = from.lens_profile_choice.clone();
                 to.lens_distortion = from.lens_distortion;
                 to.lens_vignetting = from.lens_vignetting;
                 to.lens_manual_distortion = from.lens_manual_distortion;
@@ -519,6 +520,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         engine: _,
         lens_builtin: _,
         lens_profile: _,
+        lens_profile_choice: _,
         lens_distortion: _,
         lens_vignetting: _,
         lens_manual_distortion: _,
@@ -611,6 +613,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("engine", Group(ProcessVersion)),
         ("lens_builtin", Group(LensProfileCorrections)),
         ("lens_profile", Group(LensProfileCorrections)),
+        ("lens_profile_choice", Group(LensProfileCorrections)),
         ("lens_distortion", Group(LensProfileCorrections)),
         ("lens_vignetting", Group(LensProfileCorrections)),
         ("lens_manual_distortion", Group(LensProfileCorrections)),

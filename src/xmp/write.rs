@@ -104,6 +104,30 @@ pub(super) fn look_element(r: &Recipe) -> Option<String> {
     ))
 }
 
+/// Lightroom's lens profile Setup and the profile the edit uses: the one rendering
+/// when the photo is known, else the one the edit names.
+fn lens_profile(s: &mut Settings, r: &Recipe, m: Option<&Metadata>) {
+    let choice = &r.lens_profile_choice;
+    s.text("LensProfileSetup", choice.setup.xmp());
+    let in_use = m.and_then(|m| r.lens_profile_in_use(m).used);
+    let id = match (in_use, &choice.id) {
+        // The digest the edit recorded still describes the same file.
+        (Some(c), Some(id)) if c.profile.is(&id.filename, &id.name) => id.clone(),
+        (Some(c), _) => crate::lens::choice::LensProfileId::of(&c.profile),
+        (None, Some(id)) => id.clone(),
+        (None, None) => return,
+    };
+    if !id.name.is_empty() {
+        s.text("LensProfileName", id.name);
+    }
+    if !id.filename.is_empty() {
+        s.text("LensProfileFilename", id.filename);
+    }
+    if !id.digest.is_empty() {
+        s.text("LensProfileDigest", id.digest);
+    }
+}
+
 pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
@@ -358,6 +382,7 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
         );
     }
     s.text("LensProfileEnable", if r.lens_profile { "1" } else { "0" });
+    lens_profile(&mut s, r, m);
     s.text("AutoLateralCA", if r.lens_ca { "1" } else { "0" });
     s.put(
         "LensProfileDistortionScale",

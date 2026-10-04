@@ -1,7 +1,8 @@
 //! Adobe lens profiles (LCP, Adobe Camera Model). Users import them explicitly; they
 //! are copied into `lens-profiles` under the data directory and never read from an
-//! Adobe installation. A matching profile becomes the photo's "Enable Profile
-//! Corrections" correction.
+//! Adobe installation. The imported profiles that fit a photo's camera are its
+//! choices for "Enable Profile Corrections" ([`PhotoProfiles`]); the one that fits
+//! its lens best is the automatic choice.
 //!
 //! Model: with x, y the offset from the image centre in units of FocalLengthX × the
 //! long edge (FocalLength × SensorFormatFactor / 36 when not given), r² = x² + y²,
@@ -14,7 +15,11 @@ use crate::{
     xmp::ns::{RDF, ST_CAMERA},
 };
 use anyhow::{Context, Result, ensure};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::SystemTime,
+};
 
 /// A chromatic model: ScaleFactor and radial parameters.
 type Chromatic = (f32, [f32; 3]);
@@ -23,7 +28,10 @@ type Chromatic = (f32, [f32; 3]);
 pub struct Entry {
     pub make: String,
     pub lens: Vec<String>,
+    /// The lens's display name (`LensPrettyName`, else `ProfileName`).
     pub name: String,
+    /// `ProfileName`, the name Lightroom records as `LensProfileName`.
+    pub profile_name: String,
     pub raw: bool,
     /// Lightroom uses the camera's own distortion data instead of the profile's.
     pub prefer_metadata_distortion: bool,
@@ -109,6 +117,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
             name: attr(d, "LensPrettyName")
                 .or_else(|| attr(d, "ProfileName"))
                 .unwrap_or_default(),
+            profile_name: attr(d, "ProfileName").unwrap_or_default(),
             lens,
             raw: attr(d, "CameraRawProfile").is_some_and(|v| v.eq_ignore_ascii_case("true")),
             prefer_metadata_distortion: attr(d, "PreferMetadataDistort")
@@ -237,11 +246,30 @@ fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
 }
 
+/// Which of a profile's entries describe the photo's lens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LensEntries {
+    /// Only entries naming the photo's lens, as automatic matching uses.
+    ThisLens,
+    /// Every entry: a profile the user chose for another lens (an adapted or manual
+    /// lens), as Lightroom's Custom setup allows.
+    Any,
+}
+
 /// The correction for a photo from matching profile entries.
 pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
-    let mut found: Vec<&Entry> = entries.iter().filter(|e| lens_matches(e, m)).collect();
-    let best = found.iter().filter_map(|e| make_rank(e, m)).min()?;
-    found.retain(|e| make_rank(e, m) == Some(best));
+    correction_from(entries, m, LensEntries::ThisLens)
+}
+fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Option<LensCorrection> {
+    let mut found: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| which == LensEntries::Any || lens_matches(e, m))
+        .collect();
+    match (found.iter().filter_map(|e| make_rank(e, m)).min(), which) {
+        (Some(best), _) => found.retain(|e| make_rank(e, m) == Some(best)),
+        (None, LensEntries::ThisLens) => return None,
+        (None, LensEntries::Any) => {}
+    }
     if found.iter().any(|e| e.raw) {
         found.retain(|e| e.raw);
     }
@@ -307,50 +335,225 @@ pub fn library_dirs() -> Vec<PathBuf> {
         .map(|p| p.join("lens-profiles"))
         .collect()
 }
-/// The imported profile correction for a photo, if any imported profile matches:
-/// one made on the same camera make, else on a make sharing the mount, else on
-/// any make.
-pub fn installed(m: &Metadata) -> Option<LensCorrection> {
-    if m.lens_model.is_empty() {
-        return None;
-    }
-    let mut best: Option<(u8, LensCorrection)> = None;
-    for dir in library_dirs() {
-        let Ok(files) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        let mut files: Vec<PathBuf> = files.flatten().map(|f| f.path()).collect();
-        files.sort();
-        for p in files {
-            if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lcp")) {
-                continue;
-            }
-            let Ok(entries) = std::fs::read_to_string(&p)
-                .map_err(anyhow::Error::from)
-                .and_then(|t| parse(&t))
-            else {
-                continue;
-            };
-            let Some(rank) = entries
+/// One imported LCP file, an item of Lightroom's Profile menu.
+#[derive(Debug)]
+pub struct ImportedProfile {
+    /// The file's name as imported, Lightroom's `LensProfileFilename`.
+    pub filename: String,
+    /// `ProfileName`, Lightroom's `LensProfileName`, e.g. "Adobe (Sony FE 55mm F1.8 ZA)".
+    pub name: String,
+    /// The lens maker and model, Lightroom's Make and Model menus.
+    pub lens_make: String,
+    pub lens_model: String,
+    entries: Vec<Entry>,
+}
+impl ImportedProfile {
+    fn new(filename: String, entries: Vec<Entry>) -> Self {
+        let first = |get: fn(&Entry) -> &str| {
+            entries
                 .iter()
-                .filter(|e| lens_matches(e, m))
-                .filter_map(|e| make_rank(e, m))
-                .min()
-            else {
-                continue;
-            };
-            if best.as_ref().is_some_and(|(b, _)| *b <= rank) {
-                continue;
-            }
-            if let Some(c) = correction(&entries, m) {
-                if rank == 0 {
-                    return Some(c);
-                }
-                best = Some((rank, c));
-            }
+                .map(get)
+                .find(|v| !v.is_empty())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let lens_model = Some(first(|e| &e.name))
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| first(|e| e.lens.first().map_or("", String::as_str)));
+        let name = Some(first(|e| &e.profile_name))
+            .filter(|v| !v.is_empty())
+            .or_else(|| Some(lens_model.clone()).filter(|v| !v.is_empty()))
+            .unwrap_or_else(|| filename.trim_end_matches(".lcp").to_string());
+        // Adobe's pretty names start with the lens maker ("Sigma 35mm F1.4 DG HSM
+        // A013" on a Sony body); the profile's Make is the camera's.
+        let lens_make = lens_model
+            .split_whitespace()
+            .next()
+            .map(str::to_string)
+            .unwrap_or_else(|| first(|e| &e.make));
+        Self {
+            filename,
+            name,
+            lens_make,
+            lens_model,
+            entries,
         }
     }
-    best.map(|(_, c)| c)
+    /// Entries for raw files when the profile has them, as a raw photo uses.
+    fn usable(&self) -> impl Iterator<Item = &Entry> {
+        let raw = self.entries.iter().any(|e| e.raw);
+        self.entries.iter().filter(move |e| e.raw || !raw)
+    }
+    fn has_raw(&self) -> bool {
+        self.entries.iter().any(|e| e.raw)
+    }
+    /// Whether a recorded profile identity names this file: its file name, else its
+    /// profile name when the identity has no file name.
+    pub fn is(&self, filename: &str, name: &str) -> bool {
+        if filename.is_empty() {
+            !name.is_empty() && self.name == name
+        } else {
+            self.filename.eq_ignore_ascii_case(filename)
+        }
+    }
+}
+
+/// Every imported lens profile, read once and again when the folders change.
+#[derive(Debug, Default)]
+pub struct Library {
+    profiles: Vec<Arc<ImportedProfile>>,
+}
+impl Library {
+    /// Profiles from LCP texts, by file name; files that do not parse are skipped.
+    pub fn from_texts<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        let mut profiles: Vec<Arc<ImportedProfile>> = Vec::new();
+        for (filename, text) in files {
+            if profiles
+                .iter()
+                .any(|p| p.filename.eq_ignore_ascii_case(filename))
+            {
+                continue;
+            }
+            if let Ok(entries) = parse(text) {
+                profiles.push(Arc::new(ImportedProfile::new(
+                    filename.to_string(),
+                    entries,
+                )));
+            }
+        }
+        Self { profiles }
+    }
+    fn load(dirs: &[PathBuf]) -> Self {
+        let mut files: Vec<(String, String)> = Vec::new();
+        for dir in dirs {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            let mut paths: Vec<PathBuf> = entries.flatten().map(|f| f.path()).collect();
+            paths.sort();
+            for p in paths {
+                if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lcp")) {
+                    continue;
+                }
+                let (Some(name), Ok(text)) = (p.file_name(), std::fs::read_to_string(&p)) else {
+                    continue;
+                };
+                files.push((name.to_string_lossy().into_owned(), text));
+            }
+        }
+        Self::from_texts(files.iter().map(|(n, t)| (n.as_str(), t.as_str())))
+    }
+    /// The profiles a photo can use, Lightroom's Profile menus for its camera: those
+    /// with an entry covering its sensor, raw profiles in place of non-raw ones for
+    /// the same lens.
+    pub fn for_photo(&self, m: &Metadata) -> PhotoProfiles {
+        let fits: Vec<&Arc<ImportedProfile>> = self
+            .profiles
+            .iter()
+            .filter(|p| p.usable().any(|e| make_rank(e, m).is_some()))
+            .collect();
+        let shadowed = |p: &ImportedProfile| {
+            !p.has_raw()
+                && fits.iter().any(|q| {
+                    q.has_raw()
+                        && q.entries.iter().flat_map(|e| &e.lens).any(|l| {
+                            p.entries
+                                .iter()
+                                .flat_map(|e| &e.lens)
+                                .any(|k| key(k) == key(l))
+                        })
+                })
+        };
+        let candidates: Vec<Candidate> = fits
+            .iter()
+            .filter(|p| !shadowed(p))
+            .map(|p| Candidate {
+                profile: Arc::clone(p),
+                lens_rank: p
+                    .usable()
+                    .filter(|e| lens_matches(e, m))
+                    .filter_map(|e| make_rank(e, m))
+                    .min(),
+                correction: OnceLock::new(),
+            })
+            .collect();
+        PhotoProfiles(candidates.into())
+    }
+}
+
+/// The imported profiles, cached while the profile folders are unchanged.
+pub fn library() -> Arc<Library> {
+    type Stamp = Vec<(PathBuf, Option<SystemTime>)>;
+    static CACHE: Mutex<Option<(Stamp, Arc<Library>)>> = Mutex::new(None);
+    let dirs = library_dirs();
+    // Adding, replacing or removing a file changes its folder's modification time.
+    let stamp: Stamp = dirs
+        .iter()
+        .map(|d| {
+            (
+                d.clone(),
+                std::fs::metadata(d).and_then(|m| m.modified()).ok(),
+            )
+        })
+        .collect();
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((s, library)) = cache.as_ref()
+        && *s == stamp
+    {
+        return Arc::clone(library);
+    }
+    let library = Arc::new(Library::load(&dirs));
+    *cache = Some((stamp, Arc::clone(&library)));
+    library
+}
+
+/// An imported profile as one photo can use it.
+#[derive(Debug)]
+pub struct Candidate {
+    pub profile: Arc<ImportedProfile>,
+    /// How well it fits the photo's lens, as `make_rank`; `None` when it profiles
+    /// another lens.
+    pub lens_rank: Option<u8>,
+    correction: OnceLock<Option<LensCorrection>>,
+}
+impl Candidate {
+    /// The profile's correction for `m`, the photo it was listed for.
+    pub fn correction(&self, m: &Metadata) -> Option<&LensCorrection> {
+        self.correction
+            .get_or_init(|| {
+                let which = if self.lens_rank.is_some() {
+                    LensEntries::ThisLens
+                } else {
+                    LensEntries::Any
+                };
+                correction_from(&self.profile.entries, m, which)
+            })
+            .as_ref()
+    }
+}
+
+/// The imported profiles that fit one photo's camera; rebuilt when it opens.
+#[derive(Clone, Debug, Default)]
+pub struct PhotoProfiles(Arc<[Candidate]>);
+impl PhotoProfiles {
+    pub fn all(&self) -> &[Candidate] {
+        &self.0
+    }
+    /// Lightroom's automatic choice: a profile of the photo's lens, made on the same
+    /// camera make, else on a make sharing the mount, else on any make.
+    pub fn auto(&self, m: &Metadata) -> Option<&Candidate> {
+        let mut matching: Vec<&Candidate> =
+            self.0.iter().filter(|c| c.lens_rank.is_some()).collect();
+        matching.sort_by_key(|c| c.lens_rank);
+        matching.into_iter().find(|c| c.correction(m).is_some())
+    }
+    /// The profile a recorded identity names, by file name, else by profile name.
+    pub fn find(&self, filename: &str, name: &str) -> Option<&Candidate> {
+        self.0
+            .iter()
+            .find(|c| c.profile.is(filename, ""))
+            .or_else(|| self.0.iter().find(|c| c.profile.is("", name)))
+    }
 }
 /// Validates and copies lens profiles into the data directory.
 pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
@@ -393,6 +596,30 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
         imported.push(target);
     }
     Ok(imported)
+}
+
+/// A synthetic raw LCP for one lens at 35mm, f/2: `distortion` and `vignette` are the
+/// first radial parameters (k1, a1).
+#[cfg(test)]
+pub(crate) fn test_profile(
+    make: &str,
+    lens: &str,
+    name: &str,
+    distortion: f32,
+    vignette: f32,
+) -> String {
+    format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">
+<photoshop:CameraProfiles><rdf:Seq>
+<rdf:li><rdf:Description stCamera:Make="{make}" stCamera:CameraRawProfile="True" stCamera:Lens="{lens}"
+ stCamera:LensPrettyName="{make} {lens}" stCamera:ProfileName="{name}" stCamera:SensorFormatFactor="1"
+ stCamera:FocalLength="35" stCamera:ApertureValue="2">
+ <stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="{distortion}">
+  <stCamera:VignetteModel stCamera:VignetteModelParam1="{vignette}"/>
+ </rdf:Description></stCamera:PerspectiveModel></rdf:Description></rdf:li>
+</rdf:Seq></photoshop:CameraProfiles></rdf:Description></rdf:RDF></x:xmpmeta>"#
+    )
 }
 
 #[cfg(test)]

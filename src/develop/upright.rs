@@ -7,10 +7,11 @@ use crate::raw::CameraImage;
 /// The lens settings an analysis is made through, as they render: when any of them
 /// changes, the corrections analysed before no longer fit the photo. A setting a
 /// switched-off panel or an older process version leaves unrendered changes nothing.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LensInputs {
     builtin: bool,
     profile: bool,
+    profile_choice: crate::lens::choice::LensProfileChoice,
     distortion: f32,
     manual_distortion: f32,
 }
@@ -21,6 +22,7 @@ impl LensInputs {
             return Self {
                 builtin: false,
                 profile: false,
+                profile_choice: Default::default(),
                 distortion: 1.,
                 manual_distortion: 0.,
             };
@@ -29,6 +31,11 @@ impl LensInputs {
         Self {
             builtin: shown.lens_builtin,
             profile: shown.lens_profile,
+            profile_choice: if shown.lens_profile {
+                shown.lens_profile_choice.clone()
+            } else {
+                Default::default()
+            },
             distortion: shown.lens_distortion,
             manual_distortion: shown.lens_manual_distortion,
         }

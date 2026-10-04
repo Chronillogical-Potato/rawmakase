@@ -122,6 +122,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         profile,
         lens_builtin,
         lens_profile,
+        lens_profile_choice,
         lens_distortion,
         lens_vignetting,
         lens_manual_distortion,
@@ -226,6 +227,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             profile: profile.as_ref().map(|p| p.camera_part()),
             lens_builtin: *lens_builtin,
             lens_profile: *lens_profile,
+            lens_profile_choice: lens_profile_choice.clone(),
             lens_vignetting: *lens_vignetting,
             ..Default::default()
         },
@@ -242,6 +244,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             upright: upright.clone(),
             lens_builtin: *lens_builtin,
             lens_profile: *lens_profile,
+            lens_profile_choice: lens_profile_choice.clone(),
             lens_distortion: *lens_distortion,
             lens_vignetting: *lens_vignetting,
             lens_manual_distortion: *lens_manual_distortion,

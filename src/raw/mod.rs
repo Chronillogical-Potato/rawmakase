@@ -49,9 +49,10 @@ pub struct Metadata {
     /// DNG BaselineExposure, when the file is a DNG that records one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
-    /// Correction from an imported Adobe lens profile matching this lens; rebuilt on open.
+    /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
+    /// choices; rebuilt on open.
     #[serde(skip)]
-    pub profile_lens: Option<crate::lens::LensCorrection>,
+    pub lens_profiles: crate::lens::lcp::PhotoProfiles,
     /// Lateral chromatic aberration measured from the decoded image, shared by every
     /// image made from it (see `crate::lens::auto_ca::prime`).
     #[serde(skip)]
@@ -134,7 +135,7 @@ impl Raw {
             lens: crate::lens::embedded::read(path_ref),
             lens_model: text(&m.lens).trim().to_string(),
             baseline_exposure: None,
-            profile_lens: None,
+            lens_profiles: Default::default(),
             lateral_ca: Default::default(),
             embedded_profile: None,
         };
@@ -177,7 +178,7 @@ impl Raw {
             metadata.crop_width = width;
             metadata.crop_height = height;
         }
-        metadata.profile_lens = crate::lens::lcp::installed(&metadata);
+        metadata.lens_profiles = crate::lens::lcp::library().for_photo(&metadata);
         Ok(Self { handle, metadata })
     }
     /// The embedded JPEG preview, as stored.

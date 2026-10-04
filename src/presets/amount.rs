@@ -117,6 +117,7 @@ fn fixed_change(a: &Recipe, b: &Recipe) -> Option<SettingGroup> {
         (
             r.lens_builtin,
             r.lens_profile,
+            r.lens_profile_choice.clone(),
             r.lens_distortion,
             r.lens_vignetting,
             r.lens_manual_distortion,
@@ -360,6 +361,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         engine: _,
         lens_builtin,
         lens_profile,
+        lens_profile_choice,
         lens_distortion,
         lens_vignetting,
         lens_manual_distortion,
@@ -448,6 +450,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
     let mut r = Recipe {
         lens_builtin: *lens_builtin,
         lens_profile: *lens_profile,
+        lens_profile_choice: lens_profile_choice.clone(),
         lens_distortion: *lens_distortion,
         lens_vignetting: *lens_vignetting,
         lens_manual_distortion: *lens_manual_distortion,

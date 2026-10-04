@@ -1154,3 +1154,84 @@ fn black_white_by_profile_writes_its_mix() {
     );
     assert!(packet.contains(r#"crs:GrayMixerBlue="-40""#), "{packet}");
 }
+/// Lightroom's lens profile Setup and the profile an edit names import, are kept when
+/// it isn't imported, and are written back as read.
+#[test]
+fn lens_profile_identity_round_trips() -> Result<()> {
+    use crate::lens::choice::{LensProfileChoice, LensProfileId, LensProfileSetup, tests};
+    let mut m = tests::photo();
+    m.wb = [1.; 3];
+    m.daylight_wb = [1.; 3];
+    m.matrix = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    let apply = |attrs: &str, r: &Recipe| {
+        parse(Path::new("lens.xmp"), &xml(attrs, ""))?.apply(r, &m, &[], None)
+    };
+    let named = r#"c:LensProfileEnable="1" c:LensProfileSetup="Custom" c:LensProfileName="Adobe (Gone 24mm)" c:LensProfileFilename="Gone (24mm) - RAW.lcp" c:LensProfileDigest="0123456789ABCDEF0123456789ABCDEF" c:LensProfileIsEmbedded="False""#;
+    let r = apply(named, &Recipe::default())?;
+    let id = LensProfileId {
+        name: "Adobe (Gone 24mm)".into(),
+        filename: "Gone (24mm) - RAW.lcp".into(),
+        digest: "0123456789ABCDEF0123456789ABCDEF".into(),
+    };
+    assert_eq!(
+        r.lens_profile_choice,
+        LensProfileChoice {
+            setup: LensProfileSetup::Custom,
+            id: Some(id.clone()),
+        }
+    );
+    assert!(r.lens_correction(&m).is_none());
+    assert!(
+        r.missing_lens_profile(&m)
+            .unwrap()
+            .contains("Adobe (Gone 24mm)")
+    );
+    let photo = crate::xmp::write::Photo {
+        raw_name: "IMG.RAW".into(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    for key in [
+        r#"crs:LensProfileSetup="Custom""#,
+        r#"crs:LensProfileName="Adobe (Gone 24mm)""#,
+        r#"crs:LensProfileFilename="Gone (24mm) - RAW.lcp""#,
+        r#"crs:LensProfileDigest="0123456789ABCDEF0123456789ABCDEF""#,
+    ] {
+        assert!(packet.contains(key), "{key} {packet}");
+    }
+    let back = parse(Path::new("export.xmp"), &packet)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert_eq!(back.lens_profile_choice, r.lens_profile_choice);
+    // Lightroom's names for the setups.
+    let auto = apply(r#"c:LensProfileSetup="Auto""#, &r)?;
+    assert_eq!(
+        auto.lens_profile_choice,
+        LensProfileChoice {
+            setup: LensProfileSetup::Auto,
+            id: None
+        }
+    );
+    let default = apply(r#"c:LensProfileSetup="LensDefaults""#, &r)?;
+    assert!(default.lens_profile_choice.is_default());
+    // A preset without lens settings leaves the choice alone.
+    assert_eq!(
+        apply(r#"c:Exposure2012="1""#, &r)?.lens_profile_choice,
+        r.lens_profile_choice
+    );
+    // Under Auto, the profile written is the one rendering.
+    let on = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&on, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:LensProfileSetup="LensDefaults""#),
+        "{packet}"
+    );
+    assert!(
+        packet.contains(&format!(r#"crs:LensProfileFilename="{}""#, tests::ADOBE)),
+        "{packet}"
+    );
+    Ok(())
+}
