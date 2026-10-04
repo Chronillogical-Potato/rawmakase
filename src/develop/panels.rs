@@ -119,6 +119,7 @@ impl Panel {
             Panel::Transform => {
                 r.transform = defaults.transform;
                 r.upright = defaults.upright.clone();
+                r.constrain_crop = defaults.constrain_crop;
             }
             Panel::Effects => e.reset_post_crop(),
             Panel::Calibration => {

@@ -113,6 +113,22 @@ fn refine_saturation_is_omitted_at_its_default_and_round_trips() {
     let old: Recipe = serde_json::from_value(json).unwrap();
     assert_eq!(old.curve_saturation, 1.);
 }
+/// Constrain Crop is left out of recipes while off, so releases that predate it open
+/// every recipe that does not use it.
+#[test]
+fn constrain_crop_is_omitted_while_off_and_round_trips() {
+    let json = serde_json::to_value(Recipe::default()).unwrap();
+    assert!(json.get("constrain_crop").is_none());
+    let r = Recipe {
+        constrain_crop: true,
+        ..Default::default()
+    };
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert!(back.constrain_crop);
+    assert!(back.unknown.is_empty());
+    let old: Recipe = serde_json::from_value(json).unwrap();
+    assert!(!old.constrain_crop);
+}
 #[test]
 fn reference_color_extremes_stay_finite_and_in_gamut() {
     let im = fixture();
@@ -627,4 +643,44 @@ fn refine_saturation_zero_keeps_the_colours_saturation_through_the_point_curve()
         );
     }
     assert_eq!(render(2.), full);
+}
+/// Constrain Crop renders without the white areas Vertical uncovers, at the crop's
+/// aspect.
+#[test]
+fn constrain_crop_renders_no_white() {
+    let m = Metadata {
+        width: 90,
+        height: 60,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let im = CameraImage {
+        recovered: Default::default(),
+        width: 90,
+        height: 60,
+        pixels: vec![[0.1; 3]; 90 * 60],
+        metadata: m,
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let mut r = Recipe::default();
+    r.transform.vertical = 0.6;
+    r.transform.rotate = 3.;
+    let white = |out: &Rendered| {
+        out.pixels
+            .iter()
+            .filter(|p| p.iter().all(|v| *v > 0.99))
+            .count()
+    };
+    let free = render(&im, &r, 0).unwrap();
+    assert!(white(&free) > 100, "{}", white(&free));
+    r.constrain_crop = true;
+    let constrained = render(&im, &r, 0).unwrap();
+    assert_eq!(white(&constrained), 0);
+    let aspect = constrained.width as f32 / constrained.height as f32;
+    assert!((aspect - 1.5).abs() < 0.06, "{aspect}");
+    assert!(constrained.width < free.width && constrained.width > 45);
 }

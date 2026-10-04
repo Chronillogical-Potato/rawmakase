@@ -367,9 +367,21 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
     }
     let name = if (a.temperature, a.tint, a.wb) != (b.temperature, b.tint, b.wb) {
         "White Balance"
-    } else if (a.crop, a.straighten, a.rotation, a.flip_x, a.flip_y)
-        != (b.crop, b.straighten, b.rotation, b.flip_x, b.flip_y)
-    {
+    } else if (
+        a.crop,
+        a.straighten,
+        a.constrain_crop,
+        a.rotation,
+        a.flip_x,
+        a.flip_y,
+    ) != (
+        b.crop,
+        b.straighten,
+        b.constrain_crop,
+        b.rotation,
+        b.flip_x,
+        b.flip_y,
+    ) {
         "Crop"
     } else if a.curve != b.curve
         || a.effects.channels != b.effects.channels

@@ -312,6 +312,7 @@ impl SettingGroup {
             Crop => {
                 to.crop = from.crop;
                 to.straighten = from.straighten;
+                to.constrain_crop = from.constrain_crop;
             }
             Masking => to.masks = from.masks.clone(),
         }
@@ -534,6 +535,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         sharpening: _,
         crop: _,
         straighten: _,
+        constrain_crop: _,
         transform: _,
         upright: _,
         rotation: _,
@@ -621,6 +623,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("sharpening", Group(Sharpening)),
         ("crop", Group(Crop)),
         ("straighten", Group(Crop)),
+        ("constrain_crop", Group(Crop)),
         ("transform", Group(TransformAdjustments)),
         // The mode transfers; its corrections are analysed for each photo.
         ("upright", Group(UprightMode)),

@@ -331,7 +331,9 @@ impl Editor {
         if self.preview.texture.is_some() {
             // Opening or leaving the Crop tool changes the crop before the render for
             // it lands: the old render goes where its crop sits, clipped to the new one.
-            let now = self.effective_recipe().crop;
+            let now = geometry
+                .as_ref()
+                .map_or(self.effective_recipe().crop, |g| g.crop());
             match self.preview.crop {
                 Some(then) if then != now && geometry.is_some() => {
                     let size = rect.size() / Vec2::new(now[2] - now[0], now[3] - now[1]);

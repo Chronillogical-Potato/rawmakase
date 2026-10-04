@@ -90,6 +90,12 @@ pub struct Recipe {
     pub sharpening: f32,
     pub crop: [f32; 4],
     pub straighten: f32,
+    /// Lightroom's Constrain Crop (`crs:CropConstrainToWarp`): the crop as rendered
+    /// shrinks, keeping its aspect, to leave out the white areas Upright, the Transform
+    /// sliders and manual Distortion uncover. `crop` stays as the user set it. Omitted
+    /// when off, so releases that predate it read the recipe.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub constrain_crop: bool,
     /// Transform panel sliders (engine 4).
     #[serde(default)]
     pub transform: crate::develop::Transform,
@@ -179,6 +185,7 @@ impl Default for Recipe {
             sharpening: 0.35,
             crop: [0., 0., 1., 1.],
             straighten: 0.,
+            constrain_crop: false,
             transform: Default::default(),
             upright: Default::default(),
             rotation: 0,

@@ -85,7 +85,7 @@ Lightroom's manual Distortion (Lens Corrections > Manual, `crs:LensManualDistort
 - Positive amounts correct barrel distortion: the middle shrinks and the edges' middles come from outside the photo, which renders white, as Lightroom shows it without Constrain Crop. Negative amounts correct pincushion distortion and enlarge the middle, so nothing white appears.
 - Order: Camera Raw applies it in the frame as recorded, centred on the uncropped photo. Crop and Straighten cut its result (a cropped render equals the same crop of the uncropped one exactly), and Upright and the Transform sliders apply after it: Vertical, Scale and Offset renders match only that order. On a DNG whose WarpRectilinear opcode distorts the chart, the lens correction applies after it on the way to the sensor, so `Geometry::source` applies it after the homography and before `LensMap`.
 
-The `lens-manual-distortion*` corpus cases (±50, and +50 with Vertical +30) sit at mean ΔE00 1.3–1.7 from Camera Raw (the default render is 0.9), against 16–21 if it were ignored. The Lens Corrections panel's Distortion › Amount slider sets it, from process version 4. Constrain Crop (`crs:CropConstrainToWarp` 1) is still reported as unsupported.
+The `lens-manual-distortion*` corpus cases (±50, and +50 with Vertical +30) sit at mean ΔE00 1.3–1.7 from Camera Raw (the default render is 0.9), against 16–21 if it were ignored. The Lens Corrections panel's Distortion › Amount slider sets it, from process version 4. Constrain Crop crops the white out ([transform](transform.md#constrain-crop)).
 
 ## Defringe
 

@@ -215,7 +215,9 @@ impl Editor {
                 .clone()
         };
         if self.view.is(super::state::Tool::Crop) {
+            // The whole photo, white areas included, around the crop being drawn.
             r.crop = [0., 0., 1., 1.];
+            r.constrain_crop = false;
         }
         // Switched-off panels as rendered, so viewport geometry matches the photo shown.
         if !r.panels.all_on() {
@@ -278,7 +280,7 @@ impl Editor {
             } else {
                 fit
             };
-            self.preview.pending_crop = self.effective_recipe().crop;
+            self.preview.pending_crop = geometry.crop();
             self.preview.pending_recipe = Some(self.effective_recipe());
             self.preview.pending_mode = region.map_or(
                 super::state::TextureMode::Whole,

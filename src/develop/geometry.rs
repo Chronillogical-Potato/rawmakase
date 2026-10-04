@@ -292,7 +292,7 @@ fn mat(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
 /// Inverse map from output normalized coordinates to un-oriented decoded pixels.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geometry {
     pub width: u32,
     pub height: u32,
@@ -317,23 +317,35 @@ pub struct Geometry {
 }
 impl Geometry {
     pub fn new(im: &CameraImage, r: &Recipe, max_edge: u32) -> Self {
-        let frame = super::ImageFrame::new(im);
+        Self::with_frame(
+            super::ImageFrame::new(im),
+            [im.width, im.height],
+            r,
+            max_edge,
+        )
+    }
+    /// The geometry from metadata alone, for positions and the crop as rendered before
+    /// the photo is decoded.
+    pub fn for_metadata(m: &crate::raw::Metadata, r: &Recipe) -> Self {
+        Self::with_frame(
+            super::ImageFrame::for_metadata(m),
+            [m.width.max(1), m.height.max(1)],
+            r,
+            0,
+        )
+    }
+    /// For a photo decoded at `size` pixels with `frame`.
+    fn with_frame(frame: super::ImageFrame, size: [u32; 2], r: &Recipe, max_edge: u32) -> Self {
         let turns = (frame.turns + r.rotation) % 4;
         let [w, h] = frame.size();
         let (ow, oh) = if r.rotation % 2 == 1 { (h, w) } else { (w, h) };
         let angle = r.straighten.to_radians();
         let (s, c) = angle.sin_cos();
         let zoom = (c.abs() + s.abs() * oh / ow).max(c.abs() + s.abs() * ow / oh);
-        let w = ow * (r.crop[2] - r.crop[0]);
-        let h = oh * (r.crop[3] - r.crop[1]);
-        let factor = if max_edge > 0 {
-            (max_edge as f32 / w.max(h)).min(1.)
-        } else {
-            1.
-        };
+        let [width, height] = size;
         let (frame_width, frame_height) = (
-            im.width as f32 * frame.inset[2],
-            im.height as f32 * frame.inset[3],
+            width as f32 * frame.inset[2],
+            height as f32 * frame.inset[3],
         );
         let transform = Self::homography(r, frame_width, frame_height);
         // Off with the Lens Corrections panel, for callers that pass the stored recipe
@@ -342,9 +354,9 @@ impl Geometry {
         let manual = (r.engine >= 4 && lens_panel == super::panels::PanelState::On)
             .then(|| ManualDistortion::new(r.lens_manual_distortion, frame_width, frame_height))
             .flatten();
-        Self {
-            width: (w * factor).round().max(1.) as u32,
-            height: (h * factor).round().max(1.) as u32,
+        let mut g = Self {
+            width: 0,
+            height: 0,
             oriented_width: ow,
             oriented_height: oh,
             crop: r.crop,
@@ -353,13 +365,47 @@ impl Geometry {
             turns,
             flip_x: r.flip_x,
             flip_y: r.flip_y,
-            source_width: im.width,
-            source_height: im.height,
+            source_width: width,
+            source_height: height,
             inset: frame.inset,
             transform,
             forward: transform.map(crate::color_math::inverse),
             manual,
+        };
+        if r.constrain_crop && (g.transform.is_some() || g.manual.is_some()) {
+            g.crop = g.constrained_crop();
         }
+        let w = ow * (g.crop[2] - g.crop[0]);
+        let h = oh * (g.crop[3] - g.crop[1]);
+        let factor = if max_edge > 0 {
+            (max_edge as f32 / w.max(h)).min(1.)
+        } else {
+            1.
+        };
+        g.width = (w * factor).round().max(1.) as u32;
+        g.height = (h * factor).round().max(1.) as u32;
+        g
+    }
+    /// The crop Constrain Crop renders for this geometry's crop. The viewport builds a
+    /// geometry several times a frame, so the last one found is remembered.
+    fn constrained_crop(&self) -> [f32; 4] {
+        thread_local! {
+            static LAST: std::cell::Cell<Option<(Geometry, [f32; 4])>> =
+                const { std::cell::Cell::new(None) };
+        }
+        if let Some((key, crop)) = LAST.get()
+            && key == *self
+        {
+            return crop;
+        }
+        let crop = super::crop_constraint::largest_covered(self.crop, self).unwrap_or(self.crop);
+        LAST.set(Some((*self, crop)));
+        crop
+    }
+    /// The crop as rendered (0–1 of the straightened photo): the recipe's, or with
+    /// Constrain Crop the part of it that has a source pixel everywhere.
+    pub fn crop(&self) -> [f32; 4] {
+        self.crop
     }
     /// Upright followed by the Transform sliders, output to source, in 0–1 coordinates
     /// of the photo as recorded (`width` by `height`). Camera Raw applies both in that
@@ -429,10 +475,20 @@ impl Geometry {
         self.manual.map_or([0.; 3], |m| [m.k, m.axes[0], m.axes[1]])
     }
     pub fn source(&self, u: f32, v: f32) -> [f32; 2] {
-        let mut x = self.crop[0] + u * (self.crop[2] - self.crop[0]);
-        let mut y = self.crop[1] + v * (self.crop[3] - self.crop[1]);
-        x = (x - 0.5) * self.oriented_width / self.zoom;
-        y = (y - 0.5) * self.oriented_height / self.zoom;
+        let [x, y] = self.recorded(
+            self.crop[0] + u * (self.crop[2] - self.crop[0]),
+            self.crop[1] + v * (self.crop[3] - self.crop[1]),
+        );
+        [
+            (self.inset[0] + x * self.inset[2]) * self.source_width as f32 - 0.5,
+            (self.inset[1] + y * self.inset[3]) * self.source_height as f32 - 0.5,
+        ]
+    }
+    /// The position in the frame as recorded (0–1, inside the camera's default crop) of
+    /// crop-space position (`x`, `y`), 0–1 over the straightened, uncropped photo.
+    fn recorded(&self, x: f32, y: f32) -> [f32; 2] {
+        let x = (x - 0.5) * self.oriented_width / self.zoom;
+        let y = (y - 0.5) * self.oriented_height / self.zoom;
         let (s, c) = self.angle.sin_cos();
         let nx = (c * x + s * y) / self.oriented_width + 0.5;
         let ny = (-s * x + c * y) / self.oriented_height + 0.5;
@@ -461,10 +517,7 @@ impl Geometry {
         if let Some(m) = &self.manual {
             [x, y] = m.source(x, y);
         }
-        [
-            (self.inset[0] + x * self.inset[2]) * self.source_width as f32 - 0.5,
-            (self.inset[1] + y * self.inset[3]) * self.source_height as f32 - 0.5,
-        ]
+        [x, y]
     }
     /// Output position (0–1 over the view) of decoded sample coordinates (`x`, `y`):
     /// the inverse of [`Self::source`].
@@ -501,6 +554,23 @@ impl Geometry {
             (xc - self.crop[0]) / (self.crop[2] - self.crop[0]),
             (yc - self.crop[1]) / (self.crop[3] - self.crop[1]),
         ]
+    }
+}
+
+/// Margin, in fractions of the frame, that Constrain Crop keeps from its edges, for
+/// rounding and for manual Distortion bending a crop's edges between the positions
+/// checked.
+const CONSTRAIN_MARGIN: f32 = 1e-4;
+impl super::crop_constraint::Covers for Geometry {
+    fn covers(&self, x: f32, y: f32) -> bool {
+        let inside = CONSTRAIN_MARGIN..=1. - CONSTRAIN_MARGIN;
+        let [x, y] = self.recorded(x, y);
+        inside.contains(&x) && inside.contains(&y)
+    }
+    /// Straightening, Upright and the Transform map straight lines to straight lines,
+    /// and the frame they map back to is a rectangle.
+    fn straight_edges(&self) -> bool {
+        self.manual.is_none()
     }
 }
 
@@ -700,5 +770,280 @@ mod singular_tests {
         assert!(u.validate());
         u.corrections[3] = [1., 0., 0., 0., 0., 0., 0., 0., 1.];
         assert!(!u.validate());
+    }
+}
+#[cfg(test)]
+mod constrain_crop_tests {
+    use super::*;
+    fn photo() -> CameraImage {
+        CameraImage {
+            width: 300,
+            height: 200,
+            pixels: vec![[0.2; 3]; 300 * 200],
+            metadata: crate::raw::Metadata {
+                width: 300,
+                height: 200,
+                wb: [1.; 3],
+                ..Default::default()
+            },
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+            recovered: Default::default(),
+        }
+    }
+    /// Output positions, on a grid over the rendered crop, that render white.
+    fn white(g: &Geometry) -> usize {
+        let n = 120;
+        (0..=n)
+            .flat_map(|i| (0..=n).map(move |j| (i, j)))
+            .filter(|&(i, j)| {
+                let [x, y] = g.source(i as f32 / n as f32, j as f32 / n as f32);
+                g.outside(x, y)
+            })
+            .count()
+    }
+    fn cases() -> Vec<(&'static str, Recipe)> {
+        let with = |edit: &dyn Fn(&mut Recipe)| {
+            let mut r = Recipe::default();
+            edit(&mut r);
+            r
+        };
+        let (s, c) = 4f32.to_radians().sin_cos();
+        vec![
+            ("vertical +100", with(&|r| r.transform.vertical = 1.)),
+            ("vertical -100", with(&|r| r.transform.vertical = -1.)),
+            (
+                "horizontal and vertical",
+                with(&|r| {
+                    r.transform.horizontal = 0.6;
+                    r.transform.vertical = -0.4;
+                }),
+            ),
+            ("rotate 10", with(&|r| r.transform.rotate = 10.)),
+            ("rotate -10", with(&|r| r.transform.rotate = -10.)),
+            ("scale 50", with(&|r| r.transform.scale = 0.5)),
+            ("offset x 100", with(&|r| r.transform.offset_x = 1.)),
+            (
+                "aspect and offset y",
+                with(&|r| {
+                    r.transform.aspect = 1.;
+                    r.transform.offset_y = -0.3;
+                }),
+            ),
+            ("distortion +100", with(&|r| r.lens_manual_distortion = 1.)),
+            (
+                "distortion with transform",
+                with(&|r| {
+                    r.lens_manual_distortion = 0.5;
+                    r.transform.vertical = 0.3;
+                    r.transform.scale = 0.9;
+                }),
+            ),
+            (
+                "upright",
+                with(&|r| {
+                    r.upright = Upright {
+                        mode: UprightMode::Level,
+                        corrections: vec![
+                            [1., 0., 0., 0., 1., 0., 0., 0., 1.],
+                            [1., 0., 0., 0., 1., 0., 0., 0., 1.],
+                            [1., 0., 0., 0., 1., 0., 0., 0., 1.],
+                            // A 4° turn about the centre and a slight keystone.
+                            [
+                                c,
+                                -s,
+                                0.5 - 0.5 * c + 0.5 * s,
+                                s,
+                                c,
+                                0.5 - 0.5 * s - 0.5 * c,
+                                0.05,
+                                0.,
+                                0.97,
+                            ],
+                        ],
+                        ..Default::default()
+                    }
+                }),
+            ),
+            (
+                "straighten with vertical",
+                with(&|r| {
+                    r.straighten = 20.;
+                    r.transform.vertical = 0.5;
+                }),
+            ),
+            (
+                "turned and flipped",
+                with(&|r| {
+                    r.rotation = 1;
+                    r.flip_x = true;
+                    r.transform.horizontal = 0.5;
+                    r.transform.rotate = 5.;
+                }),
+            ),
+            (
+                "user crop",
+                with(&|r| {
+                    r.crop = [0.05, 0.1, 0.55, 0.9];
+                    r.transform.vertical = 0.5;
+                }),
+            ),
+            (
+                "user crop at the edge",
+                with(&|r| {
+                    r.crop = [0.7, 0., 1., 0.3];
+                    r.straighten = -12.;
+                    r.transform.rotate = -8.;
+                    r.transform.scale = 0.8;
+                }),
+            ),
+        ]
+    }
+    #[test]
+    fn constrain_crop_leaves_no_white_and_keeps_the_crops_aspect() {
+        let im = photo();
+        for (name, r) in cases() {
+            let free = Geometry::new(&im, &r, 0);
+            assert!(white(&free) > 0, "{name}: nothing to constrain");
+            let constrained = Recipe {
+                constrain_crop: true,
+                ..r.clone()
+            };
+            let g = Geometry::new(&im, &constrained, 0);
+            assert_eq!(white(&g), 0, "{name}: {:?}", g.crop());
+            let [l, t, r2, b] = g.crop();
+            let c = r.crop;
+            // Inside the user's crop, at its aspect, and a valid crop.
+            assert!(
+                l >= c[0] - 1e-6 && t >= c[1] - 1e-6 && r2 <= c[2] + 1e-6 && b <= c[3] + 1e-6,
+                "{name}: {:?} outside {c:?}",
+                g.crop()
+            );
+            let aspect = (r2 - l) / (b - t);
+            let original = (c[2] - c[0]) / (c[3] - c[1]);
+            assert!(
+                (aspect / original - 1.).abs() < 1e-3,
+                "{name}: {aspect} {original}"
+            );
+            assert!(r2 - l >= 0.01 && b - t >= 0.01, "{name}: {:?}", g.crop());
+            assert!(constrained.validate().is_ok());
+            // The output size follows the crop as rendered.
+            let w = g.oriented_width * (r2 - l);
+            assert_eq!(g.width, w.round() as u32, "{name}");
+            // A recipe that stores the constrained crop renders it unchanged.
+            let stored = Recipe {
+                crop: g.crop(),
+                ..constrained.clone()
+            };
+            assert_eq!(Geometry::new(&im, &stored, 0).crop(), g.crop(), "{name}");
+        }
+    }
+    /// At Scale 50 only the middle half of the frame has a source pixel: the crop
+    /// becomes that half, the largest one at the photo's aspect.
+    #[test]
+    fn constrain_crop_takes_the_largest_crop_that_fits() {
+        let mut r = Recipe {
+            constrain_crop: true,
+            ..Default::default()
+        };
+        r.transform.scale = 0.5;
+        let crop = Geometry::new(&photo(), &r, 0).crop();
+        for (v, e) in crop.iter().zip([0.25, 0.25, 0.75, 0.75]) {
+            assert!((v - e).abs() < 1e-3, "{crop:?}");
+        }
+        // Offset right, the crop moves with the photo instead of shrinking around the
+        // centre.
+        r.transform.scale = 0.8;
+        r.transform.offset_x = 0.1;
+        let [l, _, right, _] = Geometry::new(&photo(), &r, 0).crop();
+        assert!((right - l - 0.8).abs() < 2e-3, "{l} {right}");
+        assert!((l - (0.1 + 0.0811)).abs() < 2e-3, "{l}");
+    }
+    /// Where the covered area is far from the crop's centre, the search still finds the
+    /// largest crop: a dense search over centres finds a side of 0.1038 here.
+    #[test]
+    fn constrain_crop_finds_the_largest_crop_away_from_the_centre() {
+        let mut r = Recipe {
+            constrain_crop: true,
+            ..Default::default()
+        };
+        r.transform = Transform {
+            horizontal: -0.1522,
+            vertical: -0.5199,
+            rotate: -2.83,
+            aspect: 0.,
+            scale: 0.5258,
+            offset_x: 0.2627,
+            offset_y: 0.8124,
+        };
+        let g = Geometry::new(&photo(), &r, 0);
+        let [l, _, right, _] = g.crop();
+        assert!(right - l > 0.1035, "{:?}", g.crop());
+        assert_eq!(white(&g), 0);
+    }
+    /// A crop wholly in the white becomes the largest crop at its aspect that the photo
+    /// covers, rather than staying white.
+    #[test]
+    fn constrain_crop_moves_a_crop_that_is_all_white() {
+        let mut r = Recipe {
+            constrain_crop: true,
+            crop: [0., 0.4, 0.15, 0.6],
+            ..Default::default()
+        };
+        r.transform.offset_x = 1.;
+        let free = Geometry::new(
+            &photo(),
+            &Recipe {
+                constrain_crop: false,
+                ..r.clone()
+            },
+            0,
+        );
+        assert_eq!(white(&free), 121 * 121);
+        let g = Geometry::new(&photo(), &r, 0);
+        assert_eq!(white(&g), 0, "{:?}", g.crop());
+        let [l, t, right, b] = g.crop();
+        assert!(
+            ((right - l) / (b - t) - 0.75).abs() < 1e-3,
+            "{:?}",
+            g.crop()
+        );
+        // The photo covers the right 0.189 of the frame.
+        assert!((right - l - 0.189).abs() < 2e-3, "{:?}", g.crop());
+    }
+    /// Switching the Transform panel off bypasses its Constrain Crop too, so manual
+    /// Distortion alone renders the stored crop.
+    #[test]
+    fn transform_panel_off_bypasses_constrain_crop() {
+        use crate::develop::panels::{Panel, PanelState};
+        let mut r = Recipe {
+            constrain_crop: true,
+            lens_manual_distortion: 0.5,
+            ..Default::default()
+        };
+        assert_ne!(Geometry::new(&photo(), &r, 0).crop(), r.crop);
+        r.panels.set(Panel::Transform, PanelState::Off);
+        let shown = r.as_rendered();
+        assert_eq!(Geometry::new(&photo(), &shown, 0).crop(), r.crop);
+    }
+    #[test]
+    fn constrain_crop_keeps_crops_with_nothing_white() {
+        let im = photo();
+        let mut r = Recipe {
+            constrain_crop: true,
+            crop: [0.3, 0.3, 0.6, 0.5],
+            straighten: 30.,
+            ..Default::default()
+        };
+        // Straighten alone zooms to leave no white.
+        assert_eq!(Geometry::new(&im, &r, 0).crop(), r.crop);
+        r.transform.vertical = 0.3;
+        assert_eq!(Geometry::new(&im, &r, 0).crop(), r.crop);
+        // Off, the crop is rendered as it is.
+        r.transform.vertical = 1.;
+        r.crop = [0., 0., 1., 1.];
+        r.constrain_crop = false;
+        assert_eq!(Geometry::new(&im, &r, 0).crop(), r.crop);
     }
 }

@@ -7,6 +7,7 @@ pub(crate) mod color;
 mod color_grade;
 mod color_grade_data;
 mod color_mixer;
+mod crop_constraint;
 pub mod curve;
 pub mod effects;
 mod geometry;
