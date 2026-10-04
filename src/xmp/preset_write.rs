@@ -53,11 +53,18 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
     let mut groups = groups.clone();
     groups.set(SettingGroup::UprightTransforms, GroupInclusion::Excluded);
     let groups = &groups;
+    // Lightroom's Amount slider, offered when every setting written scales with it.
+    // Spots and masks are never written.
+    let supports_amount = groups
+        .groups()
+        .filter(|g| !matches!(g, SettingGroup::SpotRemoval | SettingGroup::Masking))
+        .all(crate::presets::amount::group_scales);
+    let supports_amount = if supports_amount { "True" } else { "False" };
     let mut attributes: Vec<(String, String)> = [
         ("PresetType", "Normal"),
         ("Cluster", ""),
         ("UUID", info.uuid.as_str()),
-        ("SupportsAmount", "False"),
+        ("SupportsAmount", supports_amount),
         ("SupportsColor", "True"),
         ("SupportsMonochrome", "True"),
         ("SupportsHighDynamicRange", "True"),
@@ -298,6 +305,45 @@ mod tests {
         )?;
         assert_eq!(back.profile.as_ref().unwrap().name, "Test Creative");
         assert_eq!(back.profile_amount, 0.35);
+        Ok(())
+    }
+    /// A preset offers Lightroom's Amount only when every setting it holds scales.
+    #[test]
+    fn presets_offer_an_amount_when_every_group_scales() -> anyhow::Result<()> {
+        let info = PresetInfo::new("Soft", "User Presets");
+        let mut tones = GroupSelection::none();
+        for group in [
+            SettingGroup::Exposure,
+            SettingGroup::ToneCurve,
+            SettingGroup::WhiteBalance,
+            SettingGroup::TreatmentAndProfile,
+            // Never written, so they don't count.
+            SettingGroup::SpotRemoval,
+            SettingGroup::Masking,
+        ] {
+            tones.set(group, GroupInclusion::Included);
+        }
+        let text = preset(&edited(), &info, &tones);
+        assert!(text.contains(r#"crs:SupportsAmount="True""#), "{text}");
+        let parsed = crate::xmp::parse(Path::new("Soft.xmp"), &text)?;
+        let m = crate::raw::Metadata {
+            wb: [2., 1., 1.8],
+            daylight_wb: [2., 1., 1.8],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        let before = Recipe::default();
+        let full = parsed.apply(&before, &m, &[], None)?;
+        let amount = crate::presets::amount::PresetAmount::new(&parsed, before, full)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        assert_eq!(amount.at(0.5, &m).exposure, 0.25);
+        // Crop or lens corrections don't scale.
+        for group in [SettingGroup::Crop, SettingGroup::LensProfileCorrections] {
+            let mut with = tones.clone();
+            with.set(group, GroupInclusion::Included);
+            let text = preset(&edited(), &info, &with);
+            assert!(text.contains(r#"crs:SupportsAmount="False""#), "{group:?}");
+        }
         Ok(())
     }
     #[test]

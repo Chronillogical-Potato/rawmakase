@@ -136,6 +136,7 @@ impl Editor {
                         self.presets.favorites_only = show == 1;
                         self.presets.compatible_only = show == 2;
                     }
+                    self.preset_amount_ui(ui);
                     let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
                     // One line whatever the count, so switching photos never
                     // moves the list below.
@@ -299,37 +300,7 @@ impl Editor {
             self.preset_action(action);
         }
         if let Some(i) = clicked {
-            self.presets.preview = None;
-            self.presets.hover = None;
-            if let Some(m) = &self.document.metadata {
-                match library.presets[i].apply_lenient(
-                    &self.document.recipe,
-                    m,
-                    &self.document.profiles,
-                    self.document.full().map(|image| image.as_ref()),
-                ) {
-                    Ok((mut r, skipped)) => {
-                        let substitute = library.presets[i]
-                            .profile_substitute(m, &self.document.profiles)
-                            .map(|(_, used)| format!(" · using {used}"))
-                            .unwrap_or_default();
-                        this_photos_upright(&mut r, &self.document.recipe);
-                        self.document.recipe = r;
-                        self.ensure_upright();
-                        self.presets.selected = library.presets[i].id.clone();
-                        self.status = if skipped.is_empty() {
-                            format!("Applied {}{substitute}", library.presets[i].name)
-                        } else {
-                            format!(
-                                "Applied {}{substitute} · skipped: {}",
-                                library.presets[i].name,
-                                skipped.join("; ")
-                            )
-                        };
-                    }
-                    Err(e) => self.status = format!("Preset not applied: {e:#}"),
-                }
-            }
+            self.apply_preset(i);
         } else if let Some(i) = hovered {
             if self.presets.hover.as_ref().is_none_or(|(old, _)| *old != i) {
                 if self.presets.preview.take().is_some() {
@@ -361,6 +332,127 @@ impl Editor {
             if self.presets.preview.take().is_some() {
                 self.schedule();
             }
+        }
+    }
+}
+
+/// Lightroom's preset Amount while it shows: after a preset that supports one is
+/// applied, until anything else changes the photo.
+pub(super) struct AmountSession {
+    name: String,
+    amount: f32,
+    scale: crate::presets::amount::PresetAmount,
+    /// The settings it last set, to notice any other change.
+    shown: Recipe,
+}
+
+impl Editor {
+    /// Applies preset `i` of the library to the open photo, as a click does.
+    pub(super) fn apply_preset(&mut self, i: usize) {
+        self.presets.preview = None;
+        self.presets.hover = None;
+        self.presets.amount = None;
+        let library = self.presets.library.clone();
+        let preset = &library.presets[i];
+        let Some(m) = &self.document.metadata else {
+            return;
+        };
+        match preset.apply_lenient(
+            &self.document.recipe,
+            m,
+            &self.document.profiles,
+            self.document.full().map(|image| image.as_ref()),
+        ) {
+            Ok((mut r, skipped)) => {
+                let substitute = preset
+                    .profile_substitute(m, &self.document.profiles)
+                    .map(|(_, used)| format!(" · using {used}"))
+                    .unwrap_or_default();
+                this_photos_upright(&mut r, &self.document.recipe);
+                let before = std::mem::replace(&mut self.document.recipe, r);
+                self.ensure_upright();
+                // The settings before it are kept once, and every Amount is computed
+                // from them again, so dragging never drifts.
+                let full = self.document.recipe.clone();
+                self.presets.amount =
+                    crate::presets::amount::PresetAmount::new(preset, before, full.clone())
+                        .ok()
+                        .map(|scale| AmountSession {
+                            name: crate::presets::display_name(&preset.name),
+                            amount: 1.,
+                            scale,
+                            shown: full,
+                        });
+                self.presets.selected = preset.id.clone();
+                self.status = if skipped.is_empty() {
+                    format!("Applied {}{substitute}", preset.name)
+                } else {
+                    format!(
+                        "Applied {}{substitute} · skipped: {}",
+                        preset.name,
+                        skipped.join("; ")
+                    )
+                };
+            }
+            Err(e) => self.status = format!("Preset not applied: {e:#}"),
+        }
+    }
+    /// Sets the Amount of the preset just applied (0–2, 1 = 100%).
+    pub(super) fn set_preset_amount(&mut self, amount: f32) {
+        let (Some(session), Some(m)) = (&mut self.presets.amount, &self.document.metadata) else {
+            return;
+        };
+        session.amount = amount;
+        session.shown = session.scale.at(amount, m);
+        self.document.recipe = session.shown.clone();
+        self.document.history.label(super::history::Step::new(
+            "Preset Amount",
+            format!("{:.0}", amount * 100.),
+        ));
+    }
+    /// Ends the Amount once anything else has changed the photo, as Lightroom hides it.
+    pub(super) fn end_stale_preset_amount(&mut self) {
+        if self
+            .presets
+            .amount
+            .as_ref()
+            .is_some_and(|s| s.shown != self.document.recipe)
+        {
+            self.presets.amount = None;
+        }
+    }
+    /// The Amount slider, as Lightroom shows it at the top of the Presets panel. Any
+    /// other change to the photo (an edit, Undo, another preset) ends it.
+    fn preset_amount_ui(&mut self, ui: &mut egui::Ui) {
+        self.end_stale_preset_amount();
+        let Some(session) = &self.presets.amount else {
+            return;
+        };
+        let mut amount = session.amount;
+        ui.add_space(2.);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&session.name)
+                    .size(11.)
+                    .color(theme::gray(170)),
+            )
+            .truncate(),
+        );
+        super::widgets::set_edit_context(ui, "Preset");
+        ui.push_id("preset-amount", |ui| {
+            super::widgets::slider_with(
+                ui,
+                "Amount",
+                &mut amount,
+                crate::presets::amount::RANGE,
+                1.,
+                Some((100., 0)),
+                None,
+            )
+        });
+        super::widgets::set_edit_context(ui, "");
+        if amount != session.amount {
+            self.set_preset_amount(amount);
         }
     }
 }

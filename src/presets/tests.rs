@@ -211,3 +211,22 @@ fn imported_presets_still_need_their_profile() {
     assert!(format!("{e:#}").contains("Missing camera profile ‘Adobe Standard’"));
     assert!(imported.profile_substitute(&m, &profiles).is_none());
 }
+
+/// Built-in presets offer Lightroom's Amount, except Linear, which resets the curve
+/// as Adobe's "None" presets do.
+#[test]
+fn builtin_presets_offer_an_amount() {
+    let m = x100f();
+    let profiles = open_profiles(&m);
+    let base = Recipe::with_profiles(&m, &profiles);
+    for p in builtin::presets().0 {
+        let full = p.apply(&base, &m, &profiles, None).unwrap();
+        let amount = super::amount::PresetAmount::new(&p, base.clone(), full);
+        assert_eq!(amount.is_ok(), p.name != "Linear", "{}", p.name);
+        if let Ok(amount) = amount {
+            for t in [0., 0.5, 2.] {
+                amount.at(t, &m).validate().unwrap();
+            }
+        }
+    }
+}

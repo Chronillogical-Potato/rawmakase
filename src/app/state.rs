@@ -296,6 +296,8 @@ pub(super) struct PresetBrowser {
     pub(super) revision: u64,
     /// Numbers library scans, so only the latest one is shown.
     pub(super) scans: u64,
+    /// The Amount of the preset just applied, while nothing else has changed.
+    pub(super) amount: Option<super::presets::AmountSession>,
 }
 
 impl PresetBrowser {
@@ -392,6 +394,7 @@ impl PresetBrowser {
         self.selected.clear();
         self.preview = None;
         self.hover = None;
+        self.amount = None;
     }
 }
 

@@ -3026,3 +3026,77 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     in_edit_frame(&ctx, &mut editor, Editor::finish_pending_treatment);
     assert!(!editor.document.recipe.effects.monochrome);
 }
+
+/// A Lightroom preset from its settings, as a file would hold them.
+fn preset_from(name: &str, settings: &str) -> crate::xmp::Preset {
+    let text = format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:PresetType="Normal" crs:HasSettings="True" {settings}><crs:Name><rdf:Alt><rdf:li xml:lang="x-default">{name}</rdf:li></rdf:Alt></crs:Name></rdf:Description></rdf:RDF></x:xmpmeta>"#
+    );
+    crate::xmp::parse(std::path::Path::new(&format!("{name}.xmp")), &text).unwrap()
+}
+fn editor_with_presets(ctx: &egui::Context, presets: Vec<crate::xmp::Preset>) -> Editor {
+    let mut editor = Editor::with_context(ctx, None, crate::storage::Session::default(), None);
+    editor.document.metadata = Some(Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    });
+    editor.presets.library = Arc::new(crate::presets::Library {
+        presets,
+        errors: Vec::new(),
+    });
+    editor
+}
+
+#[test]
+fn preset_amount_scales_the_preset_from_the_settings_before_it() {
+    let ctx = egui::Context::default();
+    let mut editor = editor_with_presets(
+        &ctx,
+        vec![
+            preset_from(
+                "Bright",
+                r#"crs:SupportsAmount="True" crs:Exposure2012="+1.00" crs:Contrast2012="+40""#,
+            ),
+            preset_from(
+                "Fixed",
+                r#"crs:SupportsAmount="False" crs:Exposure2012="+1.00""#,
+            ),
+        ],
+    );
+    editor.document.recipe.exposure = 0.2;
+    let frame = editor.begin_edit_frame();
+    editor.apply_preset(0);
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(editor.document.recipe.exposure, 1.);
+    // Each drag is one History step, computed again from the settings before the
+    // preset, so going back and forth never drifts.
+    for amount in [1.7, 0.3, 0.5] {
+        let frame = editor.begin_edit_frame();
+        editor.set_preset_amount(amount);
+        editor.finish_edit_frame(frame, &ctx);
+        editor.end_stale_preset_amount();
+    }
+    assert!((editor.document.recipe.exposure - 0.6).abs() < 1e-6);
+    assert!((editor.document.recipe.contrast - 0.2).abs() < 1e-6);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(applied, 4);
+    assert_eq!(steps[3].name, "Preset Amount");
+    assert_eq!(steps[3].value, "50");
+    // Any other edit ends it, as Lightroom hides the slider.
+    editor.document.recipe.vibrance = 0.1;
+    editor.end_stale_preset_amount();
+    assert!(editor.presets.amount.is_none());
+    // A preset without an Amount shows none.
+    editor.apply_preset(1);
+    assert!(editor.presets.amount.is_none());
+    editor.apply_preset(0);
+    assert!(editor.presets.amount.is_some());
+    // Undo ends it too.
+    let mut recipe = editor.document.recipe.clone();
+    editor.document.history.undo(&mut recipe);
+    editor.document.recipe = recipe;
+    editor.end_stale_preset_amount();
+    assert!(editor.presets.amount.is_none());
+}
