@@ -187,8 +187,8 @@ impl LookSettings {
             parametric: self.parametric.map(|v| v * strength),
             splits: self.splits,
             toning: self.toning.filter(|_| present).map(|t| Toning {
-                shadows: [t.shadows[0], t.shadows[1] * strength],
-                highlights: [t.highlights[0], t.highlights[1] * strength],
+                shadows: [t.shadows[0], (t.shadows[1] * strength).min(1.)],
+                highlights: [t.highlights[0], (t.highlights[1] * strength).min(1.)],
                 balance: t.balance,
             }),
             vignette: self.vignette.filter(|_| present).map(|v| Vignette {
@@ -342,6 +342,12 @@ mod tests {
         assert!((r.saturation - 0.).abs() < 1e-6);
         assert_eq!(r.grading[2], [0.15, 0.1, 0.]);
         assert_eq!(r.effects.vignette, -0.05);
+        // Strong toning at 200% stays a valid saturation.
+        let mut toned = vintage();
+        toned.toning.as_mut().unwrap().highlights[1] = 0.9;
+        let scaled = toned.scaled(1.5);
+        assert_eq!(scaled.toning.unwrap().highlights[1], 1.);
+        assert!(scaled.validate().is_ok());
         // At 0% the look leaves the user's vignette and toning alone.
         user.profile_amount = 0.;
         let r = user.with_profile_adjustments();
