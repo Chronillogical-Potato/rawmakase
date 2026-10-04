@@ -491,7 +491,22 @@ impl Library {
                 correction: OnceLock::new(),
             })
             .collect();
-        PhotoProfiles(candidates.into())
+        // Lightroom's menus list makes, models and profiles alphabetically; sorted
+        // once here, not on every frame the panel is drawn.
+        let mut menu: Vec<usize> = (0..candidates.len()).collect();
+        menu.sort_by(|&a, &b| {
+            let (a, b) = (&candidates[a].profile, &candidates[b].profile);
+            (&a.lens_make, &a.lens_model, &a.name, &a.filename).cmp(&(
+                &b.lens_make,
+                &b.lens_model,
+                &b.name,
+                &b.filename,
+            ))
+        });
+        PhotoProfiles {
+            candidates: candidates.into(),
+            menu: menu.into(),
+        }
     }
 }
 
@@ -571,25 +586,37 @@ impl Candidate {
 
 /// The imported profiles that fit one photo's camera; rebuilt when it opens.
 #[derive(Clone, Debug, Default)]
-pub struct PhotoProfiles(Arc<[Candidate]>);
+pub struct PhotoProfiles {
+    /// In the order the files were read, which breaks ties in automatic matching.
+    candidates: Arc<[Candidate]>,
+    /// `candidates` indices by make, model, profile name and file name.
+    menu: Arc<[usize]>,
+}
 impl PhotoProfiles {
     pub fn all(&self) -> &[Candidate] {
-        &self.0
+        &self.candidates
+    }
+    /// The profiles in menu order: by make, model, profile name and file name.
+    pub fn in_menu_order(&self) -> impl Iterator<Item = &Candidate> {
+        self.menu.iter().map(|&i| &self.candidates[i])
     }
     /// Lightroom's automatic choice: a profile of the photo's lens, made on the same
     /// camera make, else on a make sharing the mount, else on any make.
     pub fn auto(&self, m: &Metadata) -> Option<&Candidate> {
-        let mut matching: Vec<&Candidate> =
-            self.0.iter().filter(|c| c.lens_rank.is_some()).collect();
+        let mut matching: Vec<&Candidate> = self
+            .candidates
+            .iter()
+            .filter(|c| c.lens_rank.is_some())
+            .collect();
         matching.sort_by_key(|c| c.lens_rank);
         matching.into_iter().find(|c| c.correction(m).is_some())
     }
     /// The profile a recorded identity names, by file name, else by profile name.
     pub fn find(&self, filename: &str, name: &str) -> Option<&Candidate> {
-        self.0
+        self.candidates
             .iter()
             .find(|c| c.profile.is(filename, ""))
-            .or_else(|| self.0.iter().find(|c| c.profile.is("", name)))
+            .or_else(|| self.candidates.iter().find(|c| c.profile.is("", name)))
     }
 }
 /// Validates and copies lens profiles into the data directory.

@@ -265,3 +265,22 @@ fn profiles_without_a_correction_model_are_not_offered() {
     let library = Library::from_texts([("empty.lcp", empty.as_str())]);
     assert!(library.for_photo(&photo()).all().is_empty());
 }
+
+#[test]
+fn choosing_an_imported_profile_replaces_the_cameras_own() {
+    let m = photo();
+    let adobe = &m.lens_profiles.auto(&m).unwrap().profile;
+    // An embedded identity with the same name as an imported profile.
+    let mut c = choice(
+        LensProfileSetup::Default,
+        Some(LensProfileId {
+            name: adobe.name.clone(),
+            embedded: true,
+            ..Default::default()
+        }),
+    );
+    assert!(c.resolve(&m.lens_profiles, &m).used.is_none());
+    c.choose(adobe);
+    assert!(!c.id.as_ref().unwrap().embedded);
+    assert_eq!(used(&c, &m).as_deref(), Some(ADOBE));
+}

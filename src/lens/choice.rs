@@ -113,7 +113,8 @@ impl LensProfileChoice {
     fn id_for(&mut self, profile: &ImportedProfile) -> LensProfileId {
         self.id
             .take()
-            .filter(|id| profile.is(&id.filename, &id.name))
+            // The camera's own profile is not an imported file, whatever its name.
+            .filter(|id| !id.embedded && profile.is(&id.filename, &id.name))
             .unwrap_or_else(|| LensProfileId::of(profile))
     }
     /// The choice as it renders: Default and Auto match alike, and the digest is left out.
@@ -185,31 +186,23 @@ impl LensProfileChoice {
 
 /// Lightroom's Make, Model and Profile menus over a photo's profiles.
 pub struct ProfileMenus<'p> {
-    sorted: Vec<&'p ImportedProfile>,
+    profiles: &'p PhotoProfiles,
 }
 impl<'p> ProfileMenus<'p> {
     pub fn new(profiles: &'p PhotoProfiles) -> Self {
-        let mut sorted: Vec<&ImportedProfile> =
-            profiles.all().iter().map(|c| c.profile.as_ref()).collect();
-        sorted.sort_by(|a, b| {
-            (&a.lens_make, &a.lens_model, &a.name, &a.filename).cmp(&(
-                &b.lens_make,
-                &b.lens_model,
-                &b.name,
-                &b.filename,
-            ))
-        });
-        Self { sorted }
+        Self { profiles }
+    }
+    fn sorted(&self) -> impl Iterator<Item = &'p ImportedProfile> + 'p {
+        self.profiles.in_menu_order().map(|c| c.profile.as_ref())
     }
     pub fn makes(&self) -> Vec<&'p str> {
-        let mut makes: Vec<&str> = self.sorted.iter().map(|p| p.lens_make.as_str()).collect();
+        let mut makes: Vec<&str> = self.sorted().map(|p| p.lens_make.as_str()).collect();
         makes.dedup();
         makes
     }
     pub fn models(&self, make: &str) -> Vec<&'p str> {
         let mut models: Vec<&str> = self
-            .sorted
-            .iter()
+            .sorted()
             .filter(|p| p.lens_make == make)
             .map(|p| p.lens_model.as_str())
             .collect();
@@ -217,15 +210,13 @@ impl<'p> ProfileMenus<'p> {
         models
     }
     pub fn profiles(&self, make: &str, model: &str) -> Vec<&'p ImportedProfile> {
-        self.sorted
-            .iter()
-            .copied()
+        self.sorted()
             .filter(|p| p.lens_make == make && p.lens_model == model)
             .collect()
     }
     /// What picking a make chooses: its first model's first profile.
     pub fn first_of_make(&self, make: &str) -> Option<&'p ImportedProfile> {
-        self.sorted.iter().copied().find(|p| p.lens_make == make)
+        self.sorted().find(|p| p.lens_make == make)
     }
     /// What picking a model chooses: its first profile.
     pub fn first_of_model(&self, make: &str, model: &str) -> Option<&'p ImportedProfile> {
