@@ -1,4 +1,5 @@
 use super::Editor;
+use super::crop_tool::{Attention, Guide, Ruler};
 use super::icons::{self, Icon};
 use super::navigator;
 use super::state::{TextureMode, Tool};
@@ -69,13 +70,16 @@ impl Editor {
             crop
         };
         let near = |a: f32, b: f32| (a / b - 1.).abs() < 0.005;
+        // A preset either way round: its reciprocal is the other orientation (X).
         self.view.aspect = if near(crop, photo) {
             -1.
         } else {
             super::inspector::ASPECTS
                 .iter()
                 .map(|(a, _)| *a)
-                .find(|a| *a > 0. && near(aspect, *a))
+                .filter(|a| *a > 0.)
+                .flat_map(|a| [a, 1. / a])
+                .find(|a| near(aspect, *a))
                 .unwrap_or(aspect)
         };
     }
@@ -507,22 +511,7 @@ impl Editor {
                 Stroke::new(1., Color32::WHITE),
                 egui::StrokeKind::Inside,
             );
-            for t in [1. / 3., 2. / 3.] {
-                ui.painter().line_segment(
-                    [
-                        Pos2::new(cr.left() + cr.width() * t, cr.top()),
-                        Pos2::new(cr.left() + cr.width() * t, cr.bottom()),
-                    ],
-                    Stroke::new(1., Color32::from_white_alpha(90)),
-                );
-                ui.painter().line_segment(
-                    [
-                        Pos2::new(cr.left(), cr.top() + cr.height() * t),
-                        Pos2::new(cr.right(), cr.top() + cr.height() * t),
-                    ],
-                    Stroke::new(1., Color32::from_white_alpha(90)),
-                );
-            }
+            self.crop_guides_ui(ui, cr, rect);
             let handles = [
                 cr.left_top(),
                 cr.right_top(),
@@ -540,7 +529,9 @@ impl Editor {
                     Color32::WHITE,
                 );
             }
-            if response.drag_started()
+            let ruling = self.straighten_ruler(ui, &response, rect);
+            if !ruling
+                && response.drag_started()
                 && let Some(p) = response.interact_pointer_pos()
             {
                 let nearest = handles
@@ -554,7 +545,8 @@ impl Editor {
                     .unwrap_or(8);
                 self.view.crop_drag = Some((c, handle));
             }
-            if response.dragged()
+            if !ruling
+                && response.dragged()
                 && let Some((start, handle)) = self.view.crop_drag
             {
                 let delta = response.total_drag_delta().unwrap_or_default();
@@ -605,6 +597,90 @@ impl Editor {
         if self.view.zoom.on && self.region() != self.preview.last_region {
             self.schedule();
         }
+    }
+    /// The crop guide overlay over the crop at `crop` on screen, when it shows: always;
+    /// with the pointer over the photo (`photo`), while something is dragged or just after a new
+    /// overlay is picked; or never. The Straighten ruler shows a grid.
+    fn crop_guides_ui(&self, ui: &egui::Ui, crop: Rect, photo: Rect) {
+        let drawing = matches!(self.view.ruler, Ruler::Drawing { .. });
+        const SHOWN_AFTER_CHANGE: std::time::Duration = std::time::Duration::from_millis(1500);
+        let since_change = self.view.crop_guides_changed.map(|at| at.elapsed());
+        let attention = if drawing || self.view.crop_drag.is_some() {
+            Attention::Dragging
+        } else if ui.rect_contains_pointer(photo) {
+            Attention::Hovered
+        } else if let Some(since) = since_change.filter(|s| *s < SHOWN_AFTER_CHANGE) {
+            ui.ctx().request_repaint_after(SHOWN_AFTER_CHANGE - since);
+            Attention::JustChanged
+        } else {
+            Attention::Away
+        };
+        let guides = if drawing {
+            super::crop_tool::CropGuides {
+                guide: Guide::Grid,
+                ..self.view.crop_guides
+            }
+        } else {
+            self.view.crop_guides
+        };
+        if !guides.visible(attention) {
+            return;
+        }
+        let painter = ui.painter().with_clip_rect(crop);
+        for line in guides.lines(crop.size()) {
+            let points: Vec<Pos2> = line.iter().map(|p| crop.min + p.to_vec2()).collect();
+            painter.add(egui::Shape::line(
+                points,
+                Stroke::new(1., Color32::from_white_alpha(110)),
+            ));
+        }
+    }
+    /// The Straighten ruler on the Crop tool: picked in the panel, or a Cmd-drag as in
+    /// Lightroom. Releasing it sets the angle that makes the line level or plumb, as one
+    /// History step. Returns whether it has the drag, which then moves no crop.
+    fn straighten_ruler(&mut self, ui: &egui::Ui, response: &egui::Response, photo: Rect) -> bool {
+        let cmd = ui.input(|i| i.modifiers.command);
+        let ready = self.view.ruler == Ruler::Armed || cmd;
+        let drawing = matches!(self.view.ruler, Ruler::Drawing { .. });
+        let over_photo = response.hover_pos().is_some_and(|p| photo.contains(p));
+        if (over_photo && ready || drawing) && self.view.crop_drag.is_none() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        // Started on the photo, not the backdrop around it; it may then run off it.
+        if response.drag_started()
+            && ready
+            && let Some(p) = response.interact_pointer_pos()
+            && photo.contains(p)
+        {
+            self.view.ruler = Ruler::Drawing { from: p, to: p };
+        }
+        let Ruler::Drawing { from, to } = &mut self.view.ruler else {
+            return false;
+        };
+        if let Some(p) = response.interact_pointer_pos() {
+            *to = p;
+        }
+        let (from, to) = (*from, *to);
+        let painter = ui.painter();
+        painter.line_segment([from, to], Stroke::new(3., Color32::from_black_alpha(140)));
+        painter.line_segment([from, to], Stroke::new(1., Color32::WHITE));
+        for end in [from, to] {
+            painter.circle_filled(end, 3., Color32::WHITE);
+        }
+        if response.drag_stopped() || !response.dragged() {
+            self.view.ruler = Ruler::Off;
+            let current = self.document.recipe.straighten;
+            if let Some(angle) = super::crop_tool::ruler_angle(from, to, current)
+                && angle != current
+            {
+                self.document.recipe.straighten = angle;
+                self.document.history.label(super::history::Step::new(
+                    "Straighten",
+                    format!("{angle:+.2}"),
+                ));
+            }
+        }
+        true
     }
     /// Lightroom's white balance selector over the photo: an eyedropper cursor
     /// whose tip is the picked point, and a loupe of the pixels around it with the

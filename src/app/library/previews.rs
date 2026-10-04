@@ -87,10 +87,12 @@ pub(super) enum EditSource {
     Recipe(String),
     /// Lightroom develop settings from an imported catalog.
     Lightroom(String),
+    /// No edit: the raw defaults, as Develop would open the photo.
+    Defaults(Arc<crate::develop::defaults::DevelopDefaults>),
 }
 impl EditSource {
     /// The recipe a photo is rendered with: its edit, or the defaults
-    /// Develop would open it with.
+    /// Develop would open it with (Adobe Default unless given).
     pub fn recipe(
         edit: Option<&Self>,
         raw: &crate::raw::Raw,
@@ -102,6 +104,7 @@ impl EditSource {
             Some(Self::Lightroom(text)) => {
                 crate::catalog::convert_develop(text, m, &profiles, None)?.0
             }
+            Some(Self::Defaults(defaults)) => defaults.resolve(m, &profiles).recipe,
             None => crate::develop::Recipe::with_profiles(m, &profiles),
         })
     }
@@ -112,6 +115,7 @@ impl EditSource {
         match self {
             Self::Recipe(text) => ("recipe", text).hash(&mut h),
             Self::Lightroom(text) => ("lightroom", text).hash(&mut h),
+            Self::Defaults(defaults) => ("defaults", format!("{defaults:?}")).hash(&mut h),
         }
         format!("edit-{:016x}", h.finish())
     }

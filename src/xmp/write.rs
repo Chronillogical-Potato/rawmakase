@@ -84,11 +84,35 @@ impl Settings {
     }
 }
 
+/// An enhanced profile (Adobe Color, a creative look) as Lightroom writes it: a `Look`
+/// element over its base profile, which `CameraProfile` names. Indented for a
+/// settings description.
+pub(super) fn look_element(r: &Recipe) -> Option<String> {
+    let profile = r.profile.as_ref()?;
+    let look = profile.enhanced.as_ref()?;
+    let amount = if look.amount.is_some() {
+        r.profile_amount
+    } else {
+        1.
+    };
+    Some(format!(
+        "   <crs:Look>\n    <rdf:Description\n     crs:Name=\"{}\"\n     crs:Amount=\"{}\"\n     crs:UUID=\"{}\"\n     crs:SupportsAmount=\"{}\"/>\n   </crs:Look>\n",
+        escape_text(&profile.name),
+        (amount * 100.).round() / 100.,
+        escape_text(&look.uuid),
+        look.amount.is_some(),
+    ))
+}
+
 pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
     if let Some(profile) = &r.profile {
-        s.text("CameraProfile", profile.name.clone());
+        let name = match &profile.enhanced {
+            Some(look) => &look.base_name,
+            None => &profile.name,
+        };
+        s.text("CameraProfile", name.clone());
     }
     s.text("WhiteBalance", "Custom");
     s.put("Temperature", r.temperature, 1., 0, false);
@@ -381,6 +405,17 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
         let m: Vec<String> = m.iter().map(|x| format!("{x:.9}")).collect();
         s.text(&format!("UprightTransform_{i}"), m.join(","));
     }
+    // Guided's guides as Camera Raw writes them: "x1,y1,x2,y2" with nine decimals.
+    if !u.guides.is_empty() {
+        s.text("UprightFourSegmentsCount", u.guides.len().to_string());
+    }
+    for (i, g) in u.guides.iter().enumerate() {
+        // The shortest decimal that reads back as the same number, so 0.7 is written
+        // 0.700000000 rather than its nearest single-precision value.
+        let fixed = |v: f32| format!("{:.9}", v.to_string().parse::<f64>().unwrap_or(0.));
+        let ends = [g.a[0], g.a[1], g.b[0], g.b[1]].map(fixed);
+        s.text(&format!("UprightFourSegments_{i}"), ends.join(","));
+    }
     for (key, value) in &u.lightroom {
         s.text(key, value.clone());
     }
@@ -550,6 +585,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     list(&mut out, "dc:subject", "Bag", &subject);
     list(&mut out, "lr:hierarchicalSubject", "Bag", &hierarchical);
     if photo.settings {
+        out.extend(look_element(r));
         curve(&mut out, "ToneCurvePV2012", &r.curve);
         for (i, name) in ["Red", "Green", "Blue"].iter().enumerate() {
             curve(

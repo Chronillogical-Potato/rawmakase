@@ -4,6 +4,20 @@ use anyhow::{Context, Result, ensure};
 /// `LocalEdits`), so recipes stay readable by releases that predate them.
 pub const SCHEMA: u32 = 6;
 pub const PIPELINE: u32 = 6;
+/// The version written for a recipe whose look has a Profile Amount or internal
+/// Contrast or Blacks: releases that read 6 and 7 reject those profile fields, so
+/// they are told the file is newer instead.
+const LOOK_AMOUNT: u32 = 8;
+
+/// The schema and pipeline version to write `r` with.
+pub fn saved_version(r: &crate::develop::Recipe) -> u32 {
+    let newer_look = r
+        .profile
+        .as_ref()
+        .and_then(|p| p.enhanced.as_ref())
+        .is_some_and(|e| e.amount.is_some() || e.contrast != 0. || e.blacks != 0.);
+    if newer_look { LOOK_AMOUNT } else { SCHEMA }
+}
 
 pub(crate) fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
     let schema = value["schema"].as_u64();
@@ -20,6 +34,7 @@ pub(crate) fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
                 // Development builds of the retouch tools wrote 7 with the spots and
                 // masks inside the recipe; they load as they are.
                 | (Some(7), Some(7))
+                | (Some(8), Some(8))
         ),
         "Unsupported saved recipe version: preserved without changes"
     );
@@ -55,6 +70,26 @@ mod tests {
         let mut v = serde_json::json!({"schema": 7, "pipeline": 7, "recipe": {"retouch": []}});
         super::migrate_recipe(&mut v).unwrap();
         assert!(v["recipe"].get("engine").is_none());
+        let mut v = serde_json::json!({"schema": 8, "pipeline": 8, "recipe": {}});
+        super::migrate_recipe(&mut v).unwrap();
+    }
+    /// A look with a Profile Amount saves as version 8, which releases that reject
+    /// its fields refuse as newer; everything else stays at 6.
+    #[test]
+    fn only_looks_with_new_fields_raise_the_saved_version() {
+        use crate::{camera_profiles::CameraProfile, develop::Recipe, raw::Metadata};
+        let m = Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        };
+        let mut r = Recipe::default();
+        assert_eq!(super::saved_version(&r), super::SCHEMA);
+        r.profile = crate::camera_profiles::open::color(&m).map(std::sync::Arc::new);
+        assert_eq!(super::saved_version(&r), super::SCHEMA);
+        r.profile = Some(std::sync::Arc::new(CameraProfile::creative_for_test(&m)));
+        assert_eq!(super::saved_version(&r), 8);
     }
     /// The fields a freshly saved recipe writes, as of schema 6. Releases that read
     /// schema 6 keep fields they don't know, so adding a field is safe only when it

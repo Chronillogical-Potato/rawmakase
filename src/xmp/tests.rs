@@ -266,49 +266,68 @@ fn missing_profiles_unknown_settings_and_looks_never_partially_apply() -> Result
     Ok(())
 }
 #[test]
-fn profile_amount_blocks_strict_presets_and_lenient_application_reports_it() -> Result<()> {
-    let base = Recipe {
-        exposure: 1.,
+fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
+    use crate::camera_profiles::{CameraProfile, open};
+    let m = Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
         ..Default::default()
     };
-    let p = parse(
-        Path::new("look.xmp"),
-        &xml(
-            r#"c:Exposure2012="2""#,
-            r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="0.5"/></c:Look>"#,
-        ),
-    )?;
-    assert!(
-        p.blockers.iter().any(|b| b.contains("Profile Amount 50%")),
-        "{:?}",
-        p.blockers
-    );
-    assert!(p.apply(&base, &Metadata::default(), &[], None).is_err());
-    // An amount Lightroom cannot store is malformed.
-    assert!(
+    let profiles: Vec<_> = [
+        open::standard(&m),
+        open::color(&m),
+        Some(CameraProfile::creative_for_test(&m)),
+    ]
+    .into_iter()
+    .flatten()
+    .map(std::sync::Arc::new)
+    .collect();
+    let base = Recipe::with_profiles(&m, &profiles);
+    let preset = |look: &str, amount: &str| {
         parse(
             Path::new("look.xmp"),
             &xml(
                 r#"c:Exposure2012="2""#,
-                r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="-1"/></c:Look>"#,
+                &format!(
+                    r#"<c:Look><r:Description c:Name="{look}" c:Amount="{amount}"/></c:Look>"#
+                ),
             ),
         )
-        .is_err()
-    );
-    // At 0% the look does nothing, so nothing blocks.
-    let p = parse(
+    };
+    // Presets with an Amount are no longer blocked, and apply it.
+    let p = preset("Test Creative", "0.5")?;
+    assert!(p.blockers.is_empty(), "{:?}", p.blockers);
+    assert!(p.look_available(&m, &profiles));
+    let r = p.apply(&base, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
+    assert_eq!((r.profile_amount, r.exposure), (0.5, 2.));
+    // 0% keeps the look, at no strength.
+    let r = preset("Test Creative", "0")?.apply(&base, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
+    assert_eq!(r.profile_amount, 0.);
+    // A look without an Amount renders at 100%; a preset that names another profile
+    // resets an earlier Amount.
+    let earlier = Recipe {
+        profile_amount: 0.3,
+        ..base.clone()
+    };
+    let r = parse(
         Path::new("look.xmp"),
         &xml(
-            r#"c:Exposure2012="2""#,
-            r#"<c:Look><r:Description c:Name="Adobe Color" c:Amount="0"/></c:Look>"#,
+            &format!(r#"c:CameraProfile="{}""#, open::STANDARD),
+            &format!(
+                r#"<c:Look><r:Description c:Name="{}" c:Amount="0.5"/></c:Look>"#,
+                open::COLOR
+            ),
         ),
-    )?;
-    assert!(p.blockers.is_empty(), "{:?}", p.blockers);
-    assert!(p.look.is_empty());
-    assert_eq!(
-        p.apply(&base, &Metadata::default(), &[], None)?.exposure,
-        2.
-    );
+    )?
+    .apply(&earlier, &m, &profiles, None)?;
+    assert_eq!(r.profile.as_ref().unwrap().name, open::COLOR);
+    assert_eq!(r.profile_amount, 1.);
+    // An amount Lightroom cannot store is malformed.
+    assert!(preset("Test Creative", "-1").is_err());
+    assert!(preset("Test Creative", "2.5").is_err());
     Ok(())
 }
 #[test]
@@ -830,5 +849,89 @@ fn constrain_crop_imports() -> Result<()> {
     assert!(apply(r#"c:Exposure2012="1""#, &on)?.constrain_crop);
     assert!(!apply(r#"c:CropConstrainToWarp="0""#, &on)?.constrain_crop);
     assert!(!apply(r#"c:CropConstrainToUnitSquare="1""#, &Recipe::default())?.constrain_crop);
+    Ok(())
+}
+/// Guided Upright's guides as Camera Raw 18.7 serializes them (captured from its own
+/// settings for a synthetic DNG): `UprightFourSegmentsCount` and, per guide,
+/// `UprightFourSegments_N` = "x1,y1,x2,y2" with nine decimals. They import as guides,
+/// write back the same way, and a Guided sidecar with guides but no stored correction
+/// opens to be solved on the photo.
+#[test]
+fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
+    use crate::develop::{UprightGuide, UprightMode};
+    let identity = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,1.000000000";
+    let guided = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.100000000,1.000000000";
+    let attrs = format!(
+        r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:PerspectiveUpright="5" c:UprightTransformCount="6" c:UprightTransform_0="{identity}" c:UprightTransform_1="{identity}" c:UprightTransform_2="{identity}" c:UprightTransform_3="{identity}" c:UprightTransform_4="{identity}" c:UprightTransform_5="{guided}" c:UprightGuidedDependentDigest="0123456789ABCDEF0123456789ABCDEF" c:UprightFourSegmentsCount="2" c:UprightFourSegments_0="0.300000000,0.100000000,0.250000000,0.900000000" c:UprightFourSegments_1="0.700000000,0.100000000,0.750000000,0.900000000""#
+    );
+    // Enough of a camera for the written white balance to read back.
+    let m = Metadata {
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let r = parse(Path::new("photo.xmp"), &xml(&attrs, ""))?.apply(
+        &Recipe::default(),
+        &m,
+        &[],
+        None,
+    )?;
+    let u = &r.upright;
+    assert_eq!(u.mode, UprightMode::Guided);
+    assert_eq!(
+        u.guides,
+        [
+            UprightGuide {
+                a: [0.3, 0.1],
+                b: [0.25, 0.9]
+            },
+            UprightGuide {
+                a: [0.7, 0.1],
+                b: [0.75, 0.9]
+            },
+        ]
+    );
+    assert!(
+        u.lightroom
+            .keys()
+            .all(|k| !k.starts_with("UprightFourSegments"))
+    );
+    assert_eq!(
+        u.lightroom["UprightGuidedDependentDigest"],
+        "0123456789ABCDEF0123456789ABCDEF"
+    );
+    let photo = crate::xmp::write::Photo {
+        raw_name: "IMG.ARW".into(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:UprightFourSegmentsCount="2""#),
+        "{packet}"
+    );
+    assert!(packet.contains(
+        r#"crs:UprightFourSegments_1="0.700000000,0.100000000,0.750000000,0.900000000""#
+    ));
+    let back = parse(Path::new("export.xmp"), &packet)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert_eq!(back.upright, r.upright);
+    // Guides without a stored correction are still reported: renders outside the
+    // editor (the command line, Library previews) have no analysis to solve them beside.
+    let attrs = r#"xmlns:ps="http://ns.adobe.com/photoshop/1.0/" ps:SidecarForExtension="ARW" c:PerspectiveUpright="5" c:UprightFourSegmentsCount="2" c:UprightFourSegments_0="0.3,0.1,0.25,0.9" c:UprightFourSegments_1="0.7,0.1,0.75,0.9""#;
+    assert!(
+        parse(Path::new("photo.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &m, &[], None)
+            .is_err()
+    );
+    // A broken guide is refused, not guessed at.
+    let attrs = r#"c:PerspectiveUpright="5" c:UprightFourSegmentsCount="1" c:UprightFourSegments_0="0.3 0.1 0.25 0.9""#;
+    assert!(
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?
+            .apply(&Recipe::default(), &m, &[], None)
+            .is_err()
+    );
     Ok(())
 }

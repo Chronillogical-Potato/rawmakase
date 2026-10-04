@@ -13,10 +13,13 @@ impl Editor {
         }
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
         let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
+        // With the Crop tool open, X swaps the crop's orientation instead of rejecting.
+        let cropping = !self.library_mode && self.view.is(Tool::Crop);
         let auto_advance = self.auto_advance;
         let shortcut = crate::app::photo_metadata::shortcut(ctx)
             .filter(|(e, _)| {
                 !(brushing && matches!(e, crate::app::photo_metadata::Edit::RatingDelta(_)))
+                    && !(cropping && matches!(e, crate::app::photo_metadata::Edit::Flag(-1)))
             })
             // Photo > Auto Advance: every key moves on, as Shift does.
             .map(|(edit, shift)| (edit, shift || auto_advance));
@@ -751,7 +754,9 @@ impl Editor {
                 if i.key_pressed(egui::Key::Backslash) {
                     self.view.compare = !self.view.compare;
                 }
-                if i.key_pressed(egui::Key::Enter) && self.view.is(Tool::Crop) {
+                if i.key_pressed(egui::Key::Enter)
+                    && (self.view.is(Tool::Crop) || self.view.is(Tool::Guided))
+                {
                     self.view.tool = Tool::None;
                 }
                 if i.key_pressed(egui::Key::W) && !i.modifiers.any() {
@@ -763,14 +768,23 @@ impl Editor {
                 if i.key_pressed(egui::Key::W) && i.modifiers.shift && !i.modifiers.command {
                     self.view.toggle(Tool::Mask);
                 }
+                if i.key_pressed(egui::Key::T) && i.modifiers.shift && !i.modifiers.command {
+                    self.toggle_guided_tool();
+                }
                 if i.key_pressed(egui::Key::Escape) {
                     self.view.tool = Tool::None;
+                }
+                if self.view.is(Tool::Crop) {
+                    self.crop_keys(i);
                 }
                 if self.view.is(Tool::Remove) {
                     self.retouch_keys(i);
                 }
                 if self.view.is(Tool::Mask) {
                     self.mask_keys(i);
+                }
+                if self.view.is(Tool::Guided) {
+                    self.guided_keys(i);
                 }
                 // New masks: K brush, M linear, Shift+M radial, Shift+J colour range.
                 if !i.modifiers.command && !i.modifiers.alt {

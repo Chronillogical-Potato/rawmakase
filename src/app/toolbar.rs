@@ -208,16 +208,18 @@ impl Editor {
                 });
             });
     }
-    /// Back to the camera defaults, like Lightroom's Reset.
+    /// Back to the raw defaults, like Lightroom's Reset.
     pub(super) fn reset_settings(&mut self) {
         self.document
             .history
             .label(super::history::Step::new("Reset Settings", ""));
-        self.document.recipe = self
-            .document
-            .metadata
-            .as_ref()
-            .map(|m| Recipe::with_profiles(m, &self.document.profiles))
-            .unwrap_or_default();
+        let Some(defaults) = self.photo_defaults() else {
+            self.document.recipe = Recipe::default();
+            return;
+        };
+        if let Some(note) = defaults.note {
+            self.status = note;
+        }
+        self.document.recipe = defaults.recipe;
     }
 }

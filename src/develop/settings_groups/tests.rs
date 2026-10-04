@@ -96,6 +96,7 @@ fn everything_changed() -> Recipe {
     });
     r.panels.set(Panel::Detail, PanelState::Off);
     r.curve_saturation = 0.4;
+    r.profile_amount = 0.6;
     r.unknown
         .insert("from_a_newer_release".into(), Value::Bool(true));
     let e = &mut r.effects;
@@ -209,6 +210,10 @@ fn each_group_transfers_exactly_its_settings() {
             SettingGroup::TreatmentAndProfile => {
                 expected.extend(["camera_exposure", "temperature", "tint", "wb"].map(String::from));
             }
+            // The whole of Upright, its mode with it.
+            SettingGroup::UprightTransforms => {
+                expected.insert("upright".into());
+            }
             // The source has Detail switched off.
             SettingGroup::Sharpening
             | SettingGroup::LuminanceNoiseReduction
@@ -273,12 +278,16 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
     let sony = camera("Sony", "ILCE-7M2");
     let source = Recipe {
         profile: open::color(&fuji).map(Arc::new),
+        profile_amount: 0.5,
         temperature: 4200.,
         tint: 8.,
         ..Default::default()
     };
     let sony_profiles: Vec<_> = open::color(&sony).map(Arc::new).into_iter().collect();
-    let to = Recipe::default();
+    let to = Recipe {
+        profile_amount: 1.2,
+        ..Default::default()
+    };
     let out = transfer(
         from(&source, &m),
         &to,
@@ -307,7 +316,11 @@ fn profile_and_white_balance_are_resolved_for_the_target_camera() {
             profiles: &[],
         },
     );
-    assert_eq!(out.recipe.profile, to.profile);
+    // Its own profile keeps its own Amount.
+    assert_eq!(
+        (&out.recipe.profile, out.recipe.profile_amount),
+        (&to.profile, 1.2)
+    );
     assert!(
         out.notes.iter().any(|n| n.contains(open::COLOR)),
         "{:?}",
@@ -466,4 +479,71 @@ fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
         (out.temperature, out.tint),
         (expected.temperature, expected.tint)
     );
+}
+
+/// Guides belong to the photo they were drawn on: Upright Mode leaves them behind, a
+/// target keeps its own (solving them again after new lens corrections), and only
+/// Upright Transforms copies a solved correction, guides and all.
+#[test]
+fn guides_stay_with_their_photo_unless_upright_transforms_copies_the_correction() {
+    use crate::develop::UprightGuide;
+    let m = camera("Fujifilm", "X100F");
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let guides = vec![
+        UprightGuide {
+            a: [0.3, 0.1],
+            b: [0.32, 0.9],
+        },
+        UprightGuide {
+            a: [0.7, 0.1],
+            b: [0.68, 0.9],
+        },
+    ];
+    let mut solved = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
+    solved[5][7] = 0.1;
+    let mut source = Recipe::default();
+    source.upright.mode = UprightMode::Guided;
+    source.upright.guides = guides.clone();
+    source.upright.corrections = solved.clone();
+    // Upright Mode alone: the guides don't move, so another photo's Guided is left Off.
+    let out = transfer(
+        from(&source, &m),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        target,
+    );
+    assert_eq!(out.recipe.upright.mode, UprightMode::Off);
+    assert!(out.recipe.upright.guides.is_empty());
+    // A photo with guides of its own keeps them, and solves them again once its new
+    // lens corrections are analysed.
+    let to = Recipe {
+        upright: source.upright.clone(),
+        ..Default::default()
+    };
+    let lens = Recipe {
+        lens_profile: true,
+        ..source.clone()
+    };
+    let out = transfer(from(&lens, &m), &to, &GroupSelection::default(), target);
+    assert_eq!(out.recipe.upright.mode, UprightMode::Guided);
+    assert_eq!(out.recipe.upright.guides, guides);
+    assert!(out.recipe.upright.corrections.is_empty());
+    assert!(out.recipe.upright.needs_analysis());
+    assert!(out.notes.is_empty(), "{:?}", out.notes);
+    // Upright Transforms: the correction exactly as solved on the source.
+    let mut exact = GroupSelection::none();
+    exact.set(SettingGroup::UprightTransforms, GroupInclusion::Included);
+    for lens_profile in [false, true] {
+        let to = Recipe {
+            lens_profile,
+            ..Default::default()
+        };
+        let out = transfer(from(&source, &m), &to, &exact, target);
+        assert_eq!(out.recipe.upright, source.upright, "{lens_profile}");
+    }
+    // Paste leaves it out unless asked, as Lightroom does.
+    assert!(!GroupSelection::default().contains(SettingGroup::UprightTransforms));
 }

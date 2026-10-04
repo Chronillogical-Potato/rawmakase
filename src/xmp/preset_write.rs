@@ -7,7 +7,7 @@ use super::{
 };
 use crate::develop::{
     Recipe,
-    settings_groups::{GroupSelection, SettingGroup},
+    settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
 };
 use std::fmt::Write;
 
@@ -48,6 +48,11 @@ fn new_uuid() -> String {
 
 /// The preset for `r`'s settings in `groups`.
 pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String {
+    // A preset never carries one photo's Upright correction, so Upright Transforms
+    // brings nothing, not even the Transform panel's switch.
+    let mut groups = groups.clone();
+    groups.set(SettingGroup::UprightTransforms, GroupInclusion::Excluded);
+    let groups = &groups;
     let mut attributes: Vec<(String, String)> = [
         ("PresetType", "Normal"),
         ("Cluster", ""),
@@ -112,17 +117,9 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         }
     }
     // An enhanced profile (Adobe Color, a creative look) is, as Lightroom writes it, a
-    // Look over its base profile.
-    let look = r
-        .profile
-        .as_ref()
-        .and_then(|p| p.enhanced.as_ref().map(|e| (p.name.clone(), e)))
+    // Look over its base profile, which `settings` names.
+    let look = super::write::look_element(r)
         .filter(|_| groups.contains(SettingGroup::TreatmentAndProfile));
-    if let Some((_, enhanced)) = &look
-        && let Some(profile) = attributes.iter_mut().find(|(k, _)| k == "CameraProfile")
-    {
-        profile.1 = enhanced.base_name.clone();
-    }
     // Written once, after the settings, as Lightroom does.
     attributes.push(("HasSettings".into(), "True".into()));
     let mut out = format!("  <rdf:Description rdf:about=\"\"\n    xmlns:crs=\"{CRS}\"");
@@ -143,14 +140,7 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             escape_text(text)
         );
     }
-    if let Some((name, enhanced)) = &look {
-        let _ = write!(
-            out,
-            "   <crs:Look>\n    <rdf:Description\n     crs:Name=\"{}\"\n     crs:Amount=\"1\"\n     crs:UUID=\"{}\"/>\n   </crs:Look>\n",
-            escape_text(name),
-            escape_text(&enhanced.uuid)
-        );
-    }
+    out.extend(look);
     if groups.contains(SettingGroup::ToneCurve) {
         curve(&mut out, "ToneCurvePV2012", &r.curve);
         for (i, name) in ["Red", "Green", "Blue"].iter().enumerate() {
@@ -270,6 +260,44 @@ mod tests {
     }
 
     #[test]
+    fn a_looks_profile_amount_is_written_and_read_back() -> anyhow::Result<()> {
+        use crate::camera_profiles::CameraProfile;
+        let m = crate::raw::Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        };
+        let profiles: Vec<_> = [
+            crate::camera_profiles::open::standard(&m),
+            Some(CameraProfile::creative_for_test(&m)),
+        ]
+        .into_iter()
+        .flatten()
+        .map(std::sync::Arc::new)
+        .collect();
+        let r = Recipe {
+            profile: Some(profiles[1].clone()),
+            profile_amount: 0.35,
+            ..Default::default()
+        };
+        let text = preset(
+            &r,
+            &PresetInfo::new("Faded", "User Presets"),
+            &GroupSelection::all(),
+        );
+        assert!(text.contains(r#"crs:Amount="0.35""#), "{text}");
+        let back = crate::xmp::parse(Path::new("faded.xmp"), &text)?.apply(
+            &Recipe::with_profiles(&m, &profiles),
+            &m,
+            &profiles,
+            None,
+        )?;
+        assert_eq!(back.profile.as_ref().unwrap().name, "Test Creative");
+        assert_eq!(back.profile_amount, 0.35);
+        Ok(())
+    }
+    #[test]
     fn every_key_written_belongs_to_a_group() {
         let unplaced: Vec<_> = settings(&edited(), None)
             .0
@@ -339,6 +367,14 @@ mod tests {
         let text = preset(&upright, &info, &GroupSelection::all());
         assert!(text.contains("crs:PerspectiveUpright"));
         assert!(!text.contains("UprightTransform"), "{text}");
+        // Upright Transforms alone, left over from a Copy selection, brings nothing.
+        let mut transforms = GroupSelection::none();
+        transforms.set(SettingGroup::UprightTransforms, GroupInclusion::Included);
+        let text = preset(&upright, &info, &transforms);
+        assert!(
+            !text.contains("Transform") && !text.contains("Upright"),
+            "{text}"
+        );
         // A color photo's Black & White mix is still written when the group is chosen.
         let mut mix = GroupSelection::none();
         mix.set(SettingGroup::BlackWhiteMix, GroupInclusion::Included);

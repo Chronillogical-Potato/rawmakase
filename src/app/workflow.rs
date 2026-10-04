@@ -70,6 +70,7 @@ impl Editor {
             path,
             cancel,
             prefetch,
+            defaults: self.raw_defaults.clone(),
         });
         true
     }
@@ -107,7 +108,14 @@ impl Editor {
         if let Some(done) = self.autosave.wait() {
             self.background_saved(done);
         }
+        // A slider or histogram drag still held when the photo is left (Left or Right
+        // with the button down) is saved as a step of its own; History records it
+        // once the save succeeds.
+        if self.document.history.in_gesture() {
+            self.document.save.mark_changed();
+        }
         if !self.document.save.needs_save() {
+            self.finish_gesture();
             return true;
         }
         if let (Some(path), Some(l), Some(id)) = (
@@ -138,6 +146,7 @@ impl Editor {
                 }
             }
         }
+        self.finish_gesture();
         true
     }
     /// Autosave: collects a finished background save and, once the edit
@@ -195,12 +204,8 @@ impl Editor {
     }
     pub(super) fn effective_recipe(&self) -> Recipe {
         let mut r = if self.view.compare {
-            let mut r = self
-                .document
-                .metadata
-                .as_ref()
-                .map(|m| Recipe::with_profiles(m, &self.document.profiles))
-                .unwrap_or_default();
+            // Before: the raw defaults.
+            let mut r = self.photo_defaults().map(|d| d.recipe).unwrap_or_default();
             r.crop = self.document.recipe.crop;
             r.rotation = self.document.recipe.rotation;
             r.flip_x = self.document.recipe.flip_x;

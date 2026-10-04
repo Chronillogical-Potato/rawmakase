@@ -2120,3 +2120,430 @@ fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
     e.finish_edit_frame(frame, &ctx);
     assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
 }
+#[test]
+fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result<()> {
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    let session = d.path().join("session.json");
+    e.session_file = Some(session.clone());
+    e.library_mode = false;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    let crop = [0.1, 0.2, 0.5, 0.6];
+    e.document.recipe.crop = crop;
+    e.view.toggle(state::Tool::Crop);
+    let ctx = e.context.clone();
+    let press = |e: &mut Editor, key: egui::Key, shift: bool, typing: bool| {
+        let modifiers = egui::Modifiers {
+            shift,
+            ..Default::default()
+        };
+        let mut text = String::new();
+        // A text field takes focus in one frame and has it for the keys in the next.
+        for events in [vec![], vec![true, false]] {
+            let input = egui::RawInput {
+                events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                    .chain(events.into_iter().map(|pressed| egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed,
+                        repeat: false,
+                        modifiers,
+                    }))
+                    .collect(),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                if typing {
+                    ui.text_edit_singleline(&mut text).request_focus();
+                }
+                e.metadata_shortcuts(&ctx);
+                e.develop_shortcuts(&ctx);
+            });
+            output.textures_delta.clear();
+        }
+    };
+    // Typing an X or an O in a field changes nothing.
+    press(&mut e, egui::Key::X, false, true);
+    press(&mut e, egui::Key::O, false, true);
+    assert_eq!(e.document.recipe.crop, crop);
+    assert_eq!(e.view.crop_guides, Default::default());
+    // X swaps the 120 × 80 crop to 80 × 120 about its centre, and rejects nothing.
+    press(&mut e, egui::Key::X, false, false);
+    let c = e.document.recipe.crop;
+    assert!(
+        ((c[2] - c[0]) * 300. - 80.).abs() < 1e-3 && ((c[3] - c[1]) * 200. - 120.).abs() < 1e-3,
+        "{c:?}"
+    );
+    assert!(((c[0] + c[2]) / 2. - 0.3).abs() < 1e-6 && ((c[1] + c[3]) / 2. - 0.4).abs() < 1e-6);
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, 0);
+    // O cycles the overlay and Shift+O turns it; both are kept in the session.
+    use super::crop_tool::Guide;
+    press(&mut e, egui::Key::O, false, false);
+    assert_eq!(e.view.crop_guides.guide, Guide::Diagonal);
+    press(&mut e, egui::Key::O, false, false);
+    press(&mut e, egui::Key::O, true, false);
+    assert_eq!(
+        (e.view.crop_guides.guide, e.view.crop_guides.orientation),
+        (Guide::Triangle, 1)
+    );
+    // Shift released before the frame is drawn: the press still had it.
+    let shifted = egui::Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(shifted),
+                egui::Event::Key {
+                    key: egui::Key::O,
+                    physical_key: Some(egui::Key::O),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: shifted,
+                },
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        },
+        |_| e.develop_shortcuts(&ctx),
+    );
+    output.textures_delta.clear();
+    assert_eq!(
+        (e.view.crop_guides.guide, e.view.crop_guides.orientation),
+        (Guide::Triangle, 0)
+    );
+    press(&mut e, egui::Key::O, true, false);
+    let saved: crate::storage::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
+    assert_eq!(saved.crop_guides.guide, "triangle");
+    assert_eq!(saved.crop_guides.orientation, 1);
+    // Outside the Crop tool X rejects as before.
+    e.view.tool = state::Tool::None;
+    press(&mut e, egui::Key::X, false, false);
+    assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, -1);
+    Ok(())
+}
+
+#[test]
+fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_turn() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    // Stripes falling 3° to the right.
+    let (w, h) = (600usize, 400usize);
+    let (s, c) = 3f32.to_radians().sin_cos();
+    let pixels = (0..w * h)
+        .map(|i| {
+            // Supersampled, so edges are smooth rather than pixel steps.
+            let mut sum = 0.;
+            for j in 0..4 {
+                let x = (i % w) as f32 + (j % 2) as f32 * 0.5 - 299.75;
+                let y = (i / w) as f32 + (j / 2) as f32 * 0.5 - 199.75;
+                let across = -s * x + c * y;
+                sum += if (across / 70.).rem_euclid(2.) < 1. {
+                    0.78
+                } else {
+                    0.1
+                };
+            }
+            [sum / 4.; 3]
+        })
+        .collect();
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: w as u32,
+        height: h as u32,
+        pixels,
+        metadata: Metadata {
+            width: w as u32,
+            height: h as u32,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.document.recipe.wb = [1.; 3];
+    let upright = e.document.recipe.upright.clone();
+    let next = |e: &mut Editor| loop {
+        match e.rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(worker::Event::Straighten {
+                generation,
+                analysed,
+                result,
+                ..
+            }) => break (generation, analysed, result),
+            Ok(_) => continue,
+            Err(err) => panic!("no Auto straighten result: {err}"),
+        }
+    };
+    e.start_auto_straighten();
+    assert!(e.document.straighten.is_running());
+    // Measured before the photo was turned: it is measured again, and nothing changes yet.
+    let (generation, analysed, result) = next(&mut e);
+    crate::develop::turn(&mut e.document.recipe, crate::develop::QuarterTurn::Right);
+    crate::develop::turn(&mut e.document.recipe, crate::develop::QuarterTurn::Left);
+    e.document.recipe.flip_x = true;
+    e.auto_straighten_ready(generation, &analysed, result);
+    assert_eq!(e.document.recipe.straighten, 0.);
+    assert!(e.document.straighten.is_running(), "measured again");
+    e.document.recipe.flip_x = false;
+    let (generation, analysed, result) = next(&mut e);
+    e.auto_straighten_ready(generation, &analysed, result);
+    // The stale analysis restarted once more for the flip back; take its result.
+    let (generation, analysed, result) = next(&mut e);
+    e.auto_straighten_ready(generation, &analysed, result);
+    let angle = e.document.recipe.straighten;
+    assert!((angle + 3.).abs() < 0.2, "{angle}");
+    let (steps, applied) = e.document.history.steps();
+    assert_eq!(applied, 1);
+    assert_eq!(
+        (steps[0].name.as_str(), steps[0].value.as_str()),
+        ("Straighten", "Auto")
+    );
+    // Upright is left as it was.
+    assert_eq!(e.document.recipe.upright, upright);
+    e.undo();
+    assert_eq!(e.document.recipe.straighten, 0.);
+}
+
+#[test]
+fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
+    let ctx = egui::Context::default();
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.view.tool = state::Tool::Crop;
+    let size = |e: &mut Editor, width: f32| {
+        let mut rect = Rect::NOTHING;
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(width);
+                    rect = ui.scope(|ui| e.tool_strip(ui)).response.rect;
+                },
+            );
+            output.textures_delta.clear();
+        }
+        rect
+    };
+    let plain = size(&mut e, 320.);
+    e.view.ruler = super::crop_tool::Ruler::Armed;
+    let _ = e.document.straighten.start();
+    e.view.aspect = 0.8;
+    e.view.crop_guides.guide = super::crop_tool::Guide::GoldenSpiral;
+    let busy = size(&mut e, 320.);
+    assert_eq!(plain.size(), busy.size());
+}
+#[test]
+fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"gesture fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
+    let id = l.photos[0].id;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    // A slider still held down when Left or Right leaves the photo.
+    let before = editor.document.recipe.clone();
+    editor.document.recipe.exposure = 0.6;
+    editor
+        .document
+        .history
+        .observe(before, &editor.document.recipe, true);
+    editor.document.save.mark_changed();
+    assert!(editor.flush());
+    assert!(!editor.document.history.in_gesture());
+    let library = editor.library.as_ref().unwrap();
+    let history = library.catalog.load_history(id)?.unwrap();
+    assert_eq!(history.applied, 1);
+    assert_eq!(history.steps.len(), 1);
+    assert_eq!(history.steps[0].recipe.exposure, 0.6);
+    // Undo on the next photo reaches it.
+    assert_eq!(editor.undo_log.len(), (1, 0));
+    // A save that fails keeps the drag going, as one step.
+    editor.document.catalog_photo = Some(id + 1000);
+    let before = editor.document.recipe.clone();
+    editor.document.recipe.exposure = 0.9;
+    editor
+        .document
+        .history
+        .observe(before, &editor.document.recipe, true);
+    editor.document.save.mark_changed();
+    assert!(!editor.flush());
+    assert!(editor.document.history.in_gesture());
+    assert_eq!(editor.undo_log.len(), (1, 0));
+    Ok(())
+}
+#[test]
+fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library_mode = false;
+    let edit = |editor: &mut Editor, exposure: f32, held: bool| {
+        let before = editor.document.recipe.clone();
+        editor.document.recipe.exposure = exposure;
+        editor
+            .document
+            .history
+            .observe(before, &editor.document.recipe, held);
+        editor.sync_undo();
+    };
+    edit(&mut editor, 0.3, false);
+    edit(&mut editor, 0.6, true);
+    editor.undo();
+    assert_eq!(editor.document.recipe.exposure, 0.3);
+    assert_eq!(editor.undo_log.len(), (1, 1));
+    editor.redo();
+    assert_eq!(editor.document.recipe.exposure, 0.6);
+}
+
+/// The Guided Upright tool on the photo: drawing a guide, drawing a second, moving an
+/// end and deleting a guide are one History step each, and two guides solve to a
+/// correction (docs/transform.md#guided-upright).
+#[test]
+fn guided_upright_gestures_are_one_history_step_each() {
+    use crate::develop::UprightMode;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.library_mode = false;
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    // The other modes analysed already, so the guides are solved at once.
+    e.document.recipe.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
+    e.view.tool = state::Tool::Guided;
+    let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(600., 400.));
+    let mut frame = |e: &mut Editor, events: Vec<egui::Event>| {
+        let edit = e.begin_edit_frame();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let (rect, response) =
+                    ui.allocate_exact_size(area.size(), egui::Sense::click_and_drag());
+                e.guided_overlay(ui, &response, rect, rect);
+            },
+        );
+        output.textures_delta.clear();
+        e.finish_edit_frame(edit, &ctx);
+    };
+    let button = |p: Pos2, pressed| egui::Event::PointerButton {
+        pos: p,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let drag = |e: &mut Editor,
+                frame: &mut dyn FnMut(&mut Editor, Vec<egui::Event>),
+                from: Pos2,
+                to: Pos2| {
+        frame(e, vec![egui::Event::PointerMoved(from), button(from, true)]);
+        for k in 1..=4 {
+            frame(
+                e,
+                vec![egui::Event::PointerMoved(
+                    from + (to - from) * k as f32 / 4.,
+                )],
+            );
+        }
+        frame(e, vec![button(to, false)]);
+        frame(e, vec![]);
+    };
+    frame(&mut e, vec![]);
+    // Two converging verticals.
+    drag(
+        &mut e,
+        &mut frame,
+        Pos2::new(120., 40.),
+        Pos2::new(100., 360.),
+    );
+    let guides = &e.document.recipe.upright.guides;
+    assert_eq!(guides.len(), 1);
+    assert!(
+        (guides[0].a[0] - 0.2).abs() < 1e-3 && (guides[0].a[1] - 0.1).abs() < 1e-3,
+        "{guides:?}"
+    );
+    assert_eq!(e.document.recipe.upright.mode, UprightMode::Guided);
+    drag(
+        &mut e,
+        &mut frame,
+        Pos2::new(480., 40.),
+        Pos2::new(500., 360.),
+    );
+    assert_eq!(e.document.recipe.upright.guides.len(), 2);
+    let solved = e
+        .document
+        .recipe
+        .upright
+        .correction()
+        .expect("a correction");
+    assert!(solved[2][1].abs() > 1e-3, "{solved:?}");
+    // The first guide's lower end, where it shows now the photo is corrected.
+    let g = develop::Geometry::new(e.document.full().unwrap(), &e.document.recipe, 0);
+    let [u, v] = g.from_upright_frame(e.document.recipe.upright.guides[0].b);
+    let end = Pos2::new(u * 600., v * 400.);
+    drag(&mut e, &mut frame, end, end + Vec2::new(-10., 0.));
+    assert_eq!(e.document.recipe.upright.guides.len(), 2);
+    // Selected by the drag, and deleted.
+    let edit = e.begin_edit_frame();
+    e.delete_guide();
+    e.finish_edit_frame(edit, &ctx);
+    assert_eq!(e.document.recipe.upright.guides.len(), 1);
+    let (steps, applied) = e.document.history.steps();
+    let names: Vec<&str> = steps.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Add Guide", "Add Guide", "Move Guide", "Delete Guide"]
+    );
+    assert_eq!(applied, 4);
+    // One guide corrects nothing, and says so.
+    assert_eq!(e.document.recipe.upright.correction(), None);
+    assert!(e.status.contains("two or more guides"), "{}", e.status);
+    e.undo();
+    assert_eq!(e.document.recipe.upright.guides.len(), 2);
+    assert!(e.document.recipe.upright.correction().is_some());
+    // Leaving Guided by any route closes the tool, so a drag can't switch it back.
+    e.view.tool = state::Tool::Guided;
+    let edit = e.begin_edit_frame();
+    e.document.recipe.upright = Default::default();
+    e.finish_edit_frame(edit, &ctx);
+    assert!(!e.view.is(state::Tool::Guided));
+}

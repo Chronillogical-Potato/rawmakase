@@ -44,6 +44,11 @@ pub struct Recipe {
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
+    /// Lightroom's Profile Amount (`crs:Look` `Amount`, 0–2, 1 = 100%): the strength of
+    /// a look that supports it. Other profiles render at 100% whatever it is. Omitted
+    /// at 1, so releases that predate it read the recipe.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub profile_amount: f32,
     pub sharpening_radius: f32,
     pub sharpening_detail: f32,
     pub sharpening_masking: f32,
@@ -176,6 +181,7 @@ impl Default for Recipe {
             midtone: 1.,
             curve: ToneCurve::default(),
             curve_saturation: 1.,
+            profile_amount: 1.,
             saturation: 0.,
             vibrance: 0.,
             hsl: [[0.; 3]; 8],
@@ -198,24 +204,54 @@ impl Default for Recipe {
         }
     }
 }
+/// Which profile a photo's starting settings use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfilePreference {
+    /// Adobe Color, else Adobe Standard, else the DNG's own, else RAWmakase Color.
+    Adobe,
+    /// RAWmakase Color wherever it fits the camera, else as `Adobe`.
+    Rawmakase,
+}
 impl Recipe {
-    /// Profile-internal controls are evaluated without changing the user's sliders.
+    /// The look at its Profile Amount, and its internal controls added to the user's
+    /// sliders without changing them.
     pub(crate) fn with_profile_adjustments(&self) -> std::borrow::Cow<'_, Self> {
-        let Some(look) = self
+        let Some((profile, look)) = self
             .profile
             .as_ref()
-            .and_then(|p| p.enhanced.as_ref())
+            .and_then(|p| Some((p, p.enhanced.as_ref()?)))
             .filter(|_| self.engine >= 3)
         else {
             return std::borrow::Cow::Borrowed(self);
         };
-        if look.highlights == 0. && look.shadows == 0. && look.clarity == 0. && !look.monochrome {
+        let amount = if look.amount.is_some() {
+            self.profile_amount
+        } else {
+            1.
+        };
+        let adjustments = [
+            look.highlights,
+            look.shadows,
+            look.clarity,
+            look.contrast,
+            look.blacks,
+        ];
+        if amount == 1. && adjustments.iter().all(|v| *v == 0.) && !look.monochrome {
             return std::borrow::Cow::Borrowed(self);
         }
         let mut r = self.clone();
+        let mut look = look.clone();
+        if amount != 1. {
+            let profile = profile.at_amount(amount);
+            look = profile.enhanced.clone().unwrap_or(look);
+            r.profile = Some(std::sync::Arc::new(profile));
+            r.profile_amount = 1.;
+        }
         r.highlights = (r.highlights + look.highlights).clamp(-1., 1.);
         r.shadows = (r.shadows + look.shadows).clamp(-1., 1.);
         r.effects.clarity = (r.effects.clarity + look.clarity).clamp(-1., 1.);
+        r.contrast = (r.contrast + look.contrast).clamp(-1., 1.);
+        r.blacks = (r.blacks + look.blacks).clamp(-1., 1.);
         r.effects.monochrome |= look.monochrome;
         std::borrow::Cow::Owned(r)
     }
@@ -228,9 +264,18 @@ impl Recipe {
             ..Default::default()
         }
     }
+    /// Lightroom's Adobe Default: the settings a photo starts from.
     pub fn with_profiles(
         m: &Metadata,
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+    ) -> Self {
+        Self::with_profile_preference(m, profiles, ProfilePreference::Adobe)
+    }
+    /// The starting settings, with the profile `preference` picks.
+    pub fn with_profile_preference(
+        m: &Metadata,
+        profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
+        preference: ProfilePreference,
     ) -> Self {
         let mut recipe = Self::for_metadata(m);
         let find = |name: &str| {
@@ -238,9 +283,14 @@ impl Recipe {
                 .iter()
                 .find(|p| p.name == name && p.ensure_camera(m).is_ok())
         };
+        let own = match preference {
+            ProfilePreference::Adobe => None,
+            ProfilePreference::Rawmakase => find(crate::camera_profiles::open::COLOR),
+        };
         // As in Lightroom: Adobe Color, else Adobe Standard. Without those, a DNG
         // keeps the profile it embeds, and any other file gets RAWmakase Color.
-        if let Some(profile) = find("Adobe Color")
+        if let Some(profile) = own
+            .or_else(|| find("Adobe Color"))
             .or_else(|| find("Adobe Standard"))
             .or_else(|| {
                 recipe
@@ -346,6 +396,10 @@ impl Recipe {
         ensure!(
             (0. ..=2.).contains(&self.curve_saturation),
             "Invalid Refine Saturation"
+        );
+        ensure!(
+            (0. ..=2.).contains(&self.profile_amount),
+            "Invalid Profile Amount"
         );
         // Every other number is range-checked above, which also rejects NaN.
         crate::develop::retouch::validate(&self.retouch)?;

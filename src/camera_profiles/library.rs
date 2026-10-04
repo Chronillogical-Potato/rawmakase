@@ -1,6 +1,10 @@
-use super::{CameraProfile, from_bytes};
+use super::{
+    CameraProfile,
+    enhanced::{LookBase, LookFile},
+    from_bytes,
+};
 use crate::raw::Metadata;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};
 pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
     ensure!(
@@ -11,13 +15,11 @@ pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
     {
+        let look = LookFile::read(path)?;
         let (profiles, _) = installed(m);
-        for base in profiles.iter().filter(|p| p.enhanced.is_none()) {
-            if let Ok(profile) = super::enhanced::compose(path, base) {
-                return Ok(Arc::new(profile));
-            }
-        }
-        anyhow::bail!("Unsupported XMP look or missing matching base camera profile");
+        let base = look_base(&look, &profiles, builtin(m).as_deref())
+            .context("Unsupported XMP look or missing matching base camera profile")?;
+        return Ok(Arc::new(look.compose(base)?));
     }
     let p = from_bytes(&std::fs::read(path)?)?;
     p.ensure_camera(m)?;
@@ -86,42 +88,67 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
     }
     let bases = profiles.clone();
     for path in looks {
-        let mut last_error = None;
-        let mut loaded = false;
-        for base in &bases {
-            match super::enhanced::compose(&path, base) {
-                Ok(p) => {
-                    if !profiles
-                        .iter()
-                        .any(|old| old.name == p.name && old.camera == p.camera)
-                    {
-                        profiles.push(Arc::new(p));
-                    }
-                    loaded = true;
-                    break;
-                }
-                Err(e) => {
-                    if !e.to_string().starts_with("Missing base camera profile") {
-                        last_error = Some(e);
-                    }
+        let composed = LookFile::read(&path).and_then(|look| {
+            let base = look_base(&look, &bases, builtin(m).as_deref()).with_context(|| {
+                let name = match &look.base {
+                    LookBase::Named(name) => name.as_str(),
+                    LookBase::Any => "",
+                };
+                format!("Missing matching base camera profile {name}")
+            })?;
+            look.compose(base)
+        });
+        match composed {
+            Ok(p) => {
+                if !profiles
+                    .iter()
+                    .any(|old| old.name == p.name && old.camera == p.camera)
+                {
+                    profiles.push(Arc::new(p));
                 }
             }
-        }
-        if !loaded {
-            errors.push(format!(
-                "{}: {}",
-                path.display(),
-                last_error.map_or_else(
-                    || "Missing matching base camera profile".into(),
-                    |e| e.to_string()
-                )
-            ));
+            Err(e) => errors.push(format!("{}: {e:#}", path.display())),
         }
     }
     errors.sort();
     errors.dedup();
     profiles.sort_by(|a, b| a.name.cmp(&b.name));
     (profiles, errors)
+}
+/// A look profile file over the profile it builds on among `bases` (see `look_base`),
+/// without the user's library. `own` is the file's embedded profile, if any.
+pub fn compose_look(
+    path: &Path,
+    bases: &[Arc<CameraProfile>],
+    own: Option<&CameraProfile>,
+) -> Result<CameraProfile> {
+    let look = LookFile::read(path)?;
+    look.compose(look_base(&look, bases, own).context("Missing matching base camera profile")?)
+}
+/// The profile a look goes over: the one it names, or for a creative look, which
+/// names none, Adobe Standard as Lightroom uses, else the file's own profile (`own`),
+/// else RAWmakase Standard, else any that fits. A look restricted to another camera
+/// fits none.
+pub(super) fn look_base<'a>(
+    look: &LookFile,
+    bases: &'a [Arc<CameraProfile>],
+    own: Option<&CameraProfile>,
+) -> Option<&'a CameraProfile> {
+    let fitting = || {
+        bases
+            .iter()
+            .filter(|b| look.fits(b) && look.compose(b).is_ok())
+    };
+    match &look.base {
+        LookBase::Named(_) => fitting().next(),
+        LookBase::Any => ["Adobe Standard"]
+            .into_iter()
+            .chain(own.map(|p| p.name.as_str()))
+            .chain([super::open::STANDARD])
+            .find_map(|name| fitting().find(|b| b.name == name))
+            .or_else(|| fitting().next()),
+    }
+    .map(|b| &**b)
 }
 fn collect(dir: &Path, depth: usize, files: &mut Vec<std::path::PathBuf>) {
     if depth > 8 {
@@ -209,26 +236,18 @@ fn import_into(
     }
     for (path, bytes, ext) in &files {
         if ext == "xmp" {
-            let text = std::str::from_utf8(bytes)?;
-            let mut error = None;
-            let supported =
-                bases
-                    .iter()
-                    .any(|base| match super::enhanced::compose_text(text, base) {
-                        Ok(_) => true,
-                        Err(e) => {
-                            if !e.to_string().starts_with("Missing base camera profile") {
-                                error = Some(e);
-                            }
-                            false
-                        }
-                    });
-            ensure!(
-                supported,
-                "{}: {}. Import its matching base DCP together with the XMP profile",
-                path.file_name().unwrap().to_string_lossy(),
-                error.map_or_else(|| "Missing base camera profile".into(), |e| e.to_string())
-            );
+            let file = path.file_name().unwrap().to_string_lossy();
+            let look =
+                LookFile::parse(std::str::from_utf8(bytes)?).with_context(|| format!("{file}"))?;
+            if let LookBase::Named(name) = &look.base {
+                // The base must also be for the camera the look is restricted to.
+                ensure!(
+                    bases
+                        .iter()
+                        .any(|base| look.fits(base) && look.compose(base).is_ok()),
+                    "{file}: Missing base camera profile {name}. Import its matching base DCP together with the XMP profile",
+                );
+            }
         }
     }
     std::fs::create_dir_all(destination)?;

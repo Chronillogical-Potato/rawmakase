@@ -25,6 +25,10 @@ impl Editor {
     pub(super) fn presets_scanned(&mut self, scan: u64, library: Arc<crate::presets::Library>) {
         if self.presets.is_latest(scan) {
             self.presets.library = library;
+            // A preset named as a raw default may have been imported or changed.
+            if let Err(e) = self.set_raw_defaults(self.raw_defaults.settings().clone()) {
+                self.status = format!("Raw defaults not saved: {e:#}");
+            }
             self.refresh_preset_support();
         }
     }
@@ -659,7 +663,7 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
     }
     use crate::develop::upright::LensInputs;
     if LensInputs::of(r) != LensInputs::of(current) {
-        r.upright.clear_analysis();
+        r.upright.analyse_again();
     }
 }
 /// A History row: the step on the left, its value on the right. The current

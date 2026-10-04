@@ -27,6 +27,7 @@ import datetime
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -72,15 +73,36 @@ for (var i = 0; i < jobs.length; i++) {
 '''
 
 
+def look_xmp(look):
+    """A case's look as Lightroom writes it into a sidecar: the `Look` element with the
+    profile's parameters, and its table as a top-level `Table_` attribute."""
+    text = (CORPUS / 'looks' / look['file']).read_text()
+    attributes = dict(re.findall(r'crs:(\w+)="([^"]*)"', text))
+    name = re.search(r'xml:lang="x-default">([^<]*)<', text).group(1)
+    parameters = ' '.join(f'crs:{k}="{v}"' for k, v in attributes.items()
+                          if k in ('Version', 'ProcessVersion', 'ConvertToGrayscale', 'LookTable')
+                          or k.endswith('2012'))
+    curves = ''.join(re.findall(r'(<crs:ToneCurvePV2012\w*>.*?</crs:ToneCurvePV2012\w*>)', text, re.S))
+    element = (f'<crs:Look><rdf:Description crs:Name="{name}" crs:Amount="{look["amount"]}"'
+               f' crs:UUID="{attributes["UUID"]}" crs:SupportsAmount="{attributes["SupportsAmount"].lower()}"'
+               f' crs:SupportsMonochrome="{attributes["SupportsMonochrome"].lower()}" crs:SupportsOutputReferred="false">'
+               f'<crs:Parameters><rdf:Description {parameters}>{curves}</rdf:Description></crs:Parameters>'
+               '</rdf:Description></crs:Look>')
+    tables = {k: v for k, v in attributes.items() if k.startswith('Table_')}
+    return element, tables
+
+
 def xmp(base, case, extra):
     attributes = dict(base)
     attributes.update(case.get('settings', {}))
     attributes.update(extra)
+    look, tables = look_xmp(case['look']) if 'look' in case else ('', {})
+    attributes.update(tables)
     xml = ('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
            '<rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:HasSettings="True"')
     for k in sorted(attributes):
         xml += f' crs:{k}="{attributes[k]}"'
-    xml += '>'
+    xml += '>' + look
     for name, points in sorted(case.get('curves', {}).items()):
         xml += f'<crs:{name}><rdf:Seq>' + ''.join(f'<rdf:li>{p}</rdf:li>' for p in points) + f'</rdf:Seq></crs:{name}>'
     return xml + '</rdf:Description></rdf:RDF></x:xmpmeta>'

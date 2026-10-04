@@ -1,8 +1,10 @@
 use super::Editor;
 use super::bulk_import::ImportKind;
 use super::clipping::{self, ClipSide};
+use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
 use super::state::Tool;
+use super::tone_drag::tone_drag_ui;
 use super::widgets::{
     SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
     slider_with, tone_curve_ui, toolbar_action,
@@ -13,9 +15,32 @@ use crate::app::theme;
 use crate::develop::{NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
+/// A histogram corner's clipping triangle: its corner point, which way it
+/// points (1 right, -1 left) and the area that takes its clicks.
+#[derive(Clone, Copy)]
+struct ClipTriangle {
+    corner: Pos2,
+    dir: f32,
+    hit: Rect,
+}
+impl ClipTriangle {
+    fn new(histogram: Rect, side: ClipSide) -> Self {
+        let (corner, dir) = match side {
+            ClipSide::Shadows => (histogram.left_top() + Vec2::new(6., 6.), 1.),
+            ClipSide::Highlights => (histogram.right_top() + Vec2::new(-6., 6.), -1.),
+        };
+        Self {
+            corner,
+            dir,
+            hit: Rect::from_center_size(corner + Vec2::new(4. * dir, 3.), Vec2::splat(16.)),
+        }
+    }
+}
+
 impl Editor {
     /// Lightroom-style histogram: filled channels whose overlaps mix to
     /// cyan, magenta, yellow and gray, with clipping indicators in the corners.
+    /// Dragging in it moves Blacks, Shadows, Exposure, Highlights or Whites.
     pub(super) fn histogram_ui(&mut self, ui: &mut egui::Ui) {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 96.), Sense::hover());
@@ -74,18 +99,32 @@ impl Editor {
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
+        // After the bars, so the region shows over them; before the triangles,
+        // so their clicks stay theirs.
+        let triangles = ClipSide::BOTH.map(|side| ClipTriangle::new(rect, side));
+        let region = tone_drag_ui(
+            ui,
+            rect,
+            &triangles.map(|t| t.hit),
+            &mut self.view.tone_drag,
+            &mut self.document.recipe,
+        );
+        if let Some(region) = region {
+            let [from, to] = region.span();
+            painter.rect_filled(
+                Rect::from_x_y_ranges(
+                    rect.left() + from * rect.width()..=rect.left() + to * rect.width(),
+                    rect.y_range(),
+                ),
+                0.,
+                Color32::from_white_alpha(14),
+            );
+        }
         // Clipping triangles, as Lightroom's: each lit in the colours of the
         // channels clipping at its end; a click toggles its warning, hovering
         // shows it while the pointer stays, and J toggles both.
-        for side in ClipSide::BOTH {
+        for (side, ClipTriangle { corner, dir, hit }) in ClipSide::BOTH.into_iter().zip(triangles) {
             let left = side == ClipSide::Shadows;
-            let corner = if left {
-                rect.left_top() + Vec2::new(6., 6.)
-            } else {
-                rect.right_top() + Vec2::new(-6., 6.)
-            };
-            let dir = if left { 1. } else { -1. };
-            let hit = Rect::from_center_size(corner + Vec2::new(4. * dir, 3.), Vec2::splat(16.));
             let response = ui
                 .interact(hit, ui.id().with(("clip", left)), Sense::click())
                 .on_hover_text(if left {
@@ -116,23 +155,32 @@ impl Editor {
                 },
             ));
         }
-        let exif = self
-            .document
-            .metadata
-            .as_ref()
-            .map_or_else(String::new, |m| {
-                let info = crate::catalog::PhotoInfo::from_metadata(m);
-                [
-                    info.iso_text(),
-                    info.focal_text(),
-                    info.aperture_text(),
-                    info.shutter_text(),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join("     ")
-            });
+        // The region and its value take the EXIF line's place, as in Lightroom.
+        let region_text = region.map(|region| {
+            format!(
+                "{}   {}",
+                region.label(),
+                region.display(region.value(&self.document.recipe))
+            )
+        });
+        let exif = region_text.unwrap_or_else(|| {
+            self.document
+                .metadata
+                .as_ref()
+                .map_or_else(String::new, |m| {
+                    let info = crate::catalog::PhotoInfo::from_metadata(m);
+                    [
+                        info.iso_text(),
+                        info.focal_text(),
+                        info.aperture_text(),
+                        info.shutter_text(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("     ")
+                })
+        });
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
                 .on_hover_text("Output histogram of the whole photo");
@@ -140,7 +188,7 @@ impl Editor {
     }
     /// Lightroom's tool strip: Crop, Remove and Masking, with the open tool's drawer
     /// below it.
-    fn tool_strip(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn tool_strip(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.);
         const TOOLS: [(Tool, &str, &str); 3] = [
             (Tool::Crop, "Crop", "Crop & Straighten · R"),
@@ -223,6 +271,9 @@ impl Editor {
             _ => return,
         }
         ui.add_space(4.);
+        let mut action = None;
+        let mut guides = self.view.crop_guides;
+        let analysing = self.document.straighten.is_running();
         let r = &mut self.document.recipe;
         egui::Frame::new()
             .fill(theme::gray(40))
@@ -236,21 +287,44 @@ impl Editor {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
                 control_row(ui, "Aspect", |ui| {
+                    let swap = 26.;
                     egui::ComboBox::from_id_salt("crop-aspect")
-                        .width(ui.available_width())
-                        .selected_text(
-                            ASPECTS
-                                .iter()
-                                .find(|(a, _)| *a == self.view.aspect)
-                                .map_or("Custom", |(_, name)| *name),
-                        )
+                        .width(ui.available_width() - swap - 4.)
+                        .selected_text(aspect_name(self.view.aspect))
                         .show_ui(ui, |ui| {
                             for (aspect, name) in ASPECTS {
                                 ui.selectable_value(&mut self.view.aspect, aspect, name);
                             }
                         });
+                    if ui
+                        .add_sized([swap, 20.], egui::Button::new("⇄"))
+                        .on_hover_text("Swap portrait and landscape · X")
+                        .clicked()
+                    {
+                        action = Some(CropAction::Swap);
+                    }
                 });
                 slider(ui, "Angle", &mut r.straighten, -45. ..=45., 0.);
+                control_row(ui, "Straighten", |ui| {
+                    let w = (ui.available_width() - 4.) / 2.;
+                    let armed = self.view.ruler == Ruler::Armed;
+                    if ui
+                        .add_sized([w, 20.], egui::Button::new("Ruler").selected(armed))
+                        .on_hover_text(
+                            "Drag along a horizon or vertical to level it · or Cmd-drag on the photo",
+                        )
+                        .clicked()
+                    {
+                        self.view.ruler = if armed { Ruler::Off } else { Ruler::Armed };
+                    }
+                    if ui
+                        .add_enabled(!analysing, egui::Button::new("Auto").min_size(Vec2::new(w, 20.)))
+                        .on_hover_text("Level the photo as Upright's Level would, by its angle alone")
+                        .clicked()
+                    {
+                        action = Some(CropAction::AutoStraighten);
+                    }
+                });
                 control_row(ui, "Orientation", |ui| {
                     let w = ui.available_width();
                     let mut none = usize::MAX;
@@ -265,19 +339,43 @@ impl Editor {
                         ],
                         w,
                     );
+                    use crate::develop::{Mirror, QuarterTurn, mirror, turn};
                     match none {
-                        0 => {
-                            r.rotation = (r.rotation + 3) % 4;
-                            r.crop = [0., 0., 1., 1.];
-                        }
-                        1 => {
-                            r.rotation = (r.rotation + 1) % 4;
-                            r.crop = [0., 0., 1., 1.];
-                        }
-                        2 => r.flip_x = !r.flip_x,
-                        3 => r.flip_y = !r.flip_y,
+                        0 => turn(r, QuarterTurn::Left),
+                        1 => turn(r, QuarterTurn::Right),
+                        2 => mirror(r, Mirror::Horizontal),
+                        3 => mirror(r, Mirror::Vertical),
                         _ => {}
                     }
+                });
+                control_row(ui, "Overlay", |ui| {
+                    let show = 78.;
+                    egui::ComboBox::from_id_salt("crop-guide")
+                        .width(ui.available_width() - show - 4.)
+                        .selected_text(guides.guide.name())
+                        .show_ui(ui, |ui| {
+                            for guide in Guide::ALL {
+                                if ui
+                                    .selectable_label(guides.guide == guide, guide.name())
+                                    .clicked()
+                                {
+                                    guides.guide = guide;
+                                    guides.orientation = 0;
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("O cycles the overlays, Shift+O turns them");
+                    egui::ComboBox::from_id_salt("crop-guide-show")
+                        .width(show)
+                        .selected_text(guides.show.name())
+                        .show_ui(ui, |ui| {
+                            for when in GuideShow::ALL {
+                                ui.selectable_value(&mut guides.show, when, when.name());
+                            }
+                        })
+                        .response
+                        .on_hover_text("When the overlay shows: always, with the pointer over the photo, or never");
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(83.);
@@ -316,6 +414,12 @@ impl Editor {
                     }
                 });
             });
+        self.set_crop_guides(guides);
+        match action {
+            Some(CropAction::Swap) => self.swap_crop_orientation(),
+            Some(CropAction::AutoStraighten) => self.start_auto_straighten(),
+            None => {}
+        }
     }
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
@@ -352,7 +456,7 @@ impl Editor {
         // Upright analyses the decoded photo once and keeps a correction for every mode.
         let upright_ready = self.document.full().is_some() && !self.document.upright.is_running();
         let mut upright_request = false;
-        let mut guided_unavailable = false;
+        let mut guided_action = None;
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -452,6 +556,22 @@ impl Editor {
                         }
                     });
             });
+            // Lightroom's Profile Amount, under the profile. Profiles without one show
+            // it dimmed at 100%, so the panel doesn't move when switching.
+            let supports_amount = r.profile.as_ref().is_some_and(|p| p.supports_amount());
+            ui.add_enabled_ui(supports_amount, |ui| {
+                let mut fixed = 1.;
+                let amount = if supports_amount {
+                    &mut r.profile_amount
+                } else {
+                    &mut fixed
+                };
+                ui.push_id("profile-amount", |ui| {
+                    slider_with(ui, "Amount", amount, 0. ..=2., 1., Some((100., 0)), None)
+                });
+            })
+            .response
+            .on_disabled_hover_text("This profile has no Amount");
             if !profile_errors.is_empty() {
                 ui.horizontal(|ui| {
                     ui.add_space(88.);
@@ -461,6 +581,10 @@ impl Editor {
                         import_adobe = true;
                     }
                 });
+            }
+            if old_profile != r.profile {
+                // A newly chosen profile starts at 100%, as in Lightroom.
+                r.profile_amount = 1.;
             }
             if old_profile != r.profile
                 && let Some(m) = &metadata
@@ -1084,8 +1208,12 @@ impl Editor {
                 // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Guided has nothing to analyse until guides can be drawn.
-                        let analysed = !matches!(r.upright.mode, UprightMode::Off | UprightMode::Guided);
+                        // Guided solves its guides again; without guides it has nothing to go by.
+                        let analysed = match r.upright.mode {
+                            UprightMode::Off => false,
+                            UprightMode::Guided => !r.upright.guides.is_empty(),
+                            _ => true,
+                        };
                         if ui
                             .add_enabled(upright_ready && analysed, egui::Button::new("Update"))
                             .on_hover_text("Analyse the photo again, e.g. after changing lens corrections")
@@ -1105,14 +1233,47 @@ impl Editor {
                     segmented(ui, &mut u.mode, &row, w);
                 }
                 if u.mode != before {
-                    if u.mode == UprightMode::Guided && u.corrections.len() <= u.mode.code() {
-                        // Guided needs guides drawn on the photo, which isn't built yet;
-                        // a photo imported with Guided keeps Lightroom's correction.
-                        u.mode = before;
-                        guided_unavailable = true;
+                    if u.mode == UprightMode::Guided {
+                        // As in Lightroom, choosing Guided picks up its tool.
+                        guided_action = Some(GuidedAction::Choose);
                     } else if u.mode != UprightMode::Off && u.corrections.len() <= u.mode.code() {
                         upright_request = true;
                     }
+                }
+                if u.mode == UprightMode::Guided {
+                    let count = u.guides.len();
+                    control_row(ui, "Guides", |ui| {
+                        let drawing = view.is(Tool::Guided);
+                        if ui
+                            .selectable_label(drawing, "Draw")
+                            .on_hover_text("Draw up to four guides along verticals and horizontals · Shift+T")
+                            .clicked()
+                        {
+                            guided_action = Some(GuidedAction::Toggle);
+                        }
+                        ui.label(
+                            egui::RichText::new(format!("{count} of {}", crate::develop::guided::MAX_GUIDES))
+                                .color(theme::gray(170)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_enabled(count > 0, egui::Button::new("Clear"))
+                                .on_hover_text("Remove every guide")
+                                .clicked()
+                            {
+                                guided_action = Some(GuidedAction::Clear);
+                            }
+                        });
+                    });
+                    if view.is(Tool::Guided) {
+                        control_row(ui, "", |ui| {
+                            ui.checkbox(&mut view.guided.loupe, "Show Loupe")
+                                .on_hover_text("Magnify the photo while placing a guide's end");
+                            ui.checkbox(&mut view.guided.grid, "Grid");
+                        });
+                    }
+                } else if view.is(Tool::Guided) {
+                    view.tool = Tool::None;
                 }
                 control_row(ui, "", |ui| {
                     ui.checkbox(&mut r.constrain_crop, "Constrain Crop")
@@ -1275,8 +1436,20 @@ impl Editor {
         if upright_request {
             self.start_upright();
         }
-        if guided_unavailable {
-            self.status = "Guided Upright isn't available yet".into();
+        match guided_action {
+            Some(GuidedAction::Choose) => {
+                if self.view.is(Tool::Guided) {
+                    self.choose_guided();
+                } else {
+                    self.toggle_guided_tool();
+                }
+            }
+            Some(GuidedAction::Toggle) => self.toggle_guided_tool(),
+            Some(GuidedAction::Clear) => {
+                self.view.guided.selected = None;
+                self.set_guides(Vec::new(), "Clear Guides");
+            }
+            None => {}
         }
         if import_profiles {
             self.dialog(FileDialog::CameraProfile, &ui.ctx().clone());
@@ -1295,9 +1468,16 @@ impl Editor {
             match crate::camera_profiles::import_files(&adobe) {
                 Ok(done) => {
                     let (profiles, errors) = crate::camera_profiles::installed(&m);
-                    self.document.profiles = profiles;
-                    self.document.profile_errors = errors;
-                    self.refresh_preset_support();
+                    // As the loader's: the raw defaults are resolved again
+                    // after this frame, so changing an unedited photo's recipe
+                    // is not taken for an edit.
+                    let _ = self.tx.send(super::worker::Event::Profiles {
+                        id: self.load.id(),
+                        profiles,
+                        errors,
+                    });
+                    ui.ctx().request_repaint();
+                    self.refresh_library_defaults();
                     self.status = format!(
                         "Imported {} Adobe profiles for {} {}. Choose one from the Profile menu.",
                         done.len(),
@@ -1309,6 +1489,23 @@ impl Editor {
             }
         }
     }
+}
+
+/// A Crop panel button that acts once the panel is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CropAction {
+    Swap,
+    AutoStraighten,
+}
+
+/// The aspect menu's name for `aspect`: a preset either way round (X swaps them),
+/// Original or Free, or Custom.
+fn aspect_name(aspect: f32) -> &'static str {
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    ASPECTS
+        .iter()
+        .find(|(a, _)| near(*a, aspect) || (*a > 0. && near(1. / *a, aspect)))
+        .map_or("Custom", |(_, name)| *name)
 }
 
 /// The crop's aspect presets, long side over short.
@@ -1492,4 +1689,14 @@ fn hint_row(ui: &mut egui::Ui, text: &str) {
         ui.add_space(88.);
         ui.label(egui::RichText::new(text).size(11.).color(theme::gray(140)));
     });
+}
+
+/// What the Transform panel asks of the Guided Upright tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GuidedAction {
+    /// Guided was chosen among the modes.
+    Choose,
+    /// Draw: open or close the tool.
+    Toggle,
+    Clear,
 }

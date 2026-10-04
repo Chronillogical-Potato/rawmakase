@@ -19,7 +19,6 @@ impl Editor {
         if ui.input(|i| i.key_down(egui::Key::Space)) || self.view.compare {
             return false;
         }
-        let _ = area;
         match self.view.tool {
             Tool::None | Tool::Crop | Tool::WhiteBalance | Tool::Defringe => false,
             Tool::Remove => {
@@ -27,6 +26,10 @@ impl Editor {
                 true
             }
             Tool::Mask => self.mask_overlay(ui, response, rect),
+            Tool::Guided => {
+                self.guided_overlay(ui, response, rect, area);
+                true
+            }
         }
     }
 }

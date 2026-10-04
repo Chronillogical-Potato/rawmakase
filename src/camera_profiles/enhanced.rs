@@ -9,6 +9,29 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{io::Read, path::Path};
+/// A look with Lightroom's Profile Amount (`crs:SupportsAmount`). The slider runs
+/// 0–200%; the look's table follows it only between the bounds its table stores
+/// (version 2 tables; a version 1 table stays at 100%).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AmountRange {
+    pub table_min: f32,
+    pub table_max: f32,
+}
+impl AmountRange {
+    /// The strength of the look's table at a Profile Amount.
+    pub fn table(&self, amount: f32) -> f32 {
+        amount.clamp(self.table_min, self.table_max)
+    }
+}
+/// A decoded look table and the amount bounds it stores.
+struct DecodedTable {
+    table: Table,
+    bounds: [f32; 2],
+}
+fn is_zero(v: &f32) -> bool {
+    *v == 0.
+}
 const ALPHABET: &[u8] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`'|()[]{}@%$#";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -22,8 +45,17 @@ pub struct Enhanced {
     pub shadows: f32,
     #[serde(default)]
     pub clarity: f32,
+    /// Contrast and Blacks, which Lightroom's B&W looks set. Omitted at zero, so
+    /// releases that predate them read the profile.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub contrast: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub blacks: f32,
     #[serde(default)]
     pub monochrome: bool,
+    /// Whether the look has Lightroom's Profile Amount, and how far its table goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<AmountRange>,
     pub(super) table: Table,
     pub(super) curve: Vec<f32>,
 }
@@ -36,7 +68,10 @@ impl Enhanced {
             highlights: 0.,
             shadows: 0.,
             clarity: 0.,
+            contrast: 0.,
+            blacks: 0.,
             monochrome: false,
+            amount: None,
             table,
             curve: (0..=4096)
                 .map(|i| {
@@ -47,18 +82,34 @@ impl Enhanced {
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
+        ensure!(!self.base_name.is_empty(), "Missing look base profile");
+        self.validate_contents()
+    }
+    /// Everything but the base profile, which a parsed look file does not have yet.
+    fn validate_contents(&self) -> Result<()> {
         ensure!(
             self.uuid.len() == 32 && self.uuid.bytes().all(|b| b.is_ascii_hexdigit()),
             "Invalid look UUID"
         );
-        ensure!(!self.base_name.is_empty(), "Missing look base profile");
         ensure!(
-            [self.highlights, self.shadows, self.clarity]
-                .iter()
-                .all(|v| v.is_finite() && (-1. ..=1.).contains(v)),
+            [
+                self.highlights,
+                self.shadows,
+                self.clarity,
+                self.contrast,
+                self.blacks
+            ]
+            .iter()
+            .all(|v| v.is_finite() && (-1. ..=1.).contains(v)),
             "Invalid profile tone adjustment"
         );
         self.table.validate()?;
+        ensure!(
+            self.amount.is_none_or(
+                |a| (0. ..=1.).contains(&a.table_min) && (1. ..=2.).contains(&a.table_max)
+            ),
+            "Invalid look amount bounds"
+        );
         ensure!(
             self.curve.len() == 4097
                 && self
@@ -68,6 +119,51 @@ impl Enhanced {
             "Invalid look curve"
         );
         Ok(())
+    }
+    /// The look at a Profile Amount (1 is 100%), as Camera Raw 18.7 renders it. Up to
+    /// 100% the table's shifts and scales, the curve's change and the internal
+    /// adjustments grow from none. Above, the table's shifts keep growing (within the
+    /// bounds its table stores), the curve is applied again at the excess, and the
+    /// adjustments grow at half the rate (+40 Shadows is +60 at 200%). A look without
+    /// an Amount stays at 100%.
+    pub fn at_amount(&self, amount: f32) -> Self {
+        let Some(range) = self.amount.filter(|_| amount != 1.) else {
+            return self.clone();
+        };
+        let strength = range.table(amount);
+        let table = self.table.scaled(strength);
+        let adjustment = if amount > 1. {
+            1. + (amount - 1.) * 0.5
+        } else {
+            amount
+        };
+        let eval = |x: f32| {
+            let x = x.clamp(0., 1.) * 4096.;
+            let i = (x as usize).min(4095);
+            self.curve[i] + (self.curve[i + 1] - self.curve[i]) * (x - i as f32)
+        };
+        Self {
+            highlights: self.highlights * adjustment,
+            shadows: self.shadows * adjustment,
+            clarity: self.clarity * adjustment,
+            contrast: self.contrast * adjustment,
+            blacks: self.blacks * adjustment,
+            table,
+            curve: self
+                .curve
+                .iter()
+                .enumerate()
+                .map(|(i, &y)| {
+                    if amount > 1. {
+                        y + (eval(y) - y) * (amount - 1.)
+                    } else {
+                        let x = i as f32 / 4096.;
+                        x + (y - x) * amount
+                    }
+                })
+                .collect(),
+            ..self.clone()
+        }
     }
     pub(super) fn apply_table(&self, rgb: [f32; 3]) -> [f32; 3] {
         self.table.apply(rgb.map(|v| v.clamp(0., 1.)), None, 0.)
@@ -90,7 +186,7 @@ impl Enhanced {
         }
     }
 }
-fn decode_table(text: &str) -> Result<Table> {
+fn decode_table(text: &str) -> Result<DecodedTable> {
     ensure!(text.len() <= 16_000_000, "Look table too large");
     let digits: Vec<_> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     ensure!(digits.len() % 5 != 1, "Truncated base85 table");
@@ -139,6 +235,7 @@ fn decode_table(text: &str) -> Result<Table> {
         "Invalid table payload size"
     );
     ensure!(word(end) <= 1, "Unsupported table encoding");
+    let mut bounds = [1.; 2];
     if word(4) == 2 {
         let min = f64::from_le_bytes(data[end + 4..end + 12].try_into()?);
         let max = f64::from_le_bytes(data[end + 12..end + 20].try_into()?);
@@ -146,6 +243,7 @@ fn decode_table(text: &str) -> Result<Table> {
             min.is_finite() && max.is_finite() && (0. ..=1.).contains(&min) && max >= 1.,
             "Invalid table amount bounds"
         );
+        bounds = [min as f32, max.min(2.) as f32];
     }
     if data.len() == end + tail + 4 {
         ensure!(word(end + tail) == 0, "Unsupported look table flags");
@@ -163,167 +261,235 @@ fn decode_table(text: &str) -> Result<Table> {
             .collect(),
     };
     table.validate()?;
-    Ok(table)
+    Ok(DecodedTable { table, bounds })
 }
-pub(super) fn compose(path: &Path, base: &CameraProfile) -> Result<CameraProfile> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= 16_000_000,
-        "XMP profile too large"
-    );
-    compose_text(&std::fs::read_to_string(path)?, base)
+/// Which base profile a look builds on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum LookBase {
+    /// A camera look (Adobe Color and the other Adobe Raw looks) over the named base,
+    /// usually Adobe Standard.
+    Named(String),
+    /// A creative look (Lightroom's Artistic, B&W, Modern, Vintage) names no base: it
+    /// goes over the photo's own profile.
+    Any,
 }
-pub(super) fn compose_text(text: &str, base: &CameraProfile) -> Result<CameraProfile> {
-    let doc = roxmltree::Document::parse(text)?;
-    let d = doc
-        .descendants()
-        .find(|n| {
-            n.has_tag_name((RDF, "Description"))
-                && n.parent().is_some_and(|p| p.has_tag_name((RDF, "RDF")))
-        })
-        .context("Missing profile description")?;
-    let attr = |name| d.attribute((CRS, name)).unwrap_or("");
-    ensure!(attr("PresetType") == "Look", "XMP is not a look profile");
-    ensure!(
-        attr("CameraProfile") == base.name && base.enhanced.is_none(),
-        "Missing base camera profile {}",
-        attr("CameraProfile")
-    );
-    let restriction = attr("CameraModelRestriction");
-    ensure!(
-        restriction.is_empty() || restriction.eq_ignore_ascii_case(&base.camera),
-        "Look belongs to {restriction}"
-    );
-    // Fail closed: do not silently discard profile-internal develop controls or RGB LUTs.
-    const META: &[&str] = &[
-        "PresetType",
-        "Cluster",
-        "UUID",
-        "SupportsAmount",
-        "SupportsColor",
-        "SupportsMonochrome",
-        "SupportsHighDynamicRange",
-        "SupportsNormalDynamicRange",
-        "SupportsSceneReferred",
-        "SupportsOutputReferred",
-        "CameraModelRestriction",
-        "Copyright",
-        "ContactInfo",
-        "Version",
-        "ProcessVersion",
-        "ConvertToGrayscale",
-        "CameraProfile",
-        "LookTable",
-        "HasSettings",
-        "Highlights2012",
-        "Shadows2012",
-        "Clarity2012",
-    ];
-    for a in d.attributes().filter(|a| a.namespace() == Some(CRS)) {
+/// A look profile file, parsed and validated but not yet put over a base profile.
+#[derive(Clone, Debug)]
+pub(super) struct LookFile {
+    pub name: String,
+    pub base: LookBase,
+    restriction: String,
+    copyright: String,
+    look: Enhanced,
+}
+impl LookFile {
+    pub fn read(path: &Path) -> Result<Self> {
         ensure!(
-            META.contains(&a.name()) || a.name().starts_with("Table_"),
-            "Unsupported profile setting {}",
-            a.name()
+            std::fs::metadata(path)?.len() <= 16_000_000,
+            "XMP profile too large"
         );
+        Self::parse(&std::fs::read_to_string(path)?)
     }
-    let monochrome = match attr("ConvertToGrayscale").to_ascii_lowercase().as_str() {
-        "" | "false" => false,
-        "true" => true,
-        _ => anyhow::bail!("Invalid profile monochrome flag"),
-    };
-    let adjustment = |key| -> Result<f32> {
-        let value = attr(key);
-        Ok(if value.is_empty() {
-            0.
-        } else {
-            value.parse::<f32>()? / 100.
-        })
-    };
-    let name_node = d
-        .children()
-        .find(|n| n.has_tag_name((CRS, "Name")))
-        .context("Missing profile name")?;
-    let name = name_node
-        .descendants()
-        .find(|n| n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default"))
-        .and_then(|n| n.text())
-        .context("Missing profile name")?;
-    let table_id = attr("LookTable");
-    ensure!(
-        table_id.len() == 32 && table_id.bytes().all(|b| b.is_ascii_hexdigit()),
-        "Missing HSV look table"
-    );
-    let table_key = format!("Table_{table_id}");
-    let table = decode_table(attr(&table_key))?;
-    let mut curve = ToneCurve::default();
-    for n in d
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().namespace() == Some(CRS))
-    {
-        let key = n.tag_name().name();
-        if key.starts_with("ToneCurvePV2012") {
-            let points = n
-                .descendants()
-                .filter(|v| v.has_tag_name((RDF, "li")))
-                .map(|v| -> Result<[f32; 2]> {
-                    let (x, y) = v
-                        .text()
-                        .context("Empty curve point")?
-                        .split_once(',')
-                        .context("Invalid curve point")?;
-                    Ok([
-                        x.trim().parse::<f32>()? / 255.,
-                        y.trim().parse::<f32>()? / 255.,
-                    ])
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let parsed = ToneCurve {
-                points,
-                ..Default::default()
-            };
-            parsed.validate()?;
-            if key == "ToneCurvePV2012" {
-                curve = parsed;
-            } else {
-                ensure!(
-                    [
-                        "ToneCurvePV2012Red",
-                        "ToneCurvePV2012Green",
-                        "ToneCurvePV2012Blue"
-                    ]
-                    .contains(&key)
-                        && parsed.points == [[0., 0.], [1., 1.]],
-                    "Unsupported profile channel curve {key}"
-                );
+    /// Whether this look can go over `base`.
+    pub fn fits(&self, base: &CameraProfile) -> bool {
+        base.enhanced.is_none()
+            && match &self.base {
+                LookBase::Named(name) => *name == base.name,
+                LookBase::Any => true,
             }
-        } else {
+    }
+    /// The look over `base`, which carries the camera's matrices and tables.
+    pub fn compose(&self, base: &CameraProfile) -> Result<CameraProfile> {
+        ensure!(
+            self.fits(base),
+            "Missing base camera profile {}",
+            match &self.base {
+                LookBase::Named(name) => name.as_str(),
+                LookBase::Any => "",
+            }
+        );
+        ensure!(
+            self.restriction.is_empty() || self.restriction.eq_ignore_ascii_case(&base.camera),
+            "Look belongs to {}",
+            self.restriction
+        );
+        let mut p = base.clone();
+        p.name = self.name.clone();
+        p.copyright = format!("{}; {}", base.copyright, self.copyright);
+        p.enhanced = Some(Enhanced {
+            base_name: base.name.clone(),
+            ..self.look.clone()
+        });
+        p.validate()?;
+        Ok(p)
+    }
+    pub fn parse(text: &str) -> Result<Self> {
+        let doc = roxmltree::Document::parse(text)?;
+        let d = doc
+            .descendants()
+            .find(|n| {
+                n.has_tag_name((RDF, "Description"))
+                    && n.parent().is_some_and(|p| p.has_tag_name((RDF, "RDF")))
+            })
+            .context("Missing profile description")?;
+        let attr = |name| d.attribute((CRS, name)).unwrap_or("");
+        ensure!(attr("PresetType") == "Look", "XMP is not a look profile");
+        let base = match attr("CameraProfile") {
+            "" => LookBase::Any,
+            name => LookBase::Named(name.into()),
+        };
+        // Fail closed: do not silently discard profile-internal develop controls or RGB LUTs.
+        const META: &[&str] = &[
+            "PresetType",
+            "Cluster",
+            "UUID",
+            "SupportsAmount",
+            "SupportsColor",
+            "SupportsMonochrome",
+            "SupportsHighDynamicRange",
+            "SupportsNormalDynamicRange",
+            "SupportsSceneReferred",
+            "SupportsOutputReferred",
+            "CameraModelRestriction",
+            "Copyright",
+            "ContactInfo",
+            "Version",
+            "ProcessVersion",
+            "ConvertToGrayscale",
+            "CameraProfile",
+            "LookTable",
+            "HasSettings",
+            "Highlights2012",
+            "Shadows2012",
+            "Clarity2012",
+            "Contrast2012",
+            "Blacks2012",
+        ];
+        for a in d.attributes().filter(|a| a.namespace() == Some(CRS)) {
             ensure!(
-                ["Name", "ShortName", "SortName", "Group", "Description"].contains(&key),
-                "Unsupported profile element {key}"
+                META.contains(&a.name()) || a.name().starts_with("Table_"),
+                "Unsupported profile setting {}",
+                a.name()
             );
         }
+        let monochrome = match attr("ConvertToGrayscale").to_ascii_lowercase().as_str() {
+            "" | "false" => false,
+            "true" => true,
+            _ => anyhow::bail!("Invalid profile monochrome flag"),
+        };
+        let adjustment = |key| -> Result<f32> {
+            let value = attr(key);
+            Ok(if value.is_empty() {
+                0.
+            } else {
+                value.parse::<f32>()? / 100.
+            })
+        };
+        let name_node = d
+            .children()
+            .find(|n| n.has_tag_name((CRS, "Name")))
+            .context("Missing profile name")?;
+        let name = name_node
+            .descendants()
+            .find(|n| {
+                n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default")
+            })
+            .and_then(|n| n.text())
+            .context("Missing profile name")?;
+        let table_id = attr("LookTable");
+        ensure!(
+            table_id.len() == 32 && table_id.bytes().all(|b| b.is_ascii_hexdigit()),
+            "Missing HSV look table"
+        );
+        let table_key = format!("Table_{table_id}");
+        let DecodedTable { table, bounds } = decode_table(attr(&table_key))?;
+        let amount = match attr("SupportsAmount").to_ascii_lowercase().as_str() {
+            "" | "false" => None,
+            "true" => Some(AmountRange {
+                table_min: bounds[0],
+                table_max: bounds[1],
+            }),
+            _ => anyhow::bail!("Invalid profile amount flag"),
+        };
+        let mut curve = ToneCurve::default();
+        for n in d
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().namespace() == Some(CRS))
+        {
+            let key = n.tag_name().name();
+            if key.starts_with("ToneCurvePV2012") {
+                let points = n
+                    .descendants()
+                    .filter(|v| v.has_tag_name((RDF, "li")))
+                    .map(|v| -> Result<[f32; 2]> {
+                        let (x, y) = v
+                            .text()
+                            .context("Empty curve point")?
+                            .split_once(',')
+                            .context("Invalid curve point")?;
+                        Ok([
+                            x.trim().parse::<f32>()? / 255.,
+                            y.trim().parse::<f32>()? / 255.,
+                        ])
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let parsed = ToneCurve {
+                    points,
+                    ..Default::default()
+                };
+                parsed.validate()?;
+                if key == "ToneCurvePV2012" {
+                    curve = parsed;
+                } else {
+                    ensure!(
+                        [
+                            "ToneCurvePV2012Red",
+                            "ToneCurvePV2012Green",
+                            "ToneCurvePV2012Blue"
+                        ]
+                        .contains(&key)
+                            && parsed.points == [[0., 0.], [1., 1.]],
+                        "Unsupported profile channel curve {key}"
+                    );
+                }
+            } else {
+                ensure!(
+                    ["Name", "ShortName", "SortName", "Group", "Description"].contains(&key),
+                    "Unsupported profile element {key}"
+                );
+            }
+        }
+        let lut = CurveLut::new(&curve);
+        let look = Enhanced {
+            uuid: attr("UUID").into(),
+            base_name: String::new(),
+            highlights: adjustment("Highlights2012")?,
+            shadows: adjustment("Shadows2012")?,
+            clarity: adjustment("Clarity2012")?,
+            contrast: adjustment("Contrast2012")?,
+            blacks: adjustment("Blacks2012")?,
+            monochrome,
+            amount,
+            table,
+            curve: (0..=4096).map(|i| lut.evaluate(i as f32 / 4096.)).collect(),
+        };
+        look.validate_contents()?;
+        Ok(Self {
+            name: name.into(),
+            base,
+            restriction: attr("CameraModelRestriction").into(),
+            copyright: attr("Copyright").into(),
+            look,
+        })
     }
-    let lut = CurveLut::new(&curve);
-    let mut p = base.clone();
-    p.name = name.into();
-    p.copyright = format!("{}; {}", base.copyright, attr("Copyright"));
-    p.enhanced = Some(Enhanced {
-        uuid: attr("UUID").into(),
-        base_name: base.name.clone(),
-        highlights: adjustment("Highlights2012")?,
-        shadows: adjustment("Shadows2012")?,
-        clarity: adjustment("Clarity2012")?,
-        monochrome,
-        table,
-        curve: (0..=4096).map(|i| lut.evaluate(i as f32 / 4096.)).collect(),
-    });
-    p.validate()?;
-    Ok(p)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+    fn compose_text(text: &str, base: &CameraProfile) -> Result<CameraProfile> {
+        LookFile::parse(text)?.compose(base)
+    }
     fn fixture() -> String {
         let mut bytes = Vec::new();
         for v in [0u32, 1, 1, 2, 2] {
@@ -358,7 +524,7 @@ mod tests {
     }
     #[test]
     fn sdk_base85_zlib_table_has_expected_hue_rotation() -> Result<()> {
-        let t = decode_table(&fixture())?;
+        let t = decode_table(&fixture())?.table;
         let green = t.apply([0.5, 0., 0.], None, 0.);
         assert!((green[0]).abs() < 1e-6 && (green[1] - 0.5).abs() < 1e-6 && green[2].abs() < 1e-6);
         for s in ["", "x", "!!!!!", "zzzzzzzzzz", "\"\"\"\"\""] {
@@ -404,6 +570,112 @@ mod tests {
             let result = look.apply_curve(p);
             assert!(result.into_iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-5));
         }
+        Ok(())
+    }
+    #[test]
+    fn profile_amount_scales_the_look_as_camera_raw_does() {
+        let mut look = Enhanced::for_test(decode_table(&fixture()).unwrap().table);
+        look.shadows = 0.4;
+        look.contrast = -0.2;
+        // Without SupportsAmount the look stays at 100%.
+        assert_eq!(look.at_amount(0.3), look);
+        look.amount = Some(AmountRange {
+            table_min: 0.,
+            table_max: 2.,
+        });
+        assert_eq!(look.at_amount(1.), look);
+        let none = look.at_amount(0.);
+        assert!(none.table.data.iter().all(|d| *d == [0., 1., 1.]));
+        assert!(
+            none.curve
+                .iter()
+                .enumerate()
+                .all(|(i, y)| (y - i as f32 / 4096.).abs() < 1e-6)
+        );
+        assert_eq!((none.shadows, none.contrast), (0., 0.));
+        let half = look.at_amount(0.5);
+        assert_eq!(half.table.data[0], [60., 1., 1.]);
+        assert_eq!(half.shadows, 0.2);
+        // Above 100% the internal adjustments grow at half the rate, the table's
+        // shifts keep growing and the curve is applied again.
+        let double = look.at_amount(2.);
+        assert_eq!(double.table.data[0], [240., 1., 1.]);
+        assert!((double.shadows - 0.6).abs() < 1e-6);
+        let mid = 2048;
+        let once = look.curve[mid];
+        let twice = look.curve[(once * 4096.).round() as usize];
+        assert!(
+            (double.curve[mid] - twice).abs() < 1e-3,
+            "{}",
+            double.curve[mid]
+        );
+        // A version 1 table has no amount bounds: it stays at 100%.
+        look.amount = Some(AmountRange {
+            table_min: 1.,
+            table_max: 1.,
+        });
+        assert_eq!(look.at_amount(0.).table, look.table);
+    }
+    #[test]
+    fn creative_looks_name_no_base_and_go_over_any_camera_profile() -> Result<()> {
+        let mut base = CameraProfile::camera_matrix_default(&crate::raw::Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        })
+        .unwrap();
+        base.name = "Any base".into();
+        let xml = profile_xml(&fixture())
+            .replace(r#" c:CameraProfile="Test base""#, "")
+            .replace("c:PresetType=", r#"c:SupportsAmount="True" c:PresetType="#);
+        let file = LookFile::parse(&xml)?;
+        assert_eq!(file.base, LookBase::Any);
+        let composed = file.compose(&base)?;
+        let look = composed.enhanced.as_ref().unwrap();
+        assert_eq!(look.base_name, "Any base");
+        // The fixture is a version 1 table: Amount is offered, the table stays at 100%.
+        assert_eq!(
+            look.amount,
+            Some(AmountRange {
+                table_min: 1.,
+                table_max: 1.
+            })
+        );
+        assert!(composed.supports_amount());
+        // A look never goes over another look.
+        assert!(file.compose(&composed).is_err());
+        // Over Adobe Standard when there is one, else the first profile that fits:
+        // the file's own, listed before RAWmakase Standard.
+        let named = |name: &str| {
+            let mut p = base.clone();
+            p.name = name.into();
+            std::sync::Arc::new(p)
+        };
+        // Listed by name, as `installed` returns them.
+        let own = named("Zeta embedded");
+        let mut bases = vec![
+            std::sync::Arc::new(composed.clone()),
+            named("Camera Standard"),
+            named(super::super::open::STANDARD),
+            own.clone(),
+        ];
+        let base_of = |bases: &[std::sync::Arc<CameraProfile>], own: Option<&CameraProfile>| {
+            super::super::library::look_base(&file, bases, own).map(|b| b.name.clone())
+        };
+        assert_eq!(
+            base_of(&bases, Some(&own)).as_deref(),
+            Some("Zeta embedded")
+        );
+        assert_eq!(
+            base_of(&bases, None).as_deref(),
+            Some(super::super::open::STANDARD)
+        );
+        bases.push(named("Adobe Standard"));
+        assert_eq!(
+            base_of(&bases, Some(&own)).as_deref(),
+            Some("Adobe Standard")
+        );
         Ok(())
     }
 }

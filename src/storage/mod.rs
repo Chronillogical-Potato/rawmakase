@@ -11,9 +11,9 @@ pub(crate) use files::{
     asset_dirs, atomic_json, parent_dir, persist, read_json_or_default, stage, write_atomic,
 };
 pub(crate) use format::migrate_recipe;
-pub use format::{PIPELINE, SCHEMA};
+pub use format::{PIPELINE, SCHEMA, saved_version};
 pub use identity::Stamp;
 pub(crate) use identity::{FNV_OFFSET, fnv1a};
-pub use session::{LibraryLayout, Session, load_session, save_session};
+pub use session::{CropGuideLayout, LibraryLayout, Session, load_session, save_session};
 pub(crate) use sidecar::import;
 pub use sidecar::{Identity, Sidecar, load, save, sidecar_path};

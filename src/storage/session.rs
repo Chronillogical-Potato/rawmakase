@@ -45,6 +45,27 @@ pub struct Session {
     /// The groups Copy Settings copied last time; None until it has been used.
     #[serde(default)]
     pub copy_groups: Option<crate::develop::settings_groups::GroupSelection>,
+    /// The Crop tool's guide overlay.
+    #[serde(default)]
+    pub crop_guides: CropGuideLayout,
+    /// Preferences > Raw Defaults: what photos without an edit start from.
+    #[serde(
+        default,
+        deserialize_with = "crate::develop::defaults::lenient_settings"
+    )]
+    pub raw_defaults: crate::develop::defaults::RawDefaults,
+}
+
+/// The Crop tool's guide overlay, which way round it is and when it shows, by stable
+/// names as [`LibraryLayout`]; a name this version does not know reads as the default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CropGuideLayout {
+    /// "grid", "thirds", "diagonal", "triangle", "golden-ratio" or "golden-spiral".
+    pub guide: String,
+    pub orientation: u32,
+    /// "always", "auto" or "never".
+    pub show: String,
 }
 
 /// How the Library shows its photos: its view, filter bar, sort and grid,

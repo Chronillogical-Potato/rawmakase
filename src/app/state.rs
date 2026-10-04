@@ -24,6 +24,11 @@ pub(super) struct Document {
     pub(super) snapshots: super::snapshots::Snapshots,
     /// Apply the photo's Lightroom settings once its profiles arrive.
     pub(super) pending_lightroom: bool,
+    /// Where the edit on screen started from.
+    pub(super) origin: EditOrigin,
+    /// The raw defaults for this photo, once its profiles are known: what Reset
+    /// returns to and Before shows.
+    pub(super) defaults: Option<crate::develop::defaults::Resolved>,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
@@ -39,6 +44,20 @@ pub(super) struct Document {
     pub(super) auto_effect: std::cell::RefCell<Option<(Recipe, bool)>>,
     /// The Transform panel's Upright analysis for this photo.
     pub(super) upright: super::task::Task,
+    /// The Crop panel's Auto straighten analysis for this photo.
+    pub(super) straighten: super::task::Task,
+}
+
+/// Where a photo's edit in Develop started from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum EditOrigin {
+    /// No edit: the raw defaults, which follow Preferences until it is edited.
+    #[default]
+    Defaults,
+    /// The catalog's RAWmakase edit.
+    Saved,
+    /// The photo's Lightroom edit, converted from Adobe Default.
+    Lightroom,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.
@@ -173,6 +192,8 @@ pub(super) enum Tool {
     /// Spot removal: Heal and Clone.
     Remove,
     Mask,
+    /// The Transform panel's Guided Upright tool.
+    Guided,
 }
 pub(super) struct ViewState {
     /// Fit or a zoom level, and where; Develop's and the Library's.
@@ -181,15 +202,25 @@ pub(super) struct ViewState {
     pub(super) compare: bool,
     /// The histogram's clipping warnings.
     pub(super) clipping: super::clipping::ClippingView,
+    /// A drag in the histogram in progress.
+    pub(super) tone_drag: Option<super::tone_drag::ToneDrag>,
     pub(super) tool: Tool,
     pub(super) crop_drag: Option<([f32; 4], usize)>,
     pub(super) aspect: f32,
     /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
     pub(super) aspect_read: bool,
+    /// The crop guide overlay; saved in the session.
+    pub(super) crop_guides: super::crop_tool::CropGuides,
+    /// When the overlay was last changed; it shows for a moment after, even in Auto.
+    pub(super) crop_guides_changed: Option<std::time::Instant>,
+    /// The Crop tool's Straighten ruler.
+    pub(super) ruler: super::crop_tool::Ruler,
     /// Spot removal settings, selection and drag in progress.
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Masking panel state.
     pub(super) masking: super::mask_tool::MaskTool,
+    /// The Guided Upright tool's selection, drag and view options.
+    pub(super) guided: super::guided_tool::GuidedTool,
     pub(super) monitor: Option<PathBuf>,
     pub(super) selected_band: usize,
     pub(super) selected_grade: usize,
@@ -209,12 +240,17 @@ impl Default for ViewState {
             viewport: Vec2::ZERO,
             compare: false,
             clipping: Default::default(),
+            tone_drag: None,
             tool: Tool::None,
             crop_drag: None,
             aspect: -1.,
             aspect_read: false,
+            crop_guides: Default::default(),
+            crop_guides_changed: None,
+            ruler: Default::default(),
             retouch: Default::default(),
             masking: Default::default(),
+            guided: Default::default(),
             monitor: None,
             selected_band: 0,
             selected_grade: 1,
@@ -318,6 +354,8 @@ impl ViewState {
             self.zoom.on = false;
             self.aspect_read = false;
         }
+        self.ruler = Default::default();
+        self.guided.drag = None;
     }
     pub fn clear_document(&mut self) {
         self.zoom.on = false;
@@ -325,8 +363,12 @@ impl ViewState {
         self.shown_rect = None;
         self.tool = Tool::None;
         self.crop_drag = None;
+        self.ruler = Default::default();
+        // Ends a histogram drag: the next photo starts from its own values.
+        self.tone_drag = None;
         self.retouch.clear_document();
         self.masking.clear_document();
+        self.guided.clear_document();
         self.compare = false;
     }
 }

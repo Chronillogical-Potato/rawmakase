@@ -39,6 +39,7 @@ pub enum SettingGroup {
     ChromaticAberration,
     LensVignetting,
     UprightMode,
+    UprightTransforms,
     TransformAdjustments,
     PostCropVignetting,
     Grain,
@@ -57,7 +58,7 @@ pub struct Section {
 }
 
 impl SettingGroup {
-    pub const ALL: [SettingGroup; 32] = [
+    pub const ALL: [SettingGroup; 33] = [
         SettingGroup::WhiteBalance,
         SettingGroup::Exposure,
         SettingGroup::Contrast,
@@ -82,6 +83,7 @@ impl SettingGroup {
         SettingGroup::ChromaticAberration,
         SettingGroup::LensVignetting,
         SettingGroup::UprightMode,
+        SettingGroup::UprightTransforms,
         SettingGroup::TransformAdjustments,
         SettingGroup::PostCropVignetting,
         SettingGroup::Grain,
@@ -129,7 +131,7 @@ impl SettingGroup {
             },
             Section {
                 title: "Transform",
-                groups: &[UprightMode, TransformAdjustments],
+                groups: &[UprightMode, UprightTransforms, TransformAdjustments],
             },
             Section {
                 title: "Effects",
@@ -177,6 +179,7 @@ impl SettingGroup {
             ChromaticAberration => "Chromatic Aberration",
             LensVignetting => "Lens Vignetting",
             UprightMode => "Upright Mode",
+            UprightTransforms => "Upright Transforms",
             TransformAdjustments => "Transform Adjustments",
             PostCropVignetting => "Post-Crop Vignetting",
             Grain => "Grain",
@@ -198,7 +201,7 @@ impl SettingGroup {
             ColorGrading => Panel::ColorGrading,
             Sharpening | LuminanceNoiseReduction | ColorNoiseReduction => Panel::Detail,
             LensProfileCorrections | ChromaticAberration | LensVignetting => Panel::LensCorrections,
-            UprightMode | TransformAdjustments => Panel::Transform,
+            UprightMode | UprightTransforms | TransformAdjustments => Panel::Transform,
             PostCropVignetting | Grain => Panel::Effects,
             Calibration => Panel::Calibration,
             SpotRemoval => Panel::SpotRemoval,
@@ -228,6 +231,7 @@ impl SettingGroup {
             Saturation => to.saturation = from.saturation,
             TreatmentAndProfile => {
                 to.profile = from.profile.clone();
+                to.profile_amount = from.profile_amount;
                 e.monochrome = f.monochrome;
             }
             ToneCurve => {
@@ -281,6 +285,9 @@ impl SettingGroup {
                 e.lens_vignette_midpoint = f.lens_vignette_midpoint;
             }
             UprightMode => to.upright.mode = from.upright.mode,
+            // The correction exactly as solved or analysed on the source, guides and all,
+            // as Lightroom's Upright Transforms copies it.
+            UprightTransforms => to.upright = from.upright.clone(),
             TransformAdjustments => to.transform = from.transform,
             PostCropVignetting => {
                 e.vignette = f.vignette;
@@ -329,12 +336,20 @@ pub struct GroupSelection(BTreeSet<SettingGroup>);
 
 impl Default for GroupSelection {
     /// As Lightroom's Paste Settings: everything but spot removal and masks, which
-    /// belong to the photo they were made on.
+    /// belong to the photo they were made on, and Upright Transforms, which copies the
+    /// correction made for that photo rather than analysing this one.
     fn default() -> Self {
         Self(
             SettingGroup::ALL
                 .into_iter()
-                .filter(|g| !matches!(g, SettingGroup::SpotRemoval | SettingGroup::Masking))
+                .filter(|g| {
+                    !matches!(
+                        g,
+                        SettingGroup::SpotRemoval
+                            | SettingGroup::Masking
+                            | SettingGroup::UprightTransforms
+                    )
+                })
                 .collect(),
         )
     }
@@ -436,6 +451,7 @@ pub fn transfer(
             None if profile.ensure_camera(m).is_ok() => {}
             None => {
                 recipe.profile = to.profile.clone();
+                recipe.profile_amount = to.profile_amount;
                 notes.push(format!(
                     "{name} isn't available for this camera; kept its profile"
                 ));
@@ -461,22 +477,26 @@ pub fn transfer(
     }
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
-    if super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
-        recipe.upright.corrections.clear();
-        recipe.upright.lightroom.clear();
-        if recipe.upright.mode == super::UprightMode::Guided {
-            recipe.upright.mode = super::UprightMode::Off;
+    let exact = selection.contains(SettingGroup::UprightTransforms);
+    if !exact && super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
+        // Guided solves again from this photo's guides.
+        let guided = recipe.upright.mode == super::UprightMode::Guided;
+        recipe.upright.analyse_again();
+        if guided && recipe.upright.mode != super::UprightMode::Guided {
             notes.push(
                 "New lens corrections need Guided Upright's guides drawn again; left Off".into(),
             );
         }
     }
     // Only the mode transfers: the target keeps the corrections analysed from it, and
-    // the editor analyses one it lacks. Guided needs guides drawn on the photo itself.
+    // the editor analyses one it lacks. Guided needs guides drawn on the photo itself;
+    // Upright Transforms copies the source's correction instead.
     let upright = &mut recipe.upright;
     if selection.contains(SettingGroup::UprightMode)
+        && !exact
         && upright.mode == super::UprightMode::Guided
         && upright.corrections.len() <= upright.mode.code()
+        && upright.guides.is_empty()
     {
         upright.mode = super::UprightMode::Off;
         notes.push("Guided Upright needs guides drawn on this photo; left Off".into());
@@ -503,6 +523,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         preset_name: _,
         preset_settings: _,
         profile: _,
+        profile_amount: _,
         sharpening_radius: _,
         sharpening_detail: _,
         sharpening_masking: _,
@@ -591,6 +612,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("preset_name", PhotosOwn),
         ("preset_settings", PhotosOwn),
         ("profile", Group(TreatmentAndProfile)),
+        ("profile_amount", Group(TreatmentAndProfile)),
         ("sharpening_radius", Group(Sharpening)),
         ("sharpening_detail", Group(Sharpening)),
         ("sharpening_masking", Group(Sharpening)),

@@ -146,6 +146,9 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         retouch: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         profile_tone: _,
+        // The look's strength; its Shadows, Highlights and Clarity are keyed by
+        // `LocalKey` once `Recipe::resolved` has added them.
+        profile_amount: _,
         tint: _,
         auto_white_balance: _,
         wide_gamut_curves: _,
@@ -217,7 +220,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             engine: *engine,
             wb: *wb,
             temperature: *temperature,
-            profile: profile.clone(),
+            // The blurs read the camera matrices and tables, not the look.
+            profile: profile.as_ref().map(|p| p.camera_part()),
             lens_builtin: *lens_builtin,
             lens_profile: *lens_profile,
             lens_vignetting: *lens_vignetting,
@@ -452,6 +456,31 @@ mod tests {
         for (name, r, blurs, samples) in cases {
             assert_eq!(changes(&r), (blurs, samples), "{name}");
         }
+    }
+    /// The blurs read the camera part of the profile only: a look's Profile Amount,
+    /// which `Recipe::resolved` puts into the profile, reuses them.
+    #[test]
+    fn profile_amount_reuses_the_blurs() {
+        let m = crate::raw::Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        };
+        let look = Arc::new(crate::camera_profiles::CameraProfile::creative_for_test(&m));
+        let at = |amount: f32| {
+            Recipe {
+                engine: 4,
+                profile: Some(look.clone()),
+                profile_amount: amount,
+                ..Default::default()
+            }
+            .resolved(&m)
+            .into_owned()
+        };
+        let (full, half) = (at(1.), at(0.5));
+        assert_ne!(full.profile, half.profile);
+        assert!(stage_recipes(&full).blurs == stage_recipes(&half).blurs);
     }
     #[test]
     fn lru_keeps_recent_entries_within_budget() -> Result<()> {
