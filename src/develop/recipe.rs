@@ -246,7 +246,11 @@ impl Recipe {
             look.contrast,
             look.blacks,
         ];
-        if amount == 1. && adjustments.iter().all(|v| *v == 0.) && !look.monochrome {
+        if amount == 1.
+            && adjustments.iter().all(|v| *v == 0.)
+            && !look.monochrome
+            && look.settings.is_default()
+        {
             return std::borrow::Cow::Borrowed(self);
         }
         let mut r = self.clone();
@@ -263,7 +267,53 @@ impl Recipe {
         r.contrast = (r.contrast + look.contrast).clamp(-1., 1.);
         r.blacks = (r.blacks + look.blacks).clamp(-1., 1.);
         r.effects.monochrome |= look.monochrome;
+        r.add_look_settings(&look.settings);
         std::borrow::Cow::Owned(r)
+    }
+    /// A look's Exposure, Saturation, colour mixer and parametric curve added to the
+    /// user's; its split toning for the shadows or highlights the user doesn't tone,
+    /// and its vignette in place of the user's, as Camera Raw 18.7 renders them.
+    fn add_look_settings(&mut self, s: &crate::camera_profiles::LookSettings) {
+        let add = |a: f32, b: f32| (a + b).clamp(-1., 1.);
+        self.exposure = (self.exposure + s.exposure).clamp(-8., 8.);
+        self.saturation = add(self.saturation, s.saturation);
+        for (band, look) in self.hsl.iter_mut().zip(s.hsl) {
+            for (v, l) in band.iter_mut().zip(look) {
+                *v = add(*v, l);
+            }
+        }
+        let e = &mut self.effects;
+        if s.parametric != [0.; 4] {
+            for (v, l) in e.parametric.iter_mut().zip(s.parametric) {
+                *v = add(*v, l);
+            }
+            if e.splits == crate::develop::effects::Effects::default().splits {
+                e.splits = s.splits;
+            }
+        }
+        if let Some(t) = s.toning {
+            // Split toning, as Lightroom's looks store it, overlaps all tones; the
+            // user's own toning of shadows or highlights wins over the look's.
+            if self.grading.iter().all(|g| g[1] == 0. && g[2] == 0.) && e.global_grade == [0.; 3] {
+                e.blending = 1.;
+            }
+            for (slot, [hue, saturation]) in [(0, t.shadows), (2, t.highlights)] {
+                if self.grading[slot][1] == 0. {
+                    self.grading[slot] = [hue, saturation, self.grading[slot][2]];
+                }
+            }
+            if e.balance == 0. {
+                e.balance = t.balance;
+            }
+        }
+        if let Some(v) = s.vignette {
+            e.vignette = v.amount.clamp(-1., 1.);
+            e.vignette_midpoint = v.midpoint;
+            e.vignette_feather = v.feather;
+            e.vignette_roundness = v.roundness;
+            e.vignette_highlights = v.highlights;
+            e.vignette_style = v.style.try_into().unwrap_or_default();
+        }
     }
 
     pub fn for_metadata(m: &Metadata) -> Self {

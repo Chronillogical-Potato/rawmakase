@@ -1,6 +1,6 @@
 //! XMP look profiles backed by Adobe DNG SDK-format HSV big tables and RGB tables.
 //! Assets are read from the user's installation, never bundled with RAWmakase.
-use super::{CameraProfile, Table, rgb_table::RgbTable};
+use super::{CameraProfile, Table, look_settings::LookSettings, rgb_table::RgbTable};
 use crate::{
     color_math::{srgb_decode, srgb_encode},
     develop::curve::{CurveLut, ToneCurve},
@@ -101,6 +101,10 @@ pub struct Enhanced {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) rgb: Option<RgbLook>,
     pub(super) curve: Vec<f32>,
+    /// Exposure, Saturation, colour mixer, parametric curve, split toning and
+    /// vignette settings the look carries.
+    #[serde(default, skip_serializing_if = "LookSettings::is_default")]
+    pub settings: LookSettings,
 }
 impl Enhanced {
     #[cfg(test)]
@@ -117,6 +121,7 @@ impl Enhanced {
             amount: None,
             table: Some(table),
             rgb: None,
+            settings: LookSettings::default(),
             curve: (0..=4096)
                 .map(|i| {
                     let x = i as f32 / 4096.;
@@ -131,6 +136,7 @@ impl Enhanced {
     }
     /// Everything but the base profile, which a parsed look file does not have yet.
     fn validate_contents(&self) -> Result<()> {
+        self.settings.validate()?;
         ensure!(
             self.uuid.len() == 32 && self.uuid.bytes().all(|b| b.is_ascii_hexdigit()),
             "Invalid look UUID"
@@ -210,6 +216,7 @@ impl Enhanced {
             clarity: self.clarity * adjustment,
             contrast: self.contrast * adjustment,
             blacks: self.blacks * adjustment,
+            settings: self.settings.scaled(adjustment),
             table,
             rgb,
             curve: self
@@ -237,10 +244,10 @@ impl Enhanced {
     pub(crate) fn rgb(&self) -> Option<&RgbLook> {
         self.rgb.as_ref()
     }
-    /// Whether the look has an RGB table or lacks an HSV one, which releases before
-    /// RGB tables can't read.
-    pub fn has_rgb_table(&self) -> bool {
-        self.rgb.is_some() || self.table.is_none()
+    /// Whether the look has an RGB table, lacks an HSV one or carries settings, which
+    /// releases before RGB tables can't read.
+    pub fn has_rgb_table_or_settings(&self) -> bool {
+        self.rgb.is_some() || self.table.is_none() || !self.settings.is_default()
     }
     pub(super) fn apply_curve(&self, rgb: [f32; 3]) -> [f32; 3] {
         let p = rgb.map(|v| srgb_encode(v.clamp(0., 1.)));
@@ -459,7 +466,9 @@ impl LookFile {
         ];
         for a in d.attributes().filter(|a| a.namespace() == Some(CRS)) {
             ensure!(
-                META.contains(&a.name()) || a.name().starts_with("Table_"),
+                META.contains(&a.name())
+                    || a.name().starts_with("Table_")
+                    || LookSettings::reads(a.name()),
                 "Unsupported profile setting {}",
                 a.name()
             );
@@ -599,6 +608,7 @@ impl LookFile {
             table,
             rgb,
             curve: (0..=4096).map(|i| lut.evaluate(i as f32 / 4096.)).collect(),
+            settings: LookSettings::parse(|key: &str| d.attribute((CRS, key)).unwrap_or(""))?,
         };
         look.validate_contents()?;
         Ok(Self {
@@ -831,7 +841,7 @@ pub(super) mod tests {
         assert_eq!(file.base, LookBase::Named("Camera Standard".into()));
         let composed = file.compose(&base)?;
         let look = composed.enhanced.as_ref().unwrap();
-        assert!(look.table.is_none() && look.has_rgb_table());
+        assert!(look.table.is_none() && look.has_rgb_table_or_settings());
         // The look's own amount at 100%; times the Profile Amount, within the
         // table's bounds (0–1) above.
         assert_eq!(look.rgb().unwrap().amount(), 0.5);
@@ -858,6 +868,22 @@ pub(super) mod tests {
         );
         // Without either table there is nothing to render.
         assert!(LookFile::parse(&xml.replace(&format!(r#"c:RGBTable="{id}""#), "")).is_err());
+        Ok(())
+    }
+    #[test]
+    fn looks_carry_supported_settings_and_refuse_others() -> Result<()> {
+        let xml = profile_xml(&fixture()).replace(
+            "c:PresetType=",
+            r#"c:Saturation="-20" c:SplitToningShadowHue="44" c:SplitToningShadowSaturation="25" c:PostCropVignetteAmount="-8" c:PresetType="#,
+        );
+        let file = LookFile::parse(&xml)?;
+        assert_eq!(file.look.settings.saturation, -0.2);
+        assert!(file.look.settings.toning.is_some() && file.look.settings.vignette.is_some());
+        let copy: Enhanced = serde_json::from_slice(&serde_json::to_vec(&file.look)?)?;
+        assert_eq!(copy, file.look);
+        // Settings looks can't hold yet are still refused.
+        let err = LookFile::parse(&xml.replace("c:Saturation=", "c:Dehaze=")).unwrap_err();
+        assert!(format!("{err:#}").contains("Dehaze"), "{err:#}");
         Ok(())
     }
 }

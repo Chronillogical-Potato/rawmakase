@@ -38,11 +38,12 @@ Supported enhanced-profile features:
 - Adobe RGB tables, 1D and 3D, in sRGB, Adobe RGB or ProPhoto primaries with linear, sRGB, 1.8 or 2.2 encoding, described in [RGB tables](#rgb-tables).
 - A profile-specific master tone curve, applied separately from the user's point curve. Identity per-channel profile curves are accepted; nonidentity profile channel curves are reported as unsupported.
 - Profile-internal Highlights, Shadows, Clarity, Contrast and Blacks adjustments, plus monochrome conversion. These use RAWmakase's existing approximate operators without moving the user's sliders.
-- The six Adobe Raw looks: Color, Portrait, Neutral, Landscape, Vivid and Monochrome (these have no Amount), the creative looks Artistic 01–08, B&W 01, B&W 03 to 12, Modern 01, 02 and 05–10, and Vintage 01–06 and 08–10, and camera-matching XMPs that carry their RGB table (over the camera's imported Camera Standard DCP, or the one they name).
+- Profile-internal Exposure, Saturation, colour mixer, parametric curve, split toning and post-crop vignette, described in [Settings inside looks](#settings-inside-looks).
+- The six Adobe Raw looks: Color, Portrait, Neutral, Landscape, Vivid and Monochrome (these have no Amount), the creative looks Artistic 01–08, B&W 01, B&W 03 to 12, Modern 01–10, and Vintage 01–10, and camera-matching XMPs that carry their RGB table (over the camera's imported Camera Standard DCP, or the one they name).
 - Profile Amount for looks that have one (`crs:SupportsAmount`), described below.
 - XMP sidecars/presets and Lightroom catalog `Look` records resolve imported profiles by name, UUID when supplied, and camera model.
 
-The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. Adaptive/AI profiles, camera-matching XMPs whose RGB table is not in the file (Fujifilm's film simulations, whose tables Camera Raw keeps elsewhere), looks that need a DNG's own RGB tables (`RequiresRGBTables`), looks with settings RAWmakase doesn't apply inside a profile (B&W 02's white balance, the B&W filters' mix, Vintage 07's and Modern 03 and 04's color and effects settings), and unsupported DCP variants fail explicitly. This is not universal Lightroom profile support or pixel-identical Lightroom development.
+The existing bounded DCP implementation continues to support imported camera-matching and third-party film profiles. Adaptive/AI profiles, camera-matching XMPs whose RGB table is not in the file (Fujifilm's film simulations, whose tables Camera Raw keeps elsewhere), looks that need a DNG's own RGB tables (`RequiresRGBTables`), looks with settings RAWmakase doesn't apply inside a profile (B&W 02's white balance, the B&W filters' mix, colour grading, Dehaze and the other settings not listed above), and unsupported DCP variants fail explicitly. This is not universal Lightroom profile support or pixel-identical Lightroom development.
 
 ## Profile Amount
 
@@ -76,6 +77,18 @@ Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table loo
 The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it could not be checked closely, because RAWmakase compresses out-of-gamut colours toward gray where Camera Raw clips them, which dominates the difference on those patches.
 
 A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. On engine 3 edits, whose HSL and Saturation run later in Oklab, the table follows them and comes before Monochrome; their point curves stay last, as engine 3 has always applied them. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
+
+## Settings inside looks
+
+Vintage 07 and Modern 03 and 04 carry develop settings besides their tables: Exposure, Saturation, colour mixer bands, the parametric curve, split toning and a post-crop vignette. RAWmakase renders them with the user's settings without moving the user's sliders. Measured with Camera Raw 18.7 on synthetic looks (`synthetic-color`, `-split`, `-parametric`, `-exposure` and `-vignette`) at 50, 100 and 200%:
+
+| Setting | With the user's | Amount | `look-*` cases, mean ΔE00 |
+|---|---|---|---|
+| Exposure, Saturation, colour mixer, parametric curve | Added to the user's sliders | As the tone adjustments: in proportion up to 100%, half as fast above | colour 1.0/1.2/1.4, exposure 1.2/1.5/2.6, parametric 1.7/2.8/4.9 |
+| Split toning | Tones the shadows or highlights the user doesn't tone (`look-split-grading-shadows-h30` 3.5, against 4.9 when the user's toning replaced the look's and 5.3 when the look's replaced the user's) | Saturations scale, hues stay | 1.6/2.6/3.5 |
+| Post-crop vignette | Replaces the user's: Camera Raw renders a look vignette with the user's −20 exactly as without it | Amount scales | 1.0/1.2/1.5 |
+
+The half rate above 100% matched best for the colour, exposure and vignette looks (at 200%, colour 1.4 against 2.3 for full rate, vignette 1.5 against 1.8), and was even for split toning; the parametric look was closer at full rate (4.0 against 4.9), but RAWmakase's parametric curve is already 2.8 off at 100%, as it is for the user's own parametric sliders. The remaining error is that of the existing operators: parametric curve (user Lights −50: 3.7), split toning (user shadows 210°: 2.6) and Exposure above +0.5.
 
 Schema/pipeline 5 embeds the resolved camera profile, enhanced color table, sampled curve, identity and copyright in the recipe. Reopening does not require the source XMP or DCP to remain available. Old schema 1–4 recipes migrate without changing their prior look. Older RAWmakase versions reject version 5 instead of silently dropping enhanced-profile data.
 

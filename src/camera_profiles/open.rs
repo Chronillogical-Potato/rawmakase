@@ -129,6 +129,7 @@ pub fn color(m: &Metadata) -> Option<CameraProfile> {
         amount: None,
         table: Some(color_table()),
         rgb: None,
+        settings: Default::default(),
         curve: CurveLut::new(&ToneCurve {
             points: COLOR_CURVE.to_vec(),
             ..Default::default()

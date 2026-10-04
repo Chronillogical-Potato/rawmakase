@@ -8,8 +8,8 @@ pub const PIPELINE: u32 = 6;
 /// Contrast or Blacks: releases that read 6 and 7 reject those profile fields, so
 /// they are told the file is newer instead.
 const LOOK_AMOUNT: u32 = 8;
-/// The version written for a recipe whose look has an RGB table (or no HSV table),
-/// which releases that read 8 reject.
+/// The version written for a recipe whose look has an RGB table (or no HSV table)
+/// or carries develop settings, which releases that read 8 reject.
 const RGB_TABLE: u32 = 9;
 
 /// The schema and pipeline version to write `r` with.
@@ -17,7 +17,7 @@ pub fn saved_version(r: &crate::develop::Recipe) -> u32 {
     let Some(look) = r.profile.as_ref().and_then(|p| p.enhanced.as_ref()) else {
         return SCHEMA;
     };
-    if look.has_rgb_table() {
+    if look.has_rgb_table_or_settings() {
         RGB_TABLE
     } else if look.amount.is_some() || look.contrast != 0. || look.blacks != 0. {
         LOOK_AMOUNT
@@ -102,6 +102,11 @@ mod tests {
         // A look with an RGB table saves as 9, which releases that read 8 refuse.
         let rgb = CameraProfile::creative_for_test(&m).with_test_rgb_tables();
         r.profile = Some(std::sync::Arc::new(rgb[0].clone()));
+        assert_eq!(super::saved_version(&r), 9);
+        // So does one carrying develop settings.
+        let mut look = CameraProfile::creative_for_test(&m);
+        look.enhanced.as_mut().unwrap().settings.saturation = -0.2;
+        r.profile = Some(std::sync::Arc::new(look));
         assert_eq!(super::saved_version(&r), 9);
         let mut v = serde_json::json!({"schema": 9, "pipeline": 9, "recipe": {}});
         super::migrate_recipe(&mut v).unwrap();
