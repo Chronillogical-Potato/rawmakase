@@ -3079,6 +3079,10 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     }
     assert!((editor.document.recipe.exposure - 0.6).abs() < 1e-6);
     assert!((editor.document.recipe.contrast - 0.2).abs() < 1e-6);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(applied, 4);
+    assert_eq!(steps[3].name, "Preset Amount");
+    assert_eq!(steps[3].value, "50");
     // An Upright analysis landing meanwhile keeps the Amount, and the Amount keeps it.
     let analysed = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
     editor.document.recipe.upright.corrections = analysed.clone();
@@ -3089,10 +3093,12 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.set_preset_amount(0.5);
     editor.finish_edit_frame(frame, &ctx);
     assert_eq!(editor.document.recipe.upright.corrections, analysed);
-    let (steps, applied) = editor.document.history.steps();
-    assert_eq!(applied, 4);
-    assert_eq!(steps[3].name, "Preset Amount");
-    assert_eq!(steps[3].value, "50");
+    // A new Upright mode is an edit of its own.
+    let frame = editor.begin_edit_frame();
+    editor.document.recipe.upright.mode = crate::develop::UprightMode::Level;
+    editor.finish_edit_frame(frame, &ctx);
+    assert!(editor.presets.amount.is_none());
+    editor.apply_preset(0);
     // Any other edit ends it, as Lightroom hides the slider, even with the Presets
     // panel closed.
     let frame = editor.begin_edit_frame();

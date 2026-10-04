@@ -354,14 +354,18 @@ pub(super) struct AmountSession {
 }
 
 impl AmountSession {
-    /// Whether `current` is still what this Amount set. Upright doesn't scale, and its
-    /// analysis lands whenever it finishes, so it doesn't count.
+    /// Whether `current` is still what this Amount set. Upright's corrections are
+    /// analysed from the photo and land whenever the analysis finishes, so they don't
+    /// count; a new Upright mode or guide does.
     fn still_shown(&self, current: &Recipe) -> bool {
-        if current.upright == self.shown.upright {
+        if current.upright.corrections == self.shown.upright.corrections {
             return self.shown == *current;
         }
         let mut shown = self.shown.clone();
-        shown.upright.clone_from(&current.upright);
+        shown
+            .upright
+            .corrections
+            .clone_from(&current.upright.corrections);
         shown == *current
     }
 }
@@ -425,8 +429,12 @@ impl Editor {
         };
         session.amount = amount;
         session.shown = session.scale.at(amount, m);
-        // Upright doesn't scale, and its analysis may have landed since: the photo's.
-        session.shown.upright = self.document.recipe.upright.clone();
+        // Upright's analysis may have landed since: the photo's.
+        session
+            .shown
+            .upright
+            .corrections
+            .clone_from(&self.document.recipe.upright.corrections);
         // Named only when it changes the photo: a label left over would name the
         // next edit.
         if session.shown == self.document.recipe {
