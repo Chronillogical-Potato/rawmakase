@@ -66,6 +66,11 @@ impl Editor {
         {
             self.view.tool = super::state::Tool::None;
         }
+        // A conversion waiting for the photo, once it is decoded and nothing else
+        // changed this frame (any edit drops it below).
+        if self.document.recipe == frame.recipe {
+            self.finish_pending_treatment();
+        }
         let edited = self.document.history.observe(
             frame.recipe,
             &self.document.recipe,
@@ -73,6 +78,9 @@ impl Editor {
         );
         if edited {
             self.document.save.mark_changed();
+            // A conversion waiting for the photo lapses with any other edit, Undo
+            // included.
+            self.document.pending_treatment = None;
         }
         if edited || frame.modes != self.render_modes() || frame.overlay != self.overlay() {
             self.schedule();

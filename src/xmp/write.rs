@@ -202,15 +202,13 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
             );
         }
     }
+    // Black & white by Treatment or by a black & white profile, as Lightroom writes it.
+    let black_white = r.treatment() == crate::develop::Treatment::BlackWhite;
     s.text(
         "ConvertToGrayscale",
-        if r.effects.monochrome {
-            "True"
-        } else {
-            "False"
-        },
+        if black_white { "True" } else { "False" },
     );
-    if r.effects.monochrome {
+    if black_white {
         for (i, band) in bands.iter().enumerate() {
             s.put(
                 &format!("GrayMixer{band}"),

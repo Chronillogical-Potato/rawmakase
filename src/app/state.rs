@@ -14,6 +14,12 @@ pub(super) struct Document {
     pub(super) path: Option<PathBuf>,
     pub(super) metadata: Option<Metadata>,
     image: Option<Arc<CameraImage>>,
+    /// How the decoded photo's colors spread, for Auto black & white; measured on
+    /// first use.
+    color_spread: std::cell::OnceCell<crate::develop::ColorSpread>,
+    /// A conversion to black & white waiting for the photo to decode, for its
+    /// Auto mix.
+    pub(super) pending_treatment: Option<PendingTreatment>,
     pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
@@ -395,5 +401,56 @@ impl Document {
     }
     pub fn set_image(&mut self, full: Arc<CameraImage>) {
         self.image = Some(full);
+        self.color_spread = Default::default();
+    }
+    /// How the decoded photo's colors spread, once it is decoded.
+    pub(super) fn color_spread(&self) -> Option<crate::develop::ColorSpread> {
+        self.colors().spread()
+    }
+    /// The recipe to edit, and what the photo's colors are measured from, borrowed
+    /// apart so a panel can measure them only when it needs them.
+    pub(super) fn recipe_and_colors(&mut self) -> (&mut Recipe, PhotoColorSource<'_>) {
+        (
+            &mut self.recipe,
+            PhotoColorSource {
+                image: self.image.as_ref(),
+                spread: &self.color_spread,
+                metadata: self.metadata.as_ref(),
+            },
+        )
+    }
+    fn colors(&self) -> PhotoColorSource<'_> {
+        PhotoColorSource {
+            image: self.image.as_ref(),
+            spread: &self.color_spread,
+            metadata: self.metadata.as_ref(),
+        }
+    }
+}
+
+/// A Treatment asked for while the photo decodes, and the recipe it was asked for:
+/// once the recipe changes otherwise (Reset, Undo, a preset), the request lapses.
+#[derive(Clone)]
+pub(super) struct PendingTreatment {
+    pub(super) treatment: crate::develop::Treatment,
+    pub(super) recipe: Recipe,
+}
+
+/// The decoded photo and its measured colors, for Auto black & white.
+#[derive(Clone, Copy)]
+pub(super) struct PhotoColorSource<'a> {
+    image: Option<&'a Arc<CameraImage>>,
+    spread: &'a std::cell::OnceCell<crate::develop::ColorSpread>,
+    pub(super) metadata: Option<&'a Metadata>,
+}
+impl PhotoColorSource<'_> {
+    /// How the photo's colors spread, measured on first use once it is decoded.
+    pub(super) fn spread(&self) -> Option<crate::develop::ColorSpread> {
+        let im = self.image?;
+        Some(
+            *self
+                .spread
+                .get_or_init(|| crate::develop::ColorSpread::measure(im)),
+        )
     }
 }

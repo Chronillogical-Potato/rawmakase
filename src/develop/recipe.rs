@@ -538,6 +538,18 @@ impl Recipe {
         r.profile_tone = true;
         std::borrow::Cow::Owned(r)
     }
+    /// Settings that follow a newly chosen profile: an XMP look renders through its
+    /// own tone and curves, and the camera baseline and white balance controls are
+    /// those of the new profile.
+    pub fn profile_changed(&mut self, m: &Metadata) {
+        if self.profile.as_ref().is_some_and(|p| p.enhanced.is_some()) {
+            self.profile_tone = true;
+            self.reference_curves = true;
+            self.wide_gamut_curves = true;
+        }
+        self.use_camera_baseline(m);
+        self.sync_white_balance_controls(m);
+    }
     pub fn use_camera_baseline(&mut self, m: &Metadata) {
         self.camera_exposure = if self.profile.is_some() || self.engine >= 4 {
             crate::camera_profiles::reference::baseline_exposure(m)

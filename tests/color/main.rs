@@ -856,3 +856,27 @@ fn camera_raw_parity_does_not_regress() {
         embedded_profiles,
     );
 }
+
+/// Auto black & white on the synthetic chart, which the Auto mix was not fitted to,
+/// against Camera Raw 18.7's Auto for the same chart (ConvertToGrayscale and
+/// AutoGrayscaleMix in a sidecar; Camera Raw stores the mix it resolved).
+#[test]
+fn auto_black_white_mix_matches_camera_raw_on_the_chart() {
+    const CAMERA_RAW: [i32; 8] = [-9, -19, -23, -27, -18, 11, 16, 4];
+    let im = develop(&chart_path("synthetic-d65"));
+    let profiles = embedded_profiles(&im);
+    let r = rawmakase::develop::Recipe::with_profiles(&im.metadata, &profiles);
+    let spread = rawmakase::develop::ColorSpread::measure(&im);
+    let auto = rawmakase::develop::AutoMix {
+        spread: &spread,
+        metadata: &im.metadata,
+    };
+    let mix = auto.for_recipe(&r).map(|v| (v * 100.).round() as i32);
+    let worst = mix
+        .iter()
+        .zip(CAMERA_RAW)
+        .map(|(a, b)| (a - b).abs())
+        .max()
+        .unwrap();
+    assert!(worst <= 3, "{mix:?} against Camera Raw's {CAMERA_RAW:?}");
+}

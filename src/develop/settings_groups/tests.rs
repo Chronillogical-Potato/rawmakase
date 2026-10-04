@@ -557,3 +557,32 @@ fn guides_stay_with_their_photo_unless_upright_transforms_copies_the_correction(
     // Paste leaves it out unless asked, as Lightroom does.
     assert!(!GroupSelection::default().contains(SettingGroup::UprightTransforms));
 }
+#[test]
+fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
+    use crate::camera_profiles::open;
+    let fuji = camera("Fujifilm", "X100F");
+    let sony = camera("Sony", "ILCE-7M2");
+    let mut mono = open::color(&fuji).unwrap();
+    mono.enhanced.as_mut().unwrap().monochrome = true;
+    let source = Recipe {
+        profile: Some(Arc::new(mono)),
+        engine: 4,
+        ..Default::default()
+    };
+    assert!(!source.effects.monochrome);
+    assert_eq!(source.treatment(), crate::develop::Treatment::BlackWhite);
+    // The target camera has no such profile and keeps its own color one.
+    let out = transfer(
+        from(&source, &fuji),
+        &Recipe::default(),
+        &GroupSelection::default(),
+        Target {
+            metadata: &sony,
+            profiles: &[],
+        },
+    );
+    assert_eq!(
+        out.recipe.treatment(),
+        crate::develop::Treatment::BlackWhite
+    );
+}

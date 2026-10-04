@@ -757,7 +757,8 @@ fn adjust(lab_in: vec3<f32>) -> vec3<f32> {
         for (var i = 0u; i < 8u; i++) {
             shift += p(P_GRAY_MIX + i) * weights[i];
         }
-        lab.x = clamp(lab.x + shift * 0.25, 0.0, 1.0);
+        // `gray_mix_shift` in pipeline.rs.
+        lab.x = clamp(lab.x + shift * chroma * select(4.37, 1.78, shift > 0.0), 0.0, 1.0);
         lab.y = 0.0;
         lab.z = 0.0;
     }

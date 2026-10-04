@@ -1293,6 +1293,132 @@
     "ColorGradeMidtoneHue": "30",
     "ColorGradeMidtoneSat": "50"
    }
+  },
+  {
+   "name": "bw-mix-zero",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-mix-auto",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "-9",
+    "GrayMixerOrange": "-19",
+    "GrayMixerYellow": "-23",
+    "GrayMixerGreen": "-27",
+    "GrayMixerAqua": "-18",
+    "GrayMixerBlue": "+11",
+    "GrayMixerPurple": "+16",
+    "GrayMixerMagenta": "+4"
+   }
+  },
+  {
+   "name": "bw-red+60",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "+60",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-yellow-60",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "-60",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-green+60",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "+60",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-blue-60",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "-60",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-orange+100",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "+100",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "0",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "bw-purple+60",
+   "settings": {
+    "ConvertToGrayscale": "True",
+    "AutoGrayscaleMix": "False",
+    "GrayMixerRed": "0",
+    "GrayMixerOrange": "0",
+    "GrayMixerYellow": "0",
+    "GrayMixerGreen": "0",
+    "GrayMixerAqua": "0",
+    "GrayMixerBlue": "0",
+    "GrayMixerPurple": "+60",
+    "GrayMixerMagenta": "0"
+   }
+  },
+  {
+   "name": "saturation-100",
+   "settings": {
+    "Saturation": "-100"
+   }
   }
  ]
 }

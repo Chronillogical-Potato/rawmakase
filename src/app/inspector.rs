@@ -12,7 +12,9 @@ use super::widgets::{
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::develop::{NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+use crate::develop::{
+    NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, Treatment,
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// A histogram corner's clipping triangle: its corner point, which way it
@@ -466,19 +468,25 @@ impl Editor {
         let upright_ready = self.document.full().is_some() && !self.document.upright.is_running();
         let mut upright_request = false;
         let mut guided_action = None;
+        let mut treatment_request = None;
+        let mut auto_mix_request = false;
+        let mut profile_changed_from = None;
+        // A conversion to black & white waiting for the photo to decode.
+        let pending_treatment = self
+            .document
+            .pending_treatment
+            .as_ref()
+            .map(|p| p.treatment);
         let view = &mut self.view;
-        let r = &mut self.document.recipe;
+        let (r, photo) = self.document.recipe_and_colors();
 
         if adjustment_section(ui, "Basic", |ui| {
-            // Auto, and Black & White as an on/off toggle, in place of Lightroom's
-            // Treatment switcher.
             let shortcut = if cfg!(target_os = "macos") {
                 "⌘⇧U"
             } else {
                 "Ctrl+Shift+U"
             };
-            // Right-aligned, B&W at the panel's edge and Auto to its left; styled as the
-            // toolbar's Before and Clipping.
+            // Auto, right-aligned, styled as the toolbar's Before and Clipping.
             let (row, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::hover());
             ui.scope_builder(
@@ -486,18 +494,6 @@ impl Editor {
                     .max_rect(row)
                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.;
-                    let mono = r.effects.monochrome;
-                    if toolbar_action(ui, "B&W", 52., mono, true, 0)
-                        .on_hover_text(if mono {
-                            "Black & White is on"
-                        } else {
-                            "Convert to Black & White"
-                        })
-                        .clicked()
-                    {
-                        r.effects.monochrome = !mono;
-                    }
                     let tip = if auto_in_effect {
                         "Auto settings are applied".to_owned()
                     } else {
@@ -510,6 +506,25 @@ impl Editor {
                     }
                 },
             );
+            // Lightroom's Treatment, above the profile; V switches it.
+            // A conversion waiting for the photo to decode shows as made.
+            let shown = pending_treatment.unwrap_or_else(|| r.treatment());
+            let mut treatment = shown;
+            control_row(ui, "Treatment", |ui| {
+                let w = ui.available_width();
+                segmented(
+                    ui,
+                    &mut treatment,
+                    &[
+                        (Treatment::Color, "Color"),
+                        (Treatment::BlackWhite, "Black & White"),
+                    ],
+                    w,
+                );
+            });
+            if treatment != shown {
+                treatment_request = Some(treatment);
+            }
             let old_profile = r.profile.clone();
             // From engine 4 the matrix path renders through the DNG default look.
             let matrix = if r.engine >= 4 {
@@ -598,13 +613,8 @@ impl Editor {
             if old_profile != r.profile
                 && let Some(m) = &metadata
             {
-                if r.profile.as_ref().is_some_and(|p| p.enhanced.is_some()) {
-                    r.profile_tone = true;
-                    r.reference_curves = true;
-                    r.wide_gamut_curves = true;
-                }
-                r.use_camera_baseline(m);
-                r.sync_white_balance_controls(m);
+                r.profile_changed(m);
+                profile_changed_from = Some(old_profile.clone());
             }
             // White balance is its own group below the profile, as in Lightroom.
             ui.add_space(12.);
@@ -829,14 +839,42 @@ impl Editor {
             r.effects.parametric = [0.; 4];
         }
 
-        let mixer_title = if r.effects.monochrome {
-            "B&W"
-        } else {
-            "Color Mixer"
-        };
+        // The B&W panel replaces the Color Mixer whenever the photo renders black &
+        // white, by its Treatment or by a black & white profile.
+        let black_white = r.treatment() == Treatment::BlackWhite;
+        let mixer_title = if black_white { "B&W" } else { "Color Mixer" };
         if adjustment_section(ui, mixer_title, |ui| {
-            if r.effects.monochrome {
-                subheading(ui, "Black & White Mix");
+            if black_white {
+                let heading = subheading(ui, "Black & White Mix");
+                // Measured (once) only while this panel is open.
+                let auto_mix = photo
+                    .spread()
+                    .zip(photo.metadata)
+                    .map(|(spread, metadata)| {
+                        crate::develop::AutoMix {
+                            spread: &spread,
+                            metadata,
+                        }
+                        .for_recipe(r)
+                    });
+                let button = Rect::from_min_size(
+                    Pos2::new(heading.right() - 52., heading.top() - 4.),
+                    Vec2::new(52., 24.),
+                );
+                // Greyed out while the mix is Auto's, as the Basic panel's Auto.
+                let enabled = auto_mix.is_some_and(|mix| mix != r.effects.gray_mix);
+                let auto = ui
+                    .scope_builder(egui::UiBuilder::new().max_rect(button), |ui| {
+                        ui.add_enabled(enabled, egui::Button::new("Auto").small())
+                    })
+                    .inner;
+                if auto
+                    .on_hover_text("Set the mix from the photo's colors")
+                    .on_disabled_hover_text("The Auto mix is applied")
+                    .clicked()
+                {
+                    auto_mix_request = true;
+                }
                 for (i, name) in BANDS.iter().enumerate() {
                     ui.push_id(("bw", i), |ui| {
                         slider_with(
@@ -928,7 +966,7 @@ impl Editor {
                 }
             }
         }) {
-            if r.effects.monochrome {
+            if black_white {
                 r.effects.gray_mix = [0.; 8];
             } else {
                 r.hsl = [[0.; 3]; 8];
@@ -1441,6 +1479,15 @@ impl Editor {
         }
         if let Some(kind) = auto_request {
             self.start_auto(kind);
+        }
+        if let Some(old) = profile_changed_from {
+            self.follow_profile_treatment(old.as_deref());
+        }
+        if let Some(treatment) = treatment_request {
+            self.set_treatment(treatment);
+        }
+        if auto_mix_request {
+            self.auto_black_white_mix();
         }
         if upright_request {
             self.start_upright();

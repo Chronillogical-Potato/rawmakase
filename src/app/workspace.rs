@@ -670,6 +670,7 @@ impl Editor {
             let mut match_exposures = false;
             let mut new_preset = false;
             let mut auto = false;
+            let mut treatment = false;
             let mut export = None;
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowRight) {
@@ -713,6 +714,12 @@ impl Editor {
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::R) {
                     reset = true;
                 }
+                // Lightroom's Convert to Black & White.
+                // Once per press: holding V does not flip it back and forth.
+                treatment = !i.modifiers.any()
+                    && i.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, .. })
+                    });
                 // Lightroom's Auto Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
                     auto = true;
@@ -824,6 +831,9 @@ impl Editor {
             }
             if auto && !self.auto_in_effect() {
                 self.start_auto(super::worker::AutoKind::Settings);
+            }
+            if treatment {
+                self.toggle_treatment();
             }
             match export {
                 Some(true) => self.export_with_previous(),

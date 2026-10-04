@@ -287,17 +287,7 @@ pub fn convert_develop(
         }
     }
     let base = Recipe::with_profiles(m, profiles);
-    let mut recipe = match accepted.apply(&base, m, profiles, image) {
-        Ok(recipe) => recipe,
-        // Auto black & white without the mix Lightroom resolved (checked only with
-        // the treatment and profile together) keeps the default mix, reported.
-        Err(e) if accepted.settings.remove("AutoGrayscaleMix").is_some() => {
-            let recipe = accepted.apply(&base, m, profiles, image)?;
-            warnings.push(e.to_string());
-            recipe
-        }
-        Err(e) => return Err(e),
-    };
+    let mut recipe = accepted.apply(&base, m, profiles, image)?;
     if let Some((asked, used)) = accepted.profile_substitute(m, profiles) {
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
     }

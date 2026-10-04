@@ -39,6 +39,10 @@ pub struct Session {
     /// Photo > Auto Advance: a rating, flag or label moves to the next photo.
     #[serde(default)]
     pub auto_advance: bool,
+    /// The user turned off applying the Auto mix when first converting to black &
+    /// white, which is on by default.
+    #[serde(default)]
+    pub no_auto_black_white_mix: bool,
     /// How the Library showed its photos last time.
     #[serde(default)]
     pub library_layout: LibraryLayout,
