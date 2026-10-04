@@ -1172,6 +1172,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         name: "Adobe (Gone 24mm)".into(),
         filename: "Gone (24mm) - RAW.lcp".into(),
         digest: "0123456789ABCDEF0123456789ABCDEF".into(),
+        embedded: false,
     };
     assert_eq!(
         r.lens_profile_choice,
@@ -1231,6 +1232,49 @@ fn lens_profile_identity_round_trips() -> Result<()> {
     );
     assert!(
         packet.contains(&format!(r#"crs:LensProfileFilename="{}""#, tests::ADOBE)),
+        "{packet}"
+    );
+    // The profile the RAW carries renders as the built-in correction, even with a
+    // matching profile imported, is not reported missing and is written back.
+    let embedded = apply(
+        r#"c:LensProfileEnable="1" c:LensProfileSetup="LensDefaults" c:LensProfileName="Camera Settings" c:LensProfileIsEmbedded="True""#,
+        &Recipe::default(),
+    )?;
+    assert!(embedded.lens_correction(&m).is_none());
+    // Without the RAW's own data, that is said; with it, nothing is missing.
+    assert!(
+        embedded
+            .missing_lens_profile(&m)
+            .unwrap()
+            .contains("Camera Settings")
+    );
+    let mut with_builtin = m.clone();
+    with_builtin.lens = Some(crate::lens::LensCorrection {
+        source: "Testcam built-in".into(),
+        vignetting: Some(crate::lens::Radial {
+            knots: vec![0., 1.],
+            values: vec![1., 1.5],
+        }),
+        ..Default::default()
+    });
+    let embedded_on = Recipe {
+        lens_builtin: true,
+        ..embedded.clone()
+    };
+    assert_eq!(embedded_on.missing_lens_profile(&with_builtin), None);
+    assert_eq!(
+        embedded_on
+            .lens_correction(&with_builtin)
+            .map(|l| l.source.as_str()),
+        Some("Testcam built-in")
+    );
+    let packet = crate::xmp::write::packet(&embedded, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:LensProfileIsEmbedded="True""#),
+        "{packet}"
+    );
+    assert!(
+        packet.contains(r#"crs:LensProfileName="Camera Settings""#),
         "{packet}"
     );
     // Under Auto, a named profile that isn't imported stays named.

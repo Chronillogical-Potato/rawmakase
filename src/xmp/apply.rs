@@ -912,6 +912,7 @@ impl Preset {
                 name,
                 filename,
                 digest: text("LensProfileDigest"),
+                embedded: text("LensProfileIsEmbedded").eq_ignore_ascii_case("true"),
             }
         });
         if let Some(setup) = v.get("LensProfileSetup") {

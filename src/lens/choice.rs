@@ -57,6 +57,10 @@ pub struct LensProfileId {
     /// RAWmakase cannot compute it.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub digest: String,
+    /// `crs:LensProfileIsEmbedded`: the profile is the one the RAW carries (Adobe
+    /// names it "Camera Settings"), so the built-in correction renders, not an LCP.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub embedded: bool,
 }
 impl LensProfileId {
     pub fn of(profile: &ImportedProfile) -> Self {
@@ -64,6 +68,7 @@ impl LensProfileId {
             name: profile.name.clone(),
             filename: profile.filename.clone(),
             digest: String::new(),
+            embedded: false,
         }
     }
     /// The name to show: the profile name, else the file name.
@@ -146,6 +151,9 @@ impl LensProfileChoice {
         profiles: &'p PhotoProfiles,
         m: &Metadata,
     ) -> Resolved<'c, 'p> {
+        if self.id.as_ref().is_some_and(|id| id.embedded) {
+            return Resolved::default();
+        }
         let named = self
             .id
             .as_ref()

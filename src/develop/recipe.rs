@@ -553,6 +553,20 @@ impl Recipe {
             return None;
         }
         let resolved = self.lens_profile_in_use(m);
+        // The profile the RAW carries renders as its built-in correction.
+        if let Some(id) = self
+            .lens_profile_choice
+            .id
+            .as_ref()
+            .filter(|id| id.embedded)
+        {
+            return m.lens.as_ref().filter(|_| self.lens_builtin).is_none().then(|| {
+                format!(
+                    "Lens profile \"{}\" comes with the camera, but this file has none; no lens correction",
+                    id.label()
+                )
+            });
+        }
         let profile = match (resolved.missing, m.lens_model.as_str()) {
             (Some(id), _) => format!("Lens profile \"{}\"", id.label()),
             (None, _) if resolved.used.is_some() => return None,

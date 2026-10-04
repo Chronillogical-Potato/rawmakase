@@ -130,6 +130,9 @@ fn lens_profile(s: &mut Settings, r: &Recipe, m: Option<&Metadata>) {
     if !id.digest.is_empty() {
         s.text("LensProfileDigest", id.digest);
     }
+    if id.embedded {
+        s.text("LensProfileIsEmbedded", "True");
+    }
 }
 
 pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {

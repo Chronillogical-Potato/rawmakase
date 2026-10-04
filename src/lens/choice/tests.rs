@@ -212,6 +212,7 @@ fn switching_to_custom_keeps_the_digest_of_the_same_profile() {
         name: adobe.name.clone(),
         filename: adobe.filename.clone(),
         digest: "0123ABCD".into(),
+        embedded: false,
     };
     let mut c = choice(LensProfileSetup::Auto, Some(recorded.clone()));
     c.set_setup(LensProfileSetup::Custom, Some(adobe));

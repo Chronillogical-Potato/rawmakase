@@ -1002,6 +1002,7 @@ fn profile_recipe(setup: crate::lens::choice::LensProfileSetup, filename: &str) 
                 name: String::new(),
                 filename: filename.into(),
                 digest: String::new(),
+                embedded: false,
             }),
         },
         ..Default::default()

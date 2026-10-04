@@ -22,7 +22,11 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
     // What the choice uses, shown also while Enable Profile Corrections is off.
     let resolved = r.lens_profile_choice.resolve(&m.lens_profiles, m);
     let in_use = resolved.used.map(|c| std::sync::Arc::clone(&c.profile));
-    let missing = resolved.missing.map(|id| id.label().to_string());
+    // A profile that isn't imported, or the one the RAW carries, shown by name.
+    let named = resolved
+        .missing
+        .or(r.lens_profile_choice.id.as_ref().filter(|id| id.embedded))
+        .map(|id| id.label().to_string());
     let menus = ProfileMenus::new(&m.lens_profiles);
     let enabled = r.lens_profile && r.engine >= 4;
     ui.add_enabled_ui(enabled, |ui| {
@@ -40,9 +44,9 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
                 r.lens_profile_choice.set_setup(setup, in_use.as_deref());
             }
         });
-        let (make, model, name) = match (&in_use, &missing) {
+        let (make, model, name) = match (&in_use, &named) {
             (Some(p), _) => (p.lens_make.as_str(), p.lens_model.as_str(), p.name.as_str()),
-            (None, Some(missing)) => ("", "", missing.as_str()),
+            (None, Some(named)) => ("", "", named.as_str()),
             (None, None) => ("", "", "None"),
         };
         let mut chosen = None;
