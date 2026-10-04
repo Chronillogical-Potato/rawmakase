@@ -188,7 +188,8 @@ impl Recipe {
     /// The Treatment the photo renders with: Black & White by its own setting or by a
     /// black & white profile.
     pub fn treatment(&self) -> Treatment {
-        if self.with_profile_adjustments().effects.monochrome {
+        // As `with_profile_adjustments` renders it, without building the look.
+        if self.effects.monochrome || (self.engine >= 3 && is_monochrome(self.profile.as_deref())) {
             Treatment::BlackWhite
         } else {
             Treatment::Color
@@ -223,6 +224,8 @@ impl Recipe {
     ) {
         if treatment == Treatment::Color && is_monochrome(self.profile.as_deref()) {
             self.profile = color_profile.filter(|p| !is_monochrome(Some(p)));
+            // A newly chosen profile starts at 100%, as in Lightroom.
+            self.profile_amount = 1.;
             self.profile_changed(m);
         }
         self.set_treatment(treatment, first);
