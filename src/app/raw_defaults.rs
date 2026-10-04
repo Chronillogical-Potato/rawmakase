@@ -219,9 +219,11 @@ impl Editor {
         });
         if settings != *self.raw_defaults.settings() {
             self.set_raw_defaults(settings);
-            if let Some(note) = self.photo_defaults().and_then(|d| d.note) {
-                self.status = note;
-            }
+            // Replaces any earlier choice's note.
+            self.status = self
+                .photo_defaults()
+                .and_then(|d| d.note)
+                .unwrap_or_else(|| "Raw defaults saved".into());
         }
     }
 }

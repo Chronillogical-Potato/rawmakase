@@ -253,11 +253,8 @@ fn prepare(
             notes: Vec::new(),
         },
     };
-    // What its Lightroom edit could not bring along is said, as when it is opened.
-    let mut notes: Vec<String> = starting_warnings
-        .into_iter()
-        .map(|w| format!("Lightroom edit not fully rendered: {w}"))
-        .collect();
+    // What its starting edit could not bring along is said, as when it is opened.
+    let mut notes = starting_warnings;
     notes.extend(transferred.notes);
     let mut after = transferred.recipe;
     // Upright's corrections are analysed from each photo; the open photo's editor
@@ -347,7 +344,13 @@ fn starting_edit(
         .context("Its Lightroom edit is missing")?;
     let (recipe, warnings) = crate::catalog::convert_develop(&text, metadata, profiles, None)
         .context("Its Lightroom edit can't be read")?;
-    Ok(Starting { recipe, warnings })
+    Ok(Starting {
+        recipe,
+        warnings: warnings
+            .into_iter()
+            .map(|w| format!("Lightroom edit not fully rendered: {w}"))
+            .collect(),
+    })
 }
 
 /// The edit a photo starts from, and what its Lightroom edit could not bring along.
@@ -919,6 +922,31 @@ mod tests {
         assert_eq!(start.exposure, 0.7);
         let saved = c.load_edit(photos[2].0, &photos[2].1)?.unwrap().recipe;
         assert_eq!((saved.exposure, saved.effects.clarity), (0.7, 0.2));
+
+        // A raw default that can't be used is reported as such, not as a Lightroom edit.
+        let missing = DevelopDefaults::with_presets(
+            crate::develop::defaults::RawDefaults {
+                master: crate::develop::defaults::DefaultChoice::Preset {
+                    id: "gone".into(),
+                    name: "Gone".into(),
+                },
+                ..Default::default()
+            },
+            |_| None,
+        );
+        let result = synchronize(
+            &c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &[target(photos[0].0, &photos[0].1)],
+            &missing,
+        );
+        let notes: Vec<_> = result.notes.iter().map(|n| n.note.as_str()).collect();
+        assert!(
+            notes.iter().any(|n| n.contains("‘Gone’ is missing")),
+            "{notes:?}"
+        );
+        assert!(!notes.iter().any(|n| n.contains("Lightroom")), "{notes:?}");
         Ok(())
     }
 }
