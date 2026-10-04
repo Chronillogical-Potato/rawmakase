@@ -616,6 +616,14 @@ fn hue_saturation_fields(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], re
     }
 }
 
+#[derive(Clone, Copy)]
+struct LuminanceClick {
+    value: f32,
+    before: f32,
+    deadline: f64,
+    frame: u64,
+}
+
 /// A small wheel's Luminance: a dark-to-light rail with its number, −100 to 100.
 fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region) {
     let field = Rect::from_min_size(
@@ -628,23 +636,65 @@ fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region
         Pos2::new(area.right() - 5., area.center().y + 1.),
     );
     let before = *value;
+    let id = ui.id().with(("grade-luminance", region));
     let response = ui
-        .interact(
-            area,
-            ui.id().with(("grade-luminance", region)),
-            Sense::click_and_drag(),
-        )
+        .interact(area, id, Sense::click_and_drag())
         .on_hover_text(format!(
             "{} Luminance: drag · double-click to reset",
             region.title()
         ));
+    // As with the wheel, wait out a possible double-click before applying a click.
+    let memory = id.with("click");
+    let mut click: Option<LuminanceClick> = ui.data_mut(|d| {
+        let pending = d.get_temp(memory);
+        d.remove::<LuminanceClick>(memory);
+        pending
+    });
+    let frame = ui.ctx().cumulative_frame_nr();
+    let now = ui.input(|i| i.time);
+    click = click.filter(|c| c.frame + 1 >= frame && c.before == *value);
+    if ui.input(|i| {
+        i.events.iter().any(|e| match e {
+            egui::Event::PointerButton {
+                pos, pressed: true, ..
+            } => !area.contains(*pos),
+            egui::Event::Key { pressed: true, .. } => true,
+            _ => false,
+        })
+    }) {
+        click = None;
+    }
     if response.double_clicked() {
+        click = None;
         *value = 0.;
     } else if (response.dragged() || response.clicked())
         && let Some(p) = response.interact_pointer_pos()
     {
         let t = egui::remap_clamp(p.x, rail.left()..=rail.right(), 0. ..=1.);
-        *value = ((t * 2. - 1.) * 100.).round() / 100.;
+        let target = ((t * 2. - 1.) * 100.).round() / 100.;
+        if response.dragged() {
+            click = None;
+            *value = target;
+        } else {
+            click = Some(LuminanceClick {
+                value: target,
+                before,
+                deadline: now + ui.ctx().options(|o| o.input_options.max_double_click_delay),
+                frame,
+            });
+        }
+    }
+    if let Some(mut pending) = click {
+        if now >= pending.deadline && !ui.input(|i| i.pointer.primary_down()) {
+            *value = pending.value;
+        } else {
+            pending.frame = frame;
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(
+                    (pending.deadline - now).max(0.01),
+                ));
+            ui.data_mut(|d| d.insert_temp(memory, pending));
+        }
     }
     let mut percent = (*value * 100.).round();
     if ui
@@ -819,6 +869,7 @@ mod tests {
         ctx: egui::Context,
         time: f64,
         rect: Rect,
+        luminance: bool,
     }
     impl Harness {
         fn new() -> Self {
@@ -828,6 +879,7 @@ mod tests {
             Self {
                 ctx,
                 time: 0.,
+                luminance: false,
                 rect: Rect::from_min_size(corner + Vec2::splat(10.), Vec2::splat(200.)),
             }
         }
@@ -847,7 +899,13 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ui| wheel(ui, rect, grade, Region::Shadows),
+                |ui| {
+                    if self.luminance {
+                        luminance_rail(ui, rect, &mut grade[2], Region::Shadows);
+                    } else {
+                        wheel(ui, rect, grade, Region::Shadows);
+                    }
+                },
             );
             output.textures_delta.clear();
         }
@@ -1033,6 +1091,84 @@ mod tests {
         // No delayed first click may reapply itself after the reset.
         h.frame(&mut recipe.grading[0], vec![], egui::Modifiers::NONE);
         assert_eq!(recipe, original);
+    }
+
+    #[test]
+    fn luminance_double_click_is_one_undoable_reset() {
+        let mut h = Harness::new();
+        h.luminance = true;
+        let mut history = super::super::history::History::default();
+        let mut recipe = Recipe::default();
+        recipe.grading[0] = [0.25, 0.4, -0.3];
+        let original = recipe.clone();
+        let at = Pos2::new(h.rect.left() + 120., h.rect.center().y);
+        h.frame(
+            &mut recipe.grading[0],
+            vec![egui::Event::PointerMoved(at)],
+            egui::Modifiers::NONE,
+        );
+        for pressed in [true, false, true, false] {
+            history.begin_frame();
+            let before = recipe.clone();
+            h.time -= 0.45;
+            h.frame(
+                &mut recipe.grading[0],
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                egui::Modifiers::NONE,
+            );
+            if let Some((name, value)) = h.ctx.data_mut(|d| {
+                d.remove_temp::<(String, String)>(super::super::widgets::history_step_id())
+            }) {
+                history.label(super::super::history::Step::new(name, value));
+            }
+            history.observe(before, &recipe, pressed);
+        }
+        assert_eq!(recipe.grading[0], [0.25, 0.4, 0.]);
+        assert_eq!(history.steps().1, 1);
+        assert_eq!(history.steps().0[0].name, "Shadow Luminance");
+        assert!(history.undo(&mut recipe));
+        assert_eq!(recipe, original);
+        h.frame(&mut recipe.grading[0], vec![], egui::Modifiers::NONE);
+        assert_eq!(recipe, original);
+    }
+
+    #[test]
+    fn luminance_single_click_and_drag_still_set_the_value() {
+        let mut h = Harness::new();
+        h.luminance = true;
+        let mut grade = [0.25, 0.4, -0.3];
+        let at = Pos2::new(h.rect.left() + 120., h.rect.center().y);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.frame(
+            &mut grade,
+            vec![egui::Event::PointerMoved(at)],
+            egui::Modifiers::NONE,
+        );
+        h.frame(&mut grade, vec![button(at, true)], egui::Modifiers::NONE);
+        h.time -= 0.45;
+        h.frame(&mut grade, vec![button(at, false)], egui::Modifiers::NONE);
+        h.frame(&mut grade, vec![], egui::Modifiers::NONE);
+        assert_eq!(grade, [0.25, 0.4, 0.58]);
+        // Dragging remains immediate, even outside the rail's ends.
+        h.frame(&mut grade, vec![button(at, true)], egui::Modifiers::NONE);
+        let left = Pos2::new(h.rect.left(), at.y);
+        h.frame(
+            &mut grade,
+            vec![egui::Event::PointerMoved(left)],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(grade, [0.25, 0.4, -1.]);
+        h.frame(&mut grade, vec![button(left, false)], egui::Modifiers::NONE);
     }
 
     #[test]
