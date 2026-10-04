@@ -142,6 +142,8 @@ impl Editor {
             }
             Some(Ok(source)) => source,
         };
+        // Available again, e.g. its volume is back.
+        self.reference.error = None;
         let developed = self
             .reference
             .loaded
@@ -154,13 +156,22 @@ impl Editor {
         let wanted = (id, source.tag);
         let (ticket, cancel) = self.reference.load.start();
         self.reference.pending = Some(wanted);
-        self.reference.error = None;
         self.reference_loader.submit(ReferenceJob {
             ticket,
             path: source.path,
             edit: source.edit,
             cancel,
         });
+    }
+    /// Develops the reference photo again even when its edit and file are as they
+    /// were: what they resolve to changed, e.g. camera profiles were imported. It keeps
+    /// showing until the new one arrives.
+    pub(super) fn reload_reference(&mut self) {
+        if let Some(loaded) = &mut self.reference.loaded {
+            loaded.tag.clear();
+        }
+        self.reference.pending = None;
+        self.load_reference();
     }
     /// The reference photo developed, or why not.
     pub(super) fn reference_ready(
@@ -536,6 +547,20 @@ mod tests {
             .unwrap()
             .path
             .clone();
+        // Gone for a while, it says why and keeps its picture; back, it says nothing.
+        let away = path.with_extension("away");
+        std::fs::rename(&path, &away)?;
+        editor.load_reference();
+        assert!(editor.reference.error.is_some());
+        assert!(editor.reference_side().is_some());
+        std::fs::rename(&away, &path)?;
+        editor.load_reference();
+        assert_eq!(editor.reference.error, None);
+        assert!(!editor.reference.loading());
+        // What its edit resolves to changed (profiles imported): developed again.
+        editor.reload_reference();
+        assert!(editor.reference.loading());
+        wait_for_reference(editor);
         let replacement =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/charts/synthetic-a.dng");
         std::fs::copy(replacement, &path)?;

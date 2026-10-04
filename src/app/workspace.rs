@@ -124,6 +124,8 @@ impl Editor {
             && library.take_reread_finished()
         {
             self.status = library.message.clone();
+            // Reading metadata can bring in the reference photo's Lightroom edit.
+            self.load_reference();
         }
         self.remove_copy_window(&ctx);
         self.read_metadata_window(&ctx);

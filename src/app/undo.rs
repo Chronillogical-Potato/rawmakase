@@ -148,11 +148,15 @@ impl Editor {
     pub(super) fn undo(&mut self) {
         if !self.activity.is_syncing() {
             self.step(Direction::Undo);
+            // A Library command (a Sync, a metadata read) may have changed the
+            // reference photo's edit.
+            self.load_reference();
         }
     }
     pub(super) fn redo(&mut self) {
         if !self.activity.is_syncing() {
             self.step(Direction::Redo);
+            self.load_reference();
         }
     }
     /// Reverses the latest command, or makes the latest reversed one again.
@@ -246,7 +250,6 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     library.edits_changed(sync.edits.iter().map(|e| e.id));
                 }
-                self.load_reference();
                 // A synchronized photo open here opens again with what was written
                 // back (or with no edit at all), so nothing stale is saved over it.
                 if let Some(open) = self.document.catalog_photo

@@ -377,9 +377,11 @@ impl Library {
             Err(_) => None,
         }
         .unwrap_or_else(|| EditSource::Defaults(self.defaults.clone()));
+        // The file itself too: a RAW replaced in place is developed again.
+        let file = crate::storage::Stamp::read(&photo.path).ok();
         Some(Ok(DevelopSource {
             path: photo.path.clone(),
-            tag: edit.tag(),
+            tag: format!("{}-{file:?}", edit.tag()),
             edit,
         }))
     }
@@ -672,7 +674,8 @@ impl Refusal {
 pub(in crate::app) struct DevelopSource {
     pub path: std::path::PathBuf,
     pub edit: EditSource,
-    /// Identifies `edit`, the defaults included: it changes whenever the edit does.
+    /// Identifies `edit` (the defaults included) and the file: it changes whenever
+    /// either does.
     pub tag: String,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is

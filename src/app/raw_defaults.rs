@@ -100,8 +100,8 @@ impl Editor {
         if let Some(library) = &mut self.library {
             library.set_defaults(self.raw_defaults.clone());
         }
-        // An unedited reference photo follows them too.
-        self.load_reference();
+        // An unedited reference photo follows them too, profiles imported included.
+        self.reload_reference();
     }
     /// Lists the cameras to choose from, when Preferences opens.
     pub(super) fn measure_raw_defaults(&mut self) {
