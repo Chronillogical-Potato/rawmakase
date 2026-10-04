@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Write the synthetic look profiles in tests/corpus/looks.
 
-Each is a Camera Raw look profile (an XMP with an HSV look table, a tone curve and
-profile-internal settings) made up from simple formulas here: no Adobe profile data.
-They exercise Lightroom's Profile Amount, which only looks with `SupportsAmount` have.
+Each is a Camera Raw look profile (an XMP with an HSV look table, an RGB table, a tone
+curve and profile-internal settings) made up from simple formulas here: no Adobe
+profile data. They exercise Lightroom's Profile Amount, which only looks with
+`SupportsAmount` have, and the RGB tables of creative looks (Artistic, Vintage, Modern).
 Camera Raw reads a look from a sidecar's `crs:Look` and its `Table_` attribute, so
 scripts/corpus/camera-raw-charts.py can render them without installing anything.
 
@@ -47,9 +48,53 @@ def table(dims, f, srgb=True, bounds=(0., 2.)):
     return data
 
 
-def look(name, data, settings=None, curve=None, monochrome=False):
+# The colour spaces, encodings and gamut modes of a DNG SDK RGB table.
+SRGB, ADOBE_RGB, PROPHOTO = 0, 1, 2
+LINEAR, SRGB_GAMMA, GAMMA_1_8, GAMMA_2_2 = 0, 1, 2, 3
+CLIP, EXTEND = 0, 1
+
+
+def rgb_table(divisions, f, primaries=ADOBE_RGB, gamma=GAMMA_2_2, gamut=CLIP, bounds=(0., 2.), flags=None):
+    """A DNG SDK 3D RGB table: red outermost, then green, then blue, each sample three
+    16-bit values stored as their difference from the identity, then the table's
+    colour space, encoding, gamut mode and Profile Amount bounds."""
+    data = struct.pack('<4I', 1, 1, 3, divisions)
+    grid = [(i * 0xFFFF + (divisions >> 1)) // (divisions - 1) for i in range(divisions)]
+    for r in range(divisions):
+        for g in range(divisions):
+            for b in range(divisions):
+                out = f(*(i / (divisions - 1) for i in (r, g, b)))
+                values = [round(min(max(v, 0.), 1.) * 0xFFFF) for v in out]
+                data += struct.pack('<3H', *((v - grid[i]) & 0xFFFF for v, i in zip(values, (r, g, b))))
+    return data + rgb_table_tail(primaries, gamma, gamut, bounds, flags)
+
+
+def rgb_table_1d(divisions, f, primaries=ADOBE_RGB, gamma=GAMMA_2_2, gamut=CLIP, bounds=(0., 2.)):
+    """A DNG SDK 1D RGB table: a curve for each channel, stored like a 3D table's
+    samples."""
+    data = struct.pack('<4I', 1, 1, 1, divisions)
+    for i in range(divisions):
+        identity = (i * 0xFFFF + (divisions >> 1)) // (divisions - 1)
+        out = f(i / (divisions - 1))
+        data += struct.pack('<3H', *((round(min(max(v, 0.), 1.) * 0xFFFF) - identity) & 0xFFFF for v in out))
+    return data + rgb_table_tail(primaries, gamma, gamut, bounds)
+
+
+def rgb_table_tail(primaries, gamma, gamut, bounds, flags=None):
+    data = struct.pack('<3I2d', primaries, gamma, gamut, *bounds)
+    if flags is not None:
+        data += struct.pack('<I', flags)
+    return data
+
+
+def look(name, data, settings=None, curve=None, monochrome=False, rgb=None):
     uuid = hashlib.md5(name.encode()).hexdigest().upper()
-    table_id = hashlib.md5(data).hexdigest().upper()
+    tables = {}
+    if data:
+        tables['LookTable'] = data
+    if rgb:
+        tables['RGBTable'] = rgb
+    ids = {key: hashlib.md5(t).hexdigest().upper() for key, t in tables.items()}
     attributes = {
         'PresetType': 'Look', 'Cluster': '', 'UUID': uuid, 'SupportsAmount': 'True',
         'SupportsColor': 'True', 'SupportsMonochrome': 'True' if monochrome else 'False',
@@ -57,9 +102,10 @@ def look(name, data, settings=None, curve=None, monochrome=False):
         'SupportsSceneReferred': 'True', 'SupportsOutputReferred': 'False',
         'CameraModelRestriction': '', 'Copyright': 'Synthetic test look, public domain',
         'ContactInfo': '', 'Version': '18.7', 'ProcessVersion': '15.4',
-        'ConvertToGrayscale': 'True' if monochrome else 'False', 'LookTable': table_id,
+        'ConvertToGrayscale': 'True' if monochrome else 'False',
+        **ids,
         **(settings or {}),
-        f'Table_{table_id}': base85(data),
+        **{f'Table_{ids[key]}': base85(t) for key, t in tables.items()},
     }
     xml = ('<x:xmpmeta xmlns:x="adobe:ns:meta/">\n <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
            '  <rdf:Description rdf:about=""\n    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"')
@@ -86,6 +132,19 @@ def identity(h, s, v):
     return (0., 1., 1.)
 
 
+def cross(v):
+    """Channel curves: red lifted and rolled off, green with an S, blue compressed."""
+    return (0.05 + 0.9 * v ** 0.85, v + 0.06 * math.sin(2 * math.pi * v), 0.1 + 0.75 * v)
+
+
+def fade(r, g, b):
+    """A creative grade: lifted blacks, a warm cast growing in the shadows, red bleeding
+    into green, blue compressed and a soft roll-off near white."""
+    return (0.04 + 0.9 * r ** 1.1 + 0.05 * g * (1 - r),
+            0.03 + 0.92 * g + 0.04 * math.sin(math.pi * g) + 0.03 * r * (1 - g),
+            0.08 + 0.8 * b + 0.06 * r * (1 - b) - 0.03 * math.sin(math.pi * g))
+
+
 IDENTITY = ['0, 0', '255, 255']
 S_CURVE = ['0, 0', '64, 44', '128, 132', '192, 214', '255, 255']
 LOOKS = {
@@ -100,6 +159,20 @@ LOOKS = {
                                curve=S_CURVE, monochrome=True),
     'synthetic-look.xmp': look('Synthetic Look', table((12, 5, 6), twist),
                                {'Shadows2012': '+25', 'Clarity2012': '+10'}, curve=S_CURVE),
+    'synthetic-rgb.xmp': look('Synthetic RGB', None, rgb=rgb_table(17, fade)),
+    'synthetic-rgb-half.xmp': look('Synthetic RGB Half', None, {'RGBTableAmount': '0.5'},
+                                   rgb=rgb_table(17, fade, bounds=(0., 1.))),
+    'synthetic-rgb-bounds.xmp': look('Synthetic RGB Bounds', None, rgb=rgb_table(17, fade, bounds=(0.5, 1.5))),
+    'synthetic-rgb-srgb.xmp': look('Synthetic RGB sRGB', None,
+                                   rgb=rgb_table(17, fade, primaries=SRGB, gamma=SRGB_GAMMA)),
+    'synthetic-rgb-linear.xmp': look('Synthetic RGB Linear', None,
+                                     rgb=rgb_table(17, fade, primaries=PROPHOTO, gamma=LINEAR)),
+    'synthetic-rgb-extend.xmp': look('Synthetic RGB Extend', None,
+                                     rgb=rgb_table(17, fade, primaries=SRGB, gamma=SRGB_GAMMA, gamut=EXTEND)),
+    'synthetic-rgb-1d.xmp': look('Synthetic RGB 1D', None, rgb=rgb_table_1d(64, cross)),
+    'synthetic-rgb-flag.xmp': look('Synthetic RGB Flag', None, rgb=rgb_table(17, fade, flags=1)),
+    'synthetic-rgb-look.xmp': look('Synthetic RGB Look', table((12, 5, 6), twist), curve=S_CURVE,
+                                   rgb=rgb_table(17, fade)),
 }
 
 if __name__ == '__main__':

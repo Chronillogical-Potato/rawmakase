@@ -1110,6 +1110,189 @@
     "file": "synthetic-table-v1.xmp",
     "amount": 2
    }
+  },
+  {
+   "name": "rgb-table-50",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "rgb-table-100",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-table-200",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "rgb-half-50",
+   "look": {
+    "file": "synthetic-rgb-half.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "rgb-half-100",
+   "look": {
+    "file": "synthetic-rgb-half.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-half-200",
+   "look": {
+    "file": "synthetic-rgb-half.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "rgb-bounds-0",
+   "look": {
+    "file": "synthetic-rgb-bounds.xmp",
+    "amount": 0
+   }
+  },
+  {
+   "name": "rgb-bounds-200",
+   "look": {
+    "file": "synthetic-rgb-bounds.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "rgb-srgb-100",
+   "look": {
+    "file": "synthetic-rgb-srgb.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-linear-100",
+   "look": {
+    "file": "synthetic-rgb-linear.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-extend-100",
+   "look": {
+    "file": "synthetic-rgb-extend.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-flag-100",
+   "look": {
+    "file": "synthetic-rgb-flag.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-1d-100",
+   "look": {
+    "file": "synthetic-rgb-1d.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-look-50",
+   "look": {
+    "file": "synthetic-rgb-look.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "rgb-look-100",
+   "look": {
+    "file": "synthetic-rgb-look.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-table-exposure+1",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "Exposure2012": "+1.00"
+   }
+  },
+  {
+   "name": "rgb-table-contrast+50",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "Contrast2012": "+50"
+   }
+  },
+  {
+   "name": "rgb-table-saturation+50",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "Saturation": "+50"
+   }
+  },
+  {
+   "name": "rgb-table-point-curve",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "curves": {
+    "ToneCurvePV2012": [
+     "0, 0",
+     "64, 48",
+     "128, 128",
+     "192, 208",
+     "255, 255"
+    ]
+   }
+  },
+  {
+   "name": "rgb-table-grading-shadows-h210",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "SplitToningShadowHue": "210",
+    "SplitToningShadowSaturation": "50"
+   }
+  },
+  {
+   "name": "rgb-table-hue-red+100",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "HueAdjustmentRed": "+100"
+   }
+  },
+  {
+   "name": "rgb-table-grading-midtones-h30",
+   "look": {
+    "file": "synthetic-rgb.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "ColorGradeMidtoneHue": "30",
+    "ColorGradeMidtoneSat": "50"
+   }
   }
  ]
 }
