@@ -502,16 +502,36 @@ fn auto_tilt_share(tilt: f32) -> f32 {
     0.75 * (1. - (-(t / 4.).powi(2)).exp()) * (-(t - 10.).max(0.) / 15.).exp()
 }
 
+/// Level's roll: the turn in the photo's plane, in radians, that makes its verticals
+/// plumb or, without them, its long near-horizontal edges level.
+fn level_roll(v: &Vanishing) -> f32 {
+    match v.vertical {
+        Some(d) => d[0].atan2(d[1]),
+        None => -v.horizon,
+    }
+}
+
+/// The Crop panel's Auto straighten: the Straighten angle, in degrees, that turns the
+/// photo as Upright's Level does, measured on the photo as shown (orientation and lens
+/// corrections, no crop, straightening or Transform). None when the photo has no
+/// verticals or horizon to go by, or would need more than Straighten's 45°.
+pub fn straighten_angle(im: &CameraImage, r: &Recipe) -> Option<f32> {
+    let (image, w, h) = analysis_image(im, r);
+    let found = vanishing_points(&segments(&image, w, h), focal(&im.metadata));
+    if found.vertical.is_none() && found.horizon == 0. {
+        return None;
+    }
+    // Both turn the photo clockwise for a positive angle.
+    let angle = level_roll(&found).to_degrees();
+    (angle.abs() <= 45.).then_some(angle)
+}
+
 /// Lightroom's rotations for each Upright mode, indexed by [`super::UprightMode::code`]:
 /// Level rolls, Vertical also tilts, Full also pans, Auto corrects part of the tilt and
 /// only a slight pan.
 pub fn rotations(v: &Vanishing) -> [Mat; 5] {
     let down = [0., 1., 0.];
-    let roll = |d: [f32; 3]| d[0].atan2(d[1]);
-    let level = match v.vertical {
-        Some(d) => rotation([0., 0., 1.], roll(d)),
-        None => rotation([0., 0., 1.], -v.horizon),
-    };
+    let level = rotation([0., 0., 1.], level_roll(v));
     let Some(d) = v.vertical else {
         return [IDENTITY, level, level, level, level];
     };
@@ -754,6 +774,109 @@ mod tests {
         );
         let (image, w, h) = analysis_image(&im, &off);
         assert!(image[h / 2 * w] < 255.);
+    }
+
+    /// `luminance` (0–255) as a photo with neutral white balance.
+    fn photo(luminance: &[f32], w: usize, h: usize) -> CameraImage {
+        CameraImage {
+            width: w as u32,
+            height: h as u32,
+            pixels: luminance.iter().map(|v| [v / 255.; 3]).collect(),
+            metadata: crate::raw::Metadata {
+                width: w as u32,
+                height: h as u32,
+                wb: [1.; 3],
+                ..Default::default()
+            },
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+            recovered: Default::default(),
+        }
+    }
+
+    /// A 600 × 400 photo of horizontal stripes turned `angle` degrees clockwise.
+    fn tilted_horizon(angle: f32) -> CameraImage {
+        let (w, h) = (600usize, 400usize);
+        let (s, c) = angle.to_radians().sin_cos();
+        let luminance: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let mut sum = 0.;
+                for j in 0..4 {
+                    let x = (i % w) as f32 + (j % 2) as f32 * 0.5 + 0.25 - 0.5 * w as f32;
+                    let y = (i / w) as f32 + (j / 2) as f32 * 0.5 + 0.25 - 0.5 * h as f32;
+                    let across = -s * x + c * y;
+                    sum += if (across / 70.).rem_euclid(2.) < 1. {
+                        200.
+                    } else {
+                        25.
+                    };
+                }
+                sum / 4.
+            })
+            .collect();
+        photo(&luminance, w, h)
+    }
+
+    /// Whether the line through the centre of `im` along `direction` (pixels, y down)
+    /// shows level (`plumb` false) or plumb once straightened by `angle`, and the crop
+    /// has the photo behind it everywhere.
+    fn straightened(im: &CameraImage, angle: f32, direction: [f32; 2], plumb: bool) -> f32 {
+        let r = Recipe {
+            straighten: angle,
+            ..Default::default()
+        };
+        let g = Geometry::new(im, &r, 0);
+        let (w, h) = (im.width as f32, im.height as f32);
+        let n = direction[0].hypot(direction[1]);
+        let (dx, dy) = (100. * direction[0] / n, 100. * direction[1] / n);
+        let a = g.view(0.5 * w + dx - 0.5, 0.5 * h + dy - 0.5);
+        let b = g.view(0.5 * w - dx - 0.5, 0.5 * h - dy - 0.5);
+        for [u, v] in [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] {
+            let [x, y] = g.source(u, v);
+            assert!(
+                (-0.51..=w - 0.49).contains(&x) && (-0.51..=h - 0.49).contains(&y),
+                "corner {u},{v} at {x},{y} is off the photo"
+            );
+        }
+        // Pixels off over the 200 px between the two points.
+        if plumb {
+            (a[0] - b[0]) * g.width as f32
+        } else {
+            (a[1] - b[1]) * g.height as f32
+        }
+    }
+
+    /// Auto straighten gives Level's turn as a Straighten angle: a tilted horizon comes
+    /// out level and a rolled camera's verticals plumb, and the crop still has the photo
+    /// behind it everywhere.
+    #[test]
+    fn auto_straighten_levels_the_photo_as_level_does() {
+        let neutral = Recipe {
+            wb: [1.; 3],
+            ..Default::default()
+        };
+        for tilt in [-4f32, 3.] {
+            let im = tilted_horizon(tilt);
+            let angle = straighten_angle(&im, &neutral).expect("an angle");
+            assert!((angle + tilt).abs() < 0.2, "{tilt}°: {angle}");
+            let (s, c) = tilt.to_radians().sin_cos();
+            let off = straightened(&im, angle, [c, s], false);
+            assert!(off.abs() < 1., "{tilt}°: {off} px off level");
+        }
+        let f = focal(&crate::raw::Metadata::default());
+        for roll in [-2f32, 1.5] {
+            let (luminance, w, h, d) = tilted(8., roll, f);
+            let im = photo(&luminance, w, h);
+            let angle = straighten_angle(&im, &neutral).expect("an angle");
+            assert!((angle.abs() - roll.abs()).abs() < 0.2, "{roll}°: {angle}");
+            // The vertical through the centre points at the vanishing point.
+            let off = straightened(&im, angle, [d[0], d[1]], true);
+            assert!(off.abs() < 1., "{roll}°: {off} px off plumb");
+        }
+        // A flat photo has nothing to go by.
+        let flat = photo(&[100.; 600 * 400], 600, 400);
+        assert_eq!(straighten_angle(&flat, &neutral), None);
     }
 
     #[test]

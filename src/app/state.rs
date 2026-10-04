@@ -39,6 +39,8 @@ pub(super) struct Document {
     pub(super) auto_effect: std::cell::RefCell<Option<(Recipe, bool)>>,
     /// The Transform panel's Upright analysis for this photo.
     pub(super) upright: super::task::Task,
+    /// The Crop panel's Auto straighten analysis for this photo.
+    pub(super) straighten: super::task::Task,
 }
 
 /// What the latest render showed: the whole photo, or a 1:1 region of it.
@@ -186,6 +188,10 @@ pub(super) struct ViewState {
     pub(super) aspect: f32,
     /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
     pub(super) aspect_read: bool,
+    /// The crop guide overlay; saved in the session.
+    pub(super) crop_guides: super::crop_tool::CropGuides,
+    /// The Crop tool's Straighten ruler.
+    pub(super) ruler: super::crop_tool::Ruler,
     /// Spot removal settings, selection and drag in progress.
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Masking panel state.
@@ -213,6 +219,8 @@ impl Default for ViewState {
             crop_drag: None,
             aspect: -1.,
             aspect_read: false,
+            crop_guides: Default::default(),
+            ruler: Default::default(),
             retouch: Default::default(),
             masking: Default::default(),
             monitor: None,
@@ -318,6 +326,7 @@ impl ViewState {
             self.zoom.on = false;
             self.aspect_read = false;
         }
+        self.ruler = Default::default();
     }
     pub fn clear_document(&mut self) {
         self.zoom.on = false;
@@ -325,6 +334,7 @@ impl ViewState {
         self.shown_rect = None;
         self.tool = Tool::None;
         self.crop_drag = None;
+        self.ruler = Default::default();
         self.retouch.clear_document();
         self.masking.clear_document();
         self.compare = false;

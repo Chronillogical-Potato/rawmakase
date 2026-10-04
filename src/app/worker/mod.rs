@@ -78,6 +78,14 @@ pub enum Event {
         analysed: Box<crate::develop::Recipe>,
         result: Result<Vec<[f32; 9]>, String>,
     },
+    /// The Crop panel's Auto straighten angle for the photo loaded as `id`, analysed
+    /// from `analysed`; None when the photo has nothing to level by.
+    Straighten {
+        id: u64,
+        generation: u64,
+        analysed: Box<crate::develop::Recipe>,
+        result: Result<Option<f32>, String>,
+    },
     XmpLibrary {
         scan: u64,
         library: Arc<crate::presets::Library>,

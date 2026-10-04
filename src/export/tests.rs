@@ -148,6 +148,50 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     assert_eq!(back.panels, r.panels);
     Ok(())
 }
+/// A crop turned and mirrored with the photo is written and read back as it is, and
+/// changing the lens corrections afterwards leaves it where it was.
+#[test]
+fn a_turned_and_mirrored_crop_round_trips_through_xmp() -> Result<()> {
+    let m = Metadata {
+        width: 300,
+        height: 200,
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut r = crate::develop::Recipe {
+        crop: [0.1, 0.25, 0.6, 0.875],
+        straighten: 4.5,
+        ..Default::default()
+    };
+    crate::develop::turn(&mut r, crate::develop::QuarterTurn::Right);
+    crate::develop::mirror(&mut r, crate::develop::Mirror::Horizontal);
+    assert_eq!(r.crop, [0.25, 0.1, 0.875, 0.6]);
+    assert_eq!(r.straighten, -4.5);
+    let photo = crate::xmp::write::Photo {
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
+        &crate::develop::Recipe::default(),
+        &m,
+        &[],
+        None,
+    )?;
+    assert_eq!(back.crop, r.crop);
+    assert_eq!(back.straighten, r.straighten);
+    // A lens preset applied on top keeps the crop and angle.
+    let lens = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:LensManualDistortionAmount="20" crs:LensProfileEnable="1"/></rdf:RDF></x:xmpmeta>"#;
+    let lensed = crate::xmp::parse(Path::new("lens.xmp"), lens)?.apply(&back, &m, &[], None)?;
+    assert_ne!(lensed.lens_manual_distortion, back.lens_manual_distortion);
+    assert_eq!(lensed.crop, r.crop);
+    assert_eq!(lensed.straighten, r.straighten);
+    Ok(())
+}
 /// With Constrain Crop the settings carry the crop as rendered, which Camera Raw renders
 /// as stored, and reading them back renders the same crop.
 #[test]

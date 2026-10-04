@@ -53,6 +53,14 @@ impl Editor {
                     analysed,
                     result,
                 } if id == self.load.id() => self.upright_ready(generation, &analysed, result),
+                Event::Straighten {
+                    id,
+                    generation,
+                    analysed,
+                    result,
+                } if id == self.load.id() => {
+                    self.auto_straighten_ready(generation, &analysed, result)
+                }
                 Event::XmpLibrary { scan, library } => self.presets_scanned(scan, library),
                 Event::Profiles {
                     id,
