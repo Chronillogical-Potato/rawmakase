@@ -134,12 +134,46 @@ pub fn camera_name(m: &Metadata) -> String {
         format!("{make} {model}")
     }
 }
+/// Camera makers as they lead a camera's name, lower case. Only these are taken
+/// off a name, so "EOS M10" (Canon) stays apart from "M10" (Leica).
+const MAKES: &[&str] = &[
+    "apple",
+    "canon",
+    "dji",
+    "fujifilm",
+    "google",
+    "gopro",
+    "hasselblad",
+    "huawei",
+    "kodak",
+    "konica minolta",
+    "leaf",
+    "leica",
+    "mamiya",
+    "minolta",
+    "nikon",
+    "olympus",
+    "om digital solutions",
+    "panasonic",
+    "pentax",
+    "phase one",
+    "ricoh",
+    "samsung",
+    "sigma",
+    "sony",
+    "xiaomi",
+];
 /// Whether two camera names are the same camera: equal, or one the other after
-/// the make ("ILCE-7CR", "Sony ILCE-7CR").
+/// its maker ("ILCE-7CR", "Sony ILCE-7CR").
 pub fn same_name(a: &str, b: &str) -> bool {
     let (a, b) = (a.trim().to_lowercase(), b.trim().to_lowercase());
     let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-    !short.is_empty() && (short == long || long.ends_with(&format!(" {short}")))
+    !short.is_empty()
+        && (short == long
+            || long
+                .strip_suffix(short.as_str())
+                .and_then(|make| make.strip_suffix(' '))
+                .is_some_and(|make| MAKES.contains(&make.trim())))
 }
 /// Whether `name`, from this catalog or Lightroom's, is the photo's camera. Lightroom
 /// names some cameras by model alone ("ILCE-7CR"), others with the make.
@@ -463,6 +497,11 @@ mod tests {
         );
         settings.set_camera("ILCE-7C", DefaultChoice::Rawmakase);
         assert_eq!(settings.cameras.len(), 2);
+        // Another maker's model by the same name stays apart.
+        settings.set_camera("M10", DefaultChoice::Rawmakase);
+        settings.set_camera("EOS M10", DefaultChoice::Adobe);
+        assert_eq!(settings.cameras.len(), 4);
+        assert!(same_name("Canon EOS M10", "EOS M10"));
     }
 
     #[test]
