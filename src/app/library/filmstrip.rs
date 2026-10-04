@@ -175,6 +175,7 @@ impl Library {
         });
         // The grid's edits cover its selection; elsewhere the photo shown.
         let whole_selection = library && self.view() == View::Grid;
+        let mut remeasured = false;
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 3))
             .show(ui, |ui| {
@@ -209,6 +210,7 @@ impl Library {
                         if (taken - width).abs() > 0.5 {
                             ui.data_mut(|d| d.insert_temp(width_id, taken));
                             ui.ctx().request_repaint();
+                            remeasured = true;
                         }
                     }
                 });
@@ -223,6 +225,11 @@ impl Library {
         } else {
             None
         };
+        // The strip was laid out too wide this frame, so bring the photo into view
+        // again on the next, at its right width.
+        if remeasured {
+            self.strip.revealed = None;
+        }
         let height = ui.available_height().max(40.);
         let size = Vec2::new(height * 1.25, height);
         egui::ScrollArea::horizontal()
