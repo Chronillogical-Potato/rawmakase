@@ -58,7 +58,8 @@ impl Guide {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum GuideShow {
     Always,
-    /// While the crop or the Straighten ruler is dragged.
+    /// With the pointer over the photo, while the crop or the Straighten ruler is
+    /// dragged, and for a moment after an overlay is picked.
     #[default]
     Auto,
     Never,
@@ -81,11 +82,16 @@ impl GuideShow {
     }
 }
 
-/// Whether something is being dragged on the crop.
+/// What draws attention to the crop's guides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Dragging {
-    No,
-    Yes,
+pub(super) enum Attention {
+    Away,
+    /// The pointer is over the photo, as Lightroom's Auto Show needs.
+    Hovered,
+    /// The overlay was just picked, so the choice is seen even from the panel.
+    JustChanged,
+    /// The crop or the Straighten ruler is being dragged.
+    Dragging,
 }
 
 /// The crop guide overlay chosen, a view preference saved in the session.
@@ -110,10 +116,10 @@ impl CropGuides {
     pub(super) fn turn(&mut self) {
         self.orientation = (self.orientation + 1) % self.guide.orientations();
     }
-    pub(super) fn visible(&self, dragging: Dragging) -> bool {
+    pub(super) fn visible(&self, attention: Attention) -> bool {
         match self.show {
             GuideShow::Always => true,
-            GuideShow::Auto => dragging == Dragging::Yes,
+            GuideShow::Auto => attention != Attention::Away,
             GuideShow::Never => false,
         }
     }
@@ -393,6 +399,7 @@ impl super::Editor {
     pub(super) fn set_crop_guides(&mut self, guides: CropGuides) {
         if guides != self.view.crop_guides {
             self.view.crop_guides = guides;
+            self.view.crop_guides_changed = Some(std::time::Instant::now());
             let _ = self.save_session();
         }
     }
@@ -629,13 +636,22 @@ mod tests {
     }
 
     #[test]
-    fn guides_show_always_while_dragging_or_never() {
+    fn guides_show_always_with_the_pointer_on_the_photo_or_never() {
         let mut g = CropGuides::default();
-        assert!(!g.visible(Dragging::No) && g.visible(Dragging::Yes));
+        // Auto: away from the photo they hide; over it, dragging, or just after a new
+        // overlay is picked, they show, so picking one in the panel shows it.
+        assert!(!g.visible(Attention::Away));
+        for shown in [
+            Attention::Hovered,
+            Attention::Dragging,
+            Attention::JustChanged,
+        ] {
+            assert!(g.visible(shown), "{shown:?}");
+        }
         g.show = GuideShow::Always;
-        assert!(g.visible(Dragging::No));
+        assert!(g.visible(Attention::Away));
         g.show = GuideShow::Never;
-        assert!(!g.visible(Dragging::Yes));
+        assert!(!g.visible(Attention::Dragging));
     }
 
     #[test]
