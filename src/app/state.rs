@@ -239,6 +239,8 @@ pub(super) struct ViewState {
     pub(super) compare: super::before_after::Compare,
     /// The histogram's clipping warnings.
     pub(super) clipping: super::clipping::ClippingView,
+    /// The RGB values under the pointer, shown under the histogram.
+    pub(super) readout: super::readout::Readout,
     /// A drag in the histogram in progress.
     pub(super) tone_drag: Option<super::tone_drag::ToneDrag>,
     pub(super) tool: Tool,
@@ -285,6 +287,7 @@ impl Default for ViewState {
             viewport: Vec2::ZERO,
             compare: Default::default(),
             clipping: Default::default(),
+            readout: Default::default(),
             tone_drag: None,
             tool: Tool::None,
             crop_drag: None,
@@ -371,6 +374,11 @@ impl PreviewState {
         self.mode = TextureMode::Whole;
         self.crop = None;
         self.before.clear();
+        // The pixels the readout and loupes read belong to the photo left.
+        self.samples = None;
+        self.region_samples = None;
+        self.samples_recipe = None;
+        self.samples_requested = false;
     }
     /// Textures the renderer presented into that the viewport draws.
     pub fn presented(&self) -> Vec<egui::TextureId> {
@@ -448,6 +456,8 @@ impl ViewState {
         self.red_eye.clear_document();
         self.masking.clear_document();
         self.guided.clear_document();
+        // The next photo's values come with its first render.
+        self.readout.values = None;
         // Before alone is left with the photo; Before beside the edit stays, as
         // Lightroom keeps its Before/After view from photo to photo.
         if self.compare.before_only() {

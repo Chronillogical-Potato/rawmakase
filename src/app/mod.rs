@@ -435,6 +435,7 @@ mod point_color_panel;
 mod preferences;
 mod presets;
 mod raw_defaults;
+mod readout;
 mod red_eye_tool;
 mod reference;
 mod retouch_tool;

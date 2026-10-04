@@ -166,24 +166,27 @@ impl Editor {
                 region.display(region.value(&self.document.recipe))
             )
         });
-        let exif = region_text.unwrap_or_else(|| {
-            self.document
-                .metadata
-                .as_ref()
-                .map_or_else(String::new, |m| {
-                    let info = crate::catalog::PhotoInfo::from_metadata(m);
-                    [
-                        info.iso_text(),
-                        info.focal_text(),
-                        info.aperture_text(),
-                        info.shutter_text(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("     ")
-                })
-        });
+        // So does the RGB readout while the pointer is over the photo.
+        let exif = region_text
+            .or_else(|| self.view.readout.text())
+            .unwrap_or_else(|| {
+                self.document
+                    .metadata
+                    .as_ref()
+                    .map_or_else(String::new, |m| {
+                        let info = crate::catalog::PhotoInfo::from_metadata(m);
+                        [
+                            info.iso_text(),
+                            info.focal_text(),
+                            info.aperture_text(),
+                            info.shutter_text(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join("     ")
+                    })
+            });
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
                 .on_hover_text("Output histogram of the whole photo");

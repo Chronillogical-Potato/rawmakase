@@ -44,6 +44,8 @@ The renderer returns encoded sRGB. `egui::ColorImage::from_rgb` supplies those b
 
 Clipping is judged on the rendered encoded-sRGB values (0–1), before any monitor profile, so the display never changes it. A channel clips in the highlights at 0.999 or above and in the shadows at 0.001 or below (`HIGHLIGHT_CLIP`, `SHADOW_CLIP` in `develop/rendered.rs`; the GPU's `present.wgsl` uses the same values and counts clipped pixels per channel while it counts the histogram). The highlight warning paints red where any channel clips, the shadow warning blue where all three do. Each histogram triangle lights when more than 0.1% of the pixels clip in a channel, in the colours of the clipping channels (white when all three).
 
+Develop's RGB readout under the histogram (and the White Balance loupe) reads these rendered values, never the screen, and shows them as Lightroom does in Melissa RGB: linear sRGB to ProPhoto primaries (the D65-to-D50 matrix the camera profiles use), then the sRGB tone curve.
+
 Optional monitor ICC conversion maps encoded sRGB bytes to device RGB through Little CMS with relative-colorimetric intent and black-point compensation. Failure falls back to sRGB with a visible error. Automatic monitor-profile discovery and HDR output are outside this release. Calibration/compositor interaction must be verified on the user's chosen monitor; the test suite only proves an sRGB-profile round trip within one byte.
 
 ## Invalidation and ownership

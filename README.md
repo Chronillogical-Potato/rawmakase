@@ -129,6 +129,7 @@ Useful shortcuts:
 | J | Shadow and highlight clipping warnings (click a histogram triangle for one) |
 | Backslash | Before alone |
 | Y / Option+Y / Shift+Y | Before and after: left and right / top and bottom / split |
+| I | Photo info over the photo: Info 1, Info 2, off |
 | Shift+R | Reference View: another photo beside the one you edit (drag it from the filmstrip) |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |

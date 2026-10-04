@@ -817,6 +817,16 @@ impl Editor {
                 {
                     self.toggle_reference_view();
                 }
+                // Lightroom's I: the photo info overlay, Info 1, Info 2 or off.
+                // Once per press: a held I must not flicker through them. With the
+                // modifiers held for it, which a quick shortcut can release in the
+                // same frame.
+                let info = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::I, pressed: true, repeat: false, modifiers, .. } if !modifiers.any())
+                });
+                if info && let Some(library) = &mut self.library {
+                    library.cycle_loupe_info();
+                }
                 // Shift+J makes a colour range mask, below.
                 if i.key_pressed(egui::Key::J) && !i.modifiers.any() {
                     self.view.clipping.toggle_both();
