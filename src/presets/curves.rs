@@ -211,8 +211,14 @@ impl SavedCurves {
     /// Every saved curve, sorted by name as the menu lists them.
     pub fn list(&self) -> SavedCurveList {
         let mut list = SavedCurveList::default();
-        let Ok(entries) = std::fs::read_dir(&self.dir) else {
-            return list;
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            // None saved yet.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return list,
+            Err(e) => {
+                list.errors.push(format!("{}: {e}", self.dir.display()));
+                return list;
+            }
         };
         for path in entries.flatten().map(|e| e.path()) {
             if path
@@ -354,6 +360,12 @@ mod tests {
             dir: d.path().join("Curves"),
         };
         assert_eq!(store.list(), SavedCurveList::default());
+        // A folder that can't be read is reported, not taken for an empty one.
+        let blocked = SavedCurves {
+            dir: d.path().join("file"),
+        };
+        std::fs::write(&blocked.dir, "")?;
+        assert_eq!(blocked.list().errors.len(), 1);
         let mut r = Recipe::default();
         r.curve.points = vec![[0., 0.1], [0.5, 0.45], [1., 0.95]];
         r.effects.channels[2].points = vec![[0., 0.], [0.5, 0.55], [1., 1.]];
