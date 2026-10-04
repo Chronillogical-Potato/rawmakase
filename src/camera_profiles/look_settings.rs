@@ -176,20 +176,22 @@ impl LookSettings {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
-    /// These settings at `strength` of their effect.
+    /// These settings at `strength` of their effect. At 0 the look's split toning
+    /// and vignette are left out, so they don't replace the user's either.
     pub(super) fn scaled(&self, strength: f32) -> Self {
+        let present = strength != 0.;
         Self {
             exposure: self.exposure * strength,
             saturation: self.saturation * strength,
             hsl: self.hsl.map(|band| band.map(|v| v * strength)),
             parametric: self.parametric.map(|v| v * strength),
             splits: self.splits,
-            toning: self.toning.map(|t| Toning {
+            toning: self.toning.filter(|_| present).map(|t| Toning {
                 shadows: [t.shadows[0], t.shadows[1] * strength],
                 highlights: [t.highlights[0], t.highlights[1] * strength],
                 balance: t.balance,
             }),
-            vignette: self.vignette.map(|v| Vignette {
+            vignette: self.vignette.filter(|_| present).map(|v| Vignette {
                 amount: v.amount * strength,
                 ..v
             }),
@@ -340,6 +342,11 @@ mod tests {
         assert!((r.saturation - 0.).abs() < 1e-6);
         assert_eq!(r.grading[2], [0.15, 0.1, 0.]);
         assert_eq!(r.effects.vignette, -0.05);
+        // At 0% the look leaves the user's vignette and toning alone.
+        user.profile_amount = 0.;
+        let r = user.with_profile_adjustments();
+        assert_eq!((r.effects.vignette, r.grading[2]), (-0.3, [0.; 3]));
+        user.profile_amount = 0.5;
         // A full-strength vignette at 200% stays within the slider's range.
         let mut strong = user.clone();
         let mut profile = (**strong.profile.as_ref().unwrap()).clone();
