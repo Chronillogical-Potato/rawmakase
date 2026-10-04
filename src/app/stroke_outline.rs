@@ -100,7 +100,56 @@ impl Grid {
         let back: Vec<(usize, usize)> = forward.iter().rev().copied().collect();
         sweep(forward, neighbours_forward);
         sweep(back, neighbours_back);
+        self.refine(&mut dist, segments, radius);
         dist.iter().map(|d| d - radius).collect()
+    }
+    /// The sweeps give each point the distance to some segment, which can be more than
+    /// the nearest one where a stroke folds back. A point they leave inside is inside;
+    /// the rest are checked against every segment that can reach them, found through
+    /// buckets about a brush wide, stopping at the first that puts the point inside.
+    fn refine(&self, dist: &mut [f32], segments: &[(Pos2, Pos2)], radius: f32) {
+        let bucket = radius.max(8. * self.step);
+        let (bx, by) = (
+            ((self.nx as f32 * self.step) / bucket).ceil() as usize + 1,
+            ((self.ny as f32 * self.step) / bucket).ceil() as usize + 1,
+        );
+        let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bx * by];
+        for (s, &(a, b)) in segments.iter().enumerate() {
+            let lo = a.min(b) - Vec2::splat(radius) - self.min;
+            let hi = a.max(b) + Vec2::splat(radius) - self.min;
+            let (i0, j0) = (
+                (lo.x / bucket).floor().max(0.) as usize,
+                (lo.y / bucket).floor().max(0.) as usize,
+            );
+            let (i1, j1) = (
+                ((hi.x / bucket).floor() as usize).min(bx - 1),
+                ((hi.y / bucket).floor() as usize).min(by - 1),
+            );
+            for j in j0..=j1 {
+                for i in i0..=i1 {
+                    buckets[j * bx + i].push(s);
+                }
+            }
+        }
+        for j in 0..self.ny {
+            for i in 0..self.nx {
+                let d = &mut dist[j * self.nx + i];
+                if *d < radius {
+                    continue;
+                }
+                let p = self.at(i, j);
+                let rel = p - self.min;
+                let b = ((rel.y / bucket) as usize).min(by - 1) * bx
+                    + ((rel.x / bucket) as usize).min(bx - 1);
+                for &s in &buckets[b] {
+                    let (a, e) = segments[s];
+                    *d = d.min(distance_to_segment(p, a, e));
+                    if *d < radius {
+                        break;
+                    }
+                }
+            }
+        }
     }
     /// Marching squares: where the field crosses zero along each cell edge.
     fn contour(&self, field: &[f32]) -> Vec<[Pos2; 2]> {
@@ -194,6 +243,22 @@ mod tests {
                 let d = distance_to_path(*p, &path);
                 assert!((d - r).abs() < 1., "{p:?} is {d} from the path, not {r}");
             }
+        }
+    }
+
+    #[test]
+    fn a_stroke_folding_back_gets_its_true_edge() {
+        let path = [
+            Pos2::new(49.86, 464.05),
+            Pos2::new(3.52, 224.11),
+            Pos2::new(126.01, 30.38),
+            Pos2::new(67.08, 274.34),
+            Pos2::new(136.93, 58.93),
+        ];
+        let r = 84.09;
+        for p in outline(&path, r, 2.).iter().flatten() {
+            let d = distance_to_path(*p, &path);
+            assert!((d - r).abs() < 1., "{p:?} is {d} from the path, not {r}");
         }
     }
 

@@ -87,7 +87,11 @@ pub(super) fn stroke_outline(painter: &Painter, points: &[Pos2], radius: f32, wi
     let edges = super::stroke_outline::outline(points, radius, 2.);
     // A brush too thin to outline shows as its path.
     if edges.is_empty() {
-        path(painter, points.to_vec(), Color32::from_white_alpha(230));
+        match points {
+            [] => {}
+            [dot] => ellipse(painter, *dot, Vec2::splat(radius.max(1.5)), 0., width),
+            _ => path(painter, points.to_vec(), Color32::from_white_alpha(230)),
+        }
         return;
     }
     for [a, b] in &edges {
