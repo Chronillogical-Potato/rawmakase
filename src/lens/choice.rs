@@ -190,12 +190,16 @@ impl LensProfileChoice {
 }
 
 /// Lightroom's Make, Model and Profile menus over a photo's profiles.
+/// Profiles whose correction does not validate for the photo are left out of the
+/// Profile menu and never chosen; they are checked as the menus need them, since a
+/// full Adobe library offers thousands.
 pub struct ProfileMenus<'p> {
     profiles: &'p PhotoProfiles,
+    photo: &'p Metadata,
 }
 impl<'p> ProfileMenus<'p> {
-    pub fn new(profiles: &'p PhotoProfiles) -> Self {
-        Self { profiles }
+    pub fn new(profiles: &'p PhotoProfiles, photo: &'p Metadata) -> Self {
+        Self { profiles, photo }
     }
     fn sorted(&self) -> impl Iterator<Item = &'p ImportedProfile> + 'p {
         self.profiles.in_menu_order().map(|c| c.profile.as_ref())
@@ -215,13 +219,22 @@ impl<'p> ProfileMenus<'p> {
         models
     }
     pub fn profiles(&self, make: &str, model: &str) -> Vec<&'p ImportedProfile> {
-        self.sorted()
-            .filter(|p| p.lens_make == make && p.lens_model == model)
+        let photo = self.photo;
+        self.profiles
+            .in_menu_order()
+            .filter(|c| c.profile.lens_make == make && c.profile.lens_model == model)
+            .filter(|c| c.correction(photo).is_some())
+            .map(|c| c.profile.as_ref())
             .collect()
     }
     /// What picking a make chooses: its first model's first profile.
     pub fn first_of_make(&self, make: &str) -> Option<&'p ImportedProfile> {
-        self.sorted().find(|p| p.lens_make == make)
+        let photo = self.photo;
+        self.profiles
+            .in_menu_order()
+            .filter(|c| c.profile.lens_make == make)
+            .find(|c| c.correction(photo).is_some())
+            .map(|c| c.profile.as_ref())
     }
     /// What picking a model chooses: its first profile.
     pub fn first_of_model(&self, make: &str, model: &str) -> Option<&'p ImportedProfile> {

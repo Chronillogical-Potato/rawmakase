@@ -30,7 +30,7 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
         .missing
         .or(r.lens_profile_choice.id.as_ref().filter(|id| id.embedded))
         .map(|id| id.label().to_string());
-    let menus = ProfileMenus::new(&m.lens_profiles);
+    let menus = ProfileMenus::new(&m.lens_profiles, m);
     let enabled = r.lens_profile && r.engine >= 4;
     ui.add_enabled_ui(enabled, |ui| {
         setup_row(ui, r, in_use.as_deref());

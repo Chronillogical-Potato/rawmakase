@@ -613,12 +613,15 @@ impl PhotoProfiles {
         matching.sort_by_key(|c| c.lens_rank);
         matching.into_iter().find(|c| c.correction(m).is_some())
     }
-    /// The profile a recorded identity names, by file name, else by profile name.
+    /// The profile a recorded identity names: by file name when it records one, else
+    /// by profile name. A recorded file that isn't imported is not stood in for by
+    /// another file of the same name.
     pub fn find(&self, filename: &str, name: &str) -> Option<&Candidate> {
-        self.candidates
-            .iter()
-            .find(|c| c.profile.is(filename, ""))
-            .or_else(|| self.candidates.iter().find(|c| c.profile.is("", name)))
+        if filename.is_empty() {
+            self.candidates.iter().find(|c| c.profile.is("", name))
+        } else {
+            self.candidates.iter().find(|c| c.profile.is(filename, ""))
+        }
     }
 }
 /// Validates and copies lens profiles into the data directory.

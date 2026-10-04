@@ -72,6 +72,7 @@ fn default_and_auto_match_the_lens() {
     // No imported profile of the lens: nothing automatic, whatever else is imported.
     let mut other_lens = photo();
     other_lens.lens_model = "85mm F1.8".into();
+    other_lens.lens_profiles = library().for_photo(&other_lens);
     assert_eq!(used(&LensProfileChoice::default(), &other_lens), None);
 }
 #[test]
@@ -164,7 +165,7 @@ fn choosing_a_profile_sets_custom_and_setup_rematches() {
 #[test]
 fn menus_list_makes_models_and_profiles() {
     let m = photo();
-    let menus = ProfileMenus::new(&m.lens_profiles);
+    let menus = ProfileMenus::new(&m.lens_profiles, &m);
     assert_eq!(menus.makes(), ["Lensco", "Testcam"]);
     assert_eq!(menus.models("Testcam"), ["Testcam 35mm F2"]);
     let names: Vec<&str> = menus
@@ -351,4 +352,28 @@ fn entries_without_a_model_do_not_outrank_usable_ones() {
     m.lens_profiles = Library::from_texts([("both.lcp", both.as_str())]).for_photo(&m);
     let auto = m.lens_profiles.auto(&m).expect("the usable entry matches");
     assert!(auto.correction(&m).unwrap().vignetting_gain(1.) > 1.01);
+}
+
+#[test]
+fn a_recorded_file_is_not_stood_in_for_by_another_of_the_same_name() {
+    let m = photo();
+    let other_file = LensProfileId {
+        name: "Adobe (Testcam 35mm F2)".into(),
+        filename: "Testcam (35mm F2) - copy.lcp".into(),
+        ..Default::default()
+    };
+    let c = choice(LensProfileSetup::Custom, Some(other_file));
+    let r = c.resolve(&m.lens_profiles, &m);
+    assert!(r.used.is_none() && r.missing.is_some());
+}
+
+#[test]
+fn profiles_whose_correction_does_not_validate_are_not_offered() {
+    // A distortion model so strong its radial scale leaves the valid range.
+    let wild = test_profile("Testcam", "28mm F2", "Adobe (Testcam 28mm F2)", 1000., 0.);
+    let mut m = photo();
+    m.lens_profiles = Library::from_texts([("wild.lcp", wild.as_str())]).for_photo(&m);
+    let menus = ProfileMenus::new(&m.lens_profiles, &m);
+    assert!(menus.profiles("Testcam", "Testcam 28mm F2").is_empty());
+    assert!(menus.first_of_make("Testcam").is_none());
 }
