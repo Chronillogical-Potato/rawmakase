@@ -7,6 +7,7 @@ use super::{
 };
 use crate::develop::{
     Recipe,
+    curve::ToneCurve,
     settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
 };
 use std::fmt::Write;
@@ -160,6 +161,20 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
     }
     if groups.contains(SettingGroup::ColorAdjustments) {
         super::write::point_colors(&mut out, r, super::write::NoPointColors::EmptySelection);
+    }
+    out.push_str("  </rdf:Description>\n");
+    xmpmeta(&out)
+}
+
+/// A saved point curve as Lightroom and Camera Raw keep one in their Curves folder:
+/// the RGB curve and the Red, Green and Blue curves, named by the file.
+pub fn point_curve(rgb: &ToneCurve, channels: &[ToneCurve; 3]) -> String {
+    let mut out = format!(
+        "  <rdf:Description rdf:about=\"\"\n    xmlns:crs=\"{CRS}\"\n   crs:Version=\"15.4\"\n   crs:ProcessVersion=\"11.0\"\n   crs:ToneCurveName2012=\"Custom\"\n   crs:HasSettings=\"True\">\n"
+    );
+    curve(&mut out, "ToneCurvePV2012", rgb);
+    for (channel, name) in channels.iter().zip(["Red", "Green", "Blue"]) {
+        curve(&mut out, &format!("ToneCurvePV2012{name}"), channel);
     }
     out.push_str("  </rdf:Description>\n");
     xmpmeta(&out)

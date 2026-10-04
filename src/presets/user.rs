@@ -117,45 +117,43 @@ impl UserPresets {
     }
     /// `dir/<group>/<name>.xmp`, with characters file systems refuse replaced.
     fn file_for(&self, info: &PresetInfo) -> Result<PathBuf> {
-        // Characters and names Windows, macOS or Linux refuse in a file name.
-        let clean = |s: &str| -> String {
-            let name: String = s
-                .chars()
-                .map(|c| {
-                    if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-                        || c.is_control()
-                    {
-                        '-'
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            let name = name.trim_start_matches('.').trim_end_matches(['.', ' ']);
-            let reserved = ["CON", "PRN", "AUX", "NUL"].iter().any(|r| {
-                name.split('.')
-                    .next()
-                    .is_some_and(|n| n.eq_ignore_ascii_case(r))
-            }) || ["COM", "LPT"].iter().any(|r| {
-                let stem = name.split('.').next().unwrap_or("");
-                let stem = stem.as_bytes();
-                stem.len() == 4
-                    && stem[..3].eq_ignore_ascii_case(r.as_bytes())
-                    && stem[3].is_ascii_digit()
-            });
-            if reserved {
-                format!("_{name}")
-            } else {
-                name.to_string()
-            }
-        };
-        let group = match clean(&info.group) {
+        let group = match file_name(&info.group) {
             g if g.is_empty() => "User Presets".to_string(),
             g => g,
         };
-        let name = clean(&info.name);
+        let name = file_name(&info.name);
         ensure!(!name.is_empty(), "A preset needs a name");
         Ok(self.dir.join(group).join(format!("{name}.xmp")))
+    }
+}
+
+/// `s` as a file name, with the characters and names Windows, macOS or Linux refuse
+/// in one replaced.
+pub(crate) fn file_name(s: &str) -> String {
+    let name: String = s
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let name = name.trim_start_matches('.').trim_end_matches(['.', ' ']);
+    let reserved = ["CON", "PRN", "AUX", "NUL"].iter().any(|r| {
+        name.split('.')
+            .next()
+            .is_some_and(|n| n.eq_ignore_ascii_case(r))
+    }) || ["COM", "LPT"].iter().any(|r| {
+        let stem = name.split('.').next().unwrap_or("");
+        let stem = stem.as_bytes();
+        stem.len() == 4 && stem[..3].eq_ignore_ascii_case(r.as_bytes()) && stem[3].is_ascii_digit()
+    });
+    if reserved {
+        format!("_{name}")
+    } else {
+        name.to_string()
     }
 }
 
