@@ -104,14 +104,17 @@ impl Grid {
         dist.iter().map(|d| d - radius).collect()
     }
     /// The sweeps give each point the distance to some segment, which can be more than
-    /// the nearest one where a stroke folds back. A point they leave inside is inside;
-    /// the rest are checked against every segment that can reach them, found through
-    /// buckets about a brush wide, stopping at the first that puts the point inside.
+    /// the nearest one where a stroke folds back, leaving a point that is inside marked
+    /// outside. Only where the inside meets the outside can that show, so those points
+    /// are checked against every segment that can reach them (found through buckets a
+    /// brush wide, stopping at the first that puts the point inside); each one found
+    /// inside has its neighbours checked too, until the edge is where it belongs.
     fn refine(&self, dist: &mut [f32], segments: &[(Pos2, Pos2)], radius: f32) {
+        let (nx, ny) = (self.nx, self.ny);
         let bucket = radius.max(8. * self.step);
         let (bx, by) = (
-            ((self.nx as f32 * self.step) / bucket).ceil() as usize + 1,
-            ((self.ny as f32 * self.step) / bucket).ceil() as usize + 1,
+            ((nx as f32 * self.step) / bucket).ceil() as usize + 1,
+            ((ny as f32 * self.step) / bucket).ceil() as usize + 1,
         );
         let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bx * by];
         for (s, &(a, b)) in segments.iter().enumerate() {
@@ -131,21 +134,41 @@ impl Grid {
                 }
             }
         }
-        for j in 0..self.ny {
-            for i in 0..self.nx {
-                let d = &mut dist[j * self.nx + i];
-                if *d < radius {
+        let outside = |d: f32| d >= radius;
+        let mut checked = vec![false; nx * ny];
+        let mut queue: Vec<(usize, usize)> = Vec::new();
+        for j in 0..ny {
+            for i in 0..nx {
+                if !outside(dist[j * nx + i]) {
                     continue;
                 }
-                let p = self.at(i, j);
-                let rel = p - self.min;
-                let b = ((rel.y / bucket) as usize).min(by - 1) * bx
-                    + ((rel.x / bucket) as usize).min(bx - 1);
-                for &s in &buckets[b] {
-                    let (a, e) = segments[s];
-                    *d = d.min(distance_to_segment(p, a, e));
-                    if *d < radius {
-                        break;
+                let next_to_inside =
+                    neighbours(i, j, nx, ny).any(|(ni, nj)| !outside(dist[nj * nx + ni]));
+                if next_to_inside {
+                    checked[j * nx + i] = true;
+                    queue.push((i, j));
+                }
+            }
+        }
+        while let Some((i, j)) = queue.pop() {
+            let p = self.at(i, j);
+            let rel = p - self.min;
+            let b = ((rel.y / bucket) as usize).min(by - 1) * bx
+                + ((rel.x / bucket) as usize).min(bx - 1);
+            let d = &mut dist[j * nx + i];
+            for &s in &buckets[b] {
+                let (a, e) = segments[s];
+                *d = d.min(distance_to_segment(p, a, e));
+                if !outside(*d) {
+                    break;
+                }
+            }
+            if !outside(*d) {
+                for (ni, nj) in neighbours(i, j, nx, ny) {
+                    let k = nj * nx + ni;
+                    if !checked[k] && outside(dist[k]) {
+                        checked[k] = true;
+                        queue.push((ni, nj));
                     }
                 }
             }
@@ -192,6 +215,18 @@ impl Grid {
         }
         out
     }
+}
+
+/// The up to eight grid points around `(i, j)`.
+fn neighbours(i: usize, j: usize, nx: usize, ny: usize) -> impl Iterator<Item = (usize, usize)> {
+    (-1isize..=1)
+        .flat_map(|dj| (-1isize..=1).map(move |di| (di, dj)))
+        .filter(|&(di, dj)| di != 0 || dj != 0)
+        .filter_map(move |(di, dj)| {
+            let (ni, nj) = (i as isize + di, j as isize + dj);
+            (ni >= 0 && nj >= 0 && (ni as usize) < nx && (nj as usize) < ny)
+                .then_some((ni as usize, nj as usize))
+        })
 }
 
 fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
