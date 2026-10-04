@@ -51,6 +51,22 @@ impl Editor {
         if frame.generation != self.load.id() {
             return;
         }
+        // Something other than the wheel changing the edit ends a scroll first, as its
+        // own step, before this frame's step name is given.
+        // A click (selecting another spot, say) also ends it, edit or not.
+        let clicked = ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::PointerButton { .. }))
+        });
+        let edit = if self.document.recipe == frame.recipe && !clicked {
+            super::brush_scroll::Edit::Unchanged
+        } else {
+            super::brush_scroll::Edit::Changed
+        };
+        if self.view.wheel.ends_before(edit) {
+            self.document.history.finish_gesture(&frame.recipe);
+        }
         if let Some((name, value)) = step {
             self.document
                 .history
@@ -71,11 +87,15 @@ impl Editor {
         if self.document.recipe == frame.recipe {
             self.finish_pending_treatment();
         }
-        let edited = self.document.history.observe(
-            frame.recipe,
-            &self.document.recipe,
-            ctx.input(|i| i.pointer.primary_down()),
-        );
+        // A wheel scroll sizing a spot is a gesture like a drag: one step once it pauses.
+        if let Some(left) = self.view.wheel.remaining() {
+            ctx.request_repaint_after(left);
+        }
+        let gesture = ctx.input(|i| i.pointer.primary_down()) || self.view.wheel.active();
+        let edited = self
+            .document
+            .history
+            .observe(frame.recipe, &self.document.recipe, gesture);
         // Any change but the Amount's own ends the preset Amount, whether or not the
         // Presets panel is open.
         self.end_stale_preset_amount();

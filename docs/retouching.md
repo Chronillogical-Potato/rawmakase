@@ -19,7 +19,8 @@ modes. The AI Remove mode is not implemented yet.
   stands out; its Threshold slider shows fainter detail.
 - Hold **Space** to pan while the tool is open.
 - The drawer's Mode, Size, Feather and Opacity apply to the selected spot, or to new
-  spots when none is selected.
+  spots when none is selected. The mouse wheel over the photo sizes the brush and
+  the selected spot (Shift: feather), as in Lightroom; one scroll is one History step.
 
 Paste Settings and presets leave a photo's spots alone, as Lightroom's defaults do.
 
@@ -76,10 +77,11 @@ The **Red Eye** tool sits between Remove and Masking, as in Lightroom Classic. L
 Lightroom's, it has no keyboard shortcut (Lightroom's menu leaves it unassigned, and
 Shift+R is its Reference View).
 
-- **Drag** from the centre of an eye outward to a circle that covers the whole eye:
-  RAWmakase finds the red pupil inside it and corrects it. **Click** to search a circle
-  of the last size. If nothing red enough is found, the status line says "Unable to
-  find red eye", as Lightroom does.
+- **Click** the centre of an eye: RAWmakase finds the red pupil inside the circle shown
+  around the pointer and corrects it. The mouse wheel over the photo, or **[** and
+  **]**, make the circle smaller or larger; dragging doesn't size it, as in Lightroom.
+  If nothing red enough is found, the status line says "Unable to find red eye", as
+  Lightroom does.
 - Click a correction to select it; drag it to move it. **Delete** removes the selected
   one, and Reset removes them all.
 - **Type** picks Red Eye or Pet Eye for new corrections, and changes the selected one.

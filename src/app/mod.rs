@@ -399,6 +399,7 @@ fn survive_surface_errors(device: &wgpu::Device) {
 }
 
 mod auto;
+mod brush_scroll;
 mod bulk_import;
 mod catalog;
 mod clipping;

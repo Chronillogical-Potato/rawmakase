@@ -12,7 +12,7 @@ impl Editor {
             return;
         }
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
-        let brushing = !self.library_mode && matches!(self.view.tool, Tool::Remove | Tool::Mask);
+        let brushing = !self.library_mode && self.tool_has_size();
         // With the Crop tool open, X swaps the crop's orientation instead of rejecting.
         let cropping = !self.library_mode && self.view.is(Tool::Crop);
         let auto_advance = self.auto_advance;
@@ -23,6 +23,10 @@ impl Editor {
             })
             // Photo > Auto Advance: every key moves on, as Shift does.
             .map(|(edit, shift)| (edit, shift || auto_advance));
+        // A spot resize still being grouped is logged before the rating it precedes.
+        if shortcut.is_some() {
+            self.finish_wheel_gesture();
+        }
         let Some(library) = &mut self.library else {
             return;
         };
