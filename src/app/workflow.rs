@@ -232,7 +232,7 @@ impl Editor {
         let shown = pc.visualize
             && self.point_color_tab_shown()
             && !self.view.picks_color()
-            && !self.view.compare;
+            && !self.view.compare.before_only();
         pc.selected
             .filter(|i| shown && *i < self.document.recipe.point_colors.len())
     }

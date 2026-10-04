@@ -19,7 +19,7 @@ impl super::Editor {
     pub(super) fn point_color_tab_shown(&self) -> bool {
         let r = &self.document.recipe;
         !self.library_mode
-            && !self.view.compare
+            && !self.view.compare.before_only()
             && self.view.mixer_tab == super::state::MixerTab::PointColor
             && r.treatment() == crate::develop::Treatment::Color
             && renders_point_color(r)

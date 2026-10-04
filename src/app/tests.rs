@@ -3735,7 +3735,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     // Nor when the Library or Before opens meanwhile: the sample stops at once.
     for leave in [
         (|e: &mut Editor| e.library_mode = true) as fn(&mut Editor),
-        |e: &mut Editor| e.view.compare = true,
+        |e: &mut Editor| e.view.compare = before_after::Compare::BeforeOnly,
     ] {
         in_edit_frame(&ctx, &mut editor, |e| e.start_point_color_sample(0.2, 0.5));
         leave(&mut editor);
@@ -3745,7 +3745,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
         editor.events(&ctx);
         assert_eq!(editor.document.recipe.point_colors.len(), 1);
         editor.library_mode = false;
-        editor.view.compare = false;
+        editor.view.compare = before_after::Compare::Off;
         editor.view.tool = state::Tool::PointColor;
     }
     // A sample of a photo edited meanwhile is dropped.
@@ -3782,9 +3782,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     );
     assert_ne!(Some(pending), Some(&editor.effective_recipe()));
     // Not in Before, which shows the photo's defaults.
-    editor.view.compare = true;
+    editor.view.compare = before_after::Compare::BeforeOnly;
     assert_eq!(editor.visualized_swatch(), None);
-    editor.view.compare = false;
+    editor.view.compare = before_after::Compare::Off;
     // Not while an eyedropper is out, which samples the photo as it renders.
     editor.view.toggle(state::Tool::Defringe);
     assert_eq!(editor.visualized_swatch(), None);
