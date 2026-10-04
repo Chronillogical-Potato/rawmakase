@@ -193,6 +193,9 @@ impl Editor {
                             navigator,
                         } => self.set_presented(region, (id, size), navigator),
                     }
+                    // Pixels asked for by a hover or loupe that has since ended are
+                    // not kept.
+                    let samples = samples.filter(|_| self.preview.samples_requested);
                     if region {
                         self.preview.region_samples = samples;
                     } else {
