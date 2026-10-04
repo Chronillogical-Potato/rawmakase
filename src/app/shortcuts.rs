@@ -71,7 +71,7 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 43] = [
+const DEVELOP: [Shortcut; 47] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -82,6 +82,13 @@ const DEVELOP: [Shortcut; 43] = [
     ("Q", "Spot removal"),
     ("Shift+W", "Masking"),
     ("W", "White balance selector"),
+    ("Cmd+Option+Shift+T", "Targeted adjustment: Tone Curve"),
+    (
+        "Cmd+Option+Shift+H / S / L",
+        "Targeted adjustment: Hue / Saturation / Luminance",
+    ),
+    ("Cmd+Option+Shift+G", "Targeted adjustment: B&W mix"),
+    ("Esc", "Put the open tool away"),
     ("[ / ]", "Brush or red eye size (Shift: feather)"),
     (
         "Scroll",

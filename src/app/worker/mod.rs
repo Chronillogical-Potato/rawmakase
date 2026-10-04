@@ -84,6 +84,15 @@ pub enum Event {
         sampled: Box<crate::develop::Recipe>,
         result: Result<[f32; 3], String>,
     },
+    /// The Targeted Adjustment Tool's sample for the photo loaded as `id`, taken
+    /// with `sampled` where a drag started, or what to say instead.
+    TargetedSample {
+        id: u64,
+        /// The sampling task's generation; a later drag supersedes it.
+        generation: u64,
+        sampled: Box<crate::develop::Recipe>,
+        result: Result<crate::develop::targeted::TargetSample, String>,
+    },
     /// An Auto estimate for the photo loaded as `id`.
     Auto {
         id: u64,

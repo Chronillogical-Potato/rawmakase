@@ -4,6 +4,7 @@ use super::clipping::{self, ClipSide};
 use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
 use super::state::{MixerTab, Tool};
+use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
     SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
@@ -13,6 +14,7 @@ use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::{Panel, PanelState};
+use crate::develop::targeted::Target;
 use crate::develop::{
     NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, Treatment,
 };
@@ -484,6 +486,10 @@ impl Editor {
         let grading_document = self.document.history.id();
         let saved_curves = self.saved_curves();
         let mut curve_choice = None;
+        // The Targeted Adjustment Tool: the sliders a drag is moving, and a target
+        // button's click.
+        let targeted = self.targeted_weights();
+        let mut targeted_request = None;
         let view = &mut self.view;
         let (r, photo) = self.document.recipe_and_colors();
 
@@ -764,11 +770,20 @@ impl Editor {
         if switched_section(ui, "Tone Curve", &mut switch.state, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.;
+                let (button, _) = ui.allocate_exact_size(Vec2::new(22., 22.), Sense::hover());
+                if target_button(
+                    ui,
+                    button,
+                    view.is(Tool::Targeted(Target::ToneCurve)),
+                    &format!("Targeted adjustment: drag up or down on the photo to move the region of the tone curve there · {}", targeted_shortcut("T")),
+                ) {
+                    targeted_request = Some(Target::ToneCurve);
+                }
                 segmented(
                     ui,
                     &mut view.parametric_curve,
                     &[(true, "Parametric"), (false, "Point")],
-                    128.,
+                    112.,
                 );
                 if !view.parametric_curve {
                     let w = ui.available_width();
@@ -782,7 +797,13 @@ impl Editor {
             });
             ui.add_space(4.);
             if view.parametric_curve {
-                parametric_curve_ui(ui, &mut r.effects, &histogram);
+                let moving = targeted.filter(|w| w.target == Target::ToneCurve);
+                parametric_curve_ui(
+                    ui,
+                    &mut r.effects,
+                    &histogram,
+                    moving.and_then(|w| (0..4).find(|i| w.shares[*i] > 0.)),
+                );
                 subheading(ui, "Region");
                 for (i, name) in [
                     (3, "Highlights"),
@@ -790,9 +811,10 @@ impl Editor {
                     (1, "Darks"),
                     (0, "Shadows"),
                 ] {
-                    ui.push_id(("parametric", i), |ui| {
+                    let row = ui.push_id(("parametric", i), |ui| {
                         slider(ui, name, &mut r.effects.parametric[i], -1. ..=1., 0.)
                     });
+                    highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
                 }
             } else {
                 ui.push_id(view.selected_curve, |ui| {
@@ -934,8 +956,24 @@ impl Editor {
                 {
                     auto_mix_request = true;
                 }
+                let target = Rect::from_min_size(
+                    Pos2::new(button.left() - 28., button.top() + 1.),
+                    Vec2::splat(22.),
+                );
+                if target_button(
+                    ui,
+                    target,
+                    view.is(Tool::Targeted(Target::BlackWhite)),
+                    &format!(
+                        "Targeted adjustment: drag up or down on the photo to brighten or darken its color · {}",
+                        targeted_shortcut("G")
+                    ),
+                ) {
+                    targeted_request = Some(Target::BlackWhite);
+                }
+                let moving = targeted.filter(|w| w.target == Target::BlackWhite);
                 for (i, name) in BANDS.iter().enumerate() {
-                    ui.push_id(("bw", i), |ui| {
+                    let row = ui.push_id(("bw", i), |ui| {
                         slider_with(
                             ui,
                             name,
@@ -946,6 +984,7 @@ impl Editor {
                             Some((theme::gray(40), band_color(i))),
                         )
                     });
+                    highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
                 }
                 return;
             }
@@ -1015,7 +1054,29 @@ impl Editor {
                     }
                 });
             } else {
+                let all = view.mixer_adjust == 3;
+                let channel_tip = |c: usize| {
+                    let name = ["hue", "saturation", "luminance"][c];
+                    format!(
+                        "Targeted adjustment: drag up or down on the photo to change its color's {name} · {}",
+                        targeted_shortcut(["H", "S", "L"][c])
+                    )
+                };
                 control_row(ui, "Adjust", |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.;
+                    if !all {
+                        let (button, _) =
+                            ui.allocate_exact_size(Vec2::new(22., 22.), Sense::hover());
+                        let target = hsl_target(view.mixer_adjust);
+                        if target_button(
+                            ui,
+                            button,
+                            view.is(Tool::Targeted(target)),
+                            &channel_tip(view.mixer_adjust),
+                        ) {
+                            targeted_request = Some(target);
+                        }
+                    }
                     let w = ui.available_width();
                     segmented(
                         ui,
@@ -1024,17 +1085,31 @@ impl Editor {
                         w,
                     );
                 });
-                let channels = if view.mixer_adjust == 3 {
+                let channels = if all {
                     0..3
                 } else {
                     view.mixer_adjust..view.mixer_adjust + 1
                 };
                 for c in channels {
-                    if view.mixer_adjust == 3 {
-                        subheading(ui, ["Hue", "Saturation", "Luminance"][c]);
+                    let target = hsl_target(c);
+                    if all {
+                        let heading = subheading(ui, ["Hue", "Saturation", "Luminance"][c]);
+                        let button = Rect::from_min_size(
+                            Pos2::new(heading.right() - 24., heading.top() - 3.),
+                            Vec2::splat(22.),
+                        );
+                        if target_button(
+                            ui,
+                            button,
+                            view.is(Tool::Targeted(target)),
+                            &channel_tip(c),
+                        ) {
+                            targeted_request = Some(target);
+                        }
                     }
+                    let moving = targeted.filter(|w| w.target == target);
                     for (i, name) in BANDS.iter().enumerate() {
-                        ui.push_id(("hsl-all", c, i), |ui| {
+                        let row = ui.push_id(("hsl-all", c, i), |ui| {
                             slider_with(
                                 ui,
                                 name,
@@ -1045,6 +1120,11 @@ impl Editor {
                                 Some(hsl_gradient(i, c)),
                             );
                         });
+                        highlight_targeted(
+                            ui,
+                            row.response.rect,
+                            moving.map_or(0., |w| w.shares[i]),
+                        );
                     }
                 }
             }
@@ -1541,6 +1621,9 @@ impl Editor {
         if let Some(choice) = curve_choice {
             self.choose_point_curve(choice);
         }
+        if let Some(target) = targeted_request {
+            self.toggle_targeted(target);
+        }
         if upright_request {
             self.start_upright();
         }
@@ -1667,6 +1750,28 @@ impl PanelSwitch {
     }
     pub(super) fn finish(self, r: &mut Recipe) {
         r.panels.set(self.panel, self.state);
+    }
+}
+/// Marks a slider row a Targeted Adjustment Tool drag is moving, more strongly the
+/// larger its `share` of the drag.
+fn highlight_targeted(ui: &egui::Ui, row: Rect, share: f32) {
+    if share <= 0. {
+        return;
+    }
+    let painter = ui.painter();
+    painter.rect_filled(row, 3., Color32::from_white_alpha((6. + 16. * share) as u8));
+    painter.rect_filled(
+        Rect::from_min_size(row.left_top(), Vec2::new(3., row.height())),
+        1.5,
+        theme::gray(235).gamma_multiply(0.4 + 0.6 * share),
+    );
+}
+/// The Targeted Adjustment Tool's shortcut ending in `key`, as the tooltips show it.
+fn targeted_shortcut(key: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌘⌥⇧{key}")
+    } else {
+        format!("Ctrl+Alt+Shift+{key}")
     }
 }
 /// Group caption (Tone, Presence…) starting where the slider rails start.

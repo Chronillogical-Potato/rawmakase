@@ -36,6 +36,10 @@ impl Editor {
                 self.guided_overlay(ui, response, rect, area);
                 true
             }
+            Tool::Targeted(target) => {
+                self.targeted_overlay(ui, response, rect, target);
+                true
+            }
         }
     }
 }

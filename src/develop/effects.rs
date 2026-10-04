@@ -223,6 +223,11 @@ impl Effects {
         p[2] -= tint * 0.5;
         p
     }
+    /// The parametric curve's region (0 Shadows, 1 Darks, 2 Lights, 3 Highlights) an
+    /// input `x` falls in, between the split points.
+    pub fn parametric_region(&self, x: f32) -> usize {
+        self.splits.iter().filter(|s| x > **s).count()
+    }
     pub fn parametric(&self, x: f32) -> f32 {
         if self.parametric == [0.; 4] {
             return x;

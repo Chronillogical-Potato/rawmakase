@@ -91,6 +91,8 @@ impl Editor {
         if self.view.is(super::state::Tool::PointColor) && !self.point_color_tab_shown() {
             self.view.tool = super::state::Tool::None;
         }
+        // The Targeted Adjustment Tool goes with its panel's treatment.
+        self.keep_targeted_tool();
         // A sample still being taken is dropped with the dropper.
         if !self.view.is(super::state::Tool::PointColor)
             && self.document.point_color_pick.is_running()

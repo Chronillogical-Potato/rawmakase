@@ -92,8 +92,11 @@ pub(super) fn history_step_id() -> egui::Id {
     egui::Id::new("rawmakase-history-step")
 }
 pub(super) fn name_history_step(ui: &egui::Ui, name: String, value: String) {
-    ui.ctx()
-        .data_mut(|d| d.insert_temp(history_step_id(), (name, value)));
+    name_frame_step(ui.ctx(), name, value);
+}
+/// As [`name_history_step`], for an edit made outside a control during the frame.
+pub(super) fn name_frame_step(ctx: &egui::Context, name: String, value: String) {
+    ctx.data_mut(|d| d.insert_temp(history_step_id(), (name, value)));
 }
 /// The panel or sub-panel being drawn ("Detail", then "Sharpening"), so a
 /// slider's step reads "Sharpening Amount" rather than "Amount".
@@ -541,19 +544,22 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
 }
 /// Parametric curve: dragging up or down in the graph changes the region
 /// under the pointer, and the three handles below move the region splits.
+/// The parametric curve; `targeted` is the region a Targeted Adjustment Tool drag is
+/// moving, which shows as a hovered one does.
 pub(super) fn parametric_curve_ui(
     ui: &mut egui::Ui,
     effects: &mut crate::develop::effects::Effects,
     histogram: &[[u32; 256]; 3],
+    targeted: Option<usize>,
 ) {
     let size = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
     let rect = outer.shrink(4.);
     curve_backdrop(ui, rect, histogram, 0);
-    let region = |x: f32, splits: [f32; 3]| splits.iter().filter(|s| x > **s).count();
     let hover = response.hover_pos().filter(|p| rect.contains(*p));
-    let hovered_region = hover.map(|p| region((p.x - rect.left()) / rect.width(), effects.splits));
-    if let Some(i) = hovered_region {
+    let hovered_region =
+        hover.map(|p| effects.parametric_region((p.x - rect.left()) / rect.width()));
+    if let Some(i) = hovered_region.or(targeted) {
         let bounds = [
             0.,
             effects.splits[0],
@@ -574,7 +580,7 @@ pub(super) fn parametric_curve_ui(
         && let Some(p) = response.interact_pointer_pos()
     {
         let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
-        let i = region((origin.x - rect.left()) / rect.width(), effects.splits);
+        let i = effects.parametric_region((origin.x - rect.left()) / rect.width());
         let delta = -response.drag_delta().y / rect.height() * 2.;
         effects.parametric[i] = (effects.parametric[i] + delta).clamp(-1., 1.);
     }
