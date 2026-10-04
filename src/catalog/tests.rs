@@ -247,14 +247,13 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
     assert!(r.effects.monochrome);
     assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
     assert_eq!(r.effects.gray_mix[5], 30. * 0.01);
-    // Without stored values the default mix is kept, and that is reported.
+    // Without stored values or the photo, the default mix is kept.
     let text = r#"s = { ConvertToGrayscale = true, AutoGrayscaleMix = true, Exposure2012 = 0.5 }"#;
     let (r, w) = convert_develop(text, &m, &[], None)?;
     assert!(r.effects.monochrome);
     assert_eq!(r.exposure, 0.5);
     assert_eq!(r.effects.gray_mix, Recipe::default().effects.gray_mix);
-    assert_eq!(w.len(), 1, "{w:?}");
-    assert!(w[0].contains("Auto black & white mix"), "{w:?}");
+    assert!(w.is_empty(), "{w:?}");
     // With a monochrome default profile, Auto is still judged with its stored mix.
     let m = crate::raw::Metadata {
         model: "Synthetic".into(),

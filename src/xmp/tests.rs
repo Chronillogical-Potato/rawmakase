@@ -717,10 +717,9 @@ fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Res
 }
 /// Lightroom writes `AutoGrayscaleMix` with the mixer it resolved: stored mixer values
 /// win, as in Camera Raw. Auto without values (a preset) is estimated from the photo;
-/// without one it keeps the current mix, which only lenient application accepts,
-/// reporting it.
+/// without one it keeps the current mix.
 #[test]
-fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> {
+fn auto_grayscale_mix_uses_stored_mixer_or_estimates_it() -> Result<()> {
     let m = Metadata::default();
     let resolved = parse(
         Path::new("photo.xmp"),
@@ -758,13 +757,12 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
             "",
         ),
     )?;
-    assert!(auto.apply(&base, &m, &[], None).is_err());
-    let (r, skipped) = auto.apply_lenient(&base, &m, &[], None)?;
+    // Without the photo (listing which presets fit it), the current mix stays, as
+    // Auto white balance leaves white balance.
+    let r = auto.apply(&base, &m, &[], None)?;
     assert!(r.effects.monochrome);
     assert_eq!(r.exposure, 0.5);
     assert_eq!(r.effects.gray_mix, base.effects.gray_mix);
-    assert_eq!(skipped.len(), 1, "{skipped:?}");
-    assert!(skipped[0].contains("Auto black & white mix"), "{skipped:?}");
     // With the photo, Auto alone is estimated from it, as the B&W panel's Auto does.
     let (width, height) = (16u32, 8u32);
     let photo_metadata = Metadata {
@@ -818,7 +816,7 @@ fn auto_grayscale_mix_uses_stored_mixer_or_reports_the_kept_mix() -> Result<()> 
         Path::new("auto.xmp"),
         &xml(r#"c:AutoGrayscaleMix="True""#, ""),
     )?;
-    assert!(auto.apply(&base, &m, &[], None).is_err());
+    assert_eq!(auto.apply(&base, &m, &[], None)?.effects.gray_mix, [0.; 8]);
     Ok(())
 }
 /// Camera Raw reads the Red, Green and Blue point curves only as the full set
@@ -1043,4 +1041,36 @@ fn red_eye_catalog_tables_parse_as_data() -> Result<()> {
     assert!((eyes[0].radius[0] - 0.001).abs() < 1e-7 && (eyes[0].radius[1] - 0.001).abs() < 1e-7);
     assert_eq!(eyes[0].correlation, -0.1);
     Ok(())
+}
+/// A photo black & white only by its profile is written as Lightroom writes it,
+/// with its black & white mix.
+#[test]
+fn black_white_by_profile_writes_its_mix() {
+    let m = Metadata {
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let mut profile = crate::camera_profiles::CameraProfile::camera_matrix_default(&m)
+        .unwrap()
+        .with_test_tables();
+    profile.enhanced.as_mut().unwrap().monochrome = true;
+    let mut r = Recipe {
+        profile: Some(std::sync::Arc::new(profile)),
+        engine: 3,
+        ..Default::default()
+    };
+    r.effects.gray_mix[5] = -0.4;
+    assert!(!r.effects.monochrome);
+    let photo = crate::xmp::write::Photo {
+        raw_name: "IMG.ARW".into(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:ConvertToGrayscale="True""#),
+        "{packet}"
+    );
+    assert!(packet.contains(r#"crs:GrayMixerBlue="-40""#), "{packet}");
 }

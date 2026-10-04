@@ -52,6 +52,7 @@ impl Editor {
     /// While the photo is still decoding, a conversion that needs the Auto mix waits
     /// for it ([`Editor::finish_pending_treatment`]).
     pub(super) fn set_treatment(&mut self, treatment: Treatment) {
+        self.document.pending_treatment = None;
         if self.document.recipe.treatment() == treatment {
             return;
         }
@@ -104,7 +105,13 @@ impl Editor {
 
     /// V: switches between Color and Black & White.
     pub(super) fn toggle_treatment(&mut self) {
-        self.set_treatment(match self.document.recipe.treatment() {
+        // A conversion still waiting for the photo counts as done: V again cancels it.
+        let shown = self
+            .document
+            .pending_treatment
+            .take()
+            .unwrap_or_else(|| self.document.recipe.treatment());
+        self.set_treatment(match shown {
             Treatment::Color => Treatment::BlackWhite,
             Treatment::BlackWhite => Treatment::Color,
         });

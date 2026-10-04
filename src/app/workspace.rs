@@ -715,9 +715,11 @@ impl Editor {
                     reset = true;
                 }
                 // Lightroom's Convert to Black & White.
-                if i.key_pressed(egui::Key::V) && !i.modifiers.any() {
-                    treatment = true;
-                }
+                // Once per press: holding V does not flip it back and forth.
+                treatment = !i.modifiers.any()
+                    && i.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, .. })
+                    });
                 // Lightroom's Auto Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
                     auto = true;

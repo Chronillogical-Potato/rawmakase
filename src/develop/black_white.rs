@@ -122,23 +122,61 @@ impl ColorSpread {
         if trace.is_nan() || trace <= 1e-12 {
             return neutral;
         }
-        // Power iteration from the covariance's largest column, which lies in its
-        // range and so is never orthogonal to the axis; 3×3 converges quickly.
-        let largest = (0..3).fold(0, |best, i| if c[i][i] > c[best][best] { i } else { best });
-        let mut v: [f64; 3] = std::array::from_fn(|i| c[i][largest]);
-        for _ in 0..200 {
-            let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if norm.is_nan() || norm <= 0. {
-                return neutral;
+        // Cyclic Jacobi rotations diagonalise the symmetric 3×3 covariance; the
+        // eigenvector of the largest eigenvalue is the axis.
+        let mut a = *c;
+        let mut vectors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        for _ in 0..50 {
+            let off = a[0][1].powi(2) + a[0][2].powi(2) + a[1][2].powi(2);
+            if off.is_nan() || off <= 1e-30 * trace * trace {
+                break;
             }
-            let unit = v.map(|x| x / norm);
-            v = std::array::from_fn(|i| (0..3).map(|j| c[i][j] * unit[j]).sum());
+            for (p, q) in [(0, 1), (0, 2), (1, 2)] {
+                if a[p][q] == 0. {
+                    continue;
+                }
+                let theta = (a[q][q] - a[p][p]) / (2. * a[p][q]);
+                let t = theta.signum() / (theta.abs() + (theta * theta + 1.).sqrt());
+                let t = if theta == 0. { 1. } else { t };
+                let (cos, sin) = (1. / (t * t + 1.).sqrt(), t / (t * t + 1.).sqrt());
+                let rotated = |m: &[[f64; 3]; 3], i: usize, j: usize| -> f64 {
+                    // (Jᵀ m J)[i][j] for the rotation J in the (p, q) plane.
+                    let column = |k: usize, j: usize| {
+                        if j == p {
+                            cos * m[k][p] - sin * m[k][q]
+                        } else if j == q {
+                            sin * m[k][p] + cos * m[k][q]
+                        } else {
+                            m[k][j]
+                        }
+                    };
+                    if i == p {
+                        cos * column(p, j) - sin * column(q, j)
+                    } else if i == q {
+                        sin * column(p, j) + cos * column(q, j)
+                    } else {
+                        column(i, j)
+                    }
+                };
+                a = std::array::from_fn(|i| std::array::from_fn(|j| rotated(&a, i, j)));
+                vectors = std::array::from_fn(|k| {
+                    std::array::from_fn(|j| {
+                        if j == p {
+                            cos * vectors[k][p] - sin * vectors[k][q]
+                        } else if j == q {
+                            sin * vectors[k][p] + cos * vectors[k][q]
+                        } else {
+                            vectors[k][j]
+                        }
+                    })
+                });
+            }
         }
-        let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if norm.is_nan() || norm <= 0. {
+        let largest = (0..3).fold(0, |best, i| if a[i][i] > a[best][best] { i } else { best });
+        let mut v: [f64; 3] = std::array::from_fn(|k| vectors[k][largest]);
+        if v.iter().any(|x| x.is_nan()) {
             return neutral;
         }
-        let mut v = v.map(|x| x / norm);
         if v.iter().sum::<f64>() < 0. {
             v = v.map(|x| -x);
         }
@@ -291,6 +329,16 @@ mod tests {
         assert!(
             blue_mix[5] > mix[5] + 5 && blue_mix[6] > mix[6] + 5,
             "{blue_mix:?}"
+        );
+        // A dominant axis away from the largest channel's variance is found too.
+        let correlated = ColorSpread {
+            mean: [0.2; 3],
+            covariance: [[1., 1., 0.], [1., 1., 0.], [0., 0., 1.5]],
+        };
+        let axis = correlated.principal_axis();
+        assert!(
+            (axis[0] - 0.5f64.sqrt()).abs() < 1e-9 && axis[2].abs() < 1e-9,
+            "{axis:?}"
         );
         // Two equally bright colors: an axis with no brightness component is found too.
         let opposed = spread([1., -1., 0.]);

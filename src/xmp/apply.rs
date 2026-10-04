@@ -52,8 +52,6 @@ impl Settings<'_> {
         Ok(())
     }
 }
-const UNRESOLVED_AUTO_GRAY_MIX: &str =
-    "Auto black & white mix without stored mixer values needs the photo; the current mix is kept";
 const METADATA: &[&str] = &[
     "Version",
     "ProcessVersion",
@@ -602,8 +600,8 @@ impl Preset {
     /// Lightroom resolves Auto black & white into the stored `GrayMixer` values,
     /// which then render as Auto off does in Camera Raw, so stored values are kept.
     /// Without them (a preset naming Auto alone), the Auto mix is estimated from the
-    /// photo as the B&W panel's Auto does; without the photo, the current mix stays,
-    /// which only a lenient application accepts.
+    /// photo as the B&W panel's Auto does; without the photo the current mix stays,
+    /// as Auto white balance leaves white balance.
     fn apply_auto_gray_mix(
         &self,
         settings: &mut Settings<'_>,
@@ -612,18 +610,16 @@ impl Preset {
         image: Option<&CameraImage>,
     ) -> Result<()> {
         settings.seen.insert("AutoGrayscaleMix".into());
-        if !self.leaves_auto_gray_mix(r)? {
-            return Ok(());
+        if self.leaves_auto_gray_mix(r)?
+            && let Some(im) = image
+        {
+            let spread = crate::develop::ColorSpread::measure(im);
+            r.effects.gray_mix = crate::develop::AutoMix {
+                spread: &spread,
+                metadata: m,
+            }
+            .for_recipe(r);
         }
-        let Some(im) = image else {
-            anyhow::bail!("{UNRESOLVED_AUTO_GRAY_MIX}");
-        };
-        let spread = crate::develop::ColorSpread::measure(im);
-        r.effects.gray_mix = crate::develop::AutoMix {
-            spread: &spread,
-            metadata: m,
-        }
-        .for_recipe(r);
         Ok(())
     }
     /// Whether Auto black & white applies to a black & white result (by Treatment

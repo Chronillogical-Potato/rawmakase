@@ -2816,6 +2816,22 @@ fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
         |ui| editor.draw(ui),
     );
     output.textures_delta.clear();
+    // Held down, V repeats; the repeats change nothing.
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            events: vec![egui::Event::Key {
+                key: egui::Key::V,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ui| editor.draw(ui),
+    );
+    output.textures_delta.clear();
     let auto = editor
         .photo_colors()
         .unwrap()
@@ -2866,6 +2882,16 @@ fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
 #[test]
 fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     let ctx = egui::Context::default();
+    // V twice while decoding: the second cancels the first.
+    let (mut editor, image) =
+        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
+    editor.document.set_image(image);
+    in_edit_frame(&ctx, &mut editor, Editor::finish_pending_treatment);
+    assert!(!editor.document.recipe.effects.monochrome);
+    assert_eq!(editor.document.history.steps().1, 0);
+    // Once: the conversion waits for the photo.
     let (mut editor, image) =
         editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
