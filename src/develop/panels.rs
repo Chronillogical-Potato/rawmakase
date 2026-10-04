@@ -127,6 +127,7 @@ impl Panel {
             // outside the panel's controls (inferred; not yet measured).
             Panel::LensCorrections => {
                 r.lens_profile = false;
+                r.lens_profile_choice = defaults.lens_profile_choice.clone();
                 r.lens_ca = false;
                 r.lens_distortion = defaults.lens_distortion;
                 r.lens_vignetting = defaults.lens_vignetting;

@@ -972,3 +972,198 @@ fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow:
     assert!(luma(shown(&moved, 1)?) > luma(shown(&mono, 1)?) + 0.02);
     Ok(())
 }
+/// A flat image of the synthetic lens photo, with its imported test profiles.
+fn lens_photo() -> CameraImage {
+    let mut m = crate::lens::choice::tests::photo();
+    m.width = 90;
+    m.height = 60;
+    m.wb = [1.; 3];
+    m.daylight_wb = [1.; 3];
+    m.matrix = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    // Listed for the photo's own size: corrections fit its frame.
+    m.lens_profiles = crate::lens::choice::tests::library().for_photo(&m);
+    CameraImage {
+        recovered: Default::default(),
+        width: 90,
+        height: 60,
+        pixels: vec![[0.1; 3]; 90 * 60],
+        metadata: m,
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }
+}
+fn profile_recipe(setup: crate::lens::choice::LensProfileSetup, filename: &str) -> Recipe {
+    Recipe {
+        lens_profile: true,
+        lens_profile_choice: crate::lens::choice::LensProfileChoice {
+            setup,
+            id: (!filename.is_empty()).then(|| crate::lens::choice::LensProfileId {
+                name: String::new(),
+                filename: filename.into(),
+                digest: String::new(),
+                embedded: false,
+            }),
+        },
+        ..Default::default()
+    }
+}
+/// The lens profile choice is left out of recipes at its default, so releases that
+/// predate it open them, and round trips with the profile it names.
+#[test]
+fn lens_profile_choice_round_trips_and_is_omitted_by_default() {
+    use crate::lens::choice::LensProfileSetup;
+    let json = serde_json::to_value(Recipe::default()).unwrap();
+    assert!(json.get("lens_profile_choice").is_none());
+    let mut r = profile_recipe(LensProfileSetup::Custom, "Mine 35mm F2.lcp");
+    r.lens_profile_choice.id.as_mut().unwrap().digest = "0123ABCD".into();
+    let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back.lens_profile_choice, r.lens_profile_choice);
+    assert!(back.unknown.is_empty());
+    let old: Recipe = serde_json::from_value(json).unwrap();
+    assert!(old.lens_profile_choice.is_default());
+}
+/// The chosen profile is the one rendered; Default and Auto render the best match.
+#[test]
+fn the_chosen_lens_profile_renders() {
+    use crate::lens::choice::{
+        LensProfileSetup,
+        tests::{ADOBE, MINE},
+    };
+    let im = lens_photo();
+    let m = &im.metadata;
+    let corner = |r: &Recipe| r.lens_correction(m).unwrap().vignetting_gain(1.);
+    let auto = corner(&profile_recipe(LensProfileSetup::Default, ""));
+    assert_eq!(auto, corner(&profile_recipe(LensProfileSetup::Auto, ADOBE)));
+    let mine = corner(&profile_recipe(LensProfileSetup::Custom, MINE));
+    assert!(auto > mine + 0.05 && mine > 1.01, "{auto} {mine}");
+    // Off, nothing renders and nothing is reported.
+    let off = Recipe {
+        lens_profile: false,
+        ..profile_recipe(LensProfileSetup::Custom, MINE)
+    };
+    assert!(off.lens_correction(m).is_none());
+    assert_eq!(off.missing_lens_profile(m), None);
+}
+/// The Distortion and Vignetting amounts scale the chosen profile: 0 leaves the photo
+/// as without it, 200 doubles the correction.
+#[test]
+fn lens_profile_amounts_scale_the_correction() {
+    use crate::lens::choice::{LensProfileSetup, tests::OTHER};
+    let im = lens_photo();
+    let base = profile_recipe(LensProfileSetup::Custom, OTHER);
+    let at = |distortion: f32, vignetting: f32| Recipe {
+        lens_distortion: distortion,
+        lens_vignetting: vignetting,
+        ..base.clone()
+    };
+    let gain = |r: &Recipe| VignetteField::new(&im, r).unwrap().gain(0., 0.);
+    let (g0, g1, g2) = (gain(&at(1., 0.)), gain(&at(1., 1.)), gain(&at(1., 2.)));
+    assert_eq!(g0, 1.);
+    assert!(g1 > 1.2 && (g2 - g1 * g1).abs() < 1e-4, "{g1} {g2}");
+    let scale = |r: &Recipe| {
+        let map = crate::develop::image_space::LensMap::new(&im, r).unwrap();
+        map.lens.radial_scale_with(1., map.amount)[1]
+    };
+    let (s0, s1, s2) = (scale(&at(0., 1.)), scale(&at(1., 1.)), scale(&at(2., 1.)));
+    assert_eq!(s0, 1.);
+    assert!(
+        s1 > 1.005 && ((s2 - 1.) - 2. * (s1 - 1.)).abs() < 1e-5,
+        "{s1} {s2}"
+    );
+    // As rendered: corners brighten with the amount, and 0 matches no profile.
+    let lum = |r: &Recipe| {
+        let out = render(&im, r, 0).unwrap();
+        out.pixels[0].iter().sum::<f32>()
+    };
+    let none = lum(&Recipe::default());
+    assert!((lum(&at(0., 0.)) - none).abs() < 1e-4);
+    assert!(lum(&at(0., 2.)) > lum(&at(0., 1.)) + 0.01 && lum(&at(0., 1.)) > none + 0.01);
+}
+/// A profile's distortion never uncovers white, at any amount, and Constrain Crop
+/// still crops out what the Transform sliders uncover through it.
+#[test]
+fn lens_profile_distortion_with_constrain_crop_renders_no_white() {
+    use crate::lens::choice::{LensProfileSetup, tests::OTHER};
+    let im = lens_photo();
+    let white = |out: &Rendered| {
+        out.pixels
+            .iter()
+            .filter(|p| p.iter().all(|v| *v > 0.99))
+            .count()
+    };
+    let mut r = Recipe {
+        lens_distortion: 2.,
+        ..profile_recipe(LensProfileSetup::Custom, OTHER)
+    };
+    assert_eq!(white(&render(&im, &r, 0).unwrap()), 0);
+    r.transform.vertical = 0.6;
+    assert!(white(&render(&im, &r, 0).unwrap()) > 100);
+    r.constrain_crop = true;
+    let constrained = render(&im, &r, 0).unwrap();
+    assert_eq!(white(&constrained), 0);
+    let aspect = constrained.width as f32 / constrained.height as f32;
+    assert!((aspect - 1.5).abs() < 0.06, "{aspect}");
+}
+/// Switching the Lens Corrections panel off renders no profile, keeps the choice and
+/// reports nothing missing.
+#[test]
+fn lens_corrections_panel_off_bypasses_the_chosen_profile() {
+    use crate::develop::panels::{Panel, PanelState};
+    use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    let im = lens_photo();
+    let mut r = profile_recipe(LensProfileSetup::Custom, "Gone.lcp");
+    assert!(r.missing_lens_profile(&im.metadata).is_some());
+    r.lens_profile_choice = profile_recipe(LensProfileSetup::Custom, MINE).lens_profile_choice;
+    r.panels.set(Panel::LensCorrections, PanelState::Off);
+    assert!(r.as_rendered().lens_correction(&im.metadata).is_none());
+    assert_eq!(r.lens_profile_choice.setup, LensProfileSetup::Custom);
+    assert_eq!(
+        render(&im, &r, 0).unwrap().pixels,
+        render(&im, &Recipe::default(), 0).unwrap().pixels
+    );
+    r.lens_profile_choice.id = profile_recipe(LensProfileSetup::Custom, "Gone.lcp")
+        .lens_profile_choice
+        .id;
+    assert_eq!(r.missing_lens_profile(&im.metadata), None);
+}
+/// A profile the edit names that isn't imported is reported with what renders instead.
+#[test]
+fn a_missing_named_lens_profile_is_reported() {
+    use crate::lens::choice::LensProfileSetup;
+    let im = lens_photo();
+    let m = &im.metadata;
+    let mut custom = profile_recipe(LensProfileSetup::Custom, "Gone.lcp");
+    custom.lens_profile_choice.id.as_mut().unwrap().name = "Adobe (Gone)".into();
+    assert_eq!(
+        custom.missing_lens_profile(m).as_deref(),
+        Some("Lens profile \"Adobe (Gone)\" isn't imported; no lens correction")
+    );
+    assert!(custom.lens_correction(m).is_none());
+    let auto = Recipe {
+        lens_profile_choice: crate::lens::choice::LensProfileChoice {
+            setup: LensProfileSetup::Auto,
+            ..custom.lens_profile_choice.clone()
+        },
+        ..custom.clone()
+    };
+    assert_eq!(
+        auto.missing_lens_profile(m).as_deref(),
+        Some("Lens profile \"Adobe (Gone)\" isn't imported; using Adobe (Testcam 35mm F2)")
+    );
+    assert!(
+        profile_recipe(LensProfileSetup::Auto, "")
+            .missing_lens_profile(m)
+            .is_none()
+    );
+}
+/// Changing the lens profile choice is an edit of the Lens Corrections panel, so a
+/// switched-off panel turns on with it.
+#[test]
+fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
+    use crate::develop::panels::Panel;
+    use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    let before = profile_recipe(LensProfileSetup::Auto, "");
+    let after = profile_recipe(LensProfileSetup::Custom, MINE);
+    assert!(Panel::LensCorrections.holds_change(&before, &after));
+}

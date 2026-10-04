@@ -20,6 +20,8 @@ use crate::develop::{
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
+mod lens_profile;
+
 /// A histogram corner's clipping triangle: its corner point, which way it
 /// points (1 right, -1 left) and the area that takes its clicks.
 #[derive(Clone, Copy)]
@@ -1214,8 +1216,6 @@ impl Editor {
         let mut switch = PanelSwitch::new(r, Panel::LensCorrections);
         if switched_section(ui, "Lens Corrections", &mut switch.state, |ui| {
             subheading(ui, "Profile");
-            let builtin = metadata.as_ref().and_then(|m| m.lens.as_ref());
-            let adobe = metadata.as_ref().and_then(|m| m.profile_lens.as_ref());
             ui.add_enabled_ui(r.engine >= 4, |ui| {
                 control_row(ui, "", |ui| {
                     ui.checkbox(&mut r.lens_ca, "Remove Chromatic Aberration")
@@ -1251,17 +1251,7 @@ impl Editor {
                         .color(theme::gray(200)),
                 );
             });
-            control_row(ui, "Profile", |ui| {
-                ui.label(
-                    egui::RichText::new(
-                        adobe
-                            .or(builtin)
-                            .map_or("No matching profile", |l| l.source.as_str()),
-                    )
-                    .size(11.)
-                    .color(theme::gray(200)),
-                );
-            });
+            lens_profile::profile_menus(ui, r, metadata.as_ref());
             // Said here as well as on import, so a missing profile is never silent.
             if let Some(missing) = metadata.as_ref().and_then(|m| r.missing_lens_profile(m)) {
                 control_row(ui, "", |ui| {
@@ -1359,6 +1349,7 @@ impl Editor {
             let defaults = Recipe::default();
             r.lens_ca = defaults.lens_ca;
             r.lens_profile = defaults.lens_profile;
+            r.lens_profile_choice = defaults.lens_profile_choice;
             r.lens_distortion = defaults.lens_distortion;
             r.lens_vignetting = defaults.lens_vignetting;
             r.lens_manual_distortion = defaults.lens_manual_distortion;

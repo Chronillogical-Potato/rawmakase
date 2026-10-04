@@ -118,7 +118,8 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [lens/mod.rs](../src/lens/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. |
 | [lens/auto_ca.rs](../src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
 | [lens/embedded.rs](../src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
-| [lens/lcp.rs](../src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles` and matched to the photo's lens. |
+| [lens/lcp.rs](../src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles`, cached, listed for the photo's camera and matched to its lens. |
+| [lens/choice.rs](../src/lens/choice.rs) | Lightroom's lens profile Setup (Default, Auto, Custom), the profile an edit names, which one renders, and the Make/Model/Profile menus. |
 
 ## XMP and presets
 
@@ -210,6 +211,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [onboarding.rs](../src/app/onboarding.rs) | First-run setup: a catalog, then optional Lightroom profiles and presets. |
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
+| [inspector/lens_profile.rs](../src/app/inspector/lens_profile.rs) | Lens Corrections' Setup, Make, Model and Profile menus over the imported lens profiles. |
 | [color_grading.rs](../src/app/color_grading.rs) | The Color Grading panel: 3-Way and single-wheel views, hue/saturation wheels (Shift constrains, Cmd fine, double-click resets), Luminance, Blending and Balance, over the recipe's grading values. |
 | [targeted_tool.rs](../src/app/targeted_tool.rs) | The Targeted Adjustment Tool over the photo: its drag, the sample off the UI thread, the panels' target buttons and shortcuts. |
 | [point_color_panel.rs](../src/app/point_color_panel.rs) | The Color Mixer's Point Color tab: the dropper, swatches, shifts, Variance, Range, the range handles and Visualize Range. |

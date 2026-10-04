@@ -276,6 +276,7 @@ impl SettingGroup {
             LensProfileCorrections => {
                 to.lens_builtin = from.lens_builtin;
                 to.lens_profile = from.lens_profile;
+                to.lens_profile_choice = from.lens_profile_choice.clone();
                 to.lens_distortion = from.lens_distortion;
                 to.lens_vignetting = from.lens_vignetting;
                 to.lens_manual_distortion = from.lens_manual_distortion;
@@ -463,6 +464,18 @@ pub fn transfer(
             }
         }
     }
+    // A Custom lens profile this camera can't use (not imported, or made for a smaller
+    // sensor) is kept as the edit names it, and said, as on import.
+    let embedded = recipe
+        .lens_profile_choice
+        .id
+        .as_ref()
+        .is_some_and(|id| id.embedded);
+    if selection.contains(SettingGroup::LensProfileCorrections)
+        && (embedded || recipe.lens_profile_in_use(m).missing.is_some())
+    {
+        notes.extend(recipe.missing_lens_profile(m));
+    }
     // The baseline depends on both the profile and the process version.
     if selection.contains(SettingGroup::TreatmentAndProfile)
         || selection.contains(SettingGroup::ProcessVersion)
@@ -519,6 +532,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         engine: _,
         lens_builtin: _,
         lens_profile: _,
+        lens_profile_choice: _,
         lens_distortion: _,
         lens_vignetting: _,
         lens_manual_distortion: _,
@@ -611,6 +625,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("engine", Group(ProcessVersion)),
         ("lens_builtin", Group(LensProfileCorrections)),
         ("lens_profile", Group(LensProfileCorrections)),
+        ("lens_profile_choice", Group(LensProfileCorrections)),
         ("lens_distortion", Group(LensProfileCorrections)),
         ("lens_vignetting", Group(LensProfileCorrections)),
         ("lens_manual_distortion", Group(LensProfileCorrections)),

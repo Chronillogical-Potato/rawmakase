@@ -21,6 +21,13 @@ pub struct Recipe {
     /// matches the lens, in place of the built-in correction.
     #[serde(default)]
     pub lens_profile: bool,
+    /// Lightroom's profile Setup and the profile the edit names. Omitted at Default
+    /// with no profile named, so releases that predate it read the recipe.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::lens::choice::LensProfileChoice::is_default"
+    )]
+    pub lens_profile_choice: crate::lens::choice::LensProfileChoice,
     /// Profile correction amounts, Lightroom's Distortion and Vignetting sliders
     /// (0–2, 1 = 100).
     #[serde(default = "one")]
@@ -163,6 +170,7 @@ impl Default for Recipe {
             engine: 4,
             lens_builtin: true,
             lens_profile: false,
+            lens_profile_choice: Default::default(),
             lens_distortion: 1.,
             lens_vignetting: 1.,
             lens_manual_distortion: 0.,
@@ -522,34 +530,58 @@ impl Recipe {
             self.lens_builtin = self.lens_profile;
         }
     }
-    /// Why Enable Profile Corrections cannot render with an Adobe profile here, and
-    /// what renders instead, when it is on.
+    /// The imported Adobe profile Enable Profile Corrections uses here, and the one
+    /// the edit names when it isn't imported.
+    pub fn lens_profile_in_use<'c, 'p>(
+        &'c self,
+        m: &'p Metadata,
+    ) -> crate::lens::choice::Resolved<'c, 'p> {
+        if !self.lens_profile || self.engine < 4 {
+            return Default::default();
+        }
+        self.lens_profile_choice.resolve(&m.lens_profiles, m)
+    }
+    /// Why Enable Profile Corrections cannot render with the Adobe profile it should
+    /// here, and what renders instead, when it is on.
     pub fn missing_lens_profile(&self, m: &Metadata) -> Option<String> {
         // A Lens Corrections panel switched off renders no lens correction at all.
         let panel = self
             .panels
             .state(crate::develop::panels::Panel::LensCorrections);
-        if !self.lens_profile
-            || m.profile_lens.is_some()
-            || panel == crate::develop::panels::PanelState::Off
-            || self.engine < 4
+        if panel == crate::develop::panels::PanelState::Off || !self.lens_profile || self.engine < 4
         {
             return None;
         }
-        let lens = if m.lens_model.is_empty() {
-            "this lens".to_string()
-        } else {
-            m.lens_model.clone()
+        let resolved = self.lens_profile_in_use(m);
+        // The profile the RAW carries renders as its built-in correction.
+        if let Some(id) = self
+            .lens_profile_choice
+            .id
+            .as_ref()
+            .filter(|id| id.embedded)
+        {
+            return m.lens.as_ref().filter(|_| self.lens_builtin).is_none().then(|| {
+                format!(
+                    "Lens profile \"{}\" comes with the camera, but this file has none; no lens correction",
+                    id.label()
+                )
+            });
+        }
+        let profile = match (resolved.missing, m.lens_model.as_str()) {
+            (Some(id), _) => format!("Lens profile \"{}\"", id.label()),
+            (None, _) if resolved.used.is_some() => return None,
+            (None, "") => "Adobe lens profile for this lens".to_string(),
+            (None, lens) => format!("Adobe lens profile for {lens}"),
         };
-        Some(match m.lens.as_ref().filter(|_| self.lens_builtin) {
-            Some(builtin) => format!(
-                "Adobe lens profile for {lens} isn't imported; using {}",
-                builtin.source
-            ),
-            None => format!("Adobe lens profile for {lens} isn't imported; no lens correction"),
-        })
+        let instead = match (resolved.used, m.lens.as_ref().filter(|_| self.lens_builtin)) {
+            (Some(used), _) => format!("using {}", used.profile.name),
+            (None, Some(builtin)) => format!("using {}", builtin.source),
+            (None, None) => "no lens correction".to_string(),
+        };
+        Some(format!("{profile} isn't imported; {instead}"))
     }
-    /// The built-in lens correction to apply, if enabled and present in the file.
+    /// The lens correction to apply: the Adobe profile in use, else the built-in
+    /// correction if enabled and present in the file.
     pub(crate) fn lens_correction<'a>(
         &self,
         m: &'a Metadata,
@@ -557,9 +589,9 @@ impl Recipe {
         if self.engine < 4 {
             return None;
         }
-        m.profile_lens
-            .as_ref()
-            .filter(|_| self.lens_profile)
+        self.lens_profile_in_use(m)
+            .used
+            .and_then(|c| c.correction(m))
             .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
     }
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments

@@ -894,14 +894,36 @@ impl Preset {
         let v = settings.values;
         settings.assign("CropAngle", &mut r.straighten, 1., -45., 45.)?;
         settings.seen.insert("LensProfileEnable".into());
-        // Which Adobe profile Lightroom chose; RAWmakase matches imported profiles itself.
+        // Which Adobe profile the edit uses. Whether Lightroom took it from the RAW
+        // instead does not change which profile is named.
         for key in [
+            "LensProfileSetup",
             "LensProfileName",
             "LensProfileFilename",
             "LensProfileDigest",
             "LensProfileIsEmbedded",
         ] {
             settings.seen.insert(key.into());
+        }
+        let embedded = boolean(v, "LensProfileIsEmbedded")?.unwrap_or(false);
+        let text = |key: &str| v.get(key).map(|s| s.trim().to_string()).unwrap_or_default();
+        let (name, filename) = (text("LensProfileName"), text("LensProfileFilename"));
+        let id = (!name.is_empty() || !filename.is_empty()).then(|| {
+            crate::lens::choice::LensProfileId {
+                name,
+                filename,
+                digest: text("LensProfileDigest"),
+                embedded,
+            }
+        });
+        if let Some(setup) = v.get("LensProfileSetup") {
+            // A Setup names its profile, or none (a preset's "Default").
+            r.lens_profile_choice = crate::lens::choice::LensProfileChoice {
+                setup: crate::lens::choice::LensProfileSetup::from_xmp(setup.trim()),
+                id,
+            };
+        } else if id.is_some() {
+            r.lens_profile_choice.id = id;
         }
         settings.assign(
             "LensProfileDistortionScale",
@@ -1090,7 +1112,6 @@ impl Preset {
                 );
             }
         }
-        settings.seen.insert("LensProfileSetup".into());
         // Lightroom 15 records whether the crop is kept inside the image; it only
         // constrains the crop tool and does not change rendering.
         settings.seen.insert("CropConstrainToUnitSquare".into());
