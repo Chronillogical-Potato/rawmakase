@@ -40,12 +40,13 @@ impl Primaries {
     /// From linear display RGB (sRGB primaries adapted to D50, where the colour
     /// stage works) into these primaries, and back.
     fn matrices(self) -> [Matrix; 2] {
-        let [into, back] = match self {
+        // Display RGB is sRGB already; the others go through ProPhoto.
+        let [from_pro, to_pro] = match self {
             Self::Srgb => return [IDENTITY, IDENTITY],
             Self::AdobeRgb => [PRO_TO_ADOBE, ADOBE_TO_PRO],
             Self::ProPhoto => [IDENTITY, IDENTITY],
         };
-        [matmul(into, RGB_TO_PRO), matmul(PRO_TO_RGB, back)]
+        [matmul(from_pro, RGB_TO_PRO), matmul(PRO_TO_RGB, to_pro)]
     }
 }
 /// How a table's values are encoded (`dng_rgb_table::gamma`).
@@ -152,7 +153,7 @@ impl RgbTable {
         if data.len() == end + 32 {
             ensure!(word(end + 28) <= 1, "Unsupported RGB table flags");
         }
-        let grid = |i: usize| ((i * 0xFFFF + (divisions >> 1)) / (divisions - 1)) as u16;
+        let grid = |i: usize| ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
         let samples = data[16..end]
             .as_chunks::<6>()
             .0
@@ -316,7 +317,7 @@ pub(super) mod tests {
         for v in [1u32, 1, 3, divisions as u32] {
             bytes.extend(v.to_le_bytes());
         }
-        let grid = |i: usize| ((i * 0xFFFF + (divisions >> 1)) / (divisions - 1)) as u16;
+        let grid = |i: usize| ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
         for r in 0..divisions {
             for g in 0..divisions {
                 for b in 0..divisions {
@@ -347,7 +348,7 @@ pub(super) mod tests {
             bytes.extend(v.to_le_bytes());
         }
         for i in 0..divisions {
-            let identity = ((i * 0xFFFF + (divisions >> 1)) / (divisions - 1)) as u16;
+            let identity = ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
             for v in f(i as f32 / (divisions - 1) as f32) {
                 let v = (v.clamp(0., 1.) * 65535.).round() as u16;
                 bytes.extend(v.wrapping_sub(identity).to_le_bytes());
@@ -469,6 +470,32 @@ pub(super) mod tests {
         assert!(RgbTable::decode(&encode(&flagged)).is_ok());
         flagged.splice(flagged.len() - 4.., 2u32.to_le_bytes());
         assert!(RgbTable::decode(&encode(&flagged)).is_err());
+    }
+    /// Samples are differences from the identity, rounded to 16 bits: a table of
+    /// zero differences is the identity at any size, endpoints included.
+    #[test]
+    fn zero_differences_decode_to_the_identity() {
+        for divisions in [2, 16, 32] {
+            let mut bytes = Vec::new();
+            for v in [1u32, 1, 3, divisions] {
+                bytes.extend(v.to_le_bytes());
+            }
+            bytes.resize(16 + divisions.pow(3) as usize * 6, 0);
+            for v in [1u32, 3, 0] {
+                bytes.extend(v.to_le_bytes());
+            }
+            for v in [0f64, 2.] {
+                bytes.extend(v.to_le_bytes());
+            }
+            let table = RgbTable::decode(&encode(&bytes)).unwrap();
+            for p in [[0.; 3], [1.; 3], [1., 0., 0.5], [0.3, 0.7, 0.9]] {
+                let got = table.lookup(p);
+                assert!(
+                    got.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-4),
+                    "{divisions}: {p:?} {got:?}"
+                );
+            }
+        }
     }
     #[test]
     fn one_dimensional_tables_are_a_curve_per_channel() {

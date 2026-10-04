@@ -245,8 +245,12 @@ fn color_stage(
     // Applied after the tone curves, which matches Lightroom references with point curves.
     let rgb = lut.mixer.as_ref().map_or(rgb, |m| m.apply(rgb));
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
-    // Raw 18.7 applies it (also after the user's tone curves and Saturation).
-    let rgb = lut.rgb_table.as_ref().map_or(rgb, |t| t.apply(rgb));
+    // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
+    // engine 4 the colour controls come later, in Oklab, and the table after them.
+    let rgb = match &lut.rgb_table {
+        Some(t) if lut.basic_curves => t.apply(rgb),
+        _ => rgb,
+    };
     let rgb = lut.grade.as_ref().map_or(rgb, |g| g.apply(rgb));
     let mut lab = srgb_to_lab(rgb);
     if let Some(d) = local {
@@ -301,6 +305,9 @@ fn color_stage(
     } else {
         // Identity color controls need no hue angle, trigonometry or band weights.
         lab[0] = lab[0].clamp(0., 1.);
+    }
+    if let Some(t) = lut.rgb_table.as_ref().filter(|_| !lut.basic_curves) {
+        lab = srgb_to_lab(t.apply(lab_to_srgb(lab)));
     }
     finish_color(lab, r, lut)
 }

@@ -684,3 +684,33 @@ fn constrain_crop_renders_no_white() {
     assert!((aspect - 1.5).abs() < 0.06, "{aspect}");
     assert!(constrained.width < free.width && constrained.width > 45);
 }
+/// A look's RGB table goes after the colour controls, also on engine 3, where they
+/// are the Oklab HSL and Saturation rather than the measured mixer: a fully
+/// desaturated gray still takes the table's tint.
+#[test]
+fn rgb_tables_follow_the_colour_controls_on_every_engine() {
+    let m = Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+        ..Default::default()
+    };
+    let profile = crate::camera_profiles::CameraProfile::creative_for_test(&m)
+        .with_test_rgb_tables()
+        .remove(0);
+    for engine in [3, 4] {
+        let r = Recipe {
+            engine,
+            profile: Some(Arc::new(profile.clone())),
+            saturation: -1.,
+            reference_curves: engine >= 4,
+            reference_color: engine >= 4,
+            ..Default::default()
+        };
+        let lut = CurveSet::new(&r);
+        let out = color_stage([0.05, 0.2, 0.1], 1., &r, &lut, None);
+        let spread =
+            out.iter().fold(0f32, |a, v| a.max(*v)) - out.iter().fold(1f32, |a, v| a.min(*v));
+        assert!(spread > 0.01, "engine {engine}: {out:?}");
+    }
+}

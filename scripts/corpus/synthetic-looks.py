@@ -59,7 +59,7 @@ def rgb_table(divisions, f, primaries=ADOBE_RGB, gamma=GAMMA_2_2, gamut=CLIP, bo
     16-bit values stored as their difference from the identity, then the table's
     colour space, encoding, gamut mode and Profile Amount bounds."""
     data = struct.pack('<4I', 1, 1, 3, divisions)
-    grid = [(i * 0xFFFF + (divisions >> 1)) // (divisions - 1) for i in range(divisions)]
+    grid = [(i * 0xFFFF + (divisions - 1) // 2) // (divisions - 1) for i in range(divisions)]
     for r in range(divisions):
         for g in range(divisions):
             for b in range(divisions):
@@ -74,7 +74,7 @@ def rgb_table_1d(divisions, f, primaries=ADOBE_RGB, gamma=GAMMA_2_2, gamut=CLIP,
     samples."""
     data = struct.pack('<4I', 1, 1, 1, divisions)
     for i in range(divisions):
-        identity = (i * 0xFFFF + (divisions >> 1)) // (divisions - 1)
+        identity = (i * 0xFFFF + (divisions - 1) // 2) // (divisions - 1)
         out = f(i / (divisions - 1))
         data += struct.pack('<3H', *((round(min(max(v, 0.), 1.) * 0xFFFF) - identity) & 0xFFFF for v in out))
     return data + rgb_table_tail(primaries, gamma, gamut, bounds)
