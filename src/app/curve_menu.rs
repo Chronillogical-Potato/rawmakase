@@ -3,6 +3,7 @@
 //! curve under a name. Choosing a curve is one History step.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, history::Step, theme};
+use crate::develop::panels::{Panel, PanelState};
 use crate::presets::curves::{BuiltinCurve, PointCurve, SavedCurve, SavedCurves};
 use eframe::egui::{self, Color32, Vec2};
 
@@ -52,6 +53,7 @@ impl Editor {
     }
     /// Carries out a choice from the Point Curve menu.
     pub(super) fn choose_point_curve(&mut self, choice: CurveChoice) {
+        let before = self.document.recipe.clone();
         let r = &mut self.document.recipe;
         let name = match choice {
             CurveChoice::Builtin(curve) => {
@@ -70,7 +72,13 @@ impl Editor {
                 return;
             }
         };
-        self.document.history.label(Step::new("Point Curve", name));
+        // On, as any change to the panel turns it on, even when the curve was already
+        // this one.
+        r.panels.set(Panel::ToneCurve, PanelState::On);
+        // A choice that changes nothing is no step, and must not name the next one.
+        if *r != before {
+            self.document.history.label(Step::new("Point Curve", name));
+        }
     }
     /// Whether the Save Point Curve window is open.
     pub(super) fn curve_save_open(&self) -> bool {
@@ -158,7 +166,6 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::panels::{Panel, PanelState};
 
     #[test]
     fn choosing_a_curve_is_one_named_history_step_that_turns_the_panel_on() {
@@ -183,6 +190,32 @@ mod tests {
         );
         e.undo();
         assert_eq!(e.document.recipe, before);
+
+        // The same curve again, with the panel off: it turns on, as one step.
+        e.document.recipe.curve = BuiltinCurve::MediumContrast.curve();
+        e.document
+            .recipe
+            .panels
+            .set(Panel::ToneCurve, PanelState::Off);
+        let frame = e.begin_edit_frame();
+        e.choose_point_curve(CurveChoice::Builtin(BuiltinCurve::MediumContrast));
+        e.finish_edit_frame(frame, &ctx);
+        let r = &e.document.recipe;
+        assert_eq!(r.panels.state(Panel::ToneCurve), PanelState::On);
+        let (steps, applied) = e.document.history.steps();
+        assert_eq!((applied, steps[0].name.as_str()), (1, "Point Curve"));
+        // Once more, with nothing to change: no step, and the next edit keeps its
+        // own name.
+        let frame = e.begin_edit_frame();
+        e.choose_point_curve(CurveChoice::Builtin(BuiltinCurve::MediumContrast));
+        e.finish_edit_frame(frame, &ctx);
+        assert_eq!(e.document.history.steps().1, 1);
+        let frame = e.begin_edit_frame();
+        e.document.recipe.exposure = 0.5;
+        e.finish_edit_frame(frame, &ctx);
+        let (steps, applied) = e.document.history.steps();
+        assert_eq!(applied, 2);
+        assert_ne!(steps[1].name, "Point Curve");
     }
 
     #[test]
