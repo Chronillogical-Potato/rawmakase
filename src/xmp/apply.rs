@@ -487,6 +487,14 @@ impl Preset {
 
     fn apply_color_mixer(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
         let v = settings.values;
+        settings.seen.insert("PointColors".into());
+        settings.seen.insert("ColorVariance".into());
+        if let Some(points) = v.get("PointColors") {
+            r.point_colors = crate::develop::point_color::parse_list(
+                points,
+                v.get("ColorVariance").map(String::as_str),
+            )?;
+        }
         let bands = [
             "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta",
         ];

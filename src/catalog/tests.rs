@@ -238,6 +238,37 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+fn lightroom_point_colors_import() -> Result<()> {
+    let m = crate::raw::Metadata::default();
+    let swatch = "0.425300, 0.729800, 0.603400, 0.500000, -0.300000, 0.200000, 0.500000, 0.000000, 0.333333, 0.666667, 1.000000, 0.000000, 0.549800, 0.909800, 1.000000, 0.072700, 0.622700, 0.982700, 1.000000";
+    let text = format!(
+        r#"s = {{ ColorVariance = {{ 0.4 }}, PointColors = {{ "{swatch}" }}, Exposure2012 = 0.5 }}"#
+    );
+    let (r, w) = convert_develop(&text, &m, &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.point_colors.len(), 1);
+    assert_eq!(r.point_colors[0].shift, [0.5, -0.3, 0.2]);
+    assert_eq!(r.point_colors[0].variance, 0.4);
+    // The same as bare numbers, and Lightroom's empty list.
+    let text = format!("s = {{ PointColors = {{ {swatch} }} }}");
+    assert_eq!(
+        convert_develop(&text, &m, &[], None)?.0.point_colors,
+        r.point_colors
+            .iter()
+            .map(|p| crate::develop::point_color::PointColor { variance: 0., ..*p })
+            .collect::<Vec<_>>()
+    );
+    let (r, w) = convert_develop(
+        "s = { PointColors = {  }, ColorVariance = {  } }",
+        &m,
+        &[],
+        None,
+    )?;
+    assert!(w.is_empty(), "{w:?}");
+    assert!(r.point_colors.is_empty());
+    Ok(())
+}
+#[test]
 fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
     let m = crate::raw::Metadata::default();
     // Lightroom stores the mix it resolved, which renders as Camera Raw does.

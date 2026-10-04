@@ -83,7 +83,10 @@ impl Panel {
                 e.parametric = d.parametric;
                 e.splits = d.splits;
             }
-            Panel::ColorMixer => r.hsl = defaults.hsl,
+            Panel::ColorMixer => {
+                r.hsl = defaults.hsl;
+                r.point_colors = defaults.point_colors.clone();
+            }
             Panel::BlackWhiteMix => e.gray_mix = d.gray_mix,
             Panel::ColorGrading => {
                 r.grading = defaults.grading;

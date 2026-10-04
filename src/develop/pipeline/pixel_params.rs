@@ -38,6 +38,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("REFINE_SATURATION", 1),
     ("CHANNELS", 3),
     ("MIXER", 1),
+    // Point Color: table offset and number of swatches (see `point_color::params`).
+    ("POINT", 2),
     // A look's RGB table: samples offset, dimensions, divisions, gamma, gamut and
     // amount, then the matrices into its primaries and back.
     ("RGB", 6),
@@ -277,6 +279,11 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("MIXER", &[mixer]);
+    let point = match &lut.point_colors {
+        Some(pc) => [p.push(pc.params()), pc.len() as f32],
+        None => [-1., 0.],
+    };
+    p.set("POINT", &point);
     set_rgb_table(&mut p, lut.rgb_table.as_ref());
     let grade = match &lut.grade {
         Some(g) => [

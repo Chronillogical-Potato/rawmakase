@@ -22,6 +22,7 @@ pub mod masks;
 mod orientation;
 pub mod panels;
 mod pipeline;
+pub mod point_color;
 mod preview_renderer;
 mod pyramid;
 pub mod settings_groups;

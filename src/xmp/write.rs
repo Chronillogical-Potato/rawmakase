@@ -453,6 +453,41 @@ pub(super) fn curve(out: &mut String, name: &str, c: &ToneCurve) {
     let _ = write!(out, "    </rdf:Seq>\n   </crs:{name}>\n");
 }
 
+/// What to write for a recipe without Point Color swatches.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum NoPointColors {
+    /// Nothing: a photo's settings without swatches.
+    Omit,
+    /// Lightroom's empty selection, so that applying a preset clears swatches.
+    EmptySelection,
+}
+
+/// `crs:PointColors` and `crs:ColorVariance`, one item per swatch.
+pub(super) fn point_colors(out: &mut String, r: &Recipe, empty: NoPointColors) {
+    use crate::develop::point_color::{ListText, format_list};
+    let text = if r.point_colors.is_empty() {
+        if empty == NoPointColors::Omit {
+            return;
+        }
+        ListText {
+            points: vec![["-1.000000"; 19].join(", ")],
+            variances: vec!["-50.000000".into()],
+        }
+    } else {
+        format_list(&r.point_colors)
+    };
+    for (name, items) in [
+        ("PointColors", text.points),
+        ("ColorVariance", text.variances),
+    ] {
+        let _ = write!(out, "   <crs:{name}>\n    <rdf:Seq>\n");
+        for item in items {
+            let _ = writeln!(out, "     <rdf:li>{item}</rdf:li>");
+        }
+        let _ = write!(out, "    </rdf:Seq>\n   </crs:{name}>\n");
+    }
+}
+
 /// A language alternative (dc:title, dc:description, dc:rights); nothing
 /// when it has no text.
 fn lang_alt(out: &mut String, name: &str, langs: &[(String, String)]) {
@@ -592,6 +627,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
                 &r.effects.channels[i],
             );
         }
+        point_colors(&mut out, r, NoPointColors::Omit);
     }
     out.push_str("  </rdf:Description>\n");
     xml::packet(&out)

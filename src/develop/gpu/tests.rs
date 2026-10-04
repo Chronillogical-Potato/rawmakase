@@ -263,6 +263,20 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.effects.calibration = [[0.3, -0.2], [-0.4, 0.5], [0.2, 0.1]];
     r.effects.shadow_tint = -0.4;
     recipes.push(r.clone());
+    // Point Color: overlapping swatches, one across red, with Variance and Range.
+    let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
+    warm.shift = [0.4, -0.5, 0.3];
+    warm.variance = 0.6;
+    warm.range = 0.8;
+    let mut red = crate::develop::point_color::PointColor::sampled([5.8, 0.4, 0.1]);
+    red.shift = [-0.6, 0.7, -0.4];
+    red.range = 0.2;
+    let mut cool = crate::develop::point_color::PointColor::sampled([3.5, 0.3, 0.3]);
+    cool.shift = [0.2, 0.3, 0.];
+    cool.variance = -0.8;
+    r.point_colors = vec![warm, red, cool];
+    let point_colors = recipes.len();
+    recipes.push(r.clone());
     r.effects.defringe = [0.5, 0.3];
     recipes.push(r.clone());
     r.effects.monochrome = true;
@@ -272,6 +286,14 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     let cancel = AtomicBool::new(false);
     // A local-tone gain changes the Shadows/Highlights map's input.
     let gain: Vec<f32> = (0..64 * 48).map(|i| 0.6 + wave(i, 0.05)).collect();
+    // The swatches select part of the test image (the same source for both).
+    let source = Source::new(&image, (point_colors % 2 == 1).then_some(gain.as_slice()));
+    let without = develop_samples(source, &recipes[point_colors - 1], &samples, &cancel, None)?;
+    let with = develop_samples(source, &recipes[point_colors], &samples, &cancel, None)?;
+    let changed = (with.pixels.iter().zip(&without.pixels))
+        .filter(|(a, b)| (0..3).any(|c| (a[c] - b[c]).abs() > 0.01))
+        .count();
+    assert!(changed > with.pixels.len() / 50, "{changed} pixels changed");
     for (i, recipe) in recipes.iter().enumerate() {
         let source = Source::new(&image, (i % 2 == 1).then_some(gain.as_slice()));
         let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
