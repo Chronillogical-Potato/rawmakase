@@ -487,7 +487,7 @@ impl Editor {
                 Ok(_) => {
                     super::widgets::name_history_step(ui, "Point Color".into(), "Add Swatch".into())
                 }
-                Err(refusal) => self.status = refusal.message().into(),
+                Err(message) => self.status = message,
             }
         }
         // Before shows the unedited photo, so picking there would edit what is not shown.

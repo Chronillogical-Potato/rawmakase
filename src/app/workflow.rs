@@ -231,12 +231,13 @@ impl Editor {
         r
     }
     /// The swatch Point Color's Visualize Range shows, while its tab is open on a color
-    /// photo.
+    /// photo in Develop.
+    /// Not while the dropper is out, which samples the photo as it renders.
     pub(super) fn visualized_swatch(&self) -> Option<usize> {
         let pc = &self.view.point_color;
-        let shown = self.view.mixer_tab == super::state::MixerTab::PointColor
-            && pc.visualize
-            && self.document.recipe.treatment() == crate::develop::Treatment::Color;
+        let shown = pc.visualize
+            && self.point_color_tab_shown()
+            && !self.view.is(super::state::Tool::PointColor);
         pc.selected
             .filter(|i| shown && *i < self.document.recipe.point_colors.len())
     }

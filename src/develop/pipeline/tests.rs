@@ -757,3 +757,41 @@ fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
     assert!(!serde_json::to_string(&plain)?.contains("point_colors"));
     Ok(())
 }
+#[test]
+fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
+    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::develop::point_color::{PointColor, add_sample};
+    let im = fixture();
+    let plain = Recipe {
+        reference_curves: true,
+        reference_color: true,
+        ..Default::default()
+    };
+    let pick = |r: &Recipe| crate::develop::quality::point_color_pick(&im, r, 0.05, 0.5);
+    let before = pick(&plain)?;
+    // A mask brightening the left of the photo: the dropper sees it, as the photo
+    // shows it.
+    let mut masked = plain.clone();
+    masked.masks.push(MaskGroup {
+        components: vec![MaskComponent::new(MaskShape::Linear {
+            from: [0.2, 0.5],
+            to: [0.8, 0.5],
+        })],
+        adjust: LocalAdjust {
+            exposure: 1.,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let brighter = pick(&masked)?;
+    assert!(brighter[2] > 1.3 * before[2], "{before:?} {brighter:?}");
+    // A swatch picked there selects that color: Saturation −100 grays the spot.
+    let mut edited = plain.clone();
+    let i = add_sample(&mut edited.point_colors, before).unwrap();
+    edited.point_colors[i] = PointColor {
+        shift: [0., -1., 0.],
+        ..edited.point_colors[i]
+    };
+    assert!(pick(&edited)?[1] < 0.6 * before[1]);
+    Ok(())
+}

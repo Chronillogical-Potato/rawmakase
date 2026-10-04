@@ -270,6 +270,9 @@ fn color_stage(
     local: Option<&LocalDelta>,
 ) -> [f32; 3] {
     let rgb = mixer_stage(rgb, r, lut, local);
+    if lut.output == PixelOutput::PointColor {
+        return mul(crate::camera_profiles::RGB_TO_PRO, rgb);
+    }
     // A look's RGB table: after the colour mixer, before colour grading, as Camera
     // Raw 18.7 applies it (also after the user's tone curves and Saturation). Before
     // engine 4 the colour controls come later, in Oklab, and the table after them.
@@ -406,7 +409,19 @@ fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f32; 3] {
     })
 }
 
+/// What the per-pixel stage hands back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PixelOutput {
+    /// The finished, encoded color.
+    #[default]
+    Display,
+    /// Linear ProPhoto RGB after the swatches already there: what Point Color's
+    /// dropper samples.
+    PointColor,
+}
 struct CurveSet {
+    /// Where the stage stops.
+    output: PixelOutput,
     exposure_gain: f32,
     /// Engine 4: Contrast, Whites and Blacks as measured Lightroom curves.
     basic_curves: bool,
@@ -448,6 +463,7 @@ impl CurveSet {
     fn new(r: &Recipe) -> Self {
         let basic_curves = r.engine >= 4 && r.reference_curves;
         Self {
+            output: PixelOutput::Display,
             exposure_gain: 2f32.powf(r.exposure + r.camera_exposure),
             basic_curves,
             basic: basic_curves
@@ -693,42 +709,6 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
     }))
     .unwrap_or([l, h, c]);
     r.effects.pick_fringe_hue(hue, chroma)
-}
-/// Point Color's dropper at (`u`, `v`) of the shown photo: the color Point Color sees
-/// there (a 5×5 average of the source, through every stage before Point Color and the
-/// swatches it already has), as a swatch's `source`: HSV of linear ProPhoto RGB, hue
-/// in sixths of a turn.
-pub fn point_color_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
-    let shown = r.as_rendered();
-    let r = shown.resolved(&im.metadata);
-    let g = Geometry::new(im, &r, 0);
-    let [x, y] = g.source(u, v);
-    let mut sum = [0.; 3];
-    for dy in -2..=2 {
-        for dx in -2..=2 {
-            let p = sample(im.into(), x + dx as f32, y + dy as f32);
-            for c in 0..3 {
-                sum[c] += p[c] / 25.;
-            }
-        }
-    }
-    let matrix = profile_matrix(&im.metadata, &r);
-    let lut = CurveSet::for_image(im.into(), &r, matrix, false);
-    let (rgb, _) = tone_stage(sum, &im.metadata, &r, &lut, matrix, None);
-    let rgb = lut
-        .local
-        .as_ref()
-        .map_or(rgb, |map| rgb.map(|c| c * map.gain(x, y, rgb)));
-    let p = mul(
-        crate::camera_profiles::RGB_TO_PRO,
-        mixer_stage(rgb, &r, &lut, None),
-    );
-    let [h, s, v] = crate::develop::point_color::rgb_to_hsv(p.map(|c| c.max(0.)));
-    [
-        (h / std::f32::consts::TAU * 6.).rem_euclid(6.),
-        s.clamp(0., 1.),
-        v.clamp(0., 1.),
-    ]
 }
 pub fn neutral_pick(im: &CameraImage, r: &Recipe, u: f32, v: f32) -> [f32; 3] {
     let g = Geometry::new(im, r, 0);
@@ -1418,9 +1398,43 @@ pub(crate) fn develop_samples(
     cancel: &std::sync::atomic::AtomicBool,
     weights: Option<&MaskWeights>,
 ) -> Result<Rendered> {
+    develop_samples_to(im, r, samples, cancel, weights, PixelOutput::Display)
+}
+/// Point Color's dropper over `region` of the output: each pixel as the dropper
+/// samples it ([`PixelOutput::PointColor`]), through the same sampling, lens
+/// correction, retouching and masks as the render.
+pub(crate) fn point_color_samples(
+    toned: &Toned,
+    r: &Recipe,
+    g: &Geometry,
+    region: [u32; 4],
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Rendered> {
+    let im = toned.source();
+    let samples = Arc::new(sample_region(im, r, g, region, 0., cancel)?);
+    let weights = mask_weights(toned, r, g, region, 0., Some(&samples), None, cancel)?;
+    let samples = detail(toned, r, samples, weights.as_deref(), None, cancel)?;
+    develop_samples_to(
+        im,
+        r,
+        &samples,
+        cancel,
+        weights.as_deref(),
+        PixelOutput::PointColor,
+    )
+}
+fn develop_samples_to(
+    im: Source,
+    r: &Recipe,
+    samples: &Samples,
+    cancel: &std::sync::atomic::AtomicBool,
+    weights: Option<&MaskWeights>,
+    output: PixelOutput,
+) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
     let local_tone = weights.is_some_and(|w| w.uses(&[slot::SHADOWS, slot::HIGHLIGHTS]));
-    let lut = CurveSet::for_image(im, r, matrix, local_tone);
+    let mut lut = CurveSet::for_image(im, r, matrix, local_tone);
+    lut.output = output;
     let math = weights.map(|_| LocalMath::new(&im.metadata, r));
     let mut pixels = vec![[0.; 3]; samples.pixels.len()];
     pixels.par_iter_mut().enumerate().for_each(|(i, out)| {

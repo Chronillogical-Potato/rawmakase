@@ -4,22 +4,37 @@
 use super::state::{PointColorView, Tool, ViewState};
 use super::theme;
 use super::widgets::{name_history_step, set_edit_context, slider_with};
-use crate::develop::point_color::{
-    MAX_SWATCHES, PointColor, PointColors, SampleRefusal, add_sample,
-};
+use crate::develop::point_color::{MAX_SWATCHES, PointColor, PointColors, add_sample};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
+/// Whether the recipe's process renders Point Color (engine 4 with the measured curves).
+pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
+    r.engine >= 4 && r.reference_curves
+}
+
 impl super::Editor {
+    /// Whether Point Color's tab is where the photo is edited: Develop, a color photo
+    /// with the current process, and the Color Mixer on its Point Color tab.
+    pub(super) fn point_color_tab_shown(&self) -> bool {
+        let r = &self.document.recipe;
+        !self.library_mode
+            && self.view.mixer_tab == super::state::MixerTab::PointColor
+            && r.treatment() == crate::develop::Treatment::Color
+            && renders_point_color(r)
+    }
     /// Point Color's dropper at (`u`, `v`) of the shown photo: adds a swatch of the
-    /// color there, selects it and puts the dropper away.
+    /// color there, selects it and puts the dropper away. The error is what the status
+    /// line says.
     pub(super) fn add_point_color_sample(
         &mut self,
         im: &crate::raw::CameraImage,
         u: f32,
         v: f32,
-    ) -> Result<usize, SampleRefusal> {
-        let source = crate::develop::point_color_pick(im, &self.document.recipe, u, v);
-        let i = add_sample(&mut self.document.recipe.point_colors, source)?;
+    ) -> Result<usize, String> {
+        let source = crate::develop::quality::point_color_pick(im, &self.document.recipe, u, v)
+            .map_err(|e| format!("Cannot sample a color: {e:#}"))?;
+        let i = add_sample(&mut self.document.recipe.point_colors, source)
+            .map_err(|refusal| refusal.message().to_string())?;
         self.view.point_color.selected = Some(i);
         self.view.tool = Tool::None;
         Ok(i)

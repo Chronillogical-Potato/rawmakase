@@ -85,6 +85,11 @@ impl Editor {
         {
             self.view.tool = super::state::Tool::None;
         }
+        // Point Color's dropper goes with its tab: another tab, black & white, an older
+        // process or the Library put it away, so a click never adds a hidden swatch.
+        if self.view.is(super::state::Tool::PointColor) && !self.point_color_tab_shown() {
+            self.view.tool = super::state::Tool::None;
+        }
         // A conversion waiting for the photo, once it is decoded and nothing else
         // changed this frame (any edit drops it below).
         if self.document.recipe == frame.recipe {

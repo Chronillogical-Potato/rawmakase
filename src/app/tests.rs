@@ -3565,6 +3565,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     let ctx = egui::Context::default();
     let (mut editor, image) =
         editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
+    // The current process, which renders Point Color.
+    editor.document.recipe.reference_curves = true;
+    editor.document.recipe.reference_color = true;
     editor.view.toggle(state::Tool::PointColor);
     assert!(editor.view.picks_color());
     let mut added = None;
@@ -3590,7 +3593,10 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     in_edit_frame(&ctx, &mut editor, |e| {
         added = Some(e.add_point_color_sample(&image, 0.7, 0.5));
     });
-    assert_eq!(added, Some(Err(SampleRefusal::AlreadySampled)));
+    assert_eq!(
+        added,
+        Some(Err(SampleRefusal::AlreadySampled.message().to_string()))
+    );
     assert_eq!(editor.document.recipe.point_colors.len(), 1);
     // Visualize Range shows the selected swatch while the tab is open, on a color photo.
     assert_eq!(editor.visualized_swatch(), None);
@@ -3610,6 +3616,22 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.document.recipe.effects.monochrome = true;
     assert_eq!(editor.visualized_swatch(), None);
     editor.document.recipe.effects.monochrome = false;
+    // Not while the dropper is out, which samples the photo as it renders.
+    editor.view.toggle(state::Tool::PointColor);
+    assert_eq!(editor.visualized_swatch(), None);
+    // The dropper goes with the tab: on the Mixer tab a click adds no hidden swatch.
+    in_edit_frame(&ctx, &mut editor, |e| {
+        e.view.mixer_tab = state::MixerTab::Mixer
+    });
+    assert_eq!(editor.view.tool, state::Tool::None);
+    editor.view.mixer_tab = state::MixerTab::PointColor;
+    // Nor in the Library, or with an older process, which doesn't render it.
+    editor.library_mode = true;
+    assert_eq!(editor.visualized_swatch(), None);
+    editor.library_mode = false;
+    editor.document.recipe.reference_curves = false;
+    assert_eq!(editor.visualized_swatch(), None);
+    editor.document.recipe.reference_curves = true;
     // One History step, which Undo takes back.
     let mut recipe = editor.document.recipe.clone();
     assert!(editor.document.history.undo(&mut recipe));
