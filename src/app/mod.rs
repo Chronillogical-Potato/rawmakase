@@ -41,6 +41,8 @@ pub struct Editor {
     preset_rename: Option<user_presets::PresetRename>,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
+    /// The sides in Solo Mode as last saved to the session.
+    solo: std::collections::BTreeSet<String>,
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
     preferences: preferences::Preferences,
@@ -141,7 +143,8 @@ impl Editor {
         // Cmd/Ctrl + and − zoom the photo, not the whole interface.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         ctx.data_mut(|d| {
-            d.insert_temp(widgets::collapsed_sections_id(), session.collapsed.clone())
+            d.insert_temp(widgets::collapsed_sections_id(), session.collapsed.clone());
+            d.insert_temp(widgets::solo_sections_id(), session.solo.clone());
         });
         ctx.all_styles_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8., 5.);
@@ -206,6 +209,7 @@ impl Editor {
             preset_rename: None,
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
+            solo: session.solo.clone(),
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
@@ -277,6 +281,7 @@ impl Editor {
                     last_path: self.session_path(),
                     monitor: self.view.monitor.clone(),
                     collapsed: self.collapsed.clone(),
+                    solo: self.solo.clone(),
                     onboarding_done: self.onboarding_done,
                     library_source: self.saved_place.0.clone(),
                     selected_photo: self.saved_place.1,

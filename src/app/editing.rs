@@ -106,6 +106,9 @@ impl Editor {
             ctx.request_repaint_after(left);
         }
         let gesture = ctx.input(|i| i.pointer.primary_down()) || self.view.wheel.active();
+        if !self.document.history.is_replaying() {
+            turn_on_edited_panels(&frame.recipe, &mut self.document.recipe);
+        }
         let edited = self
             .document
             .history
@@ -125,5 +128,20 @@ impl Editor {
         if frame.export != (self.document.export.quality, self.document.export.max_edge) {
             self.document.save.mark_changed();
         }
+    }
+}
+
+/// Turns a switched-off panel back on when this frame changed only its settings, as
+/// Lightroom does, so the change shows: a slider in it, or an edit applied later in
+/// the frame (B&W Auto, Clear Guides, the fringe picker).
+fn turn_on_edited_panels(before: &Recipe, after: &mut Recipe) {
+    use crate::develop::panels::{Panel, PanelState};
+    let edited = Panel::ALL.into_iter().find(|panel| {
+        before.panels.state(*panel) == PanelState::Off
+            && after.panels.state(*panel) == PanelState::Off
+            && panel.holds_change(before, after)
+    });
+    if let Some(panel) = edited {
+        after.panels.set(panel, PanelState::On);
     }
 }
