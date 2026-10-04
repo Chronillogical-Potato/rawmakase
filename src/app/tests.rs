@@ -3644,6 +3644,10 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
         crate::develop::point_color::SwatchView::VisualizeRange
     );
     assert_ne!(Some(pending), Some(&editor.effective_recipe()));
+    // Not in Before, which shows the photo's defaults.
+    editor.view.compare = true;
+    assert_eq!(editor.visualized_swatch(), None);
+    editor.view.compare = false;
     // Not while an eyedropper is out, which samples the photo as it renders.
     editor.view.toggle(state::Tool::Defringe);
     assert_eq!(editor.visualized_swatch(), None);

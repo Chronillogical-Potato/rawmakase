@@ -535,7 +535,9 @@ pub fn point_color_pick(
     if r.lens_ca {
         crate::lens::auto_ca::prime(im);
     }
-    let source = retouched(im, r, cancel, None)?;
+    // Through a fresh retouch cache, which checks `cancel` between operations.
+    let mut retouch = develop::retouch::RetouchCache::default();
+    let source = retouched(im, r, cancel, Some(&mut retouch))?;
     let g = Geometry::new(&source, r, 0);
     let (toned, tonal) = local_stage(&source, r, 1., cancel, None)?;
     let at = |t: f32, size: u32| {

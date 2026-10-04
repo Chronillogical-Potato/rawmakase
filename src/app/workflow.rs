@@ -232,10 +232,14 @@ impl Editor {
     }
     /// The swatch Point Color's Visualize Range shows, while its tab is open on a color
     /// photo in Develop.
-    /// Not while an eyedropper is out, which samples the photo as it renders.
+    /// Not while an eyedropper is out, which samples the photo as it renders, nor in
+    /// Before, which shows the photo's defaults.
     pub(super) fn visualized_swatch(&self) -> Option<usize> {
         let pc = &self.view.point_color;
-        let shown = pc.visualize && self.point_color_tab_shown() && !self.view.picks_color();
+        let shown = pc.visualize
+            && self.point_color_tab_shown()
+            && !self.view.picks_color()
+            && !self.view.compare;
         pc.selected
             .filter(|i| shown && *i < self.document.recipe.point_colors.len())
     }
