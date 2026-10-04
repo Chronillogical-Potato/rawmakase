@@ -1,0 +1,338 @@
+{
+  "device": "Loupedeck+ (LPO-1801)",
+  "usb": {
+    "vid": "0x2EC2",
+    "pid": 2
+  },
+  "midi_port": "Loupedeck+",
+  "channel": 1,
+  "dials": {
+    "message": "control_change",
+    "encoding": "relative",
+    "clockwise": 1,
+    "counter_clockwise": 127,
+    "controls": [
+      {
+        "id": "fader_p1",
+        "label": "Fader P1",
+        "cc": 17
+      },
+      {
+        "id": "fader_p2",
+        "label": "Fader P2",
+        "cc": 18
+      },
+      {
+        "id": "fader_p3",
+        "label": "Fader P3",
+        "cc": 19
+      },
+      {
+        "id": "fader_p4",
+        "label": "Fader P4",
+        "cc": 20
+      },
+      {
+        "id": "fader_p5",
+        "label": "Fader P5",
+        "cc": 21
+      },
+      {
+        "id": "fader_p6",
+        "label": "Fader P6",
+        "cc": 22
+      },
+      {
+        "id": "fader_p7",
+        "label": "Fader P7",
+        "cc": 23
+      },
+      {
+        "id": "fader_p8",
+        "label": "Fader P8",
+        "cc": 24
+      },
+      {
+        "id": "exposure",
+        "label": "Exposure",
+        "cc": 33
+      },
+      {
+        "id": "blacks",
+        "label": "Blacks",
+        "cc": 34
+      },
+      {
+        "id": "whites",
+        "label": "Whites",
+        "cc": 35
+      },
+      {
+        "id": "saturation",
+        "label": "Saturation",
+        "cc": 36
+      },
+      {
+        "id": "vibrance",
+        "label": "Vibrance",
+        "cc": 37
+      },
+      {
+        "id": "temperature",
+        "label": "Temperature",
+        "cc": 38
+      },
+      {
+        "id": "tint",
+        "label": "Tint",
+        "cc": 39
+      },
+      {
+        "id": "highlights",
+        "label": "Highlights",
+        "cc": 40
+      },
+      {
+        "id": "d1",
+        "label": "D1",
+        "cc": 41
+      },
+      {
+        "id": "d2",
+        "label": "D2",
+        "cc": 42
+      },
+      {
+        "id": "shadows",
+        "label": "Shadows",
+        "cc": 44
+      },
+      {
+        "id": "clarity",
+        "label": "Clarity",
+        "cc": 45
+      },
+      {
+        "id": "contrast",
+        "label": "Contrast",
+        "cc": 46
+      },
+      {
+        "id": "control_dial",
+        "label": "Control Dial",
+        "cc": 48
+      }
+    ],
+    "note": "Faders P1-P8 (CC 17-24) also report relative ticks (1 up / 127 down), not absolute position."
+  },
+  "buttons": {
+    "message": "note_on (press) / note_off (release)",
+    "velocity": 64,
+    "controls": [
+      {
+        "id": "c1",
+        "label": "C1",
+        "note": 49
+      },
+      {
+        "id": "c2",
+        "label": "C2",
+        "note": 50
+      },
+      {
+        "id": "c3",
+        "label": "C3",
+        "note": 51
+      },
+      {
+        "id": "c4",
+        "label": "C4",
+        "note": 52
+      },
+      {
+        "id": "c5",
+        "label": "C5",
+        "note": 53
+      },
+      {
+        "id": "c6",
+        "label": "C6",
+        "note": 54
+      },
+      {
+        "id": "col",
+        "label": "Col",
+        "note": 65
+      },
+      {
+        "id": "shift",
+        "label": "Shift",
+        "note": 66
+      },
+      {
+        "id": "ctrl",
+        "label": "Ctrl",
+        "note": 67
+      },
+      {
+        "id": "command",
+        "label": "Command",
+        "note": 68
+      },
+      {
+        "id": "alt",
+        "label": "Alt",
+        "note": 69
+      },
+      {
+        "id": "tab",
+        "label": "Tab",
+        "note": 70
+      },
+      {
+        "id": "up_arrow",
+        "label": "Up Arrow",
+        "note": 76
+      },
+      {
+        "id": "bottom_arrow",
+        "label": "Bottom Arrow",
+        "note": 77
+      },
+      {
+        "id": "left_arrow",
+        "label": "Left Arrow",
+        "note": 78
+      },
+      {
+        "id": "right_arrow",
+        "label": "Right Arrow",
+        "note": 79
+      },
+      {
+        "id": "p1",
+        "label": "P1",
+        "note": 80
+      },
+      {
+        "id": "p2",
+        "label": "P2",
+        "note": 81
+      },
+      {
+        "id": "p3",
+        "label": "P3",
+        "note": 82
+      },
+      {
+        "id": "p4",
+        "label": "P4",
+        "note": 83
+      },
+      {
+        "id": "p5",
+        "label": "P5",
+        "note": 84
+      },
+      {
+        "id": "p6",
+        "label": "P6",
+        "note": 85
+      },
+      {
+        "id": "p7",
+        "label": "P7",
+        "note": 86
+      },
+      {
+        "id": "p8",
+        "label": "P8",
+        "note": 87
+      },
+      {
+        "id": "export",
+        "label": "Export",
+        "note": 88
+      },
+      {
+        "id": "copy",
+        "label": "Copy",
+        "note": 92
+      },
+      {
+        "id": "paste",
+        "label": "Paste",
+        "note": 93
+      },
+      {
+        "id": "undo",
+        "label": "Undo",
+        "note": 95
+      },
+      {
+        "id": "redo",
+        "label": "Redo",
+        "note": 96
+      },
+      {
+        "id": "screen_mode",
+        "label": "Screen Mode",
+        "note": 97
+      },
+      {
+        "id": "hue",
+        "label": "Hue",
+        "note": 98
+      },
+      {
+        "id": "sat",
+        "label": "Sat",
+        "note": 99
+      },
+      {
+        "id": "lum",
+        "label": "Lum",
+        "note": 100
+      },
+      {
+        "id": "clr_bw",
+        "label": "Clr/BW",
+        "note": 101
+      },
+      {
+        "id": "before_after",
+        "label": "Before After",
+        "note": 102
+      },
+      {
+        "id": "fn",
+        "label": "Fn",
+        "note": 110
+      },
+      {
+        "id": "l1",
+        "label": "L1",
+        "note": 114
+      },
+      {
+        "id": "l2",
+        "label": "L2",
+        "note": 115
+      },
+      {
+        "id": "l3",
+        "label": "L3",
+        "note": 116
+      },
+      {
+        "id": "custom_mode",
+        "label": "Custom mode",
+        "note": 117
+      }
+    ]
+  },
+  "notes": [
+    "Mapped from the physical layout by probing each control (probe.py). Contrast is CC 46 (earlier mislabelled 'Ctrl').",
+    "CC 1-5 seen once in an earlier capture were never reproduced and are unassigned; they may belong to another Loupedeck layer (Fn / Custom Mode)."
+  ]
+}

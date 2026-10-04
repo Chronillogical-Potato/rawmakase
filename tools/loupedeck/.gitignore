@@ -1,0 +1,4 @@
+# Raw captures and the mapper's scratch output.
+*.jsonl
+mapping.json
+.venv/
