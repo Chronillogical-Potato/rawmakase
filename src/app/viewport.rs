@@ -511,7 +511,7 @@ impl Editor {
                 Stroke::new(1., Color32::WHITE),
                 egui::StrokeKind::Inside,
             );
-            self.crop_guides_ui(ui, cr);
+            self.crop_guides_ui(ui, cr, rect);
             let handles = [
                 cr.left_top(),
                 cr.right_top(),
@@ -599,15 +599,15 @@ impl Editor {
         }
     }
     /// The crop guide overlay over the crop at `crop` on screen, when it shows: always;
-    /// with the pointer over the crop, while something is dragged or just after a new
+    /// with the pointer over the photo (`photo`), while something is dragged or just after a new
     /// overlay is picked; or never. The Straighten ruler shows a grid.
-    fn crop_guides_ui(&self, ui: &egui::Ui, crop: Rect) {
+    fn crop_guides_ui(&self, ui: &egui::Ui, crop: Rect, photo: Rect) {
         let drawing = matches!(self.view.ruler, Ruler::Drawing { .. });
         const SHOWN_AFTER_CHANGE: std::time::Duration = std::time::Duration::from_millis(1500);
         let since_change = self.view.crop_guides_changed.map(|at| at.elapsed());
         let attention = if drawing || self.view.crop_drag.is_some() {
             Attention::Dragging
-        } else if ui.rect_contains_pointer(crop) {
+        } else if ui.rect_contains_pointer(photo) {
             Attention::Hovered
         } else if let Some(since) = since_change.filter(|s| *s < SHOWN_AFTER_CHANGE) {
             ui.ctx().request_repaint_after(SHOWN_AFTER_CHANGE - since);
