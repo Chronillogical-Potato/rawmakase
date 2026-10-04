@@ -209,6 +209,8 @@ pub(super) struct ViewState {
     pub(super) aspect_read: bool,
     /// The crop guide overlay; saved in the session.
     pub(super) crop_guides: super::crop_tool::CropGuides,
+    /// When the overlay was last changed; it shows for a moment after, even in Auto.
+    pub(super) crop_guides_changed: Option<std::time::Instant>,
     /// The Crop tool's Straighten ruler.
     pub(super) ruler: super::crop_tool::Ruler,
     /// Spot removal settings, selection and drag in progress.
@@ -240,6 +242,7 @@ impl Default for ViewState {
             aspect: -1.,
             aspect_read: false,
             crop_guides: Default::default(),
+            crop_guides_changed: None,
             ruler: Default::default(),
             retouch: Default::default(),
             masking: Default::default(),

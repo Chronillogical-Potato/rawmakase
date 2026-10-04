@@ -375,7 +375,7 @@ impl Editor {
                             }
                         })
                         .response
-                        .on_hover_text("When the overlay shows: always, while dragging, or never");
+                        .on_hover_text("When the overlay shows: always, with the pointer over the photo, or never");
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(83.);
