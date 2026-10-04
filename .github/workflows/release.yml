@@ -460,6 +460,123 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "RAWmakase ${RELEASE_TAG#v}" --notes-file release-notes/notes.md
 
+      # The asset list this run published, for the verification job below.
+      # gh release upload --clobber replaces matching names and never removes
+      # anything, so repairing a tag can leave an asset from the first attempt
+      # behind; recording dist/ is what makes such an orphan detectable.
+      - name: Record the published asset list
+        run: |
+          ls -1 dist > "$RUNNER_TEMP/expected-assets.txt"
+          cat "$RUNNER_TEMP/expected-assets.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: expected-assets
+          path: ${{ runner.temp }}/expected-assets.txt
+          if-no-files-found: error
+
+  # Users and coding agents install from the release page, so the release is
+  # not done until the published assets themselves have been checked: this
+  # downloads them again and compares them with the manifests uploaded beside
+  # them, instead of trusting dist/ on the publish runner.
+  verify:
+    name: Verify the published downloads
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: expected-assets
+          path: expected
+      # The updater's trusted key comes from the tagged source, like in publish.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          sparse-checkout: assets
+          persist-credentials: false
+      - name: Verify the published downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/verify"
+          assets="$work/assets"
+          mkdir -p "$assets"
+          sort expected/expected-assets.txt > "$work/expected.txt"
+          # the release's own asset list, which comm compares below
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' | sort > "$work/published.txt"
+          : > "$work/missing.txt"
+          failures=0
+          # Fetch each expected asset on its own, so a missing one is named.
+          # --ignore-missing is what README.md tells users to run, and it passes
+          # when an asset is absent; the loop asserts the download instead.
+          while read -r name; do
+            echo "fetching $name"
+            if ! gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --dir "$assets" --pattern "$name" || test ! -s "$assets/$name"; then
+              echo "::error::not on the release or not downloadable: $name"
+              echo "$name" >> "$work/missing.txt"
+              failures=$((failures + 1))
+            fi
+          done < "$work/expected.txt"
+          # --strict, without --ignore-missing: every asset the manifests name
+          # has to be present with the published bytes. checksums.txt covers
+          # SHA256SUMS as well, so a stale manifest cannot pass either.
+          if ! (cd "$assets" && sha256sum --check --strict SHA256SUMS); then
+            echo "::error::a published asset does not match SHA256SUMS"
+            failures=$((failures + 1))
+          fi
+          if ! (cd "$assets" && sha256sum --check --strict checksums.txt); then
+            echo "::error::a published asset does not match checksums.txt"
+            failures=$((failures + 1))
+          fi
+          # Reconcile the release against this run. An unexpected asset that
+          # looks like a package is an orphan of an earlier attempt, in neither
+          # manifest and installable by mistake, so it fails the job. Media the
+          # maintainer uploads for the release notes is expected to stay.
+          # Nothing is deleted: RELEASING.md promises unrelated assets are
+          # preserved, and a silent delete could take a hand-uploaded asset or
+          # one another run still needs.
+          comm -13 "$work/expected.txt" "$work/published.txt" > "$work/unexpected.txt"
+          : > "$work/orphan.txt"
+          : > "$work/preserved.txt"
+          while read -r name; do
+            case "$name" in
+              *.deb|*.rpm|*.pkg.tar.zst|*.dmg|*.zip|*.exe|*.msi|*.tar.gz|*.tar.xz|\
+              SHA256SUMS|checksums.txt|checksums.txt.sig|rawmakase.rb)
+                echo "$name" >> "$work/orphan.txt" ;;
+              *) echo "$name" >> "$work/preserved.txt" ;;
+            esac
+          done < "$work/unexpected.txt"
+          while read -r name; do
+            echo "::error::unexpected asset left on the release: $name"
+            failures=$((failures + 1))
+          done < "$work/orphan.txt"
+          {
+            echo "### Published release $RELEASE_TAG"
+            echo
+            echo "- assets expected: $(wc -l < "$work/expected.txt")"
+            echo "- missing or undownloadable: $(wc -l < "$work/missing.txt")"
+            echo "- orphan assets of an earlier run: $(wc -l < "$work/orphan.txt")"
+            echo "- preserved assets added by hand: $(wc -l < "$work/preserved.txt")"
+            if [ "$failures" -eq 0 ]; then
+              echo
+              echo "PASS: every published asset downloads and matches both manifests."
+            else
+              echo
+              echo "FAIL: $failures problem(s) with the published release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$failures" -ne 0 ]; then
+            echo "::error::$failures problem(s) with the published $RELEASE_TAG; see the errors above."
+            exit 1
+          fi
+          echo "PASS: every asset of $RELEASE_TAG downloads, matches SHA256SUMS and checksums.txt, and signs correctly."
+
   website:
     name: Update website downloads
     needs: publish
