@@ -174,18 +174,17 @@ impl Recipe {
     }
 
     /// Lightroom's Treatment switcher: as [`Recipe::set_treatment`], and choosing Color
-    /// while a black & white profile is in use changes to the photo's default profile,
-    /// since the profile alone would keep it black & white.
+    /// while a black & white profile is in use changes to `color_profile`, the photo's
+    /// default, since the profile alone would keep it black & white.
     pub fn choose_treatment(
         &mut self,
         treatment: Treatment,
         first: Option<AutoMix>,
+        color_profile: Option<Arc<CameraProfile>>,
         m: &Metadata,
-        profiles: &[Arc<CameraProfile>],
     ) {
         if treatment == Treatment::Color && is_monochrome(self.profile.as_deref()) {
-            let default = Recipe::with_profiles(m, profiles).profile;
-            self.profile = default.filter(|p| !is_monochrome(Some(p)));
+            self.profile = color_profile.filter(|p| !is_monochrome(Some(p)));
             self.profile_changed(m);
         }
         self.set_treatment(treatment, first);
@@ -364,7 +363,7 @@ mod tests {
         assert!(r.effects.monochrome);
         assert_ne!(r.effects.gray_mix, [0.; 8]);
         // Color with that profile in use goes back to a color profile.
-        r.choose_treatment(Treatment::Color, auto, &m, std::slice::from_ref(&mono));
+        r.choose_treatment(Treatment::Color, auto, color.clone(), &m);
         assert_eq!(r.treatment(), Treatment::Color);
         assert!(!is_monochrome(r.profile.as_deref()));
         // Leaving a black & white profile for a color one converts back too.

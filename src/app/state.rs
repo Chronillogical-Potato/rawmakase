@@ -17,6 +17,9 @@ pub(super) struct Document {
     /// How the decoded photo's colors spread, for Auto black & white; measured on
     /// first use.
     color_spread: std::cell::OnceCell<crate::develop::ColorSpread>,
+    /// A conversion to black & white waiting for the photo to decode, for its
+    /// Auto mix.
+    pub(super) pending_treatment: Option<crate::develop::Treatment>,
     pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,

@@ -833,6 +833,7 @@ impl Editor {
             if treatment {
                 self.toggle_treatment();
             }
+            self.finish_pending_treatment();
             match export {
                 Some(true) => self.export_with_previous(),
                 Some(false) => self.open_export_dialog(),

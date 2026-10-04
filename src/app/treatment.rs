@@ -1,6 +1,7 @@
-//! The Basic panel's Treatment and the B&W panel's Auto, each one History step.
+//! The Basic panel's Treatment and the B&W panel's Auto. Each runs during an edit
+//! frame, which records it as one History step under the name it gives.
 use super::{Editor, history::Step};
-use crate::develop::{AutoMix, ColorSpread, Recipe, Treatment};
+use crate::develop::{AutoMix, ColorSpread, Treatment};
 use crate::raw::Metadata;
 
 /// What converting to black & white does to a mix that was never set: Lightroom's
@@ -46,26 +47,59 @@ impl Editor {
     }
 
     /// Lightroom's Treatment switcher, and V: converting to black & white applies
-    /// the Auto mix the first time, if the preference asks for it.
+    /// the Auto mix the first time, if the preference asks for it. Called during an
+    /// edit frame, which records the change as one History step under this name.
+    /// While the photo is still decoding, a conversion that needs the Auto mix waits
+    /// for it ([`Editor::finish_pending_treatment`]).
     pub(super) fn set_treatment(&mut self, treatment: Treatment) {
         if self.document.recipe.treatment() == treatment {
             return;
         }
-        let old = self.begin_step();
         let colors = self.first_conversion_colors();
+        let needs_auto = treatment == Treatment::BlackWhite
+            && self.first_conversion == FirstConversion::AutoMix
+            && self.document.recipe.effects.gray_mix == [0.; 8];
+        if needs_auto && colors.is_none() {
+            self.document.pending_treatment = Some(treatment);
+            self.status = "Converting to Black & White once the photo is decoded".into();
+            return;
+        }
         let first = colors.as_ref().map(PhotoColors::auto_mix);
+        let color_profile = self.photo_defaults().and_then(|d| d.recipe.profile);
         let document = &mut self.document;
         match &document.metadata {
             Some(m) => document
                 .recipe
-                .choose_treatment(treatment, first, m, &document.profiles),
+                .choose_treatment(treatment, first, color_profile, m),
             None => document.recipe.set_treatment(treatment, first),
         }
         let name = match treatment {
             Treatment::Color => "Convert to Color",
             Treatment::BlackWhite => "Convert to Black & White",
         };
-        self.end_step(old, Step::new(name, ""));
+        self.document.history.label(Step::new(name, ""));
+    }
+
+    /// Converts as asked while the photo was decoding, once it is decoded. Called
+    /// during an edit frame.
+    pub(super) fn finish_pending_treatment(&mut self) {
+        if self.document.full().is_some()
+            && let Some(treatment) = self.document.pending_treatment.take()
+        {
+            self.set_treatment(treatment);
+        }
+    }
+
+    /// Keeps the Treatment with a newly chosen profile (see
+    /// [`Recipe::follow_profile_treatment`]). Called during the edit frame that
+    /// changed the profile, so it is part of that step.
+    pub(super) fn follow_profile_treatment(
+        &mut self,
+        old: Option<&crate::camera_profiles::CameraProfile>,
+    ) {
+        let colors = self.first_conversion_colors();
+        let first = colors.as_ref().map(PhotoColors::auto_mix);
+        self.document.recipe.follow_profile_treatment(old, first);
     }
 
     /// V: switches between Color and Black & White.
@@ -77,32 +111,17 @@ impl Editor {
     }
 
     /// The B&W panel's Auto: sets the black & white mix from the photo's colors.
+    /// Called during an edit frame, which records it as one History step.
     pub(super) fn auto_black_white_mix(&mut self) {
         let Some(colors) = self.photo_colors() else {
             return;
         };
         let mix = colors.auto_mix().for_recipe(&self.document.recipe);
-        if self.document.recipe.effects.gray_mix == mix {
-            return;
+        if self.document.recipe.effects.gray_mix != mix {
+            self.document.recipe.effects.gray_mix = mix;
+            self.document
+                .history
+                .label(Step::new("Black & White Mix", "Auto"));
         }
-        let old = self.begin_step();
-        self.document.recipe.effects.gray_mix = mix;
-        self.end_step(old, Step::new("Black & White Mix", "Auto"));
-    }
-
-    /// Records a drag still under way first, so undoing the step keeps it; returns
-    /// the recipe before the step.
-    fn begin_step(&mut self) -> Recipe {
-        if self.document.history.in_gesture() {
-            self.document.history.finish_gesture(&self.document.recipe);
-            self.document.save.mark_changed();
-        }
-        self.document.recipe.clone()
-    }
-
-    fn end_step(&mut self, old: Recipe, step: Step) {
-        self.document.history.label(step);
-        self.history(old);
-        self.schedule();
     }
 }

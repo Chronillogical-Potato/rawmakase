@@ -470,9 +470,12 @@ impl Editor {
         let mut guided_action = None;
         let mut treatment_request = None;
         let mut auto_mix_request = false;
-        // Auto black & white for the photo, measured once it is decoded.
-        let colors = self.photo_colors();
-        let first_colors = self.first_conversion_colors();
+        let mut profile_changed_from = None;
+        // Auto black & white for the photo, measured (once) only while the B&W panel
+        // shows.
+        let colors = (self.document.recipe.treatment() == Treatment::BlackWhite)
+            .then(|| self.photo_colors())
+            .flatten();
         let view = &mut self.view;
         let r = &mut self.document.recipe;
 
@@ -608,8 +611,7 @@ impl Editor {
                 && let Some(m) = &metadata
             {
                 r.profile_changed(m);
-                let first = first_colors.as_ref().map(|c| c.auto_mix());
-                r.follow_profile_treatment(old_profile.as_deref(), first);
+                profile_changed_from = Some(old_profile.clone());
             }
             // White balance is its own group below the profile, as in Lightroom.
             ui.add_space(12.);
@@ -1464,6 +1466,9 @@ impl Editor {
         }
         if let Some(kind) = auto_request {
             self.start_auto(kind);
+        }
+        if let Some(old) = profile_changed_from {
+            self.follow_profile_treatment(old.as_deref());
         }
         if let Some(treatment) = treatment_request {
             self.set_treatment(treatment);

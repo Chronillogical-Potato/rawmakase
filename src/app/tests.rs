@@ -2750,9 +2750,15 @@ fn guided_upright_gestures_are_one_history_step_each() {
     assert!(!e.view.is(state::Tool::Guided));
 }
 
-/// A small photo of colors spread along blue, decoded and with its metadata.
-fn editor_with_blue_photo(ctx: &egui::Context, session: crate::storage::Session) -> Editor {
+/// A small photo of colors spread along blue, with its metadata; decoded unless
+/// `decoded` is false.
+fn editor_with_blue_photo(
+    ctx: &egui::Context,
+    session: crate::storage::Session,
+    decoded: bool,
+) -> (Editor, Arc<CameraImage>) {
     let mut editor = Editor::with_context(ctx, None, session, None);
+    editor.library_mode = false;
     let (width, height) = (32u32, 24u32);
     let metadata = Metadata {
         width,
@@ -2763,7 +2769,7 @@ fn editor_with_blue_photo(ctx: &egui::Context, session: crate::storage::Session)
         ..Default::default()
     };
     editor.document.metadata = Some(metadata.clone());
-    editor.document.set_image(Arc::new(CameraImage {
+    let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width,
         height,
@@ -2777,32 +2783,39 @@ fn editor_with_blue_photo(ctx: &egui::Context, session: crate::storage::Session)
         fast: false,
         scale_factor: 1.,
         scale_clipped: 0,
-    }));
-    editor
+    });
+    if decoded {
+        editor.document.set_image(image.clone());
+    }
+    (editor, image)
+}
+/// Runs `action` in an edit frame, as the panels and shortcuts do.
+fn in_edit_frame(ctx: &egui::Context, editor: &mut Editor, action: impl FnOnce(&mut Editor)) {
+    let frame = editor.begin_edit_frame();
+    action(editor);
+    editor.finish_edit_frame(frame, ctx);
 }
 #[test]
 fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
     let ctx = egui::Context::default();
-    let mut editor = editor_with_blue_photo(&ctx, crate::storage::Session::default());
+    let (mut editor, _) = editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
     let before = editor.document.recipe.clone();
-    let press_v = |editor: &mut Editor| {
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
-                events: vec![egui::Event::Key {
-                    key: egui::Key::V,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
-                ..Default::default()
-            },
-            |ui| editor.develop_shortcuts(ui.ctx()),
-        );
-        output.textures_delta.clear();
-    };
-    press_v(&mut editor);
+    // V, through a whole frame of the Develop module.
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            events: vec![egui::Event::Key {
+                key: egui::Key::V,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ui| editor.draw(ui),
+    );
+    output.textures_delta.clear();
     let auto = editor
         .photo_colors()
         .unwrap()
@@ -2818,39 +2831,54 @@ fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
         (1, "Convert to Black & White")
     );
     // Back to color keeps the mix for the next conversion, as Lightroom does.
-    press_v(&mut editor);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     assert!(!editor.document.recipe.effects.monochrome);
     assert_eq!(editor.document.recipe.effects.gray_mix, auto);
-    assert_eq!(
-        editor.document.history.steps().0[1].name,
-        "Convert to Color"
-    );
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!((applied, steps[1].name.as_str()), (2, "Convert to Color"));
     editor.undo();
     editor.undo();
     assert_eq!(editor.document.recipe, before);
 
     // The B&W panel's Auto brings back the Auto mix after a slider moved, as one step.
     editor.redo();
-    editor.document.recipe.effects.gray_mix[3] = 0.6;
-    editor.auto_black_white_mix();
+    in_edit_frame(&ctx, &mut editor, |e| {
+        e.document.recipe.effects.gray_mix[3] = 0.6
+    });
+    in_edit_frame(&ctx, &mut editor, Editor::auto_black_white_mix);
     assert_eq!(editor.document.recipe.effects.gray_mix, auto);
     let (steps, applied) = editor.document.history.steps();
+    assert_eq!(applied, 3);
     assert_eq!(
-        (
-            steps[applied - 1].name.as_str(),
-            steps[applied - 1].value.as_str()
-        ),
+        (steps[2].name.as_str(), steps[2].value.as_str()),
         ("Black & White Mix", "Auto")
     );
     // With the preference off, the first conversion keeps the mix at zero.
-    let mut editor = editor_with_blue_photo(
-        &ctx,
-        crate::storage::Session {
-            no_auto_black_white_mix: true,
-            ..Default::default()
-        },
-    );
-    editor.toggle_treatment();
+    let session = crate::storage::Session {
+        no_auto_black_white_mix: true,
+        ..Default::default()
+    };
+    let (mut editor, _) = editor_with_blue_photo(&ctx, session, true);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     assert!(editor.document.recipe.effects.monochrome);
     assert_eq!(editor.document.recipe.effects.gray_mix, [0.; 8]);
+}
+#[test]
+fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
+    let ctx = egui::Context::default();
+    let (mut editor, image) =
+        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
+    assert!(!editor.document.recipe.effects.monochrome);
+    assert_eq!(editor.document.history.steps().1, 0);
+    editor.document.set_image(image);
+    in_edit_frame(&ctx, &mut editor, Editor::finish_pending_treatment);
+    let r = &editor.document.recipe;
+    assert!(r.effects.monochrome);
+    assert_ne!(r.effects.gray_mix, [0.; 8]);
+    let (steps, applied) = editor.document.history.steps();
+    assert_eq!(
+        (applied, steps[0].name.as_str()),
+        (1, "Convert to Black & White")
+    );
 }
