@@ -206,4 +206,40 @@ mod tests {
         e.create_preset_in(&user, &form, &groups);
         assert!(e.status.starts_with("Preset not created"), "{}", e.status);
     }
+
+    #[test]
+    fn a_preset_s_groups_leave_the_copy_and_sync_choice_alone() {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let before = e.copy_groups.clone();
+        e.open_copy_dialog(super::super::settings_transfer::Transfer::NewPreset);
+        let mut narrow = GroupSelection::none();
+        narrow.set(SettingGroup::Exposure, GroupInclusion::Included);
+        e.copy_dialog.as_mut().unwrap().groups = narrow;
+        e.close_copy_dialog(super::super::settings_transfer::CopyChoice::Confirm);
+        assert_eq!(e.copy_groups, before);
+    }
+
+    #[test]
+    fn an_older_preset_scan_never_replaces_a_newer_one() {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let library = |name: &str| {
+            let info = PresetInfo::new(name, "Mine");
+            let text = crate::xmp::preset_write::preset(
+                &crate::develop::Recipe::default(),
+                &info,
+                &GroupSelection::all(),
+            );
+            std::sync::Arc::new(crate::presets::Library {
+                presets: vec![crate::xmp::parse(std::path::Path::new("p.xmp"), &text).unwrap()],
+                errors: Vec::new(),
+            })
+        };
+        let older = e.presets.next_scan();
+        let newer = e.presets.next_scan();
+        e.presets_scanned(newer, library("new"));
+        e.presets_scanned(older, library("old"));
+        assert_eq!(e.presets.library.presets[0].name, "new");
+    }
 }

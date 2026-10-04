@@ -77,6 +77,18 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
             // from this photo, so a preset names only the mode, as Lightroom's do.
             .filter(|(key, _)| !key.starts_with("Enable") && !key.starts_with("Upright")),
     );
+    // The mix is written only for black-and-white photos; a preset made from a
+    // color one still carries the mix it was asked for.
+    if groups.contains(SettingGroup::BlackWhiteMix) && !r.effects.monochrome {
+        let mut mono = r.clone();
+        mono.effects.monochrome = true;
+        attributes.extend(
+            settings(&mono)
+                .0
+                .into_iter()
+                .filter(|(key, _)| key.starts_with("GrayMixer")),
+        );
+    }
     // Each chosen panel's switch as the photo has it, on or off, so applying the
     // preset also sets that panel the same way.
     for panel in crate::develop::panels::Panel::ALL {
@@ -315,6 +327,14 @@ mod tests {
         let text = preset(&upright, &info, &GroupSelection::all());
         assert!(text.contains("crs:PerspectiveUpright"));
         assert!(!text.contains("UprightTransform"), "{text}");
+        // A color photo's Black & White mix is still written when the group is chosen.
+        let mut mix = GroupSelection::none();
+        mix.set(SettingGroup::BlackWhiteMix, GroupInclusion::Included);
+        let mut color = Recipe::default();
+        color.effects.gray_mix[0] = 0.3;
+        let text = preset(&color, &info, &mix);
+        assert!(text.contains(r#"crs:GrayMixerRed="+30""#), "{text}");
+        assert!(!text.contains("ConvertToGrayscale"), "{text}");
         assert_eq!(
             all.panels.state(crate::develop::panels::Panel::Effects),
             crate::develop::panels::PanelState::Off

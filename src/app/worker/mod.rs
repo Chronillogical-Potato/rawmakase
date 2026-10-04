@@ -78,7 +78,10 @@ pub enum Event {
         analysed: Box<crate::develop::Recipe>,
         result: Result<Vec<[f32; 9]>, String>,
     },
-    XmpLibrary(Arc<crate::presets::Library>),
+    XmpLibrary {
+        scan: u64,
+        library: Arc<crate::presets::Library>,
+    },
     PresetSave(PathBuf),
     Header(Box<LoadedHeader>),
     Embedded {

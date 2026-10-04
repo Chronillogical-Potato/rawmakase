@@ -138,9 +138,10 @@ impl UserPresets {
                     .is_some_and(|n| n.eq_ignore_ascii_case(r))
             }) || ["COM", "LPT"].iter().any(|r| {
                 let stem = name.split('.').next().unwrap_or("");
+                let stem = stem.as_bytes();
                 stem.len() == 4
-                    && stem[..3].eq_ignore_ascii_case(r)
-                    && stem.as_bytes()[3].is_ascii_digit()
+                    && stem[..3].eq_ignore_ascii_case(r.as_bytes())
+                    && stem[3].is_ascii_digit()
             });
             if reserved {
                 format!("_{name}")
@@ -290,6 +291,13 @@ mod tests {
         assert_eq!(odd, user.dir.join("a-b").join("x- -b-.xmp"));
         let reserved = user.create(&r, &PresetInfo::new("CON", "a|b"), &groups)?;
         assert_eq!(reserved, user.dir.join("a-b").join("_CON.xmp"));
+        // Names of four bytes but fewer characters are names like any other.
+        for name in ["éé", "🙂", "COMé"] {
+            let made = user.create(&r, &PresetInfo::new(name, "a|b"), &groups)?;
+            assert_eq!(made, user.dir.join("a-b").join(format!("{name}.xmp")));
+        }
+        let com = user.create(&r, &PresetInfo::new("com1.x", "a|b"), &groups)?;
+        assert_eq!(com, user.dir.join("a-b").join("_com1.x.xmp"));
         // A file copied into the folder from elsewhere is not ours to change.
         let foreign = crate::xmp::Preset {
             settings: Default::default(),

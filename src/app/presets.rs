@@ -10,14 +10,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl Editor {
-    pub(super) fn reload_presets(&self, ctx: &egui::Context) {
+    pub(super) fn reload_presets(&mut self, ctx: &egui::Context) {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
+        let scan = self.presets.next_scan();
         std::thread::spawn(move || {
-            let library = crate::presets::load_library();
-            let _ = tx.send(Event::XmpLibrary(Arc::new(library)));
+            let library = Arc::new(crate::presets::load_library());
+            let _ = tx.send(Event::XmpLibrary { scan, library });
             ctx.request_repaint();
         });
+    }
+    /// A finished library scan, unless a later one has started since: scans run in
+    /// parallel and may finish in any order.
+    pub(super) fn presets_scanned(&mut self, scan: u64, library: Arc<crate::presets::Library>) {
+        if self.presets.is_latest(scan) {
+            self.presets.library = library;
+            self.refresh_preset_support();
+        }
     }
     pub(super) fn refresh_preset_support(&mut self) {
         let had_preview = self.presets.preview.take().is_some();

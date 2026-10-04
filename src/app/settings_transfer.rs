@@ -181,7 +181,8 @@ impl Editor {
         }
     }
     /// Copy keeps the groups chosen for Paste, and Synchronize applies them to the
-    /// other selected photos; both start the next dialog from that choice.
+    /// other selected photos; both start the next dialog from that choice. A new
+    /// preset's groups are its own and leave that choice as it was.
     pub(super) fn close_copy_dialog(&mut self, choice: CopyChoice) {
         let Some(dialog) = self.copy_dialog.take() else {
             return;
@@ -189,8 +190,10 @@ impl Editor {
         if choice == CopyChoice::Cancel {
             return;
         }
-        self.copy_groups = dialog.groups.clone();
-        let _ = self.save_session();
+        if dialog.purpose != Transfer::NewPreset {
+            self.copy_groups = dialog.groups.clone();
+            let _ = self.save_session();
+        }
         match dialog.purpose {
             Transfer::Copy => self.copy_settings(dialog.groups),
             Transfer::Sync => self.start_sync(super::sync::BatchChange::Settings(dialog.groups)),
