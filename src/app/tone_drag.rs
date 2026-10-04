@@ -79,12 +79,18 @@ impl ToneRegion {
     }
     /// `start` moved by a drag of `dx`, a fraction of the histogram's width:
     /// the whole width moves the slider from its centre to one end. Steps as
-    /// the slider's drag does: 0.05 EV, or one unit.
+    /// the slider's drag does: 0.05 EV, or one unit. A value outside the
+    /// slider's range (an imported Exposure of +7 EV) stays until the drag
+    /// moves it back in, and one that does not reach the next step is kept.
     pub(super) fn dragged(self, start: f32, dx: f32) -> f32 {
         let limit = self.limit();
         let steps = if self == Self::Exposure { 20. } else { 100. };
-        let value = start + dx * limit;
-        ((value * steps).round() / steps).clamp(-limit, limit)
+        let round = |v: f32| (v * steps).round() / steps;
+        let value = round(start + dx * limit);
+        if value == round(start) {
+            return start;
+        }
+        value.clamp((-limit).min(start), limit.max(start))
     }
 }
 
@@ -95,18 +101,24 @@ pub(super) struct ToneDrag {
     start: f32,
 }
 
-/// The histogram's drag handling over `rect`. Returns the region to show:
-/// the one dragged, or the one under the pointer.
+/// The histogram's drag handling over `rect`, except over `controls` (the
+/// clipping triangles), which keep their presses. Primary button only.
+/// Returns the region to show: the one dragged, or the one under the pointer.
 pub(super) fn tone_drag_ui(
     ui: &egui::Ui,
     rect: Rect,
+    controls: &[Rect],
     drag: &mut Option<ToneDrag>,
     recipe: &mut Recipe,
 ) -> Option<ToneRegion> {
+    let primary = egui::PointerButton::Primary;
     let response = ui.interact(rect, ui.id().with("histogram-drag"), Sense::drag());
     let fraction = |x: f32| (x - rect.left()) / rect.width().max(1.);
-    if response.drag_started()
-        && let Some(p) = response.interact_pointer_pos()
+    let free = |p: &egui::Pos2| !controls.iter().any(|c| c.contains(*p));
+    // Where the press was, not where the drag was noticed.
+    let pressed_at = ui.input(|i| i.pointer.press_origin());
+    if response.drag_started_by(primary)
+        && let Some(p) = pressed_at.filter(free)
     {
         let region = ToneRegion::at(fraction(p.x));
         *drag = Some(ToneDrag {
@@ -115,23 +127,30 @@ pub(super) fn tone_drag_ui(
         });
     }
     if let Some(d) = *drag {
-        if response.dragged() {
+        let dragged = response.dragged_by(primary);
+        if dragged {
             let dx = response.total_drag_delta().map_or(0., |v| v.x) / rect.width().max(1.);
-            *d.region.value_mut(recipe) = d.region.dragged(d.start, dx);
-            let value = d.region.value(recipe);
-            super::widgets::name_history_step(
-                ui,
-                d.region.label().to_string(),
-                d.region.display(value),
-            );
-        }
-        if !response.dragged() {
+            let value = d.region.dragged(d.start, dx);
+            let slider = d.region.value_mut(recipe);
+            // Named only when it changed, or the name would go to the next edit.
+            if *slider != value {
+                *slider = value;
+                super::widgets::name_history_step(
+                    ui,
+                    d.region.label().to_string(),
+                    d.region.display(value),
+                );
+            }
+        } else {
             *drag = None;
         }
     }
-    let shown = drag
-        .map(|d| d.region)
-        .or_else(|| response.hover_pos().map(|p| ToneRegion::at(fraction(p.x))));
+    let shown = drag.map(|d| d.region).or_else(|| {
+        response
+            .hover_pos()
+            .filter(free)
+            .map(|p| ToneRegion::at(fraction(p.x)))
+    });
     if shown.is_some() {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
@@ -141,6 +160,7 @@ pub(super) fn tone_drag_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::history::{History, Step};
     use eframe::egui::{Pos2, Vec2};
 
     #[test]
@@ -168,67 +188,125 @@ mod tests {
     }
 
     #[test]
-    fn one_drag_is_one_history_step_named_after_its_region() {
-        let ctx = egui::Context::default();
-        let rect = Rect::from_min_size(Pos2::new(0., 0.), Vec2::new(500., 100.));
-        let mut recipe = Recipe::default();
-        let mut drag = None;
-        let mut history = super::super::history::History::default();
-        let mut frame = |events: Vec<egui::Event>, down: bool, recipe: &mut Recipe| {
-            let before = recipe.clone();
+    fn a_value_is_kept_until_the_drag_reaches_another_step() {
+        // An imported +7 EV, beyond the slider: kept, then moved back in.
+        assert_eq!(ToneRegion::Exposure.dragged(7., 0.), 7.);
+        assert_eq!(ToneRegion::Exposure.dragged(7., -0.002), 7.);
+        assert_eq!(ToneRegion::Exposure.dragged(7., -0.2), 6.);
+        assert_eq!(ToneRegion::Exposure.dragged(7., 0.2), 7.);
+        // A typed value between steps does not snap on the press.
+        assert_eq!(ToneRegion::Shadows.dragged(0.333, 0.001), 0.333);
+        assert_eq!(ToneRegion::Shadows.dragged(0.333, 0.01), 0.34);
+    }
+
+    /// The histogram at (0, 0)–(500, 100), drawn as the editor draws it, with
+    /// History observing each frame.
+    struct Harness {
+        ctx: egui::Context,
+        recipe: Recipe,
+        drag: Option<ToneDrag>,
+        history: History,
+        controls: Vec<Rect>,
+    }
+    impl Harness {
+        const RECT: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(500., 100.));
+        fn new(controls: Vec<Rect>) -> Self {
+            let mut h = Self {
+                ctx: egui::Context::default(),
+                recipe: Recipe::default(),
+                drag: None,
+                history: History::default(),
+                controls,
+            };
+            h.frame(vec![]);
+            h
+        }
+        fn frame(&mut self, events: Vec<egui::Event>) -> Option<ToneRegion> {
+            let before = self.recipe.clone();
             let mut shown = None;
-            let mut output = ctx.run_ui(
+            let (recipe, drag, controls) = (&mut self.recipe, &mut self.drag, &self.controls);
+            let mut output = self.ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(600.))),
                     events,
                     ..Default::default()
                 },
-                |ui| shown = tone_drag_ui(ui, rect, &mut drag, recipe),
+                |ui| shown = tone_drag_ui(ui, Self::RECT, controls, drag, recipe),
             );
             output.textures_delta.clear();
-            if let Some((name, value)) = ctx.data_mut(|d| {
+            let label = self.ctx.data_mut(|d| {
                 d.remove_temp::<(String, String)>(super::super::widgets::history_step_id())
-            }) {
-                history.label(super::super::history::Step::new(name, value));
+            });
+            if let Some((name, value)) = label {
+                self.history.label(Step::new(name, value));
             }
-            history.observe(before, recipe, down);
+            let down = self.ctx.input(|i| i.pointer.primary_down());
+            self.history.observe(before, &self.recipe, down);
             shown
-        };
-        let button = |p: Pos2, pressed| egui::Event::PointerButton {
-            pos: p,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
+        }
+        /// Presses `button` at `from`, moves through `to` and releases.
+        fn drag(&mut self, button: egui::PointerButton, from: Pos2, to: &[f32]) {
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.frame(vec![egui::Event::PointerMoved(from), press(from, true)]);
+            let mut at = from;
+            for x in to {
+                at = Pos2::new(*x, from.y);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            self.frame(vec![press(at, false)]);
+        }
+        fn steps(&self) -> Vec<(String, String)> {
+            let (steps, _) = self.history.steps();
+            steps
+                .iter()
+                .map(|s| (s.name.clone(), s.value.clone()))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn one_drag_is_one_history_step_named_after_its_region() {
+        let mut h = Harness::new(Vec::new());
         // Hovering shows the region without changing anything.
         let start = Pos2::new(70., 50.);
-        frame(vec![], false, &mut recipe);
         assert_eq!(
-            frame(vec![egui::Event::PointerMoved(start)], false, &mut recipe),
+            h.frame(vec![egui::Event::PointerMoved(start)]),
             Some(ToneRegion::Blacks)
         );
-        frame(vec![button(start, true)], true, &mut recipe);
         // Leaving the region mid-drag keeps driving Blacks.
-        for x in [120., 170., 220.] {
-            let shown = frame(
-                vec![egui::Event::PointerMoved(Pos2::new(x, 50.))],
-                true,
-                &mut recipe,
-            );
-            assert_eq!(shown, Some(ToneRegion::Blacks));
-        }
-        frame(
-            vec![button(Pos2::new(220., 50.), false)],
-            false,
-            &mut recipe,
+        h.drag(egui::PointerButton::Primary, start, &[120., 170., 220.]);
+        assert_eq!(h.recipe.blacks, 0.3);
+        assert_eq!(h.recipe.exposure, 0.);
+        assert_eq!(h.steps(), [("Blacks".into(), "+30".into())]);
+    }
+
+    #[test]
+    fn only_a_primary_drag_away_from_the_triangles_edits() {
+        let triangle = Rect::from_min_size(Pos2::new(480., 0.), Vec2::splat(16.));
+        let mut h = Harness::new(vec![triangle]);
+        h.drag(
+            egui::PointerButton::Primary,
+            Pos2::new(488., 8.),
+            &[440., 400.],
         );
-        assert_eq!(recipe.blacks, 0.3);
-        assert_eq!(recipe.exposure, 0.);
-        let (steps, applied) = history.steps();
-        assert_eq!(applied, 1);
-        assert_eq!(
-            (steps[0].name.as_str(), steps[0].value.as_str()),
-            ("Blacks", "+30")
+        h.drag(
+            egui::PointerButton::Secondary,
+            Pos2::new(250., 50.),
+            &[300., 350.],
+        );
+        // A press without a move names no step either.
+        h.drag(egui::PointerButton::Primary, Pos2::new(250., 50.), &[]);
+        assert_eq!(h.recipe, Recipe::default());
+        assert!(h.steps().is_empty());
+        assert!(
+            h.ctx
+                .data(|d| d.get_temp::<(String, String)>(super::super::widgets::history_step_id()))
+                .is_none()
         );
     }
 }

@@ -15,6 +15,28 @@ use crate::app::theme;
 use crate::develop::{NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
+/// A histogram corner's clipping triangle: its corner point, which way it
+/// points (1 right, -1 left) and the area that takes its clicks.
+#[derive(Clone, Copy)]
+struct ClipTriangle {
+    corner: Pos2,
+    dir: f32,
+    hit: Rect,
+}
+impl ClipTriangle {
+    fn new(histogram: Rect, side: ClipSide) -> Self {
+        let (corner, dir) = match side {
+            ClipSide::Shadows => (histogram.left_top() + Vec2::new(6., 6.), 1.),
+            ClipSide::Highlights => (histogram.right_top() + Vec2::new(-6., 6.), -1.),
+        };
+        Self {
+            corner,
+            dir,
+            hit: Rect::from_center_size(corner + Vec2::new(4. * dir, 3.), Vec2::splat(16.)),
+        }
+    }
+}
+
 impl Editor {
     /// Lightroom-style histogram: filled channels whose overlaps mix to
     /// cyan, magenta, yellow and gray, with clipping indicators in the corners.
@@ -79,9 +101,11 @@ impl Editor {
         }
         // After the bars, so the region shows over them; before the triangles,
         // so their clicks stay theirs.
+        let triangles = ClipSide::BOTH.map(|side| ClipTriangle::new(rect, side));
         let region = tone_drag_ui(
             ui,
             rect,
+            &triangles.map(|t| t.hit),
             &mut self.view.tone_drag,
             &mut self.document.recipe,
         );
@@ -99,15 +123,8 @@ impl Editor {
         // Clipping triangles, as Lightroom's: each lit in the colours of the
         // channels clipping at its end; a click toggles its warning, hovering
         // shows it while the pointer stays, and J toggles both.
-        for side in ClipSide::BOTH {
+        for (side, ClipTriangle { corner, dir, hit }) in ClipSide::BOTH.into_iter().zip(triangles) {
             let left = side == ClipSide::Shadows;
-            let corner = if left {
-                rect.left_top() + Vec2::new(6., 6.)
-            } else {
-                rect.right_top() + Vec2::new(-6., 6.)
-            };
-            let dir = if left { 1. } else { -1. };
-            let hit = Rect::from_center_size(corner + Vec2::new(4. * dir, 3.), Vec2::splat(16.));
             let response = ui
                 .interact(hit, ui.id().with(("clip", left)), Sense::click())
                 .on_hover_text(if left {
