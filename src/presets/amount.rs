@@ -117,7 +117,8 @@ fn fixed_change(a: &Recipe, b: &Recipe) -> Option<SettingGroup> {
         (
             r.lens_builtin,
             r.lens_profile,
-            r.lens_profile_choice.clone(),
+            // As it renders: Default and Auto alike, and Adobe's digest left out.
+            r.lens_profile_choice.rendering(),
             r.lens_distortion,
             r.lens_vignetting,
             r.lens_manual_distortion,

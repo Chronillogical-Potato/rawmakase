@@ -397,3 +397,31 @@ fn point_color_shifts_scale_and_new_swatches_dont() {
         Err(NoAmount::Changes(SettingGroup::ColorAdjustments))
     );
 }
+
+#[test]
+fn lens_profile_setup_changes_that_render_alike_keep_amount() {
+    use crate::lens::choice::{LensProfileChoice, LensProfileId, LensProfileSetup};
+    let id = |digest: &str| {
+        Some(LensProfileId {
+            name: "Adobe (Testcam 35mm F2)".into(),
+            digest: digest.into(),
+            ..Default::default()
+        })
+    };
+    let at = |setup, digest| Recipe {
+        lens_profile_choice: LensProfileChoice {
+            setup,
+            id: id(digest),
+        },
+        ..Default::default()
+    };
+    let before = at(LensProfileSetup::Default, "");
+    assert_eq!(
+        super::fixed_change(&before, &at(LensProfileSetup::Auto, "0123ABCD")),
+        None
+    );
+    assert_eq!(
+        super::fixed_change(&before, &at(LensProfileSetup::Custom, "")),
+        Some(SettingGroup::LensProfileCorrections)
+    );
+}

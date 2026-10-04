@@ -376,4 +376,5 @@ fn profiles_whose_correction_does_not_validate_are_not_offered() {
     let menus = ProfileMenus::new(&m.lens_profiles, &m);
     assert!(menus.profiles("Testcam", "Testcam 28mm F2").is_empty());
     assert!(menus.first_of_make("Testcam").is_none());
+    assert!(menus.models("Testcam").is_empty());
 }

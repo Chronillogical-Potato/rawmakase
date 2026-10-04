@@ -209,11 +209,15 @@ impl<'p> ProfileMenus<'p> {
         makes.dedup();
         makes
     }
+    /// The make's models with a profile that validates; only the chosen make's
+    /// profiles are checked, so opening the menu stays quick.
     pub fn models(&self, make: &str) -> Vec<&'p str> {
+        let photo = self.photo;
         let mut models: Vec<&str> = self
-            .sorted()
-            .filter(|p| p.lens_make == make)
-            .map(|p| p.lens_model.as_str())
+            .profiles
+            .in_menu_order()
+            .filter(|c| c.profile.lens_make == make && c.correction(photo).is_some())
+            .map(|c| c.profile.lens_model.as_str())
             .collect();
         models.dedup();
         models
