@@ -117,10 +117,9 @@ pub struct Recipe {
     /// Red eye corrections, in order; saved apart, as `retouch`.
     #[serde(
         default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "crate::develop::red_eye::lenient"
+        skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank"
     )]
-    pub red_eye: Vec<crate::develop::red_eye::RedEyeOp>,
+    pub red_eye: crate::develop::red_eye::RedEyeList,
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
@@ -138,17 +137,14 @@ pub struct Recipe {
 pub struct LocalEdits {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub retouch: Vec<crate::develop::retouch::RetouchOp>,
-    #[serde(
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "crate::develop::red_eye::lenient"
-    )]
-    pub red_eye: Vec<crate::develop::red_eye::RedEyeOp>,
+    #[serde(skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank")]
+    pub red_eye: crate::develop::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
 }
 impl LocalEdits {
     pub fn is_empty(&self) -> bool {
-        self.retouch.is_empty() && self.red_eye.is_empty() && self.masks.is_empty()
+        self.retouch.is_empty() && self.red_eye.is_blank() && self.masks.is_empty()
     }
     pub fn validate(&self) -> Result<()> {
         crate::develop::retouch::validate(&self.retouch)?;
@@ -211,7 +207,7 @@ impl Default for Recipe {
             flip_x: false,
             flip_y: false,
             retouch: Vec::new(),
-            red_eye: Vec::new(),
+            red_eye: Default::default(),
             masks: Vec::new(),
             panels: PanelSwitches::default(),
             unknown: Default::default(),
@@ -437,7 +433,7 @@ impl Recipe {
         if !local.retouch.is_empty() {
             self.retouch = local.retouch;
         }
-        if !local.red_eye.is_empty() {
+        if !local.red_eye.is_blank() {
             self.red_eye = local.red_eye;
         }
         if !local.masks.is_empty() {

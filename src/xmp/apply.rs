@@ -1042,7 +1042,7 @@ impl Preset {
             r.retouch = retouch;
         }
         if let Some(red_eye) = edits.red_eye {
-            r.red_eye = red_eye;
+            r.red_eye = red_eye.into();
         }
         if let Some(masks) = edits.masks {
             r.masks = masks;

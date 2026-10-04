@@ -46,6 +46,8 @@ pub const DEFAULT_PUPIL_SIZE: f32 = 0.5;
 pub const DEFAULT_DARKEN: f32 = 0.5;
 /// Most corrections per photo.
 pub const MAX_OPS: usize = 200;
+/// The largest semi-axis, as a fraction of the long edge.
+pub const MAX_RADIUS: f32 = 0.25;
 /// The largest correlation kept; Camera Raw refuses ±1.
 pub const MAX_CORRELATION: f32 = 0.95;
 
@@ -53,7 +55,7 @@ impl RedEyeOp {
     pub fn validate(&self) -> Result<()> {
         let unit = |v: f32| v.is_finite() && (0. ..=1.).contains(&v);
         let position = |v: f32| v.is_finite() && v.abs() <= 2.;
-        let radius = |r: f32| r.is_finite() && (1e-4..=0.25).contains(&r);
+        let radius = |r: f32| r.is_finite() && (1e-4..=MAX_RADIUS).contains(&r);
         ensure!(
             self.center.iter().all(|v| position(*v))
                 && self.radius.iter().all(|r| radius(*r))
@@ -101,14 +103,65 @@ pub fn validate(ops: &[RedEyeOp]) -> Result<()> {
     ops.iter().try_for_each(RedEyeOp::validate)
 }
 
-/// Reads saved corrections, skipping any this release cannot read (a type added by a
-/// later release), so they never stop the photo's other local edits from loading.
-pub(crate) fn lenient<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<RedEyeOp>, D::Error> {
-    let values = Vec::<serde_json::Value>::deserialize(d)?;
-    Ok(values
-        .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect())
+/// A photo's red eye corrections, as a list of [`RedEyeOp`]s.
+///
+/// Corrections this release cannot read (a type a later release adds) are kept aside
+/// as they were saved and written back after the others, so they never stop the
+/// photo's other local edits from loading and are not lost when it is edited here.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RedEyeList {
+    ops: Vec<RedEyeOp>,
+    later: Vec<serde_json::Value>,
+}
+impl RedEyeList {
+    /// No corrections at all, readable or not.
+    pub fn is_blank(&self) -> bool {
+        self.ops.is_empty() && self.later.is_empty()
+    }
+}
+impl From<Vec<RedEyeOp>> for RedEyeList {
+    fn from(ops: Vec<RedEyeOp>) -> Self {
+        Self {
+            ops,
+            later: Vec::new(),
+        }
+    }
+}
+impl std::ops::Deref for RedEyeList {
+    type Target = Vec<RedEyeOp>;
+    fn deref(&self) -> &Vec<RedEyeOp> {
+        &self.ops
+    }
+}
+impl std::ops::DerefMut for RedEyeList {
+    fn deref_mut(&mut self) -> &mut Vec<RedEyeOp> {
+        &mut self.ops
+    }
+}
+impl Serialize for RedEyeList {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = s.serialize_seq(Some(self.ops.len() + self.later.len()))?;
+        for op in &self.ops {
+            seq.serialize_element(op)?;
+        }
+        for value in &self.later {
+            seq.serialize_element(value)?;
+        }
+        seq.end()
+    }
+}
+impl<'de> Deserialize<'de> for RedEyeList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut list = Self::default();
+        for value in Vec::<serde_json::Value>::deserialize(d)? {
+            match serde_json::from_value(value.clone()) {
+                Ok(op) => list.ops.push(op),
+                Err(_) => list.later.push(value),
+            }
+        }
+        Ok(list)
+    }
 }
 
 #[cfg(test)]

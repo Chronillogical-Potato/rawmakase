@@ -42,7 +42,7 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     let p: Preset = serde_json::from_value(v)?;
     let mut recipe = p.recipe.with_local(crate::develop::LocalEdits {
         retouch: Vec::new(),
-        red_eye: Vec::new(),
+        red_eye: Default::default(),
         masks: p.masks,
     });
     recipe.upright.clear_analysis();

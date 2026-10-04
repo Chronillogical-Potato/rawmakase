@@ -283,8 +283,15 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     let local: crate::develop::LocalEdits = serde_json::from_str(json).unwrap();
     assert_eq!(local.red_eye.len(), 1);
     assert_eq!(local.red_eye[0].center, [0.5, 0.5]);
-    // Saved and read back unchanged.
-    let back: crate::develop::LocalEdits =
-        serde_json::from_str(&serde_json::to_string(&local).unwrap()).unwrap();
-    assert_eq!(back, local);
+    // Saved and read back unchanged, the later release's correction included, even
+    // after an edit here.
+    let mut edited = local.clone();
+    edited.red_eye[0].darken = 0.8;
+    let text = serde_json::to_string(&edited).unwrap();
+    assert!(text.contains("\"Cat\""), "{text}");
+    let back: crate::develop::LocalEdits = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, edited);
+    // Through the recipe too.
+    let recipe = crate::develop::Recipe::default().with_local(edited.clone());
+    assert_eq!(recipe.split_local().1, edited);
 }

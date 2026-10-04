@@ -932,6 +932,44 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
     assert!((recipe.red_eye[0].center[0] - 0.35).abs() < 0.005);
 }
 #[test]
+fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: (0..160000)
+            .map(|i| {
+                let (x, y) = ((i % 400) as f32, (i / 400) as f32);
+                if (x - 200.).hypot(y - 200.) <= 150. {
+                    [0.6, 0.03, 0.03]
+                } else {
+                    [0.55, 0.35, 0.25]
+                }
+            })
+            .collect(),
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.add_red_eye([0.5, 0.5], 0.48);
+    assert!(editor.document.recipe.red_eye.is_empty());
+    assert!(
+        editor.status.contains("Unable to find red eye"),
+        "{}",
+        editor.status
+    );
+    editor.document.recipe.validate().unwrap();
+}
+#[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     use crate::develop::masks::MaskShape;
     let ctx = egui::Context::default();

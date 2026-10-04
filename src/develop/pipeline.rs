@@ -1359,7 +1359,19 @@ pub(crate) fn develop_samples(
 
 pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     r.validate()?;
-    render_legacy_inner(im, &r.resolved(&im.metadata), max_edge)
+    let im = legacy_retouched(im, r);
+    render_legacy_inner(&im, &r.resolved(&im.metadata), max_edge)
+}
+/// The camera image with the recipe's red eye corrections and spots applied, for the
+/// older engines, which develop without highlight recovery or the retouch cache.
+fn legacy_retouched<'a>(im: &'a CameraImage, r: &Recipe) -> std::borrow::Cow<'a, CameraImage> {
+    let shown = r.as_rendered();
+    let ops = super::retouch::Retouching::of(&shown);
+    if ops.is_empty() {
+        std::borrow::Cow::Borrowed(im)
+    } else {
+        std::borrow::Cow::Owned(super::retouch::apply(im, ops))
+    }
 }
 fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
@@ -1456,6 +1468,8 @@ fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
 
 /// Render a rectangle of the full output at one sample per output pixel.
 pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
+    let im = legacy_retouched(im, r);
+    let im = im.as_ref();
     let r = r.resolved(&im.metadata);
     render_region_inner(
         im.into(),

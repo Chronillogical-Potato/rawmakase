@@ -116,7 +116,7 @@ impl Editor {
             {
                 let size = long_edge_distance(center, to_image(pos), aspect);
                 if size > 0.002 {
-                    self.view.red_eye.size = size;
+                    self.view.red_eye.size = size.min(red_eye::MAX_RADIUS);
                     self.add_red_eye(center, size);
                 }
             }
@@ -170,7 +170,7 @@ impl Editor {
     }
     /// Corrects the red pupil found within `size` (long-edge fraction) of image
     /// position `center`, or says none was found.
-    fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
+    pub(super) fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
         if self.document.recipe.red_eye.len() >= red_eye::MAX_OPS {
             self.status = "Too many red eye corrections on this photo".into();
             return;
@@ -178,7 +178,7 @@ impl Editor {
         let Some(im) = self.document.full() else {
             return;
         };
-        match red_eye::find_pupil(im, center, size) {
+        match red_eye::find_pupil(im, center, size.min(red_eye::MAX_RADIUS)) {
             Ok(pupil) => {
                 let (pupil_size, darken) = self
                     .view
@@ -189,14 +189,19 @@ impl Editor {
                         (red_eye::DEFAULT_PUPIL_SIZE, red_eye::DEFAULT_DARKEN),
                         |op| (op.pupil_size, op.darken),
                     );
-                self.document.recipe.red_eye.push(RedEyeOp {
+                let op = RedEyeOp {
                     kind: EyeKind::Red,
                     center: pupil.center,
                     radius: pupil.radius,
                     correlation: pupil.correlation,
                     pupil_size,
                     darken,
-                });
+                };
+                if let Err(e) = op.validate() {
+                    self.status = e.to_string();
+                    return;
+                }
+                self.document.recipe.red_eye.push(op);
                 self.view.red_eye.selected = Some(self.document.recipe.red_eye.len() - 1);
             }
             Err(e) => self.status = e.to_string(),

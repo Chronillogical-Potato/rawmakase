@@ -18,6 +18,8 @@ pub enum DetectError {
     /// The red area has no edge within the circle: the circle is too small, or the
     /// area isn't a pupil.
     NoEdge,
+    /// The red area is larger than a correction can be.
+    TooLarge,
 }
 impl std::fmt::Display for DetectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -166,6 +168,9 @@ pub fn find_pupil(im: &CameraImage, center: [f32; 2], radius: f32) -> Result<Pup
             correlation,
         )
     };
+    if radius.iter().any(|r| *r > super::MAX_RADIUS) {
+        return Err(DetectError::TooLarge);
+    }
     Ok(Pupil {
         center,
         radius,

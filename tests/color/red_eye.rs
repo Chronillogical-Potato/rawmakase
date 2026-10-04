@@ -65,7 +65,8 @@ fn red_pupil_turns_dark_and_neutral_and_the_iris_stays() {
             correlation: pupil.correlation,
             pupil_size: 0.5,
             darken,
-        }];
+        }]
+        .into();
         render(&im, &r, 0).unwrap()
     };
     let half = corrected(0.5);

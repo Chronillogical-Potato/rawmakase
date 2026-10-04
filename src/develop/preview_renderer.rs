@@ -633,7 +633,7 @@ mod tests {
                 full.pixels[y * full.width as usize + x]
             };
             let red = at(&r);
-            r.red_eye = vec![op.clone()];
+            r.red_eye = vec![op.clone()].into();
             let fixed = at(&r);
             assert!(red[0] > 3. * red[1], "{rotation}: red before {red:?}");
             assert!(
@@ -649,6 +649,40 @@ mod tests {
             let tile = warm.render(&im, &r, 0, Some(region), &cancel).unwrap();
             let full = quality::render(&im, &r, 0, Some(region)).unwrap();
             assert_eq!(tile.pixels, full.pixels);
+        }
+        // Older process versions render it too, in previews, regions and exports.
+        let legacy = |red_eye: Vec<RedEyeOp>| Recipe {
+            engine: 2,
+            red_eye: red_eye.into(),
+            ..Default::default()
+        };
+        let [x, y] = [eye[0] as u32, eye[1] as u32];
+        for (before, after) in [
+            (
+                super::super::render_legacy(&im, &legacy(vec![]), 0).unwrap(),
+                super::super::render_legacy(&im, &legacy(vec![op.clone()]), 0).unwrap(),
+            ),
+            (
+                warm.render(&im, &legacy(vec![]), 0, Some([x, y, 1, 1]), &cancel)
+                    .unwrap(),
+                warm.render(
+                    &im,
+                    &legacy(vec![op.clone()]),
+                    0,
+                    Some([x, y, 1, 1]),
+                    &cancel,
+                )
+                .unwrap(),
+            ),
+        ] {
+            let i = if before.width == 1 {
+                0
+            } else {
+                (y * w + x) as usize
+            };
+            let (red, fixed) = (before.pixels[i], after.pixels[i]);
+            assert!(red[0] > 3. * red[1], "{red:?}");
+            assert!(fixed[0] < 1.3 * fixed[1], "legacy: {fixed:?} from {red:?}");
         }
     }
     /// Mask edits (sliders, shapes, ranges, visibility) never reuse stale weights.

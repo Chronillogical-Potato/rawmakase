@@ -102,8 +102,9 @@ Shift+R is its Reference View).
 - **Storage:** corrections are parameters beside the recipe, like spots (`red_eye` in
   the catalog's `local_edits`), in image space, so they stay on the eye through crop,
   straightening, Transform, rotation and flips. Releases that predate them open the
-  photo without them, and a correction of a kind a later release adds is skipped
-  rather than stopping the photo's other spots and masks from loading.
+  photo without them. A correction of a kind a later release adds is not shown, but
+  is kept and saved back as it was, and never stops the photo's other spots and masks
+  from loading. Older process versions render corrections (and spots) too.
 - **Rendering:** on the linear camera image, before Heal and Clone (so a heal copying
   from an eye copies the corrected pupil), with previews recomputing only the tiles a
   change reaches. Inside a soft ellipse every pixel moves towards a dark neutral, as
