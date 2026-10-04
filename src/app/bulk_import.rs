@@ -494,6 +494,8 @@ impl Editor {
                         let photo = self.document.catalog_photo;
                         self.open_raw(path, photo);
                     }
+                    // And the reference photo, whose lens may now have a profile.
+                    self.reload_reference();
                 }
                 ImportKind::Presets => self.reload_presets(ctx),
             }

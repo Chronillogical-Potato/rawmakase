@@ -130,8 +130,12 @@ impl Editor {
             return;
         };
         if self.document.catalog_photo == Some(id) {
-            // Shown live: open, so whatever kept it from loading is past.
+            // Shown live: open, so whatever kept it from loading is past, and a
+            // load still running for it can only bring back a stale error.
             self.reference.error = None;
+            if self.reference.pending.take().is_some() {
+                self.reference.load.invalidate();
+            }
             return;
         }
         let source = self.library.as_ref().and_then(|l| l.develop_source(id));
@@ -515,7 +519,12 @@ mod tests {
         editor.preview.before.texture = Some(shown);
         // Left/Right moves the Active photo; the reference stays where it was.
         editor.reference.error = Some("was offline".into());
+        // A load still running for it is dropped once it opens.
+        editor.reload_reference();
+        let stale = editor.reference.load.id();
         editor.develop_catalog_photo(other);
+        assert!(!editor.reference.loading());
+        editor.reference_ready(stale, Err("stale".into()));
         assert_eq!(editor.document.catalog_photo, Some(other));
         assert!(editor.preview.before.texture.is_some());
         // Open now, it can't be offline; until it decodes, it shows as developed.
