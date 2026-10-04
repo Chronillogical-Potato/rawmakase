@@ -1,5 +1,5 @@
-//! Red Eye Correction (Lightroom's tool between Remove and Masking): drag from the
-//! centre of an eye outward, or click to use the last size; the red (or, for Pet Eye,
+//! Red Eye Correction (Lightroom's tool between Remove and Masking): click the centre
+//! of an eye, with the circle sized by the mouse wheel or `[` `]`; the red (or, for Pet Eye,
 //! glowing) pupil found inside that circle gets a correction. Drag a correction to move
 //! it, and a pet eye's catchlight to place it; Pupil Size, Darken and Add Catchlight
 //! change the selected one; Delete removes it.
@@ -10,7 +10,6 @@ use super::widgets::{segmented, slider_with};
 use crate::develop::{
     ViewMapping,
     red_eye::{self, EyeKind, RedEyeOp},
-    retouch::radii,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
@@ -60,26 +59,37 @@ impl PupilType {
 enum Drag {
     #[default]
     None,
-    /// Drawing the search circle out from its centre (image space).
-    Circle([f32; 2]),
+    /// A press off any correction, placing one there (image space) on release.
+    Place([f32; 2]),
     /// Moving a correction; image-space pointer position at the start and the
     /// correction then.
     Move([f32; 2], RedEyeOp),
     /// Placing the selected pet eye's catchlight.
     Catchlight,
 }
+/// A step of `[` or `]`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SizeStep {
+    Smaller,
+    Larger,
+}
 impl RedEyeTool {
+    /// The click circle one step smaller or larger, within sizes a pupil can have.
+    fn resize(&mut self, step: SizeStep) {
+        self.scale(match step {
+            SizeStep::Smaller => 1. / 1.15,
+            SizeStep::Larger => 1.15,
+        });
+    }
+    /// The click circle scaled by `k`, within sizes a pupil can have.
+    pub(super) fn scale(&mut self, k: f32) {
+        self.size = (self.size * k).clamp(0.002, 0.25);
+    }
     pub(super) fn clear_document(&mut self) {
         self.selected = None;
         self.drag = Drag::None;
     }
 }
-/// The distance from `a` to `b` (image space) as a fraction of the long edge.
-fn long_edge_distance(a: [f32; 2], b: [f32; 2], aspect: f32) -> f32 {
-    let (sx, sy) = radii(1., aspect);
-    ((b[0] - a[0]) / sx).hypot((b[1] - a[1]) / sy)
-}
-
 impl Editor {
     /// Handles the pointer on the photo and draws the corrections. The tool owns the
     /// pointer.
@@ -134,7 +144,7 @@ impl Editor {
                     self.select_red_eye(Some(i));
                     Drag::Move(at, ops[i].clone())
                 }
-                None => Drag::Circle(at),
+                None => Drag::Place(at),
             };
         }
         if response.dragged()
@@ -158,15 +168,12 @@ impl Editor {
             self.document.recipe.red_eye[i].set_catchlight(to_image(pos), aspect);
             self.show_red_eye();
         }
+        // As in Lightroom, the size comes from the wheel or `[` `]`, not the drag: a
+        // drag that starts off a correction places one where it started.
         if response.drag_stopped() {
-            if let Drag::Circle(center) = std::mem::take(&mut self.view.red_eye.drag)
-                && let Some(pos) = response.interact_pointer_pos()
-            {
-                let size = long_edge_distance(center, to_image(pos), aspect);
-                if size > 0.002 {
-                    self.view.red_eye.size = size.min(red_eye::MAX_RADIUS);
-                    self.add_red_eye(center, size);
-                }
+            if let Drag::Place(center) = std::mem::take(&mut self.view.red_eye.drag) {
+                let size = self.view.red_eye.size;
+                self.add_red_eye(center, size);
             }
             self.view.red_eye.drag = Drag::None;
         }
@@ -204,11 +211,10 @@ impl Editor {
                 }
             }
         }
-        if let Drag::Circle(center) = &tool.drag
-            && let Some(pos) = pointer
+        if let Drag::Place(center) = &tool.drag
+            && pointer.is_some()
         {
-            let size = long_edge_distance(*center, to_image(pos), aspect);
-            let circle = circle_points(*center, size, aspect);
+            let circle = circle_points(*center, tool.size, aspect);
             outline(&painter, circle.into_iter().map(to_screen).collect(), 1.);
             crosshair(&painter, to_screen(*center));
         } else if let Some(pos) = pointer
@@ -295,12 +301,22 @@ impl Editor {
             .set(Panel::RedEye, PanelState::On);
     }
     /// The Red Eye tool's keys: Delete removes the selected correction.
+    /// Delete removes the selected correction; `[` and `]` resize the circle a click
+    /// corrects within, as they size the Remove brush.
     pub(super) fn red_eye_keys(&mut self, i: &egui::InputState) {
+        use egui::Key;
         if i.modifiers.command || i.modifiers.alt {
             return;
         }
-        if i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace) {
+        if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
             self.delete_red_eye();
+        }
+        let pressed = |keys: &[Key]| keys.iter().any(|k| i.key_pressed(*k));
+        if pressed(&[Key::OpenBracket, Key::OpenCurlyBracket]) {
+            self.view.red_eye.resize(SizeStep::Smaller);
+        }
+        if pressed(&[Key::CloseBracket, Key::CloseCurlyBracket]) {
+            self.view.red_eye.resize(SizeStep::Larger);
         }
     }
     pub(super) fn delete_red_eye(&mut self) {
@@ -387,7 +403,7 @@ impl Editor {
         ui.add_space(4.);
         hint(
             ui,
-            "Drag from the center of the eye or click to use current size",
+            "Click the center of the eye; scroll or [ ] to size the circle",
         );
         hint(ui, "Delete removes the selected correction");
         ui.add_space(4.);

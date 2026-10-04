@@ -82,7 +82,11 @@ const DEVELOP: [Shortcut; 33] = [
     ("Q", "Spot removal"),
     ("Shift+W", "Masking"),
     ("W", "White balance selector"),
-    ("[ / ]", "Brush size (Shift: feather)"),
+    ("[ / ]", "Brush or red eye size (Shift: feather)"),
+    (
+        "Scroll",
+        "Brush or red eye size over the photo (Shift: feather)",
+    ),
     ("/", "New source for the selected spot"),
     ("H", "Hide spot pins"),
     ("A", "Visualize spots"),

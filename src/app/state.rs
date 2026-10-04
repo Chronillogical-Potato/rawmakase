@@ -227,6 +227,8 @@ pub(super) struct ViewState {
     pub(super) retouch: super::retouch_tool::RetouchTool,
     /// Red Eye Correction's selection, last size and drag in progress.
     pub(super) red_eye: super::red_eye_tool::RedEyeTool,
+    /// A wheel scroll sizing a brush, recorded as one History step when it pauses.
+    pub(super) wheel: super::brush_scroll::WheelGesture,
     /// Masking panel state.
     pub(super) masking: super::mask_tool::MaskTool,
     /// The Guided Upright tool's selection, drag and view options.
@@ -261,6 +263,7 @@ impl Default for ViewState {
             ruler: Default::default(),
             retouch: Default::default(),
             red_eye: Default::default(),
+            wheel: Default::default(),
             masking: Default::default(),
             guided: Default::default(),
             monitor: None,

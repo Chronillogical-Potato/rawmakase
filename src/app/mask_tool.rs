@@ -130,6 +130,17 @@ impl Editor {
             .selected
             .filter(|i| *i < self.document.recipe.masks.len())
     }
+    /// Whether the brush is in use: a brush component is selected and no new shape is
+    /// waiting to be drawn. Only then does the cursor show it, and the wheel size it.
+    pub(super) fn mask_brush_shown(&self) -> bool {
+        self.view.masking.pending.is_none()
+            && self.selected_component().is_some_and(|(m, c)| {
+                matches!(
+                    self.document.recipe.masks[m].components[c].shape,
+                    MaskShape::Brush { .. }
+                )
+            })
+    }
     fn selected_component(&self) -> Option<(usize, usize)> {
         let m = self.selected_mask()?;
         let c = self
@@ -257,7 +268,7 @@ impl Editor {
         let shape =
             selected.map(|(m, c)| self.document.recipe.masks[m].components[c].shape.clone());
         let pending = self.view.masking.pending;
-        let brushing = pending.is_none() && matches!(shape, Some(MaskShape::Brush { .. }));
+        let brushing = self.mask_brush_shown();
         let handles: Vec<(Handle, Pos2)> = match &shape {
             Some(s) if pending.is_none() => handles(s, space, &to_screen),
             _ => Vec::new(),
