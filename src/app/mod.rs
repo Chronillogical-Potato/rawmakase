@@ -402,6 +402,7 @@ mod auto;
 mod bulk_import;
 mod catalog;
 mod clipping;
+mod color_grading;
 mod crop_tool;
 mod dialogs;
 mod export;

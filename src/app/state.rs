@@ -233,7 +233,8 @@ pub(super) struct ViewState {
     pub(super) guided: super::guided_tool::GuidedTool,
     pub(super) monitor: Option<PathBuf>,
     pub(super) selected_band: usize,
-    pub(super) selected_grade: usize,
+    /// The Color Grading panel's view: 3-Way or one wheel.
+    pub(super) grading: super::color_grading::GradingView,
     pub(super) selected_curve: usize,
     pub(super) parametric_curve: bool,
     pub(super) mixer_color: bool,
@@ -264,7 +265,7 @@ impl Default for ViewState {
             guided: Default::default(),
             monitor: None,
             selected_band: 0,
-            selected_grade: 1,
+            grading: Default::default(),
             selected_curve: 0,
             parametric_curve: false,
             mixer_color: false,
