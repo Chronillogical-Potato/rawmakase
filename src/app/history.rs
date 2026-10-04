@@ -89,8 +89,23 @@ fn next_state() -> u64 {
 impl History {
     /// History as saved with the photo's edit: undone steps are kept, so they can
     /// still be redone after the photo opens again, as in Lightroom.
+    ///
+    /// A drag still in progress is saved as the step it will become, without being
+    /// recorded yet, so a save that fails leaves the drag going.
     pub fn saved(&self, current: &Recipe) -> SavedHistory {
-        let done: Vec<_> = self.undo.iter().collect();
+        let gesture = self.gesture.as_ref().filter(|before| *before != current);
+        let mut done: Vec<_> = self
+            .undo
+            .iter()
+            .map(|(r, step)| (r, step.clone()))
+            .collect();
+        if let Some(before) = gesture {
+            let step = self
+                .label
+                .clone()
+                .unwrap_or_else(|| describe(before, current));
+            done.push((before, step));
+        }
         let mut steps: Vec<SavedStep> = done
             .iter()
             .enumerate()
@@ -100,13 +115,16 @@ impl History {
                 recipe: done.get(i + 1).map_or(current, |(r, _)| r).clone(),
             })
             .collect();
-        steps.extend(self.redo.iter().rev().map(|(r, step)| SavedStep {
-            name: step.name.clone(),
-            value: step.value.clone(),
-            recipe: r.clone(),
-        }));
+        // Finishing the drag will drop the steps undone before it.
+        if gesture.is_none() {
+            steps.extend(self.redo.iter().rev().map(|(r, step)| SavedStep {
+                name: step.name.clone(),
+                value: step.value.clone(),
+                recipe: r.clone(),
+            }));
+        }
         SavedHistory {
-            origin: done.first().map_or(current, |(r, _)| r).clone(),
+            origin: done.first().map_or(current, |(r, _)| *r).clone(),
             steps,
             applied: done.len(),
         }

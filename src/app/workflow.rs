@@ -108,12 +108,13 @@ impl Editor {
             self.background_saved(done);
         }
         // A slider or histogram drag still held when the photo is left (Left or Right
-        // with the button down) is a step of its own, saved with the edit.
+        // with the button down) is saved as a step of its own; History records it
+        // once the save succeeds.
         if self.document.history.in_gesture() {
-            self.document.history.finish_gesture(&self.document.recipe);
             self.document.save.mark_changed();
         }
         if !self.document.save.needs_save() {
+            self.finish_gesture();
             return true;
         }
         if let (Some(path), Some(l), Some(id)) = (
@@ -144,6 +145,7 @@ impl Editor {
                 }
             }
         }
+        self.finish_gesture();
         true
     }
     /// Autosave: collects a finished background save and, once the edit

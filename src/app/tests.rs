@@ -2382,5 +2382,41 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     assert_eq!(history.applied, 1);
     assert_eq!(history.steps.len(), 1);
     assert_eq!(history.steps[0].recipe.exposure, 0.6);
+    // Undo on the next photo reaches it.
+    assert_eq!(editor.undo_log.len(), (1, 0));
+    // A save that fails keeps the drag going, as one step.
+    editor.document.catalog_photo = Some(id + 1000);
+    let before = editor.document.recipe.clone();
+    editor.document.recipe.exposure = 0.9;
+    editor
+        .document
+        .history
+        .observe(before, &editor.document.recipe, true);
+    editor.document.save.mark_changed();
+    assert!(!editor.flush());
+    assert!(editor.document.history.in_gesture());
+    assert_eq!(editor.undo_log.len(), (1, 0));
     Ok(())
+}
+#[test]
+fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    editor.library_mode = false;
+    let edit = |editor: &mut Editor, exposure: f32, held: bool| {
+        let before = editor.document.recipe.clone();
+        editor.document.recipe.exposure = exposure;
+        editor
+            .document
+            .history
+            .observe(before, &editor.document.recipe, held);
+        editor.sync_undo();
+    };
+    edit(&mut editor, 0.3, false);
+    edit(&mut editor, 0.6, true);
+    editor.undo();
+    assert_eq!(editor.document.recipe.exposure, 0.3);
+    assert_eq!(editor.undo_log.len(), (1, 1));
+    editor.redo();
+    assert_eq!(editor.document.recipe.exposure, 0.6);
 }
