@@ -353,6 +353,19 @@ pub(super) struct AmountSession {
     shown: Recipe,
 }
 
+impl AmountSession {
+    /// Whether `current` is still what this Amount set. Upright doesn't scale, and its
+    /// analysis lands whenever it finishes, so it doesn't count.
+    fn still_shown(&self, current: &Recipe) -> bool {
+        if current.upright == self.shown.upright {
+            return self.shown == *current;
+        }
+        let mut shown = self.shown.clone();
+        shown.upright.clone_from(&current.upright);
+        shown == *current
+    }
+}
+
 impl Editor {
     /// Applies preset `i` of the library to the open photo, as a click does.
     pub(super) fn apply_preset(&mut self, i: usize) {
@@ -412,6 +425,8 @@ impl Editor {
         };
         session.amount = amount;
         session.shown = session.scale.at(amount, m);
+        // Upright doesn't scale, and its analysis may have landed since: the photo's.
+        session.shown.upright = self.document.recipe.upright.clone();
         // Named only when it changes the photo: a label left over would name the
         // next edit.
         if session.shown == self.document.recipe {
@@ -433,7 +448,7 @@ impl Editor {
             .presets
             .amount
             .as_ref()
-            .is_some_and(|s| s.shown != self.document.recipe)
+            .is_some_and(|s| !s.still_shown(&self.document.recipe))
         {
             self.presets.amount = None;
         }

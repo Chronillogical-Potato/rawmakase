@@ -3079,6 +3079,16 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     }
     assert!((editor.document.recipe.exposure - 0.6).abs() < 1e-6);
     assert!((editor.document.recipe.contrast - 0.2).abs() < 1e-6);
+    // An Upright analysis landing meanwhile keeps the Amount, and the Amount keeps it.
+    let analysed = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
+    editor.document.recipe.upright.corrections = analysed.clone();
+    let frame = editor.begin_edit_frame();
+    editor.finish_edit_frame(frame, &ctx);
+    assert!(editor.presets.amount.is_some());
+    let frame = editor.begin_edit_frame();
+    editor.set_preset_amount(0.5);
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(editor.document.recipe.upright.corrections, analysed);
     let (steps, applied) = editor.document.history.steps();
     assert_eq!(applied, 4);
     assert_eq!(steps[3].name, "Preset Amount");
