@@ -359,20 +359,34 @@ impl super::Editor {
     /// The Crop tool's keys: X swaps the crop's orientation, O cycles the guide overlay
     /// and Shift+O turns it. The caller leaves them alone while a text field has focus.
     pub(super) fn crop_keys(&mut self, i: &egui::InputState) {
-        if i.modifiers.command || i.modifiers.alt {
-            return;
-        }
-        if i.key_pressed(egui::Key::X) && !i.modifiers.shift {
-            self.swap_crop_orientation();
-        }
-        if i.key_pressed(egui::Key::O) {
-            let mut guides = self.view.crop_guides;
-            if i.modifiers.shift {
-                guides.turn();
-            } else {
-                guides.cycle();
+        // The modifiers held with each key press, which a quick release of Shift
+        // before the frame does not change.
+        for event in &i.events {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if modifiers.command || modifiers.alt || modifiers.ctrl {
+                continue;
             }
-            self.set_crop_guides(guides);
+            match key {
+                egui::Key::X if !modifiers.shift => self.swap_crop_orientation(),
+                egui::Key::O => {
+                    let mut guides = self.view.crop_guides;
+                    if modifiers.shift {
+                        guides.turn();
+                    } else {
+                        guides.cycle();
+                    }
+                    self.set_crop_guides(guides);
+                }
+                _ => {}
+            }
         }
     }
     /// Changes the guide overlay, saved in the session as a view preference.

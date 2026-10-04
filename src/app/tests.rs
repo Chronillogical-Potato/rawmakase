@@ -2199,6 +2199,34 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
         (e.view.crop_guides.guide, e.view.crop_guides.orientation),
         (Guide::Triangle, 1)
     );
+    // Shift released before the frame is drawn: the press still had it.
+    let shifted = egui::Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(shifted),
+                egui::Event::Key {
+                    key: egui::Key::O,
+                    physical_key: Some(egui::Key::O),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: shifted,
+                },
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        },
+        |_| e.develop_shortcuts(&ctx),
+    );
+    output.textures_delta.clear();
+    assert_eq!(
+        (e.view.crop_guides.guide, e.view.crop_guides.orientation),
+        (Guide::Triangle, 0)
+    );
+    press(&mut e, egui::Key::O, true, false);
     let saved: crate::storage::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
     assert_eq!(saved.crop_guides.guide, "triangle");
     assert_eq!(saved.crop_guides.orientation, 1);
