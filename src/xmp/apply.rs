@@ -937,12 +937,39 @@ impl Preset {
         settings.seen.insert("PerspectiveUpright".into());
         let mut lightroom = BTreeMap::new();
         let mut corrections = Vec::new();
+        let mut guides = Vec::new();
         for (key, value) in v.range("Upright".to_string()..) {
             let Some(name) = key.strip_prefix("Upright") else {
                 break;
             };
             settings.seen.insert(key.clone());
-            if name == "TransformCount" {
+            if name == "TransformCount" || name == "FourSegmentsCount" {
+                continue;
+            }
+            // Guided's guides: "x1,y1,x2,y2" in 0–1 of the frame as recorded.
+            if let Some(i) = name.strip_prefix("FourSegments_") {
+                let i: usize = i
+                    .parse()
+                    .ok()
+                    .filter(|&i| i < crate::develop::guided::MAX_GUIDES)
+                    .with_context(|| format!("Unsupported {key}"))?;
+                let v: Vec<f32> = value
+                    .split(',')
+                    .map(|x| x.trim().parse::<f32>())
+                    .collect::<Result<_, _>>()
+                    .with_context(|| format!("Invalid {key}"))?;
+                let [x1, y1, x2, y2]: [f32; 4] = v
+                    .try_into()
+                    .ok()
+                    .filter(|v: &[f32; 4]| v.iter().all(|x| x.is_finite()))
+                    .with_context(|| format!("Invalid {key}"))?;
+                if guides.len() <= i {
+                    guides.resize(i + 1, None);
+                }
+                guides[i] = Some(crate::develop::UprightGuide {
+                    a: [x1, y1],
+                    b: [x2, y2],
+                });
                 continue;
             }
             let Some(i) = name.strip_prefix("Transform_") else {
@@ -972,6 +999,7 @@ impl Preset {
         // Lightroom stores every mode; keep only the unbroken run from Off, so a mode
         // without its own correction is never stood in for by an identity.
         let corrections: Vec<[f32; 9]> = corrections.into_iter().map_while(|m| m).collect();
+        let guides: Vec<_> = guides.into_iter().flatten().collect();
         let Some(code) = number(v, "PerspectiveUpright")? else {
             ensure!(
                 corrections.is_empty(),
@@ -984,7 +1012,11 @@ impl Preset {
             .with_context(|| format!("Unsupported PerspectiveUpright {code}"))?;
         // A preset names only the mode; the app analyses each photo it is applied to.
         // A photo's own settings always carry Lightroom's corrections.
-        let stored = mode == UprightMode::Off || mode.code() < corrections.len();
+        // Guided with its guides is solved on the photo when Lightroom's correction is
+        // missing.
+        let stored = mode == UprightMode::Off
+            || mode.code() < corrections.len()
+            || (mode == UprightMode::Guided && !guides.is_empty());
         ensure!(
             stored || !self.photo_settings,
             "PerspectiveUpright without Lightroom's stored correction is not supported yet"
@@ -997,7 +1029,7 @@ impl Preset {
         r.upright = crate::develop::Upright {
             mode,
             corrections,
-            guides: Vec::new(),
+            guides,
             lightroom,
         };
         Ok(())
