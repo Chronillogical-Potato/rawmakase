@@ -38,6 +38,11 @@ const FIELDS: &[(&str, usize)] = &[
     ("REFINE_SATURATION", 1),
     ("CHANNELS", 3),
     ("MIXER", 1),
+    // A look's RGB table: samples offset, dimensions, divisions, gamma, gamut and
+    // amount, then the matrices into its primaries and back.
+    ("RGB", 6),
+    ("RGB_INTO", 9),
+    ("RGB_BACK", 9),
     ("GRADE", 3),
     ("ADJUST", 1),
     ("DEFRINGE", 2),
@@ -174,6 +179,36 @@ fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
         p.set(name, &values);
     }
 }
+fn set_rgb_table(p: &mut PixelParams, look: Option<&crate::camera_profiles::RgbLook>) {
+    use crate::camera_profiles::{Dimensions, Gamut};
+    let Some(look) = look else {
+        return p.set("RGB", &[-1., 0., 0., 0., 0., 0.]);
+    };
+    let t = look.table();
+    let at = p.push(t.samples().iter().flatten().copied());
+    let dimensions = match t.dimensions() {
+        Dimensions::One => 1.,
+        Dimensions::Three => 3.,
+    };
+    let extend = match t.gamut() {
+        Gamut::Clip => 0.,
+        Gamut::Extend => 1.,
+    };
+    p.set(
+        "RGB",
+        &[
+            at,
+            dimensions,
+            t.divisions() as f32,
+            t.gamma().code() as f32,
+            extend,
+            look.amount(),
+        ],
+    );
+    let [into, back] = t.matrices();
+    p.set("RGB_INTO", into.as_flattened());
+    p.set("RGB_BACK", back.as_flattened());
+}
 /// `tone` parameters for the whole stage, with the map built from their result.
 pub(crate) fn with_map(mut p: PixelParams, map: &LocalToneMap) -> PixelParams {
     p.set("TONE_ONLY", &[0.]);
@@ -205,9 +240,9 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     let ramp = lut.black_ramp.as_ref()?;
     p.set("RAMP", &[ramp.black, ramp.slope, ramp.radius, ramp.q]);
     p.table("LOOK", t.look);
-    p.table("ENH", t.enhanced.map(|e| e.0));
-    let curve = match t.enhanced {
-        Some((_, curve)) => p.push(curve.iter().copied()),
+    p.table("ENH", t.enhanced);
+    let curve = match t.enhanced_curve {
+        Some(curve) => p.push(curve.iter().copied()),
         None => -1.,
     };
     p.set("ENH_CURVE", &[curve]);
@@ -242,6 +277,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("MIXER", &[mixer]);
+    set_rgb_table(&mut p, lut.rgb_table.as_ref());
     let grade = match &lut.grade {
         Some(g) => [
             p.push(g.gain.iter().flatten().copied()),

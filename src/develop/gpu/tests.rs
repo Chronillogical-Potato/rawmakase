@@ -230,6 +230,13 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
         ..Default::default()
     };
     let mut recipes = vec![base(&plain), base(&tables)];
+    // A look's RGB tables: 3D and 1D, clipping and extending the gamut.
+    let rgb_tables = tables.clone().with_test_rgb_tables();
+    recipes.extend(rgb_tables.iter().map(base));
+    let mut r = base(&rgb_tables[0]);
+    r.saturation = 0.3;
+    r.grading[1] = [0.1, 0.3, 0.];
+    recipes.push(r);
     let mut r = base(&tables);
     r.exposure = 0.7;
     r.contrast = 0.4;

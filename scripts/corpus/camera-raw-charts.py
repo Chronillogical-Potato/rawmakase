@@ -80,7 +80,7 @@ def look_xmp(look):
     attributes = dict(re.findall(r'crs:(\w+)="([^"]*)"', text))
     name = re.search(r'xml:lang="x-default">([^<]*)<', text).group(1)
     parameters = ' '.join(f'crs:{k}="{v}"' for k, v in attributes.items()
-                          if k in ('Version', 'ProcessVersion', 'ConvertToGrayscale', 'LookTable')
+                          if k in ('Version', 'ProcessVersion', 'ConvertToGrayscale', 'LookTable', 'RGBTable', 'RGBTableAmount')
                           or k.endswith('2012'))
     curves = ''.join(re.findall(r'(<crs:ToneCurvePV2012\w*>.*?</crs:ToneCurvePV2012\w*>)', text, re.S))
     element = (f'<crs:Look><rdf:Description crs:Name="{name}" crs:Amount="{look["amount"]}"'
