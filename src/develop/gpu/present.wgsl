@@ -247,17 +247,22 @@ fn present(@builtin(global_invocation_id) id: vec3<u32>) {
         atomicAdd(&histogram[bins.r], 1u);
         atomicAdd(&histogram[256u + bins.g], 1u);
         atomicAdd(&histogram[512u + bins.b], 1u);
+        // `Clipped`: per channel, highlights then shadows, at `HIGHLIGHT_CLIP`
+        // and `SHADOW_CLIP` of the rendered values, before the monitor profile.
+        for (var c = 0u; c < 3u; c++) {
+            if color[c] >= 0.999 { atomicAdd(&histogram[768u + c], 1u); }
+            if color[c] <= 0.001 { atomicAdd(&histogram[771u + c], 1u); }
+        }
     }
     var bytes = floor(clamped * 255.0 + 0.5);
     if p.lut_size > 1u {
         bytes = monitor(bytes);
     }
-    if p.clipping != 0u {
-        if any(color >= vec3(0.999)) {
-            bytes = vec3(255.0, 40.0, 40.0);
-        } else if all(color <= vec3(0.001)) {
-            bytes = vec3(40.0, 80.0, 255.0);
-        }
+    // `ClipOverlay`: 1 highlights, 2 shadows.
+    if (p.clipping & 1u) != 0u && any(color >= vec3(0.999)) {
+        bytes = vec3(255.0, 40.0, 40.0);
+    } else if (p.clipping & 2u) != 0u && all(color <= vec3(0.001)) {
+        bytes = vec3(40.0, 80.0, 255.0);
     }
     textureStore(shown, vec2(id.x, id.y), vec4(bytes / 255.0, 1.0));
 }

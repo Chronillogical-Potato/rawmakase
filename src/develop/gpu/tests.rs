@@ -417,15 +417,31 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let cancel = AtomicBool::new(false);
     // `ca`: 1 the measured aberration alone, 2 with the built-in distortion. Each
     // spatial run has another vignette style and amount.
+    use crate::develop::ClipOverlay;
     use crate::develop::effects::VignetteStyle::*;
+    let (none, both) = (
+        ClipOverlay::NONE,
+        ClipOverlay {
+            shadows: true,
+            highlights: true,
+        },
+    );
+    let shadows = ClipOverlay {
+        shadows: true,
+        ..none
+    };
+    let highlights = ClipOverlay {
+        highlights: true,
+        ..none
+    };
     for (spatial, clipping, ca, (style, vignette)) in [
-        (false, false, 0, (HighlightPriority, 0.)),
-        (true, false, 0, (HighlightPriority, -0.3)),
-        (true, true, 0, (ColorPriority, -0.6)),
-        (true, false, 0, (PaintOverlay, -0.5)),
-        (true, false, 1, (HighlightPriority, 0.5)),
-        (true, false, 2, (ColorPriority, 0.4)),
-        (true, false, 0, (PaintOverlay, 0.7)),
+        (false, shadows, 0, (HighlightPriority, 0.)),
+        (true, none, 0, (HighlightPriority, -0.3)),
+        (true, both, 0, (ColorPriority, -0.6)),
+        (true, highlights, 0, (PaintOverlay, -0.5)),
+        (true, none, 1, (HighlightPriority, 0.5)),
+        (true, none, 2, (ColorPriority, 0.4)),
+        (true, none, 0, (PaintOverlay, 0.7)),
     ] {
         let mut recipe = base.clone();
         if spatial {
@@ -481,19 +497,29 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 (expected.width, expected.height)
             );
             let mut rgb = expected.rgb8();
-            if clipping {
-                for (p, orig) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(&expected.pixels) {
-                    if orig.iter().any(|v| *v >= 0.999) {
-                        p.copy_from_slice(&[255, 40, 40]);
-                    } else if orig.iter().all(|v| *v <= 0.001) {
-                        p.copy_from_slice(&[40, 80, 255]);
-                    }
-                }
-            }
+            clipping.paint(&mut rgb, &expected.pixels);
             let processor = gpu.gpu().unwrap();
             // The photo stayed on the device: sampled there, not on the CPU.
             assert!(!processor.resident.as_ref().unwrap().samples.is_empty());
-            let actual = read_texture(processor, &frame.texture)?;
+            let mut actual = read_texture(processor, &frame.texture)?;
+            // A value within float rounding of a clipping threshold may land on
+            // either side of it; such pixels are compared without the overlay.
+            let near = |v: f32| {
+                [crate::develop::HIGHLIGHT_CLIP, crate::develop::SHADOW_CLIP]
+                    .iter()
+                    .any(|t| (v - t).abs() < 1e-4)
+            };
+            for ((a, e), orig) in actual
+                .as_chunks_mut::<3>()
+                .0
+                .iter_mut()
+                .zip(rgb.as_chunks::<3>().0)
+                .zip(&expected.pixels)
+            {
+                if orig.iter().any(|v| near(*v)) {
+                    *a = *e;
+                }
+            }
             let worst = actual
                 .iter()
                 .zip(&rgb)
@@ -501,7 +527,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .max()
                 .unwrap();
             let label = format!(
-                "spatial={spatial} clipping={clipping} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
+                "spatial={spatial} clipping={clipping:?} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
             );
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(
@@ -510,7 +536,16 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             );
             assert!(worst <= 1, "{label}: largest difference {worst}");
             let histogram = expected.histogram();
-            for (gpu, cpu) in frame.histogram.iter().zip(&histogram) {
+            // Counted from the same values, so within the GPU's float rounding.
+            let clipped =
+                |h: &crate::develop::Histogram| [h.clipped.shadows, h.clipped.highlights].concat();
+            for (gpu, cpu) in clipped(&frame.histogram).iter().zip(clipped(&histogram)) {
+                assert!(
+                    gpu.abs_diff(cpu) <= cpu / 100 + 2,
+                    "{label}: clipped {gpu} vs {cpu}"
+                );
+            }
+            for (gpu, cpu) in frame.histogram.bins.iter().zip(&histogram.bins) {
                 let total: u32 = gpu.iter().sum();
                 assert_eq!(total, frame.width * frame.height, "{label}");
                 let moved: u32 = gpu.iter().zip(cpu).map(|(a, b)| a.abs_diff(*b)).sum();
@@ -581,7 +616,7 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
     for x in [0, 4, 8, 12, 16] {
         let display = super::Display {
             slot: super::Slot::Region,
-            clipping: false,
+            clipping: crate::develop::ClipOverlay::NONE,
             monitor: None,
             navigator: None,
             thumbnail: None,

@@ -79,7 +79,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [gpu/resident.rs](../src/develop/gpu/resident.rs), [gpu/logs.wgsl](../src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
-| [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion and histogram generation. |
+| [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
 | [curve.rs](../src/develop/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
@@ -195,6 +195,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [onboarding.rs](../src/app/onboarding.rs) | First-run setup: a catalog, then optional Lightroom profiles and presets. |
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
 | [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
+| [clipping.rs](../src/app/clipping.rs) | The histogram's clipping triangles: independent shadow and highlight warnings, hover preview, J, and the triangles' channel colours. |
 | [viewport.rs](../src/app/viewport.rs) | Photo canvas, fit/100%, pan, crop and white-balance picking; hands the pointer to the active tool. |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |

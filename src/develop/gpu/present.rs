@@ -4,7 +4,8 @@
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input};
 use crate::develop::{
-    Recipe, effects::PostCropVignette, pipeline::pixel_params::PixelParams, quality,
+    ClipOverlay, Histogram, Recipe, effects::PostCropVignette, pipeline::pixel_params::PixelParams,
+    quality,
 };
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -18,6 +19,10 @@ use std::{
 };
 use wgpu::util::DeviceExt;
 
+/// The histogram buffer: 256 bins per channel, then `Clipped`'s highlight and
+/// shadow counts per channel.
+const HISTOGRAM_WORDS: u64 = 768 + 6;
+
 /// The view a presented image is for; each keeps its own textures, so drawing one
 /// never shows another's pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,8 +35,8 @@ pub enum Slot {
 /// How a preview is shown.
 pub struct Display {
     pub slot: Slot,
-    /// Red and blue overlay for clipped highlights and shadows.
-    pub clipping: bool,
+    /// Red and blue overlays for clipped highlights and shadows.
+    pub clipping: ClipOverlay,
     pub monitor: Option<Arc<MonitorLut>>,
     /// Long edge of a reduced copy for the Navigator.
     pub navigator: Option<u32>,
@@ -55,7 +60,7 @@ pub struct Frame {
     pub generation: u64,
     pub navigator: Option<wgpu::Texture>,
     /// As [`crate::develop::Rendered::histogram`] of the finished pixels.
-    pub histogram: Box<[[u32; 256]; 3]>,
+    pub histogram: Box<Histogram>,
     /// Width, height and RGB bytes of the reduced copy for thumbnails.
     pub thumbnail: Option<(u32, u32, Vec<u8>)>,
     /// Width, height and RGB bytes of the shown pixels, when `Display::samples`.
@@ -210,7 +215,7 @@ impl Presenter {
         let histogram = |label, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
-                size: 768 * 4,
+                size: HISTOGRAM_WORDS * 4,
                 usage,
                 mapped_at_creation: false,
             })
@@ -429,7 +434,11 @@ impl Processor {
                 sharpen as u32,
                 f(recipe.sharpening),
                 f(recipe.sharpening_masking * 0.03 * (1. - recipe.sharpening_detail * 0.8)),
-                (shown && display.clipping) as u32,
+                if shown {
+                    display.clipping.shader_flags()
+                } else {
+                    0
+                },
                 display
                     .monitor
                     .as_ref()
@@ -521,7 +530,7 @@ impl Processor {
         }
         // Library thumbnails and loupe samples show the photo without the overlay or
         // monitor profile.
-        let overlays = display.clipping || display.monitor.is_some();
+        let overlays = display.clipping.any() || display.monitor.is_some();
         let plain = ((display.thumbnail.is_some() || display.samples) && overlays).then(|| {
             let plain = presenter
                 .target(&device, Kind::Plain, cw, ch, &[])
@@ -584,7 +593,7 @@ impl Processor {
             0,
             &presenter.histogram_staging,
             0,
-            768 * 4,
+            HISTOGRAM_WORDS * 4,
         );
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let submission = self.queue.submit([encoder.finish()]);
@@ -621,17 +630,18 @@ impl Processor {
             unmap(presenter);
             return Err(error);
         }
-        let mut histogram = Box::new([[0; 256]; 3]);
+        let mut histogram = Box::new(Histogram::EMPTY);
         {
             let counts = presenter.histogram_staging.slice(..).get_mapped_range()?;
-            for (c, channel) in bytemuck::cast_slice::<u8, u32>(&counts)
-                .as_chunks::<256>()
-                .0
-                .iter()
-                .enumerate()
-            {
-                histogram[c].copy_from_slice(channel);
+            let counts = bytemuck::cast_slice::<u8, u32>(&counts);
+            for (c, channel) in counts[..768].as_chunks::<256>().0.iter().enumerate() {
+                histogram.bins[c].copy_from_slice(channel);
             }
+            histogram
+                .clipped
+                .highlights
+                .copy_from_slice(&counts[768..771]);
+            histogram.clipped.shadows.copy_from_slice(&counts[771..774]);
         }
         let rgb = |(tw, th, row, buffer): &(u32, u32, u32, wgpu::Buffer)| -> Result<_> {
             let bytes = buffer.slice(..).get_mapped_range()?;

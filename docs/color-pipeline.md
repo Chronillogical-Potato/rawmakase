@@ -42,6 +42,8 @@ The fit preview area-averages camera data to a maximum 1600-pixel edge before th
 
 The renderer returns encoded sRGB. `egui::ColorImage::from_rgb` supplies those bytes to egui's own texture/compositing path; there is no extra application gamma pass. The viewport measures logical-point dimensions times `pixels_per_point` when asking for a 100% region, then paints the result at one texel per physical pixel.
 
+Clipping is judged on the rendered encoded-sRGB values (0–1), before any monitor profile, so the display never changes it. A channel clips in the highlights at 0.999 or above and in the shadows at 0.001 or below (`HIGHLIGHT_CLIP`, `SHADOW_CLIP` in `develop/rendered.rs`; the GPU's `present.wgsl` uses the same values and counts clipped pixels per channel while it counts the histogram). The highlight warning paints red where any channel clips, the shadow warning blue where all three do. Each histogram triangle lights when more than 0.1% of the pixels clip in a channel, in the colours of the clipping channels (white when all three).
+
 Optional monitor ICC conversion maps encoded sRGB bytes to device RGB through Little CMS with relative-colorimetric intent and black-point compensation. Failure falls back to sRGB with a visible error. Automatic monitor-profile discovery and HDR output are outside this release. Calibration/compositor interaction must be verified on the user's chosen monitor; the test suite only proves an sRGB-profile round trip within one byte.
 
 ## Invalidation and ownership

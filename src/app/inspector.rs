@@ -1,5 +1,6 @@
 use super::Editor;
 use super::bulk_import::ImportKind;
+use super::clipping::{self, ClipSide};
 use super::dialogs::FileDialog;
 use super::state::Tool;
 use super::widgets::{
@@ -27,7 +28,8 @@ impl Editor {
                 Stroke::new(1., theme::gray(32)),
             );
         }
-        let h = self.preview.histogram;
+        let histogram = self.preview.histogram;
+        let h = histogram.bins;
         // Light smoothing, and scaling that ignores the clipped end bins.
         let smooth = |c: usize, i: usize| {
             let at = |j: isize| h[c][j.clamp(0, 255) as usize] as f32;
@@ -72,10 +74,11 @@ impl Editor {
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
-        // Clipping triangles: lit when pixels sit in the end bins; click toggles J.
-        let total: u32 = h[1].iter().sum::<u32>().max(1);
-        for (left, bin) in [(true, 0usize), (false, 255usize)] {
-            let clipped = (0..3).any(|c| h[c][bin] as f32 / total as f32 > 0.001);
+        // Clipping triangles, as Lightroom's: each lit in the colours of the
+        // channels clipping at its end; a click toggles its warning, hovering
+        // shows it while the pointer stays, and J toggles both.
+        for side in ClipSide::BOTH {
+            let left = side == ClipSide::Shadows;
             let corner = if left {
                 rect.left_top() + Vec2::new(6., 6.)
             } else {
@@ -86,19 +89,19 @@ impl Editor {
             let response = ui
                 .interact(hit, ui.id().with(("clip", left)), Sense::click())
                 .on_hover_text(if left {
-                    "Shadow clipping · J shows clipped areas"
+                    "Show shadow clipping · J shows both"
                 } else {
-                    "Highlight clipping · J shows clipped areas"
+                    "Show highlight clipping · J shows both"
                 });
-            let color = if clipped {
-                theme::gray(235)
-            } else {
-                theme::gray(if self.view.clipping || response.hovered() {
-                    150
-                } else {
-                    80
-                })
-            };
+            if response.clicked() {
+                self.view.clipping.toggle(side);
+            }
+            if response.hovered() {
+                self.view.clipping.set_hover(Some(side));
+            }
+            let on = self.view.clipping.is_on(side);
+            let color = clipping::indicator_color(clipping::clipped_channels(&histogram, side))
+                .unwrap_or_else(|| theme::gray(if on || response.hovered() { 150 } else { 80 }));
             painter.add(egui::Shape::convex_polygon(
                 vec![
                     corner,
@@ -106,15 +109,12 @@ impl Editor {
                     corner + Vec2::new(0., 7.),
                 ],
                 color,
-                if self.view.clipping {
+                if on {
                     Stroke::new(1., Color32::WHITE)
                 } else {
                     Stroke::NONE
                 },
             ));
-            if response.clicked() {
-                self.view.clipping = !self.view.clipping;
-            }
         }
         let exif = self
             .document
@@ -344,7 +344,7 @@ impl Editor {
         let metadata = self.document.metadata.clone();
         let profiles = self.document.profiles.clone();
         let profile_errors = self.document.profile_errors.clone();
-        let histogram = self.preview.histogram;
+        let histogram = self.preview.histogram.bins;
         // Auto needs the decoded photo, and runs one estimate at a time.
         let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
         let auto_in_effect = self.auto_in_effect();

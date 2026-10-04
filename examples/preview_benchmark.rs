@@ -33,7 +33,7 @@ fn cpu_display(out: &develop::Rendered, navigator: bool) -> usize {
     let rgb = out.rgb8();
     let histogram = out.histogram();
     let image = eframe::egui::ColorImage::from_rgb([out.width as usize, out.height as usize], &rgb);
-    let mut n = image.pixels.len() + histogram[0][0] as usize;
+    let mut n = image.pixels.len() + histogram.bins[0][0] as usize;
     if navigator && let Some(full) = image::RgbImage::from_raw(out.width, out.height, rgb) {
         let scale = (360. / out.width.max(out.height) as f32).min(1.);
         let small = image::imageops::thumbnail(
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
                 };
                 let display = develop::gpu::Display {
                     slot,
-                    clipping: false,
+                    clipping: develop::ClipOverlay::NONE,
                     monitor: None,
                     navigator: None,
                     thumbnail: None,
@@ -219,7 +219,7 @@ fn main() -> Result<()> {
                 };
                 let display = develop::gpu::Display {
                     slot,
-                    clipping: false,
+                    clipping: develop::ClipOverlay::NONE,
                     monitor: None,
                     navigator: (slot == develop::gpu::Slot::Whole).then_some(360),
                     thumbnail: None,
