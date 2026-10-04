@@ -5,7 +5,7 @@
    crs:PresetType="Normal"
    crs:Cluster=""
    crs:UUID="8406FD531A4A5ACD9A2519CF7E85360A"
-   crs:SupportsAmount="False"
+   crs:SupportsAmount="True"
    crs:SupportsColor="True"
    crs:SupportsMonochrome="True"
    crs:SupportsHighDynamicRange="True"

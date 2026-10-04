@@ -1,4 +1,5 @@
 //! Native recipe presets, built-in presets and installed XMP preset collections.
+pub mod amount;
 pub mod builtin;
 mod library;
 mod native;
