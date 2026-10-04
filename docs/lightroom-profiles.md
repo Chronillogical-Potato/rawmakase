@@ -68,14 +68,14 @@ Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table loo
 | Question | Camera Raw's answer | Cases |
 |---|---|---|
 | Where it applies | After the user's tone controls, point curves, HSL and Saturation, before color grading: `rgb-table-point-curve` is 0.87 ΔE00 from Camera Raw with the table there and 2.80 with it at the end of the profile; with Saturation +50 1.78 against 3.75. | `rgb-table-*` |
-| Amount | `r + amount·(table(r) − r)` in the table's encoding, at the look's `RGBTableAmount` (1 when absent) times the Profile Amount, clamped to the bounds the table stores. A 0.5 look at 200% renders as the full table at 100%, identical to the 16-bit level; bounds 0.5–1.5 hold 0% at half and 200% at 1.5. | `rgb-table-50/100/200`, `rgb-half-*`, `rgb-bounds-*` |
+| Amount | `r + amount·(table(r) − r)` in the table's encoding, at the look's `RGBTableAmount` (1 when absent) times the Profile Amount, clamped to the bounds the table stores. A 0.5 look at 200% renders as the full table at 100%, identical to the 16-bit level; bounds 0.5–1.5 hold 0% at half and 200% at 1.5. At an amount of 0 RAWmakase leaves the table out, so it clips nothing either. | `rgb-table-50/100/200`, `rgb-half-*`, `rgb-bounds-*` |
 | Primaries and encoding | Codes 0, 1, 2 are sRGB, Adobe RGB and ProPhoto; gamma codes 0–3 linear, sRGB, 1.8 and 2.2. | `rgb-srgb-100`, `rgb-linear-100` |
 | 1D tables | A curve per channel, stored like the 3D samples. | `rgb-1d-100` |
 | The extra word some camera-matching tables end with | No visible effect at 0 or 1. | `rgb-flag-100` |
 
 The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it could not be checked closely, because RAWmakase compresses out-of-gamut colours toward gray where Camera Raw clips them, which dominates the difference on those patches.
 
-A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
+A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. On engine 3 edits, whose HSL and Saturation run later in Oklab, the table follows them and comes before Monochrome; their point curves stay last, as engine 3 has always applied them. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
 
 Schema/pipeline 5 embeds the resolved camera profile, enhanced color table, sampled curve, identity and copyright in the recipe. Reopening does not require the source XMP or DCP to remain available. Old schema 1–4 recipes migrate without changing their prior look. Older RAWmakase versions reject version 5 instead of silently dropping enhanced-profile data.
 

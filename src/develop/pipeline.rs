@@ -290,6 +290,7 @@ fn color_stage(
         lab[1] = angle.cos() * chroma * sat;
         lab[2] = angle.sin() * chroma * sat;
         lab = r.effects.defringe_color(lab, hue);
+        lab = legacy_rgb_table(lab, lut);
         if r.effects.monochrome {
             let shift: f32 = r
                 .effects
@@ -304,12 +305,19 @@ fn color_stage(
         }
     } else {
         // Identity color controls need no hue angle, trigonometry or band weights.
+        lab = legacy_rgb_table(lab, lut);
         lab[0] = lab[0].clamp(0., 1.);
     }
-    if let Some(t) = lut.rgb_table.as_ref().filter(|_| !lut.basic_curves) {
-        lab = srgb_to_lab(t.apply(lab_to_srgb(lab)));
-    }
     finish_color(lab, r, lut)
+}
+/// Before engine 4 the colour controls run in Oklab, after the place of the measured
+/// mixer: a look's RGB table follows them there, before Monochrome. Engine 3's point
+/// curves stay last, in encoded output, as that renderer has always applied them.
+fn legacy_rgb_table(lab: [f32; 3], lut: &CurveSet) -> [f32; 3] {
+    match &lut.rgb_table {
+        Some(t) if !lut.basic_curves => srgb_to_lab(t.apply(lab_to_srgb(lab))),
+        _ => lab,
+    }
 }
 /// The colour stage after the colour controls and Defringe: legacy and table colour
 /// grading, gamut compression and, before engine 4, the per-channel curves. Returns

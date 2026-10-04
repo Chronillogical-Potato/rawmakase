@@ -807,7 +807,7 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     if offset(P_MIXER) >= 0 {
         rgb = mixer(rgb);
     }
-    if offset(P_RGB) >= 0 {
+    if offset(P_RGB) >= 0 && p(P_RGB + 5u) != 0.0 {
         rgb = rgb_table(rgb);
     }
     if offset(P_GRADE) >= 0 {

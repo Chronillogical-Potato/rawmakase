@@ -686,7 +686,7 @@ fn constrain_crop_renders_no_white() {
 }
 /// A look's RGB table goes after the colour controls, also on engine 3, where they
 /// are the Oklab HSL and Saturation rather than the measured mixer: a fully
-/// desaturated gray still takes the table's tint.
+/// desaturated gray still takes the table's tint, and Monochrome still makes it gray.
 #[test]
 fn rgb_tables_follow_the_colour_controls_on_every_engine() {
     let m = Metadata {
@@ -707,10 +707,14 @@ fn rgb_tables_follow_the_colour_controls_on_every_engine() {
             reference_color: engine >= 4,
             ..Default::default()
         };
-        let lut = CurveSet::new(&r);
-        let out = color_stage([0.05, 0.2, 0.1], 1., &r, &lut, None);
-        let spread =
-            out.iter().fold(0f32, |a, v| a.max(*v)) - out.iter().fold(1f32, |a, v| a.min(*v));
-        assert!(spread > 0.01, "engine {engine}: {out:?}");
+        let spread = |r: &Recipe| {
+            let out = color_stage([0.05, 0.2, 0.1], 1., r, &CurveSet::new(r), None);
+            out.iter().fold(0f32, |a, v| a.max(*v)) - out.iter().fold(1f32, |a, v| a.min(*v))
+        };
+        assert!(spread(&r) > 0.01, "engine {engine}");
+        // Monochrome comes after the table and stays gray.
+        let mut mono = r.clone();
+        mono.effects.monochrome = true;
+        assert!(spread(&mono) < 1e-3, "engine {engine}");
     }
 }

@@ -208,6 +208,10 @@ impl RgbTable {
     }
     /// `rgb` (linear display RGB) through the table at `amount`.
     pub fn apply(&self, rgb: [f32; 3], amount: f32) -> [f32; 3] {
+        // At 0 the table is off: colours outside its space are not clipped either.
+        if amount == 0. {
+            return rgb;
+        }
         let [into, back] = self.matrices;
         let full = mul(into, rgb).map(|v| v.signum() * self.gamma.encode(v.abs()));
         let encoded = full.map(|v| v.clamp(0., 1.));
@@ -427,6 +431,9 @@ pub(super) mod tests {
         // again, all in gamma 2.2.
         let none = table.apply(gray, 0.);
         assert!(none.iter().zip(gray).all(|(a, b)| (a - b).abs() < 1e-5));
+        // Not even colours outside Adobe RGB, which the table clips.
+        let wide = [1.2, -0.1, 0.05];
+        assert_eq!(table.apply(wide, 0.), wide);
         let encoded = 0.2f32.powf(1. / 2.2);
         let looked = table.lookup([encoded; 3]);
         for amount in [1., 2.] {
