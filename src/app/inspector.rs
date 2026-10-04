@@ -472,7 +472,11 @@ impl Editor {
         let mut auto_mix_request = false;
         let mut profile_changed_from = None;
         // A conversion to black & white waiting for the photo to decode.
-        let pending_treatment = self.document.pending_treatment;
+        let pending_treatment = self
+            .document
+            .pending_treatment
+            .as_ref()
+            .map(|p| p.treatment);
         let view = &mut self.view;
         let (r, photo) = self.document.recipe_and_colors();
 

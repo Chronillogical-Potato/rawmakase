@@ -19,10 +19,7 @@ pub(super) struct Document {
     color_spread: std::cell::OnceCell<crate::develop::ColorSpread>,
     /// A conversion to black & white waiting for the photo to decode, for its
     /// Auto mix.
-    pub(super) pending_treatment: Option<crate::develop::Treatment>,
-    /// A black & white profile converted the photo before it was decoded: its
-    /// Auto mix follows once it is.
-    pub(super) pending_auto_mix: bool,
+    pub(super) pending_treatment: Option<PendingTreatment>,
     pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
@@ -429,6 +426,14 @@ impl Document {
             metadata: self.metadata.as_ref(),
         }
     }
+}
+
+/// A Treatment asked for while the photo decodes, and the recipe it was asked for:
+/// once the recipe changes otherwise (Reset, Undo, a preset), the request lapses.
+#[derive(Clone)]
+pub(super) struct PendingTreatment {
+    pub(super) treatment: crate::develop::Treatment,
+    pub(super) recipe: Recipe,
 }
 
 /// The decoded photo and its measured colors, for Auto black & white.

@@ -61,7 +61,10 @@ impl Editor {
             && self.first_conversion == FirstConversion::AutoMix
             && self.document.recipe.effects.gray_mix == [0.; 8];
         if needs_auto && colors.is_none() {
-            self.document.pending_treatment = Some(treatment);
+            self.document.pending_treatment = Some(super::state::PendingTreatment {
+                treatment,
+                recipe: self.document.recipe.clone(),
+            });
             self.status = "Converting to Black & White once the photo is decoded".into();
             return;
         }
@@ -84,17 +87,11 @@ impl Editor {
     /// Converts as asked while the photo was decoding, once it is decoded. Called
     /// during an edit frame.
     pub(super) fn finish_pending_treatment(&mut self) {
-        if self.document.full().is_none() {
-            return;
-        }
-        if let Some(treatment) = self.document.pending_treatment.take() {
-            self.set_treatment(treatment);
-        }
-        if std::mem::take(&mut self.document.pending_auto_mix)
-            && self.document.recipe.treatment() == Treatment::BlackWhite
-            && self.document.recipe.effects.gray_mix == [0.; 8]
+        if self.document.full().is_some()
+            && let Some(pending) = self.document.pending_treatment.take()
+            && pending.recipe == self.document.recipe
         {
-            self.auto_black_white_mix();
+            self.set_treatment(pending.treatment);
         }
     }
 
@@ -107,15 +104,7 @@ impl Editor {
     ) {
         let colors = self.first_conversion_colors();
         let first = colors.as_ref().map(PhotoColors::auto_mix);
-        let was = self.document.recipe.effects.monochrome;
         self.document.recipe.follow_profile_treatment(old, first);
-        // Converted before the photo decoded: the Auto mix follows once it has.
-        let r = &self.document.recipe;
-        self.document.pending_auto_mix = !was
-            && r.effects.monochrome
-            && r.effects.gray_mix == [0.; 8]
-            && self.first_conversion == FirstConversion::AutoMix
-            && colors.is_none();
     }
 
     /// V: switches between Color and Black & White.
@@ -125,7 +114,7 @@ impl Editor {
             .document
             .pending_treatment
             .take()
-            .unwrap_or_else(|| self.document.recipe.treatment());
+            .map_or_else(|| self.document.recipe.treatment(), |p| p.treatment);
         self.set_treatment(match shown {
             Treatment::Color => Treatment::BlackWhite,
             Treatment::BlackWhite => Treatment::Color,
