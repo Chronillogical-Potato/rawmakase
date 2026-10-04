@@ -266,30 +266,30 @@ fn rectangle(
     ))
 }
 
-type Mat = [[f32; 3]; 3];
-const IDENTITY: Mat = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
-fn mat(a: Mat, b: Mat) -> Mat {
+pub(super) type Mat = [[f32; 3]; 3];
+pub(super) const IDENTITY: Mat = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+pub(super) fn mat(a: Mat, b: Mat) -> Mat {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
-fn apply(m: Mat, v: [f32; 3]) -> [f32; 3] {
+pub(super) fn apply(m: Mat, v: [f32; 3]) -> [f32; 3] {
     [dot(m[0], v), dot(m[1], v), dot(m[2], v)]
 }
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+pub(super) fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+pub(super) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
 }
-fn unit(a: [f32; 3]) -> [f32; 3] {
+pub(super) fn unit(a: [f32; 3]) -> [f32; 3] {
     let n = dot(a, a).sqrt().max(1e-12);
     [a[0] / n, a[1] / n, a[2] / n]
 }
 /// Rotation by `angle` radians about `axis`.
-fn rotation(axis: [f32; 3], angle: f32) -> Mat {
+pub(super) fn rotation(axis: [f32; 3], angle: f32) -> Mat {
     let [x, y, z] = unit(axis);
     let (s, c) = angle.sin_cos();
     let t = 1. - c;
@@ -300,7 +300,7 @@ fn rotation(axis: [f32; 3], angle: f32) -> Mat {
     ]
 }
 /// The smallest rotation taking direction `from` to `to`.
-fn align(from: [f32; 3], to: [f32; 3]) -> Mat {
+pub(super) fn align(from: [f32; 3], to: [f32; 3]) -> Mat {
     let (from, to) = (unit(from), unit(to));
     let axis = cross(from, to);
     let s = dot(axis, axis).sqrt();
@@ -312,7 +312,7 @@ fn align(from: [f32; 3], to: [f32; 3]) -> Mat {
 
 /// A segment's plane through the camera centre, as its unit normal, for focal length
 /// `f` in long-edge units.
-fn normal(s: &Segment, f: f32) -> [f32; 3] {
+pub(super) fn normal(s: &Segment, f: f32) -> [f32; 3] {
     unit(cross(
         [s.a[0] / f, s.a[1] / f, 1.],
         [s.b[0] / f, s.b[1] / f, 1.],
@@ -399,7 +399,7 @@ fn vanishing(
 }
 /// Eigenvector of the smallest eigenvalue of a symmetric 3×3 matrix, by inverse
 /// iteration on a shifted copy.
-fn smallest_eigenvector(m: Mat) -> [f32; 3] {
+pub(super) fn smallest_eigenvector(m: Mat) -> [f32; 3] {
     let trace = m[0][0] + m[1][1] + m[2][2];
     // Power iteration on (trace·I − m) finds the eigenvector of m's smallest eigenvalue.
     let s: Mat = std::array::from_fn(|i| {
@@ -667,39 +667,78 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     let (image, w, h) = analysis_image(im, r);
     let f = focal(&im.metadata);
     let found = vanishing_points(&segments(&image, w, h), f);
-    let long = w.max(h) as f32;
-    let (width, height) = (w as f32 / long, h as f32 / long);
-    let k = [[f, 0., 0.], [0., f, 0.], [0., 0., 1.]];
-    let k_inverse = [[1. / f, 0., 0.], [0., 1. / f, 0.], [0., 0., 1.]];
-    // 0–1 coordinates of the displayed photo to centred long-edge units, and displayed
-    // 0–1 coordinates to recorded ones (flips, then turns, as `Geometry::source`).
-    let centred = [
-        [width, 0., -0.5 * width],
-        [0., height, -0.5 * height],
-        [0., 0., 1.],
-    ];
     let turns = (super::ImageFrame::new(im).turns + r.rotation) % 4;
-    let recorded = |x: f32, y: f32| {
-        let x = if r.flip_x { 1. - x } else { x };
-        let y = if r.flip_y { 1. - y } else { y };
-        super::image_space::turn(turns, x, y)
-    };
-    let [ox, oy] = recorded(0., 0.);
-    let [xx, xy] = recorded(1., 0.);
-    let [yx, yy] = recorded(0., 1.);
-    let orient = [[xx - ox, yx - ox, ox], [xy - oy, yy - oy, oy], [0., 0., 1.]];
-    let to_recorded = mat(orient, crate::color_math::inverse(centred));
-    let from_recorded = mat(centred, crate::color_math::inverse(orient));
+    let shown = Displayed::new(w as f32, h as f32, turns, r.flip_x, r.flip_y);
     let rotations = rotations(&found);
     let mut out = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
     for (code, rotation) in rotations.iter().enumerate().skip(1) {
-        let g = mat(k, mat(*rotation, k_inverse));
-        let level = code == super::UprightMode::Level.code();
-        let g = mat(framing(g, width, height, level), g);
-        let g = mat(to_recorded, mat(g, from_recorded));
-        out[code] = std::array::from_fn(|i| g[i / 3][i % 3] / g[2][2]);
+        let mode = super::UprightMode::from_code(code).unwrap_or_default();
+        out[code] = shown.correction(camera_turn(*rotation, f), mode);
     }
     out
+}
+
+/// A camera rotation as the homography it makes of the photo, in centred long-edge
+/// units of a photo at focal length `f`: K·R·K⁻¹.
+pub(super) fn camera_turn(rotation: Mat, f: f32) -> Mat {
+    let k = [[f, 0., 0.], [0., f, 0.], [0., 0., 1.]];
+    let k_inverse = [[1. / f, 0., 0.], [0., 1. / f, 0.], [0., 0., 1.]];
+    mat(k, mat(rotation, k_inverse))
+}
+
+/// The photo as displayed, in which Upright measures and turns it: centred coordinates
+/// in units of its long edge, y down, and the way to and from the frame as recorded
+/// (0–1), in which Lightroom stores the corrections.
+pub(super) struct Displayed {
+    /// Width and height in long-edge units.
+    pub(super) width: f32,
+    pub(super) height: f32,
+    to_recorded: Mat,
+    from_recorded: Mat,
+}
+impl Displayed {
+    /// For a photo displayed `width` by `height` (any unit) after `turns` quarter turns
+    /// and the flips of the frame as recorded.
+    pub(super) fn new(width: f32, height: f32, turns: u8, flip_x: bool, flip_y: bool) -> Self {
+        let long = width.max(height);
+        let (width, height) = (width / long, height / long);
+        // 0–1 coordinates of the displayed photo to centred long-edge units, and displayed
+        // 0–1 coordinates to recorded ones (flips, then turns, as `Geometry::source`).
+        let centred = [
+            [width, 0., -0.5 * width],
+            [0., height, -0.5 * height],
+            [0., 0., 1.],
+        ];
+        let recorded = |x: f32, y: f32| {
+            let x = if flip_x { 1. - x } else { x };
+            let y = if flip_y { 1. - y } else { y };
+            super::image_space::turn(turns, x, y)
+        };
+        let [ox, oy] = recorded(0., 0.);
+        let [xx, xy] = recorded(1., 0.);
+        let [yx, yy] = recorded(0., 1.);
+        let orient = [[xx - ox, yx - ox, ox], [xy - oy, yy - oy, oy], [0., 0., 1.]];
+        Self {
+            width,
+            height,
+            to_recorded: mat(orient, crate::color_math::inverse(centred)),
+            from_recorded: mat(centred, crate::color_math::inverse(orient)),
+        }
+    }
+    /// A recorded position (0–1) in centred long-edge units of the displayed photo.
+    pub(super) fn centred(&self, p: [f32; 2]) -> [f32; 2] {
+        let q = apply(self.from_recorded, [p[0], p[1], 1.]);
+        [q[0] / q[2], q[1] / q[2]]
+    }
+    /// The stored correction for homography `g` of the displayed photo, framed as
+    /// Lightroom frames `mode`: a forward homography in 0–1 coordinates of the recorded
+    /// frame, row major, scaled to end in 1.
+    pub(super) fn correction(&self, g: Mat, mode: super::UprightMode) -> [f32; 9] {
+        let level = mode == super::UprightMode::Level;
+        let g = mat(framing(g, self.width, self.height, level), g);
+        let g = mat(self.to_recorded, mat(g, self.from_recorded));
+        std::array::from_fn(|i| g[i / 3][i % 3] / g[2][2])
+    }
 }
 
 #[cfg(test)]

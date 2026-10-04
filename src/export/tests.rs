@@ -92,6 +92,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
             [1.02, -0.01, 0.005, 0.02, 1.02, -0.02, 0., 0., 1.],
         ],
         lightroom: [("UprightVersion".into(), "151388160".into())].into(),
+        ..Default::default()
     };
     let photo = crate::xmp::write::Photo {
         raw_name: "DSC07924.ARW".into(),

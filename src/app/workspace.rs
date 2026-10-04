@@ -754,7 +754,9 @@ impl Editor {
                 if i.key_pressed(egui::Key::Backslash) {
                     self.view.compare = !self.view.compare;
                 }
-                if i.key_pressed(egui::Key::Enter) && self.view.is(Tool::Crop) {
+                if i.key_pressed(egui::Key::Enter)
+                    && (self.view.is(Tool::Crop) || self.view.is(Tool::Guided))
+                {
                     self.view.tool = Tool::None;
                 }
                 if i.key_pressed(egui::Key::W) && !i.modifiers.any() {
@@ -765,6 +767,9 @@ impl Editor {
                 }
                 if i.key_pressed(egui::Key::W) && i.modifiers.shift && !i.modifiers.command {
                     self.view.toggle(Tool::Mask);
+                }
+                if i.key_pressed(egui::Key::T) && i.modifiers.shift && !i.modifiers.command {
+                    self.toggle_guided_tool();
                 }
                 if i.key_pressed(egui::Key::Escape) {
                     self.view.tool = Tool::None;
@@ -777,6 +782,9 @@ impl Editor {
                 }
                 if self.view.is(Tool::Mask) {
                     self.mask_keys(i);
+                }
+                if self.view.is(Tool::Guided) {
+                    self.guided_keys(i);
                 }
                 // New masks: K brush, M linear, Shift+M radial, Shift+J colour range.
                 if !i.modifiers.command && !i.modifiers.alt {

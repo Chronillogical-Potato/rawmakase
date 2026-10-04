@@ -226,7 +226,7 @@ impl Preset {
         let brought = self.apply_upright(&mut settings, &mut trial).is_ok()
             && !trial.upright.corrections.is_empty();
         if !brought && LensInputs::of(r) != LensInputs::of(base) {
-            r.upright.clear_analysis();
+            r.upright.analyse_again();
         }
     }
     /// The camera profile this preset asks for, if any.
@@ -997,6 +997,7 @@ impl Preset {
         r.upright = crate::develop::Upright {
             mode,
             corrections,
+            guides: Vec::new(),
             lightroom,
         };
         Ok(())

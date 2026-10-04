@@ -259,15 +259,16 @@ fn prepare(
     let mut after = transferred.recipe;
     // Upright's corrections are analysed from each photo; the open photo's editor
     // does it on Paste, and here the photo is developed for it.
-    let upright = &after.upright;
-    if !matches!(
-        upright.mode,
-        crate::develop::UprightMode::Off | crate::develop::UprightMode::Guided
-    ) && upright.corrections.len() <= upright.mode.code()
-    {
+    // Guided solves this photo's own guides beside that analysis.
+    if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let image = raw.develop(false, &cancel)?;
         after.upright.corrections = crate::develop::upright::analyse(&image, &after);
+        if after.upright.mode == crate::develop::UprightMode::Guided
+            && let Some(issue) = crate::develop::guided::store(&mut after, &image.metadata)
+        {
+            notes.push(issue.message().into());
+        }
     }
     let before_recipe = before.recipe().clone();
     if after == before_recipe {

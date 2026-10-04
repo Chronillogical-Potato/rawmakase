@@ -42,14 +42,23 @@ impl Editor {
 
     /// Analyses the photo when an Upright mode is chosen but has no correction yet, as
     /// after undoing to a state from before an analysis, or opening such a photo.
+    /// Guided's guides are solved once the other modes' corrections are there to sit
+    /// beside its own.
     pub(super) fn ensure_upright(&mut self) {
         let u = &self.document.recipe.upright;
-        if !matches!(u.mode, UprightMode::Off | UprightMode::Guided)
-            && u.corrections.len() <= u.mode.code()
-            && !self.document.upright.is_running()
-        {
-            self.start_upright();
+        if !u.needs_analysis() || self.document.upright.is_running() {
+            return;
         }
+        if u.mode == UprightMode::Guided && u.corrections.len() == UprightMode::Guided.code() {
+            if let Some(im) = self.document.full().cloned()
+                && let Some(issue) =
+                    crate::develop::guided::store(&mut self.document.recipe, &im.metadata)
+            {
+                self.status = issue.message().into();
+            }
+            return;
+        }
+        self.start_upright();
     }
 
     /// Stores Upright's corrections for every mode. The mode was chosen when the analysis
@@ -88,21 +97,38 @@ impl Editor {
         let fits = |r: &Recipe| {
             inputs(r) == inputs(analysed) && r.upright.corrections == analysed.upright.corrections
         };
-        for r in
-            std::iter::once(&mut self.document.recipe).chain(self.document.history.states_mut())
+        let metadata = self.document.full().map(|im| im.metadata.clone());
+        let mut issue = None;
+        for (i, r) in std::iter::once(&mut self.document.recipe)
+            .chain(self.document.history.states_mut())
+            .enumerate()
         {
             if fits(r) {
-                // An imported Guided correction has no analysis to replace it.
+                // An imported Guided correction without guides has nothing to solve it
+                // again from; guides are solved again beside the new analysis.
                 let guided = r
                     .upright
                     .corrections
                     .get(UprightMode::Guided.code())
-                    .copied();
+                    .copied()
+                    .filter(|_| r.upright.guides.is_empty());
                 r.upright.corrections = corrections.clone();
                 r.upright.corrections.extend(guided);
                 // Lightroom's own analysis details no longer describe these corrections.
                 r.upright.lightroom.clear();
+                if !r.upright.guides.is_empty()
+                    && let Some(m) = &metadata
+                {
+                    let solved = crate::develop::guided::store(r, m);
+                    // Only the photo as shown speaks in the status line.
+                    if i == 0 {
+                        issue = solved;
+                    }
+                }
             }
+        }
+        if let Some(issue) = issue {
+            self.status = issue.message().into();
         }
         self.document.save.mark_changed();
         self.schedule();

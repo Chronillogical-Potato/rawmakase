@@ -167,10 +167,24 @@ pub struct Upright {
     /// stores `crs:UprightTransform_N`; Camera Raw renders them exactly (docs/transform.md).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub corrections: Vec<[f32; 9]>,
-    /// Lightroom's other Upright settings (analysis centre, focal length, version,
-    /// guides), kept to write back unchanged.
+    /// Guided Upright's guides, drawn on this photo; `corrections` holds what they
+    /// solve to.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<UprightGuide>,
+    /// Lightroom's other Upright settings (analysis centre, focal length, version),
+    /// kept to write back unchanged.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub lightroom: std::collections::BTreeMap<String, String>,
+}
+/// A Guided Upright guide: a line drawn along an edge that should be vertical or
+/// horizontal. Its ends are in 0–1 coordinates of the photo as recorded, where Upright
+/// applies: after lens corrections, before the photo is turned or flipped for display
+/// and before Upright itself, so the guide stays on the edge it was drawn along
+/// whatever the correction (docs/transform.md#guided-upright).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct UprightGuide {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
 }
 impl Upright {
     pub fn is_default(&self) -> bool {
@@ -181,13 +195,39 @@ impl Upright {
     pub fn clear_analysis(&mut self) {
         self.corrections.clear();
         self.lightroom.clear();
+        self.guides.clear();
         // Guided can't be analysed again without its guides.
         if self.mode == UprightMode::Guided {
             self.mode = UprightMode::Off;
         }
     }
+    /// Drops the corrections analysed through lens settings that changed since, for a new
+    /// analysis of the same photo. Guided keeps its guides, to solve again; without
+    /// guides it has nothing to solve from and turns Off.
+    pub fn analyse_again(&mut self) {
+        self.corrections.clear();
+        self.lightroom.clear();
+        if self.mode == UprightMode::Guided && self.guides.is_empty() {
+            self.mode = UprightMode::Off;
+        }
+    }
+    /// Whether the mode needs an analysis (or, for Guided, its guides solved) that is
+    /// not there yet.
+    pub fn needs_analysis(&self) -> bool {
+        let missing = self.corrections.len() <= self.mode.code();
+        match self.mode {
+            UprightMode::Off => false,
+            UprightMode::Guided => missing && !self.guides.is_empty(),
+            _ => missing,
+        }
+    }
     pub fn validate(&self) -> bool {
         self.corrections.len() <= UprightMode::ALL.len()
+            && self.guides.len() <= super::guided::MAX_GUIDES
+            && self
+                .guides
+                .iter()
+                .all(|g| g.a.iter().chain(&g.b).all(|v| v.is_finite()))
             && self.corrections.iter().all(|m| {
                 let [a, b, c, d, e, f, g, h, i] = *m;
                 let determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
@@ -487,6 +527,25 @@ impl Geometry {
     /// The position in the frame as recorded (0–1, inside the camera's default crop) of
     /// crop-space position (`x`, `y`), 0–1 over the straightened, uncropped photo.
     fn recorded(&self, x: f32, y: f32) -> [f32; 2] {
+        let [x, y] = self.unwarped(x, y);
+        self.manual.map_or([x, y], |m| m.source(x, y))
+    }
+    /// The position in Upright's frame (0–1 of the frame as recorded, after lens
+    /// corrections and before Upright and the Transform sliders) shown at view position
+    /// (`u`, `v`): where Guided Upright's guides are kept.
+    pub fn upright_frame(&self, u: f32, v: f32) -> [f32; 2] {
+        self.unwarped(
+            self.crop[0] + u * (self.crop[2] - self.crop[0]),
+            self.crop[1] + v * (self.crop[3] - self.crop[1]),
+        )
+    }
+    /// View position of position `p` in Upright's frame: the inverse of
+    /// [`Self::upright_frame`].
+    pub fn from_upright_frame(&self, p: [f32; 2]) -> [f32; 2] {
+        self.frame_to_view(p[0], p[1])
+    }
+    /// [`Self::recorded`] up to Upright's frame, before manual Distortion.
+    fn unwarped(&self, x: f32, y: f32) -> [f32; 2] {
         let x = (x - 0.5) * self.oriented_width / self.zoom;
         let y = (y - 0.5) * self.oriented_height / self.zoom;
         let (s, c) = self.angle.sin_cos();
@@ -514,9 +573,6 @@ impl Geometry {
                 (h[1][0] * x + h[1][1] * y + h[1][2]) / w,
             );
         }
-        if let Some(m) = &self.manual {
-            [x, y] = m.source(x, y);
-        }
         [x, y]
     }
     /// Output position (0–1 over the view) of decoded sample coordinates (`x`, `y`):
@@ -525,6 +581,10 @@ impl Geometry {
         let x = ((x + 0.5) / self.source_width as f32 - self.inset[0]) / self.inset[2];
         let y = ((y + 0.5) / self.source_height as f32 - self.inset[1]) / self.inset[3];
         let [x, y] = self.manual.map_or([x, y], |m| m.output(x, y));
+        self.frame_to_view(x, y)
+    }
+    /// View position of position (`x`, `y`) in Upright's frame.
+    fn frame_to_view(&self, x: f32, y: f32) -> [f32; 2] {
         let (x, y) = match &self.forward {
             Some(f) => {
                 let w = f[2][0] * x + f[2][1] * y + f[2][2];

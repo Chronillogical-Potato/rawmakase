@@ -71,12 +71,14 @@ const GENERAL: [Shortcut; 5] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 28] = [
+const DEVELOP: [Shortcut; 30] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
     ("O / Shift+O", "Next crop overlay / turn it"),
     ("Cmd+drag", "Straighten along a line"),
+    ("Shift+T", "Guided Upright: draw guides"),
+    ("Delete", "Delete the selected guide"),
     ("Q", "Spot removal"),
     ("Shift+W", "Masking"),
     ("W", "White balance selector"),
