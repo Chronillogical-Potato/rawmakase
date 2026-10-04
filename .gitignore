@@ -11,3 +11,5 @@
 *.lrcat-*
 *.rawmakase
 *.rawmakase-*
+__pycache__/
+*.pyc
