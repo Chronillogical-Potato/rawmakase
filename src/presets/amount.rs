@@ -159,13 +159,14 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.reference_color = full.reference_color;
 }
 
-/// A slider between `a` and `b`, kept within `lo..=hi`. One the preset leaves alone
-/// stays as it was, even outside the slider's range (an imported Exposure of +6).
+/// A slider between `a` and `b`, kept within `lo..=hi` above 100%. Imported values may
+/// lie outside the slider's range (an Exposure of +7): the range then reaches them, so
+/// the Amount moves smoothly up to them and a setting left alone stays.
 fn lerp(a: f32, b: f32, t: f32, lo: f32, hi: f32) -> f32 {
     if a == b {
         return a;
     }
-    (a + (b - a) * t).clamp(lo, hi)
+    (a + (b - a) * t).clamp(lo.min(a).min(b), hi.max(a).max(b))
 }
 fn lerp_all<const N: usize>(a: [f32; N], b: [f32; N], t: f32, lo: f32, hi: f32) -> [f32; N] {
     std::array::from_fn(|i| lerp(a[i], b[i], t, lo, hi))
@@ -211,8 +212,9 @@ pub(crate) fn curve(a: &ToneCurve, b: &ToneCurve, t: f32) -> ToneCurve {
         xs.dedup_by(|x, kept| *x - *kept < 0.001);
         xs
     };
+    // Too many for a curve: the preset's own, so 100% is exact and nothing jumps there.
     if xs.len() > 32 {
-        xs = (0..=16).map(|i| i as f32 / 16.).collect();
+        xs = b.points.iter().map(|p| p[0]).collect();
     }
     let points = xs
         .into_iter()

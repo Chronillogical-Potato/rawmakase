@@ -336,6 +336,13 @@ impl Editor {
     }
 }
 
+/// Whether an Amount change changed the photo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AmountChange {
+    Same,
+    Changed,
+}
+
 /// Lightroom's preset Amount while it shows: after a preset that supports one is
 /// applied, until anything else changes the photo.
 pub(super) struct AmountSession {
@@ -397,22 +404,28 @@ impl Editor {
             Err(e) => self.status = format!("Preset not applied: {e:#}"),
         }
     }
-    /// Sets the Amount of the preset just applied (0–2, 1 = 100%).
-    pub(super) fn set_preset_amount(&mut self, amount: f32) {
+    /// Sets the Amount of the preset just applied (0–2, 1 = 100%), and whether that
+    /// changed the photo.
+    pub(super) fn set_preset_amount(&mut self, amount: f32) -> AmountChange {
         let (Some(session), Some(m)) = (&mut self.presets.amount, &self.document.metadata) else {
-            return;
+            return AmountChange::Same;
         };
         session.amount = amount;
         session.shown = session.scale.at(amount, m);
         // Named only when it changes the photo: a label left over would name the
         // next edit.
-        if session.shown != self.document.recipe {
-            self.document.recipe = session.shown.clone();
-            self.document.history.label(super::history::Step::new(
-                "Preset Amount",
-                format!("{:.0}", amount * 100.),
-            ));
+        if session.shown == self.document.recipe {
+            // The slider named a step; with nothing changed it would name the next edit.
+            self.context
+                .data_mut(|d| d.remove_temp::<(String, String)>(super::widgets::history_step_id()));
+            return AmountChange::Same;
         }
+        self.document.recipe = session.shown.clone();
+        self.document.history.label(super::history::Step::new(
+            "Preset Amount",
+            format!("{:.0}", amount * 100.),
+        ));
+        AmountChange::Changed
     }
     /// Ends the Amount once anything else has changed the photo, as Lightroom hides it.
     pub(super) fn end_stale_preset_amount(&mut self) {
@@ -426,9 +439,9 @@ impl Editor {
         }
     }
     /// The Amount slider, as Lightroom shows it at the top of the Presets panel. Any
-    /// other change to the photo (an edit, Undo, another preset) ends it.
+    /// other change to the photo (an edit, Undo, another preset) ends it; see
+    /// `end_stale_preset_amount`, which runs every frame.
     fn preset_amount_ui(&mut self, ui: &mut egui::Ui) {
-        self.end_stale_preset_amount();
         let Some(session) = &self.presets.amount else {
             return;
         };

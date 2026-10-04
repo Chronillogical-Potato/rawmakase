@@ -324,6 +324,38 @@ fn settings_the_preset_leaves_alone_stay_as_they_were() {
     for t in [0.5, 2.] {
         assert_eq!(amount(&before, &full).at(t, &m).exposure, 6.);
     }
+    // One the preset brings from outside the slider's range is reached smoothly.
+    let seven = Recipe {
+        exposure: 7.,
+        ..Default::default()
+    };
+    let a = amount(&Recipe::default(), &seven);
+    assert!((a.at(0.9, &m).exposure - 6.3).abs() < 1e-5);
+    assert_eq!(a.at(1.5, &m).exposure, 7.);
+}
+
+/// Curves with too many inputs between them keep the preset's, so 100% is exact.
+#[test]
+fn dense_curves_keep_the_presets_points() {
+    let m = metadata();
+    let dense = |offset: f32| {
+        let mut r = Recipe::default();
+        r.curve.points = (0..20)
+            .map(|i| {
+                let x = (i as f32 + offset) / 20.;
+                [x.min(1.), x.min(1.)]
+            })
+            .collect();
+        r.curve.points[0][0] = 0.;
+        r.curve.points[19] = [1., 0.9];
+        r
+    };
+    let before = dense(0.5);
+    let full = dense(0.);
+    let r = amount(&before, &full).at(0.99, &m);
+    let xs = |r: &Recipe| r.curve.points.iter().map(|p| p[0]).collect::<Vec<_>>();
+    assert_eq!(xs(&r), xs(&full));
+    r.validate().unwrap();
 }
 
 /// Parametric region boundaries stop where two would meet rather than jump back.

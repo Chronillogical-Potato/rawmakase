@@ -76,6 +76,9 @@ impl Editor {
             &self.document.recipe,
             ctx.input(|i| i.pointer.primary_down()),
         );
+        // Any change but the Amount's own ends the preset Amount, whether or not the
+        // Presets panel is open.
+        self.end_stale_preset_amount();
         if edited {
             self.document.save.mark_changed();
             // A conversion waiting for the photo lapses with any other edit, Undo

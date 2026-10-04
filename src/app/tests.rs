@@ -3076,7 +3076,6 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
         let frame = editor.begin_edit_frame();
         editor.set_preset_amount(amount);
         editor.finish_edit_frame(frame, &ctx);
-        editor.end_stale_preset_amount();
     }
     assert!((editor.document.recipe.exposure - 0.6).abs() < 1e-6);
     assert!((editor.document.recipe.contrast - 0.2).abs() < 1e-6);
@@ -3084,9 +3083,11 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert_eq!(applied, 4);
     assert_eq!(steps[3].name, "Preset Amount");
     assert_eq!(steps[3].value, "50");
-    // Any other edit ends it, as Lightroom hides the slider.
+    // Any other edit ends it, as Lightroom hides the slider, even with the Presets
+    // panel closed.
+    let frame = editor.begin_edit_frame();
     editor.document.recipe.vibrance = 0.1;
-    editor.end_stale_preset_amount();
+    editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     // A preset without an Amount shows none.
     editor.apply_preset(1);
@@ -3106,20 +3107,27 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.apply_preset(0);
     editor.finish_edit_frame(frame, &ctx);
     let frame = editor.begin_edit_frame();
+    // As the slider does while it moves.
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::history_step_id(),
+            ("Preset Amount".to_string(), "50".to_string()),
+        )
+    });
     editor.set_preset_amount(0.5);
     editor.finish_edit_frame(frame, &ctx);
     let frame = editor.begin_edit_frame();
     editor.document.recipe.exposure = 0.9;
     editor.finish_edit_frame(frame, &ctx);
-    editor.end_stale_preset_amount();
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0);
     let (steps, applied) = editor.document.history.steps();
     assert_ne!(steps[applied - 1].name, "Preset Amount");
     // Undo ends it too.
+    let frame = editor.begin_edit_frame();
     let mut recipe = editor.document.recipe.clone();
     editor.document.history.undo(&mut recipe);
     editor.document.recipe = recipe;
-    editor.end_stale_preset_amount();
+    editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
 }
