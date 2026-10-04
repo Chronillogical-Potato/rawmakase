@@ -116,7 +116,13 @@ fn lens_profile(s: &mut Settings, r: &Recipe, m: Option<&Metadata>) {
         // A profile the edit names that isn't imported stays named, so the edit
         // finds it again once it is; the digest the edit recorded still describes
         // the same file.
-        (Some(c), Some(id)) if missing || c.profile.is(&id.filename, &id.name) => id.clone(),
+        (Some(c), Some(id))
+            if missing
+                || (c.profile.is(&id.filename, &id.name)
+                    && (id.name.is_empty() || id.name == c.profile.name)) =>
+        {
+            id.clone()
+        }
         (Some(c), _) => crate::lens::choice::LensProfileId::of(&c.profile),
         (None, Some(id)) => id.clone(),
         (None, None) => return,

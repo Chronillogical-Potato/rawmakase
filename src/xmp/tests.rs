@@ -1277,6 +1277,21 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(r#"crs:LensProfileName="Camera Settings""#),
         "{packet}"
     );
+    // A file replaced under the same name by another profile is written as rendered,
+    // without the old digest.
+    let stale = apply(
+        &format!(
+            r#"c:LensProfileEnable="1" c:LensProfileSetup="Custom" c:LensProfileName="Adobe (Old)" c:LensProfileFilename="{}" c:LensProfileDigest="0123ABCD""#,
+            tests::ADOBE
+        ),
+        &Recipe::default(),
+    )?;
+    let packet = crate::xmp::write::packet(&stale, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:LensProfileName="Adobe (Testcam 35mm F2)""#),
+        "{packet}"
+    );
+    assert!(!packet.contains("0123ABCD"), "{packet}");
     // Lightroom's other boolean spelling.
     let one = apply(
         r#"c:LensProfileSetup="LensDefaults" c:LensProfileName="Camera Settings" c:LensProfileIsEmbedded="1""#,
