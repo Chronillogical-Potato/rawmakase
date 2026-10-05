@@ -256,26 +256,13 @@ impl Editor {
         }
         self.open_raw(p.path, Some(id));
     }
-    pub(super) fn apply_lightroom_edits(&mut self) {
-        let (Some(l), Some(id), Some(m)) = (
-            &self.library,
-            self.document.catalog_photo,
-            &self.document.metadata,
-        ) else {
+    /// Starts the open photo from its Lightroom settings `text`, converted as every
+    /// photo's Lightroom edit is (`catalog::resolve`).
+    pub(super) fn apply_lightroom_edits(&mut self, text: &str) {
+        let Some(m) = &self.document.metadata else {
             return;
         };
-        let result = (|| -> anyhow::Result<_> {
-            let text = l
-                .catalog
-                .lightroom_develop(id)?
-                .ok_or_else(|| anyhow::anyhow!("No Lightroom Develop settings"))?;
-            crate::catalog::lightroom::convert_develop(
-                &text,
-                m,
-                &self.document.profiles,
-                self.document.full().map(|image| image.as_ref()),
-            )
-        })();
+        let result = crate::catalog::resolve::lightroom_edit(text, m, &self.document.profiles);
         match result {
             Ok((r, warnings)) => {
                 self.document.recipe = r;

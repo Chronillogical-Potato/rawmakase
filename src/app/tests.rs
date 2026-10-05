@@ -4103,3 +4103,94 @@ fn b_and_w_opens_and_closes_with_the_color_mixer_in_solo_mode() {
     draw("B&W", click_at(mixer, egui::PointerButton::Primary), 4.);
     assert_eq!(collapsed(), ["Tone Curve".to_string()].into());
 }
+
+/// Develop opens every photo with the edit the shared resolver gives it, so a photo
+/// synchronized or exported without being opened is developed as it would be on
+/// screen: a saved edit with its masks, a Lightroom edit, and the raw defaults.
+#[test]
+fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<()> {
+    use crate::catalog::resolve::{self, Origin};
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus/charts/synthetic-d65.dng");
+    for name in ["a.dng", "b.dng", "c.dng"] {
+        std::fs::copy(&chart, photos.join(name))?;
+    }
+    let catalog = dir.path().join("test.rawmakase");
+    let mut c = crate::catalog::Catalog::create(&catalog)?;
+    c.add_folder(&photos)?;
+    let ids: Vec<(i64, std::path::PathBuf)> =
+        c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
+    let metadata = crate::raw::Raw::open(&ids[0].1)?.metadata;
+    let (profiles, _) = crate::camera_profiles::installed(&metadata);
+    let mut saved = Recipe::with_profiles(&metadata, &profiles);
+    saved.exposure = 0.4;
+    saved.masks.push(develop::masks::MaskGroup {
+        components: vec![develop::masks::MaskComponent::new(
+            develop::masks::MaskShape::Radial {
+                center: [0.5, 0.5],
+                radii: [0.2, 0.1],
+                angle: 0.,
+                feather: 0.5,
+            },
+        )],
+        adjust: develop::masks::LocalAdjust {
+            shadows: 0.5,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    c.save_edit(
+        ids[0].0,
+        &ids[0].1,
+        &saved,
+        &Default::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
+    rusqlite::Connection::open(&catalog)?.execute(
+        "UPDATE photos SET lightroom_develop='s = { Exposure2012 = 0.25, Contrast2012 = 10 }' WHERE id=?",
+        [ids[1].0],
+    )?;
+    drop(c);
+    let ctx = egui::Context::default();
+    let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
+    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    // Not this machine's own raw defaults. Adobe Default needs no preset, so the
+    // preset scan the editor starts leaves them as they are.
+    editor.raw_defaults = Arc::new(develop::defaults::DevelopDefaults::with_presets(
+        Default::default(),
+        |_| None,
+    ));
+    editor.library = Some(Box::new(library));
+    for ((id, path), origin) in ids
+        .iter()
+        .zip([Origin::Saved, Origin::Lightroom, Origin::Defaults])
+    {
+        editor.open_raw(path.clone(), Some(*id));
+        // Opened once the decode is in: the header and profiles come before it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while editor.document.full().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{} not opened",
+                path.display()
+            );
+            editor.events(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let record = editor.library.as_ref().unwrap().catalog.edit_record(*id)?;
+        let resolved = resolve::resolve(
+            &record,
+            path,
+            editor.document.metadata.as_ref().unwrap(),
+            &editor.document.profiles,
+            &editor.raw_defaults,
+        )?;
+        assert_eq!(resolved.origin, origin);
+        assert_eq!(editor.document.recipe, resolved.recipe, "{origin:?}");
+        assert!(resolved.warnings.is_empty(), "{:?}", resolved.warnings);
+    }
+    Ok(())
+}

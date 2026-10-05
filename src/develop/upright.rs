@@ -685,6 +685,48 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     out
 }
 
+/// Stores an analysis of the photo (from [`analyse`]) in `r`, and solves Guided's
+/// guides beside it when the photo's metadata `m` is known; returns why the guides
+/// correct less than they might. An imported Guided correction without guides has
+/// nothing to solve it again from, so it is kept. Lightroom's own analysis details
+/// no longer describe the corrections.
+pub fn store(
+    r: &mut Recipe,
+    corrections: &[[f32; 9]],
+    m: Option<&crate::raw::Metadata>,
+) -> Option<super::guided::Issue> {
+    let guided = r
+        .upright
+        .corrections
+        .get(super::UprightMode::Guided.code())
+        .copied()
+        .filter(|_| r.upright.guides.is_empty());
+    r.upright.corrections = corrections.to_vec();
+    r.upright.corrections.extend(guided);
+    r.upright.lightroom.clear();
+    match m {
+        Some(m) if !r.upright.guides.is_empty() => super::guided::store(r, m),
+        _ => None,
+    }
+}
+
+/// Completes the Upright corrections `r` needs and lacks, from the developed photo:
+/// analyses it, or only solves Guided's guides when the other modes' corrections are
+/// already there. What Develop does in the background once a photo is open, for a
+/// photo developed without being opened.
+pub fn complete(r: &mut Recipe, im: &CameraImage) -> Option<super::guided::Issue> {
+    if !r.upright.needs_analysis() {
+        return None;
+    }
+    if r.upright.mode == super::UprightMode::Guided
+        && r.upright.corrections.len() == super::UprightMode::Guided.code()
+    {
+        return super::guided::store(r, &im.metadata);
+    }
+    let corrections = analyse(im, r);
+    store(r, &corrections, Some(&im.metadata))
+}
+
 /// A camera rotation as the homography it makes of the photo, in centred long-edge
 /// units of a photo at focal length `f`: K·R·K⁻¹.
 pub(super) fn camera_turn(rotation: Mat, f: f32) -> Mat {
@@ -777,6 +819,84 @@ mod tests {
             })
             .collect();
         (image, w, h, if d[1] < 0. { d.map(|v| -v) } else { d })
+    }
+
+    /// A photo developed without being opened gets the corrections Develop's
+    /// analysis gives it: every mode analysed, an imported Guided correction
+    /// without guides kept, and Lightroom's analysis details dropped.
+    #[test]
+    fn completing_upright_stores_what_develops_analysis_does() {
+        use crate::develop::{UprightGuide, UprightMode};
+        let flat = photo(&[100.; 300 * 200], 300, 200);
+        let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+        let imported = [2., 0., 0., 0., 1., 0., 0., 0., 1.];
+        let mut r = Recipe {
+            wb: [1.; 3],
+            ..Default::default()
+        };
+        r.upright.mode = UprightMode::Auto;
+        r.upright
+            .lightroom
+            .insert("UprightVersion".into(), "151388160".into());
+        assert!(r.upright.needs_analysis());
+        assert!(complete(&mut r, &flat).is_none());
+        assert_eq!(r.upright.corrections, analyse(&flat, &r));
+        assert!(r.upright.lightroom.is_empty());
+        assert!(!r.upright.needs_analysis());
+        // Nothing left to complete: unchanged.
+        let done = r.clone();
+        assert!(complete(&mut r, &flat).is_none());
+        assert_eq!(r, done);
+
+        // An imported Guided correction, with no guides to solve it again from, stays
+        // beside a new analysis.
+        let mut kept = Recipe {
+            wb: [1.; 3],
+            ..Default::default()
+        };
+        kept.upright.mode = UprightMode::Guided;
+        kept.upright.corrections = vec![identity; UprightMode::Guided.code()];
+        kept.upright.corrections.push(imported);
+        let analysis = analyse(&flat, &kept);
+        store(&mut kept, &analysis, Some(&flat.metadata));
+        assert_eq!(
+            kept.upright.corrections.len(),
+            UprightMode::Guided.code() + 1
+        );
+        assert_eq!(
+            kept.upright.corrections[UprightMode::Guided.code()],
+            imported
+        );
+
+        // Guided with the other modes analysed only solves its guides: the analysis
+        // is not run again.
+        let mut guided = Recipe {
+            wb: [1.; 3],
+            ..Default::default()
+        };
+        guided.upright.mode = UprightMode::Guided;
+        guided.upright.corrections = vec![imported; UprightMode::Guided.code()];
+        guided.upright.guides = vec![
+            UprightGuide {
+                a: [0.2, 0.1],
+                b: [0.25, 0.9],
+            },
+            UprightGuide {
+                a: [0.8, 0.1],
+                b: [0.75, 0.9],
+            },
+        ];
+        assert!(guided.upright.needs_analysis());
+        complete(&mut guided, &flat);
+        assert_eq!(
+            guided.upright.corrections[..UprightMode::Guided.code()],
+            vec![imported; UprightMode::Guided.code()][..]
+        );
+        assert_eq!(
+            guided.upright.corrections.len(),
+            UprightMode::Guided.code() + 1
+        );
+        assert!(!guided.upright.needs_analysis());
     }
 
     /// Manual Distortion's white border is analysed as the white it renders, not as

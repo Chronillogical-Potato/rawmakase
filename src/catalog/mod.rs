@@ -27,6 +27,7 @@ mod info;
 mod ingest;
 pub mod lightroom;
 mod models;
+pub mod resolve;
 mod sidecar;
 mod snapshots;
 pub use crate::xmp::descriptive::Read as FileMetadata;

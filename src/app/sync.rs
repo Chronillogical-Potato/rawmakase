@@ -8,7 +8,10 @@ use super::{
     worker::Event,
 };
 use crate::{
-    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory},
+    catalog::{
+        Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory,
+        resolve::{self, Origin},
+    },
     develop::{
         Recipe,
         defaults::DevelopDefaults,
@@ -25,15 +28,6 @@ pub(super) struct SyncTarget {
     pub id: i64,
     pub path: PathBuf,
     pub name: String,
-    /// Where its edit starts when RAWmakase has none yet.
-    pub start: StartingEdit,
-}
-
-/// The edit a photo without a RAWmakase edit has, as Develop would open it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum StartingEdit {
-    Defaults,
-    Lightroom,
 }
 
 /// One photo's edit before and after a Sync.
@@ -212,24 +206,31 @@ fn prepare(
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
-    let mut starting_warnings = Vec::new();
     let raw = crate::raw::Raw::open(&target.path)
         .with_context(|| format!("{} can't be read", target.name))?;
     let metadata = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
-    let (before, export) = match catalog.load_edit(target.id, &target.path)? {
-        Some(saved) => (EditBefore::Saved(Box::new(saved.recipe)), saved.export),
-        None => {
-            let start = starting_edit(catalog, target, &metadata, &profiles, defaults)?;
-            starting_warnings = start.warnings;
-            (
-                EditBefore::None {
-                    starting: Box::new(start.recipe),
-                },
-                ExportOptions::default(),
-            )
+    let record = catalog.edit_record(target.id)?;
+    let resolved = resolve::resolve(&record, &target.path, &metadata, &profiles, defaults)?;
+    let mut starting_warnings = Vec::new();
+    let before = match resolved.origin {
+        Origin::Saved => EditBefore::Saved(Box::new(resolved.recipe)),
+        // What its starting edit could not bring along is said, as when it is opened.
+        origin => {
+            starting_warnings = match origin {
+                Origin::Lightroom => resolved
+                    .warnings
+                    .into_iter()
+                    .map(|w| format!("Lightroom edit not fully rendered: {w}"))
+                    .collect(),
+                _ => resolved.warnings,
+            };
+            EditBefore::None {
+                starting: Box::new(resolved.recipe),
+            }
         }
     };
+    let export = resolved.export;
     let transferred = match change {
         BatchChange::Settings(groups) => settings_groups::transfer(
             Source {
@@ -263,9 +264,8 @@ fn prepare(
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let image = raw.develop(false, &cancel)?;
-        after.upright.corrections = crate::develop::upright::analyse(&image, &after);
-        if after.upright.mode == crate::develop::UprightMode::Guided
-            && let Some(issue) = crate::develop::guided::store(&mut after, &image.metadata)
+        if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
+            && after.upright.mode == crate::develop::UprightMode::Guided
         {
             notes.push(issue.message().into());
         }
@@ -320,44 +320,6 @@ pub(super) fn capture_stops(m: &crate::raw::Metadata) -> Option<f32> {
 fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
     Some((source.recipe.exposure + difference).clamp(-5., 5.))
-}
-
-/// The edit Develop opens a photo with when RAWmakase has none: its Lightroom edit
-/// (converted from Adobe Default, as Lightroom stores it), else the raw defaults. A
-/// Lightroom edit that cannot be read fails the photo rather than losing its
-/// unsynchronized settings.
-fn starting_edit(
-    catalog: &Catalog,
-    target: &SyncTarget,
-    metadata: &crate::raw::Metadata,
-    profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-    defaults: &DevelopDefaults,
-) -> Result<Starting> {
-    if target.start == StartingEdit::Defaults {
-        let resolved = defaults.resolve(metadata, profiles);
-        return Ok(Starting {
-            recipe: resolved.recipe,
-            warnings: resolved.note.into_iter().collect(),
-        });
-    }
-    let text = catalog
-        .lightroom_develop(target.id)?
-        .context("Its Lightroom edit is missing")?;
-    let (recipe, warnings) = crate::catalog::convert_develop(&text, metadata, profiles, None)
-        .context("Its Lightroom edit can't be read")?;
-    Ok(Starting {
-        recipe,
-        warnings: warnings
-            .into_iter()
-            .map(|w| format!("Lightroom edit not fully rendered: {w}"))
-            .collect(),
-    })
-}
-
-/// The edit a photo starts from, and what its Lightroom edit could not bring along.
-struct Starting {
-    recipe: Recipe,
-    warnings: Vec<String>,
 }
 
 /// Writes one side of a Sync back, in one transaction, keeping each photo's History,
@@ -456,7 +418,7 @@ impl Editor {
         // while an Auto estimate is still to land on them.
         // A protected edit (its file changed) shows camera defaults, not its settings;
         // profiles still being imported would resolve differently photo to photo.
-        if self.document.pending_lightroom
+        if self.document.pending_lightroom.is_some()
             || self.document.metadata.is_none()
             || self.document.auto.is_running()
             || self.document.save.is_protected()
@@ -478,11 +440,6 @@ impl Editor {
                 id: p.id,
                 path: p.path.clone(),
                 name: format!("{}{}", p.filename, crate::app::library::copy_suffix(p)),
-                start: if p.has_lightroom_edits {
-                    StartingEdit::Lightroom
-                } else {
-                    StartingEdit::Defaults
-                },
             })
             .collect()
     }
@@ -623,7 +580,6 @@ mod tests {
             id,
             path: path.to_path_buf(),
             name: path.file_name().unwrap().to_string_lossy().into(),
-            start: StartingEdit::Defaults,
         }
     }
 
@@ -849,9 +805,15 @@ mod tests {
         recipe.upright.mode = crate::develop::UprightMode::Guided;
         recipe.exposure = 0.3;
         let source = Settings { recipe, metadata };
-        let mut lightroom = target(photos[1].0, &photos[1].1);
-        lightroom.start = StartingEdit::Lightroom;
-        let targets = [lightroom, target(photos[2].0, &photos[2].1)];
+        // Settings cut off mid-value.
+        rusqlite::Connection::open(&c.path)?.execute(
+            "UPDATE photos SET lightroom_develop='s = { Exposure2012 = ' WHERE id=?",
+            [photos[1].0],
+        )?;
+        let targets = [
+            target(photos[1].0, &photos[1].1),
+            target(photos[2].0, &photos[2].1),
+        ];
         let result = synchronize(
             &c,
             &source,
@@ -893,9 +855,10 @@ mod tests {
             recipe: source,
             metadata: metadata.clone(),
         };
-        let mut lightroom = target(photos[1].0, &photos[1].1);
-        lightroom.start = StartingEdit::Lightroom;
-        let targets = [lightroom, target(photos[2].0, &photos[2].1)];
+        let targets = [
+            target(photos[1].0, &photos[1].1),
+            target(photos[2].0, &photos[2].1),
+        ];
         let mut clarity = GroupSelection::none();
         clarity.set(
             settings_groups::SettingGroup::Clarity,
