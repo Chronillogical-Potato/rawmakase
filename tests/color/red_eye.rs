@@ -46,7 +46,11 @@ fn red_pupil_turns_dark_and_neutral_and_the_iris_stays() {
         Glow::Red,
     )
     .expect("a pupil");
-    let recipe = Recipe::with_profiles(&im.metadata, &embedded_profiles(&im));
+    let recipe = Recipe {
+        // Sharpening's halo around the darkened pupil is not the correction's own.
+        sharpening: 0.,
+        ..Recipe::with_profiles(&im.metadata, &embedded_profiles(&im))
+    };
     let base = render(&im, &recipe, 0).unwrap();
     let at = |r: &rawmakase::develop::Rendered, d: f32, t: f32| {
         let [u, v] = ViewMapping::new(&im, &recipe)

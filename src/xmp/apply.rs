@@ -39,6 +39,13 @@ struct Settings<'a> {
     seen: BTreeSet<String>,
 }
 impl Settings<'_> {
+    /// Whether a packet RAWmakase wrote names `operator` as kept from before it was
+    /// measured, so Lightroom's values for it don't switch it to the measured one.
+    fn keeps_original(&self, operator: &str) -> bool {
+        self.values
+            .get("RAWmakaseOriginal")
+            .is_some_and(|v| v.split(',').any(|name| name.trim() == operator))
+    }
     fn assign(&mut self, key: &str, out: &mut f32, scale: f32, lo: f32, hi: f32) -> Result<()> {
         self.seen.insert(key.to_string());
         if let Some(value) = number(self.values, key)? {
@@ -87,6 +94,8 @@ const METADATA: &[&str] = &[
     "RawFileName",
     // Marks a preset made in RAWmakase, which it may update, rename or delete.
     "RAWmakasePreset",
+    // Operators a RAWmakase recipe keeps from before they were measured.
+    "RAWmakaseOriginal",
 ];
 impl Preset {
     /// Apply to a private recipe, publishing only after every stage validates.
@@ -413,6 +422,22 @@ impl Preset {
             0.,
             1.,
         )?;
+        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        if [
+            "Sharpness",
+            "SharpenRadius",
+            "SharpenDetail",
+            "SharpenEdgeMasking",
+        ]
+        .iter()
+        .any(|k| settings.values.contains_key(*k))
+        {
+            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Measured;
+        }
+        // RAWmakase's own packet for a recipe that kept the original operator.
+        if settings.keeps_original(super::write::ORIGINAL_SHARPENING) {
+            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Original;
+        }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
         Ok(())
@@ -783,6 +808,9 @@ impl Preset {
             .any(|k| settings.values.contains_key(*k))
         {
             r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_LENS_VIGNETTE) {
+            r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Original;
         }
         for (i, name) in ["Purple", "Green"].iter().enumerate() {
             settings.assign(

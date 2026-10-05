@@ -14,6 +14,7 @@ use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::{Panel, PanelState};
+use crate::develop::sharpening::{SharpeningModel, SharpeningSliders};
 use crate::develop::targeted::Target;
 use crate::develop::{
     NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, Treatment,
@@ -1158,6 +1159,7 @@ impl Editor {
         switch.finish(r);
 
         let mut switch = PanelSwitch::new(r, Panel::Detail);
+        let sharpening = SharpeningSliders::defaults(r.sharpening_model);
         if switched_section(ui, "Detail", &mut switch.state, |ui| {
             subheading(ui, "Sharpening");
             slider_with(
@@ -1165,7 +1167,7 @@ impl Editor {
                 "Amount",
                 &mut r.sharpening,
                 0. ..=1.,
-                0.35,
+                sharpening.amount,
                 Some((150., 0)),
                 None,
             );
@@ -1175,12 +1177,24 @@ impl Editor {
                     "Radius",
                     &mut r.sharpening_radius,
                     0.5..=3.,
-                    0.8,
+                    sharpening.radius,
                     Some((1., 1)),
                     None,
                 );
-                slider(ui, "Detail", &mut r.sharpening_detail, 0. ..=1., 0.25);
-                slider(ui, "Masking", &mut r.sharpening_masking, 0. ..=1., 0.35);
+                slider(
+                    ui,
+                    "Detail",
+                    &mut r.sharpening_detail,
+                    0. ..=1.,
+                    sharpening.detail,
+                );
+                slider(
+                    ui,
+                    "Masking",
+                    &mut r.sharpening_masking,
+                    0. ..=1.,
+                    sharpening.masking,
+                );
             }
             subheading(ui, "Noise Reduction");
             slider(ui, "Luminance", &mut r.noise_luma, 0. ..=1., 0.);
@@ -1207,10 +1221,8 @@ impl Editor {
             r.effects.luma_contrast = d.luma_contrast;
             r.effects.chroma_detail = d.chroma_detail;
             r.effects.chroma_smoothness = d.chroma_smoothness;
-            r.sharpening = if r.engine >= 3 { 0.35 } else { 0. };
-            r.sharpening_radius = 0.8;
-            r.sharpening_detail = 0.25;
-            r.sharpening_masking = 0.35;
+            // Reset brings the current defaults, with the measured operator.
+            r.set_sharpening_defaults(SharpeningModel::Measured);
         }
         switch.finish(r);
 
@@ -1521,13 +1533,7 @@ impl Editor {
                         )
                         .clicked()
                     {
-                        if r.engine < 3 {
-                            r.profile = metadata.as_ref().and_then(crate::camera_profiles::builtin);
-                            if r.sharpening == 0. {
-                                r.sharpening = 0.35;
-                            }
-                        }
-                        r.engine = 4;
+                        r.update_process(metadata.as_ref());
                     }
                 });
             } else {

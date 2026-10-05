@@ -15,7 +15,7 @@ struct Params {
     grain_seed: u32, vignette: f32, vignette_style: u32, vignette_highlights: f32,
     vignette_scale_x: f32, vignette_scale_y: f32, vignette_power: f32, vignette_midpoint: f32,
     vignette_feather: f32, lens_vignette: f32, lens_vignette_midpoint: f32, effects: u32,
-    count: u32, pad0: u32, pad1: u32, pad2: u32,
+    count: u32, halo: f32, dark: f32, pad2: u32,
 };
 @group(0) @binding(0) var<storage, read_write> pixels: array<f32>;
 @group(0) @binding(1) var<storage, read_write> scratch: array<f32>;
@@ -41,6 +41,18 @@ fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     scratch[id.y * p.width + id.x] = value;
 }
+// `sharpening::Sharpener::delta` for a non-negative `amount` (strength already
+// applied): the original operator clips at 0.08 (halo 0); the measured one shapes the
+// high-pass, dark halos at `dark` of light ones.
+fn sharpen_delta(d: f32, amount: f32, threshold: f32, halo: f32, dark: f32) -> f32 {
+    var mask = 1.0;
+    if threshold != 0.0 { mask = clamp(abs(d) / threshold, 0.0, 1.0); }
+    let k = amount * mask;
+    if halo == 0.0 { return clamp(d * k, -0.08, 0.08); }
+    let r = abs(d) / halo;
+    let shaped = d / (1.0 + r * r * r);
+    return k * select(shaped, shaped * dark, shaped < 0.0);
+}
 @compute @workgroup_size(16, 16)
 fn sharpen(@builtin(global_invocation_id) id: vec3<u32>) {
     if id.x >= p.width || id.y >= p.height { return; }
@@ -52,9 +64,7 @@ fn sharpen(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.y * p.width + id.x;
     let color = rgb(i);
     let d = luminance(color) - blur;
-    var mask = 1.0;
-    if p.threshold != 0.0 { mask = clamp(abs(d) / p.threshold, 0.0, 1.0); }
-    let delta = clamp(d * p.amount * 2.0 * mask, -0.08, 0.08);
+    let delta = sharpen_delta(d, p.amount, p.threshold, p.halo, p.dark);
     let result = clamp(color + vec3(delta), vec3(0.0), vec3(1.0));
     pixels[3u * i] = result.r;
     pixels[3u * i + 1u] = result.g;

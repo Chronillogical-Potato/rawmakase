@@ -594,6 +594,30 @@ pub fn keyword_lists(keywords: &[KeywordPath]) -> (Vec<String>, Vec<String>) {
     (subject, hierarchical)
 }
 
+/// The operators this recipe keeps from before they were measured in Camera Raw,
+/// each with a Lightroom setting it renders. Lightroom's values for them would read
+/// back as the measured ones, so RAWmakase names them for itself to render the recipe
+/// as it was.
+pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)> {
+    [
+        (
+            r.sharpening_model.is_original(),
+            ORIGINAL_SHARPENING,
+            "Sharpness",
+        ),
+        (
+            r.lens_vignette_model.is_original(),
+            ORIGINAL_LENS_VIGNETTE,
+            "VignetteAmount",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(original, name, key)| original.then_some((name, key)))
+    .collect()
+}
+pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
+pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
+
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     let mut attributes: Vec<(String, String)> = vec![
@@ -632,6 +656,13 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
                 .into_iter()
                 .map(|(k, v)| (format!("crs:{k}"), v)),
         );
+        let original: Vec<_> = original_operators(r)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        if !original.is_empty() {
+            attributes.push(("crs:RAWmakaseOriginal".into(), original.join(",")));
+        }
         attributes.push(("crs:AlreadyApplied".into(), "True".into()));
     }
     let mut out = format!(
