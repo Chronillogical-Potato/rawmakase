@@ -346,9 +346,11 @@ mod tests {
         let entry = [0x2a, 0xc6, 10, 0, 1, 0, 0, 0];
         let at = bytes.windows(8).position(|w| w == entry).unwrap();
         bytes[at + 2] = 0;
-        let f = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), bytes).unwrap();
-        let m = super::Raw::open(f.path()).unwrap().metadata;
+        // A closed file: Windows' LibRaw cannot open one a NamedTempFile holds open.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("no-baseline.dng");
+        std::fs::write(&path, bytes).unwrap();
+        let m = super::Raw::open(&path).unwrap().metadata;
         // A camera without a table row would otherwise take the table's median.
         assert_eq!(m.baseline_exposure, Some(0.));
         assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
