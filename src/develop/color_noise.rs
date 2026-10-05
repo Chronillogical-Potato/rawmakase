@@ -15,8 +15,10 @@
 //! Camera Raw also reduces strong single-pixel colour lines by about a quarter, which
 //! this keeps, and takes out somewhat less noise than this on very noisy photos.
 use crate::raw::CameraImage;
+use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Which operator renders a recipe's colour noise reduction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +36,9 @@ impl NoiseModel {
     }
 }
 
+/// The lowest Amount measured in Camera Raw, which already reduces the finest level as
+/// much as the default does.
+const LOWEST_MEASURED: f32 = 0.1;
 /// Pyramid levels with a threshold below the finest.
 const LEVELS: usize = 4;
 /// The finest level: the share of its colour noise kept, by Detail 0, 25, 50, 75 and
@@ -85,13 +90,16 @@ impl ChromaDenoise {
             };
             base * detail * at_quarters(&SMOOTHNESS_FACTOR[l], smoothness)
         });
+        // The finest level comes in over the lowest measured Amount, 10, so the
+        // slider has no step at its start.
+        let ramp = (amount / LOWEST_MEASURED).min(1.);
         Some(Self {
-            fine_kept: at_quarters(&FINE_KEPT, detail),
+            fine_kept: 1. - (1. - at_quarters(&FINE_KEPT, detail)) * ramp,
             thresholds,
         })
     }
-    /// `im` with its colour noise reduced.
-    pub(crate) fn apply(&self, im: &CameraImage) -> CameraImage {
+    /// `im` with its colour noise reduced; stops with an error when `cancel` is set.
+    pub(crate) fn apply(&self, im: &CameraImage, cancel: &AtomicBool) -> Result<CameraImage> {
         let (w, h) = (im.width as usize, im.height as usize);
         let (luma, data): (Vec<f32>, Vec<[f32; 2]>) = im
             .pixels
@@ -102,7 +110,7 @@ impl ChromaDenoise {
             })
             .unzip();
         let chroma = Plane { w, h, data };
-        let chroma = self.filter(chroma, 0);
+        let chroma = self.filter(chroma, 0, cancel)?;
         let mut out = im.clone();
         out.recovered = Default::default();
         out.pixels
@@ -112,16 +120,18 @@ impl ChromaDenoise {
                 let g = y - (a + b) * 0.25;
                 *p = [g + a, g, g + b].map(|v| v.max(0.).powi(2));
             });
-        out
+        Ok(out)
     }
     /// Filters `plane` as pyramid level `level`, recursing to the coarser ones.
-    fn filter(&self, plane: Plane, level: usize) -> Plane {
+    fn filter(&self, plane: Plane, level: usize, cancel: &AtomicBool) -> Result<Plane> {
         if level > LEVELS || plane.w < 4 || plane.h < 4 {
-            return plane;
+            return Ok(plane);
         }
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let coarse = plane.down();
         let up = coarse.up(plane.w, plane.h);
-        let coarse = self.filter(coarse, level + 1);
+        let coarse = self.filter(coarse, level + 1, cancel)?;
+        ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let coarse_up = coarse.up(plane.w, plane.h);
         let (kept, threshold) = match level {
             0 => (self.fine_kept, FINE_THRESHOLD),
@@ -142,11 +152,11 @@ impl ChromaDenoise {
                 [c[0] + d[0] * gain, c[1] + d[1] * gain]
             })
             .collect();
-        Plane {
+        Ok(Plane {
             w: plane.w,
             h: plane.h,
             data,
-        }
+        })
     }
 }
 
@@ -295,7 +305,7 @@ mod tests {
             }
         });
         let d = ChromaDenoise::new(0.25, 0.5, 0.5).unwrap();
-        let out = d.apply(&im);
+        let out = d.apply(&im, &AtomicBool::new(false)).unwrap();
         // Away from the edge colours are as they were; a strong colour edge stays sharp,
         // within a pixel of where it was.
         for (i, (a, b)) in im.pixels.iter().zip(&out.pixels).enumerate() {
@@ -326,14 +336,23 @@ mod tests {
                 .sqrt()
         };
         let before = noise(&im);
-        let at =
-            |a: f32, d: f32| noise(&ChromaDenoise::new(a, d, 0.5).unwrap().apply(&im)) / before;
+        let at = |a: f32, d: f32| {
+            noise(
+                &ChromaDenoise::new(a, d, 0.5)
+                    .unwrap()
+                    .apply(&im, &AtomicBool::new(false))
+                    .unwrap(),
+            ) / before
+        };
         // Camera Raw at the default 25 keeps about half of a flat's colour noise.
         assert!((0.3..0.7).contains(&at(0.25, 0.5)), "{}", at(0.25, 0.5));
         assert!(at(1., 0.5) < at(0.25, 0.5));
         assert!(at(0.25, 1.) > at(0.25, 0.5));
         // Luminance is left alone.
-        let out = ChromaDenoise::new(1., 0.5, 0.5).unwrap().apply(&im);
+        let out = ChromaDenoise::new(1., 0.5, 0.5)
+            .unwrap()
+            .apply(&im, &AtomicBool::new(false))
+            .unwrap();
         for (a, b) in im.pixels.iter().zip(&out.pixels) {
             let luma = |p: &[f32; 3]| {
                 let [r, g, b] = p.map(|v| v.max(0.).sqrt());
@@ -341,5 +360,32 @@ mod tests {
             };
             assert!((luma(a) - luma(b)).abs() < 1e-4);
         }
+    }
+    #[test]
+    fn low_amounts_start_from_no_change_and_cancel_stops_it() {
+        let im = image(64, 64, |x, y| {
+            [
+                0.18 + 0.02 * hash(x, y, 1),
+                0.18,
+                0.18 + 0.02 * hash(x, y, 3),
+            ]
+        });
+        let cancel = AtomicBool::new(false);
+        let barely = ChromaDenoise::new(0.005, 0.5, 0.5)
+            .unwrap()
+            .apply(&im, &cancel)
+            .unwrap();
+        for (a, b) in im.pixels.iter().zip(&barely.pixels) {
+            for c in 0..3 {
+                assert!((a[c] - b[c]).abs() < 2e-3, "{a:?} {b:?}");
+            }
+        }
+        cancel.store(true, Ordering::Relaxed);
+        assert!(
+            ChromaDenoise::new(0.25, 0.5, 0.5)
+                .unwrap()
+                .apply(&im, &cancel)
+                .is_err()
+        );
     }
 }

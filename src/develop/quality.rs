@@ -490,9 +490,9 @@ pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<Cam
     let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
-/// The recovered image with the recipe's red eye corrections and spot removal applied,
-/// then the measured Color noise reduction: from the preview's cache, updated where
-/// the operations changed, or built at once (exports).
+/// The recovered image with the measured Color noise reduction, then the recipe's red
+/// eye corrections and spot removal, so those stay within their shapes: from the
+/// preview's cache, updated where the operations changed, or built at once (exports).
 pub(crate) fn retouched(
     im: &CameraImage,
     r: &Recipe,
@@ -504,21 +504,17 @@ pub(crate) fn retouched(
     let denoise = r.chroma_denoise();
     match cache {
         Some(cache) => {
-            let retouched = cache.get(&recovered, ops, cancel)?;
-            Ok(match denoise {
-                Some(d) => cache.denoised(&retouched, d),
-                None => retouched,
-            })
+            let base = cache.denoised(&recovered, denoise, cancel)?;
+            cache.get(&base, ops, cancel)
         }
         None => {
-            let retouched = if ops.is_empty() {
-                recovered
-            } else {
-                Arc::new(develop::retouch::apply(&recovered, ops))
+            let base = match denoise {
+                Some(d) => Arc::new(d.apply(&recovered, cancel)?),
+                None => recovered,
             };
-            Ok(match denoise {
-                Some(d) => Arc::new(d.apply(&retouched)),
-                None => retouched,
+            Ok(match ops.is_empty() {
+                true => base,
+                false => Arc::new(develop::retouch::apply(&base, ops)),
             })
         }
     }

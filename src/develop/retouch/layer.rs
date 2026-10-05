@@ -247,21 +247,29 @@ impl RetouchCache {
         self.image = Some(image.clone());
         Ok(image)
     }
-    /// `source` with Color noise reduction `d`, reused while neither changes.
+    /// `source` with Color noise reduction `d`, reused while neither changes; without
+    /// one, `source` itself, and the last result is let go.
     pub(crate) fn denoised(
         &mut self,
         source: &Arc<CameraImage>,
-        d: ChromaDenoise,
-    ) -> Arc<CameraImage> {
+        d: Option<ChromaDenoise>,
+        cancel: &AtomicBool,
+    ) -> Result<Arc<CameraImage>> {
+        let Some(d) = d else {
+            self.denoised = None;
+            return Ok(source.clone());
+        };
         if let Some((s, last, out)) = &self.denoised
             && Arc::ptr_eq(s, source)
             && *last == d
         {
-            return out.clone();
+            return Ok(out.clone());
         }
-        let out = Arc::new(d.apply(source));
+        // Free the previous result before making the next.
+        self.denoised = None;
+        let out = Arc::new(d.apply(source, cancel)?);
         self.denoised = Some((source.clone(), d, out.clone()));
-        out
+        Ok(out)
     }
     /// What the last change replaced, and where the images differ.
     /// Whether `image` is what the last change replaced; then the current image

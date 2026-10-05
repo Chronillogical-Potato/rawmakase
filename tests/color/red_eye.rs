@@ -47,10 +47,8 @@ fn red_pupil_turns_dark_and_neutral_and_the_iris_stays() {
     )
     .expect("a pupil");
     let recipe = Recipe {
-        // Sharpening's halo around the darkened pupil, and colour noise reduction
-        // spreading its change, are not the correction's own.
+        // Sharpening's halo around the darkened pupil is not the correction's own.
         sharpening: 0.,
-        noise_chroma: 0.,
         ..Recipe::with_profiles(&im.metadata, &embedded_profiles(&im))
     };
     let base = render(&im, &recipe, 0).unwrap();
