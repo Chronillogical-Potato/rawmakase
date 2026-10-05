@@ -611,6 +611,11 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             "VignetteAmount",
         ),
         (r.grain_model.is_original(), ORIGINAL_GRAIN, "GrainAmount"),
+        (
+            r.clarity_model.is_original(),
+            ORIGINAL_CLARITY,
+            "Clarity2012",
+        ),
         // These travel with Process Version, as copying settings does.
         (
             r.mixer_model.is_original(),
@@ -630,6 +635,7 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
 pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
 pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
 pub(super) const ORIGINAL_GRAIN: &str = "Grain";
+pub(super) const ORIGINAL_CLARITY: &str = "Clarity";
 pub(super) const ORIGINAL_COLOR_MIXER: &str = "ColorMixer";
 pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 

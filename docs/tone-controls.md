@@ -55,6 +55,14 @@ Offline fits on the sweeps show both are local operators whose effect is best ex
 
 Dehaze is mostly a per-photo tone curve with a spatial residual. A single curve per photo explains ±40 to 0.011–0.019 MAE (from 0.04–0.11 unchanged). Engine 4 applies the curve averaged across photos, before Contrast in the same composed curve. Extra MAE over the default render: +0.0078 / +0.0135 at +40 / −40 (previously +0.037 / +0.062), +0.0021 / +0.0045 at ±20, and +0.036 / +0.044 at ±100, where the per-photo adaptation dominates.
 
+### Clarity
+
+Camera Raw's positive Clarity is a local contrast operator whose strength depends on the scale of the detail and on how bright its surroundings are relative to the photo's highlights. Measured on synthetic gray scenes, it stops at edges: both sides of a step change keep their own level up to a few pixels from the edge, and a uniform gray only darkens by about 0.1 EV at +100. Its effect scales with the photo's size, so a 3000-pixel copy of a scene responds like a 1500-pixel one (correlation 0.92).
+
+New edits render positive Clarity with that model (`src/develop/clarity.rs`, `ClarityModel::Measured`). On the Shadows/Highlights map's 512-pixel copy of the toned photo, it takes the detail at four scales, the log luminance minus an edge-aware blur (bilateral, range σ 2 EV, spatial σ 0.4%, 1.5%, 5% and 15% of the long edge). Each scale gets a weight that depends on the local base level (`local_tone.rs`) relative to the photo's 99th luminance percentile. The resulting log2 gain is applied per pixel with Shadows and Highlights. The weights are least-squares fits to the log2 change Camera Raw 18.7 renders at Clarity +50 and +100 on 104 synthetic scenes: 80 random photo-like scenes plus edges, disks, ramps, gratings and textures. Values in between are interpolated, and below +50 the +50 fit is scaled. No photo was used to fit it.
+
+Checked against Camera Raw on the five photos above, Clarity +25 / +50 / +100 change the block averages to within 0.0080 / 0.0156 / 0.0301 of Camera Raw's change, against 0.0118 / 0.0231 / 0.0453 with the earlier operator (doing nothing scores 0.0118 / 0.0232 / 0.0456). Every photo is closer at every amount. Negative Clarity, a mask's Clarity and recipes saved before keep the earlier operator (`clarity_model` missing means `Original`).
+
 ## Parametric curve
 
 The Tone Curve's region sliders (Shadows, Darks, Lights, Highlights) and their three splits were measured with Camera Raw 18.7 on the synthetic chart: about 380 settings, each region at ±25, ±50, ±75 and ±100 with moved splits, and Darks with Lights together (`scripts/corpus/parametric-curve.py`). What the renders show:
@@ -133,4 +141,4 @@ A photo takes one render of the reduced copy, after highlight recovery and the r
 - Positive Whites' offset between photos and the chart is fitted on five photos; Lightroom's own measure of the highlights is unknown.
 - Contrast's pivot is predicted from two statistics of the photo to about 0.03; what Camera Raw measures exactly is unknown.
 - Auto's Whites: Lightroom's choice follows the brightest percentiles only loosely (90th percentile error about 30).
-- Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.
+- Positive Clarity at +100 is still 0.030 from Camera Raw on block averages (was 0.045). Negative Clarity, a mask's Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.

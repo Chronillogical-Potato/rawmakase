@@ -508,6 +508,10 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             if style == ColorPriority {
                 recipe.grain_model = crate::develop::effects::GrainModel::Measured;
             }
+            // The measured Clarity, in the map, on Paint Overlay cases.
+            if style == PaintOverlay {
+                recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+            }
             recipe.effects.vignette = vignette;
             recipe.effects.vignette_style = style;
             recipe.effects.vignette_highlights = 0.6;

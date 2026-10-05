@@ -161,6 +161,9 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         reference_color: _,
         parametric_model: _,
         grain_model: _,
+        // The measured Clarity is in the map, built per render; the original one is
+        // keyed by `LocalKey` through `effects.clarity`.
+        clarity_model: _,
         contrast_model: _,
         grading_model: _,
         mixer_model: _,
