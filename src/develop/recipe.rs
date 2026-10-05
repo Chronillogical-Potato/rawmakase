@@ -713,6 +713,19 @@ impl Recipe {
             0.
         }
     }
+    /// Calibration's Update: the current process, with the camera's built-in profile
+    /// and the sharpening that version 3 introduced for older recipes.
+    pub fn update_process(&mut self, m: Option<&Metadata>) {
+        if self.engine < 3 {
+            self.profile = m.and_then(crate::camera_profiles::builtin);
+            if self.sharpening == 0. {
+                self.sharpening =
+                    crate::develop::sharpening::SharpeningSliders::defaults(self.sharpening_model)
+                        .amount;
+            }
+        }
+        self.engine = 4;
+    }
     /// The Sharpening sliders at their defaults for `model`, which the recipe then
     /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)
     /// with the measured operator, RAWmakase's earlier ones with the original.

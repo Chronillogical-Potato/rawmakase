@@ -1375,3 +1375,27 @@ fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
     let compressed = GamutModel::Compress.into_srgb(out_of_gamut, 0.7);
     assert!(compressed[1] > 0.2 && compressed[2] > 0., "{compressed:?}");
 }
+/// Updating an old process gives the sharpening Amount of the recipe's operator: the
+/// original's on an old edit, Lightroom's after Detail's reset chose the measured one.
+#[test]
+fn process_update_sharpens_with_the_recipe_operator_default() {
+    use crate::develop::sharpening::{SharpeningModel, SharpeningSliders};
+    let mut old = Recipe {
+        engine: 1,
+        ..Default::default()
+    };
+    old.update_process(None);
+    assert_eq!(old.engine, 4);
+    assert_eq!(
+        old.sharpening,
+        SharpeningSliders::defaults(SharpeningModel::Original).amount
+    );
+    let mut reset = Recipe {
+        engine: 1,
+        ..Default::default()
+    };
+    reset.set_sharpening_defaults(SharpeningModel::Measured);
+    assert_eq!(reset.sharpening, 0.);
+    reset.update_process(None);
+    assert_eq!(reset.sharpening, 40. / 150.);
+}

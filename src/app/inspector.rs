@@ -1533,13 +1533,7 @@ impl Editor {
                         )
                         .clicked()
                     {
-                        if r.engine < 3 {
-                            r.profile = metadata.as_ref().and_then(crate::camera_profiles::builtin);
-                            if r.sharpening == 0. {
-                                r.sharpening = 0.35;
-                            }
-                        }
-                        r.engine = 4;
+                        r.update_process(metadata.as_ref());
                     }
                 });
             } else {
