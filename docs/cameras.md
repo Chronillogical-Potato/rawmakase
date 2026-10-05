@@ -28,7 +28,10 @@ difference from that DR100 shift to the row, so DR200 and DR400 photos work even
 the raw does not record the DR mode itself. Camera Raw keeps one value whatever the
 shift for the X-T2 (measured at DR200) and, inferred from their equal values, the other
 X-Trans III bodies (X-E3, X-Pro2, X-T20, X100F, X-H1); their rows say
-`fujifilm_exposure_shift = "ignored"`.
+`fujifilm_exposure_shift = "ignored"`. RAWmakase assumes the usual DR100 shift of the
+sensor type (−0.72 X-Trans, 0 Bayer); a body that records another one, like the GFX
+bodies' −0.49, says so in its row with `fujifilm_dr100_shift`. `rawmakase inspect` on a
+DR100 raw at base ISO prints it as `fuji_exposure_shift`.
 
 The baseline is stored per edit, apart from the Exposure slider, so changing the table
 changes photos opened afterwards. An existing edit keeps its value; Develop's

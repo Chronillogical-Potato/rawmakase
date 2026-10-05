@@ -13,7 +13,7 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
         return dng;
     }
     let row = crate::cameras::baseline_exposure(&m.make, &m.model);
-    let table = row.ev + fujifilm_shift(m, row.exposure_shift);
+    let table = row.ev + fujifilm_shift(m, &row);
     // Table rows hold for photos without Highlight Tone Priority, which Camera Raw
     // brightens by the stop the camera held back.
     match m.highlight_tone_priority {
@@ -23,23 +23,19 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
 }
 /// Camera Raw's baseline for a Fujifilm raw is a per-body constant minus the raw's
 /// exposure midpoint shift, which moves a stop for each DR step (DR200 is often not
-/// recorded otherwise) and for extended ISO. Table rows hold at the usual DR100 shift.
-fn fujifilm_shift(m: &Metadata, follows: crate::cameras::ExposureShift) -> f32 {
+/// recorded otherwise) and for extended ISO. Table rows hold at the body's DR100 shift:
+/// the row's own, else the sensor's usual one.
+fn fujifilm_shift(m: &Metadata, row: &crate::cameras::Baseline) -> f32 {
     let Some(shift) = m.fuji_exposure_shift else {
         return 0.;
     };
-    if !m.make.eq_ignore_ascii_case("Fujifilm") || follows == crate::cameras::ExposureShift::Ignored
+    if !m.make.eq_ignore_ascii_case("Fujifilm")
+        || row.exposure_shift == crate::cameras::ExposureShift::Ignored
     {
         return 0.;
     }
-    let dr100 = if m.xtrans {
-        -0.72
-    } else if m.model.to_ascii_uppercase().starts_with("GFX") {
-        -0.49
-    } else {
-        0.
-    };
-    dr100 - shift
+    let usual = if m.xtrans { -0.72 } else { 0. };
+    row.dr100_shift.unwrap_or(usual) - shift
 }
 pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
     if x100f(m) {
@@ -80,8 +76,12 @@ mod tests {
         // Extended ISO 100 on an ISO 160 body shifts the other way.
         let x_t30 = fujifilm("X-T30", true, Some(0.28));
         assert!(close(baseline_exposure(&x_t30), row("X-T30") - 1.));
+        // GFX rows give their own DR100 shift, -0.49.
         let gfx = fujifilm("GFX100 II", false, Some(-1.72));
         assert!(close(baseline_exposure(&gfx), row("GFX100 II") + 1.23));
+        // A Bayer body without one assumes 0, whatever its name.
+        let unlisted = fujifilm("GFX200", false, Some(-1.));
+        assert!(close(baseline_exposure(&unlisted), row("GFX200") + 1.));
         // Small Bayer bodies record no shift at DR100.
         let xf10 = Metadata {
             fuji_dynamic_range: 65535,
