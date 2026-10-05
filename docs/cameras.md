@@ -28,18 +28,20 @@ changes photos opened afterwards. An existing edit keeps its value; Develop's
 
 ### How good the fallback is
 
-Predicting each of the 59 bodies in the table on 2026-10-05 from the other rows
-(leave-one-out) misses Camera Raw by:
+Predicting each of the 179 bodies in the table on 2026-10-05 from the other rows
+(leave-one-out) misses Adobe's value by:
 
 | Rule | Mean error | 90th percentile | Worst |
 |---|---|---|---|
-| No baseline (before the table) | 0.26 EV | 0.50 EV | 0.60 EV |
-| Median of all rows | 0.17 EV | 0.40 EV | 0.65 EV |
-| Median of the same make | 0.10 EV | 0.20 EV | 0.65 EV |
+| No baseline | 0.28 EV | 0.50 EV | 0.85 EV |
+| Median of all rows | 0.19 EV | 0.45 EV | 0.80 EV |
+| Median of the same make | 0.13 EV | 0.35 EV | 1.00 EV |
 
-The worst case is the Panasonic G9 (+0.6 among Panasonic bodies near 0). No rule from
-the raw's own metadata did better: within a make, neither white level nor black level
-orders the baselines. The same-make median is the fallback.
+The worst cases are bodies unlike the rest of their make: Pentax's 645Z (−0.5 among
++0.5 bodies), Panasonic's GH5 II and G9, and the 1-inch compacts (Sony RX100 and ZV-1
+at −0.25, Nikon Coolpix at −0.3, against +0.3 for their makes' larger sensors). No
+rule from the raw's own metadata did better: within a make, neither white level nor
+black level orders the baselines. The same-make median is the fallback.
 
 The camera-matching DCPs (Camera Standard and so on) of some Sony bodies carry a
 BaselineExposureOffset of −0.35 EV, which RAWmakase applies with those profiles; Adobe
@@ -88,13 +90,30 @@ DNGs or Adobe profiles.
 
 ## Sources of the current rows
 
-Adobe DNG Converter was not installed when the table was made, so every row except
-the X100F (read from two Lightroom DNGs, see `macos-lightroom-validation.md`) is
-fitted to Camera Raw renders with Adobe Standard: Camera Raw 18.7 on one CC0 sample
-per camera from [raw.pixls.us](https://raw.pixls.us) (the samples `scripts/corpus/pixls.py` downloads), and Camera Raw 18.6 on private
-photos for the A7 II (8) and A7CR (4).
+Most rows (`adobe-dng`) come from Adobe DNG Converter 18.x: it converted a copy of one
+CC0 [raw.pixls.us](https://raw.pixls.us) sample per camera (the files
+`scripts/corpus/pixls.py` downloads), and the row is the DNG's BaselineExposure plus
+the difference between Adobe's white level and LibRaw's, which RAWmakase scales by:
+log2((LibRaw white − black) / (Adobe white − black)). That term is 0 for most bodies;
+Canon's ISO-dependent white levels make it up to +0.8 EV, so a Canon row holds at the
+sample's ISO and may be off by a few tenths at others.
 
-After the table, every listed camera's unedited render is within ±0.1 EV of Camera Raw
-on its sample. Photos with Canon Highlight Tone Priority or Fujifilm DR200/DR400, and
-the EOS R6 Mark III, Sony A7R IV and RX100 VII samples, still differ by about 1 EV for
-reasons beyond the baseline.
+Adobe's value also follows some shooting settings, which the rows leave out: Canon
+Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO 50,
+Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
+so in `sample`.
+
+The fitted rows agree with Adobe's: on the 56 bodies measured both ways, the median
+midtone fit is within 0.05 EV of Adobe's value for 35 and averages 0.04 EV lower. The
+exceptions are the Fujifilm X-H2 (0.37), X-T30 II (0.32), X-S10, X-T5 and X100VI
+(0.17): Camera Raw renders those darker than their baseline explains.
+
+Three rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+`macos-lightroom-validation.md`) and the A7 II and A7CR, fitted to Camera Raw 18.6
+renders of private photos (8 and 4).
+
+Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
+fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names
+alike; and bodies whose only CC0 sample is an sRAW or other non-mosaic file (EOS 5D
+Mark IV, 5DS R, 6D Mark II, 7D Mark II, 80D, 1D X Mark II, Nikon D810, Sony RX1R III
+and A1 II).
