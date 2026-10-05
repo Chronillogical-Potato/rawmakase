@@ -161,6 +161,7 @@ impl Editor {
         } else {
             Direction::Undo
         });
+        self.sync_command_revision();
         self.load_reference();
         applied
     }

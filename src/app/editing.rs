@@ -32,6 +32,7 @@ impl Editor {
         }
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
+        self.sync_command_revision();
         self.document.history.begin_frame();
         // Before the frame looks at it, so reading it changes no crop.
         self.read_aspect();
@@ -123,7 +124,7 @@ impl Editor {
         // Presets panel is open.
         self.end_stale_preset_amount();
         if edited {
-            self.automation.revision = self.automation.revision.wrapping_add(1);
+            self.sync_command_revision();
             self.document.save.mark_changed();
             // A conversion waiting for the photo lapses with any other edit, Undo
             // included.

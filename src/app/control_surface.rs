@@ -32,6 +32,8 @@ enum Msg {
     Note(u8, bool),
     Command(Command),
     Request(socket::Request),
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+    Midi(Arc<Mutex<Status>>, u64, Box<Msg>),
 }
 
 /// What a button does.
@@ -367,11 +369,22 @@ enum Last {
 struct Status {
     /// The MIDI port while it is connected.
     connected: Option<String>,
+    epoch: u64,
     last: Option<Last>,
 }
 
 fn locked(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status> {
     status.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The epoch is shared outside the bounded input queue, so disconnects cannot
+/// lose their reset signal and queued input from old connections is discarded.
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+fn reset_connection(status: &Mutex<Status>, ctx: &egui::Context) -> u64 {
+    let mut status = locked(status);
+    status.epoch = status.epoch.wrapping_add(1);
+    ctx.request_repaint();
+    status.epoch
 }
 
 /// Listens for the device on a thread of its own, finding it again when it is
@@ -396,6 +409,7 @@ fn listen(
                 // device comes back as a new endpoint behind the same name.
                 if last.elapsed() > Duration::from_secs(10) {
                     connected = None;
+                    reset_connection(&status, &ctx);
                 }
                 last = Instant::now();
                 if let Ok(input) = MidiInput::new("RAWmakase") {
@@ -406,10 +420,12 @@ fn listen(
                             if !ports.iter().any(|p| &named(p) == name && &p.id() == id) =>
                         {
                             connected = None;
+                            reset_connection(&status, &ctx);
                         }
                         Some(_) => {}
                         None => {
                             if let Some(p) = ports.iter().find(|p| named(p).contains(&port)) {
+                                let epoch = reset_connection(&status, &ctx);
                                 let (name, id) = (named(p), p.id());
                                 let (tx, ctx, status) = (tx.clone(), ctx.clone(), status.clone());
                                 connected = input
@@ -429,7 +445,11 @@ fn listen(
                                                     }
                                                     _ => {}
                                                 }
-                                                let _ = tx.try_send(msg);
+                                                let _ = tx.try_send(Msg::Midi(
+                                                    status.clone(),
+                                                    epoch,
+                                                    Box::new(msg),
+                                                ));
                                                 ctx.request_repaint();
                                             }
                                         },
@@ -467,6 +487,8 @@ pub(super) struct Surface {
     photo_dir: i32,
     last_photo: Option<Instant>,
     last_turn: Option<Instant>,
+    turn_scope: Option<(Param, Option<usize>, u64, usize)>,
+    midi_epoch: u64,
     status: Arc<Mutex<Status>>,
     stop_midi: Arc<AtomicBool>,
     listening_port: String,
@@ -501,6 +523,8 @@ impl Surface {
             photo_dir: 0,
             last_photo: None,
             last_turn: None,
+            turn_scope: None,
+            midi_epoch: 0,
             status: Arc::default(),
             stop_midi: Arc::default(),
             link: None,
@@ -509,10 +533,11 @@ impl Surface {
     }
     fn restart_midi(&mut self) {
         self.stop_midi.store(true, Ordering::Relaxed);
-        self.held = Modifiers::NONE;
+        self.reset_midi_state();
+        self.status = Arc::default();
+        self.midi_epoch = 0;
         let Some((tx, ctx)) = &self.link else { return };
         self.stop_midi = Arc::default();
-        self.status = Arc::default();
         self.listening_port = self.config.port.clone();
         listen(
             self.config.port.clone(),
@@ -533,6 +558,26 @@ impl Surface {
     }
     pub(super) fn end_turn(&mut self) {
         self.last_turn = None;
+        self.turn_scope = None;
+    }
+    pub(super) fn continues_turn(&self, scope: Option<(Param, Option<usize>, u64, usize)>) -> bool {
+        self.turning() && self.turn_scope == scope
+    }
+    pub(super) fn set_turn_scope(&mut self, scope: Option<(Param, Option<usize>, u64, usize)>) {
+        self.turn_scope = scope;
+    }
+    fn reset_midi_state(&mut self) {
+        self.held = Modifiers::NONE;
+        self.photo_ticks = 0;
+        self.photo_dir = 0;
+        self.last_photo = None;
+    }
+    fn sync_midi_epoch(&mut self) {
+        let epoch = locked(&self.status).epoch;
+        if epoch != self.midi_epoch {
+            self.midi_epoch = epoch;
+            self.reset_midi_state();
+        }
     }
     pub(super) fn begin_turn(&mut self, ctx: &egui::Context) {
         self.last_turn = Some(Instant::now());
@@ -565,7 +610,7 @@ impl Surface {
             Msg::Command(command) => return Ok(Some(command)),
             Msg::Cc(cc, v) if self.config.photo_dial == Some(cc) => {
                 let step = self.photo_turn(ticks(v));
-                return Ok((step != 0).then(|| Command::new(O::Navigate(step))));
+                return Ok((step != 0).then(|| Command::new(O::DeviceNavigate(step))));
             }
             Msg::Cc(cc, v) => {
                 let p = self.config.dials.get(&cc).copied().ok_or_else(|| {
@@ -590,6 +635,8 @@ impl Surface {
                 }
                 a
             }
+            #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+            Msg::Midi(..) => unreachable!("MIDI envelope removed before translation"),
             Msg::Request(_) => return Err(Error::new("invalid_request", "Nested request")),
         };
         let advance = self.held.shift || matches!(action,Action::Key(_,m) if m.shift);
@@ -678,6 +725,7 @@ fn without(a: Modifiers, b: Modifiers) -> Modifiers {
 
 impl Editor {
     pub(super) fn control_commands(&mut self, ctx: &egui::Context) {
+        self.surface.sync_midi_epoch();
         let messages: Vec<_> = self.surface.rx.try_iter().take(128).collect();
         let full = messages.len() == 128;
         for message in messages {
@@ -708,6 +756,25 @@ impl Editor {
     ) -> commands::Result<serde_json::Value> {
         let mut result = serde_json::Value::Null;
         for msg in messages {
+            self.sync_command_revision();
+            self.surface.sync_midi_epoch();
+            #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+            let msg = match msg {
+                Msg::Midi(source, epoch, msg)
+                    if Arc::ptr_eq(&source, &self.surface.status)
+                        && epoch == self.surface.midi_epoch =>
+                {
+                    *msg
+                }
+                Msg::Midi(..) => continue,
+                msg => msg,
+            };
+            if matches!(msg, Msg::Cc(cc, _) if self.surface.config.photo_dial == Some(cc))
+                && self.library_mode
+                && !self.library.as_ref().is_some_and(|l| l.loupe_open())
+            {
+                continue;
+            }
             let device = matches!(msg, Msg::Cc(..) | Msg::Note(..));
             if let Some(mut command) = self.surface.translate(msg)? {
                 // Device adjustments follow the active mask; scripts use explicit
@@ -930,6 +997,107 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    #[test]
+    fn disconnect_clears_modifiers_even_with_old_input_queued() {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let (tx, rx) = mpsc::sync_channel(1);
+        e.surface = Surface::new(Config::defaults(), rx);
+        let old = reset_connection(&e.surface.status, &ctx);
+        e.control_messages(
+            vec![Msg::Midi(
+                e.surface.status.clone(),
+                old,
+                Box::new(Msg::Note(66, true)),
+            )],
+            &ctx,
+        )
+        .unwrap();
+        assert!(e.surface.held.shift);
+        tx.send(Msg::Midi(
+            e.surface.status.clone(),
+            old,
+            Box::new(Msg::Note(68, true)),
+        ))
+        .unwrap();
+        // The reset cannot be lost even though the bounded queue is full.
+        let new = reset_connection(&e.surface.status, &ctx);
+        e.control_commands(&ctx);
+        assert_eq!(e.surface.held, Modifiers::NONE);
+        let undo = e.surface.translate(Msg::Note(95, true)).unwrap().unwrap();
+        assert!(matches!(
+            undo.operation,
+            commands::Operation::Action(commands::Action::Undo)
+        ));
+        e.control_messages(
+            vec![Msg::Midi(
+                e.surface.status.clone(),
+                new,
+                Box::new(Msg::Note(66, true)),
+            )],
+            &ctx,
+        )
+        .unwrap();
+        assert!(e.surface.held.shift);
+        reset_connection(&e.surface.status, &ctx);
+        e.control_commands(&ctx);
+        assert_eq!(e.surface.held, Modifiers::NONE);
+        // Changing the configured port creates a separate listener identity.
+        let old_source = e.surface.status.clone();
+        let old_epoch = locked(&old_source).epoch;
+        e.surface.restart_midi();
+        e.control_messages(
+            vec![Msg::Midi(
+                old_source,
+                old_epoch,
+                Box::new(Msg::Note(66, true)),
+            )],
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(e.surface.held, Modifiers::NONE);
+    }
+
+    #[test]
+    fn photo_dial_ignores_grid_preserves_loupe_and_navigates_develop() -> anyhow::Result<()> {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        e.onboarding.visible = false;
+        let dir = tempfile::tempdir()?;
+        let photos = dir.path().join("photos");
+        std::fs::create_dir(&photos)?;
+        for name in ["a.DNG", "b.DNG"] {
+            std::fs::write(photos.join(name), b"synthetic")?;
+        }
+        let db = dir.path().join("catalog.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&db)?;
+        catalog.add_folder(&photos)?;
+        drop(catalog);
+        e.library = Some(Box::new(super::super::library::Library::load(
+            &db,
+            ctx.clone(),
+        )?));
+        let library = e.library.as_mut().unwrap();
+        let first = library.photos[0].id;
+        library.make_active(first);
+        let second = library.navigate(first, 1).unwrap();
+        e.library_mode = true;
+        e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
+        assert!(e.library_mode);
+        assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
+        e.library.as_mut().unwrap().open_loupe();
+        e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
+        assert!(e.library_mode);
+        assert!(e.library.as_ref().unwrap().loupe_open());
+        assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
+        e.library_mode = false;
+        e.document.catalog_photo = Some(second);
+        e.control_messages(vec![Msg::Cc(48, 127)], &ctx).unwrap();
+        assert!(!e.library_mode);
+        assert_eq!(e.document.catalog_photo, Some(first));
+        Ok(())
+    }
+
     #[test]
     fn modifier_bindings_become_actions_without_keyboard_state() {
         let mut surface = Surface::inactive();

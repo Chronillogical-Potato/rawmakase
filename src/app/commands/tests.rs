@@ -272,3 +272,102 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
     );
     Ok(())
 }
+
+#[test]
+fn curve_save_is_modal_for_commands_and_state() {
+    let (mut e, ctx) = editor();
+    e.choose_point_curve(super::super::curve_menu::CurveChoice::Save);
+    assert_eq!(e.command_state()["modal"], true);
+    assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "busy");
+    assert_eq!(
+        e.execute_command(Command::new(Operation::Action(Action::Reset)), &ctx)
+            .unwrap_err()
+            .code,
+        "busy"
+    );
+    assert!(
+        e.execute_command(Command::new(Operation::State), &ctx)
+            .is_ok()
+    );
+}
+
+#[test]
+fn asynchronous_edits_and_out_of_frame_undo_invalidate_guards() {
+    let (mut e, ctx) = editor();
+    let initial = e.command_state()["revision"].as_u64().unwrap();
+    let mut auto = e.document.recipe.clone();
+    auto.exposure = 1.25;
+    e.auto_ready(super::super::worker::AutoKind::Settings, Ok(Box::new(auto)));
+    let mut command = Command::new(Operation::Set(Param::Contrast, 10.));
+    command.target.revision = Some(initial);
+    assert_eq!(
+        e.execute_command(command, &ctx).unwrap_err().code,
+        "stale_target"
+    );
+    let after_auto = e.command_state()["revision"].as_u64().unwrap();
+    assert!(after_auto > initial);
+    e.undo();
+    let after_undo = e.command_state()["revision"].as_u64().unwrap();
+    assert!(after_undo > after_auto);
+    // Direct worker-style recipe changes must also be caught before a frame snapshot.
+    e.document.recipe.straighten = 1.;
+    let frame = e.begin_edit_frame();
+    e.finish_edit_frame(frame, &ctx);
+    assert!(e.command_state()["revision"].as_u64().unwrap() > after_undo);
+}
+
+#[test]
+fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
+    let (mut e, ctx) = editor();
+    let exposure = e.document.recipe.exposure;
+    set(&mut e, &ctx, exposure).unwrap();
+    let old = e.document.recipe.clone();
+    e.document.recipe.preset_name = "Example".into();
+    e.history(old);
+    assert_eq!(e.document.history.steps().0.last().unwrap().name, "Preset");
+    set(&mut e, &ctx, 100.).unwrap();
+    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
+        .unwrap();
+    e.surface.end_turn();
+    e.finish_gesture();
+    let old = e.document.recipe.clone();
+    e.document.recipe.preset_name = "Another".into();
+    e.history(old);
+    assert_eq!(e.document.history.steps().0.last().unwrap().name, "Preset");
+}
+
+#[test]
+fn turns_group_only_the_same_parameter_and_scope() {
+    let (mut e, ctx) = editor();
+    for _ in 0..2 {
+        e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
+            .unwrap();
+    }
+    let exposure = e.document.recipe.exposure;
+    e.execute_command(Command::new(Operation::Adjust(Param::Contrast, 1)), &ctx)
+        .unwrap();
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.contrast, 0.);
+    assert_eq!(e.document.recipe.exposure, exposure);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, 0.);
+    e.document.recipe.masks.push(Default::default());
+    e.command_state();
+    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
+        .unwrap();
+    let global = e.document.recipe.exposure;
+    let mut command = Command::new(Operation::Adjust(Param::Exposure, 1));
+    command.target = Target {
+        mask: Some(0),
+        generation: Some(e.load.id()),
+        revision: Some(e.automation.revision),
+        ..Default::default()
+    };
+    e.execute_command(command, &ctx).unwrap();
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.masks[0].adjust.exposure, 0.);
+    assert_eq!(e.document.recipe.exposure, global);
+}

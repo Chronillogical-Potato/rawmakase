@@ -6,6 +6,7 @@ mod parameter;
 #[derive(Default)]
 pub(super) struct Automation {
     pub revision: u64,
+    observed: Option<(u64, crate::develop::Recipe)>,
     outputs: output::Outputs,
 }
 pub(super) use parameter::Param;
@@ -63,6 +64,7 @@ pub(super) enum Operation {
     Search(String),
     Module(bool),
     Navigate(i32),
+    DeviceNavigate(i32),
     Save,
     Output {
         path: std::path::PathBuf,
@@ -245,7 +247,23 @@ impl Error {
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
 impl Editor {
-    pub(super) fn command_state(&self) -> Value {
+    /// Reconcile at command/frame boundaries as worker results and undo can edit
+    /// the recipe outside an edit frame. Revisions identify observed recipe states.
+    pub(super) fn sync_command_revision(&mut self) {
+        let generation = self.load.id();
+        if let Some((seen_generation, recipe)) = &self.automation.observed
+            && *seen_generation == generation
+            && *recipe == self.document.recipe
+        {
+            return;
+        }
+        if self.automation.observed.is_some() {
+            self.automation.revision = self.automation.revision.wrapping_add(1);
+        }
+        self.automation.observed = Some((generation, self.document.recipe.clone()));
+    }
+    pub(super) fn command_state(&mut self) -> Value {
+        self.sync_command_revision();
         let develop = !self.library_mode && self.document.metadata.is_some();
         let mut recipe = self.document.recipe.clone();
         let mut values = serde_json::Map::new();
@@ -303,6 +321,7 @@ impl Editor {
             || self.copy_dialog.is_some()
             || self.preset_rename.is_some()
             || self.onboarding.visible
+            || self.curve_save_open()
     }
     fn check_target(&self, target: &Target) -> Result<()> {
         if target
@@ -342,6 +361,7 @@ impl Editor {
         command: Command,
         ctx: &egui::Context,
     ) -> Result<Value> {
+        self.sync_command_revision();
         let Command { operation, target } = command;
         match operation {
             Operation::State => return Ok(Value::Null),
@@ -388,10 +408,20 @@ impl Editor {
                 "This command does not operate on a mask",
             ));
         }
-        if !matches!(operation, Operation::Adjust(..)) {
+        let turn = match operation {
+            Operation::Adjust(param, _) => Some((
+                param,
+                target.mask,
+                self.load.id(),
+                self.view.mixer_adjust.min(2),
+            )),
+            _ => None,
+        };
+        if turn.is_none() || !self.surface.continues_turn(turn) {
             self.surface.end_turn();
             self.finish_gesture();
         }
+        self.surface.set_turn_scope(turn);
         let save = matches!(operation, Operation::Save);
         let frame = self.begin_edit_frame();
         let result = self.apply_command(operation, &target, ctx);
@@ -438,6 +468,17 @@ impl Editor {
             }
             Operation::Module(develop) => return self.command_module(develop),
             Operation::Navigate(step) => return self.command_navigate(step),
+            Operation::DeviceNavigate(step) => {
+                if !self.library_mode {
+                    return self.command_navigate(step);
+                }
+                if let Some(library) = &mut self.library
+                    && library.loupe_open()
+                    && let Some(next) = library.selected().and_then(|id| library.navigate(id, step))
+                {
+                    library.make_active(next);
+                }
+            }
             Operation::Output { path, max_edge } => {
                 self.require_develop()?;
                 let photo = self
@@ -490,6 +531,7 @@ impl Editor {
         if value.is_some_and(|v| !v.is_finite()) {
             return Err(Error::new("invalid_value", "Value must be finite"));
         }
+        let before_recipe = self.document.recipe.clone();
         let channel = self.view.mixer_adjust.min(2);
         let shown = if let Some(index) = target.mask {
             let mask = self
@@ -518,7 +560,9 @@ impl Editor {
         } else {
             param.label(channel)
         };
-        ctx.data_mut(|d| d.insert_temp(super::widgets::history_step_id(), (label, shown)));
+        if before_recipe != self.document.recipe {
+            ctx.data_mut(|d| d.insert_temp(super::widgets::history_step_id(), (label, shown)));
+        }
         Ok(())
     }
     pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Value> {
