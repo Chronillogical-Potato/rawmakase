@@ -28,6 +28,7 @@ pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::raw::HighlightTonePriority;
     fn camera(make: &str, model: &str) -> Metadata {
         Metadata {
             make: make.into(),
@@ -60,6 +61,16 @@ mod tests {
             crate::cameras::baseline_exposure("Canon", "EOS R1").ev
         );
         assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.3);
+    }
+    #[test]
+    fn canon_highlight_tone_priority_adds_a_stop() {
+        let mut m = camera("Canon", "EOS R8");
+        let normal = baseline_exposure(&m);
+        m.highlight_tone_priority = HighlightTonePriority::On;
+        assert_eq!(baseline_exposure(&m), normal + 1.);
+        // A DNG's own value already includes it.
+        m.baseline_exposure = Some(1.27);
+        assert_eq!(baseline_exposure(&m), 1.27);
     }
     #[test]
     fn dngs_use_their_own_baseline() {
