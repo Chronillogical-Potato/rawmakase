@@ -2,7 +2,7 @@
 //! X100F values were read from Lightroom-generated DNGs of DSCF7845 (ISO 400)
 //! and DSCF7853 (ISO 200), both DR100. See docs/macos-lightroom-validation.md.
 //! Per-camera baseline exposures live in data/cameras.toml (crate::cameras).
-use crate::raw::Metadata;
+use crate::raw::{HighlightTonePriority, Metadata};
 fn x100f(m: &Metadata) -> bool {
     m.make.eq_ignore_ascii_case("Fujifilm") && m.model.eq_ignore_ascii_case("X100F")
 }
@@ -16,7 +16,13 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
     if m.make.eq_ignore_ascii_case("Fujifilm") && m.fuji_dynamic_range != 100 {
         return 0.;
     }
-    crate::cameras::baseline_exposure(&m.make, &m.model).ev
+    let table = crate::cameras::baseline_exposure(&m.make, &m.model).ev;
+    // Table rows hold for photos without Highlight Tone Priority, which Camera Raw
+    // brightens by the stop the camera held back.
+    match m.highlight_tone_priority {
+        HighlightTonePriority::Off => table,
+        HighlightTonePriority::On | HighlightTonePriority::Enhanced => table + 1.,
+    }
 }
 pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
     if x100f(m) {
@@ -60,6 +66,18 @@ mod tests {
             crate::cameras::baseline_exposure("Canon", "EOS R1").ev
         );
         assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.3);
+    }
+    #[test]
+    fn canon_highlight_tone_priority_adds_a_stop() {
+        let mut m = camera("Canon", "EOS R8");
+        let normal = baseline_exposure(&m);
+        m.highlight_tone_priority = HighlightTonePriority::On;
+        assert_eq!(baseline_exposure(&m), normal + 1.);
+        m.highlight_tone_priority = HighlightTonePriority::Enhanced;
+        assert_eq!(baseline_exposure(&m), normal + 1.);
+        // A DNG's own value already includes it.
+        m.baseline_exposure = Some(1.27);
+        assert_eq!(baseline_exposure(&m), 1.27);
     }
     #[test]
     fn dngs_use_their_own_baseline() {

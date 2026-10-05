@@ -27,6 +27,9 @@ pub struct Metadata {
     pub xtrans: bool,
     #[serde(default)]
     pub fuji_dynamic_range: u32,
+    /// Canon Highlight Tone Priority, from the maker notes; `Off` for other makes.
+    #[serde(default)]
+    pub highlight_tone_priority: HighlightTonePriority,
     pub iso: f32,
     pub shutter: f32,
     pub aperture: f32,
@@ -60,6 +63,26 @@ pub struct Metadata {
     /// Camera profile embedded in a DNG; rebuilt from the file on open.
     #[serde(skip)]
     pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
+}
+/// Canon Highlight Tone Priority: the camera exposes a stop darker to keep
+/// highlights, and Camera Raw brightens the photo by that stop again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HighlightTonePriority {
+    #[default]
+    Off,
+    On,
+    /// "Enhanced" (D+2) on recent bodies. No sample has been measured yet.
+    Enhanced,
+}
+impl HighlightTonePriority {
+    /// From LibRaw's `makernotes.canon.HighlightTonePriority`.
+    fn from_libraw(v: i32) -> Self {
+        match v {
+            1 => Self::On,
+            2 => Self::Enhanced,
+            _ => Self::Off,
+        }
+    }
 }
 /// Which demosaic full-size development uses. A process-wide preference: the app sets
 /// it from its settings, and RAWMAKASE_LIBRAW_DEMOSAIC=1 forces LibRaw.
@@ -123,6 +146,7 @@ impl Raw {
             flip: m.flip,
             xtrans: m.xtrans != 0,
             fuji_dynamic_range: m.fuji_dynamic_range,
+            highlight_tone_priority: HighlightTonePriority::from_libraw(m.highlight_tone_priority),
             iso: m.iso,
             shutter: m.shutter,
             aperture: m.aperture,
@@ -315,6 +339,14 @@ pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_highlight_tone_priority_from_libraw() {
+        use super::HighlightTonePriority as H;
+        assert_eq!(H::from_libraw(0), H::Off);
+        assert_eq!(H::from_libraw(1), H::On);
+        assert_eq!(H::from_libraw(2), H::Enhanced);
+        assert_eq!(H::from_libraw(-1), H::Off);
+    }
     #[test]
     fn reads_fujifilm_default_crop() {
         let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
