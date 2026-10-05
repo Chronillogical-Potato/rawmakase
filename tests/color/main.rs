@@ -769,6 +769,17 @@ pub fn check_parity(
             profiles,
             Some(&reference.cases),
         );
+        // RAWmakase's patch values for scripts/corpus/parity-report.py.
+        if let Some(dir) = std::env::var_os("RAWMAKASE_PARITY_DUMP") {
+            PatchFile {
+                about: BTreeMap::new(),
+                cases: current
+                    .iter()
+                    .filter_map(|(name, v)| Some((name.clone(), v.as_ref().ok()?.clone())))
+                    .collect(),
+            }
+            .write(&Path::new(&dir).join(format!("{chart}.json")));
+        }
         println!(
             "\n{title}: {chart} (Camera Raw {})",
             reference.about.get("camera_raw").map_or("?", |s| s)

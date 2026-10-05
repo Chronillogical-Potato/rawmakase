@@ -13,9 +13,9 @@ describe("suppress", () => {
   });
 
   it("merges small groups into other", () => {
-    expect(suppress(groups({ a: 40, b: 6, c: 5 }))).toEqual({
+    expect(suppress(groups({ a: 40, b: 4, c: 3 }))).toEqual({
       shown: groups({ a: 40 }),
-      other: 11,
+      other: 7,
     });
   });
 
@@ -28,10 +28,10 @@ describe("suppress", () => {
     });
   });
 
-  it("grows other until it reaches the minimum", () => {
-    expect(suppress(groups({ a: 40, d: 15, b: 3, c: 2 }))).toEqual({
-      shown: groups({ a: 40 }),
-      other: 20,
+  it("lets other fall below the minimum when it merges two groups", () => {
+    expect(suppress(groups({ a: 40, d: 15, b: 3, c: 1 }))).toEqual({
+      shown: groups({ a: 40, d: 15 }),
+      other: 4,
     });
   });
 
@@ -39,7 +39,7 @@ describe("suppress", () => {
     expect(suppress(groups({ a: 4, b: 4, c: 4 }))).toEqual({ shown: [], other: 12 });
   });
 
-  it("never publishes a count below the minimum", () => {
+  it("never publishes a group below the minimum", () => {
     for (let seed = 0; seed < 500; seed++) {
       const counts: Group[] = [];
       for (let i = 0; i < 1 + (seed % 7); i++) {
@@ -49,7 +49,6 @@ describe("suppress", () => {
       if (total < MIN_GROUP) continue;
       const { shown, other } = suppress(counts);
       for (const g of shown) expect(g.count).toBeGreaterThanOrEqual(MIN_GROUP);
-      if (other !== null) expect(other).toBeGreaterThanOrEqual(MIN_GROUP);
       expect(shown.reduce((n, g) => n + g.count, other ?? 0)).toBe(total);
     }
   });
@@ -59,8 +58,8 @@ describe("publishWeek", () => {
   it("publishes nothing for a week below the minimum", () => {
     expect(
       publishWeek("2026-W40", {
-        platform: groups({ "linux x86_64": 9 }),
-        version: groups({ "0.1.10": 9 }),
+        platform: groups({ "linux x86_64": 4 }),
+        version: groups({ "0.1.10": 4 }),
       }),
     ).toEqual({ week: "2026-W40", total: null, breakdowns: null });
   });
@@ -68,7 +67,7 @@ describe("publishWeek", () => {
   it("suppresses each breakdown separately", () => {
     const week = publishWeek("2026-W40", {
       platform: groups({ "linux x86_64": 30, "macos aarch64": 25 }),
-      version: groups({ "0.1.10": 50, "0.1.9": 3, "0.1.8": 2 }),
+      version: groups({ "0.1.10": 52, "0.1.9": 3 }),
       channel: groups({ "macos-dmg": 25, aur: 30 }),
     });
     expect(week.total).toBe(55);
@@ -78,12 +77,12 @@ describe("publishWeek", () => {
 
   it("leaves out a Linux-only breakdown with too few Linux reports", () => {
     const week = publishWeek("2026-W40", {
-      platform: groups({ "linux x86_64": 6, "macos aarch64": 40 }),
-      distro: groups({ arch: 4, fedora: 2 }),
-      gpu: groups({ metal: 40, vulkan: 6 }),
+      platform: groups({ "linux x86_64": 4, "macos aarch64": 40 }),
+      distro: groups({ arch: 3, fedora: 1 }),
+      gpu: groups({ metal: 40, vulkan: 4 }),
     });
     expect(week.breakdowns?.distro).toBeNull();
     expect(week.breakdowns?.display).toBeNull();
-    expect(week.breakdowns?.gpu).toEqual({ shown: [], other: 46 });
+    expect(week.breakdowns?.gpu).toEqual({ shown: [], other: 44 });
   });
 });
