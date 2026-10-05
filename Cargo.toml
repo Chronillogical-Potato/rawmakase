@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/pch/rawmakase"
 
 [dependencies]
+getrandom = "0.4"
 anyhow = "1"
 flate2 = "1"
 roxmltree = "0.21.1"

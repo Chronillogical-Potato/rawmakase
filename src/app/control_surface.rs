@@ -1,5 +1,5 @@
 //! MIDI control surfaces such as the Loupedeck+: dials turn the Basic sliders and
-//! buttons press the keys the keyboard would. The listener reconnects when the
+//! buttons run named application actions. The listener reconnects when the
 //! device is plugged in; `midi.json` in the data folder overrides the mapping.
 //! The same commands also arrive from the `rawmakase-ctl` tool, over a local
 //! socket (see [`socket`]).
@@ -7,17 +7,15 @@ mod settings;
 mod socket;
 
 use super::Editor;
-use super::inspector::BANDS;
-use super::widgets::{history_step_id, slider_text};
-use crate::catalog::Photo;
-use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
-use eframe::egui::{self, Event, Key, Modifiers};
+use super::commands::{self, Command, Param};
+
+use eframe::egui::{self, Key, Modifiers};
 use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, SyncSender as Sender},
     },
     time::{Duration, Instant},
 };
@@ -28,247 +26,19 @@ const GESTURE: Duration = Duration::from_millis(400);
 /// A pause this long ends a turn of the photo dial.
 const PHOTO_IDLE: Duration = Duration::from_millis(600);
 
-/// A raw message from the device, or a command from the control socket.
+/// Raw device input is translated here, never in the application command layer.
 enum Msg {
     Cc(u8, u8),
     Note(u8, bool),
-    /// A dial turned by `ticks`, as if its CC had arrived.
-    Turn(Param, i32),
-    /// A slider set to a value, in the units the slider shows.
-    Set(Param, f32),
-    /// A button's action, pressed once.
-    Action(Action),
-    /// The photo dial moved one photo (-1 or +1).
-    Photo(i32),
-    /// Nothing, but answered with the next frame's state.
-    Ping,
-    /// Something only the app itself can do, with the result in the state.
-    Job(Job),
-}
-
-/// A photo to open: by name, or by its catalog id.
-#[derive(Debug, PartialEq)]
-enum Target {
-    Name(String),
-    Id(i64),
-}
-
-/// A command that acts on the Library rather than on a slider or a key.
-#[derive(Debug, PartialEq)]
-enum Job {
-    /// Open the photo in Develop.
-    Open(Target),
-    /// Put this in the Library's search box ("" clears it).
-    Search(String),
-    /// Switch to Develop (true) or the Library grid (false).
-    Module(bool),
-}
-
-/// A change to a slider, in the order it was asked for.
-enum Edit {
-    Turn(Param, i32),
-    Set(Param, f32),
-}
-
-/// The Color Mixer's channels, in the order of `Recipe::hsl`.
-const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
-
-/// A slider a dial can turn.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Param {
-    Exposure,
-    Contrast,
-    Highlights,
-    Shadows,
-    Whites,
-    Blacks,
-    Texture,
-    Clarity,
-    Dehaze,
-    Vibrance,
-    Saturation,
-    Temperature,
-    Tint,
-    /// A Color Mixer colour band (0 Red .. 7 Magenta), on the channel the
-    /// panel's Hue / Sat / Lum selector shows.
-    Band(usize),
-    /// One channel (0 Hue, 1 Saturation, 2 Luminance) of a Color Mixer band,
-    /// whichever channel the panel shows.
-    Hsl(usize, usize),
-    /// A band's gray mix, which Black & White uses in place of the mixer.
-    Gray(usize),
-}
-impl Param {
-    /// The sliders with a name of their own, as `midi.json` and the control
-    /// socket spell them.
-    const NAMED: [(&'static str, Self); 13] = [
-        ("exposure", Self::Exposure),
-        ("contrast", Self::Contrast),
-        ("highlights", Self::Highlights),
-        ("shadows", Self::Shadows),
-        ("whites", Self::Whites),
-        ("blacks", Self::Blacks),
-        ("texture", Self::Texture),
-        ("clarity", Self::Clarity),
-        ("dehaze", Self::Dehaze),
-        ("vibrance", Self::Vibrance),
-        ("saturation", Self::Saturation),
-        ("temperature", Self::Temperature),
-        ("tint", Self::Tint),
-    ];
-    /// `exposure`, `band3` (the channel the panel shows), `band3.sat` or
-    /// `band3.gray`; bands count from 1 (Red).
-    fn parse(name: &str) -> Option<Self> {
-        let name = name.to_ascii_lowercase();
-        if name == "temp" {
-            return Some(Self::Temperature);
-        }
-        if let Some((_, param)) = Self::NAMED.iter().find(|(n, _)| *n == name) {
-            return Some(*param);
-        }
-        let (band, channel) = match name.strip_prefix("band")?.split_once('.') {
-            Some((band, channel)) => (band, Some(channel)),
-            None => (name.strip_prefix("band")?, None),
-        };
-        let i = match band.parse::<usize>() {
-            Ok(n) if (1..=8).contains(&n) => n - 1,
-            _ => return None,
-        };
-        Some(match channel {
-            None => Self::Band(i),
-            Some("hue") => Self::Hsl(i, 0),
-            Some("sat" | "saturation") => Self::Hsl(i, 1),
-            Some("lum" | "luminance") => Self::Hsl(i, 2),
-            Some("gray" | "grey") => Self::Gray(i),
-            Some(_) => return None,
-        })
-    }
-    /// The name `parse` reads back: `exposure`, `band3`, `band3.sat`.
-    fn spec(self) -> String {
-        if let Some((name, _)) = Self::NAMED.iter().find(|(_, p)| *p == self) {
-            return (*name).into();
-        }
-        match self {
-            Self::Band(i) => format!("band{}", i + 1),
-            Self::Hsl(i, c) => format!("band{}.{}", i + 1, ["hue", "sat", "lum"][c]),
-            Self::Gray(i) => format!("band{}.gray", i + 1),
-            _ => unreachable!("every other slider has a name"),
-        }
-    }
-    /// The name the slider and its History step carry.
-    fn label(self, channel: usize) -> String {
-        match self {
-            Self::Band(i) => return format!("{} {}", BANDS[i], MIXER_CHANNELS[channel]),
-            Self::Hsl(i, c) => return format!("{} {}", BANDS[i], MIXER_CHANNELS[c]),
-            Self::Gray(i) => return format!("{} Gray", BANDS[i]),
-            _ => {}
-        }
-        match self {
-            Self::Exposure => "Exposure",
-            Self::Contrast => "Contrast",
-            Self::Highlights => "Highlights",
-            Self::Shadows => "Shadows",
-            Self::Whites => "Whites",
-            Self::Blacks => "Blacks",
-            Self::Texture => "Texture",
-            Self::Clarity => "Clarity",
-            Self::Dehaze => "Dehaze",
-            Self::Vibrance => "Vibrance",
-            Self::Saturation => "Saturation",
-            Self::Temperature => "Temp",
-            Self::Tint => "Tint",
-            Self::Band(_) | Self::Hsl(..) | Self::Gray(_) => unreachable!(),
-        }
-        .to_string()
-    }
-    fn value(self, r: &mut Recipe, channel: usize) -> &mut f32 {
-        match self {
-            // Black & White swaps the mixer for one gray mix per band.
-            Self::Band(i) if r.effects.monochrome => &mut r.effects.gray_mix[i],
-            Self::Band(i) => &mut r.hsl[i][channel],
-            Self::Hsl(i, c) => &mut r.hsl[i][c],
-            Self::Gray(i) => &mut r.effects.gray_mix[i],
-            Self::Exposure => &mut r.exposure,
-            Self::Contrast => &mut r.contrast,
-            Self::Highlights => &mut r.highlights,
-            Self::Shadows => &mut r.shadows,
-            Self::Whites => &mut r.whites,
-            Self::Blacks => &mut r.blacks,
-            Self::Texture => &mut r.effects.texture,
-            Self::Clarity => &mut r.effects.clarity,
-            Self::Dehaze => &mut r.effects.dehaze,
-            Self::Vibrance => &mut r.vibrance,
-            Self::Saturation => &mut r.saturation,
-            Self::Temperature => &mut r.temperature,
-            Self::Tint => &mut r.tint,
-        }
-    }
-    fn is_white_balance(self) -> bool {
-        matches!(self, Self::Temperature | Self::Tint)
-    }
-    /// The slider's number as it shows: EV, kelvin or tint units, else -100..100.
-    fn shown(self, r: &mut Recipe, channel: usize) -> f64 {
-        let scale = match self {
-            Self::Exposure | Self::Temperature | Self::Tint => 1.,
-            _ => 100.,
-        };
-        (f64::from(*self.value(r, channel)) * scale * 1000.).round() / 1000.
-    }
-    /// Sets the slider to `shown`, a number as `shown` returns it, and returns
-    /// the text for the History step.
-    fn set(self, r: &mut Recipe, shown: f32, channel: usize) -> String {
-        let v = self.value(r, channel);
-        match self {
-            Self::Exposure => {
-                *v = shown.clamp(-5., 5.);
-                slider_text(f64::from(*v), 2, true)
-            }
-            Self::Temperature => {
-                *v = shown.clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-                slider_text(f64::from(*v), 0, false)
-            }
-            Self::Tint => {
-                *v = shown.clamp(-TINT_LIMIT, TINT_LIMIT);
-                slider_text(f64::from(*v), 0, true)
-            }
-            _ => {
-                *v = (shown / 100.).clamp(-1., 1.);
-                slider_text(f64::from(*v * 100.), 0, true)
-            }
-        }
-    }
-    /// Moves the slider by `ticks` (clockwise positive) and returns the value as
-    /// the slider shows it, for the History step.
-    fn turn(self, r: &mut Recipe, ticks: i32, channel: usize) -> String {
-        let t = ticks as f32;
-        let v = self.value(r, channel);
-        match self {
-            Self::Exposure => {
-                *v = (*v + 0.02 * t).clamp(-5., 5.);
-                slider_text(f64::from(*v), 2, true)
-            }
-            // Evenly in mireds, as the slider does; clockwise is warmer.
-            Self::Temperature => {
-                let mired = (1e6 / *v - 4. * t).max(1e6 / TEMPERATURE_MAX);
-                *v = (1e6 / mired).clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-                slider_text(f64::from(*v), 0, false)
-            }
-            Self::Tint => {
-                *v = (*v + t).clamp(-TINT_LIMIT, TINT_LIMIT);
-                slider_text(f64::from(*v), 0, true)
-            }
-            _ => {
-                *v = (*v + 0.01 * t).clamp(-1., 1.);
-                slider_text(f64::from(*v * 100.), 0, true)
-            }
-        }
-    }
+    Command(Command),
+    Request(socket::Request),
 }
 
 /// What a button does.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Action {
-    /// Presses a key, with the modifiers of any held modifier buttons.
+    Named(commands::Action),
+    /// Legacy shortcut notation, resolved to a named action before execution.
     Key(Key, Modifiers),
     /// Acts as a modifier while held.
     Hold(Modifiers),
@@ -313,6 +83,12 @@ fn key_named(name: &str) -> Option<Key> {
     })
 }
 fn parse_action(text: &str) -> Option<Action> {
+    if !text.starts_with("mixer:")
+        && text != "toggle:bw"
+        && let Some(action) = commands::Action::parse(text)
+    {
+        return Some(Action::Named(action));
+    }
     if text.eq_ignore_ascii_case("toggle:bw") {
         return Some(Action::ToggleMono);
     }
@@ -333,6 +109,7 @@ fn parse_action(text: &str) -> Option<Action> {
     for part in text.split('+').map(str::trim) {
         match part.to_ascii_lowercase().as_str() {
             "cmd" | "command" | "ctrl" | "control" | "primary" => modifiers |= command(),
+            "control-key" => modifiers.ctrl = true,
             "shift" => modifiers.shift = true,
             "alt" | "option" => modifiers.alt = true,
             _ => key = Some(key_named(part)?),
@@ -344,6 +121,16 @@ fn parse_action(text: &str) -> Option<Action> {
         _ => None,
     }
 }
+/// Only bindings with an executable application meaning are offered in Preferences.
+fn supported_action(text: &str) -> Option<Action> {
+    let action = parse_action(text)?;
+    if let Action::Key(key, modifiers) = action
+        && shortcut_action(key, modifiers).is_none()
+    {
+        return None;
+    }
+    Some(action)
+}
 /// The text `parse_action` reads back: `cmd+shift+z`, `hold:shift`, `mixer:hue`.
 fn action_spec(action: Action) -> String {
     let modifiers = |m: Modifiers| {
@@ -351,7 +138,7 @@ fn action_spec(action: Action) -> String {
         if m.command || m.mac_cmd {
             parts.push("cmd");
         } else if m.ctrl {
-            parts.push("ctrl");
+            parts.push("control-key");
         }
         if m.shift {
             parts.push("shift");
@@ -362,6 +149,11 @@ fn action_spec(action: Action) -> String {
         parts
     };
     match action {
+        Action::Named(a) => commands::Action::NAMES
+            .iter()
+            .find(|n| commands::Action::parse(n) == Some(a))
+            .expect("named action")
+            .to_string(),
         Action::ToggleMono => "toggle:bw".into(),
         Action::Mixer(c) => format!("mixer:{}", ["hue", "sat", "lum"][c]),
         Action::Hold(m) => format!("hold:{}", modifiers(m).join("+")),
@@ -379,7 +171,15 @@ impl Config {
     /// Writes `midi.json` as what differs from the defaults, so a later release's
     /// better defaults still reach whatever was left alone.
     fn save(&self) -> anyhow::Result<()> {
-        crate::storage::atomic_json(&Self::path(), &self.to_json())
+        let mut midi = self.to_json();
+        midi.as_object_mut()
+            .expect("config object")
+            .remove("socket");
+        crate::storage::atomic_json(&Self::path(), &midi)?;
+        crate::storage::atomic_json(
+            &crate::storage::data_dir().join("automation.json"),
+            &serde_json::json!({"protocol":commands::PROTOCOL,"socket":self.socket}),
+        )
     }
     fn to_json(&self) -> serde_json::Value {
         use serde_json::{Map, Value};
@@ -471,7 +271,7 @@ impl Config {
             port: "Loupedeck".into(),
             photo_dial: Some(48),
             photo_detent: 2,
-            socket: true,
+            socket: false,
             dials: dials.collect(),
             buttons: buttons.into_iter().collect(),
         }
@@ -486,6 +286,20 @@ impl Config {
             match serde_json::from_str::<serde_json::Value>(&text) {
                 Ok(json) => config.apply(&json),
                 Err(e) => eprintln!("{}: {e}", path.display()),
+            }
+        }
+        if let Ok(text) =
+            std::fs::read_to_string(crate::storage::data_dir().join("automation.json"))
+        {
+            match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(json) => {
+                    config.socket = json["protocol"].as_u64() == Some(u64::from(commands::PROTOCOL))
+                        && json["socket"].as_bool().unwrap_or(false)
+                }
+                Err(e) => {
+                    config.socket = false;
+                    eprintln!("automation.json: {e}");
+                }
             }
         }
         config
@@ -530,6 +344,7 @@ fn ticks(value: u8) -> i32 {
     }
 }
 
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
 fn parse(bytes: &[u8]) -> Option<Msg> {
     match *bytes {
         [status, d1, d2] if status & 0xF0 == 0xB0 => Some(Msg::Cc(d1, d2)),
@@ -614,7 +429,7 @@ fn listen(
                                                     }
                                                     _ => {}
                                                 }
-                                                let _ = tx.send(msg);
+                                                let _ = tx.try_send(msg);
                                                 ctx.request_repaint();
                                             }
                                         },
@@ -648,50 +463,55 @@ pub(super) struct Surface {
     rx: Receiver<Msg>,
     config: Config,
     held: Modifiers,
-    /// Slider changes since the frame began editing, in order.
-    pending: Vec<Edit>,
-    /// What the control socket waits on, and the state it answers with.
-    shared: Arc<socket::Shared>,
-    /// How many socket commands the last `poll` is known to have read.
-    consumed: u64,
-    /// Library commands waiting for the start of the next frame.
-    jobs: Vec<Job>,
-    /// How the last of them went, for the next state.
-    result: Option<serde_json::Value>,
-    /// The Mixer channel a button asked for since the last frame.
-    mixer: Option<usize>,
-    /// How many times Black & White was asked for since the last frame.
-    mono_toggles: u32,
-    /// Ticks of the photo dial not yet worth a photo, and when it last turned.
     photo_ticks: i32,
     photo_dir: i32,
     last_photo: Option<Instant>,
     last_turn: Option<Instant>,
-    /// What the MIDI thread reports, and how to stop it.
     status: Arc<Mutex<Status>>,
     stop_midi: Arc<AtomicBool>,
-    /// The port name the MIDI thread is looking for.
     listening_port: String,
-    /// What the threads need to send messages and wake the app; none in tests.
     link: Option<(Sender<Msg>, egui::Context)>,
-    /// The control socket while it listens.
     socket: Option<socket::Handle>,
 }
+impl Drop for Surface {
+    fn drop(&mut self) {
+        self.stop_midi.store(true, Ordering::Relaxed);
+    }
+}
 impl Surface {
+    pub(super) fn inactive() -> Self {
+        let (_, rx) = mpsc::sync_channel(256);
+        Self::new(Config::defaults(), rx)
+    }
     pub(super) fn start(ctx: &egui::Context) -> Self {
-        let config = Config::load();
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Self::new(config, rx);
+        let (tx, rx) = mpsc::sync_channel(256);
+        let mut surface = Self::new(Config::load(), rx);
         surface.link = Some((tx, ctx.clone()));
         surface.restart_midi();
         surface.set_socket(surface.config.socket);
         surface
     }
-    /// Listens again, for the port named in the config.
+    fn new(config: Config, rx: Receiver<Msg>) -> Self {
+        Self {
+            listening_port: config.port.clone(),
+            config,
+            rx,
+            held: Modifiers::NONE,
+            photo_ticks: 0,
+            photo_dir: 0,
+            last_photo: None,
+            last_turn: None,
+            status: Arc::default(),
+            stop_midi: Arc::default(),
+            link: None,
+            socket: None,
+        }
+    }
     fn restart_midi(&mut self) {
         self.stop_midi.store(true, Ordering::Relaxed);
+        self.held = Modifiers::NONE;
         let Some((tx, ctx)) = &self.link else { return };
-        self.stop_midi = Arc::new(AtomicBool::new(false));
+        self.stop_midi = Arc::default();
         self.status = Arc::default();
         self.listening_port = self.config.port.clone();
         listen(
@@ -702,62 +522,27 @@ impl Surface {
             self.stop_midi.clone(),
         );
     }
-    /// Starts or stops the control socket; stopping removes `control.json`, so
-    /// `rawmakase-ctl` says RAWmakase is not listening.
     fn set_socket(&mut self, on: bool) {
         self.socket = None;
         if on && let Some((tx, ctx)) = &self.link {
-            self.socket = socket::start(tx.clone(), ctx.clone(), self.shared.clone());
+            self.socket = socket::start(tx.clone(), ctx.clone());
         }
     }
-    fn new(config: Config, rx: Receiver<Msg>) -> Self {
-        Self {
-            status: Arc::default(),
-            stop_midi: Arc::default(),
-            listening_port: config.port.clone(),
-            link: None,
-            socket: None,
-            rx,
-            config,
-            held: Modifiers::NONE,
-            pending: Vec::new(),
-            shared: Arc::default(),
-            consumed: 0,
-            jobs: Vec::new(),
-            result: None,
-            mixer: None,
-            mono_toggles: 0,
-            photo_ticks: 0,
-            photo_dir: 0,
-            last_photo: None,
-            last_turn: None,
-        }
-    }
-    /// The photo to move to, -1 or +1, once the photo dial has turned a detent;
-    /// one at a time, so the photo is loaded before the next.
-    fn photo_step(&mut self) -> i32 {
-        if self
-            .last_photo
-            .is_none_or(|t| t.elapsed() > Duration::from_millis(600))
-        {
-            self.photo_ticks = 0;
-        }
-        if self.photo_ticks.abs() < self.config.photo_detent {
-            return 0;
-        }
-        let step = self.photo_ticks.signum();
-        self.photo_ticks -= step * self.config.photo_detent;
-        step
-    }
-    /// A dial is still being turned, so its steps are one History entry.
     pub(super) fn turning(&self) -> bool {
         self.last_turn.is_some_and(|t| t.elapsed() < GESTURE)
     }
-    /// A turn of the photo dial by `t` ticks.
-    fn photo_turn(&mut self, t: i32) {
-        let fresh = self.last_photo.is_none_or(|l| l.elapsed() > PHOTO_IDLE);
-        // A new turn, or one the other way, moves at once; the dial
-        // has no detents to wait for.
+    pub(super) fn end_turn(&mut self) {
+        self.last_turn = None;
+    }
+    pub(super) fn begin_turn(&mut self, ctx: &egui::Context) {
+        self.last_turn = Some(Instant::now());
+        ctx.request_repaint_after(GESTURE + Duration::from_millis(50));
+    }
+    fn photo_turn(&mut self, t: i32) -> i32 {
+        if t == 0 {
+            return 0;
+        }
+        let fresh = self.last_photo.is_none_or(|p| p.elapsed() > PHOTO_IDLE);
         if fresh || t.signum() != self.photo_dir {
             self.photo_ticks = t.signum() * self.config.photo_detent;
         } else {
@@ -765,77 +550,121 @@ impl Surface {
         }
         self.photo_dir = t.signum();
         self.last_photo = Some(Instant::now());
+        let step = self.photo_ticks / self.config.photo_detent;
+        self.photo_ticks %= self.config.photo_detent;
+        step.signum()
     }
-    /// A button going down or up.
-    fn act(&mut self, action: Action, down: bool, events: &mut Vec<Event>) {
-        match action {
-            Action::Mixer(channel) if down => self.mixer = Some(channel),
-            Action::ToggleMono if down => self.mono_toggles += 1,
-            Action::Hold(m) => {
-                self.held = if down {
-                    self.held | m
-                } else {
-                    without(self.held, m)
-                };
-            }
-            Action::Key(key, modifiers) if down => {
-                let modifiers = modifiers | self.held;
-                for pressed in [true, false] {
-                    events.push(Event::Key {
-                        key,
-                        physical_key: Some(key),
-                        pressed,
-                        repeat: false,
-                        modifiers,
-                    });
-                }
-            }
+    fn translate(&mut self, msg: Msg) -> commands::Result<Option<Command>> {
+        use commands::{Action as A, Error, Operation as O};
+        match &msg {
+            Msg::Cc(cc, value) => locked(&self.status).last = Some(Last::Dial(*cc, ticks(*value))),
+            Msg::Note(note, true) => locked(&self.status).last = Some(Last::Button(*note)),
             _ => {}
         }
-    }
-    /// Reads what arrived: buttons become key presses now, dials wait for the
-    /// edit frame.
-    fn poll(&mut self) -> Vec<Event> {
-        // Read before the queue, so every command it counts is in the queue.
-        self.consumed = self.shared.sent();
-        let mut events = Vec::new();
-        while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                Msg::Cc(cc, value) if self.config.photo_dial == Some(cc) => {
-                    self.photo_turn(ticks(value));
-                }
-                Msg::Cc(cc, value) => {
-                    if let Some(&param) = self.config.dials.get(&cc) {
-                        self.turn(param, ticks(value));
-                    }
-                }
-                Msg::Note(note, down) => {
-                    if let Some(&action) = self.config.buttons.get(&note) {
-                        self.act(action, down, &mut events);
-                    }
-                }
-                Msg::Turn(param, t) => self.turn(param, t),
-                Msg::Set(param, v) => self.pending.push(Edit::Set(param, v)),
-                Msg::Action(action) => self.act(action, true, &mut events),
-                // Exactly one photo, however soon after the last.
-                Msg::Photo(step) => {
-                    self.photo_ticks += step * self.config.photo_detent;
-                    self.photo_dir = step.signum();
-                    self.last_photo = Some(Instant::now());
-                }
-                Msg::Ping => {}
-                Msg::Job(job) => self.jobs.push(job),
+        let action = match msg {
+            Msg::Command(command) => return Ok(Some(command)),
+            Msg::Cc(cc, v) if self.config.photo_dial == Some(cc) => {
+                let step = self.photo_turn(ticks(v));
+                return Ok((step != 0).then(|| Command::new(O::Navigate(step))));
             }
-        }
-        events
-    }
-    fn turn(&mut self, param: Param, t: i32) {
-        match self.pending.last_mut() {
-            Some(Edit::Turn(p, n)) if *p == param => *n += t,
-            _ => self.pending.push(Edit::Turn(param, t)),
-        }
+            Msg::Cc(cc, v) => {
+                let p = self.config.dials.get(&cc).copied().ok_or_else(|| {
+                    Error::new("unmapped_control", "No action is mapped to this CC")
+                })?;
+                return Ok(Some(Command::new(O::Adjust(p, ticks(v)))));
+            }
+            Msg::Note(n, down) => {
+                let a = self.config.buttons.get(&n).copied().ok_or_else(|| {
+                    Error::new("unmapped_control", "No action is mapped to this note")
+                })?;
+                if let Action::Hold(m) = a {
+                    self.held = if down {
+                        self.held | m
+                    } else {
+                        without(self.held, m)
+                    };
+                    return Ok(None);
+                }
+                if !down {
+                    return Ok(None);
+                }
+                a
+            }
+            Msg::Request(_) => return Err(Error::new("invalid_request", "Nested request")),
+        };
+        let advance = self.held.shift || matches!(action,Action::Key(_,m) if m.shift);
+        let action = match action {
+            Action::Mixer(c) => A::Mixer(c),
+            Action::ToggleMono => A::ToggleMono,
+            Action::Named(a) => a,
+            Action::Key(k, m) => shortcut_action(k, m | self.held).ok_or_else(|| {
+                Error::new(
+                    "unsupported_action",
+                    "This shortcut has no application action",
+                )
+            })?,
+            Action::Hold(_) => return Ok(None),
+        };
+        let operation = if let Some(edit) = action.metadata() {
+            O::Metadata { edit, advance }
+        } else {
+            O::Action(action)
+        };
+        Ok(Some(Command::new(operation)))
     }
 }
+
+/// Device/legacy key notation resolves to semantics. Never inject egui events:
+/// handlers read both per-event and frame modifiers, and focus changes meaning.
+fn shortcut_action(key: Key, m: Modifiers) -> Option<commands::Action> {
+    use commands::Action as A;
+    Some(
+        match (key, m.command || m.ctrl || m.mac_cmd, m.shift, m.alt) {
+            (Key::Z, true, false, false) => A::Undo,
+            (Key::Z, true, true, false) | (Key::Y, true, false, false) => A::Redo,
+            (Key::C, true, true, false) => A::Copy,
+            (Key::V, true, true, false) => A::Paste,
+            (Key::V, true, false, true) => A::PastePrevious,
+            (Key::S, true, true, false) => A::Sync,
+            (Key::R, true, true, false) => A::Reset,
+            (Key::U, true, true, false) => A::AutoTone,
+            (Key::E, true, true, false) => A::ExportDialog,
+            (Key::E, true, true, true) => A::ExportPrevious,
+            (Key::W, false, true, false) => A::Mask,
+            (key, false, _, false) => match key {
+                Key::Num0 => A::Rating(0),
+                Key::Num1 => A::Rating(1),
+                Key::Num2 => A::Rating(2),
+                Key::Num3 => A::Rating(3),
+                Key::Num4 => A::Rating(4),
+                Key::Num5 => A::Rating(5),
+                Key::Num6 => A::ToggleLabel(0),
+                Key::Num7 => A::ToggleLabel(1),
+                Key::Num8 => A::ToggleLabel(2),
+                Key::Num9 => A::ToggleLabel(3),
+                Key::P => A::Flag(1),
+                Key::X => A::Flag(-1),
+                Key::U => A::Flag(0),
+                Key::ArrowLeft | Key::ArrowUp => A::Previous,
+                Key::ArrowRight | Key::ArrowDown => A::Next,
+                Key::Backslash => A::Compare,
+                Key::J => A::Clipping,
+                Key::Z => A::Zoom,
+                Key::F => A::Fit,
+                Key::R | Key::C => A::Crop,
+                Key::Q => A::Remove,
+                Key::W => A::WhiteBalance,
+                Key::V => A::ToggleMono,
+                Key::G => A::Library,
+                Key::D => A::Develop,
+                Key::E => A::Loupe,
+                _ => return None,
+            },
+            _ => return None,
+        },
+    )
+}
+
 /// `a` without the modifiers that are on in `b`.
 fn without(a: Modifiers, b: Modifiers) -> Modifiers {
     Modifiers {
@@ -847,286 +676,77 @@ fn without(a: Modifiers, b: Modifiers) -> Modifiers {
     }
 }
 
-/// The photos a name stands for: the filename or the path, in any case, with or
-/// without the extension; else the ones whose name contains it. A master wins
-/// over its virtual copies, which share its filename.
-fn find_photos<'a>(photos: &'a [Photo], name: &str) -> Vec<&'a Photo> {
-    let wanted = name.trim().to_lowercase();
-    let by_path = wanted.contains(['/', '\\']);
-    let text = |p: &Photo| {
-        if by_path {
-            p.path.to_string_lossy().to_lowercase()
-        } else {
-            p.filename.to_lowercase()
-        }
-    };
-    let stem = |p: &Photo| {
-        std::path::Path::new(&text(p))
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-    };
-    let pick = |matching: &dyn Fn(&Photo) -> bool| -> Vec<&'a Photo> {
-        let all: Vec<&Photo> = photos.iter().filter(|p| matching(p)).collect();
-        let masters: Vec<&Photo> = all.iter().copied().filter(|p| p.master.is_none()).collect();
-        if masters.is_empty() { all } else { masters }
-    };
-    if wanted.is_empty() {
-        return Vec::new();
-    }
-    let exact = pick(&|p| text(p) == wanted || (!by_path && stem(p).as_deref() == Some(&wanted)));
-    if exact.is_empty() {
-        pick(&|p| text(p).contains(&wanted))
-    } else {
-        exact
-    }
-}
-
 impl Editor {
-    /// Start of the frame: button presses reach the shortcut handlers as if typed.
-    pub(super) fn surface_buttons(&mut self, ctx: &egui::Context) {
-        let events = self.surface.poll();
-        self.surface_jobs();
-        if let Some(channel) = self.surface.mixer.take() {
-            // The HSL view, where the selector is, so the screen shows what the faders turn.
-            self.view.mixer_adjust = channel;
-            self.view.mixer_color = false;
-        }
-        if self.library_mode {
-            self.surface.pending.clear();
-            self.surface.mono_toggles = 0;
-            self.surface_publish();
-        }
-        // Only where one photo is shown: the grid, Compare and Survey use the
-        // arrows for other things.
-        let single = !self.library_mode || self.library.as_ref().is_some_and(|l| l.loupe_open());
-        let step = if single { self.surface.photo_step() } else { 0 };
-        if !single {
-            self.surface.photo_ticks = 0;
-        }
-        let mut events = events;
-        if step != 0 {
-            let key = if step > 0 {
-                Key::ArrowRight
-            } else {
-                Key::ArrowLeft
-            };
-            for pressed in [true, false] {
-                events.push(Event::Key {
-                    key,
-                    physical_key: Some(key),
-                    pressed,
-                    repeat: false,
-                    modifiers: Modifiers::NONE,
-                });
-            }
-            if self.surface.photo_ticks != 0 {
-                // More detents waiting: another frame for the next photo.
-                ctx.request_repaint();
-            }
-        }
-        if !events.is_empty() {
-            ctx.input_mut(|i| i.events.extend(events));
-        }
-    }
-    /// Inside the edit frame: turns the dials' sliders. Dials do nothing without
-    /// a photo open in Develop.
-    pub(super) fn surface_dials(&mut self, ctx: &egui::Context) {
-        self.apply_edits(ctx);
-        self.surface_publish();
-    }
-    /// Library commands from the socket, at the start of the frame.
-    fn surface_jobs(&mut self) {
-        for job in std::mem::take(&mut self.surface.jobs) {
-            let done = match job {
-                Job::Search(text) => self.surface_search(&text),
-                Job::Module(true) => self.surface_develop(),
-                Job::Module(false) => self.surface_library(),
-                Job::Open(target) => self.surface_open(&target),
-            };
-            self.surface.result = Some(match done {
-                Ok(mut json) => {
-                    json["ok"] = true.into();
-                    json
+    pub(super) fn control_commands(&mut self, ctx: &egui::Context) {
+        let messages: Vec<_> = self.surface.rx.try_iter().take(128).collect();
+        let full = messages.len() == 128;
+        for message in messages {
+            match message {
+                Msg::Request(request) => {
+                    if !request.begin() {
+                        continue;
+                    }
+                    let result = self.control_messages(request.messages, ctx);
+                    let state = self.command_state();
+                    let _=request.reply.send(result.map(|result|serde_json::json!({"state":state,"result":result,"status":"applied"})));
                 }
-                Err(error) => serde_json::json!({"ok": false, "error": error}),
-            });
-        }
-    }
-    fn surface_search(&mut self, text: &str) -> Result<serde_json::Value, String> {
-        let library = self.library.as_mut().ok_or("no catalog is open")?;
-        let mut layout = library.layout();
-        layout.query = text.to_string();
-        layout.filters_off = false;
-        library.apply_layout(&layout);
-        Ok(serde_json::json!({"query": text}))
-    }
-    /// G: the Library's grid.
-    fn surface_library(&mut self) -> Result<serde_json::Value, String> {
-        if self.library.is_none() {
-            return Err("no catalog is open".into());
-        }
-        if !self.flush() {
-            return Err("an edit is still being saved".into());
-        }
-        self.library_mode = true;
-        if let Some(library) = &mut self.library {
-            library.show_grid();
-        }
-        Ok(serde_json::json!({}))
-    }
-    /// D: Develop on the selected photo, or the first one shown.
-    fn surface_develop(&mut self) -> Result<serde_json::Value, String> {
-        if !self.library_mode {
-            return Ok(serde_json::json!({}));
-        }
-        let library = self.library.as_mut().ok_or("no catalog is open")?;
-        let id = library
-            .selected_or_first()
-            .ok_or("the Library shows no photo to open")?;
-        self.surface_develop_photo(id)
-    }
-    fn surface_open(&mut self, target: &Target) -> Result<serde_json::Value, String> {
-        let library = self.library.as_mut().ok_or("no catalog is open")?;
-        let id = match target {
-            Target::Id(id) => library
-                .photo(*id)
-                .map(|p| p.id)
-                .ok_or_else(|| format!("no photo has id {id}"))?,
-            Target::Name(name) => match find_photos(&library.photos, name)[..] {
-                [] => return Err(format!("no photo matches \"{name}\"")),
-                [p] => p.id,
-                ref many => {
-                    let list: Vec<String> = many
-                        .iter()
-                        .take(10)
-                        .map(|p| format!("{} {} ({})", p.id, p.filename, p.path.display()))
-                        .collect();
-                    return Err(format!(
-                        "{} photos match \"{name}\"; open one with --id: {}",
-                        many.len(),
-                        list.join("; ")
-                    ));
-                }
-            },
-        };
-        // Leaves a filter that hides it, as clicking it elsewhere would.
-        library.reveal(id);
-        self.surface_develop_photo(id)
-    }
-    fn surface_develop_photo(&mut self, id: i64) -> Result<serde_json::Value, String> {
-        self.develop_catalog_photo(id);
-        if self.library_mode {
-            return Err(match &self.not_editable {
-                Some((_, reason)) => reason.clone(),
-                None => "RAWmakase is busy or has an edit to save first".into(),
-            });
-        }
-        let photo = self.library.as_ref().and_then(|l| l.photo(id));
-        Ok(
-            serde_json::json!({"opened": photo.map(|p| serde_json::json!({
-                "id": p.id,
-                "filename": p.filename,
-                "path": p.path.display().to_string(),
-            }))}),
-        )
-    }
-    fn apply_edits(&mut self, ctx: &egui::Context) {
-        let pending = std::mem::take(&mut self.surface.pending);
-        let toggles = std::mem::take(&mut self.surface.mono_toggles);
-        if self.document.metadata.is_none() {
-            return;
-        }
-        if toggles % 2 == 1 {
-            let mono = &mut self.document.recipe.effects.monochrome;
-            *mono = !*mono;
-        }
-        if pending.is_empty() {
-            return;
-        }
-        // "All" shows three channels at once; the faders then turn Hue.
-        let channel = self.view.mixer_adjust.min(2);
-        let mut step = None;
-        let mut turned = false;
-        for edit in pending {
-            let r = &mut self.document.recipe;
-            let (param, before, shown) = match edit {
-                Edit::Turn(_, 0) => continue,
-                Edit::Turn(param, ticks) => {
-                    turned = true;
-                    let before = *param.value(r, channel);
-                    (param, before, param.turn(r, ticks, channel))
-                }
-                Edit::Set(param, value) => {
-                    let before = *param.value(r, channel);
-                    (param, before, param.set(r, value, channel))
-                }
-            };
-            if param.is_white_balance()
-                && before != *param.value(r, channel)
-                && let Some(m) = &self.document.metadata
-            {
-                r.update_wb(m);
-                r.auto_white_balance = None;
-            }
-            step = Some((param.label(channel), shown));
-        }
-        if let Some(step) = step {
-            ctx.data_mut(|d| d.insert_temp(history_step_id(), step));
-        }
-        if turned {
-            self.surface.last_turn = Some(Instant::now());
-            // One more frame once the turning stops, to close the History entry.
-            ctx.request_repaint_after(GESTURE + Duration::from_millis(50));
-        }
-    }
-    /// Tells the control socket what the app looks like now, if it asked.
-    fn surface_publish(&mut self) {
-        let result = self.surface.result.take();
-        let surface = &self.surface;
-        surface.shared.publish(surface.consumed, || {
-            let develop = !self.library_mode && self.document.metadata.is_some();
-            let mut recipe = self.document.recipe.clone();
-            let channel = self.view.mixer_adjust.min(2);
-            let mut values = serde_json::Map::new();
-            if develop {
-                let named = Param::NAMED.iter().map(|&(name, p)| (name.to_string(), p));
-                let bands = (0..8).flat_map(|i| {
-                    let band = i + 1;
-                    ["hue", "sat", "lum", "gray"].into_iter().enumerate().map(
-                        move |(c, name)| {
-                            let p = if c < 3 { Param::Hsl(i, c) } else { Param::Gray(i) };
-                            (format!("band{band}.{name}"), p)
-                        },
-                    )
-                });
-                for (name, param) in named.chain(bands) {
-                    values.insert(name, param.shown(&mut recipe, channel).into());
+                message => {
+                    if let Err(error) = self.control_messages(vec![message], ctx) {
+                        self.status = format!("Control surface: {}", error.message);
+                    }
                 }
             }
-            let mixer_channel = ["hue", "sat", "lum"][channel];
-            serde_json::json!({
-                "mode": if self.library_mode { "library" } else { "develop" },
-                "photo": develop.then(|| self.document.path.as_ref().map(|p| p.display().to_string())).flatten(),
-                "black_and_white": develop && recipe.effects.monochrome,
-                "mixer_channel": mixer_channel,
-                "photo_id": develop.then_some(self.document.catalog_photo).flatten(),
-                "loaded": develop && self.document.full().is_some() && !self.load.is_running(),
-                "values": values,
-                "result": result,
-            })
-        });
+        }
+        if full {
+            ctx.request_repaint();
+        }
+    }
+    fn control_messages(
+        &mut self,
+        messages: Vec<Msg>,
+        ctx: &egui::Context,
+    ) -> commands::Result<serde_json::Value> {
+        let mut result = serde_json::Value::Null;
+        for msg in messages {
+            let device = matches!(msg, Msg::Cc(..) | Msg::Note(..));
+            if let Some(mut command) = self.surface.translate(msg)? {
+                // Device adjustments follow the active mask; scripts use explicit
+                // scope. Unsupported mask parameters fail rather than edit globally.
+                if device
+                    && matches!(command.operation, commands::Operation::Adjust(..))
+                    && self.view.is(super::state::Tool::Mask)
+                {
+                    let index =
+                        self.view.masking.selected.ok_or_else(|| {
+                            commands::Error::new("no_mask", "Select a mask first")
+                        })?;
+                    command.target = commands::Target {
+                        mask: Some(index),
+                        generation: Some(self.load.id()),
+                        revision: Some(self.automation.revision),
+                        ..Default::default()
+                    };
+                }
+                if device
+                    && let commands::Operation::Metadata { advance, .. } = &mut command.operation
+                {
+                    *advance |= self.auto_advance;
+                }
+                result = self.execute_command(command, ctx)?;
+            }
+        }
+        Ok(result)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
     #[test]
     fn encoder_values_are_relative() {
         assert_eq!((ticks(1), ticks(127), ticks(3), ticks(125)), (1, -1, 3, -3));
     }
-
     #[test]
     fn parses_device_messages() {
         assert!(matches!(parse(&[0xB0, 48, 1]), Some(Msg::Cc(48, 1))));
@@ -1134,7 +754,6 @@ mod tests {
         assert!(matches!(parse(&[0x80, 68, 64]), Some(Msg::Note(68, false))));
         assert!(parse(&[0xF8]).is_none());
     }
-
     #[test]
     fn dials_clamp_and_label_like_sliders() {
         let mut r = Recipe::default();
@@ -1146,7 +765,6 @@ mod tests {
         Param::Tint.turn(&mut r, -1000, 0);
         assert_eq!(r.tint, -TINT_LIMIT);
     }
-
     #[test]
     fn temperature_clockwise_is_warmer_and_stays_in_range() {
         let mut r = Recipe {
@@ -1160,7 +778,6 @@ mod tests {
         Param::Temperature.turn(&mut r, -100_000, 0);
         assert_eq!(r.temperature, TEMPERATURE_MIN);
     }
-
     #[test]
     fn faders_turn_the_selected_mixer_channel() {
         let mut r = Recipe::default();
@@ -1173,7 +790,6 @@ mod tests {
         assert!((r.effects.gray_mix[7] + 0.03).abs() < 1e-6);
         assert_eq!(r.hsl[7], [0.; 3]);
     }
-
     #[test]
     fn sliders_are_set_in_the_units_they_show() {
         let mut r = Recipe::default();
@@ -1195,7 +811,6 @@ mod tests {
         assert_eq!(Param::Gray(2).label(0), "Yellow Gray");
         assert_eq!(Param::Hsl(2, 1).label(0), "Yellow Saturation");
     }
-
     #[test]
     fn slider_names_parse_with_bands_and_channels() {
         assert_eq!(Param::parse("Temp"), Some(Param::Temperature));
@@ -1208,169 +823,6 @@ mod tests {
             assert_eq!(Param::parse(name), Some(param));
         }
     }
-
-    #[test]
-    fn commands_apply_in_order_and_photo_steps_are_exact() {
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Surface::new(Config::defaults(), rx);
-        tx.send(Msg::Turn(Param::Tint, 1)).unwrap();
-        tx.send(Msg::Set(Param::Tint, 10.)).unwrap();
-        tx.send(Msg::Turn(Param::Tint, 1)).unwrap();
-        surface.poll();
-        assert!(matches!(
-            surface.pending[..],
-            [Edit::Turn(..), Edit::Set(..), Edit::Turn(..)]
-        ));
-        // Two photos in a row, however close together.
-        tx.send(Msg::Photo(1)).unwrap();
-        tx.send(Msg::Photo(1)).unwrap();
-        surface.poll();
-        assert_eq!(surface.photo_step(), 1);
-        assert_eq!(surface.photo_step(), 1);
-        assert_eq!(surface.photo_step(), 0);
-    }
-
-    fn photo(id: i64, path: &str, master: Option<i64>) -> Photo {
-        let path = std::path::PathBuf::from(path);
-        Photo {
-            id,
-            folder: 1,
-            filename: path.file_name().unwrap().to_string_lossy().into_owned(),
-            path,
-            captured: String::new(),
-            rating: 0,
-            flag: 0,
-            label: String::new(),
-            format: "RAF".into(),
-            copy_name: String::new(),
-            master,
-            keywords: String::new(),
-            has_lightroom_edits: false,
-        }
-    }
-    fn ids(photos: Vec<&Photo>) -> Vec<i64> {
-        photos.into_iter().map(|p| p.id).collect()
-    }
-
-    #[test]
-    fn photos_are_found_by_name() {
-        let photos = [
-            photo(1, "/a/DSCF0042.RAF", None),
-            photo(2, "/a/DSCF0042.RAF", Some(1)),
-            photo(3, "/a/DSCF0043.RAF", None),
-            photo(4, "/b/DSCF0042.RAF", None),
-            photo(5, "/b/portrait.jpg", None),
-        ];
-        // Case, extension and stem; a master wins over its copy.
-        assert_eq!(ids(find_photos(&photos, "dscf0043")), [3]);
-        assert_eq!(ids(find_photos(&photos, "PORTRAIT.JPG")), [5]);
-        assert_eq!(ids(find_photos(&photos, "portrait")), [5]);
-        // The same name in two folders is ambiguous, but copies are not extra.
-        assert_eq!(ids(find_photos(&photos, "DSCF0042")), [1, 4]);
-        // A path picks one.
-        assert_eq!(ids(find_photos(&photos, "/b/dscf0042.raf")), [4]);
-        // Else a part of the name, if it fits.
-        assert_eq!(ids(find_photos(&photos, "0043")), [3]);
-        assert_eq!(ids(find_photos(&photos, "dscf")), [1, 3, 4]);
-        assert!(find_photos(&photos, "nothing").is_empty());
-        assert!(find_photos(&photos, "  ").is_empty());
-    }
-
-    #[test]
-    fn photo_dial_moves_at_once_then_once_per_detent() {
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Surface::new(Config::defaults(), rx);
-        tx.send(Msg::Cc(48, 1)).unwrap();
-        surface.poll();
-        assert_eq!(surface.photo_step(), 1, "the first tick moves");
-        assert_eq!(surface.photo_step(), 0);
-        tx.send(Msg::Cc(48, 1)).unwrap();
-        surface.poll();
-        assert_eq!(surface.photo_step(), 0, "one more tick is half a detent");
-        tx.send(Msg::Cc(48, 1)).unwrap();
-        surface.poll();
-        assert_eq!(surface.photo_step(), 1);
-        // The other way moves at once too.
-        tx.send(Msg::Cc(48, 127)).unwrap();
-        surface.poll();
-        assert_eq!(surface.photo_step(), -1);
-        // After a pause the leftover is forgotten.
-        tx.send(Msg::Cc(48, 127)).unwrap();
-        surface.poll();
-        surface.last_photo = Some(Instant::now() - Duration::from_secs(1));
-        assert_eq!(surface.photo_step(), 0);
-        assert_eq!(surface.photo_ticks, 0);
-    }
-
-    #[test]
-    fn p_buttons_rate_pick_and_reject() {
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Surface::new(Config::defaults(), rx);
-        for note in 80..=87 {
-            tx.send(Msg::Note(note, true)).unwrap();
-        }
-        let keys: Vec<Key> = surface
-            .poll()
-            .into_iter()
-            .filter_map(|e| match e {
-                Event::Key {
-                    key, pressed: true, ..
-                } => Some(key),
-                _ => None,
-            })
-            .collect();
-        let expected = [
-            Key::Num1,
-            Key::Num2,
-            Key::Num3,
-            Key::Num4,
-            Key::Num5,
-            Key::Num0,
-            Key::P,
-            Key::X,
-        ];
-        assert_eq!(keys, expected);
-    }
-
-    #[test]
-    fn labels_clipping_and_black_and_white_buttons() {
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Surface::new(Config::defaults(), rx);
-        for note in [51, 52, 53, 54, 97, 49] {
-            tx.send(Msg::Note(note, true)).unwrap();
-        }
-        let keys: Vec<Key> = surface
-            .poll()
-            .into_iter()
-            .filter_map(|e| match e {
-                Event::Key {
-                    key, pressed: true, ..
-                } => Some(key),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            keys,
-            [Key::Num6, Key::Num7, Key::Num8, Key::Num9, Key::J, Key::Z]
-        );
-        tx.send(Msg::Note(101, true)).unwrap();
-        tx.send(Msg::Note(101, false)).unwrap();
-        assert!(surface.poll().is_empty());
-        assert_eq!(surface.mono_toggles, 1, "only the press toggles");
-        assert_eq!(parse_action("toggle:bw"), Some(Action::ToggleMono));
-    }
-
-    #[test]
-    fn default_faders_and_mixer_buttons() {
-        let config = Config::defaults();
-        assert_eq!(config.dials.get(&17), Some(&Param::Band(0)));
-        assert_eq!(config.dials.get(&24), Some(&Param::Band(7)));
-        assert_eq!(config.buttons.get(&99), Some(&Action::Mixer(1)));
-        assert_eq!(Param::parse("band8"), Some(Param::Band(7)));
-        assert_eq!(Param::parse("band9"), None);
-        assert_eq!(parse_action("mixer:lum"), Some(Action::Mixer(2)));
-    }
-
     #[test]
     fn config_overrides_defaults() {
         let mut config = Config::defaults();
@@ -1387,7 +839,6 @@ mod tests {
         assert!(!config.buttons.contains_key(&95));
         assert_eq!(config.buttons.get(&99), Some(&Action::Hold(SHIFT)));
     }
-
     #[test]
     fn default_keys_parse_the_way_the_names_say() {
         assert_eq!(
@@ -1409,7 +860,6 @@ mod tests {
         );
         assert_eq!(parse_action("nonsense"), None);
     }
-
     #[test]
     fn saved_config_is_the_changes_and_reads_back_the_same() {
         let defaults = Config::defaults();
@@ -1432,7 +882,6 @@ mod tests {
         read.apply(&config.to_json());
         assert_eq!(read, config);
     }
-
     #[test]
     fn every_default_spells_back_to_itself() {
         let config = Config::defaults();
@@ -1440,11 +889,6 @@ mod tests {
             assert_eq!(Param::parse(&param.spec()), Some(*param), "CC {cc}");
         }
         for (note, action) in &config.buttons {
-            // Ctrl alone is the one default `parse_action` cannot name: it reads
-            // "ctrl" as the command key, which is the same key off the Mac.
-            if *action == Action::Hold(Modifiers::CTRL) && cfg!(target_os = "macos") {
-                continue;
-            }
             assert_eq!(
                 parse_action(&action_spec(*action)),
                 Some(*action),
@@ -1458,7 +902,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn every_device_message_is_listed_for_the_page() {
         // The page lists what the device sends; the defaults must be among it.
@@ -1473,7 +916,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn held_modifiers_join_and_leave() {
         let held = Modifiers::NONE | SHIFT;
@@ -1483,22 +925,62 @@ mod tests {
         assert!(both.shift && both.command);
         assert_eq!(without(both, command()), SHIFT);
     }
+}
 
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
     #[test]
-    fn buttons_become_key_events() {
-        let (tx, rx) = mpsc::channel();
-        let mut surface = Surface::new(Config::defaults(), rx);
-        tx.send(Msg::Note(95, true)).unwrap();
-        tx.send(Msg::Note(95, false)).unwrap();
-        let events = surface.poll();
-        assert_eq!(events.len(), 2);
+    fn modifier_bindings_become_actions_without_keyboard_state() {
+        let mut surface = Surface::inactive();
+        let command = surface.translate(Msg::Note(92, true)).unwrap().unwrap();
         assert!(matches!(
-            events[0],
-            Event::Key {
-                key: Key::Z,
-                pressed: true,
-                ..
+            command.operation,
+            commands::Operation::Action(commands::Action::Copy)
+        ));
+        let command = surface.translate(Msg::Note(95, true)).unwrap().unwrap();
+        assert!(matches!(
+            command.operation,
+            commands::Operation::Action(commands::Action::Undo)
+        ));
+        surface.translate(Msg::Note(66, true)).unwrap();
+        let command = surface.translate(Msg::Note(95, true)).unwrap().unwrap();
+        assert!(matches!(
+            command.operation,
+            commands::Operation::Action(commands::Action::Redo)
+        ));
+        surface.translate(Msg::Note(66, false)).unwrap();
+        assert_eq!(surface.held, Modifiers::NONE);
+        let command = surface.translate(Msg::Note(51, true)).unwrap().unwrap();
+        assert!(
+            matches!(command.operation,commands::Operation::Metadata {edit:crate::app::photo_metadata::Edit::ToggleLabel(ref label),advance:false} if label=="Red")
+        );
+        surface.translate(Msg::Note(66, true)).unwrap();
+        let command = surface.translate(Msg::Note(80, true)).unwrap().unwrap();
+        assert!(matches!(
+            command.operation,
+            commands::Operation::Metadata {
+                edit: crate::app::photo_metadata::Edit::Rating(1),
+                advance: true
             }
         ));
+    }
+    #[test]
+    fn each_socket_request_runs_and_replies_before_the_next() {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        e.onboarding.visible = false;
+        let (tx, rx) = mpsc::sync_channel(4);
+        e.surface = Surface::new(Config::defaults(), rx);
+        let (first, r1) = socket::test_request(vec![Msg::Command(Command::new(
+            commands::Operation::Set(Param::Exposure, 1.),
+        ))]);
+        let (second, r2) =
+            socket::test_request(vec![Msg::Command(Command::new(commands::Operation::State))]);
+        tx.send(Msg::Request(first)).unwrap();
+        tx.send(Msg::Request(second)).unwrap();
+        e.control_commands(&ctx);
+        assert_eq!(r1.recv().unwrap().unwrap_err().code, "no_document");
+        assert!(r2.recv().unwrap().is_ok());
     }
 }

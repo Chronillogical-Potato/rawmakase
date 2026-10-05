@@ -1,0 +1,764 @@
+//! Application operations shared by UI, MIDI and the authenticated local API.
+//! Adapters translate input; only the Editor executes commands and owns history.
+mod output;
+mod parameter;
+
+#[derive(Default)]
+pub(super) struct Automation {
+    pub revision: u64,
+    outputs: output::Outputs,
+}
+pub(super) use parameter::Param;
+
+use super::{Editor, state::Tool};
+use crate::catalog::Photo;
+use eframe::egui;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+pub(super) const PROTOCOL: u32 = 1;
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Target {
+    pub photo_id: Option<i64>,
+    pub generation: Option<u64>,
+    pub revision: Option<u64>,
+    /// A mask index from state. Requires generation and revision guards, since
+    /// masks have no persistent IDs and can be removed or reordered by the UI.
+    pub mask: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Command {
+    pub operation: Operation,
+    pub target: Target,
+}
+impl Command {
+    pub fn new(operation: Operation) -> Self {
+        Self {
+            operation,
+            target: Target::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum Operation {
+    State,
+    Capabilities,
+    Photos {
+        query: String,
+        offset: usize,
+        limit: usize,
+    },
+    Set(Param, f32),
+    Adjust(Param, i32),
+    Action(Action),
+    Metadata {
+        edit: super::photo_metadata::Edit,
+        advance: bool,
+    },
+    Open(PhotoTarget),
+    Search(String),
+    Module(bool),
+    Navigate(i32),
+    Save,
+    Output {
+        path: std::path::PathBuf,
+        max_edge: u32,
+    },
+    Job(u64),
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum PhotoTarget {
+    Name(String),
+    Id(i64),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Action {
+    Undo,
+    Redo,
+    Rating(u8),
+    Flag(i8),
+    Label(u8),
+    ToggleLabel(u8),
+    Copy,
+    Paste,
+    PastePrevious,
+    Sync,
+    Reset,
+    AutoTone,
+    ExportDialog,
+    ExportPrevious,
+    ToggleMono,
+    Treatment(bool),
+    Compare,
+    Clipping,
+    Zoom,
+    Fit,
+    Crop,
+    Remove,
+    WhiteBalance,
+    Mask,
+    Mixer(usize),
+    Library,
+    Develop,
+    Loupe,
+    Next,
+    Previous,
+}
+impl Action {
+    pub const NAMES: &[&str] = &[
+        "undo",
+        "redo",
+        "rating:0",
+        "rating:1",
+        "rating:2",
+        "rating:3",
+        "rating:4",
+        "rating:5",
+        "pick",
+        "reject",
+        "unflag",
+        "label:red",
+        "label:yellow",
+        "label:green",
+        "label:blue",
+        "label:purple",
+        "label:none",
+        "toggle_label:red",
+        "toggle_label:yellow",
+        "toggle_label:green",
+        "toggle_label:blue",
+        "toggle_label:purple",
+        "copy",
+        "paste",
+        "paste_previous",
+        "sync",
+        "reset",
+        "auto_tone",
+        "export_dialog",
+        "export_previous",
+        "toggle:bw",
+        "treatment:bw",
+        "treatment:color",
+        "compare",
+        "clipping",
+        "zoom",
+        "fit",
+        "crop",
+        "remove",
+        "white_balance",
+        "mask",
+        "mixer:hue",
+        "mixer:sat",
+        "mixer:lum",
+        "library",
+        "develop",
+        "loupe",
+        "next",
+        "previous",
+    ];
+    pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
+        use super::photo_metadata::{Edit, LABELS};
+        Some(match self {
+            Self::Rating(n) => Edit::Rating(i32::from(n)),
+            Self::Flag(n) => Edit::Flag(i32::from(n)),
+            Self::Label(n) => Edit::Label(LABELS.get(usize::from(n)).copied().unwrap_or("").into()),
+            Self::ToggleLabel(n) => {
+                Edit::ToggleLabel(LABELS.get(usize::from(n)).copied().unwrap_or("").into())
+            }
+            _ => return None,
+        })
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "undo" => Self::Undo,
+            "redo" => Self::Redo,
+            "pick" => Self::Flag(1),
+            "reject" => Self::Flag(-1),
+            "unflag" => Self::Flag(0),
+            "toggle_label:red" => Self::ToggleLabel(0),
+            "toggle_label:yellow" => Self::ToggleLabel(1),
+            "toggle_label:green" => Self::ToggleLabel(2),
+            "toggle_label:blue" => Self::ToggleLabel(3),
+            "toggle_label:purple" => Self::ToggleLabel(4),
+            "label:red" => Self::Label(0),
+            "label:yellow" => Self::Label(1),
+            "label:green" => Self::Label(2),
+            "label:blue" => Self::Label(3),
+            "label:purple" => Self::Label(4),
+            "label:none" => Self::Label(5),
+            "copy" => Self::Copy,
+            "paste" => Self::Paste,
+            "paste_previous" => Self::PastePrevious,
+            "sync" => Self::Sync,
+            "reset" => Self::Reset,
+            "auto_tone" => Self::AutoTone,
+            "export_dialog" => Self::ExportDialog,
+            "export_previous" => Self::ExportPrevious,
+            "toggle:bw" => Self::ToggleMono,
+            "treatment:bw" => Self::Treatment(true),
+            "treatment:color" => Self::Treatment(false),
+            "compare" => Self::Compare,
+            "clipping" => Self::Clipping,
+            "zoom" => Self::Zoom,
+            "fit" => Self::Fit,
+            "crop" => Self::Crop,
+            "remove" => Self::Remove,
+            "white_balance" => Self::WhiteBalance,
+            "mask" => Self::Mask,
+            "mixer:hue" => Self::Mixer(0),
+            "mixer:sat" => Self::Mixer(1),
+            "mixer:lum" => Self::Mixer(2),
+            "library" => Self::Library,
+            "develop" => Self::Develop,
+            "loupe" => Self::Loupe,
+            "next" => Self::Next,
+            "previous" => Self::Previous,
+            _ => Self::Rating(
+                s.strip_prefix("rating:")?
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|n| *n <= 5)?,
+            ),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct Error {
+    pub code: &'static str,
+    pub message: String,
+}
+impl Error {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+pub(super) type Result<T> = std::result::Result<T, Error>;
+
+impl Editor {
+    pub(super) fn command_state(&self) -> Value {
+        let develop = !self.library_mode && self.document.metadata.is_some();
+        let mut recipe = self.document.recipe.clone();
+        let mut values = serde_json::Map::new();
+        if develop {
+            for (name, param) in Param::all() {
+                values.insert(
+                    name,
+                    param
+                        .shown(&mut recipe, self.view.mixer_adjust.min(2))
+                        .into(),
+                );
+            }
+        }
+        let masks: Vec<Value> = recipe
+            .masks
+            .iter()
+            .enumerate()
+            .map(|(index, mask)| {
+                let values: serde_json::Map<String, Value> = Param::NAMED
+                    .iter()
+                    .filter_map(|(name, param)| {
+                        param
+                            .local_shown(&mask.adjust)
+                            .map(|v| ((*name).into(), v.into()))
+                    })
+                    .collect();
+                json!({"index":index,"name":mask.name,"hidden":mask.hidden,"values":values})
+            })
+            .collect();
+        json!({
+            "protocol": PROTOCOL,
+            "mode": if self.library_mode {"library"} else {"develop"},
+            "photo": develop.then(|| self.document.path.as_ref().map(|p| p.display().to_string())).flatten(),
+            "photo_id": develop.then_some(self.document.catalog_photo).flatten(),
+            "generation":self.load.id(), "revision":self.automation.revision,
+            "loaded":develop && self.document.full().is_some() && !self.load.is_running(),
+            "busy":self.activity.is_busy(), "modal":self.command_modal(),
+            "black_and_white":develop && recipe.effects.monochrome,
+            "mixer_channel":(["hue","sat","lum"][self.view.mixer_adjust.min(2)]),
+            "values":values, "masks":masks,
+            "selected_mask":self.view.masking.selected,
+            "exporting": self.exporting(),
+            "auto_running": self.document.auto.is_running(),
+            "treatment_pending": self.document.pending_treatment.is_some(),
+            "save_state": match self.document.save { super::save_state::SaveState::Clean => "saved", super::save_state::SaveState::Pending(_) => "pending", super::save_state::SaveState::Saving {..} => "saving", super::save_state::SaveState::Failed {..} => "failed", super::save_state::SaveState::Protected(_) => "protected" },
+        })
+    }
+    pub(super) fn command_modal(&self) -> bool {
+        self.preferences.open
+            || self.export_modal()
+            || self.remove_copy.is_some()
+            || self.read_metadata.is_some()
+            || self.not_editable.is_some()
+            || self.view.shortcuts
+            || self.copy_dialog.is_some()
+            || self.preset_rename.is_some()
+            || self.onboarding.visible
+    }
+    fn check_target(&self, target: &Target) -> Result<()> {
+        if target
+            .photo_id
+            .is_some_and(|id| self.document.catalog_photo != Some(id))
+            || target.generation.is_some_and(|n| n != self.load.id())
+            || target
+                .revision
+                .is_some_and(|n| n != self.automation.revision)
+        {
+            return Err(Error::new(
+                "stale_target",
+                "The photo or edit changed; read state again",
+            ));
+        }
+        if target.mask.is_some() && (target.generation.is_none() || target.revision.is_none()) {
+            return Err(Error::new(
+                "target_required",
+                "Mask edits require generation and revision from state",
+            ));
+        }
+        Ok(())
+    }
+    fn require_develop(&self) -> Result<()> {
+        if self.library_mode || self.document.metadata.is_none() {
+            return Err(Error::new("no_document", "Open a photo in Develop first"));
+        }
+        if self.load.is_running() || self.document.full().is_none() {
+            return Err(Error::new("not_ready", "The photo is still loading"));
+        }
+        Ok(())
+    }
+    /// Each command is a complete edit transaction. The reply is built only
+    /// afterward, including history and rendering invalidation, on the UI thread.
+    pub(super) fn execute_command(
+        &mut self,
+        command: Command,
+        ctx: &egui::Context,
+    ) -> Result<Value> {
+        let Command { operation, target } = command;
+        match operation {
+            Operation::State => return Ok(Value::Null),
+            Operation::Job(id) => return self.automation.outputs.state(id),
+            Operation::Capabilities => {
+                return Ok(
+                    json!({"protocol":PROTOCOL,"actions":Action::NAMES,"parameters":Param::capabilities(),
+                "commands":["state","capabilities","photos","set","turn","action","open","search","module","photo","save","export","preview","job"],
+                "target_fields":["photo_id","generation","revision","mask"],
+                "completion":"applied; loaded/exporting/save_state describe asynchronous work", "headless":false}),
+                );
+            }
+            Operation::Photos {
+                query,
+                offset,
+                limit,
+            } => {
+                let library = self
+                    .library
+                    .as_ref()
+                    .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
+                let query = query.to_lowercase();
+                let all: Vec<_> = library
+                    .photos
+                    .iter()
+                    .filter(|p| query.is_empty() || p.filename.to_lowercase().contains(&query))
+                    .collect();
+                let photos: Vec<_> = all.iter().skip(offset).take(limit).map(|p| json!({"id":p.id,"filename":p.filename,"path":p.path,"rating":p.rating,"flag":p.flag,"label":p.label})).collect();
+                return Ok(json!({"total":all.len(),"offset":offset,"photos":photos}));
+            }
+            _ => {}
+        }
+        self.check_target(&target)?;
+        if self.activity.is_busy() || self.command_modal() {
+            return Err(Error::new(
+                "busy",
+                "Close the dialog or wait for the current operation",
+            ));
+        }
+        if target.mask.is_some() && !matches!(operation, Operation::Set(..) | Operation::Adjust(..))
+        {
+            return Err(Error::new(
+                "unsupported_scope",
+                "This command does not operate on a mask",
+            ));
+        }
+        if !matches!(operation, Operation::Adjust(..)) {
+            self.surface.end_turn();
+            self.finish_gesture();
+        }
+        let save = matches!(operation, Operation::Save);
+        let frame = self.begin_edit_frame();
+        let result = self.apply_command(operation, &target, ctx);
+        self.finish_edit_frame(frame, ctx);
+        self.sync_undo();
+        if save && result.is_ok() {
+            if !self.flush() || self.document.save.needs_save() || self.document.save.is_protected()
+            {
+                return Err(Error::new("save_failed", "The edit could not be saved"));
+            }
+            return Ok(json!({"saved":true}));
+        }
+        result
+    }
+    fn apply_command(
+        &mut self,
+        operation: Operation,
+        target: &Target,
+        ctx: &egui::Context,
+    ) -> Result<Value> {
+        match operation {
+            Operation::Set(param, value) => {
+                self.command_parameter(param, Some(value), 0, target, ctx)?
+            }
+            Operation::Adjust(param, ticks) => {
+                self.command_parameter(param, None, ticks, target, ctx)?;
+                self.surface.begin_turn(ctx);
+            }
+            Operation::Action(action) => return self.execute_action(action, target.photo_id),
+            Operation::Metadata { edit, advance } => {
+                self.command_metadata(edit, target.photo_id, advance)?
+            }
+            Operation::Open(photo) => return self.command_open(photo),
+            Operation::Search(text) => {
+                let library = self
+                    .library
+                    .as_mut()
+                    .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
+                let mut layout = library.layout();
+                layout.query = text.clone();
+                layout.filters_off = false;
+                library.apply_layout(&layout);
+                return Ok(json!({"query":text}));
+            }
+            Operation::Module(develop) => return self.command_module(develop),
+            Operation::Navigate(step) => return self.command_navigate(step),
+            Operation::Output { path, max_edge } => {
+                self.require_develop()?;
+                let photo = self
+                    .export_photo()
+                    .ok_or_else(|| Error::new("not_ready", "The photo is not ready to export"))?;
+                return self.automation.outputs.start(
+                    photo,
+                    path,
+                    max_edge,
+                    self.load.id(),
+                    self.automation.revision,
+                    ctx.clone(),
+                );
+            }
+            Operation::Save => {
+                self.require_develop()?;
+                if self.document.save.is_protected() {
+                    return Err(Error::new(
+                        "protected",
+                        "This edit is protected from saving",
+                    ));
+                }
+                if self.library.is_none()
+                    || self.document.catalog_photo.is_none()
+                    || self.document.path.is_none()
+                {
+                    return Err(Error::new(
+                        "no_catalog",
+                        "The photo must belong to an open catalog",
+                    ));
+                }
+                // Flush after the transaction has finalized pending recipe changes.
+            }
+            Operation::State
+            | Operation::Capabilities
+            | Operation::Photos { .. }
+            | Operation::Job(_) => unreachable!(),
+        }
+        Ok(Value::Null)
+    }
+    fn command_parameter(
+        &mut self,
+        param: Param,
+        value: Option<f32>,
+        ticks: i32,
+        target: &Target,
+        ctx: &egui::Context,
+    ) -> Result<()> {
+        self.require_develop()?;
+        if value.is_some_and(|v| !v.is_finite()) {
+            return Err(Error::new("invalid_value", "Value must be finite"));
+        }
+        let channel = self.view.mixer_adjust.min(2);
+        let shown = if let Some(index) = target.mask {
+            let mask = self
+                .document
+                .recipe
+                .masks
+                .get_mut(index)
+                .ok_or_else(|| Error::new("unknown_mask", "The mask does not exist"))?;
+            param.local_set(&mut mask.adjust, value, ticks)?
+        } else {
+            let recipe = &mut self.document.recipe;
+            let before = *param.value(recipe, channel);
+            let shown = if let Some(value) = value {
+                param.set(recipe, value, channel)
+            } else {
+                param.turn(recipe, ticks, channel)
+            };
+            if param.is_white_balance() && before != *param.value(recipe, channel) {
+                recipe.update_wb(self.document.metadata.as_ref().expect("checked above"));
+                recipe.auto_white_balance = None;
+            }
+            shown
+        };
+        let label = if let Some(index) = target.mask {
+            format!("Mask {} {}", index + 1, param.label(channel))
+        } else {
+            param.label(channel)
+        };
+        ctx.data_mut(|d| d.insert_temp(super::widgets::history_step_id(), (label, shown)));
+        Ok(())
+    }
+    pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Value> {
+        use Action::*;
+        if let Some(edit) = action.metadata() {
+            self.command_metadata(edit, photo, false)?;
+            return Ok(Value::Null);
+        }
+        match action {
+            Undo | Redo => {
+                if !self.command_history(action == Redo) {
+                    return Err(Error::new(
+                        "history_unavailable",
+                        "No history step could be applied",
+                    ));
+                }
+            }
+            Library => return self.command_module(false),
+            Develop => return self.command_module(true),
+            Next => return self.command_navigate(1),
+            Previous => return self.command_navigate(-1),
+            Loupe => {
+                self.command_module(false)?;
+                if let Some(library) = &mut self.library {
+                    library.open_loupe();
+                }
+            }
+            _ => {
+                self.require_develop()?;
+                match action {
+                    Copy => self.open_copy_dialog(super::settings_transfer::Transfer::Copy),
+                    Paste => {
+                        if self.clipboard.is_none() {
+                            return Err(Error::new(
+                                "empty_clipboard",
+                                "No settings have been copied",
+                            ));
+                        }
+                        self.paste_settings();
+                    }
+                    PastePrevious => {
+                        if self.previous_settings.is_none() {
+                            return Err(Error::new(
+                                "no_previous",
+                                "No previous photo settings are available",
+                            ));
+                        }
+                        self.paste_previous();
+                    }
+                    Sync => {
+                        if self.sync_targets().is_empty() {
+                            return Err(Error::new(
+                                "no_selection",
+                                "Select destination photos to synchronize",
+                            ));
+                        }
+                        self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
+                    }
+                    Reset => self.reset_settings(),
+                    AutoTone => self.start_auto(super::worker::AutoKind::Settings),
+                    ExportDialog => self.open_export_dialog(),
+                    ExportPrevious => self.export_with_previous(),
+                    ToggleMono => self.toggle_treatment(),
+                    Treatment(bw) => self.set_treatment(if bw {
+                        crate::develop::Treatment::BlackWhite
+                    } else {
+                        crate::develop::Treatment::Color
+                    }),
+                    Compare => self.set_compare(
+                        self.view
+                            .compare
+                            .toggled(super::before_after::Compare::BeforeOnly),
+                    ),
+                    Clipping => self.view.clipping.toggle_both(),
+                    Zoom => self.view.zoom.on = !self.view.zoom.on,
+                    Fit => self.view.zoom.on = false,
+                    Crop => self.view.toggle(Tool::Crop),
+                    Remove => self.view.toggle(Tool::Remove),
+                    WhiteBalance => self.view.toggle(Tool::WhiteBalance),
+                    Mask => self.view.toggle(Tool::Mask),
+                    Mixer(c) => {
+                        self.view.mixer_adjust = c;
+                        self.view.mixer_color = false;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        Ok(Value::Null)
+    }
+    pub(super) fn command_metadata(
+        &mut self,
+        edit: super::photo_metadata::Edit,
+        photo: Option<i64>,
+        advance: bool,
+    ) -> Result<()> {
+        let library = self
+            .library
+            .as_mut()
+            .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
+        let id = photo.or(if self.library_mode {
+            None
+        } else {
+            self.document.catalog_photo
+        });
+        let next = if let Some(id) = id {
+            library.edit_metadata(id, edit, advance)
+        } else if self.library_mode {
+            library.edit_shown(edit, advance).map(|_| None)
+        } else {
+            return Err(Error::new("no_document", "No catalog photo is open"));
+        };
+        let next = next.map_err(|e| Error::new("save_failed", e.to_string()))?;
+        self.status = library.message.clone();
+        self.sync_undo();
+        if let Some(next) = next {
+            self.develop_catalog_photo(next);
+            if self.document.catalog_photo != Some(next)
+                && let (Some(library), Some(id)) = (&mut self.library, id)
+            {
+                library.make_active(id);
+            }
+        }
+        Ok(())
+    }
+    fn command_module(&mut self, develop: bool) -> Result<Value> {
+        if develop {
+            if !self.library_mode {
+                return Ok(Value::Null);
+            }
+            let id = self
+                .library
+                .as_mut()
+                .and_then(|l| l.selected_or_first())
+                .ok_or_else(|| Error::new("no_document", "Select a photo first"))?;
+            self.command_open(PhotoTarget::Id(id))
+        } else {
+            if self.library.is_none() {
+                return Err(Error::new("no_catalog", "No catalog is open"));
+            }
+            if !self.flush() {
+                return Err(Error::new("save_failed", "The edit could not be saved"));
+            }
+            self.library_mode = true;
+            if let Some(library) = &mut self.library {
+                library.show_grid();
+            }
+            Ok(Value::Null)
+        }
+    }
+    fn command_navigate(&mut self, step: i32) -> Result<Value> {
+        let library = self
+            .library
+            .as_ref()
+            .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
+        let current = if self.library_mode {
+            library.selected()
+        } else {
+            self.document.catalog_photo
+        };
+        let next = current
+            .and_then(|id| library.navigate(id, step))
+            .ok_or_else(|| Error::new("end_of_list", "No next photo in this direction"))?;
+        self.command_open(PhotoTarget::Id(next))
+    }
+    fn command_open(&mut self, target: PhotoTarget) -> Result<Value> {
+        let library = self
+            .library
+            .as_ref()
+            .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
+        let id = match target {
+            PhotoTarget::Id(id) => id,
+            PhotoTarget::Name(name) => match find_photos(&library.photos, &name)[..] {
+                [] => return Err(Error::new("not_found", "No photo matches this name")),
+                [photo] => photo.id,
+                ref many => {
+                    return Err(Error::new(
+                        "ambiguous",
+                        format!("{} photos match; use a catalog ID", many.len()),
+                    ));
+                }
+            },
+        };
+        let photo = library
+            .photo(id)
+            .cloned()
+            .ok_or_else(|| Error::new("not_found", "No photo has this ID"))?;
+        if let Some(refusal) = super::library::develop_refusal(&photo, photo.path.is_file()) {
+            return Err(Error::new("not_editable", refusal.detail()));
+        }
+        if !self.flush() {
+            return Err(Error::new("save_failed", "The edit could not be saved"));
+        }
+        self.develop_catalog_photo(id);
+        if self.library_mode || self.document.catalog_photo != Some(id) {
+            return Err(Error::new(
+                "open_failed",
+                "The requested photo could not be opened",
+            ));
+        }
+        if let Some(library) = &mut self.library {
+            library.reveal(id);
+        }
+        Ok(json!({"opened":{"id":id,"filename":photo.filename,"path":photo.path}}))
+    }
+}
+
+/// The photos a name stands for: the filename or the path, in any case, with or
+/// without the extension; else the ones whose name contains it. A master wins
+/// over its virtual copies, which share its filename.
+fn find_photos<'a>(photos: &'a [Photo], name: &str) -> Vec<&'a Photo> {
+    let wanted = name.trim().to_lowercase();
+    let by_path = wanted.contains(['/', '\\']);
+    let text = |p: &Photo| {
+        if by_path {
+            p.path.to_string_lossy().to_lowercase()
+        } else {
+            p.filename.to_lowercase()
+        }
+    };
+    let stem = |p: &Photo| {
+        std::path::Path::new(&text(p))
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+    };
+    let pick = |matching: &dyn Fn(&Photo) -> bool| -> Vec<&'a Photo> {
+        let all: Vec<&Photo> = photos.iter().filter(|p| matching(p)).collect();
+        let masters: Vec<&Photo> = all.iter().copied().filter(|p| p.master.is_none()).collect();
+        if masters.is_empty() { all } else { masters }
+    };
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let exact = pick(&|p| text(p) == wanted || (!by_path && stem(p).as_deref() == Some(&wanted)));
+    if exact.is_empty() {
+        pick(&|p| text(p).contains(&wanted))
+    } else {
+        exact
+    }
+}
+
+#[cfg(test)]
+mod tests;

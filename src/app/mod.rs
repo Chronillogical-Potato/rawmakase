@@ -96,6 +96,7 @@ pub struct Editor {
     raw_defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
     /// A MIDI control surface such as the Loupedeck+.
     surface: control_surface::Surface,
+    automation: commands::Automation,
 }
 impl Editor {
     pub fn new(
@@ -118,6 +119,7 @@ impl Editor {
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
+        editor.surface = control_surface::Surface::start(&cc.egui_ctx);
         editor.updates.launched(launch, &mut editor.status);
         cc.egui_ctx
             .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
@@ -266,7 +268,8 @@ impl Editor {
             raw_defaults: std::sync::Arc::new(crate::develop::defaults::DevelopDefaults::load(
                 session.raw_defaults.clone(),
             )),
-            surface: control_surface::Surface::start(ctx),
+            surface: control_surface::Surface::inactive(),
+            automation: commands::Automation::default(),
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;
@@ -422,6 +425,7 @@ mod bulk_import;
 mod catalog;
 mod clipping;
 mod color_grading;
+mod commands;
 mod control_surface;
 mod crop_tool;
 mod curve_menu;

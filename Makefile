@@ -14,6 +14,9 @@ check:
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --all-targets --no-default-features -- -D warnings
 	cargo test --locked
+	cargo fmt --manifest-path tools/rawmakase-ctl/Cargo.toml --check
+	cargo clippy --manifest-path tools/rawmakase-ctl/Cargo.toml --all-targets --locked -- -D warnings
+	cargo test --manifest-path tools/rawmakase-ctl/Cargo.toml --locked
 
 # Install does not rebuild, so `make && sudo make install PREFIX=/usr` never compiles as root.
 install:

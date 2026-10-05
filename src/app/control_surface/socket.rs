@@ -1,156 +1,178 @@
-//! A local control socket, so a program can do what the Loupedeck does:
-//! `rawmakase-ctl` (tools/rawmakase-ctl) turns dials, presses buttons and sets
-//! sliders by sending the same messages the MIDI thread does.
-//!
-//! The app listens on a loopback TCP port (the same on every platform) and
-//! writes `control.json` in the data folder with the port and a random token;
-//! only a program that can read that file can send commands. A request is one
-//! line of JSON and so is the reply:
-//!
-//! ```text
-//! {"token": "...", "cmd": "turn", "param": "exposure", "ticks": 5}
-//! {"ok": true, "state": {"mode": "develop", "values": {"exposure": 0.1, ...}}}
-//! ```
-//!
-//! Commands that act on the Library (`open`, `search`, `module`) put their outcome
-//! in `state.result`: `{"ok": false, "error": "..."}` when they fail.
-//!
-//! A reply is sent once a frame has handled the command, with the state after it.
-use super::{Action, Job, Msg, Param, Target, parse_action};
+//! Versioned, bounded local control transport. Every request carries its own
+//! reply channel; a timed-out request still in the queue is cancelled atomically.
+use super::{Action, Msg, Sender, parse_action, shortcut_action};
+use crate::app::commands::{self, Command, Error, Operation, Param, PhotoTarget, Target};
 use eframe::egui;
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
     sync::{
-        Condvar, Mutex, PoisonError,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::Sender,
+        Arc,
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-/// How long a request waits for the app to draw a frame.
 const ANSWER: Duration = Duration::from_secs(3);
-
-/// A request is one short line.
 const MAX_REQUEST: u64 = 64 * 1024;
+const MAX_CLIENTS: usize = 16;
 
-/// Hands out a ticket per command and tells whoever holds one when a frame has
-/// read it.
-#[derive(Default)]
-pub(super) struct Shared {
-    /// Tickets issued.
-    sent: AtomicU64,
-    /// The highest ticket a published frame had read, and its state.
-    published: Mutex<(u64, Value)>,
-    changed: Condvar,
+pub(super) struct Request {
+    pub messages: Vec<Msg>,
+    pub reply: mpsc::SyncSender<commands::Result<Value>>,
+    phase: Arc<AtomicU8>, // pending, executing, cancelled
+    deadline: Instant,
+    stop: Arc<AtomicBool>,
 }
-impl Shared {
-    /// How many tickets are issued; every command up to that is in the queue.
-    pub(super) fn sent(&self) -> u64 {
-        self.sent.load(Ordering::SeqCst)
-    }
-    fn ticket(&self) -> u64 {
-        self.sent.fetch_add(1, Ordering::SeqCst) + 1
-    }
-    /// Answers the tickets up to `consumed`; `state` is only built when there
-    /// are some not yet answered.
-    pub(super) fn publish(&self, consumed: u64, state: impl FnOnce() -> Value) {
-        let mut published = self
-            .published
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if consumed > published.0 {
-            *published = (consumed, state());
-            self.changed.notify_all();
+impl Request {
+    pub fn begin(&self) -> bool {
+        if self.stop.load(Ordering::SeqCst) || Instant::now() >= self.deadline {
+            let _ = self
+                .phase
+                .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst);
+            return false;
         }
-    }
-    fn wait(&self, ticket: u64, timeout: Duration) -> Option<Value> {
-        let published = self
-            .published
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let (published, _) = self
-            .changed
-            .wait_timeout_while(published, timeout, |p| p.0 < ticket)
-            .unwrap_or_else(PoisonError::into_inner);
-        (published.0 >= ticket).then(|| published.1.clone())
+        self.phase
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
     }
 }
+fn invalid(message: impl Into<String>) -> Error {
+    Error::new("invalid_request", message)
+}
 
-/// The messages a request stands for.
-fn command(request: &Value) -> Result<Vec<Msg>, String> {
+fn command(request: &Value) -> commands::Result<Vec<Msg>> {
+    if request
+        .get("protocol")
+        .is_some_and(|v| v.as_u64() != Some(u64::from(commands::PROTOCOL)))
+    {
+        return Err(Error::new(
+            "unsupported_protocol",
+            "Supported protocol version is 1",
+        ));
+    }
     let text = |key: &str| {
         request[key]
             .as_str()
-            .ok_or_else(|| format!("\"{key}\" is missing"))
+            .ok_or_else(|| invalid(format!("{key} must be a string")))
     };
-    let number = |key: &str| {
+    let integer = |key: &str, min: i64, max: i64| {
         request[key]
-            .as_f64()
-            .filter(|n| n.is_finite())
-            .ok_or_else(|| format!("\"{key}\" is missing or not a number"))
+            .as_i64()
+            .filter(|n| (min..=max).contains(n))
+            .ok_or_else(|| invalid(format!("{key} must be an integer from {min} to {max}")))
     };
-    let midi = |key: &str| {
-        let n = number(key)?;
-        (0. ..=127.)
-            .contains(&n)
-            .then_some(n as u8)
-            .ok_or_else(|| format!("\"{key}\" must be 0 to 127"))
+    let param = || Param::parse(text("param")?).ok_or_else(|| invalid("Unknown parameter"));
+    let target: Target = match request.get("target") {
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| invalid(e.to_string()))?,
+        None => Target::default(),
     };
-    let param = || {
-        let name = text("param")?;
-        Param::parse(name).ok_or_else(|| format!("unknown slider \"{name}\""))
-    };
-    Ok(match text("cmd")? {
-        "state" => vec![Msg::Ping],
-        "cc" => vec![Msg::Cc(midi("cc")?, midi("value")?)],
+    let operation = match text("cmd")? {
+        "state" => Operation::State,
+        "capabilities" => Operation::Capabilities,
+        "photos" => Operation::Photos {
+            query: request["query"].as_str().unwrap_or("").into(),
+            offset: request["offset"]
+                .as_u64()
+                .unwrap_or(0)
+                .min(usize::MAX as u64) as usize,
+            limit: request["limit"].as_u64().unwrap_or(100).clamp(1, 500) as usize,
+        },
+        "set" => {
+            let value = request["value"]
+                .as_f64()
+                .filter(|n| n.is_finite() && (*n as f32).is_finite())
+                .ok_or_else(|| invalid("value must be a finite float"))?;
+            let p = param()?;
+            if matches!(p, Param::Band(_)) {
+                return Err(invalid("Use an explicit band channel, such as band3.sat"));
+            }
+            Operation::Set(p, value as f32)
+        }
+        "turn" => {
+            let p = param()?;
+            if matches!(p, Param::Band(_)) {
+                return Err(invalid("Use an explicit band channel, such as band3.sat"));
+            }
+            Operation::Adjust(p, integer("ticks", -1000, 1000)? as i32)
+        }
+        "action" => {
+            let name = text("action")?;
+            let action = commands::Action::parse(name)
+                .or_else(|| match parse_action(name)? {
+                    Action::Key(k, m) => shortcut_action(k, m),
+                    Action::Mixer(c) => Some(commands::Action::Mixer(c)),
+                    Action::ToggleMono => Some(commands::Action::ToggleMono),
+                    Action::Named(a) => Some(a),
+                    Action::Hold(_) => None,
+                })
+                .ok_or_else(|| {
+                    invalid("Unknown action; use capabilities to list supported actions")
+                })?;
+            Operation::Action(action)
+        }
+        "open" => Operation::Open(match (request["id"].as_i64(), request["name"].as_str()) {
+            (Some(id), _) => PhotoTarget::Id(id),
+            (None, Some(name)) => PhotoTarget::Name(name.into()),
+            _ => return Err(invalid("open requires id or name")),
+        }),
+        "search" => Operation::Search(text("text")?.into()),
+        "module" => Operation::Module(match text("module")? {
+            "develop" => true,
+            "library" => false,
+            _ => return Err(invalid("module must be develop or library")),
+        }),
+        "photo" => {
+            let step = integer("step", -1, 1)?;
+            if step == 0 {
+                return Err(invalid("step must be -1 or 1"));
+            }
+            Operation::Navigate(step as i32)
+        }
+        "save" => Operation::Save,
+        "export" | "preview" => {
+            let preview = text("cmd")? == "preview";
+            let max_edge = match request.get("max_edge") {
+                Some(_) => integer("max_edge", 1, 16384)? as u32,
+                None => {
+                    if preview {
+                        1600
+                    } else {
+                        0
+                    }
+                }
+            };
+            Operation::Output {
+                path: text("path")?.into(),
+                max_edge,
+            }
+        }
+        "job" => Operation::Job(integer("job_id", 1, i64::MAX)? as u64),
+        // Legacy device-level commands remain an adapter. Explicit targets
+        // belong to semantic commands, never to mutable device mappings.
+        "cc" | "note" if request.get("target").is_some() => {
+            return Err(invalid("Use set/turn/action for explicit targets"));
+        }
+        "cc" => {
+            return Ok(vec![Msg::Cc(
+                integer("cc", 0, 127)? as u8,
+                integer("value", 0, 127)? as u8,
+            )]);
+        }
         "note" => {
-            let note = midi("note")?;
-            match request["press"].as_str().unwrap_or("click") {
+            let note = integer("note", 0, 127)? as u8;
+            return Ok(match request["press"].as_str().unwrap_or("click") {
                 "click" => vec![Msg::Note(note, true), Msg::Note(note, false)],
                 "down" => vec![Msg::Note(note, true)],
                 "up" => vec![Msg::Note(note, false)],
-                other => return Err(format!("\"press\" is click, down or up, not \"{other}\"")),
-            }
+                _ => return Err(invalid("press must be click, down or up")),
+            });
         }
-        "turn" => {
-            let ticks = number("ticks")?;
-            if ticks.abs() > 1000. {
-                return Err("\"ticks\" must be within 1000".into());
-            }
-            vec![Msg::Turn(param()?, ticks as i32)]
-        }
-        "set" => vec![Msg::Set(param()?, number("value")? as f32)],
-        "action" => {
-            let name = text("action")?;
-            match parse_action(name) {
-                Some(Action::Hold(_)) => return Err("a held modifier is not an action".into()),
-                Some(action) => vec![Msg::Action(action)],
-                None => return Err(format!("unknown action \"{name}\"")),
-            }
-        }
-        "open" => {
-            let target = match (request["id"].as_i64(), request["name"].as_str()) {
-                (Some(id), _) => Target::Id(id),
-                (None, Some(name)) => Target::Name(name.into()),
-                _ => return Err("\"name\" or \"id\" is missing".into()),
-            };
-            vec![Msg::Job(Job::Open(target))]
-        }
-        "search" => vec![Msg::Job(Job::Search(text("text")?.into()))],
-        "module" => match text("module")? {
-            "develop" => vec![Msg::Job(Job::Module(true))],
-            "library" => vec![Msg::Job(Job::Module(false))],
-            other => return Err(format!("\"module\" is develop or library, not \"{other}\"")),
-        },
-        "photo" => match number("step")? as i32 {
-            step @ (-1 | 1) => vec![Msg::Photo(step)],
-            _ => return Err("\"step\" is -1 or 1".into()),
-        },
-        other => return Err(format!("unknown command \"{other}\"")),
-    })
+        _ => return Err(invalid("Unknown command")),
+    };
+    Ok(vec![Msg::Command(Command { operation, target })])
 }
 
 fn handle(
@@ -158,297 +180,376 @@ fn handle(
     token: &str,
     tx: &Sender<Msg>,
     ctx: &egui::Context,
-    shared: &Shared,
-) -> Result<Value, String> {
-    let request: Value = serde_json::from_str(line).map_err(|e| format!("not JSON: {e}"))?;
+    stop: &Arc<AtomicBool>,
+    timeout: Duration,
+) -> commands::Result<Value> {
+    let request: Value = serde_json::from_str(line).map_err(|e| invalid(e.to_string()))?;
     if request["token"].as_str() != Some(token) {
-        return Err("wrong token; read it from control.json".into());
+        return Err(Error::new("unauthorized", "Wrong token; read control.json"));
+    }
+    if stop.load(Ordering::SeqCst) {
+        return Err(Error::new("disabled", "External control is disabled"));
     }
     let messages = command(&request)?;
-    for message in messages {
-        tx.send(message).map_err(|_| "RAWmakase is closing")?;
-    }
-    let ticket = shared.ticket();
+    let (reply, rx) = mpsc::sync_channel(1);
+    let phase = Arc::new(AtomicU8::new(0));
+    let queued = Request {
+        messages,
+        reply,
+        phase: phase.clone(),
+        deadline: Instant::now() + timeout,
+        stop: stop.clone(),
+    };
+    tx.try_send(Msg::Request(queued)).map_err(|e| match e {
+        mpsc::TrySendError::Full(_) => Error::new("busy", "The command queue is full"),
+        mpsc::TrySendError::Disconnected(_) => Error::new("closed", "RAWmakase is closing"),
+    })?;
     ctx.request_repaint();
-    shared.wait(ticket, ANSWER).ok_or_else(|| {
-        "RAWmakase drew no frame in time (is its window minimized?); the command is queued".into()
-    })
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(_) => {
+            if phase
+                .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+                || phase.load(Ordering::SeqCst) == 2
+            {
+                Err(Error::new(
+                    "cancelled",
+                    "The command did not start in time and was cancelled",
+                ))
+            } else {
+                Err(Error::new(
+                    "outcome_unknown",
+                    "Execution started but the reply timed out; inspect state before retrying",
+                ))
+            }
+        }
+    }
 }
-
 fn serve(
     mut stream: TcpStream,
     token: &str,
     tx: &Sender<Msg>,
     ctx: &egui::Context,
-    shared: &Shared,
+    stop: &Arc<AtomicBool>,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let mut line = String::new();
-    let read = match stream.try_clone() {
-        Ok(reader) => BufReader::new(reader.take(MAX_REQUEST)).read_line(&mut line),
-        Err(e) => Err(e),
-    };
-    let reply = match read {
+    let read = stream
+        .try_clone()
+        .and_then(|s| BufReader::new(s.take(MAX_REQUEST + 1)).read_line(&mut line));
+    let result = match read {
         Ok(0) => return,
-        Ok(_) => match handle(&line, token, tx, ctx, shared) {
-            Ok(state) => json!({"ok": true, "state": state}),
-            Err(error) => json!({"ok": false, "error": error}),
-        },
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
+        Ok(_) if line.len() as u64 > MAX_REQUEST || !line.ends_with('\n') => Err(invalid(
+            "Request must be a newline-terminated JSON object of at most 64 KiB",
+        )),
+        Ok(_) => handle(&line, token, tx, ctx, stop, ANSWER),
+        Err(e) => Err(invalid(e.to_string())),
     };
+    let id = serde_json::from_str::<Value>(&line)
+        .ok()
+        .and_then(|v| v.get("request_id").cloned());
+    let mut reply = match result {
+        Ok(mut body) => {
+            body["ok"] = true.into();
+            body
+        }
+        Err(error) => json!({"ok":false,"error":error.message,"code":error.code}),
+    };
+    reply["protocol"] = commands::PROTOCOL.into();
+    reply["request_id"] = id.into();
     let _ = writeln!(stream, "{reply}");
 }
-
 fn spawn(
     listener: TcpListener,
     token: String,
     tx: Sender<Msg>,
     ctx: egui::Context,
-    shared: std::sync::Arc<Shared>,
-    stop: std::sync::Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("control-socket".into())
         .spawn(move || {
+            let clients = Arc::new(AtomicUsize::new(0));
             for stream in listener.incoming().flatten() {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
-                let (token, tx, ctx, shared) =
-                    (token.clone(), tx.clone(), ctx.clone(), shared.clone());
-                // A client that stalls must not hold up the next.
-                let _ = std::thread::Builder::new()
+                if clients.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
+                    clients.fetch_sub(1, Ordering::SeqCst);
+                    continue;
+                }
+                let (token, tx, ctx, stop, clients) = (
+                    token.clone(),
+                    tx.clone(),
+                    ctx.clone(),
+                    stop.clone(),
+                    clients.clone(),
+                );
+                let count = clients.clone();
+                let spawned = std::thread::Builder::new()
                     .name("control-request".into())
-                    .spawn(move || serve(stream, &token, &tx, &ctx, &shared));
+                    .spawn(move || {
+                        serve(stream, &token, &tx, &ctx, &stop);
+                        clients.fetch_sub(1, Ordering::SeqCst);
+                    });
+                if spawned.is_err() {
+                    count.fetch_sub(1, Ordering::SeqCst);
+                }
             }
         })
         .map(drop)
 }
-
-/// A token nobody can guess: the standard library's hasher is seeded by the OS.
-fn new_token() -> String {
-    use std::hash::{BuildHasher, Hasher, RandomState};
-    (0..4)
-        .map(|_| format!("{:016x}", RandomState::new().build_hasher().finish()))
-        .collect()
+fn new_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
-
-/// Writes where the socket is, for `rawmakase-ctl`; only its owner may read it.
-fn write_connection(port: u16, token: &str) -> std::io::Result<()> {
-    let dir = crate::storage::data_dir();
-    std::fs::create_dir_all(&dir)?;
-    let tmp = dir.join("control.json.tmp");
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+fn write_connection(path: &std::path::Path, port: u16, token: &str) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Missing data directory"))?;
+    std::fs::create_dir_all(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let body = json!({"port": port, "token": token, "pid": std::process::id()});
-    options.open(&tmp)?.write_all(body.to_string().as_bytes())?;
-    std::fs::rename(tmp, dir.join("control.json"))
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    write!(
+        file,
+        "{}",
+        json!({"protocol":commands::PROTOCOL,"port":port,"token":token,"pid":std::process::id()})
+    )?;
+    file.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
-
-/// A listening socket. Dropping it stops listening and takes `control.json`
-/// away, if it is still this socket's.
 pub(super) struct Handle {
-    stop: std::sync::Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
     port: u16,
     token: String,
+    path: std::path::PathBuf,
 }
 impl Handle {
-    pub(super) fn port(&self) -> u16 {
+    pub fn port(&self) -> u16 {
         self.port
     }
 }
 impl Drop for Handle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // The thread is waiting in accept; a connection wakes it to see the flag.
         let _ = TcpStream::connect_timeout(
             &(Ipv4Addr::LOCALHOST, self.port).into(),
-            Duration::from_secs(1),
+            Duration::from_millis(100),
         );
-        let file = crate::storage::data_dir().join("control.json");
-        let ours = std::fs::read_to_string(&file)
+        let ours = std::fs::read_to_string(&self.path)
             .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .is_some_and(|json| json["token"].as_str() == Some(self.token.as_str()));
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .is_some_and(|v| v["token"].as_str() == Some(&self.token));
         if ours {
-            let _ = std::fs::remove_file(file);
+            let _ = std::fs::remove_file(&self.path);
         }
     }
 }
-
-/// Starts listening on a thread of its own. Without a socket nothing is ever sent.
-pub(super) fn start(
+pub(super) fn start(tx: Sender<Msg>, ctx: egui::Context) -> Option<Handle> {
+    start_at(tx, ctx, crate::storage::data_dir().join("control.json"))
+        .map_err(|e| eprintln!("Control socket: {e}"))
+        .ok()
+}
+fn start_at(
     tx: Sender<Msg>,
     ctx: egui::Context,
-    shared: std::sync::Arc<Shared>,
-) -> Option<Handle> {
-    let token = new_token();
-    let stop = std::sync::Arc::new(AtomicBool::new(false));
-    let started = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|listener| {
-        let port = listener.local_addr()?.port();
-        write_connection(port, &token)?;
-        spawn(listener, token.clone(), tx, ctx, shared, stop.clone())?;
-        Ok(Handle { stop, port, token })
-    });
-    started.map_err(|e| eprintln!("Control socket: {e}")).ok()
+    path: std::path::PathBuf,
+) -> std::io::Result<Handle> {
+    let token = new_token()?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+    let port = listener.local_addr()?.port();
+    write_connection(&path, port, &token)?;
+    let handle = Handle {
+        stop: stop.clone(),
+        port,
+        token: token.clone(),
+        path,
+    };
+    spawn(listener, token, tx, ctx, stop)?;
+    Ok(handle)
+}
+
+#[cfg(test)]
+pub(super) fn test_request(
+    messages: Vec<Msg>,
+) -> (Request, mpsc::Receiver<commands::Result<Value>>) {
+    let (reply, rx) = mpsc::sync_channel(1);
+    (
+        Request {
+            messages,
+            reply,
+            phase: Arc::default(),
+            deadline: Instant::now() + Duration::from_secs(30),
+            stop: Arc::default(),
+        },
+        rx,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, mpsc};
-
-    fn parsed(text: &str) -> Result<Vec<Msg>, String> {
-        command(&serde_json::from_str(text).unwrap())
-    }
-
     #[test]
-    fn requests_become_the_messages_the_device_sends() {
-        let note = parsed(r#"{"cmd":"note","note":87}"#).unwrap();
-        assert!(matches!(
-            note[..],
-            [Msg::Note(87, true), Msg::Note(87, false)]
-        ));
-        let held = parsed(r#"{"cmd":"note","note":66,"press":"down"}"#).unwrap();
-        assert!(matches!(held[..], [Msg::Note(66, true)]));
-        let cc = parsed(r#"{"cmd":"cc","cc":33,"value":127}"#).unwrap();
-        assert!(matches!(cc[..], [Msg::Cc(33, 127)]));
-        let turn = parsed(r#"{"cmd":"turn","param":"Exposure","ticks":-5}"#).unwrap();
-        assert!(matches!(turn[..], [Msg::Turn(Param::Exposure, -5)]));
-        let set = parsed(r#"{"cmd":"set","param":"band3.sat","value":20}"#).unwrap();
-        assert!(matches!(set[..], [Msg::Set(Param::Hsl(2, 1), v)] if v == 20.));
-        let key = parsed(r#"{"cmd":"action","action":"cmd+shift+z"}"#).unwrap();
-        assert!(matches!(key[..], [Msg::Action(Action::Key(..))]));
-        let open = parsed(r#"{"cmd":"open","name":"DSCF0042"}"#).unwrap();
-        assert!(matches!(&open[..], [Msg::Job(Job::Open(Target::Name(n)))] if n == "DSCF0042"));
-        let open = parsed(r#"{"cmd":"open","id":7}"#).unwrap();
-        assert!(matches!(open[..], [Msg::Job(Job::Open(Target::Id(7)))]));
-        let search = parsed(r#"{"cmd":"search","text":""}"#).unwrap();
-        assert!(matches!(&search[..], [Msg::Job(Job::Search(t))] if t.is_empty()));
-        let module = parsed(r#"{"cmd":"module","module":"develop"}"#).unwrap();
-        assert!(matches!(module[..], [Msg::Job(Job::Module(true))]));
-        let photo = parsed(r#"{"cmd":"photo","step":-1}"#).unwrap();
-        assert!(matches!(photo[..], [Msg::Photo(-1)]));
-    }
-
-    #[test]
-    fn bad_requests_say_what_is_wrong() {
-        for (text, wanted) in [
-            (r#"{"cmd":"cc","cc":200,"value":1}"#, "0 to 127"),
-            (
-                r#"{"cmd":"turn","param":"nope","ticks":1}"#,
-                "unknown slider",
-            ),
-            (
-                r#"{"cmd":"turn","param":"tint","ticks":1e9}"#,
-                "within 1000",
-            ),
-            (r#"{"cmd":"set","param":"tint"}"#, "\"value\""),
-            (r#"{"cmd":"action","action":"hold:shift"}"#, "not an action"),
-            (r#"{"cmd":"action","action":"nonsense"}"#, "unknown action"),
-            (r#"{"cmd":"photo","step":5}"#, "-1 or 1"),
-            (r#"{"cmd":"open"}"#, "\"name\" or \"id\""),
-            (r#"{"cmd":"module","module":"grid"}"#, "develop or library"),
-            (r#"{"cmd":"dance"}"#, "unknown command"),
-            (r#"{}"#, "\"cmd\""),
+    fn rejects_invalid_numbers_scopes_and_versions() {
+        for value in [
+            json!({"cmd":"set","param":"exposure","value":1e100}),
+            json!({"cmd":"turn","param":"exposure","ticks":1.5}),
+            json!({"cmd":"cc","cc":1.5,"value":1}),
+            json!({"cmd":"state","protocol":2}),
+            json!({"cmd":"set","param":"band1","value":1}),
+            json!({"cmd":"state","target":{"typo":1}}),
         ] {
-            let error = parsed(text).err().unwrap_or_default();
-            assert!(error.contains(wanted), "{text}: {error}");
+            assert!(command(&value).is_err(), "{value}");
         }
     }
-
     #[test]
-    fn a_reply_waits_for_the_frame_that_read_the_command() {
-        let shared = Arc::new(Shared::default());
-        let ticket = shared.ticket();
-        assert!(shared.wait(ticket, Duration::from_millis(10)).is_none());
-        shared.publish(0, || panic!("nothing to answer"));
-        let waiting = {
-            let shared = shared.clone();
-            std::thread::spawn(move || shared.wait(ticket, Duration::from_secs(5)))
+    fn timeout_cancels_queued_commands() {
+        let (tx, rx) = mpsc::sync_channel(2);
+        let result = handle(
+            r#"{"token":"t","cmd":"set","param":"exposure","value":1}"#,
+            "t",
+            &tx,
+            &egui::Context::default(),
+            &Arc::default(),
+            Duration::from_millis(5),
+        );
+        assert_eq!(result.unwrap_err().code, "cancelled");
+        let Msg::Request(request) = rx.recv().unwrap() else {
+            panic!()
         };
-        shared.publish(ticket, || json!({"mode": "develop"}));
-        assert_eq!(waiting.join().unwrap(), Some(json!({"mode": "develop"})));
-        // Later tickets are answered by later frames only.
-        let next = shared.ticket();
-        assert!(shared.wait(next, Duration::from_millis(10)).is_none());
+        assert!(!request.begin());
     }
-
     #[test]
-    fn dropping_the_handle_stops_listening() {
-        let (tx, _rx) = mpsc::channel();
-        let stop = Arc::new(AtomicBool::new(false));
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        spawn(
-            listener,
-            "t".into(),
-            tx,
-            egui::Context::default(),
-            Arc::default(),
-            stop.clone(),
-        )
-        .unwrap();
-        assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_ok());
-        // Its token is not in any control.json, so no file is touched.
-        drop(Handle {
-            stop,
-            port,
-            token: "not in any file".into(),
-        });
-        let closed = (0..50).any(|_| {
-            std::thread::sleep(Duration::from_millis(20));
-            TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err()
-        });
-        assert!(closed, "the port stayed open");
-    }
-
-    #[test]
-    fn the_socket_checks_the_token_and_answers_over_tcp() {
-        let (tx, rx) = mpsc::channel();
-        let shared = Arc::new(Shared::default());
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        spawn(
-            listener,
-            "secret".into(),
-            tx,
-            egui::Context::default(),
-            shared.clone(),
-            Default::default(),
-        )
-        .unwrap();
-        // A stand-in for the app's frames.
-        let frames = {
-            let shared = shared.clone();
-            std::thread::spawn(move || {
-                let mut got = Vec::new();
-                while got.is_empty() {
-                    let consumed = shared.sent();
-                    while let Ok(msg) = rx.try_recv() {
-                        got.push(msg);
-                    }
-                    shared.publish(consumed, || json!({"mode": "develop"}));
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                got
+    fn clients_receive_only_their_own_results() {
+        let (tx, rx) = mpsc::sync_channel(4);
+        let clients: Vec<_> = (1..=2)
+            .map(|id| {
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    handle(
+                        &json!({"token":"t","cmd":"open","id":id}).to_string(),
+                        "t",
+                        &tx,
+                        &egui::Context::default(),
+                        &Arc::default(),
+                        Duration::from_secs(5),
+                    )
+                    .unwrap()
+                })
             })
-        };
-        let ask = |request: Value| -> Value {
+            .collect();
+        for _ in 0..2 {
+            let Msg::Request(request) = rx.recv().unwrap() else {
+                panic!()
+            };
+            assert!(request.begin());
+            let Msg::Command(Command {
+                operation: Operation::Open(PhotoTarget::Id(id)),
+                ..
+            }) = &request.messages[0]
+            else {
+                panic!()
+            };
+            request.reply.send(Ok(json!({"id":id}))).unwrap();
+        }
+        for (index, client) in clients.into_iter().enumerate() {
+            assert_eq!(client.join().unwrap()["id"], index + 1);
+        }
+    }
+    #[test]
+    fn real_tcp_reply_contains_the_executed_requests_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::sync_channel(8);
+        let ctx = egui::Context::default();
+        let mut editor =
+            crate::app::Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        editor.surface = super::super::Surface::new(super::super::Config::defaults(), rx);
+        let handle = start_at(tx, ctx.clone(), dir.path().join("control.json")).unwrap();
+        let port = handle.port;
+        let token = handle.token.clone();
+        let client = std::thread::spawn(move || {
             let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-            writeln!(stream, "{request}").unwrap();
-            let mut reply = String::new();
-            BufReader::new(stream).read_line(&mut reply).unwrap();
-            serde_json::from_str(&reply).unwrap()
-        };
-        let denied = ask(json!({"token": "guess", "cmd": "state"}));
-        assert_eq!(denied["ok"], false);
-        let reply = ask(json!({"token": "secret", "cmd": "turn", "param": "tint", "ticks": 2}));
-        assert_eq!(reply, json!({"ok": true, "state": {"mode": "develop"}}));
-        let got = frames.join().unwrap();
-        assert!(matches!(got[..], [Msg::Turn(Param::Tint, 2)]));
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            writeln!(
+                stream,
+                "{}",
+                json!({"protocol":1,"request_id":"state-1","token":token,"cmd":"state"})
+            )
+            .unwrap();
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).unwrap();
+            serde_json::from_str::<Value>(&line).unwrap()
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !client.is_finished() {
+            editor.control_commands(&ctx);
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let reply = client.join().unwrap();
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["protocol"], 1);
+        assert_eq!(reply["request_id"], "state-1");
+        assert_eq!(reply["state"], editor.command_state());
+        drop(handle);
+    }
+    #[test]
+    fn disable_and_backpressure_prevent_execution() {
+        let (request, _) = test_request(vec![]);
+        request.stop.store(true, Ordering::SeqCst);
+        assert!(!request.begin());
+        let (tx, _rx) = mpsc::sync_channel(1);
+        tx.try_send(Msg::Command(Command::new(Operation::State)))
+            .unwrap();
+        let result = handle(
+            r#"{"token":"t","cmd":"state"}"#,
+            "t",
+            &tx,
+            &egui::Context::default(),
+            &Arc::default(),
+            Duration::from_millis(5),
+        );
+        assert_eq!(result.unwrap_err().code, "busy");
+    }
+
+    #[test]
+    fn token_disable_and_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.json");
+        let (tx, rx) = mpsc::sync_channel(2);
+        let handle = start_at(tx.clone(), egui::Context::default(), path.clone()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let denied = super::handle(
+            r#"{"token":"wrong","cmd":"state"}"#,
+            &handle.token,
+            &tx,
+            &egui::Context::default(),
+            &handle.stop,
+            Duration::from_millis(5),
+        );
+        assert_eq!(denied.unwrap_err().code, "unauthorized");
+        assert!(rx.try_recv().is_err());
+        let stop = handle.stop.clone();
+        drop(handle);
+        assert!(!path.exists());
+        assert!(stop.load(Ordering::SeqCst));
     }
 }

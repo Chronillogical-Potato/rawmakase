@@ -146,25 +146,30 @@ impl Editor {
     }
     /// Waits while Sync writes edits, which Undo could otherwise race.
     pub(super) fn undo(&mut self) {
-        if !self.activity.is_syncing() {
-            self.step(Direction::Undo);
-            // A Library command (a Sync, a metadata read) may have changed the
-            // reference photo's edit.
-            self.load_reference();
-        }
+        self.command_history(false);
     }
     pub(super) fn redo(&mut self) {
-        if !self.activity.is_syncing() {
-            self.step(Direction::Redo);
-            self.load_reference();
+        self.command_history(true);
+    }
+    /// Shared by UI shortcuts and external commands; false preserves a failed step.
+    pub(super) fn command_history(&mut self, redo: bool) -> bool {
+        if self.activity.is_syncing() {
+            return false;
         }
+        let applied = self.step(if redo {
+            Direction::Redo
+        } else {
+            Direction::Undo
+        });
+        self.load_reference();
+        applied
     }
     /// Reverses the latest command, or makes the latest reversed one again.
     /// What the Library panels hold is saved first, so it is a command
     /// before the one to reverse is picked.
-    fn step(&mut self, direction: Direction) {
+    fn step(&mut self, direction: Direction) -> bool {
         if !self.commit_library_drafts() {
-            return;
+            return false;
         }
         // A drag still held is the latest change, so it is what Undo takes back.
         self.finish_gesture();
@@ -174,7 +179,7 @@ impl Editor {
             Direction::Redo => log.redo.pop(),
         };
         let Some(command) = command else {
-            return;
+            return false;
         };
         let applied = self.apply(&command, direction);
         let log = &mut self.undo_log;
@@ -182,6 +187,7 @@ impl Editor {
             (Direction::Undo, true) | (Direction::Redo, false) => log.redo.push(command),
             (Direction::Undo, false) | (Direction::Redo, true) => log.undo.push_back(command),
         }
+        applied
     }
     /// Returns to where `command` was made and sets its state from before
     /// (undo) or after (redo). False when nothing could be written, so the

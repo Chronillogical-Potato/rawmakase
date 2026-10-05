@@ -1,7 +1,7 @@
 //! Preferences > Automation: what each Loupedeck+ dial and button does, and
 //! whether `rawmakase-ctl` may connect. Changes apply at once and are saved
 //! to `midi.json` (see [`Config::save`]).
-use super::{Config, Last, Param, parse_action};
+use super::{Config, Last, Param, supported_action as parse_action};
 use crate::app::{
     Editor,
     inspector::BANDS,
@@ -232,7 +232,7 @@ impl Editor {
             (status.connected.clone(), status.last)
         };
 
-        group(ui, "Control surface");
+        group(ui, "MIDI control surface · Loupedeck+ defaults");
         form_row(ui, "Device name", |ui| {
             ui.add(egui::TextEdit::singleline(&mut config.port).desired_width(160.));
             small(ui, "Part of its MIDI port name");
@@ -264,9 +264,9 @@ impl Editor {
         });
         gap(ui);
 
-        group(ui, "Command line");
+        group(ui, "External control");
         form_row(ui, "Control socket", |ui| {
-            ui.checkbox(&mut config.socket, "Let rawmakase-ctl connect");
+            ui.checkbox(&mut config.socket, "Allow local scripts and applications");
         });
         form_row(ui, "Status", |ui| {
             let text = match &self.surface.socket {
@@ -285,10 +285,24 @@ impl Editor {
 
         group(ui, "Dials and faders");
         let choices = DialUse::all();
-        for (name, cc) in DIALS {
+        let mut dials: Vec<(String, u8)> = DIALS.iter().map(|(n, id)| ((*n).into(), *id)).collect();
+        let mut extra: Vec<u8> = config
+            .dials
+            .keys()
+            .copied()
+            .chain(match last {
+                Some(Last::Dial(n, _)) => Some(n),
+                _ => None,
+            })
+            .filter(|id| !DIALS.iter().any(|(_, n)| n == id))
+            .collect();
+        extra.sort_unstable();
+        extra.dedup();
+        dials.extend(extra.into_iter().map(|id| (format!("CC {id}"), id)));
+        for (name, cc) in dials {
             let now = dial_use(&config, cc);
             let mut choice = now;
-            form_row(ui, name, |ui| {
+            form_row(ui, &name, |ui| {
                 egui::ComboBox::from_id_salt(("automation-dial", cc))
                     .width(210.)
                     .selected_text(now.label())
@@ -306,7 +320,22 @@ impl Editor {
         gap(ui);
 
         group(ui, "Buttons");
-        for (name, note) in BUTTONS {
+        let mut buttons: Vec<(String, u8)> =
+            BUTTONS.iter().map(|(n, id)| ((*n).into(), *id)).collect();
+        let mut extra: Vec<u8> = config
+            .buttons
+            .keys()
+            .copied()
+            .chain(match last {
+                Some(Last::Button(n)) => Some(n),
+                _ => None,
+            })
+            .filter(|id| !BUTTONS.iter().any(|(_, n)| n == id))
+            .collect();
+        extra.sort_unstable();
+        extra.dedup();
+        buttons.extend(extra.into_iter().map(|id| (format!("Note {id}"), id)));
+        for (name, note) in buttons {
             let current = config.buttons.get(&note).copied();
             let preset = PRESETS
                 .iter()
@@ -317,7 +346,7 @@ impl Editor {
                 .map(|(label, _)| *label);
             let mut picked = None;
             let mut typed = None;
-            form_row(ui, name, |ui| {
+            form_row(ui, &name, |ui| {
                 egui::ComboBox::from_id_salt(("automation-button", note))
                     .width(170.)
                     .selected_text(preset.unwrap_or("Custom"))
@@ -338,7 +367,7 @@ impl Editor {
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .desired_width(100.)
-                        .hint_text("key")
+                        .hint_text("action")
                         .text_color_opt((!valid).then(|| egui::Color32::from_rgb(230, 100, 90))),
                 );
                 if response.changed() {
@@ -369,7 +398,7 @@ impl Editor {
         gap(ui);
         hint(
             ui,
-            "A button presses the key of its action, with any held Shift, Command or Alt button added. Type a key such as cmd+shift+z, hold:shift or toggle:bw to set one that is not in the list.",
+            "Buttons run application actions. Enter a name such as undo, pick or treatment:bw, or a supported shortcut such as cmd+shift+z. Dials follow the selected mask while Masking is active.",
         );
 
         if config != self.surface.config {

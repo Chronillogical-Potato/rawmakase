@@ -189,3 +189,24 @@ smallest pyramid level at or above the physical viewport size on every change;
 at 100% a reduced region from the pyramid is published first (as a draft stage),
 then the full-resolution region. The single-slot mailbox and cancellation keep
 continuous editing on the latest change.
+
+## Live application control
+
+`app::commands` defines transport-independent application operations, target
+checks, parameter units and explicit results. `Editor` executes each mutation
+inside its generation-bound edit transaction, then answers that request.
+`app::control_surface` translates MIDI and legacy device messages; its socket
+adapter authenticates, bounds and expires requests, each with a separate reply
+channel. These adapters never write catalog edits or render pixels themselves.
+Headless test editors do not start listeners or touch connection/configuration
+files; only desktop initialization starts them.
+
+External parameter commands default to global scope. MIDI may resolve the active
+mask; explicit mask commands require generation and revision guards because
+recipe masks have no persistent IDs. Output jobs capture the photo and recipe
+revision and call `export::job`; successful queueing is distinct from published
+output. The protocol and CLI are documented in [External control](automation.md).
+
+The built-in `rawmakase control` subcommand and optional `tools/rawmakase-ctl`
+client share source and the data-directory policy in `storage::paths`. The CLI
+performs transport and polling only, without creating an Editor or GUI context.

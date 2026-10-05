@@ -1,6 +1,8 @@
 // Release builds on Windows open no console window beside the app.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use anyhow::Result;
+#[path = "../tools/rawmakase-ctl/src/client.rs"]
+mod control_client;
 use clap::{Parser, Subcommand};
 use rawmakase::{
     develop::{self, Recipe},
@@ -18,6 +20,8 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Control the running desktop app (enable external control in Preferences first).
+    Control(control_client::Cli),
     /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
     ImportProfiles {
         #[arg(required = true, num_args = 1..)]
@@ -137,6 +141,7 @@ fn main() -> Result<()> {
         .ok();
     let a = Args::parse_from(&launch.arguments);
     match a.command {
+        Some(Command::Control(cli)) => control_client::run(cli).map_err(anyhow::Error::msg)?,
         Some(Command::ImportLensProfiles { files }) => {
             for p in rawmakase::lens::lcp::import_files(&files)? {
                 println!("Imported {}", p.display());

@@ -3040,6 +3040,7 @@ dependencies = [
  "fastframe-theme",
  "fastframe-update",
  "flate2",
+ "getrandom 0.4.3",
  "image",
  "md-5",
  "memmap2",
