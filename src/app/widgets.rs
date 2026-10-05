@@ -549,6 +549,7 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
 pub(super) fn parametric_curve_ui(
     ui: &mut egui::Ui,
     effects: &mut crate::develop::effects::Effects,
+    model: crate::develop::parametric::ParametricModel,
     histogram: &[[u32; 256]; 3],
     targeted: Option<usize>,
 ) {
@@ -589,12 +590,13 @@ pub(super) fn parametric_curve_ui(
     {
         effects.parametric[i] = 0.;
     }
-    let pts: Vec<_> = (0..=128)
-        .map(|i| {
-            let x = i as f32 / 128.;
+    let pts: Vec<_> = crate::develop::parametric::samples(model, effects, 128)
+        .into_iter()
+        .enumerate()
+        .map(|(i, y)| {
             Pos2::new(
-                rect.left() + x * rect.width(),
-                rect.bottom() - effects.parametric(x) * rect.height(),
+                rect.left() + i as f32 / 128. * rect.width(),
+                rect.bottom() - y * rect.height(),
             )
         })
         .collect();

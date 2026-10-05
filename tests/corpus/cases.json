@@ -577,6 +577,124 @@
    }
   },
   {
+   "name": "parametric-shadows-100",
+   "settings": {
+    "ParametricShadows": "-100"
+   }
+  },
+  {
+   "name": "parametric-shadows+100",
+   "settings": {
+    "ParametricShadows": "+100"
+   }
+  },
+  {
+   "name": "parametric-darks-100",
+   "settings": {
+    "ParametricDarks": "-100"
+   }
+  },
+  {
+   "name": "parametric-darks+100",
+   "settings": {
+    "ParametricDarks": "+100"
+   }
+  },
+  {
+   "name": "parametric-lights-100",
+   "settings": {
+    "ParametricLights": "-100"
+   }
+  },
+  {
+   "name": "parametric-lights+100",
+   "settings": {
+    "ParametricLights": "+100"
+   }
+  },
+  {
+   "name": "parametric-highlights-100",
+   "settings": {
+    "ParametricHighlights": "-100"
+   }
+  },
+  {
+   "name": "parametric-highlights+100",
+   "settings": {
+    "ParametricHighlights": "+100"
+   }
+  },
+  {
+   "name": "parametric-shadows+50-splits-10-50-75",
+   "settings": {
+    "ParametricShadows": "+50",
+    "ParametricShadowSplit": "10",
+    "ParametricMidtoneSplit": "50",
+    "ParametricHighlightSplit": "75"
+   }
+  },
+  {
+   "name": "parametric-darks-50-splits-25-65-75",
+   "settings": {
+    "ParametricDarks": "-50",
+    "ParametricShadowSplit": "25",
+    "ParametricMidtoneSplit": "65",
+    "ParametricHighlightSplit": "75"
+   }
+  },
+  {
+   "name": "parametric-lights+50-splits-25-35-75",
+   "settings": {
+    "ParametricLights": "+50",
+    "ParametricShadowSplit": "25",
+    "ParametricMidtoneSplit": "35",
+    "ParametricHighlightSplit": "75"
+   }
+  },
+  {
+   "name": "parametric-highlights-50-splits-25-50-90",
+   "settings": {
+    "ParametricHighlights": "-50",
+    "ParametricShadowSplit": "25",
+    "ParametricMidtoneSplit": "50",
+    "ParametricHighlightSplit": "90"
+   }
+  },
+  {
+   "name": "parametric-s-curve",
+   "settings": {
+    "ParametricShadows": "-30",
+    "ParametricDarks": "-40",
+    "ParametricLights": "+40",
+    "ParametricHighlights": "+30"
+   }
+  },
+  {
+   "name": "parametric-fade",
+   "settings": {
+    "ParametricShadows": "+60",
+    "ParametricDarks": "+20",
+    "ParametricLights": "-20",
+    "ParametricHighlights": "-60"
+   }
+  },
+  {
+   "name": "parametric-all+50",
+   "settings": {
+    "ParametricShadows": "+50",
+    "ParametricDarks": "+50",
+    "ParametricLights": "+50",
+    "ParametricHighlights": "+50"
+   }
+  },
+  {
+   "name": "parametric-darks-50-lights+100",
+   "settings": {
+    "ParametricDarks": "-50",
+    "ParametricLights": "+100"
+   }
+  },
+  {
    "name": "curve-s",
    "settings": {},
    "curves": {

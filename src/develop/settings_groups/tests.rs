@@ -54,6 +54,7 @@ fn everything_changed() -> Recipe {
         reference_curves: true,
         reference_calibration: true,
         reference_color: true,
+        parametric_model: crate::develop::parametric::ParametricModel::Measured,
         temperature: 4000.,
         tint: 12.,
         wb: [1.5, 1., 0.8],

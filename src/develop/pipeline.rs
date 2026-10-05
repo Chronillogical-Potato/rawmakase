@@ -484,6 +484,8 @@ struct CurveSet {
     /// The profile look's RGB table, at the recipe's Profile Amount.
     rgb_table: Option<crate::camera_profiles::RgbLook>,
     calibration: crate::develop::calibration::Calibration,
+    /// Engine 4's measured parametric curve, when the recipe uses it and a region is set.
+    parametric: Option<crate::develop::parametric::ParametricCurve>,
     master: CurveLut,
     channels: [CurveLut; 3],
 }
@@ -548,6 +550,15 @@ impl CurveSet {
                 r.effects.calibration,
                 r.effects.shadow_tint,
             ),
+            parametric: (basic_curves
+                && r.parametric_model == crate::develop::parametric::ParametricModel::Measured)
+                .then(|| {
+                    crate::develop::parametric::ParametricCurve::new(
+                        r.effects.parametric,
+                        r.effects.splits,
+                    )
+                })
+                .flatten(),
             master: CurveLut::new(&r.curve),
             channels: std::array::from_fn(|c| CurveLut::new(&r.effects.channels[c])),
         }
@@ -559,7 +570,12 @@ fn apply_reference_curves(
     lut: &CurveSet,
     local: Option<&LocalDelta>,
 ) -> [f32; 3] {
-    let p = curve_input(rgb, r, lut, local).map(|x| r.effects.parametric(x));
+    let p = curve_input(rgb, r, lut, local);
+    let p = match &lut.parametric {
+        Some(curve) => curve.apply(p),
+        // The original curve, the identity when no region is set.
+        None => p.map(|x| r.effects.parametric(x)),
+    };
     let lo = p.into_iter().fold(f32::INFINITY, f32::min);
     let hi = p.into_iter().fold(0f32, f32::max);
     let a = lut.master.evaluate(lo);

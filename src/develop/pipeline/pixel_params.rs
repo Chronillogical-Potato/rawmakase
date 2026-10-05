@@ -34,6 +34,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("PARAMETRIC_ON", 1),
     ("PARAMETRIC", 4),
     ("SPLITS", 3),
+    // The measured parametric curve's table, or -1 (see `parametric::ParametricCurve`).
+    ("PARAMETRIC_LUT", 1),
     ("MASTER", 1),
     ("REFINE_SATURATION", 1),
     ("CHANNELS", 3),
@@ -268,9 +270,18 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("BASIC", &[basic]);
     p.set("LEVELS", &[r.black_point, r.white_point, r.midtone]);
     let e = &r.effects;
-    p.set("PARAMETRIC_ON", &[(e.parametric != [0.; 4]) as u8 as f32]);
+    // The original per-channel curve runs in `level`, the measured one after it.
+    p.set(
+        "PARAMETRIC_ON",
+        &[(lut.parametric.is_none() && e.parametric != [0.; 4]) as u8 as f32],
+    );
     p.set("PARAMETRIC", &e.parametric);
     p.set("SPLITS", &e.splits);
+    let parametric = match &lut.parametric {
+        Some(c) => p.push(c.values().iter().copied()),
+        None => -1.,
+    };
+    p.set("PARAMETRIC_LUT", &[parametric]);
     let master = p.push(lut.master.values().iter().copied());
     p.set("MASTER", &[master]);
     p.set("REFINE_SATURATION", &[r.curve_saturation.clamp(0., 1.)]);
