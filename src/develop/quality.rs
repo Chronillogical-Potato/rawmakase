@@ -626,6 +626,10 @@ fn local_stage(
         spatial.shadows = 0.;
         spatial.highlights = 0.;
     }
+    // The measured positive Clarity is part of the map (clarity.rs).
+    if develop::clarity::measured(r) != 0. {
+        spatial.effects.clarity = 0.;
+    }
     let mut tonal = r.clone();
     if !measured {
         tonal.shadows = 0.;
@@ -641,8 +645,8 @@ fn local_stage(
     let mut cache = cache;
     if spatial.shadows != 0.
         || spatial.highlights != 0.
-        || r.effects.clarity != 0.
-        || r.effects.texture != 0.
+        || spatial.effects.clarity != 0.
+        || spatial.effects.texture != 0.
     {
         let (gain, key) = local_gain(im, &spatial, scale, cancel, cache.as_deref_mut())?;
         (toned.gain, toned.gain_key) = (Some(gain), key);
@@ -745,6 +749,9 @@ fn render_resident(
     let mut spatial = base.clone();
     spatial.shadows = 0.;
     spatial.highlights = 0.;
+    if develop::clarity::measured(&base) != 0. {
+        spatial.effects.clarity = 0.;
+    }
     let mut toned = Toned {
         image: source.clone(),
         scale,
@@ -753,8 +760,8 @@ fn render_resident(
         reduced: None,
     };
     let mut tones = None;
-    if r.effects.clarity != 0. || r.effects.texture != 0. {
-        let texture = r.effects.texture != 0.;
+    if spatial.effects.clarity != 0. || spatial.effects.texture != 0. {
+        let texture = spatial.effects.texture != 0.;
         let blur_key = BlurKey::new(source, &spatial, scale, texture);
         let Some(camera) = pixel_params(Source::from(source.as_ref()), &spatial) else {
             return Ok(None);

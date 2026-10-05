@@ -745,7 +745,9 @@ impl Editor {
             slider(ui, "Blacks", &mut r.blacks, -1. ..=1., 0.);
             subheading(ui, "Presence");
             slider(ui, "Texture", &mut r.effects.texture, -1. ..=1., 0.);
+            let previous_clarity = r.effects.clarity;
             slider(ui, "Clarity", &mut r.effects.clarity, -1. ..=1., 0.);
+            r.adopt_measured_clarity(previous_clarity);
             slider(ui, "Dehaze", &mut r.effects.dehaze, -1. ..=1., 0.);
             slider(ui, "Vibrance", &mut r.vibrance, -1. ..=1., 0.);
             slider(ui, "Saturation", &mut r.saturation, -1. ..=1., 0.);

@@ -437,13 +437,21 @@ fn local_gain(pos: vec2<f32>, rgb: vec3<f32>) -> f32 {
     }
     let y = max(0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z, 6e-4);
     let base = coef.x * log2(y) + coef.y;
+    // The measured positive Clarity (clarity.rs), on the same grid.
+    var clarity = 0.0;
+    let c = offset(P_LOCAL_A + 2u);
+    if c >= 0 {
+        let top = table(c + i32(iy * w + ix)) * (1.0 - tx) + table(c + i32(iy * w + jx)) * tx;
+        let bottom = table(c + i32(jy * w + ix)) * (1.0 - tx) + table(c + i32(jy * w + jx)) * tx;
+        clarity = top * (1.0 - ty) + bottom * ty;
+    }
     if masked && (delta[L_SHADOWS] != 0.0 || delta[L_HIGHLIGHTS] != 0.0) {
         let s = p(P_GLOBAL_SH) + delta[L_SHADOWS];
         let h = p(P_GLOBAL_SH + 1u) + delta[L_HIGHLIGHTS];
         return exp2(family(0u, s, p(P_LOCAL_KEYS), base)
-            + family(1u, h, p(P_LOCAL_KEYS + 1u), base));
+            + family(1u, h, p(P_LOCAL_KEYS + 1u), base) + clarity);
     }
-    return exp2(local_curve(P_SHADOWS, base) + local_curve(P_HIGHLIGHTS, base));
+    return exp2(local_curve(P_SHADOWS, base) + local_curve(P_HIGHLIGHTS, base) + clarity);
 }
 fn parametric(x: f32) -> f32 {
     if p(P_PARAMETRIC_ON) == 0.0 {

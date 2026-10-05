@@ -225,7 +225,10 @@ impl SettingGroup {
             Whites => to.whites = from.whites,
             Blacks => to.blacks = from.blacks,
             Texture => e.texture = f.texture,
-            Clarity => e.clarity = f.clarity,
+            Clarity => {
+                e.clarity = f.clarity;
+                to.clarity_model = from.clarity_model;
+            }
             Dehaze => e.dehaze = f.dehaze,
             Vibrance => to.vibrance = from.vibrance,
             Saturation => to.saturation = from.saturation,
@@ -564,6 +567,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         reference_color: _,
         parametric_model: _,
         grain_model: _,
+        clarity_model: _,
         contrast_model: _,
         lens_vignette_model: _,
         grading_model: _,
@@ -665,6 +669,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("reference_color", Group(ProcessVersion)),
         ("parametric_model", Group(ProcessVersion)),
         ("grain_model", Group(Grain)),
+        ("clarity_model", Group(Clarity)),
         ("contrast_model", Group(ProcessVersion)),
         ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),

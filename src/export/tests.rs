@@ -710,13 +710,14 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
     assert!(packet.contains("xmp:CreateDate=\"2024-05-01T12:30:15.120456+02:00\""));
     Ok(())
 }
-/// A recipe that keeps the sharpening, lens vignetting and grain from before they were
+/// A recipe that keeps the sharpening, lens vignetting, grain and Clarity from before they were
 /// measured reads back from its own exported XMP with the same operators, while
 /// Lightroom's packets, and RAWmakase's for measured recipes, set the measured ones.
 #[test]
 fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     use crate::develop::{
         Recipe,
+        clarity::ClarityModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
     };
@@ -747,8 +748,10 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     };
     old.effects.lens_vignette = -0.3;
     old.effects.grain = 0.4;
+    old.effects.clarity = 0.3;
     let back = read(&old)?;
     assert_eq!(back.grain_model, GrainModel::Original);
+    assert_eq!(back.clarity_model, ClarityModel::Original);
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     // Also onto a new photo's settings, which start on the measured operators.
@@ -759,10 +762,12 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
+    assert_eq!(back.clarity_model, ClarityModel::Original);
     let measured = Recipe {
         sharpening_model: SharpeningModel::Measured,
         lens_vignette_model: LensVignetteModel::Measured,
         grain_model: GrainModel::Measured,
+        clarity_model: ClarityModel::Measured,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
@@ -770,5 +775,6 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     let back = read(&measured)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    assert_eq!(back.clarity_model, ClarityModel::Measured);
     Ok(())
 }

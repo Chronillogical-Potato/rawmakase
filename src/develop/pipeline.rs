@@ -519,15 +519,15 @@ struct CurveSet {
     channels: [CurveLut; 3],
 }
 impl CurveSet {
-    /// Curves plus, for engine 4, the Shadows/Highlights map of this image; built
-    /// also when `local_tone` (masks change Shadows or Highlights).
+    /// Curves plus, for engine 4, the Shadows/Highlights map of this image (which also
+    /// carries the measured Clarity); built also when `local_tone` (masks change
+    /// Shadows or Highlights).
     fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3], local_tone: bool) -> Self {
         let mut lut = Self::with_photo_measures(im, r, matrix);
         if lut.basic_curves {
             let local = crate::develop::local_tone::LocalToneMap::build(
                 im,
-                r.shadows,
-                r.highlights,
+                crate::develop::local_tone::Sliders::of(r),
                 local_tone,
                 |p| tone_stage(p, &im.metadata, r, &lut, matrix, None).0,
             );
@@ -1215,8 +1215,7 @@ pub(crate) fn gpu_pixel_params(
         lum,
         [small.width, small.height],
         [im.width, im.height],
-        r.shadows,
-        r.highlights,
+        super::local_tone::Sliders::of(r),
     );
     Some(pixel_params::with_map(tone, &map))
 }

@@ -25,6 +25,8 @@ pub(crate) struct LocalToneMap {
     /// Image keys of Shadows and Highlights, for masks that evaluate them at their own
     /// slider values.
     pub(crate) keys: [f32; 2],
+    /// The measured positive Clarity's log2 gain on this grid (`clarity.rs`).
+    pub(crate) clarity: Option<Vec<f32>>,
 }
 pub(crate) struct Curve {
     pub(crate) key: f32,
@@ -70,20 +72,37 @@ impl Curve {
         self.table[i] + (self.table[i + 1] - self.table[i]) * (f - i as f32)
     }
 }
+/// The slider values a map is built for: Shadows, Highlights and the measured
+/// positive Clarity (0 when the recipe renders Clarity otherwise).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Sliders {
+    pub(crate) shadows: f32,
+    pub(crate) highlights: f32,
+    pub(crate) clarity: f32,
+}
+impl Sliders {
+    pub(crate) fn of(r: &super::Recipe) -> Self {
+        Self {
+            shadows: r.shadows,
+            highlights: r.highlights,
+            clarity: super::clarity::measured(r),
+        }
+    }
+}
 pub(crate) fn luminance(rgb: [f32; 3]) -> f32 {
     (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]).max(6e-4)
 }
 impl LocalToneMap {
     /// `tone` maps a camera sample to linear display RGB after the profile tone curve.
-    /// Built when either slider is set, or when `local` (masks change them).
+    /// Built when either slider or the measured `clarity` is set, or when `local`
+    /// (masks change Shadows or Highlights).
     pub(crate) fn build(
         im: super::pipeline::Source,
-        shadows: f32,
-        highlights: f32,
+        sliders: Sliders,
         local: bool,
         tone: impl Fn([f32; 3]) -> [f32; 3] + Sync,
     ) -> Option<Self> {
-        if shadows == 0. && highlights == 0. && !local {
+        if sliders.shadows == 0. && sliders.highlights == 0. && sliders.clarity == 0. && !local {
             return None;
         }
         let small = match im.reduced {
@@ -99,8 +118,7 @@ impl LocalToneMap {
             lum,
             [small.width, small.height],
             [im.width, im.height],
-            shadows,
-            highlights,
+            sliders,
         ))
     }
     /// The map from the luminance of the reduced photo toned, `size` pixels of a
@@ -109,8 +127,7 @@ impl LocalToneMap {
         lum: Vec<f32>,
         size: [u32; 2],
         source: [u32; 2],
-        shadows: f32,
-        highlights: f32,
+        sliders: Sliders,
     ) -> Self {
         let (w, h) = (size[0] as usize, size[1] as usize);
         let logs: Vec<f32> = lum.iter().map(|y| y.log2()).collect();
@@ -140,15 +157,24 @@ impl LocalToneMap {
             percentile(SHADOWS.percentile),
             percentile(HIGHLIGHTS.percentile),
         ];
+        let clarity = (sliders.clarity > 0.).then(|| {
+            let base: Vec<f32> = logs
+                .iter()
+                .zip(a.iter().zip(&b))
+                .map(|(l, (a, b))| a * l + b)
+                .collect();
+            super::clarity::field(&logs, &base, w, h, keys[0], sliders.clarity)
+        });
         Self {
             width: w,
             height: h,
             a,
             b,
             scale: [w as f32 / source[0] as f32, h as f32 / source[1] as f32],
-            shadows: Curve::new(&SHADOWS, shadows, keys[0]),
-            highlights: Curve::new(&HIGHLIGHTS, highlights, keys[1]),
+            shadows: Curve::new(&SHADOWS, sliders.shadows, keys[0]),
+            highlights: Curve::new(&HIGHLIGHTS, sliders.highlights, keys[1]),
             keys,
+            clarity,
         }
     }
     /// Luminance gain for a toned pixel at camera-image sample position `x`, `y`.
@@ -156,27 +182,33 @@ impl LocalToneMap {
         let base = self.base(x, y, rgb);
         let ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
             + self.highlights.as_ref().map_or(0., |c| c.eval(base));
-        ev.exp2()
+        (ev + self.clarity(x, y)).exp2()
     }
     /// As [`Self::gain`], with Shadows and Highlights at the given slider values.
     pub(crate) fn gain_with(&self, x: f32, y: f32, rgb: [f32; 3], sliders: [f32; 2]) -> f32 {
         let base = self.base(x, y, rgb);
         (family(&SHADOWS, sliders[0], self.keys[0], base)
-            + family(&HIGHLIGHTS, sliders[1], self.keys[1], base))
+            + family(&HIGHLIGHTS, sliders[1], self.keys[1], base)
+            + self.clarity(x, y))
         .exp2()
     }
     fn base(&self, x: f32, y: f32, rgb: [f32; 3]) -> f32 {
+        self.bilinear(x, y, &self.a) * luminance(rgb).log2() + self.bilinear(x, y, &self.b)
+    }
+    /// The measured Clarity's log2 gain at sample position `x`, `y`.
+    fn clarity(&self, x: f32, y: f32) -> f32 {
+        self.clarity.as_ref().map_or(0., |c| self.bilinear(x, y, c))
+    }
+    /// `v` on this grid at camera-image sample position `x`, `y`.
+    fn bilinear(&self, x: f32, y: f32, v: &[f32]) -> f32 {
         let fx = ((x + 0.5) * self.scale[0] - 0.5).clamp(0., (self.width - 1) as f32);
         let fy = ((y + 0.5) * self.scale[1] - 0.5).clamp(0., (self.height - 1) as f32);
         let (ix, iy) = (fx as usize, fy as usize);
         let (jx, jy) = ((ix + 1).min(self.width - 1), (iy + 1).min(self.height - 1));
         let (tx, ty) = (fx - ix as f32, fy - iy as f32);
-        let bilinear = |v: &[f32]| {
-            let top = v[iy * self.width + ix] * (1. - tx) + v[iy * self.width + jx] * tx;
-            let bottom = v[jy * self.width + ix] * (1. - tx) + v[jy * self.width + jx] * tx;
-            top * (1. - ty) + bottom * ty
-        };
-        bilinear(&self.a) * luminance(rgb).log2() + bilinear(&self.b)
+        let top = v[iy * self.width + ix] * (1. - tx) + v[iy * self.width + jx] * tx;
+        let bottom = v[jy * self.width + ix] * (1. - tx) + v[jy * self.width + jx] * tx;
+        top * (1. - ty) + bottom * ty
     }
 }
 /// The measured positions a slider is bracketed in, as `Curve::new` builds them: each
@@ -227,7 +259,7 @@ pub(crate) fn gpu_families() -> Vec<f32> {
     out
 }
 /// Mean over a (2r+1)² window, clamped at the borders, via running sums.
-fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+pub(super) fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
     // One line: `out[i]` for `len` values read through `get`; lines are independent,
     // so they run in parallel with the same arithmetic.
     let line = |len: usize, get: &dyn Fn(usize) -> f32| -> Vec<f32> {

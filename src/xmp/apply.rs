@@ -730,6 +730,13 @@ impl Preset {
     fn apply_effects(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
         let v = settings.values;
         settings.assign("Clarity2012", &mut r.effects.clarity, 0.01, -1., 1.)?;
+        // Lightroom's Clarity means the measured operator, also on a recipe saved before.
+        if settings.values.contains_key("Clarity2012") {
+            r.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_CLARITY) {
+            r.clarity_model = crate::develop::clarity::ClarityModel::Original;
+        }
         settings.assign("Texture", &mut r.effects.texture, 0.01, -1., 1.)?;
         settings.assign("Dehaze", &mut r.effects.dehaze, 0.01, -1., 1.)?;
         settings.assign("GrainAmount", &mut r.effects.grain, 0.01, 0., 1.)?;
