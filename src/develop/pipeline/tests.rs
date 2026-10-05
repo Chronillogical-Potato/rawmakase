@@ -47,6 +47,7 @@ fn old_recipes_keep_original_profile_tones() {
         "contrast_model",
         "grading_model",
         "whites_model",
+        "gamut_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -70,6 +71,7 @@ fn old_recipes_keep_original_profile_tones() {
         crate::develop::basic_tone::WhitesModel::Original
     );
     assert!(Recipe::default().profile_tone);
+    assert_eq!(old.gamut_model, crate::develop::GamutModel::Compress);
     assert_eq!(
         old.grading_model,
         crate::develop::color_grade::GradingModel::Original
@@ -80,6 +82,7 @@ fn old_recipes_keep_original_profile_tones() {
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
+        gamut_model: crate::develop::GamutModel::Clip,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
@@ -87,6 +90,7 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.contrast_model, measured.contrast_model);
     assert_eq!(back.grading_model, measured.grading_model);
     assert_eq!(back.whites_model, measured.whites_model);
+    assert_eq!(back.gamut_model, measured.gamut_model);
 }
 
 #[test]
@@ -1356,4 +1360,18 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
     assert_eq!(kept.lens_vignette_model, LensVignetteModel::Original);
     old.adopt_measured_vignette(0.);
     assert_eq!(old.lens_vignette_model, LensVignetteModel::Measured);
+}
+
+#[test]
+fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
+    use crate::develop::GamutModel;
+    let im = fixture();
+    let r = Recipe::with_profiles(&im.metadata, &[]);
+    assert_eq!(r.gamut_model, GamutModel::Clip);
+    // Clipping keeps the channels inside sRGB as they are; compression desaturates
+    // every channel toward the color's neutral.
+    let out_of_gamut = [1.3, 0.2, -0.1];
+    assert_eq!(GamutModel::Clip.into_srgb(out_of_gamut, 0.7), [1., 0.2, 0.]);
+    let compressed = GamutModel::Compress.into_srgb(out_of_gamut, 0.7);
+    assert!(compressed[1] > 0.2 && compressed[2] > 0., "{compressed:?}");
 }

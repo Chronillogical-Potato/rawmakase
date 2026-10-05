@@ -162,6 +162,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         contrast_model: _,
         grading_model: _,
         whites_model: _,
+        gamut_model: _,
         contrast: _,
         whites: _,
         blacks: _,

@@ -421,26 +421,52 @@ fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f32; 3] {
         lab[0] = lab[0].clamp(0., 1.);
         lab_to_srgb(lab)
     };
-    // Compress chroma toward neutral instead of clipping individual negative channels.
-    let gray = lab[0].clamp(0., 1.).powi(3);
-    let mut gamut = 1f32;
-    for v in rgb {
-        if v < 0. {
-            gamut = gamut.min(gray / (gray - v).max(1e-8));
-        }
-        if v > 1. {
-            gamut = gamut.min((1. - gray) / (v - gray).max(1e-8));
-        }
-    }
+    let rgb = r.gamut_model.into_srgb(rgb, lab[0]);
     std::array::from_fn(|c| {
-        let v = rgb[c];
-        let encoded = srgb_encode(gray + (v - gray) * gamut);
+        let encoded = srgb_encode(rgb[c]);
         if r.wide_gamut_curves || r.reference_curves {
             encoded.clamp(0., 1.)
         } else {
             apply_curve(encoded, c, r, lut)
         }
     })
+}
+
+/// How colors outside sRGB are brought into it at the end of the color stage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GamutModel {
+    /// Chroma compressed toward the neutral of the same lightness: what recipes saved
+    /// before the clipped model keep, so they render as they did.
+    #[default]
+    Compress,
+    /// Each channel clipped on its own, as Camera Raw's conversion to sRGB does
+    /// (docs/color-pipeline.md#out-of-gamut-colors).
+    Clip,
+}
+impl GamutModel {
+    pub(crate) fn is_compress(&self) -> bool {
+        *self == Self::Compress
+    }
+    /// Linear sRGB inside 0–1; `lightness` is the color's Oklab lightness.
+    pub(crate) fn into_srgb(self, rgb: [f32; 3], lightness: f32) -> [f32; 3] {
+        match self {
+            Self::Clip => rgb.map(|v| v.clamp(0., 1.)),
+            Self::Compress => {
+                // Compress chroma toward neutral instead of clipping single channels.
+                let gray = lightness.clamp(0., 1.).powi(3);
+                let mut gamut = 1f32;
+                for v in rgb {
+                    if v < 0. {
+                        gamut = gamut.min(gray / (gray - v).max(1e-8));
+                    }
+                    if v > 1. {
+                        gamut = gamut.min((1. - gray) / (v - gray).max(1e-8));
+                    }
+                }
+                rgb.map(|v| gray + (v - gray) * gamut)
+            }
+        }
+    }
 }
 
 /// What the per-pixel stage hands back.

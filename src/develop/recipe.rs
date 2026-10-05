@@ -110,6 +110,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::basic_tone::WhitesModel::is_original"
     )]
     pub whites_model: crate::develop::basic_tone::WhitesModel,
+    /// How out-of-gamut colors reach sRGB. Missing means compressed, so recipes saved
+    /// before the clipped model look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::GamutModel::is_compress"
+    )]
+    pub gamut_model: crate::develop::GamutModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -233,6 +240,7 @@ impl Default for Recipe {
             lens_vignette_model: Default::default(),
             grading_model: Default::default(),
             whites_model: Default::default(),
+            gamut_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -464,6 +472,7 @@ impl Recipe {
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
+        recipe.gamut_model = crate::develop::GamutModel::Clip;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe
