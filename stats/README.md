@@ -51,7 +51,9 @@ its own.
   weeks, since daily snapshots of them could be subtracted. Groups under 10
   are merged into "other", which always merges at least two groups and
   reaches 10 itself, and weeks with fewer than 10 reports publish no numbers
-  ([src/publish.ts](src/publish.ts)).
+  ([src/publish.ts](src/publish.ts)). Showing any group therefore takes at
+  least 20 reports that week; until then the page leaves the breakdown out
+  rather than show a lone "other".
 - The daily cron deletes tallies older than 24 months. D1 Time Travel, whose
   window Cloudflare sets by plan, is the only backup.
 

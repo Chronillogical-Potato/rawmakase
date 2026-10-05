@@ -302,6 +302,9 @@ describe("publishing", () => {
     expect(page.headers.get("content-type")).toContain("text/html");
     const html = await page.text();
     expect(html).toContain("Week 2020-W01: 23 installations");
+    // Platform merges into a lone "other", so only its table is left out.
+    expect(html).toContain(">Version</th>");
+    expect(html).not.toContain(">Platform</th>");
     expect(html).not.toMatch(/<(script|link)\b/);
     const json = await exports.default.fetch("https://stats.rawmakase.com/stats.json");
     expect(await json.json()).toEqual(await published(env, new Date()));
@@ -326,6 +329,16 @@ describe("publishing", () => {
     // A query string doesn't skip the cache.
     const again = await exports.default.fetch("https://stats.rawmakase.com/?fresh=1");
     expect(await again.text()).toContain("No completed weeks yet.");
+  });
+
+  it("says when no breakdown can be shown", async () => {
+    await env.DB.prepare(
+      `INSERT INTO platform_counts VALUES ('2020-W01', 'linux', 'x86_64', 15), ('2020-W01', 'macos', 'aarch64', 4)`,
+    ).run();
+    const html = await (await exports.default.fetch("https://stats.rawmakase.com/")).text();
+    expect(html).toContain("Week 2020-W01: 19 installations");
+    expect(html).toContain("Too few installations to break down yet.");
+    expect(html).not.toContain("<table>");
   });
 
   it("renders an empty page before any data", async () => {

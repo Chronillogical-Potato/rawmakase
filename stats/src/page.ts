@@ -91,15 +91,21 @@ ${bars}
 }
 
 function breakdowns(week: Week): string {
+  // A breakdown that shows no group is a lone "other" row equal to the
+  // total, which says nothing, so it is left out.
   const tables = DIMENSIONS.flatMap(({ name, title }) => {
     const breakdown = week.breakdowns![name];
-    return breakdown ? [table(title, breakdown)] : [];
+    return breakdown && breakdown.shown.length > 0 ? [table(title, breakdown)] : [];
   });
+  const body =
+    tables.length > 0
+      ? `<div class="tables">
+${tables.join("\n")}
+</div>`
+      : `<p class="empty">Too few installations to break down yet. A group is shown once it and the remaining installations each reach ${MIN_GROUP}.</p>`;
   return `<section>
 <h2>Week ${week.week}: ${week.total} installations</h2>
-<div class="tables">
-${tables.join("\n")}
-</div>
+${body}
 </section>`;
 }
 
