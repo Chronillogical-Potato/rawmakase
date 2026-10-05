@@ -85,6 +85,11 @@ jobs:
           rustup toolchain install "$msrv" --profile minimal
           cargo +"$msrv" check --locked --all-targets
       - run: cargo fmt --check
+      - name: Check standalone control client
+        run: |
+          cargo fmt --manifest-path tools/rawmakase-ctl/Cargo.toml --check
+          cargo clippy --manifest-path tools/rawmakase-ctl/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path tools/rawmakase-ctl/Cargo.toml --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
       - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings

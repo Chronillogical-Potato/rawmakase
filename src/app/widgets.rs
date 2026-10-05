@@ -1109,7 +1109,7 @@ fn hovered_nudge(ui: &egui::Ui, row: Rect) -> Option<f32> {
     (nudge != 0.).then_some(nudge)
 }
 /// A slider's number as shown: Lightroom's scale, with a sign when it has one.
-fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
+pub(super) fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
     let text = format!("{v:.decimals$}");
     if signed && v > 0. && !text.trim_start_matches(['0', '.']).is_empty() {
         format!("+{text}")

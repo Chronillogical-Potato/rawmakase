@@ -3,6 +3,7 @@ pub mod bitmaps;
 mod files;
 mod format;
 mod identity;
+mod paths;
 mod session;
 mod sidecar;
 

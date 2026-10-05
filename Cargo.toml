@@ -8,6 +8,11 @@ license = "MIT"
 repository = "https://github.com/pch/rawmakase"
 
 [dependencies]
+# Local MCP adapter; no HTTP server or remote authorization stack.
+rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+base64 = "0.22"
+getrandom = "0.4"
 anyhow = "1"
 flate2 = "1"
 roxmltree = "0.21.1"
@@ -55,6 +60,10 @@ default = ["telemetry"]
 # build with --no-default-features: the question, the Preferences row and all
 # reporting are then left out.
 telemetry = []
+
+# MIDI input adapters (src/app/automation/midi.rs). Linux would need ALSA headers.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+midir = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

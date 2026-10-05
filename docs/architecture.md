@@ -189,3 +189,47 @@ smallest pyramid level at or above the physical viewport size on every change;
 at 100% a reduced region from the pyramid is published first (as a draft stage),
 then the full-resolution region. The single-slot mailbox and cancellation keep
 continuous editing on the latest change.
+
+## Live application control
+
+`app::commands` defines transport-independent application operations, target
+checks, parameter units and explicit results. `Editor` executes each mutation
+inside its generation-bound edit transaction, then answers that request.
+`app::automation` owns the input queue and adapter lifecycles. Its MIDI device
+adapter translates controls, while its independent socket adapter authenticates,
+bounds and expires requests, each with a separate reply channel. These adapters never write catalog edits or render pixels themselves.
+Headless test editors do not start listeners or touch connection/configuration
+files; only desktop initialization starts them.
+
+External parameter commands default to global scope. MIDI may resolve the active
+mask; explicit mask commands require generation and revision guards because
+recipe masks have no persistent IDs. Output jobs capture the photo and recipe
+revision and call `export::job`; successful queueing is distinct from published
+output. The protocol and CLI are documented in [External control](automation.md).
+
+The built-in `rawmakase control` subcommand and optional `tools/rawmakase-ctl`
+client share source and the data-directory policy in `storage::paths`. The CLI
+performs transport and polling only, without creating an Editor or GUI context.
+
+`rawmakase mcp` is a stdio adapter built with the official Rust MCP SDK. It shares
+connection discovery and request/reply validation with the command-line client,
+and sends the same guarded commands through the local socket. It owns tool
+schemas and temporary preview images, but no recipe state or editing logic.
+Point-curve validation, history, auto adjustment and target checks remain in the
+application command layer. MCP errors retain application error codes; output
+jobs retain their captured edit revision. See [MCP](mcp.md) for setup and tools.
+
+### Automation boundaries
+
+Application commands return typed state snapshots and results; the socket adapter
+encodes them as protocol JSON. A single action-name table supports parsing,
+discovery and device mapping serialization. Gesture ownership belongs to the
+application command layer, with separate MIDI and socket scopes.
+
+The automation owner manages the bounded queue and local socket independently
+of MIDI. Each MIDI device owns its mapping and connection state, using a shared
+profile registry. Further work can route remaining UI shortcuts through these
+operations and share parameter descriptors with all editing panels.
+The standalone client still includes its shared implementation by path; a
+workspace protocol/client crate would also let MCP schemas reuse those types.
+These follow-ups do not require a new editing engine or MIDI-specific commands.

@@ -208,6 +208,7 @@ impl Editor {
     }
     pub(super) fn history(&mut self, old: Recipe) {
         if self.document.history.record(old, &self.document.recipe) {
+            self.sync_command_revision();
             self.document.save.mark_changed();
         }
     }
