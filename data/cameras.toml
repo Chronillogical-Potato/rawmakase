@@ -258,10 +258,10 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.25 plus +0.04 fo
 [[camera]]
 make = "Canon"
 model = "PowerShot V1"
-baseline_exposure = 0.25
-source = "fitted"
+baseline_exposure = 0.5
+source = "adobe-dng"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level; Adobe's value 0.5 left the Camera Raw 18.7 render -0.30 EV away, so fitted to it"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level"
 
 [[camera]]
 make = "Fujifilm"

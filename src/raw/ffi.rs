@@ -300,6 +300,37 @@ pub fn display_transform(path: &Path, data: &mut [u8]) -> Result<()> {
 mod tests {
     unsafe extern "C" {
         fn ora_scale_probe(wb: f32, error: *mut f32) -> i32;
+        fn ora_masked_black(border: *const u16, n: usize, black: u32, maximum: u32) -> i32;
+    }
+    fn masked_black(border: &[u16], black: u32) -> Option<u32> {
+        // SAFETY: `border` is a live slice of `n` values, only read.
+        let b = unsafe { ora_masked_black(border.as_ptr(), border.len(), black, 16383) };
+        u32::try_from(b).ok()
+    }
+    /// Optical-black border values around `level`, with a little read noise.
+    fn border(level: u16) -> Vec<u16> {
+        (0..20_000u32)
+            .map(|i| level - 6 + (i * 7919 % 13) as u16)
+            .collect()
+    }
+    #[test]
+    fn black_level_far_below_the_masked_border_is_corrected() {
+        // LibRaw reads the EOS R6 Mark III's black as 71 on average over its
+        // channels; its masked border, and Adobe's DNG, say 512.
+        assert_eq!(masked_black(&border(512), 71), Some(512));
+        // A black LibRaw reads right, or slightly above the border, stays.
+        assert_eq!(masked_black(&border(512), 512), None);
+        assert_eq!(masked_black(&border(505), 512), None);
+        // So does one well below a border that sits above the true black
+        // (Pentax K-70: 64 against a border of 130, and Adobe says 64).
+        assert_eq!(masked_black(&border(130), 64), None);
+        // A margin that holds image rather than optical black is no evidence.
+        let image: Vec<u16> = (0..20_000u32)
+            .map(|i| 600 + (i * 7919 % 8000) as u16)
+            .collect();
+        assert_eq!(masked_black(&image, 0), None);
+        // Nor is a margin too small to measure.
+        assert_eq!(masked_black(&border(512)[..100], 0), None);
     }
     /// The hand-written mirror of `struct Metadata` and the C++ original agree on
     /// size, so a field added on one side alone fails here rather than misreading.
