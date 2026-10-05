@@ -125,7 +125,7 @@ impl LocalMath {
 pub(crate) fn tone(
     d: &LocalDelta,
     p: [f32; 3],
-    contrast: crate::develop::basic_tone::ContrastCurve,
+    photo: &crate::develop::basic_tone::PhotoTone,
 ) -> [f32; 3] {
     let curve = |x| {
         crate::develop::basic_tone::compose(
@@ -133,7 +133,7 @@ pub(crate) fn tone(
             d[slot::WHITES],
             d[slot::BLACKS],
             d[slot::DEHAZE],
-            contrast,
+            photo,
             x,
         )
     };
@@ -188,19 +188,24 @@ mod tests {
     }
     #[test]
     fn local_tone_is_the_global_curve_and_hue_rotates() {
-        use crate::develop::basic_tone::{BasicTone, ContrastCurve};
+        use crate::develop::basic_tone::{BasicTone, ContrastCurve, PhotoTone, WhitesTable};
         let mut d = [0.; LEN];
-        let original = ContrastCurve::Original;
-        assert_eq!(tone(&d, [0.2, 0.4, 0.6], original), [0.2, 0.4, 0.6]);
+        let original = PhotoTone::original();
+        assert_eq!(tone(&d, [0.2, 0.4, 0.6], &original), [0.2, 0.4, 0.6]);
         d[slot::CONTRAST] = 0.5;
+        d[slot::WHITES] = 0.4;
         d[slot::BLACKS] = -0.3;
-        for curve in [original, ContrastCurve::Pivot(0.45)] {
-            let global = BasicTone::new(0.5, 0., -0.3, 0., curve).unwrap();
+        let adaptive = PhotoTone {
+            contrast: ContrastCurve::Pivot(0.45),
+            whites: WhitesTable::for_highlights(0.8),
+        };
+        for photo in [original, adaptive] {
+            let global = BasicTone::new(0.5, 0.4, -0.3, 0., &photo).unwrap();
             for p in [[0.2; 3], [0.1, 0.5, 0.9]] {
-                let (a, b) = (tone(&d, p, curve), global.apply(p));
+                let (a, b) = (tone(&d, p, &photo), global.apply(p));
                 assert!(
                     a.iter().zip(b).all(|(x, y)| (x - y).abs() < 2e-3),
-                    "{curve:?}: {a:?} {b:?}"
+                    "{photo:?}: {a:?} {b:?}"
                 );
             }
         }

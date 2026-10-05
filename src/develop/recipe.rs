@@ -79,9 +79,9 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::parametric::ParametricModel::is_original"
     )]
     pub parametric_model: crate::develop::parametric::ParametricModel,
-    /// Whether Contrast comes before or after Whites and Blacks. Missing means before,
-    /// so recipes saved before the measured order look as they did; omitted at that
-    /// default, and kept by releases that predate it.
+    /// Whether Contrast pivots where the photo puts it, after Whites and Blacks.
+    /// Missing means the original averaged curve before them, so older recipes look as
+    /// they did; omitted at that default, and kept by releases that predate it.
     #[serde(
         default,
         skip_serializing_if = "crate::develop::basic_tone::ContrastModel::is_original"
@@ -94,6 +94,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_grade::GradingModel::is_original"
     )]
     pub grading_model: crate::develop::color_grade::GradingModel,
+    /// Whether positive Whites follows the photo's highlights. Missing means the
+    /// original median curve, so older recipes look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::basic_tone::WhitesModel::is_original"
+    )]
+    pub whites_model: crate::develop::basic_tone::WhitesModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -215,6 +223,7 @@ impl Default for Recipe {
             parametric_model: Default::default(),
             contrast_model: Default::default(),
             grading_model: Default::default(),
+            whites_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -412,6 +421,7 @@ impl Recipe {
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
+        recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe

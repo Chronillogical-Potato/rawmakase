@@ -793,11 +793,19 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     let mut gpu = Processor::new()?;
     let cancel = AtomicBool::new(false);
     let source = Source::from(image.as_ref());
-    for model in [
-        crate::develop::ContrastModel::Original,
-        crate::develop::ContrastModel::Adaptive,
+    r.whites = 0.3;
+    for (model, whites) in [
+        (
+            crate::develop::ContrastModel::Original,
+            crate::develop::WhitesModel::Original,
+        ),
+        (
+            crate::develop::ContrastModel::Adaptive,
+            crate::develop::WhitesModel::Adaptive,
+        ),
     ] {
         r.contrast_model = model;
+        r.whites_model = whites;
         let mut params = pixel_params(source, &r).expect("GPU port covers this recipe");
         assert!(params.set_masks(source, &r, Some(&weights)));
         let expected = develop_samples(source, &r, &samples, &cancel, Some(&weights))?;

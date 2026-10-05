@@ -319,6 +319,7 @@ impl SettingGroup {
                 to.parametric_model = from.parametric_model;
                 to.contrast_model = from.contrast_model;
                 to.grading_model = from.grading_model;
+                to.whites_model = from.whites_model;
             }
             Calibration => {
                 e.calibration = f.calibration;
@@ -558,6 +559,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         parametric_model: _,
         contrast_model: _,
         grading_model: _,
+        whites_model: _,
         temperature: _,
         tint: _,
         wb: _,
@@ -653,6 +655,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("parametric_model", Group(ProcessVersion)),
         ("contrast_model", Group(ProcessVersion)),
         ("grading_model", Group(ProcessVersion)),
+        ("whites_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
         ("wb", Derived),

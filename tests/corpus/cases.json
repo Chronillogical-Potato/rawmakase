@@ -88,6 +88,33 @@
    }
   },
   {
+   "name": "whites+25",
+   "settings": {
+    "Whites2012": "+25"
+   }
+  },
+  {
+   "name": "pair-exposure-1.5-whites+50",
+   "settings": {
+    "Exposure2012": "-1.50",
+    "Whites2012": "+50"
+   }
+  },
+  {
+   "name": "pair-exposure-1.5-whites+100",
+   "settings": {
+    "Exposure2012": "-1.50",
+    "Whites2012": "+100"
+   }
+  },
+  {
+   "name": "pair-exposure+0.75-whites+100",
+   "settings": {
+    "Exposure2012": "+0.75",
+    "Whites2012": "+100"
+   }
+  },
+  {
    "name": "blacks-50",
    "settings": {
     "Blacks2012": "-50"
