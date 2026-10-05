@@ -48,10 +48,11 @@ its own.
   minutes, so a deploy reaches them soon. Both show
   the current week's total through the end of yesterday, which updates daily,
   and completed weeks, at most 26. Breakdowns are only published for completed
-  weeks, since daily snapshots of them could be subtracted. Groups under 10
-  are merged into "other", which always merges at least two groups and
-  reaches 10 itself, and weeks with fewer than 10 reports publish no numbers
-  ([src/publish.ts](src/publish.ts)).
+  weeks, since daily snapshots of them could be subtracted. Groups under 5
+  are merged into "other", which always merges at least two groups, and
+  weeks with fewer than 5 reports publish no numbers
+  ([src/publish.ts](src/publish.ts)). A breakdown that would show only
+  "other" is left out of the page.
 - The daily cron deletes tallies older than 24 months. D1 Time Travel, whose
   window Cloudflare sets by plan, is the only backup.
 
