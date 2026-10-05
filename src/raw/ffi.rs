@@ -49,8 +49,9 @@ pub(super) struct NativeMetadata {
     pub(super) lens: [c_char; 128],
     pub(super) focal_35mm: f32,
     pub(super) highlight_tone_priority: i32,
+    pub(super) fuji_exposure_shift: f32,
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 420);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 424);
 
 /// Size of the error buffers `native/raw.cpp`'s `message` writes into.
 const ERR: usize = 512;
