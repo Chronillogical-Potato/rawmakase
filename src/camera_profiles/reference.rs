@@ -12,17 +12,34 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
     if let Some(dng) = m.baseline_exposure {
         return dng;
     }
-    // Fujifilm rows hold for DR100; other DR modes have not been calibrated.
-    if m.make.eq_ignore_ascii_case("Fujifilm") && m.fuji_dynamic_range != 100 {
-        return 0.;
-    }
-    let table = crate::cameras::baseline_exposure(&m.make, &m.model).ev;
+    let row = crate::cameras::baseline_exposure(&m.make, &m.model);
+    let table = row.ev + fujifilm_shift(m, row.exposure_shift);
     // Table rows hold for photos without Highlight Tone Priority, which Camera Raw
     // brightens by the stop the camera held back.
     match m.highlight_tone_priority {
         HighlightTonePriority::Off => table,
         HighlightTonePriority::On | HighlightTonePriority::Enhanced => table + 1.,
     }
+}
+/// Camera Raw's baseline for a Fujifilm raw is a per-body constant minus the raw's
+/// exposure midpoint shift, which moves a stop for each DR step (DR200 is often not
+/// recorded otherwise) and for extended ISO. Table rows hold at the usual DR100 shift.
+fn fujifilm_shift(m: &Metadata, follows: crate::cameras::ExposureShift) -> f32 {
+    let Some(shift) = m.fuji_exposure_shift else {
+        return 0.;
+    };
+    if !m.make.eq_ignore_ascii_case("Fujifilm") || follows == crate::cameras::ExposureShift::Ignored
+    {
+        return 0.;
+    }
+    let dr100 = if m.xtrans {
+        -0.72
+    } else if m.model.to_ascii_uppercase().starts_with("GFX") {
+        -0.49
+    } else {
+        0.
+    };
+    dr100 - shift
 }
 pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
     if x100f(m) {
@@ -41,18 +58,46 @@ mod tests {
             ..Default::default()
         }
     }
+    fn fujifilm(model: &str, xtrans: bool, shift: Option<f32>) -> Metadata {
+        Metadata {
+            xtrans,
+            fuji_exposure_shift: shift,
+            ..camera("Fujifilm", model)
+        }
+    }
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
     #[test]
-    fn fujifilm_baselines_hold_for_dr100_only() {
-        let mut m = camera("Fujifilm", "X100F");
-        m.fuji_dynamic_range = 100;
-        assert_eq!(baseline_exposure(&m), 0.15);
-        m.fuji_dynamic_range = 200;
-        assert_eq!(baseline_exposure(&m), 0.);
-        m.model = "X-T5".into();
-        m.fuji_dynamic_range = 100;
-        assert_eq!(baseline_exposure(&m), -0.1);
-        m.model = "X100V".into();
-        assert_eq!(neutral_calibration(&m), [1.; 3]);
+    fn fujifilm_baselines_follow_the_exposure_shift() {
+        // Rows hold at the usual DR100 shift: -0.72 for X-Trans, -0.49 for GFX.
+        let row = |model| crate::cameras::baseline_exposure("Fujifilm", model).ev;
+        let x_e5 = fujifilm("X-E5", true, Some(-0.72));
+        assert_eq!(baseline_exposure(&x_e5), row("X-E5"));
+        // DR200 (the raw often does not say so) shifts a stop: Camera Raw adds it back.
+        let x_e5 = fujifilm("X-E5", true, Some(-1.72));
+        assert!(close(baseline_exposure(&x_e5), row("X-E5") + 1.));
+        // Extended ISO 100 on an ISO 160 body shifts the other way.
+        let x_t30 = fujifilm("X-T30", true, Some(0.28));
+        assert!(close(baseline_exposure(&x_t30), row("X-T30") - 1.));
+        let gfx = fujifilm("GFX100 II", false, Some(-1.72));
+        assert!(close(baseline_exposure(&gfx), row("GFX100 II") + 1.23));
+        // Small Bayer bodies record no shift at DR100.
+        let xf10 = Metadata {
+            fuji_dynamic_range: 65535,
+            ..fujifilm("XF10", false, Some(0.))
+        };
+        assert_eq!(baseline_exposure(&xf10), row("XF10"));
+        // Without a shift in the raw, the row as it is.
+        assert_eq!(baseline_exposure(&fujifilm("X-T5", true, None)), -0.1);
+        // Camera Raw keeps one value for the X-Trans III bodies whatever the shift.
+        let x_t2 = fujifilm("X-T2", true, Some(-1.72));
+        assert_eq!(baseline_exposure(&x_t2), 0.15);
+        assert_eq!(
+            baseline_exposure(&fujifilm("X100F", true, Some(-1.72))),
+            0.15
+        );
+        assert_eq!(neutral_calibration(&fujifilm("X100V", true, None)), [1.; 3]);
     }
     #[test]
     fn baseline_covers_measured_cameras() {

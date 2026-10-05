@@ -27,6 +27,7 @@ struct Metadata {
     char lens[128];
     float focal_35mm;
     int highlight_tone_priority;
+    float fuji_exposure_shift;
 };
 typedef int (*Cancel)(void*);
 }
@@ -110,6 +111,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->aperture=d.other.aperture; m->focal=d.other.focal_len;
         m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         m->highlight_tone_priority=d.makernotes.canon.HighlightTonePriority;
+        m->fuji_exposure_shift=d.makernotes.fuji.ExpoMidPointShift;
         for(int c=0;c<3;++c) {
             m->daylight_wb[c] = d.color.pre_mul[c];
             m->wb[c] = d.color.cam_mul[c] > 0 ? d.color.cam_mul[c] : d.color.pre_mul[c];
