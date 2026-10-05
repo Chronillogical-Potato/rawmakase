@@ -36,7 +36,8 @@ CORPUS = ROOT / 'tests/corpus'
 PHOTOSHOP = 'Adobe Photoshop 2026'
 CAMERA_RAW_PLIST = Path('/Library/Application Support/Adobe/Plug-Ins/CC/File Formats/'
                         'Camera Raw.plugin/Contents/Info.plist')
-RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf'}
+RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf', '.ori', '.pef',
+                  '.rwl', '.fff', '.3fr'}
 EDGE = 2000
 
 TEMPLATE = r'''#target photoshop
