@@ -153,9 +153,12 @@ gh release edit vX.Y.Z --notes-file packaging/release-notes/vX.Y.Z.md
 
 ## Dependency maintenance
 
-`packaging/native-deps.sh` pins LibRaw 0.22.2 and Little CMS 2.19.1 by SHA-256 and
-builds them into a private prefix. Update versions and hashes together after
-testing. Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
+`packaging/native-deps.sh` pins Little CMS 2.19.1 and a LibRaw master commit
+(newer than 0.22.2, for the Sony A7 V) by SHA-256 and builds them into a
+private prefix. A git archive has no configure script, so the build runs
+`autoreconf` and needs autoconf, automake and libtool; move back to a release
+tarball once LibRaw publishes one with those cameras. Update versions and
+hashes together after testing. Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
 The app's native wrapper retains OpenMP acceleration.
 Release builds define `CMS_NO_REGISTER_KEYWORD` for compatibility between the
 Little CMS headers and the wrapper's C++17 compiler.
@@ -177,7 +180,10 @@ script are published alongside packages; application source is also attached.
 Windows builds with MSVC. `packaging/windows/deps.ps1` builds the same LibRaw
 and Little CMS versions (plus libjpeg-turbo, zlib and JasPer, which LibRaw
 needs) as static libraries with vcpkg, pinned to one vcpkg commit; update that
-commit when the versions above change. `build.rs` finds them through vcpkg's
+commit when the versions above change. vcpkg's own LibRaw port follows releases
+only, so LibRaw comes from the overlay port in `packaging/windows/vcpkg-ports/libraw`
+(vcpkg's port, MIT, with the commit and SHA-512 of the git archive changed);
+delete the overlay once vcpkg's port reaches a release with the same cameras. `build.rs` finds them through vcpkg's
 pkg-config files. Windows builds link the C runtime statically
 (`.cargo/config.toml`) and compile the wrapper without OpenMP, so
 `rawmakase.exe` imports only Windows' own DLLs: the updater runs a copy of it
