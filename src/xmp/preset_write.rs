@@ -402,6 +402,28 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn process_version_presets_carry_the_original_mixer_and_calibration() -> anyhow::Result<()> {
+        use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+        let info = PresetInfo::new("Old process", "User Presets");
+        let source = Recipe::default();
+        let m = crate::raw::Metadata {
+            wb: [2., 1., 1.8],
+            daylight_wb: [2., 1., 1.8],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        let target = Recipe::with_profiles(&m, &[]);
+        assert_eq!(target.calibration_model, CalibrationModel::Measured);
+        let mut process = GroupSelection::none();
+        process.set(SettingGroup::ProcessVersion, GroupInclusion::Included);
+        let text = preset(&source, &info, &process);
+        let applied =
+            crate::xmp::parse(Path::new("Old.xmp"), &text)?.apply(&target, &m, &[], None)?;
+        assert_eq!(applied.mixer_model, MixerModel::Original);
+        assert_eq!(applied.calibration_model, CalibrationModel::Original);
+        Ok(())
+    }
+    #[test]
     fn every_key_written_belongs_to_a_group() {
         let unplaced: Vec<_> = settings(&edited(), None)
             .0

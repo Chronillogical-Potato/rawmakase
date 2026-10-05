@@ -159,32 +159,32 @@
         10.588
       ],
       "calibration-blue-hue-50": [
-        1.707,
-        4.034
+        0.639,
+        1.42
       ],
       "calibration-blue-saturation+50": [
-        1.714,
-        4.977
+        0.677,
+        1.629
       ],
       "calibration-green-hue-50": [
-        1.111,
-        2.556
+        0.639,
+        1.426
       ],
       "calibration-green-saturation+50": [
-        1.191,
-        2.927
+        0.655,
+        1.45
       ],
       "calibration-red-hue+50": [
-        1.499,
-        3.531
+        0.625,
+        1.374
       ],
       "calibration-red-hue-100": [
-        2.021,
-        5.074
+        0.624,
+        1.485
       ],
       "calibration-red-saturation+50": [
-        1.689,
-        4.324
+        0.664,
+        1.544
       ],
       "calibration-shadow-tint+30": [
         0.71,
@@ -791,8 +791,8 @@
         1.7
       ],
       "pair-calibration-red-hue+50-hue-red-50": [
-        1.554,
-        4.014
+        0.66,
+        1.433
       ],
       "pair-clarity+50-contrast+50": [
         4.245,

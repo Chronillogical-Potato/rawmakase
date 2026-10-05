@@ -323,6 +323,7 @@ impl SettingGroup {
                 to.contrast_model = from.contrast_model;
                 to.grading_model = from.grading_model;
                 to.mixer_model = from.mixer_model;
+                to.calibration_model = from.calibration_model;
                 to.whites_model = from.whites_model;
                 to.gamut_model = from.gamut_model;
             }
@@ -572,6 +573,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         retouch_model: _,
         grading_model: _,
         mixer_model: _,
+        calibration_model: _,
         whites_model: _,
         gamut_model: _,
         temperature: _,
@@ -673,6 +675,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),
         ("mixer_model", Group(ProcessVersion)),
+        ("calibration_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
         ("gamut_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),

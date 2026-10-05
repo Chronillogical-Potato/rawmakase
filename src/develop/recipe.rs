@@ -133,6 +133,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
     )]
     pub mixer_model: crate::develop::color_mixer::MixerModel,
+    /// Which fit renders Camera Calibration's primary sliders. Missing means the
+    /// original coefficients, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::calibration::CalibrationModel::is_original"
+    )]
+    pub calibration_model: crate::develop::calibration::CalibrationModel,
     /// Whether positive Whites follows the photo's highlights. Missing means the
     /// original median curve, so older recipes look as they did; omitted at that
     /// default, and kept by releases that predate it.
@@ -274,6 +281,7 @@ impl Default for Recipe {
             retouch_model: Default::default(),
             grading_model: Default::default(),
             mixer_model: Default::default(),
+            calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
             temperature: 6500.,
@@ -510,6 +518,7 @@ impl Recipe {
         recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
         recipe.use_camera_baseline(m);
