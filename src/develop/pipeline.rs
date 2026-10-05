@@ -1018,23 +1018,30 @@ impl<'a> VignetteField<'a> {
         let lens = r
             .lens_correction(&im.metadata)
             .and_then(|l| l.vignetting.as_ref());
+        let (w, h) = (im.width as f32, im.height as f32);
+        let half = (w * w + h * h).sqrt() * 0.5;
         let (table, amount) = match (lens, r.manual_vignette()) {
-            (_, Some(manual)) => (
-                VignetteTable::Combined(super::effects::combined_table(
-                    lens,
-                    r.lens_vignetting,
-                    &manual,
-                )),
-                1.,
-            ),
+            (_, Some(manual)) => {
+                // Manual Vignetting spans the photo frame, inside the camera's default crop.
+                let inset = super::ImageFrame::new(im).inset;
+                let frame = (w * inset[2]).hypot(h * inset[3]) * 0.5;
+                (
+                    VignetteTable::Combined(super::effects::combined_table(
+                        lens,
+                        r.lens_vignetting,
+                        &manual,
+                        half / frame,
+                    )),
+                    1.,
+                )
+            }
             (Some(lens), None) => (VignetteTable::Lens(lens), r.lens_vignetting),
             (None, None) => return None,
         };
-        let (w, h) = (im.width as f32, im.height as f32);
         Some(Self {
             table,
             center: [w * 0.5, h * 0.5],
-            half: (w * w + h * h).sqrt() * 0.5,
+            half,
             amount,
         })
     }

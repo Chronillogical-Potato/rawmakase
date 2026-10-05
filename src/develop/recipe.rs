@@ -624,6 +624,13 @@ impl Recipe {
             self.effects.lens_vignette_midpoint,
         )
     }
+    /// After an edit of manual Vignetting from Amount `previous`: an Amount moved from 0
+    /// has nothing of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_vignette(&mut self, previous: f32) {
+        if previous == 0. && self.effects.lens_vignette != 0. {
+            self.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        }
+    }
     /// The manual lens Vignetting Amount the finishing stage applies: only the
     /// original operator's; the measured one is applied with the lens profile.
     pub(crate) fn finished_lens_vignette(&self) -> f32 {

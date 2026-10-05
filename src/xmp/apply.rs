@@ -777,6 +777,13 @@ impl Preset {
             0.,
             1.,
         )?;
+        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        if ["VignetteAmount", "VignetteMidpoint"]
+            .iter()
+            .any(|k| settings.values.contains_key(*k))
+        {
+            r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        }
         for (i, name) in ["Purple", "Green"].iter().enumerate() {
             settings.assign(
                 &format!("Defringe{name}Amount"),

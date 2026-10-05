@@ -1278,4 +1278,17 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
     assert!(json.get("lens_vignette_model").is_none());
     let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    // An old recipe takes the measured operator once its Amount leaves 0, not before.
+    let mut old = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..Recipe::default()
+    };
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Original);
+    old.effects.lens_vignette = 0.3;
+    let mut kept = old.clone();
+    kept.adopt_measured_vignette(0.2);
+    assert_eq!(kept.lens_vignette_model, LensVignetteModel::Original);
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Measured);
 }
