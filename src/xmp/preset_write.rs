@@ -116,10 +116,17 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         .collect();
     attributes.extend(dormant);
     // Operators of the chosen groups that the photo keeps from before they were
-    // measured, so applying the preset renders them as the photo does.
+    // measured, so applying the preset renders them as the photo does: with the
+    // group they travel with, or with their own settings.
+    let chosen = |key: &str| group_of_key(key).is_some_and(|g| groups.contains(g));
     let original: Vec<_> = super::write::original_operators(r)
         .into_iter()
-        .filter(|(_, key)| group_of_key(key).is_some_and(|g| groups.contains(g)))
+        .filter(|(name, key)| {
+            chosen(key)
+                || super::write::operator_keys(name)
+                    .iter()
+                    .any(|k| chosen(k.example()))
+        })
         .map(|(name, _)| name)
         .collect();
     if !original.is_empty() {
@@ -422,6 +429,28 @@ mod tests {
             crate::xmp::parse(Path::new("Old.xmp"), &text)?.apply(&target, &m, &[], None)?;
         assert_eq!(applied.mixer_model, MixerModel::Original);
         assert_eq!(applied.calibration_model, CalibrationModel::Original);
+        Ok(())
+    }
+    #[test]
+    fn saturation_presets_carry_the_photos_saturation_operator() -> anyhow::Result<()> {
+        use crate::develop::color_mixer::SaturationModel;
+        let info = PresetInfo::new("Muted", "User Presets");
+        let source = Recipe {
+            saturation: -0.8,
+            ..Default::default()
+        };
+        let mut saturation = GroupSelection::none();
+        saturation.set(SettingGroup::Saturation, GroupInclusion::Included);
+        let text = preset(&source, &info, &saturation);
+        assert!(text.contains("Saturation"), "{text}");
+        let target = Recipe::default();
+        let applied = crate::xmp::parse(Path::new("Muted.xmp"), &text)?.apply(
+            &target,
+            &Default::default(),
+            &[],
+            None,
+        )?;
+        assert_eq!(applied.saturation_model, SaturationModel::Original);
         Ok(())
     }
     #[test]

@@ -679,6 +679,12 @@ impl OperatorKey {
             Self::Prefix(p) => key.starts_with(p),
         }
     }
+    /// A key it stands for, to find the settings group it belongs to.
+    pub(super) fn example(&self) -> &'static str {
+        match self {
+            Self::Exact(k) | Self::Prefix(k) => k,
+        }
+    }
 }
 
 /// The settings whose presence in a packet means it carried that operator.
