@@ -96,6 +96,8 @@ const METADATA: &[&str] = &[
     "RAWmakasePreset",
     // Operators a RAWmakase recipe keeps from before they were measured.
     "RAWmakaseOriginal",
+    // Packets and presets whose RAWmakaseOriginal names every kept operator.
+    "RAWmakaseMarkers",
 ];
 impl Preset {
     /// Apply to a private recipe, publishing only after every stage validates.

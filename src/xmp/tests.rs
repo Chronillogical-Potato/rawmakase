@@ -1342,12 +1342,38 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
     let lightroom = apply("Adobe Photoshop Lightroom Classic 14.5 (Macintosh)")?;
     assert_eq!(lightroom.saturation_model, SaturationModel::Gray);
     assert_eq!(lightroom.calibration_model, CalibrationModel::Measured);
-    // A packet that carries the marker, even empty, says it itself.
+    // 0.1.15 already named some kept operators; the newer ones are added to them.
     let attrs = format!(
-        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseOriginal="" {settings}"#
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseOriginal="Sharpening" {settings}"#
+    );
+    let named = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
+    assert_eq!(named.saturation_model, SaturationModel::Original);
+    assert_eq!(
+        named.sharpening_model,
+        crate::develop::sharpening::SharpeningModel::Original
+    );
+    // A packet with the current marker says it itself.
+    let attrs = format!(
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseMarkers="2" {settings}"#
     );
     let current = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
     assert_eq!(current.saturation_model, SaturationModel::Gray);
+    // A preset from before the marker keeps them too; one written now does not.
+    let old_preset = parse(
+        Path::new("p.xmp"),
+        &xml(&format!(r#"c:RAWmakasePreset="1" {settings}"#), ""),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(old_preset.saturation_model, SaturationModel::Original);
+    let new_preset = parse(
+        Path::new("p.xmp"),
+        &xml(
+            &format!(r#"c:RAWmakasePreset="1" c:RAWmakaseMarkers="2" {settings}"#),
+            "",
+        ),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(new_preset.saturation_model, SaturationModel::Gray);
     Ok(())
 }
 #[test]

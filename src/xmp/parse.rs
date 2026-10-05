@@ -66,11 +66,19 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         .filter(|a| a.namespace() == Some(CRS))
         .map(|a| (a.name().to_string(), a.value().to_string()))
         .collect();
-    // A packet from a RAWmakase that predates the marker keeps the operators
-    // measured only since; packets that have it say so themselves.
-    let implied = description
-        .attribute((super::ns::XMP, "CreatorTool"))
-        .filter(|_| !settings.contains_key("RAWmakaseOriginal"))
+    // A packet or preset from a RAWmakase that predates `RAWmakaseMarkers` keeps the
+    // operators measured only since, besides any it names. Presets record no
+    // release; theirs is taken as the last one without the marker.
+    let legacy_version = if settings.contains_key("RAWmakaseMarkers") {
+        None
+    } else if let Some(tool) = description.attribute((super::ns::XMP, "CreatorTool")) {
+        super::write::rawmakase_version(tool)
+    } else if settings.contains_key("RAWmakasePreset") {
+        Some((0, 1, 15))
+    } else {
+        None
+    };
+    let implied = legacy_version
         .map(super::write::implied_original)
         .unwrap_or_default();
     if !implied.is_empty() {
