@@ -1310,3 +1310,22 @@ fn lens_profile_identity_round_trips() -> Result<()> {
     );
     Ok(())
 }
+#[test]
+fn lightroom_manual_vignetting_takes_the_measured_operator() -> Result<()> {
+    use crate::develop::effects::LensVignetteModel;
+    // Recipe::default() stands for a recipe saved before the measured operator.
+    let apply = |attrs: &str| {
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )
+    };
+    let r = apply(r#"c:VignetteAmount="-50" c:VignetteMidpoint="20""#)?;
+    assert_eq!(r.lens_vignette_model, LensVignetteModel::Measured);
+    assert_eq!(r.effects.lens_vignette, -0.5);
+    let r = apply(r#"c:Exposure2012="0.5""#)?;
+    assert_eq!(r.lens_vignette_model, LensVignetteModel::Original);
+    Ok(())
+}

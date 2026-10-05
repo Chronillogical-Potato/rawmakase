@@ -56,6 +56,7 @@ fn everything_changed() -> Recipe {
         reference_color: true,
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
+        lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         temperature: 4000.,

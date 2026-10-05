@@ -422,7 +422,8 @@ impl Processor {
             None => None,
         };
         let e = &recipe.effects;
-        let effects = e.grain != 0. || e.vignette != 0. || e.lens_vignette != 0.;
+        let lens_vignette = recipe.finished_lens_vignette();
+        let effects = e.grain != 0. || e.vignette != 0. || lens_vignette != 0.;
         let [cx, cy, cw, ch] = finish.crop;
         let f = f32::to_bits;
         let vignette = PostCropVignette::new(e, finish.full);
@@ -465,7 +466,7 @@ impl Processor {
                 f(vignette.map_or(2., |v| v.power)),
                 f(vignette.map_or(0., |v| v.midpoint)),
                 f(vignette.map_or(1., |v| v.feather)),
-                f(e.lens_vignette),
+                f(lens_vignette),
                 f(e.lens_vignette_midpoint),
                 effects as u32,
                 shown as u32,
