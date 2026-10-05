@@ -46,7 +46,7 @@ pub struct Metadata {
     /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
-    /// DNG BaselineExposure, when the file is a DNG that records one.
+    /// DNG BaselineExposure (0 when the DNG has none); `None` for other formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
@@ -143,7 +143,8 @@ impl Raw {
         let dng = crate::dng::read(path_ref);
         let mut crop = fuji_crop(path_ref);
         if let Some(dng) = dng {
-            metadata.baseline_exposure = dng.baseline_exposure;
+            // 0 is the DNG default; the camera table is for other raw formats.
+            metadata.baseline_exposure = Some(dng.baseline_exposure.unwrap_or(0.));
             metadata.embedded_profile = dng
                 .profile
                 .filter(|p| p.ensure_camera(&metadata).is_ok())
@@ -333,6 +334,24 @@ mod tests {
         assert_eq!(super::fuji_crop(f.path()), Some([16, 16, 6000, 4000]));
         std::fs::write(f.path(), b"FUJIFILMCCD-RAW").unwrap();
         assert_eq!(super::fuji_crop(f.path()), None);
+    }
+    #[test]
+    fn dng_without_baseline_exposure_uses_the_dng_default() {
+        let chart = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/corpus/charts/synthetic-d65.dng"
+        );
+        let mut bytes = std::fs::read(chart).unwrap();
+        // BaselineExposure, SRATIONAL, count 1: give it an invalid type so it is unread.
+        let entry = [0x2a, 0xc6, 10, 0, 1, 0, 0, 0];
+        let at = bytes.windows(8).position(|w| w == entry).unwrap();
+        bytes[at + 2] = 0;
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), bytes).unwrap();
+        let m = super::Raw::open(f.path()).unwrap().metadata;
+        // A camera without a table row would otherwise take the table's median.
+        assert_eq!(m.baseline_exposure, Some(0.));
+        assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
     }
     #[test]
     fn corrupt_raw_is_an_error() {

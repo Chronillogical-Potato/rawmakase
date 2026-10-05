@@ -2887,6 +2887,7 @@ dependencies = [
  "skrifa 0.47.0",
  "tempfile",
  "tiff",
+ "toml",
  "unicode-normalization",
  "ureq",
  "wgpu",

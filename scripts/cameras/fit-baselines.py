@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Suggest data/cameras.toml rows. Optional: a camera can always be added by hand.
+
+From Adobe DNGs (preferred): convert copies of sample raws with Adobe DNG Converter,
+outside the repository, and pass the folder; each DNG's BaselineExposure is read
+with exiftool.
+  python3 scripts/cameras/fit-baselines.py --dng <folder of DNGs>
+
+From Camera Raw renders: run the exposure check in tests/corpus/README.md
+(parity-report.py --photos), then fit from its report:
+  python3 scripts/cameras/fit-baselines.py --report <report dir>/report.json
+Each camera's offset is the midtone exposure difference of the rendered output. The
+tone curve steepens midtones, so output moves about 1.17 EV per EV of baseline
+(measured on 14 bodies, 0.85-1.34): the new value is the baseline RAWmakase applied
+(the camera's row, or the fallback) plus offset / 1.17. Rerun the check after
+changing rows; a second pass converges to within ±0.05 EV. Only raw.pixls.us
+samples are named by camera. Fujifilm fits hold for DR100 photos only.
+
+Prints TOML rows to paste or merge; it never edits the table itself.
+"""
+import argparse
+import datetime
+import json
+import statistics
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+TABLE = Path(__file__).resolve().parents[2] / 'data' / 'cameras.toml'
+
+
+def rows():
+    return tomllib.loads(TABLE.read_text())['camera']
+
+
+def applied_baseline(table, make, model):
+    """What crate::cameras::baseline_exposure returns."""
+    same = lambda a, b: a.lower() == b.lower()
+    for c in table:
+        if same(c['make'], make) and any(same(m, model) for m in [c['model'], *c.get('aliases', [])]):
+            return c['baseline_exposure']
+    by_make = [c['baseline_exposure'] for c in table if same(c['make'], make)]
+    return statistics.median(by_make or [c['baseline_exposure'] for c in table] or [0.])
+
+
+def row(make, model, ev, source, sample, how=None):
+    lines = ['[[camera]]', f'make = "{make}"', f'model = "{model}"',
+             f'baseline_exposure = {round(ev * 20) / 20:g}', f'source = "{source}"',
+             f'checked = "{datetime.date.today()}"', f'sample = "{sample}"']
+    if how:
+        lines.append(f'how = "{how}"')
+    return '\n'.join(lines) + '\n'
+
+
+def from_dngs(folder):
+    for dng in sorted(Path(folder).rglob('*.dng'), key=lambda p: p.name.lower()):
+        out = subprocess.run(['exiftool', '-j', '-n', '-Make', '-UniqueCameraModel', '-Model',
+                              '-BaselineExposure', str(dng)], capture_output=True, text=True, check=True)
+        tags = json.loads(out.stdout)[0]
+        if 'BaselineExposure' not in tags:
+            print(f'# {dng.name}: no BaselineExposure', file=sys.stderr)
+            continue
+        print(row(tags.get('Make', '?'), tags.get('Model', '?'), float(tags['BaselineExposure']),
+                  'adobe-dng', 'Adobe DNG Converter'))
+
+
+MIDTONE_GAIN = 1.17
+
+
+def from_report(path):
+    table = rows()
+    for p in json.loads(Path(path).read_text()).get('photos') or sys.exit('No photos in the report; run it with --photos'):
+        make, _, model = p['camera'].partition(' ')
+        if not model:  # private photos, named by folder
+            continue
+        print(f'# {p["camera"]}: Camera Raw {p["ev"]:+.2f} EV from RAWmakase')
+        print(row(make, model, applied_baseline(table, make, model) + p['ev'] / MIDTONE_GAIN, 'fitted',
+                  f'raw.pixls.us, {p["photos"]} photo{"s" * (p["photos"] > 1)}'))
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument('--dng', type=Path, help='folder of DNGs written by Adobe DNG Converter')
+    g.add_argument('--report', type=Path, help='report.json of scripts/corpus/parity-report.py --photos')
+    args = p.parse_args()
+    from_dngs(args.dng) if args.dng else from_report(args.report)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,485 @@
+# RAWmakase's camera table: per-model values that are not in the raw file itself.
+# See docs/cameras.md for what each field means and how to add a camera.
+#
+# make and model are the names LibRaw reports (raw-identify -v prints them as
+# "Normalized Make/Model"); aliases are other model names for the same body.
+# baseline_exposure is the exposure, in EV, Camera Raw adds to an unedited photo
+# with Adobe Standard. source says where the value comes from:
+#   adobe-dng      read from a DNG Adobe software wrote (BaselineExposure tag)
+#   adobe-profile  read from the camera's Adobe DCP (BaselineExposureOffset tag)
+#   fitted         fitted to Camera Raw renders (median midtone offset)
+#   measured       measured by hand; say how in `how`
+# checked is the date of the check and sample what it was checked on.
+# Fujifilm values hold for DR100 only.
+
+[[camera]]
+make = "Canon"
+model = "EOS 90D"
+baseline_exposure = 0.45
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS M50"
+baseline_exposure = 0.5
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R"
+baseline_exposure = 0.55
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R10"
+baseline_exposure = 0.4
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R100"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R5"
+baseline_exposure = 0.5
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R5 Mark II"
+baseline_exposure = 0.5
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R50"
+baseline_exposure = 0.25
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R6"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R6 Mark II"
+baseline_exposure = 0.5
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS R7"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Canon"
+model = "EOS RP"
+baseline_exposure = 0.45
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-E4"
+baseline_exposure = 0
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-H2"
+baseline_exposure = -0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-Pro3"
+baseline_exposure = 0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-S10"
+baseline_exposure = -0.1
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-S20"
+baseline_exposure = -0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-T3"
+baseline_exposure = 0
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-T30 II"
+baseline_exposure = -0.2
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-T4"
+baseline_exposure = 0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X-T5"
+baseline_exposure = -0.15
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X100F"
+baseline_exposure = 0.15
+source = "adobe-dng"
+checked = "2026-09-26"
+sample = "2 Lightroom DNGs (ISO 200 and 400), see docs/macos-lightroom-validation.md"
+
+[[camera]]
+make = "Fujifilm"
+model = "X100V"
+baseline_exposure = 0
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Fujifilm"
+model = "X100VI"
+baseline_exposure = -0.15
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "D750"
+baseline_exposure = 0.15
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "D7500"
+baseline_exposure = 0.4
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "D780"
+baseline_exposure = 0.2
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "D850"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z 30"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z 5"
+baseline_exposure = 0.25
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z 50"
+baseline_exposure = 0.45
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z 6"
+baseline_exposure = 0.4
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z 7"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z f"
+baseline_exposure = 0.2
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Nikon"
+model = "Z fc"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-G9"
+baseline_exposure = 0.6
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-G9M2"
+baseline_exposure = -0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-GH5"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-GH6"
+baseline_exposure = -0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-S1"
+baseline_exposure = -0.15
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-S5"
+baseline_exposure = 0
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-S5M2"
+baseline_exposure = -0.1
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Ricoh"
+model = "GR III"
+baseline_exposure = 0.1
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-1"
+baseline_exposure = 0.15
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-6000"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-6400"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-6600"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-6700"
+baseline_exposure = 0.1
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7C"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7CM2"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7CR"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-09-26"
+sample = "4 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 EV bright"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7M2"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-09-26"
+sample = "8 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 EV bright"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7M3"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7M4"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7RM3"
+baseline_exposure = 0.2
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7RM5"
+baseline_exposure = 0.3
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7SM3"
+baseline_exposure = 0.05
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-9M3"
+baseline_exposure = 0.2
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
+
+[[camera]]
+make = "Sony"
+model = "ZV-E10"
+baseline_exposure = 0.35
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo"
