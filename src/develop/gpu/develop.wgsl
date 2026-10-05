@@ -967,7 +967,12 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     let l = clamp(lab.x, 0.0, 1.0);
     let gray = l * l * l;
     var gamut = 1.0;
+    // GamutModel::Clip: each channel clipped on its own, as Camera Raw does.
+    let clip = p(P_GAMUT_CLIP) != 0.0;
     for (var k = 0; k < 3; k++) {
+        if clip {
+            break;
+        }
         let v = rgb[k];
         if v < 0.0 {
             gamut = min(gamut, gray / max(gray - v, 1e-8));
@@ -978,7 +983,7 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     }
     var out: vec3<f32>;
     for (var k = 0; k < 3; k++) {
-        out[k] = clamp(srgb_encode(gray + (rgb[k] - gray) * gamut), 0.0, 1.0);
+        out[k] = clamp(srgb_encode(select(gray + (rgb[k] - gray) * gamut, clamp(rgb[k], 0.0, 1.0), clip)), 0.0, 1.0);
     }
     if point_selection >= 0.0 {
         out = visualize(out);

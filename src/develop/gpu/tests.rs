@@ -273,6 +273,10 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     measured.grading[2] = [0.1, 0.5, 0.2];
     measured.effects.blending = 0.8;
     measured.effects.balance = -0.3;
+    recipes.push(measured.clone());
+    // Out-of-gamut colors clipped per channel.
+    measured.gamut_model = crate::develop::GamutModel::Clip;
+    measured.saturation = 0.8;
     recipes.push(measured);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
     let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);

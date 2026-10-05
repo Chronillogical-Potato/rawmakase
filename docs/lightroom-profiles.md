@@ -74,7 +74,7 @@ Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table loo
 | 1D tables | A curve per channel, stored like the 3D samples. | `rgb-1d-100` |
 | The extra word some camera-matching tables end with | No visible effect at 0 or 1. | `rgb-flag-100` |
 
-The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it could not be checked closely, because RAWmakase compresses out-of-gamut colours toward gray where Camera Raw clips them, which dominates the difference on those patches.
+The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it was not checked closely, because RAWmakase compressed out-of-gamut colours toward gray where Camera Raw clips them; new edits clip per channel too ([out-of-gamut colors](color-pipeline.md#out-of-gamut-colors)).
 
 A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. On engine 3 edits, whose HSL and Saturation run later in Oklab, the table follows them and comes before Monochrome; their point curves stay last, as engine 3 has always applied them. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
 

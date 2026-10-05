@@ -52,6 +52,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("ADJUST", 1),
     ("DEFRINGE", 2),
     ("DEFRINGE_RANGES", 4),
+    // 1 when out-of-gamut colors clip per channel (`GamutModel::Clip`).
+    ("GAMUT_CLIP", 1),
     ("MONO", 1),
     ("GRAY_MIX", 8),
     ("TONE_ONLY", 1),
@@ -353,6 +355,10 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("ADJUST", &[lut.color_adjustments as u8 as f32]);
     p.set("DEFRINGE", &e.defringe);
     p.set("DEFRINGE_RANGES", e.defringe_ranges.as_flattened());
+    p.set(
+        "GAMUT_CLIP",
+        &[(r.gamut_model == crate::develop::GamutModel::Clip) as u8 as f32],
+    );
     p.set("MONO", &[e.monochrome as u8 as f32]);
     p.set("GRAY_MIX", &e.gray_mix);
     Some(p)

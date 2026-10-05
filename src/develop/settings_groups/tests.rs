@@ -59,6 +59,7 @@ fn everything_changed() -> Recipe {
         lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
+        gamut_model: crate::develop::GamutModel::Clip,
         temperature: 4000.,
         tint: 12.,
         wb: [1.5, 1., 0.8],
