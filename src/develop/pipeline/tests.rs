@@ -76,7 +76,7 @@ fn old_recipes_keep_original_profile_tones() {
     );
     // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
-        parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        parametric_model: crate::develop::parametric::ParametricModel::Layered,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
@@ -1258,4 +1258,42 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         .collect();
     let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.photo, plain.photo);
+}
+
+/// A look's parametric curve: added to the user's regions by the measured model, a
+/// second curve after the user's by the layered one, as Camera Raw 18.7 renders it.
+#[test]
+fn a_looks_parametric_curve_follows_the_users() {
+    use crate::develop::parametric::{ParametricCurve, ParametricModel};
+    let mut m = fixture().metadata;
+    m.cam_xyz = [
+        [1.1434, -0.4948, -0.121],
+        [-0.3746, 1.2042, 0.1903],
+        [-0.0666, 0.1479, 0.52],
+    ];
+    let mut look = crate::camera_profiles::CameraProfile::creative_for_test(&m);
+    let settings = &mut look.enhanced.as_mut().unwrap().settings;
+    settings.parametric = [0., -0.15, -0.2, -0.33];
+    settings.splits = [0.25, 0.5, 0.75];
+    let mut r = Recipe {
+        profile: Some(std::sync::Arc::new(look)),
+        engine: 4,
+        reference_curves: true,
+        ..Default::default()
+    };
+    r.effects.parametric = [0., 0.3, 0., 0.];
+    let user = ParametricCurve::new([0., 0.3, 0., 0.], [0.25, 0.5, 0.75]).unwrap();
+    let own = ParametricCurve::new([0., -0.15, -0.2, -0.33], [0.25, 0.5, 0.75]).unwrap();
+    r.parametric_model = ParametricModel::Layered;
+    let layered = r.with_profile_adjustments().into_owned();
+    assert_eq!(layered.effects.parametric, [0., 0.3, 0., 0.]);
+    let curve = CurveSet::new(&layered).parametric.unwrap();
+    for x in [0.1, 0.3, 0.5, 0.7, 0.9] {
+        assert!((curve.eval(x) - own.eval(user.eval(x))).abs() < 1e-3, "{x}");
+    }
+    r.parametric_model = ParametricModel::Measured;
+    let added = r.with_profile_adjustments().into_owned();
+    assert!((added.effects.parametric[1] - 0.15).abs() < 1e-6);
+    let curve = CurveSet::new(&added).parametric.unwrap();
+    assert!((curve.eval(0.3) - own.eval(user.eval(0.3))).abs() > 1e-3);
 }
