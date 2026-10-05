@@ -366,9 +366,12 @@ impl Recipe {
             }
         }
         let e = &mut self.effects;
-        // The layered curve renders a look's parametric curve as a curve of its own.
-        let merge_parametric =
-            self.parametric_model != crate::develop::parametric::ParametricModel::Layered;
+        // The layered curve renders a look's parametric curve as a curve of its own,
+        // on the measured path only; elsewhere the look's regions join the user's.
+        let merge_parametric = !(self.parametric_model
+            == crate::develop::parametric::ParametricModel::Layered
+            && self.engine >= 4
+            && self.reference_curves);
         if s.parametric != [0.; 4] && merge_parametric {
             for (v, l) in e.parametric.iter_mut().zip(s.parametric) {
                 *v = add(*v, l);
