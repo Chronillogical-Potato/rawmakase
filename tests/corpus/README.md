@@ -71,6 +71,7 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
 - `scripts/corpus/camera-raw-charts.py`: Camera Raw renders of the synthetic charts into `camera-raw/`; with `--adobe`, of the camera charts with Adobe Standard into the private corpus.
 - `scripts/corpus/camera-raw-photos.py`: Camera Raw renders of every corpus photo for the `photos` cases.
 - `scripts/corpus/contrast-curve.py`: renders Contrast on `synthetic-d65`, prints the chart's Contrast table for `basic_tone_data.rs`, and with the private photo references fits the photo's Contrast pivot.
+- `scripts/corpus/color-grading.py`: renders Color Grading's fitting cases (about 740: every region at twelve hues and four saturations, Shadows, Midtones and Highlights over a grid of Blending and Balance, the Luminance sliders, and held-out checks) on `synthetic-d65` as 16-bit ProPhoto RGB and fits `src/develop/color_grade_curves.bin` from them. The renders' patch means stay outside the repository.
 - `scripts/corpus/parametric-curve.py`: renders the parametric curve's fitting cases (about 380 region and split settings) on `synthetic-d65` and fits `src/develop/parametric.bin` from them. The renders' patch means stay outside the repository.
 - `scripts/corpus/pixls.py`: `manifest` (rebuild `pixls.json`), `download` (checks hashes and the budget), `cameras` (rebuild `cameras.json` from the corpus RAWs).
 - `scripts/corpus/migrate-references.py`: reduce existing reference TIFFs (sweeps, Lightroom exports) to block files.

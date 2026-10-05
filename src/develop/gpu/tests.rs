@@ -267,6 +267,13 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.effects.calibration = [[0.3, -0.2], [-0.4, 0.5], [0.2, 0.1]];
     r.effects.shadow_tint = -0.4;
     recipes.push(r.clone());
+    // Measured grading curves, at Blending and Balance the original tables don't cover.
+    let mut measured = r.clone();
+    measured.grading_model = crate::develop::color_grade::GradingModel::Measured;
+    measured.grading[2] = [0.1, 0.5, 0.2];
+    measured.effects.blending = 0.8;
+    measured.effects.balance = -0.3;
+    recipes.push(measured);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
     let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
     warm.shift = [0.4, -0.5, 0.3];
