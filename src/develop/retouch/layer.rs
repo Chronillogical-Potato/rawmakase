@@ -265,8 +265,12 @@ impl RetouchCache {
         {
             return Ok(out.clone());
         }
-        // Free the previous result before making the next.
+        // Free the previous result, and the retouched image built on it, before making
+        // the next; spot removal is then rebuilt on the new one.
         self.denoised = None;
+        self.base = None;
+        self.image = None;
+        self.change = None;
         let out = Arc::new(d.apply(source, cancel)?);
         self.denoised = Some((source.clone(), d, out.clone()));
         Ok(out)

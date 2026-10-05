@@ -806,7 +806,7 @@ impl Recipe {
     /// The measured Color noise reduction to run on the camera image; `None` for the
     /// original operator, which [`Recipe::sampled_noise_chroma`] applies at sampling.
     pub(crate) fn chroma_denoise(&self) -> Option<crate::develop::color_noise::ChromaDenoise> {
-        if self.noise_model.is_original() {
+        if !self.measures_color_noise() {
             return None;
         }
         crate::develop::color_noise::ChromaDenoise::new(
@@ -818,11 +818,16 @@ impl Recipe {
     /// The Color amount the original operator applies when sampling the camera image:
     /// none for the measured one, which runs on the camera image first.
     pub(crate) fn sampled_noise_chroma(&self) -> f32 {
-        if self.noise_model.is_original() {
-            self.noise_chroma
-        } else {
+        if self.measures_color_noise() {
             0.
+        } else {
+            self.noise_chroma
         }
+    }
+    /// Whether the measured Color noise reduction renders: engines before 3 develop
+    /// without it and keep the original filter.
+    fn measures_color_noise(&self) -> bool {
+        !self.noise_model.is_original() && self.engine >= 3
     }
     /// The Sharpening sliders at their defaults for `model`, which the recipe then
     /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)

@@ -1225,7 +1225,12 @@ impl Editor {
             r.noise_luma = 0.;
             r.effects.luma_detail = d.luma_detail;
             r.effects.luma_contrast = d.luma_contrast;
-            r.set_color_noise_defaults(crate::develop::color_noise::NoiseModel::Measured);
+            // The oldest engines render only the original filter.
+            r.set_color_noise_defaults(if r.engine >= 3 {
+                crate::develop::color_noise::NoiseModel::Measured
+            } else {
+                crate::develop::color_noise::NoiseModel::Original
+            });
             // Reset brings the current defaults, with the measured operator.
             r.set_sharpening_defaults(SharpeningModel::Measured);
         }

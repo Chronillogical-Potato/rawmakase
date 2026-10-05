@@ -1539,3 +1539,20 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     assert_eq!(saved.noise_model, NoiseModel::Original);
     Ok(())
 }
+/// Engines before 3 develop without the measured Color noise reduction, so a recipe
+/// there keeps applying its Color amount with the original filter.
+#[test]
+fn legacy_engines_keep_the_original_colour_noise_filter() {
+    use crate::develop::color_noise::NoiseModel;
+    let mut r = Recipe {
+        engine: 2,
+        noise_chroma: 0.25,
+        noise_model: NoiseModel::Measured,
+        ..Default::default()
+    };
+    assert!(r.chroma_denoise().is_none());
+    assert_eq!(r.sampled_noise_chroma(), 0.25);
+    r.engine = 4;
+    assert!(r.chroma_denoise().is_some());
+    assert_eq!(r.sampled_noise_chroma(), 0.);
+}
