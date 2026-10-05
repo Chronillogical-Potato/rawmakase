@@ -4,7 +4,9 @@
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input};
 use crate::develop::{
-    ClipOverlay, Histogram, Recipe, effects::PostCropVignette, pipeline::pixel_params::PixelParams,
+    ClipOverlay, Histogram, Recipe,
+    effects::{GrainField, GrainModel, PostCropVignette},
+    pipeline::pixel_params::PixelParams,
     quality,
 };
 use anyhow::{Context, Result, ensure};
@@ -428,8 +430,13 @@ impl Processor {
         let [cx, cy, cw, ch] = finish.crop;
         let f = f32::to_bits;
         let vignette = PostCropVignette::new(e, finish.full);
+        let grain = GrainField::new(
+            e,
+            recipe.grain_model,
+            finish.full[0].max(finish.full[1]) as f32 / finish.scale,
+        );
         let parameters = |shown: bool| -> wgpu::Buffer {
-            let values: [u32; 36] = [
+            let values: [u32; 40] = [
                 width,
                 height,
                 cx,
@@ -455,10 +462,10 @@ impl Processor {
                 finish.full[0],
                 finish.full[1],
                 f(finish.scale),
-                f(e.grain),
-                f(e.grain_size),
-                f(e.grain_roughness),
-                e.grain_seed,
+                f(grain.amount),
+                f(grain.cell),
+                f(grain.coarse),
+                grain.seed,
                 f(vignette.map_or(0., |v| v.amount)),
                 vignette.map_or(0, |v| v.style.code() as u32),
                 f(vignette.map_or(0., |v| v.highlights)),
@@ -473,6 +480,10 @@ impl Processor {
                 shown as u32,
                 f(sharpener.halo),
                 f(sharpener.dark),
+                0,
+                f(grain.fine),
+                (grain.model == GrainModel::Measured) as u32,
+                0,
                 0,
             ];
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

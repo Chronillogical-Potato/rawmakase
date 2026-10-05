@@ -741,6 +741,16 @@ impl Preset {
             0.,
             1.,
         )?;
+        // Lightroom's values mean the measured grain, also on a recipe saved before.
+        if ["GrainAmount", "GrainSize", "GrainFrequency"]
+            .iter()
+            .any(|k| settings.values.contains_key(*k))
+        {
+            r.grain_model = crate::develop::effects::GrainModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_GRAIN) {
+            r.grain_model = crate::develop::effects::GrainModel::Original;
+        }
         settings.seen.insert("GrainSeed".into());
         if let Some(seed) = v.get("GrainSeed") {
             r.effects.grain_seed = seed.parse().context("Invalid grain seed")?;

@@ -310,6 +310,7 @@ impl SettingGroup {
                 e.grain_size = f.grain_size;
                 e.grain_roughness = f.grain_roughness;
                 e.grain_seed = f.grain_seed;
+                to.grain_model = from.grain_model;
             }
             ProcessVersion => {
                 to.engine = from.engine;
@@ -561,6 +562,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         reference_calibration: _,
         reference_color: _,
         parametric_model: _,
+        grain_model: _,
         contrast_model: _,
         lens_vignette_model: _,
         grading_model: _,
@@ -660,6 +662,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("reference_calibration", Group(ProcessVersion)),
         ("reference_color", Group(ProcessVersion)),
         ("parametric_model", Group(ProcessVersion)),
+        ("grain_model", Group(Grain)),
         ("contrast_model", Group(ProcessVersion)),
         ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),

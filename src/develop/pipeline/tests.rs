@@ -1399,3 +1399,52 @@ fn process_update_sharpens_with_the_recipe_operator_default() {
     reset.update_process(None);
     assert_eq!(reset.sharpening, 40. / 150.);
 }
+/// New edits render Grain as strong as Camera Raw 18.7 does: Amount 50, Size 25 on a
+/// flat mid gray 1500 pixels wide measured an L* standard deviation of 7.3 there.
+#[test]
+fn new_edits_render_grain_at_camera_raw_strength() -> anyhow::Result<()> {
+    let (width, height) = (1500, 40);
+    let m = Metadata {
+        width,
+        height,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let im = CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: vec![[0.18; 3]; (width * height) as usize],
+        metadata: m.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let mut r = Recipe::with_profiles(&m, &[]);
+    r.sharpening = 0.;
+    r.noise_chroma = 0.;
+    let flat = crate::develop::render(&im, &r, 0)?;
+    r.effects.grain = 0.5;
+    let grain = crate::develop::render(&im, &r, 0)?;
+    let lightness = |p: &[f32; 3]| {
+        let v = p[1];
+        let y = if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        };
+        116. * y.cbrt() - 16.
+    };
+    let n = flat.pixels.len() as f32;
+    let deltas: Vec<f32> = (flat.pixels.iter().zip(&grain.pixels))
+        .map(|(a, b)| lightness(b) - lightness(a))
+        .collect();
+    let mean = deltas.iter().sum::<f32>() / n;
+    let deviation = (deltas.iter().map(|d| (d - mean).powi(2)).sum::<f32>() / n).sqrt();
+    let gray = flat.pixels.iter().map(lightness).sum::<f32>() / n;
+    assert!((35. ..75.).contains(&gray), "{gray}");
+    assert!((5.8..8.8).contains(&deviation), "{deviation}");
+    Ok(())
+}
