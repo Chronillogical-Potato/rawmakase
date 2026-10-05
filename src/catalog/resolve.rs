@@ -64,6 +64,46 @@ impl Catalog {
     }
 }
 
+/// What exporting one photo needs from the catalog: its edit and the metadata the
+/// file carries.
+#[derive(Clone, Debug)]
+pub struct PhotoRecord {
+    pub id: i64,
+    pub edit: EditRecord,
+    pub descriptive: super::Descriptive,
+    pub keywords: Vec<super::Keyword>,
+    pub rating: i32,
+    pub label: String,
+}
+
+impl Catalog {
+    /// The records of `ids`, in order, read in one transaction: one consistent
+    /// state of the catalog however many photos there are.
+    pub fn photo_records(&self, ids: &[i64]) -> Result<Vec<PhotoRecord>> {
+        let tx = self.db.unchecked_transaction()?;
+        let records = ids
+            .iter()
+            .map(|&id| {
+                let (rating, label) =
+                    self.db
+                        .query_row("SELECT rating,label FROM photos WHERE id=?", [id], |r| {
+                            Ok((r.get(0)?, r.get(1)?))
+                        })?;
+                Ok(PhotoRecord {
+                    id,
+                    edit: self.edit_record(id)?,
+                    descriptive: self.descriptive(id)?,
+                    keywords: self.keywords(id)?,
+                    rating,
+                    label,
+                })
+            })
+            .collect::<Result<_>>()?;
+        tx.commit()?;
+        Ok(records)
+    }
+}
+
 impl EditRecord {
     /// The saved RAWmakase edit, if there is one. An error when it can't be read, or
     /// when the file at `path` is not the one it was saved for: the edit is then
