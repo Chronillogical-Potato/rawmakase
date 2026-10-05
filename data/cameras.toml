@@ -13,7 +13,9 @@
 # checked is the date of the check and sample what it was checked on.
 # Values hold at standard settings (no Highlight Tone Priority, DR100, no extended
 # low ISO). RAWmakase moves Fujifilm rows with the raw's exposure midpoint shift
-# (DR200/DR400, extended ISO) unless the row says fujifilm_exposure_shift = "ignored".
+# (DR200/DR400, extended ISO) unless the row says fujifilm_exposure_shift = "ignored";
+# fujifilm_dr100_shift gives the body's shift at DR100 when it is not the sensor's
+# usual one (-0.72 X-Trans, 0 Bayer).
 
 [[camera]]
 make = "Canon"
@@ -267,6 +269,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 fo
 make = "Fujifilm"
 model = "GFX 100"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -275,6 +278,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX 50R"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -283,6 +287,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX 50S"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -291,6 +296,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX100 II"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.22 at DR200, which adds 1.23 EV on GFX bodies; BaselineExposure +1.22 plus -0.05 for the white level"
@@ -299,6 +305,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.22 at DR200, which adds 1.2
 make = "Fujifilm"
 model = "GFX100RF"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -307,6 +314,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for
 make = "Fujifilm"
 model = "GFX100S"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -315,6 +323,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX100S II"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for the white level"
@@ -323,6 +332,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for
 make = "Fujifilm"
 model = "GFX50S II"
 baseline_exposure = -0.05
+fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 for the white level"
