@@ -114,12 +114,12 @@ from the Canon maker notes (both On and Enhanced; no Enhanced sample has been me
 and follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
 is not handled yet.
 
-After the table, 150 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
+After the table, 151 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
 RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
-master of 2026-10-02). For 16 bodies Adobe's value alone left the render more than
+master of 2026-10-02). For 15 bodies Adobe's value alone left the render more than
 0.1 EV off, so their rows are `fitted` to the render instead and say Adobe's value in
 `sample`: the Fujifilm X-H2 (0.40 EV darker in Camera Raw), X-T30 II (0.38 darker), X-S10,
-X-S20, X-T5 and X100VI, the Canon PowerShot V1 and G5 X Mark II, the Nikon D500,
+X-S20, X-T5 and X100VI, the Canon PowerShot G5 X Mark II, the Nikon D500,
 D5600, D850 and Z 7, the Olympus PEN-F, the Pentax K-70 and the Sony RX100 VII, and since the exposure shift is
 followed, the Fujifilm X-H2S (0.14 darker at DR200). The Sony A7 V row is
 fitted too: its Adobe DNG is 16-bit, so its white level does not compare with LibRaw's.
@@ -127,8 +127,10 @@ Camera Raw renders most of those Fujifilm bodies darker than their baseline expl
 for a reason not found yet.
 
 Still about 1 EV off, for the shooting settings above or a decoding problem: the
-Olympus E-M10 Mark III and Sony A7R IV (extended low ISO), and the Canon EOS R6 Mark III,
-whose black level LibRaw reads as 0 instead of 512. The Leica Q, Ricoh GR III and Sigma fp L
+Olympus E-M10 Mark III and Sony A7R IV (extended low ISO). LibRaw reads the black level
+of the Canon EOS R6 Mark III and PowerShot V1 as 0 plus small per-channel values instead
+of 512; RAWmakase takes the black from the raw's masked left border when LibRaw's is
+below a quarter of it, which brings both within 0.1 EV. The Leica Q, Ricoh GR III and Sigma fp L
 raws are DNGs with their own value and render 0.11 to 0.13 EV brighter than Camera Raw.
 
 Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
