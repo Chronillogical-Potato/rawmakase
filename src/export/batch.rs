@@ -481,33 +481,52 @@ fn commit(
         return Ok((target, None));
     }
     loop {
-        match staged.persist_noclobber(&target) {
-            Ok(_) => {
-                crate::storage::sync_dir(crate::storage::parent_dir(&target))?;
-                return Ok((target, None));
-            }
-            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                staged = e.file;
-                reserved.found(&target);
-                match late {
-                    Existing::Unique => target = reserved.unique(&target),
-                    Existing::Overwrite => {
-                        overwrite(staged, &target, &photo.source)?;
-                        return Ok((
-                            target,
-                            Some("replaced a file that appeared during the export".into()),
-                        ));
-                    }
-                    Existing::Skip | Existing::Ask => {
-                        return Err(Stop::Skipped(
-                            "a file with its name appeared during the export".into(),
-                        ));
-                    }
+        // A file under the name in other case is the same name here; an exact-name
+        // check alone misses it on a case-sensitive volume.
+        let appeared = match spelled_otherwise(&target) {
+            Some(existing) => existing,
+            None => match staged.persist_noclobber(&target) {
+                Ok(_) => {
+                    crate::storage::sync_dir(crate::storage::parent_dir(&target))?;
+                    return Ok((target, None));
                 }
+                Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    staged = e.file;
+                    target.clone()
+                }
+                Err(e) => return Err(Stop::Failed(e.error.into())),
+            },
+        };
+        reserved.found(&appeared);
+        match late {
+            Existing::Unique => target = reserved.unique(&target),
+            Existing::Overwrite => {
+                overwrite(staged, &appeared, &photo.source)?;
+                return Ok((
+                    appeared,
+                    Some("replaced a file that appeared during the export".into()),
+                ));
             }
-            Err(e) => return Err(Stop::Failed(e.error.into())),
+            Existing::Skip | Existing::Ask => {
+                return Err(Stop::Skipped(
+                    "a file with its name appeared during the export".into(),
+                ));
+            }
         }
     }
+}
+
+/// The file in `path`'s folder whose name is `path`'s in other case, if any.
+fn spelled_otherwise(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?;
+    let folded = fold(name);
+    let dir = crate::storage::parent_dir(path);
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.file_name())
+        .find(|other| other != name && fold(other) == folded)
+        .map(|other| dir.join(other))
 }
 
 /// Replaces the file at `target` with `staged`, never the photo's own file.

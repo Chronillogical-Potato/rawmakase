@@ -344,6 +344,31 @@ fn a_file_that_appears_during_the_export_gets_the_batchs_answer() -> Result<()> 
     let (outcome, files) = late(Existing::Ask, None)?;
     assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
     assert_eq!(files, ["a.tif"]);
+
+    // The same name in other case, as an earlier batch may write it: the same
+    // answers, on any volume, and an overwrite replaces it as it is spelled.
+    let other_case = |existing: Existing| -> Result<(Outcome, Vec<String>)> {
+        let out = f.out().join(format!("case-{existing:?}"));
+        let mut settings = settings(&out);
+        settings.existing = existing;
+        let batch = Batch {
+            plan: plan(&photos, &settings, None).unwrap(),
+            ..f.batch(photos.clone(), settings)
+        };
+        std::fs::create_dir_all(&out)?;
+        std::fs::write(out.join("A.TIF"), b"late")?;
+        let outcome = run_all(&batch).remove(0);
+        Ok((outcome, listing(&out)))
+    };
+    let (outcome, files) = other_case(Existing::Unique)?;
+    assert_eq!(exported(&outcome), f.out().join("case-Unique/a-2.tif"));
+    assert_eq!(files, ["A.TIF", "a-2.tif"]);
+    let (outcome, files) = other_case(Existing::Overwrite)?;
+    assert_eq!(exported(&outcome), f.out().join("case-Overwrite/A.TIF"));
+    assert_eq!(files, ["A.TIF"]);
+    let (outcome, files) = other_case(Existing::Skip)?;
+    assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
+    assert_eq!(files, ["A.TIF"]);
     Ok(())
 }
 
