@@ -33,6 +33,15 @@ Camera Raw's Contrast is one curve whose pivot (the level it leaves alone) depen
 
 Engine 4 renders this (`ContrastModel::Adaptive`): the chart's measured Contrast (`CONTRAST_CHART`, Camera Raw 18.7) moved to the pivot measured on the photo's reduced copy, as its profile, white balance and calibration render it at the camera's exposure, after Whites and Blacks. Masks' Contrast uses the same pivot. Extra MAE over the default render on the private photos, compared with RAWmakase's own default render, falls from 0.0046 to 0.0033 on the five sweep photos (Contrast ±25, ±50, ±100) and from 0.0095 to 0.0066 on 14 sample photos (Contrast +50). On the chart, `contrast±*` cases go from 1.6–3.8 to 0.8–2.1 mean ΔE00 and Contrast with Blacks or Whites from 1.8–3.4 to 1.0–2.2. Recipes saved before it keep the averaged curve before Whites and Blacks (`contrast_model` missing means `Original`).
 
+### Whites
+
+Positive Whites follows the photo's highlights in Camera Raw, after its Exposure: on the synthetic chart rendered at Exposure −2 to +1 (13 steps), Whites +100 stretches the highlights to white from about 0.65 (encoded) at −2 EV and 0.9 at 0 EV, and leaves them nearly alone at +1 EV. The chart's curves at these exposures form one family:
+
+- One member of it explains each of the five sweep photos' Camera Raw Whites at +25, +50 and +100 together (0.0003–0.0045 MAE; the median curve was 0.0004–0.21).
+- Which member follows the 98th percentile of the photo's encoded luminance: the chart exposure with the same highlights, plus 0.24 EV (photos behave a little brighter than the chart), predicts the best member to 0.15 EV (`scripts/corpus/whites-curve.py`).
+
+Engine 4 renders this (`WhitesModel::Adaptive`): the curve for the photo's highlights, measured on its reduced copy as the recipe renders it before the Basic tone sliders (Exposure included), interpolated between the chart's exposures. Negative Whites, which is the same on every photo, keeps the median curve, and so do masks' Whites with the photo's table. Extra MAE over the default render on the five photos (Whites +25, +50, +100) falls from 0.024 to 0.0068. On the chart, Whites with Exposure −1.5 or +0.75 goes from 4.1–16.3 to 1.0–3.1 mean ΔE00, while the chart at its own exposure moves from 0.91–3.12 to 0.98–3.06 (+50: 1.37 to 1.52): photos and the chart differ by the 0.24 EV above, and the offset follows the photos. Recipes saved before it keep the median curve (`whites_model` missing means `Original`).
+
 ### Shadows and Highlights
 
 Offline fits on the sweeps show both are local operators whose effect is best explained in log luminance of the toned image. The base level is a guided filter (radius 3.2% of the long edge, ε = 1.5 in log2 units squared), with the gain measured as a function of that base level relative to an image key. The key is the 99th luminance percentile for Shadows and the median for Highlights. `src/develop/local_tone.rs` computes the base level on a 512 px copy of the photo, so tiles, 100% regions and previews agree, and applies the measured tables in `local_tone_data.rs` after the profile tone curve.
@@ -121,7 +130,7 @@ A photo takes one render of the reduced copy, after highlight recovery and the r
 
 ## Remaining
 
-- Positive Whites needs the image-adaptive white point. The table is a median, which is poor on photos with dim highlights at +100.
+- Positive Whites' offset between photos and the chart is fitted on five photos; Lightroom's own measure of the highlights is unknown.
 - Contrast's pivot is predicted from two statistics of the photo to about 0.03; what Camera Raw measures exactly is unknown.
 - Auto's Whites: Lightroom's choice follows the brightest percentiles only loosely (90th percentile error about 30).
 - Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.

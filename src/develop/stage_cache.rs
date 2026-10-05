@@ -160,6 +160,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         parametric_model: _,
         contrast_model: _,
         grading_model: _,
+        whites_model: _,
         contrast: _,
         whites: _,
         blacks: _,

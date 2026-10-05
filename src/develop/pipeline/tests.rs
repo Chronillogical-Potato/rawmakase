@@ -46,6 +46,7 @@ fn old_recipes_keep_original_profile_tones() {
         "parametric_model",
         "contrast_model",
         "grading_model",
+        "whites_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -64,6 +65,10 @@ fn old_recipes_keep_original_profile_tones() {
         old.contrast_model,
         crate::develop::basic_tone::ContrastModel::Original
     );
+    assert_eq!(
+        old.whites_model,
+        crate::develop::basic_tone::WhitesModel::Original
+    );
     assert!(Recipe::default().profile_tone);
     assert_eq!(
         old.grading_model,
@@ -74,12 +79,14 @@ fn old_recipes_keep_original_profile_tones() {
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
+        whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
     assert_eq!(back.parametric_model, measured.parametric_model);
     assert_eq!(back.contrast_model, measured.contrast_model);
     assert_eq!(back.grading_model, measured.grading_model);
+    assert_eq!(back.whites_model, measured.whites_model);
 }
 
 #[test]
@@ -1194,11 +1201,11 @@ fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
     assert!(Panel::LensCorrections.holds_change(&before, &after));
 }
 
-/// The Contrast pivot is the photo's: the same for the GPU's map pass (whose
+/// The Contrast pivot and the Whites curve are the photo's: the same for the GPU's map pass (whose
 /// parameters also run the final pass) as for the plain per-pixel parameters, and not
 /// moved by Clarity's or Texture's gain.
 #[test]
-fn the_contrast_pivot_is_measured_on_the_photo_alone() {
+fn contrast_and_whites_are_measured_on_the_photo_alone() {
     use crate::develop::basic_tone::{ContrastCurve, ContrastModel, TYPICAL_PIVOT};
     let mut im = fixture();
     im.metadata.cam_xyz = [
@@ -1223,19 +1230,25 @@ fn the_contrast_pivot_is_measured_on_the_photo_alone() {
         reference_calibration: true,
         contrast_model: ContrastModel::Adaptive,
         contrast: 0.6,
+        whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
+        whites: 0.5,
         shadows: 0.3,
         ..Default::default()
     };
     let matrix = profile_matrix(&im.metadata, &r);
     let plain = CurveSet::for_image((&im).into(), &r, matrix, false);
-    let ContrastCurve::Pivot(pivot) = plain.contrast else {
-        panic!("{:?}", plain.contrast);
+    let ContrastCurve::Pivot(pivot) = plain.photo.contrast else {
+        panic!("{:?}", plain.photo.contrast);
     };
     assert!((pivot - TYPICAL_PIVOT).abs() > 0.01, "{pivot}");
+    assert_ne!(
+        plain.photo.whites,
+        crate::develop::basic_tone::WhitesTable::original()
+    );
     let tone = pixel_params::tone_params((&im).into(), &r).unwrap();
     assert_eq!(tone.get("LOCAL_PIVOT"), [pivot]);
-    let map_pass = CurveSet::with_contrast_pivot((&im).into(), &r, matrix);
-    assert_eq!(map_pass.contrast, plain.contrast);
+    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    assert_eq!(map_pass.photo, plain.photo);
     assert_eq!(
         map_pass.basic.as_ref().map(|b| &b.lut),
         plain.basic.as_ref().map(|b| &b.lut)
@@ -1243,6 +1256,6 @@ fn the_contrast_pivot_is_measured_on_the_photo_alone() {
     let gain: Vec<f32> = (0..im.pixels.len())
         .map(|i| 0.5 + (i % 7) as f32 * 0.2)
         .collect();
-    let gained = CurveSet::with_contrast_pivot(Source::new(&im, Some(&gain)), &r, matrix);
-    assert_eq!(gained.contrast, plain.contrast);
+    let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
+    assert_eq!(gained.photo, plain.photo);
 }

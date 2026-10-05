@@ -177,7 +177,7 @@ pub(crate) fn needs_map(r: &Recipe) -> bool {
 /// Whether a render needs the photo reduced for the Shadows/Highlights map or for
 /// measuring the photo's Contrast pivot; the stage cache keeps it between renders.
 pub(crate) fn needs_reduced(r: &Recipe) -> bool {
-    needs_map(r) || super::measures_contrast_pivot(r)
+    needs_map(r) || super::measures_contrast_pivot(r) || super::measures_whites(r)
 }
 /// Parameters that stop after the tone stage (`tone_stage`, before the map), to tone
 /// the reduced photo the Shadows/Highlights map is built from on the GPU.
@@ -188,7 +188,7 @@ pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     let matrix = profile_matrix(&im.metadata, r);
     // The same parameters run the final pass once the map is built (`with_map`), so
     // they carry this photo's Contrast pivot.
-    let mut p = fill(r, CurveSet::with_contrast_pivot(im, r, matrix), matrix)?;
+    let mut p = fill(r, CurveSet::with_photo_measures(im, r, matrix), matrix)?;
     p.set("TONE_ONLY", &[1.]);
     Some(p)
 }
@@ -291,9 +291,11 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("BASIC", &[basic]);
+    let tone = p.push(crate::develop::basic_tone::gpu_tables(&lut.photo.whites));
+    p.set("LOCAL_TONE", &[tone]);
     p.set(
         "LOCAL_PIVOT",
-        &[match lut.contrast {
+        &[match lut.photo.contrast {
             crate::develop::basic_tone::ContrastCurve::Original => -1.,
             crate::develop::basic_tone::ContrastCurve::Pivot(pivot) => pivot,
         }],
@@ -383,8 +385,6 @@ impl PixelParams {
         self.set("MASK_DELTAS", &[deltas]);
         let math = local::LocalMath::new(&im.metadata, r);
         self.set("LOCAL_WB", math.white_balance.as_flattened());
-        let tone = self.push(crate::develop::basic_tone::gpu_tables());
-        self.set("LOCAL_TONE", &[tone]);
         let families = self.push(crate::develop::local_tone::gpu_families());
         self.set("LOCAL_FAMILIES", &[families]);
         let pixels = w.data.len() / n;
