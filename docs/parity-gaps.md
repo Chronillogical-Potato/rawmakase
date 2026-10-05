@@ -1,6 +1,6 @@
 # Remaining Lightroom parity gaps
 
-Status: 2026-10-05, engine 4; lens, profile and catalog notes updated 2026-10-03. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.7 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`; most of the entries below are mean ΔE00 against Camera Raw 18.7 renders of the synthetic charts. For scale: Lightroom X100F references now average 0.0090, Sony A7 II Camera Raw references 0.0065. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
+Status: 2026-10-05, engine 4; lens, profile and catalog notes updated 2026-10-03. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`; most of the entries below are mean ΔE00 against Camera Raw 18.7 renders of the synthetic charts. For scale: Lightroom X100F references now average 0.0090, Sony A7 II Camera Raw references 0.0065. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
 
 ## Measured and matched (for reference)
 
