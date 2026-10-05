@@ -157,6 +157,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         reference_curves: _,
         reference_calibration: _,
         reference_color: _,
+        parametric_model: _,
         contrast: _,
         whites: _,
         blacks: _,

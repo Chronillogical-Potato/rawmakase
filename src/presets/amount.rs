@@ -176,6 +176,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.reference_curves = full.reference_curves;
     r.reference_calibration = full.reference_calibration;
     r.reference_color = full.reference_color;
+    r.parametric_model = full.parametric_model;
 }
 
 /// A slider between `a` and `b`, kept within `lo..=hi` above 100%. Imported values may
@@ -382,6 +383,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         reference_curves: _,
         reference_calibration: _,
         reference_color: _,
+        parametric_model: _,
         temperature,
         tint,
         wb,

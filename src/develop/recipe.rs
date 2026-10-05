@@ -71,6 +71,14 @@ pub struct Recipe {
     /// RGB-hue grading and reference-calibrated color response. Missing means legacy.
     #[serde(default)]
     pub reference_color: bool,
+    /// How the Tone Curve's parametric regions render. Missing means the original
+    /// approximation, so recipes saved before the measured curve look as they did;
+    /// omitted at that default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::parametric::ParametricModel::is_original"
+    )]
+    pub parametric_model: crate::develop::parametric::ParametricModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -189,6 +197,7 @@ impl Default for Recipe {
             reference_curves: false,
             reference_calibration: false,
             reference_color: false,
+            parametric_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -380,6 +389,7 @@ impl Recipe {
         recipe.reference_color = true;
         recipe.reference_curves = true;
         recipe.reference_calibration = true;
+        recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe

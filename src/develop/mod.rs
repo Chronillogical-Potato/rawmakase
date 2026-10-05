@@ -21,6 +21,7 @@ mod local_tone_data;
 pub mod masks;
 mod orientation;
 pub mod panels;
+pub mod parametric;
 mod pipeline;
 pub mod point_color;
 mod preview_renderer;

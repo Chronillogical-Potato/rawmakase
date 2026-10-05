@@ -495,6 +495,12 @@ fn reference_curves(rgb: vec3<f32>) -> vec3<f32> {
         q = rgb_tone_values(q, local_tone_curve(lo), local_tone_curve(hi), lo, hi);
     }
     q = vec3(level(q.x), level(q.y), level(q.z));
+    let parametric = offset(P_PARAMETRIC_LUT);
+    if parametric >= 0 {
+        let lo = min(min(q.x, q.y), q.z);
+        let hi = max(max(max(q.x, q.y), q.z), 0.0);
+        q = rgb_tone_values(q, lut(parametric, 1024u, lo), lut(parametric, 1024u, hi), lo, hi);
+    }
     let lo = min(min(q.x, q.y), q.z);
     let hi = max(max(max(q.x, q.y), q.z), 0.0);
     let master = offset(P_MASTER);

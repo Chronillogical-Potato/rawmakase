@@ -35,6 +35,20 @@ Offline fits on the sweeps show both are local operators whose effect is best ex
 
 Dehaze is mostly a per-photo tone curve with a spatial residual. A single curve per photo explains ±40 to 0.011–0.019 MAE (from 0.04–0.11 unchanged). Engine 4 applies the curve averaged across photos, before Contrast in the same composed curve. Extra MAE over the default render: +0.0078 / +0.0135 at +40 / −40 (previously +0.037 / +0.062), +0.0021 / +0.0045 at ±20, and +0.036 / +0.044 at ±100, where the per-photo adaptation dominates.
 
+## Parametric curve
+
+The Tone Curve's region sliders (Shadows, Darks, Lights, Highlights) and their three splits were measured with Camera Raw 18.7 on the synthetic chart: about 380 settings, each region at ±25, ±50, ±75 and ±100 with moved splits, and Darks with Lights together (`scripts/corpus/parametric-curve.py`). What the renders show:
+
+- It is one curve, applied DNG RGBTone fashion in ProPhoto RGB (brightest and darkest channel curved, the middle one keeping its place), between the Basic panel's tone and the point curve. A curve read from the gray ramp predicts the chart's colors to mean ΔE00 0.06–0.34; applied to each channel instead, as RAWmakase did, 0.2–0.8.
+- The curve is smooth in gamma-2.2 encoded ProPhoto RGB: a cubic spline with knots at the splits fits every single-region render to 0.05/255 there, and to 0.4/255 in the sRGB encoding the point curves use.
+- Shadows acts only below the midtone split and Highlights only above it; Shadows depends on the shadow and midtone splits, Highlights on the midtone and highlight splits, and both scale with the span they act on. Darks and Lights act over the whole range and depend on the midtone split only.
+- Shadows then Darks, and Highlights then Lights, compose exactly. Darks and Lights together are not the sum of each (up to 8/255 off at ±100), so they were measured together.
+- Negative and positive settings are not mirror images: Shadows −50 takes the bottom of the curve to black, while +50 lifts it by about 0.7 EV.
+
+Engine 4 renders it from these measurements (`src/develop/parametric.rs`, tables in `parametric.bin`): Shadows over 0 to the midtone split and Highlights above it, per amount and split ratio, then Darks and Lights, per amount and midtone split (together, on a grid at the default splits, with a moved midtone split changing each as it does alone). Values between the measured ones are interpolated linearly. On all the fitting renders, the curve applied to Camera Raw's own default render is within mean ΔE00 0.29 of Camera Raw (worst 3.3, Lights +100 at a midtone split of 20); the RAWmakase chart cases are in [parity gaps](parity-gaps.md#tone).
+
+Recipes saved before this keep the earlier approximation, applied to each channel (`parametric_model` missing in the recipe means `Original`); new edits and imports use the measured curve. A look's parametric curve is added to the user's, as before: Camera Raw instead applies it as a second curve after the user's, and at Amount 200 its effect is about 1.6 times the look's, not twice.
+
 ## Refine Saturation
 
 Lightroom's Refine Saturation (`crs:CurveRefineSaturation`, default 100) sets how much of the saturation change a master point curve makes is kept. It was measured on the synthetic chart with Camera Raw 18.7, through an S curve, a strong S, a lift and a fade, at 0, 50, 100, 150 and 200:

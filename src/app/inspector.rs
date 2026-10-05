@@ -803,6 +803,7 @@ impl Editor {
                 parametric_curve_ui(
                     ui,
                     &mut r.effects,
+                    r.parametric_model,
                     &histogram,
                     moving.and_then(|w| (0..4).find(|i| w.shares[*i] > 0.)),
                 );

@@ -316,6 +316,7 @@ impl SettingGroup {
                 to.reference_curves = from.reference_curves;
                 to.reference_calibration = from.reference_calibration;
                 to.reference_color = from.reference_color;
+                to.parametric_model = from.parametric_model;
             }
             Calibration => {
                 e.calibration = f.calibration;
@@ -552,6 +553,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         reference_curves: _,
         reference_calibration: _,
         reference_color: _,
+        parametric_model: _,
         temperature: _,
         tint: _,
         wb: _,
@@ -644,6 +646,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("reference_curves", Group(ProcessVersion)),
         ("reference_calibration", Group(ProcessVersion)),
         ("reference_color", Group(ProcessVersion)),
+        ("parametric_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
         ("wb", Derived),

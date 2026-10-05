@@ -251,6 +251,10 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.white_point = 0.97;
     r.midtone = 1.2;
     recipes.push(r.clone());
+    // The measured parametric curve, with moved splits, from here on.
+    r.parametric_model = crate::develop::parametric::ParametricModel::Measured;
+    r.effects.parametric = [0.3, 0.2, -0.3, -0.2];
+    r.effects.splits = [0.2, 0.45, 0.8];
     r.shadows = 0.5;
     r.highlights = -0.6;
     recipes.push(r.clone());
