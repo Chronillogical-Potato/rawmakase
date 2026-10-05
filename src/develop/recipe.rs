@@ -102,6 +102,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_grade::GradingModel::is_original"
     )]
     pub grading_model: crate::develop::color_grade::GradingModel,
+    /// Which measured tables render the color mixer. Missing means the tables
+    /// measured on photos, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
+    )]
+    pub mixer_model: crate::develop::color_mixer::MixerModel,
     /// Whether positive Whites follows the photo's highlights. Missing means the
     /// original median curve, so older recipes look as they did; omitted at that
     /// default, and kept by releases that predate it.
@@ -239,6 +246,7 @@ impl Default for Recipe {
             contrast_model: Default::default(),
             lens_vignette_model: Default::default(),
             grading_model: Default::default(),
+            mixer_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
             temperature: 6500.,
@@ -471,6 +479,7 @@ impl Recipe {
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
+        recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
         recipe.use_camera_baseline(m);

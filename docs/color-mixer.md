@@ -10,6 +10,15 @@ Their effect on the default rendering is a hue/saturation/value lookup in linear
 
 Checked with Camera Raw 18.6 on three photos (X100F ×2, A7 II) for single bands at −25/−50/−100/+50, all bands at −25/−50/+50, a pair and one real multi-band edit. Mean extra error over each photo's default render, before → after: all bands −50 +0.0019 → −0.0001, all bands −25 +0.0023 → 0.0000, the multi-band edit +0.0018 → +0.0001, Orange −50 +0.0014 → +0.0001; positive sliders and −100 unchanged. The Lightroom X100F scorecard went from 0.0093 to 0.0090 (HSL reference 0.0178 → 0.0113, portrait mix 0.0152 → 0.0120), with no reference worse. With each photo left out of the fit, every slider reproduces Camera Raw to 0.0002–0.0066 MAE, 3–5× closer than leaving the image unchanged. On three of the photos, the extra error over the default render drops from +0.0022 to +0.0003 on average, and for the worst slider (Orange Luminance −100) from +0.0153 to +0.0016. Blue and purple are the least covered bands.
 
+### Chart tables
+
+New edits use band tables refitted to Camera Raw 18.7 on a dense synthetic chart (`MixerModel::Chart`, `color_mixer_chart.bin`); edits saved before keep the photo tables above. The chart has 1,728 colors (72 hues every 5° in Oklab, at six lightnesses and four fractions of the most chroma sRGB holds there) and a gray ramp; Camera Raw rendered it with every band's Hue, Saturation and Luminance at ±100, and Blue and Purple also at ±50 (`scripts/corpus/color-mixer.py`). The fit takes Camera Raw's default render as the mixer's input. Cells the chart does not reach, such as colors beyond sRGB, keep the photo tables' values; Saturation and Vibrance are unchanged. What the renders showed:
+
+- No band's slider moves a gray, while the photo tables moved one by up to 1.5% (Red Luminance ±100). The chart tables leave grays alone.
+- Luminance is not linear in the slider: −50 makes about a third of −100's change in log value and +50 about 58% of +100's, on Blue and Purple alike. The chart tables scale band Luminance by the slider position to the power 1.6 when darkening and 0.79 when lightening. Hue and Saturation keep the scaling above.
+
+On the chart's patches left out of the fit (every other hue), the mean ΔE00 over the 60 rendered slider settings goes from 0.50 with the photo tables to 0.15, and no setting gets worse; Blue Luminance −100 goes from 1.40 to 0.54, Purple Luminance −100 from 1.60 to 0.27, Blue Hue −100 from 0.91 to 0.27. On the corpus chart, every case with a mixer slider is closer to Camera Raw (the default render is 0.66): the single-band `hue-*` cases sit at 0.66–0.79 (were 0.69–1.39), `saturation-*` at 0.66–1.02 (0.72–1.35), `luminance-*` at 0.64–1.31 (0.82–2.13), and the combined `mixer-*` cases at 0.75–1.42 (0.90–3.07).
+
 Both the mixer and grading run after the tone curves (basic curves and point curves). With them before the point curve, Lightroom references that combine grading with a faded point curve scored worse (e.g. global blue 0.0206, against 0.0083 after).
 
 ## Color grading (engine 4)

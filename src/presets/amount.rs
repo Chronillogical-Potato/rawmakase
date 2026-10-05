@@ -179,6 +179,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.parametric_model = full.parametric_model;
     r.contrast_model = full.contrast_model;
     r.grading_model = full.grading_model;
+    r.mixer_model = full.mixer_model;
     r.whites_model = full.whites_model;
     r.gamut_model = full.gamut_model;
 }
@@ -391,6 +392,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         contrast_model: _,
         lens_vignette_model,
         grading_model: _,
+        mixer_model: _,
         whites_model: _,
         gamut_model: _,
         temperature,
