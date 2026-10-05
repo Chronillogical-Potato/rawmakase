@@ -1,11 +1,13 @@
 //! Atomic JPEG and 16-bit TIFF export with sRGB ICC, the camera's EXIF and the
 //! edit as Camera Raw XMP, as Lightroom embeds them.
 pub mod assemble;
+pub mod batch;
 mod encode;
 pub(crate) mod exif;
 mod extended_xmp;
 pub mod job;
 mod metadata;
+pub mod queue;
 pub mod settings;
 pub use crate::storage::Replace;
 use crate::{
@@ -103,6 +105,22 @@ pub fn export_with(
         );
         ensure!(replace == Replace::Overwrite, "Destination already exists");
     }
+    let staged = stage(path, image, m, options, embed)?;
+    crate::storage::persist(staged, path, replace)
+}
+
+/// The export of `image` for `path`, encoded into a synced temporary file in
+/// `path`'s folder: [`crate::storage::persist`] puts it in place, and dropping it
+/// leaves nothing behind.
+pub fn stage(
+    path: &Path,
+    image: &Rendered,
+    m: &Metadata,
+    options: &ExportOptions,
+    embed: &Embed,
+) -> Result<NamedTempFile> {
+    ensure!(!is_raw(path), "An export cannot overwrite a RAW file");
+    options.validate()?;
     let parent = crate::storage::parent_dir(path);
     let mut temp = NamedTempFile::new_in(parent)?;
     let profile = raw::srgb_profile()?;
@@ -120,7 +138,7 @@ pub fn export_with(
         None => bail!("Export extension must be .jpg, .jpeg, .tif or .tiff"),
     }
     temp.as_file().sync_all()?;
-    crate::storage::persist(temp, path, replace)
+    Ok(temp)
 }
 
 #[cfg(test)]

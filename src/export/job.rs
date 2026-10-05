@@ -44,6 +44,41 @@ pub fn run(
     cancel: &AtomicBool,
     progress: impl Fn(f32),
 ) -> Result<Option<String>> {
+    let prepared = prepare(&photo, settings, cancel, &progress)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    super::export_with(
+        target,
+        &photo.source,
+        &prepared.rendered,
+        &prepared.metadata,
+        &prepared.options,
+        &prepared.embed,
+        replace,
+    )?;
+    progress(1.);
+    Ok(prepared.notice)
+}
+
+/// A photo rendered for export, with what goes in the file beside its pixels.
+pub struct Prepared {
+    pub rendered: crate::develop::Rendered,
+    pub metadata: crate::raw::Metadata,
+    pub options: super::ExportOptions,
+    pub embed: Embed,
+    /// What the export has to say besides "Exported".
+    pub notice: Option<String>,
+}
+
+/// Renders `photo` for an export with `settings`, reporting progress up to 0.85.
+/// Stops between stages once `cancel` is set.
+pub fn prepare(
+    photo: &Photo,
+    settings: &ExportSettings,
+    cancel: &AtomicBool,
+    progress: &impl Fn(f32),
+) -> Result<Prepared> {
     let cancelled = || -> Result<()> {
         ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
         Ok(())
@@ -94,26 +129,31 @@ pub fn run(
     let xmp = assembled
         .xmp
         .as_ref()
-        .map(|fields| xmp(&photo, &image, settings, fields));
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    super::export_with(
-        target,
-        &photo.source,
-        &rendered,
-        &image.metadata,
-        &options,
-        &Embed {
+        .map(|fields| xmp(photo, &image, settings, fields));
+    Ok(Prepared {
+        rendered,
+        metadata: image.metadata.clone(),
+        options,
+        embed: Embed {
             camera: Some(assembled.exif),
             camera_fallback: policy.camera,
             xmp,
             ppi: settings.ppi,
         },
-        replace,
-    )?;
-    progress(1.);
-    Ok(notice)
+        notice,
+    })
+}
+
+/// `raw` at full resolution, as Develop decodes the photo it opens: the decode
+/// cache's copy when it has one.
+pub fn decode_full(raw: Raw, source: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
+    let cached = DecodeCache::key(source)
+        .ok()
+        .and_then(|key| DecodeCache::default().load(&key, &raw.metadata));
+    match cached {
+        Some(full) => Ok(full),
+        None => raw.develop(false, cancel),
+    }
 }
 
 /// The full-resolution image: the open one, the decode cache's, or a new decode.
