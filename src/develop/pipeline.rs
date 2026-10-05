@@ -495,6 +495,21 @@ impl CurveSet {
     /// Curves plus, for engine 4, the Shadows/Highlights map of this image; built
     /// also when `local_tone` (masks change Shadows or Highlights).
     fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3], local_tone: bool) -> Self {
+        let mut lut = Self::with_contrast_pivot(im, r, matrix);
+        if lut.basic_curves {
+            let local = crate::develop::local_tone::LocalToneMap::build(
+                im,
+                r.shadows,
+                r.highlights,
+                local_tone,
+                |p| tone_stage(p, &im.metadata, r, &lut, matrix, None).0,
+            );
+            lut.local = local;
+        }
+        lut
+    }
+    /// Curves with Contrast at this image's pivot, when the recipe measures it.
+    fn with_contrast_pivot(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> Self {
         let mut lut = Self::new(r);
         if measures_contrast_pivot(r) {
             lut.contrast =
@@ -506,16 +521,6 @@ impl CurveSet {
                 r.effects.dehaze,
                 lut.contrast,
             );
-        }
-        if lut.basic_curves {
-            let local = crate::develop::local_tone::LocalToneMap::build(
-                im,
-                r.shadows,
-                r.highlights,
-                local_tone,
-                |p| tone_stage(p, &im.metadata, r, &lut, matrix, None).0,
-            );
-            lut.local = local;
         }
         lut
     }
@@ -603,9 +608,14 @@ pub(crate) fn measures_contrast_pivot(r: &Recipe) -> bool {
 /// recipe's profile, white balance and calibration render it, at the camera's
 /// exposure: the user's Exposure does not move it (measured on the chart).
 fn contrast_pivot(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> f32 {
-    let small = match im.reduced {
-        Some(small) => std::borrow::Cow::Borrowed(small),
-        None => std::borrow::Cow::Owned(preview_source(im, super::local_tone::MAP_EDGE)),
+    // Clarity's and Texture's gain is a user adjustment, and depends on the preview
+    // size: the photo is measured without it.
+    let small = match (im.reduced, im.gain) {
+        (Some(small), None) => std::borrow::Cow::Borrowed(small),
+        _ => std::borrow::Cow::Owned(preview_source(
+            Source::new(im.image, None),
+            super::local_tone::MAP_EDGE,
+        )),
     };
     let default = Recipe {
         exposure: 0.,

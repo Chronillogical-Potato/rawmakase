@@ -103,6 +103,18 @@ impl PixelParams {
         }
         unreachable!("Unknown parameter {name}");
     }
+    /// The values of parameter `name`.
+    #[cfg(test)]
+    pub(crate) fn get(&self, name: &str) -> &[f32] {
+        let mut at = 0;
+        for (field, len) in FIELDS {
+            if *field == name {
+                return &self.params[at..at + len];
+            }
+            at += len;
+        }
+        unreachable!("Unknown parameter {name}");
+    }
     /// Appends a table and returns its offset as a parameter value.
     fn push(&mut self, values: impl IntoIterator<Item = f32>) -> f32 {
         let at = self.tables.len();
@@ -172,7 +184,9 @@ pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
         return None;
     }
     let matrix = profile_matrix(&im.metadata, r);
-    let mut p = fill(r, CurveSet::new(r), matrix)?;
+    // The same parameters run the final pass once the map is built (`with_map`), so
+    // they carry this photo's Contrast pivot.
+    let mut p = fill(r, CurveSet::with_contrast_pivot(im, r, matrix), matrix)?;
     p.set("TONE_ONLY", &[1.]);
     Some(p)
 }
