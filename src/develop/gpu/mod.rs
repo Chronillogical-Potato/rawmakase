@@ -298,9 +298,10 @@ impl Processor {
             });
         }
         let b = self.buffers.as_ref().unwrap();
-        let radius = (recipe.sharpening_radius * 3.).ceil() as u32;
+        let sharpener = crate::develop::sharpening::Sharpener::new(recipe);
+        let radius = (sharpener.sigma * 3.).ceil() as u32;
         let mut weights: Vec<f32> = (-(radius as i32)..=radius as i32)
-            .map(|x| (-0.5 * (x as f32 / recipe.sharpening_radius).powi(2)).exp())
+            .map(|x| (-0.5 * (x as f32 / sharpener.sigma).powi(2)).exp())
             .collect();
         let sum: f32 = weights.iter().sum();
         for v in &mut weights {
@@ -327,10 +328,10 @@ impl Processor {
             x_stride,
             y_stride,
             y_offset,
-            recipe.sharpening.to_bits(),
-            (recipe.sharpening_masking * 0.03 * (1. - recipe.sharpening_detail * 0.8)).to_bits(),
-            0,
-            0,
+            (recipe.sharpening * sharpener.gain).to_bits(),
+            sharpener.threshold.to_bits(),
+            sharpener.halo.to_bits(),
+            sharpener.dark.to_bits(),
         ];
         let uniform = self
             .device

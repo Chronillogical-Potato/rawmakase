@@ -28,6 +28,7 @@ pub mod point_color;
 mod preview_renderer;
 mod pyramid;
 pub mod settings_groups;
+pub mod sharpening;
 pub mod targeted;
 pub mod upright;
 pub use pipeline::GamutModel;

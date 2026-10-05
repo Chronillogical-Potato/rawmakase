@@ -1,5 +1,6 @@
 //! Full-resolution detail processing shared by Fit, 100% regions and exports.
 use crate::develop::masks::{MaskWeights, local::slot};
+use crate::develop::sharpening::Sharpener;
 use crate::develop::{
     pipeline::Toned,
     preview_renderer::Stages,
@@ -89,7 +90,7 @@ fn sharpen_cancellable(
     local: Option<&MaskWeights>,
     cancel: &AtomicBool,
 ) -> Result<()> {
-    sharpen_with_radius(im, r, r.sharpening_radius, local, cancel)
+    sharpen_with_radius(im, r, Sharpener::new(r).sigma, local, cancel)
 }
 /// Normalized Gaussian taps. Below half a pixel, which only scaled previews use, a
 /// sampled Gaussian degenerates to a single tap; three taps with the same variance
@@ -119,6 +120,7 @@ fn sharpen_with_radius(
     if r.sharpening == 0. && local.is_none() {
         return Ok(());
     }
+    let sharpener = Sharpener::new(r);
     let (radius, weights) = gaussian(sigma);
     let lum: Vec<f32> = im.pixels.par_iter().map(|p| luminance(*p)).collect();
     let w = im.width as usize;
@@ -151,19 +153,7 @@ fn sharpen_with_radius(
             + local
                 .and_then(|w| w.delta(i))
                 .map_or(0., |d| d[slot::SHARPNESS]);
-        // Edge mask suppresses sharpening of smooth areas; Detail admits finer texture.
-        let threshold = r.sharpening_masking * 0.03 * (1. - r.sharpening_detail * 0.8);
-        let mask = if threshold == 0. {
-            1.
-        } else {
-            (d.abs() / threshold).clamp(0., 1.)
-        };
-        let delta = if amount >= 0. {
-            (d * amount * 2. * mask).clamp(-0.08, 0.08)
-        } else {
-            // Negative local Sharpness blurs toward the Gaussian.
-            -d * (-amount).min(1.)
-        };
+        let delta = sharpener.delta(d, amount);
         // Add only luminance detail, preserving inter-channel differences.
         for v in p {
             *v = (*v + delta).clamp(0., 1.);
@@ -937,7 +927,7 @@ pub(crate) fn render_level(
     (g.width, g.height) = size;
     // Output pixels per full-resolution pixel.
     let scale = level_scale / footprint;
-    let sigma = r.sharpening_radius * scale;
+    let sigma = Sharpener::new(r).sigma * scale;
     let [x, y, w, h] = region;
     ensure!(
         w > 0
@@ -1085,7 +1075,7 @@ pub(crate) fn render_preview(
         "Invalid viewport region"
     );
     let halo = if r.sharpening > 0. {
-        (3. * r.sharpening_radius).ceil() as u32
+        (3. * Sharpener::new(r).sigma).ceil() as u32
     } else {
         0
     };
@@ -1105,7 +1095,7 @@ pub(crate) fn render_preview(
         region.is_some() || output_size(g.width, g.height, max_edge) == (g.width, g.height);
     if unresized && let Some(stages) = stages.as_mut() {
         let finish = develop::gpu::Finish {
-            sigma: r.sharpening_radius,
+            sigma: Sharpener::new(r).sigma,
             origin: [left, top],
             full: [g.width, g.height],
             scale: 1.,
@@ -1125,7 +1115,7 @@ pub(crate) fn render_preview(
     )?;
     if unresized && let Some(stages) = stages.as_mut() {
         let finish = develop::gpu::Finish {
-            sigma: r.sharpening_radius,
+            sigma: Sharpener::new(r).sigma,
             origin: [left, top],
             full: [g.width, g.height],
             scale: 1.,

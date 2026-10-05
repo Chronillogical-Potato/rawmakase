@@ -262,6 +262,7 @@ impl SettingGroup {
                 to.sharpening_radius = from.sharpening_radius;
                 to.sharpening_detail = from.sharpening_detail;
                 to.sharpening_masking = from.sharpening_masking;
+                to.sharpening_model = from.sharpening_model;
             }
             LuminanceNoiseReduction => {
                 to.noise_luma = from.noise_luma;
@@ -552,6 +553,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         sharpening_radius: _,
         sharpening_detail: _,
         sharpening_masking: _,
+        sharpening_model: _,
         exposure: _,
         camera_exposure: _,
         wide_gamut_curves: _,
@@ -647,6 +649,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("preset_settings", PhotosOwn),
         ("profile", Group(TreatmentAndProfile)),
         ("profile_amount", Group(TreatmentAndProfile)),
+        ("sharpening_model", Group(Sharpening)),
         ("sharpening_radius", Group(Sharpening)),
         ("sharpening_detail", Group(Sharpening)),
         ("sharpening_masking", Group(Sharpening)),

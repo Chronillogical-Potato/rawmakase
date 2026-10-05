@@ -393,6 +393,7 @@ impl Processor {
             }));
         }
         let sharpen = recipe.sharpening != 0.;
+        let sharpener = crate::develop::sharpening::Sharpener::new(recipe);
         let (radius, weights) = if sharpen {
             quality::gaussian(finish.sigma)
         } else {
@@ -437,8 +438,8 @@ impl Processor {
                 ch,
                 radius as u32,
                 sharpen as u32,
-                f(recipe.sharpening),
-                f(recipe.sharpening_masking * 0.03 * (1. - recipe.sharpening_detail * 0.8)),
+                f(recipe.sharpening * sharpener.gain),
+                f(sharpener.threshold),
                 if shown {
                     display.clipping.shader_flags()
                 } else {
@@ -470,8 +471,8 @@ impl Processor {
                 f(e.lens_vignette_midpoint),
                 effects as u32,
                 shown as u32,
-                0,
-                0,
+                f(sharpener.halo),
+                f(sharpener.dark),
                 0,
             ];
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

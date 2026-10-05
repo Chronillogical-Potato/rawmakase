@@ -180,6 +180,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         sharpening_radius: _,
         sharpening_detail: _,
         sharpening_masking: _,
+        sharpening_model: _,
         masks: _,
         // Not read when rendering: switched-off panels are bypassed before the stages
         // (see `Recipe::as_rendered`).

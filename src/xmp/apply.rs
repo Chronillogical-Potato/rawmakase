@@ -413,6 +413,18 @@ impl Preset {
             0.,
             1.,
         )?;
+        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        if [
+            "Sharpness",
+            "SharpenRadius",
+            "SharpenDetail",
+            "SharpenEdgeMasking",
+        ]
+        .iter()
+        .any(|k| settings.values.contains_key(*k))
+        {
+            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Measured;
+        }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
         Ok(())

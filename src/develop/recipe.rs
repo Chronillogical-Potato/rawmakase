@@ -56,6 +56,14 @@ pub struct Recipe {
     /// at 1, so releases that predate it read the recipe.
     #[serde(default = "one", skip_serializing_if = "is_one")]
     pub profile_amount: f32,
+    /// Which operator renders Sharpening. Missing means the original unsharp mask, so
+    /// recipes saved before the measured one look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::sharpening::SharpeningModel::is_original"
+    )]
+    pub sharpening_model: crate::develop::sharpening::SharpeningModel,
     pub sharpening_radius: f32,
     pub sharpening_detail: f32,
     pub sharpening_masking: f32,
@@ -226,6 +234,7 @@ impl Default for Recipe {
             preset_name: String::new(),
             preset_settings: Default::default(),
             profile: None,
+            sharpening_model: Default::default(),
             sharpening_radius: 0.8,
             sharpening_detail: 0.25,
             sharpening_masking: 0.35,
@@ -468,6 +477,7 @@ impl Recipe {
         recipe.reference_curves = true;
         recipe.reference_calibration = true;
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
+        recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
@@ -702,6 +712,17 @@ impl Recipe {
         } else {
             0.
         }
+    }
+    /// The Sharpening sliders at their defaults for `model`, which the recipe then
+    /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)
+    /// with the measured operator, RAWmakase's earlier ones with the original.
+    pub fn set_sharpening_defaults(&mut self, model: crate::develop::sharpening::SharpeningModel) {
+        let d = crate::develop::sharpening::SharpeningSliders::defaults(model);
+        self.sharpening_model = model;
+        self.sharpening = if self.engine >= 3 { d.amount } else { 0. };
+        self.sharpening_radius = d.radius;
+        self.sharpening_detail = d.detail;
+        self.sharpening_masking = d.masking;
     }
     pub(crate) fn lens_correction<'a>(
         &self,
