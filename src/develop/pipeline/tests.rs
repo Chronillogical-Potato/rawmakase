@@ -1297,3 +1297,57 @@ fn a_looks_parametric_curve_follows_the_users() {
     let curve = CurveSet::new(&added).parametric.unwrap();
     assert!((curve.eval(0.3) - own.eval(user.eval(0.3))).abs() > 1e-3);
 }
+
+#[test]
+fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
+    use crate::develop::effects::LensVignetteModel;
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let mut r = Recipe::for_metadata(&im.metadata);
+    r.lens_vignette_model = LensVignetteModel::Measured;
+    r.effects.lens_vignette = -0.5;
+    let lum = |p: [f32; 3]| p.iter().sum::<f32>();
+    let full = render(&im, &r, 0).unwrap();
+    let at = |im: &Rendered, x: u32, y: u32| lum(im.pixels[(y * im.width + x) as usize]);
+    let (corner, centre) = (at(&full, 11, 0), at(&full, 6, 4));
+    assert!(corner < centre * 0.9, "{corner} {centre}");
+    // Lightroom's positive amounts lighten the corners.
+    let lighter = Recipe {
+        effects: crate::develop::effects::Effects {
+            lens_vignette: 0.5,
+            ..r.effects.clone()
+        },
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &lighter, 0).unwrap(), 11, 0) > centre * 1.1);
+    // The gain belongs to the whole photo: a crop keeps each pixel's.
+    let cropped = Recipe {
+        crop: [0.5, 0., 1., 1.],
+        ..r.clone()
+    };
+    let half = render(&im, &cropped, 0).unwrap();
+    assert!((at(&half, half.width - 1, 0) - corner).abs() < 1e-3);
+    // Recipes saved before keep the original operator, which lightened at -0.5.
+    let original = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &original, 0).unwrap(), 11, 0) > centre);
+    let json = serde_json::to_value(&original).unwrap();
+    assert!(json.get("lens_vignette_model").is_none());
+    let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    // An old recipe takes the measured operator once its Amount leaves 0, not before.
+    let mut old = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..Recipe::default()
+    };
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Original);
+    old.effects.lens_vignette = 0.3;
+    let mut kept = old.clone();
+    kept.adopt_measured_vignette(0.2);
+    assert_eq!(kept.lens_vignette_model, LensVignetteModel::Original);
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Measured);
+}

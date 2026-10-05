@@ -87,6 +87,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::basic_tone::ContrastModel::is_original"
     )]
     pub contrast_model: crate::develop::basic_tone::ContrastModel,
+    /// How manual lens Vignetting renders. Missing means the original operator, so
+    /// recipes saved before the measured one look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
+    )]
+    pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
     /// How color grading renders. Missing means the original operator, so recipes
     /// saved before the measured curves look as they did; omitted at that default.
     #[serde(
@@ -222,6 +230,7 @@ impl Default for Recipe {
             reference_color: false,
             parametric_model: Default::default(),
             contrast_model: Default::default(),
+            lens_vignette_model: Default::default(),
             grading_model: Default::default(),
             whites_model: Default::default(),
             temperature: 6500.,
@@ -270,6 +279,31 @@ pub enum ProfilePreference {
     Adobe,
     /// RAWmakase Color wherever it fits the camera, else as `Adobe`.
     Rawmakase,
+    /// Lightroom's Camera Settings: the imported profile matching the camera's
+    /// standard look (see [`camera_matching_profile`]), else as `Adobe`.
+    Camera,
+}
+/// Names of the camera-matching profile Adobe ships for a camera's standard
+/// look, by maker. RAWmakase doesn't read the picture style set in the camera,
+/// so Camera Settings always starts from this one.
+pub fn camera_matching_names(m: &Metadata) -> &'static [&'static str] {
+    let make = m.make.trim().to_ascii_lowercase();
+    if make.starts_with("fujifilm") {
+        &["Camera PROVIA/Standard"]
+    } else {
+        &["Camera Standard"]
+    }
+}
+/// The imported camera-matching profile for this camera's standard look.
+pub fn camera_matching_profile<'a>(
+    m: &Metadata,
+    profiles: &'a [std::sync::Arc<crate::camera_profiles::CameraProfile>],
+) -> Option<&'a std::sync::Arc<crate::camera_profiles::CameraProfile>> {
+    camera_matching_names(m).iter().find_map(|name| {
+        profiles
+            .iter()
+            .find(|p| p.name == *name && p.ensure_camera(m).is_ok())
+    })
 }
 impl Recipe {
     /// The look at its Profile Amount, and its internal controls added to the user's
@@ -401,6 +435,7 @@ impl Recipe {
         let own = match preference {
             ProfilePreference::Adobe => None,
             ProfilePreference::Rawmakase => find(crate::camera_profiles::open::COLOR),
+            ProfilePreference::Camera => camera_matching_profile(m, profiles),
         };
         // As in Lightroom: Adobe Color, else Adobe Standard. Without those, a DNG
         // keeps the profile it embeds, and any other file gets RAWmakase Color.
@@ -423,6 +458,7 @@ impl Recipe {
         recipe.reference_calibration = true;
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
+        recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.use_camera_baseline(m);
@@ -627,6 +663,34 @@ impl Recipe {
     }
     /// The lens correction to apply: the Adobe profile in use, else the built-in
     /// correction if enabled and present in the file.
+    /// Manual lens Vignetting as measured in Camera Raw, applied with the lens
+    /// profile's to the camera image; `None` at Amount 0 and for recipes that keep the
+    /// original operator, which [`crate::develop::effects::spatial_finish`] applies.
+    pub(crate) fn manual_vignette(&self) -> Option<crate::develop::effects::ManualVignette> {
+        if self.lens_vignette_model.is_original() {
+            return None;
+        }
+        crate::develop::effects::ManualVignette::new(
+            self.effects.lens_vignette,
+            self.effects.lens_vignette_midpoint,
+        )
+    }
+    /// After an edit of manual Vignetting from Amount `previous`: an Amount moved from 0
+    /// has nothing of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_vignette(&mut self, previous: f32) {
+        if previous == 0. && self.effects.lens_vignette != 0. {
+            self.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        }
+    }
+    /// The manual lens Vignetting Amount the finishing stage applies: only the
+    /// original operator's; the measured one is applied with the lens profile.
+    pub(crate) fn finished_lens_vignette(&self) -> f32 {
+        if self.lens_vignette_model.is_original() {
+            self.effects.lens_vignette
+        } else {
+            0.
+        }
+    }
     pub(crate) fn lens_correction<'a>(
         &self,
         m: &'a Metadata,

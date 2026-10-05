@@ -278,14 +278,18 @@ fn remove_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     );
     response.on_hover_text("Remove this camera's default")
 }
-/// Adobe Default, RAWmakase Default or a Develop preset, by group.
+/// Adobe Default, Camera Settings, RAWmakase Default or a Develop preset, by group.
 fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets: &[Preset]) {
     egui::ComboBox::from_id_salt(id)
         .width(240.)
         .height(360.)
         .selected_text(choice_text(choice, presets))
         .show_ui(ui, |ui| {
-            for fixed in [DefaultChoice::Adobe, DefaultChoice::Rawmakase] {
+            for fixed in [
+                DefaultChoice::Adobe,
+                DefaultChoice::CameraSettings,
+                DefaultChoice::Rawmakase,
+            ] {
                 let label = fixed.label();
                 ui.selectable_value(choice, fixed, label);
             }

@@ -6,7 +6,10 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+mod lens_vignette;
 mod vignette;
+pub use lens_vignette::LensVignetteModel;
+pub(crate) use lens_vignette::{ManualVignette, combined_table};
 pub(crate) use vignette::PostCropVignette;
 /// Lightroom's post-crop vignette styles. Recipes and XMP store Lightroom's codes:
 /// 1 Highlight Priority, 2 Color Priority, 3 Paint Overlay. Camera Raw 18.7 renders 0
@@ -355,7 +358,8 @@ pub(crate) fn spatial_finish_scaled(
     scale: f32,
 ) {
     let e = &r.effects;
-    if e.grain == 0. && e.vignette == 0. && e.lens_vignette == 0. {
+    let lens_vignette = r.finished_lens_vignette();
+    if e.grain == 0. && e.vignette == 0. && lens_vignette == 0. {
         return;
     }
     let vignette = PostCropVignette::new(e, full);
@@ -371,7 +375,7 @@ pub(crate) fn spatial_finish_scaled(
         let lens = ((nx * nx + ny * ny - e.lens_vignette_midpoint).max(0.)
             / (2. - e.lens_vignette_midpoint))
             .clamp(0., 1.);
-        let gain = 2f32.powf(-e.lens_vignette * lens * 2.);
+        let gain = 2f32.powf(-lens_vignette * lens * 2.);
         let size = 0.75 + e.grain_size * 5.;
         let (gx, gy) = if scale == 1. {
             (x as f32, y as f32)

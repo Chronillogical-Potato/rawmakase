@@ -93,8 +93,8 @@ impl Editor {
                     self.document.profile_errors = errors;
                     self.refresh_photo_defaults();
                     self.refresh_preset_support();
-                    if std::mem::take(&mut self.document.pending_lightroom) {
-                        self.apply_lightroom_edits();
+                    if let Some(text) = self.document.pending_lightroom.take() {
+                        self.apply_lightroom_edits(&text);
                         // The Lightroom edit is the starting point, not an unsaved change.
                         self.document.save.saved();
                     }
@@ -360,7 +360,14 @@ impl Editor {
             self.document.lightroom_history =
                 l.catalog.lightroom_history(photo).unwrap_or_default();
             self.document.snapshots.list = l.catalog.snapshots(photo).unwrap_or_default();
-            match l.catalog.load_edit(photo, &p) {
+            // The edit as the catalog stores it, read once: the Lightroom settings
+            // applied below are the ones read with it.
+            let record = l.catalog.edit_record(photo);
+            let saved = record
+                .as_ref()
+                .map_err(|e| anyhow::anyhow!("{e:#}"))
+                .and_then(|r| r.saved(&p));
+            match saved {
                 Ok(Some(saved)) => {
                     self.document.origin = super::state::EditOrigin::Saved;
                     self.document.recipe = saved.recipe;
@@ -380,8 +387,8 @@ impl Editor {
                     // No RAWmakase edit yet: start from the Lightroom edit, as
                     // Lightroom shows it, once camera profiles are known.
                     self.document.pending_lightroom =
-                        l.photo(photo).is_some_and(|p| p.has_lightroom_edits);
-                    if self.document.pending_lightroom {
+                        record.ok().and_then(|r| r.lightroom().map(str::to_owned));
+                    if self.document.pending_lightroom.is_some() {
                         self.document.origin = super::state::EditOrigin::Lightroom;
                     }
                 }

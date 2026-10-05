@@ -31,8 +31,9 @@ pub(super) struct Document {
     pub(super) before: Option<Recipe>,
     /// The open catalog photo's Snapshots.
     pub(super) snapshots: super::snapshots::Snapshots,
-    /// Apply the photo's Lightroom settings once its profiles arrive.
-    pub(super) pending_lightroom: bool,
+    /// The photo's Lightroom settings, as read with its edit, to apply once its
+    /// profiles arrive.
+    pub(super) pending_lightroom: Option<String>,
     /// Where the edit on screen started from.
     pub(super) origin: EditOrigin,
     /// The raw defaults for this photo, once its profiles are known: what Reset

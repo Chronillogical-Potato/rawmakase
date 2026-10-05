@@ -136,6 +136,8 @@ impl Panel {
                 e.defringe_ranges = d.defringe_ranges;
                 e.lens_vignette = 0.;
                 e.lens_vignette_midpoint = d.lens_vignette_midpoint;
+                // Renders nothing at Amount 0; a first Vignetting edit sets it.
+                r.lens_vignette_model = defaults.lens_vignette_model;
             }
             Panel::Transform => {
                 r.transform = defaults.transform;
@@ -218,6 +220,11 @@ mod tests {
         let mut after = before.clone();
         after.lens_profile = !before.lens_profile;
         after.lens_builtin = !before.lens_builtin;
+        assert!(Panel::LensCorrections.holds_change(&before, &after));
+        // A first manual Vignetting on an old recipe also sets the measured operator.
+        let mut after = before.clone();
+        after.effects.lens_vignette = -0.4;
+        after.adopt_measured_vignette(0.);
         assert!(Panel::LensCorrections.holds_change(&before, &after));
     }
 }

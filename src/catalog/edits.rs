@@ -2,7 +2,7 @@
 //! kept beside them, and the bitmaps recipes refer to by hash.
 use super::{Catalog, SavedEdit};
 use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;
 
@@ -106,43 +106,21 @@ impl Catalog {
     }
     /// The photo's spots and masks, saved apart from its recipe.
     fn local_edits(&self, id: i64) -> Result<crate::develop::LocalEdits> {
-        let data: Option<String> = self
+        local_edits(self.local_text(id)?.as_deref())
+    }
+    /// The photo's spots and masks as stored, unread.
+    pub(super) fn local_text(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
             .db
             .query_row("SELECT data FROM local_edits WHERE photo=?", [id], |r| {
                 r.get(0)
             })
-            .optional()?;
-        let local: crate::develop::LocalEdits = match data {
-            Some(d) => serde_json::from_str(&d)?,
-            None => Default::default(),
-        };
-        local.validate()?;
-        Ok(local)
+            .optional()?)
     }
+    /// The photo's saved RAWmakase edit, if it has one; an error when it can't be
+    /// read or its file changed since it was saved.
     pub fn load_edit(&self, id: i64, path: &Path) -> Result<Option<SavedEdit>> {
-        let (recipe, export, identity): (Option<String>, Option<String>, Option<String>) =
-            self.db.query_row(
-                "SELECT recipe,export_options,identity FROM photos WHERE id=?",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-        if let Some(recipe) = recipe {
-            let saved: Identity =
-                serde_json::from_str(&identity.context("Missing photo identity")?)?;
-            ensure!(
-                saved == Identity::read(path)?,
-                "Photo changed since this catalog edit was saved; catalog edit protected"
-            );
-            let recipe: Recipe = serde_json::from_str(&recipe)?;
-            let recipe = recipe.with_local(self.local_edits(id)?);
-            recipe.validate()?;
-            let export: ExportOptions =
-                serde_json::from_str(&export.context("Missing export settings")?)?;
-            export.validate()?;
-            Ok(Some(SavedEdit { recipe, export }))
-        } else {
-            Ok(None)
-        }
+        self.edit_record(id)?.saved(path)
     }
     /// When each edited photo was last edited, as "YYYY-MM-DD HH:MM:SS"
     /// UTC: in RAWmakase, or else in Lightroom, whose history counts seconds
@@ -194,4 +172,13 @@ impl Catalog {
         };
         Ok((recipe, lightroom))
     }
+}
+/// Spots and masks from their stored text; none when there is none.
+pub(super) fn local_edits(text: Option<&str>) -> Result<crate::develop::LocalEdits> {
+    let local: crate::develop::LocalEdits = match text {
+        Some(d) => serde_json::from_str(d)?,
+        None => Default::default(),
+    };
+    local.validate()?;
+    Ok(local)
 }
