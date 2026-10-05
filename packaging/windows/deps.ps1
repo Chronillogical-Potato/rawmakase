@@ -1,6 +1,7 @@
 # Builds LibRaw and Little CMS for the MSVC build with vcpkg, pinned to a
 # commit with the same versions packaging/native-deps.sh builds elsewhere
-# (LibRaw 0.22.2, lcms2 2.19.1). Static libraries against the static C
+# (lcms2 2.19.1; LibRaw comes from the overlay port in vcpkg-ports, which
+# builds the same LibRaw commit as the other platforms). Static libraries against the static C
 # runtime the app links (.cargo/config.toml), release builds only; build.rs finds them through vcpkg's
 # pkg-config files.
 #
@@ -31,6 +32,7 @@ if (-not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) {
 
 # LibRaw decodes lossy DNGs with libjpeg, as the other platforms' builds do.
 & (Join-Path $vcpkg 'vcpkg.exe') install --disable-metrics --host-triplet=$hostTriplet `
+    "--overlay-ports=$(Join-Path $PSScriptRoot 'vcpkg-ports')" `
     "libraw[core,dng-lossy]:$triplet" "pkgconf:$hostTriplet"
 
 $installed = Join-Path $vcpkg 'installed'
