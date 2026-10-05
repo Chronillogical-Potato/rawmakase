@@ -611,15 +611,16 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             "VignetteAmount",
         ),
         (r.grain_model.is_original(), ORIGINAL_GRAIN, "GrainAmount"),
+        // These travel with Process Version, as copying settings does.
         (
             r.mixer_model.is_original(),
             ORIGINAL_COLOR_MIXER,
-            "HueAdjustmentRed",
+            "ProcessVersion",
         ),
         (
             r.calibration_model.is_original(),
             ORIGINAL_CALIBRATION,
-            "RedHue",
+            "ProcessVersion",
         ),
     ]
     .into_iter()
