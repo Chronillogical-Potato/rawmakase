@@ -1160,7 +1160,7 @@ pub(crate) fn render_preview(
         .is_some_and(|w| w.uses(&[slot::SHARPNESS, slot::NOISE]));
     let spatial = r.effects.grain != 0.
         || r.effects.vignette != 0.
-        || r.effects.lens_vignette != 0.
+        || r.finished_lens_vignette() != 0.
         || local_finish;
     let mut gpu_sharpened = false;
     let edge = if region.is_some() { 0 } else { max_edge };

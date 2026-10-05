@@ -1239,3 +1239,43 @@ fn the_contrast_pivot_is_measured_on_the_photo_alone() {
     let gained = CurveSet::with_contrast_pivot(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.contrast, plain.contrast);
 }
+#[test]
+fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
+    use crate::develop::effects::LensVignetteModel;
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let mut r = Recipe::for_metadata(&im.metadata);
+    r.lens_vignette_model = LensVignetteModel::Measured;
+    r.effects.lens_vignette = -0.5;
+    let lum = |p: [f32; 3]| p.iter().sum::<f32>();
+    let full = render(&im, &r, 0).unwrap();
+    let at = |im: &Rendered, x: u32, y: u32| lum(im.pixels[(y * im.width + x) as usize]);
+    let (corner, centre) = (at(&full, 11, 0), at(&full, 6, 4));
+    assert!(corner < centre * 0.9, "{corner} {centre}");
+    // Lightroom's positive amounts lighten the corners.
+    let lighter = Recipe {
+        effects: crate::develop::effects::Effects {
+            lens_vignette: 0.5,
+            ..r.effects.clone()
+        },
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &lighter, 0).unwrap(), 11, 0) > centre * 1.1);
+    // The gain belongs to the whole photo: a crop keeps each pixel's.
+    let cropped = Recipe {
+        crop: [0.5, 0., 1., 1.],
+        ..r.clone()
+    };
+    let half = render(&im, &cropped, 0).unwrap();
+    assert!((at(&half, half.width - 1, 0) - corner).abs() < 1e-3);
+    // Recipes saved before keep the original operator, which lightened at -0.5.
+    let original = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &original, 0).unwrap(), 11, 0) > centre);
+    let json = serde_json::to_value(&original).unwrap();
+    assert!(json.get("lens_vignette_model").is_none());
+    let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+}

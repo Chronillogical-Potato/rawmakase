@@ -87,6 +87,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::basic_tone::ContrastModel::is_original"
     )]
     pub contrast_model: crate::develop::basic_tone::ContrastModel,
+    /// How manual lens Vignetting renders. Missing means the original operator, so
+    /// recipes saved before the measured one look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
+    )]
+    pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -207,6 +215,7 @@ impl Default for Recipe {
             reference_color: false,
             parametric_model: Default::default(),
             contrast_model: Default::default(),
+            lens_vignette_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -400,6 +409,7 @@ impl Recipe {
         recipe.reference_calibration = true;
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
+        recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe
@@ -602,6 +612,27 @@ impl Recipe {
     }
     /// The lens correction to apply: the Adobe profile in use, else the built-in
     /// correction if enabled and present in the file.
+    /// Manual lens Vignetting as measured in Camera Raw, applied with the lens
+    /// profile's to the camera image; `None` at Amount 0 and for recipes that keep the
+    /// original operator, which [`crate::develop::effects::spatial_finish`] applies.
+    pub(crate) fn manual_vignette(&self) -> Option<crate::develop::effects::ManualVignette> {
+        if self.lens_vignette_model.is_original() {
+            return None;
+        }
+        crate::develop::effects::ManualVignette::new(
+            self.effects.lens_vignette,
+            self.effects.lens_vignette_midpoint,
+        )
+    }
+    /// The manual lens Vignetting Amount the finishing stage applies: only the
+    /// original operator's; the measured one is applied with the lens profile.
+    pub(crate) fn finished_lens_vignette(&self) -> f32 {
+        if self.lens_vignette_model.is_original() {
+            self.effects.lens_vignette
+        } else {
+            0.
+        }
+    }
     pub(crate) fn lens_correction<'a>(
         &self,
         m: &'a Metadata,

@@ -472,16 +472,21 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         highlights: true,
         ..none
     };
-    for (spatial, clipping, ca, (style, vignette)) in [
-        (false, shadows, 0, (HighlightPriority, 0.)),
-        (true, none, 0, (HighlightPriority, -0.3)),
-        (true, both, 0, (ColorPriority, -0.6)),
-        (true, highlights, 0, (PaintOverlay, -0.5)),
-        (true, none, 1, (HighlightPriority, 0.5)),
-        (true, none, 2, (ColorPriority, 0.4)),
-        (true, none, 0, (PaintOverlay, 0.7)),
+    use crate::develop::effects::LensVignetteModel::{Measured, Original};
+    for (spatial, clipping, ca, (style, vignette), lens_vignette) in [
+        (false, shadows, 0, (HighlightPriority, 0.), Original),
+        (true, none, 0, (HighlightPriority, -0.3), Original),
+        (true, both, 0, (ColorPriority, -0.6), Original),
+        (true, highlights, 0, (PaintOverlay, -0.5), Original),
+        (true, none, 1, (HighlightPriority, 0.5), Original),
+        (true, none, 2, (ColorPriority, 0.4), Original),
+        (true, none, 0, (PaintOverlay, 0.7), Original),
+        // Measured manual Vignetting is sampled with the lens profile's.
+        (true, none, 0, (HighlightPriority, -0.3), Measured),
+        (true, none, 0, (ColorPriority, 0.), Measured),
     ] {
         let mut recipe = base.clone();
+        recipe.lens_vignette_model = lens_vignette;
         if spatial {
             recipe.effects.grain = 0.4;
             recipe.effects.vignette = vignette;
@@ -509,6 +514,11 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         if ca > 0 {
             recipe.lens_builtin = ca == 2;
             recipe.lens_ca = true;
+        }
+        if lens_vignette == Measured && vignette == 0. {
+            // Without lens data: the manual gain alone makes the lens stage.
+            recipe.lens_builtin = false;
+            recipe.effects.lens_vignette = -0.6;
         }
         for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
             let display = super::Display {

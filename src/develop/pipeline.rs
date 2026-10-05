@@ -998,33 +998,57 @@ impl ExposureRamp {
         }
     }
 }
-/// Built-in vignetting over the camera image. Radius 1 is the half diagonal; `x`, `y`
-/// use sample coordinates, where pixel `i` is centred at `i`.
+/// Vignetting over the camera image: the lens profile's at its Vignetting amount, and
+/// measured manual Vignetting. Radius 1 is the half diagonal; `x`, `y` use sample
+/// coordinates, where pixel `i` is centred at `i`.
 pub(crate) struct VignetteField<'a> {
-    lens: &'a crate::lens::LensCorrection,
+    table: VignetteTable<'a>,
     center: [f32; 2],
     half: f32,
-    /// Lightroom's profile Vignetting amount (1 = 100%).
+    /// The power the table is raised to: Lightroom's profile Vignetting amount (1 =
+    /// 100%), or 1 for a combined table, which holds it already.
     amount: f32,
+}
+enum VignetteTable<'a> {
+    Lens(&'a crate::lens::Radial),
+    Combined(crate::lens::Radial),
 }
 impl<'a> VignetteField<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
         let lens = r
             .lens_correction(&im.metadata)
-            .filter(|l| l.vignetting.is_some())?;
+            .and_then(|l| l.vignetting.as_ref());
+        let (table, amount) = match (lens, r.manual_vignette()) {
+            (_, Some(manual)) => (
+                VignetteTable::Combined(super::effects::combined_table(
+                    lens,
+                    r.lens_vignetting,
+                    &manual,
+                )),
+                1.,
+            ),
+            (Some(lens), None) => (VignetteTable::Lens(lens), r.lens_vignetting),
+            (None, None) => return None,
+        };
         let (w, h) = (im.width as f32, im.height as f32);
         Some(Self {
-            lens,
+            table,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
-            amount: r.lens_vignetting,
+            amount,
         })
+    }
+    fn table(&self) -> &crate::lens::Radial {
+        match &self.table {
+            VignetteTable::Lens(t) => t,
+            VignetteTable::Combined(t) => t,
+        }
     }
     pub(crate) fn gain(&self, x: f32, y: f32) -> f32 {
         let dx = x + 0.5 - self.center[0];
         let dy = y + 0.5 - self.center[1];
-        self.lens
-            .vignetting_gain((dx * dx + dy * dy).sqrt() / self.half)
+        self.table()
+            .eval((dx * dx + dy * dy).sqrt() / self.half)
             .powf(self.amount)
     }
 }
@@ -1134,11 +1158,7 @@ pub(crate) fn lens_gpu_params(
         Some([red, blue]) => [push(Some(red)), push(Some(blue))],
         None => [[-1., 0.]; 2],
     };
-    let vignetting = push(
-        warp.vignetting
-            .as_ref()
-            .map(|v| v.lens.vignetting.as_ref().unwrap()),
-    );
+    let vignetting = push(warp.vignetting.as_ref().map(VignetteField::table));
     let m = &warp.map;
     // 2 marks a measured aberration, evaluated at the distorted radius.
     let mode = if m.chromatic.is_some() { 2. } else { 1. };
@@ -1202,11 +1222,11 @@ pub(crate) fn source_bounds(
     });
     [a.0, b.0, a.1 - a.0 + 1, b.1 - b.0 + 1]
 }
-/// Built-in vignetting for `gpu/logs.wgsl`: centre, half diagonal, amount and the
+/// Vignetting (lens profile and manual) for `gpu/logs.wgsl`: centre, half diagonal, amount and the
 /// radial table (knots, then values), or `None`.
 pub(crate) fn vignetting_gpu_params(im: &CameraImage, r: &Recipe) -> Option<([f32; 4], Vec<f32>)> {
     let v = VignetteField::new(im, r)?;
-    let radial = v.lens.vignetting.as_ref()?;
+    let radial = v.table();
     let mut table = radial.knots.clone();
     table.extend(&radial.values);
     Some(([v.center[0], v.center[1], v.half, v.amount], table))

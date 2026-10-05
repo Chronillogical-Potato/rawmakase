@@ -137,6 +137,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         upright,
         noise_luma,
         noise_chroma,
+        lens_vignette_model,
         effects,
         // Shadows/Highlights and their exposure are keyed by `LocalKey`; spot removal
         // changes the source image, which every key holds.
@@ -214,8 +215,10 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         vignette_feather: _,
         vignette_highlights: _,
         vignette_style: _,
-        lens_vignette: _,
-        lens_vignette_midpoint: _,
+        // Manual Vignetting, measured, scales the camera image; the original
+        // operator's only finishes it, so it is keyed on without effect.
+        lens_vignette,
+        lens_vignette_midpoint,
         defringe: _,
         defringe_ranges: _,
     } = effects;
@@ -231,6 +234,12 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             lens_profile: *lens_profile,
             lens_profile_choice: lens_profile_choice.clone(),
             lens_vignetting: *lens_vignetting,
+            lens_vignette_model: *lens_vignette_model,
+            effects: Effects {
+                lens_vignette: *lens_vignette,
+                lens_vignette_midpoint: *lens_vignette_midpoint,
+                ..Default::default()
+            },
             ..Default::default()
         },
         // Geometry, lens correction and noise reduction.
@@ -251,6 +260,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             lens_vignetting: *lens_vignetting,
             lens_manual_distortion: *lens_manual_distortion,
             lens_ca: *lens_ca,
+            lens_vignette_model: *lens_vignette_model,
             noise_luma: *noise_luma,
             noise_chroma: *noise_chroma,
             effects: Effects {
@@ -258,6 +268,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
                 luma_contrast: *luma_contrast,
                 chroma_detail: *chroma_detail,
                 chroma_smoothness: *chroma_smoothness,
+                lens_vignette: *lens_vignette,
+                lens_vignette_midpoint: *lens_vignette_midpoint,
                 ..Default::default()
             },
             ..Default::default()
@@ -409,11 +421,20 @@ mod tests {
             (a.blurs != b.blurs, a.samples != b.samples)
         };
         // (edit, changes the blurs, changes the samples)
-        let cases: [(&str, Recipe, bool, bool); 14] = [
+        let cases: [(&str, Recipe, bool, bool); 15] = [
             ("temperature", edit(&|r| r.temperature = 3000.), true, false),
             (
                 "lens vignetting",
                 edit(&|r| r.lens_vignetting = 0.5),
+                true,
+                true,
+            ),
+            (
+                "manual vignetting",
+                edit(&|r| {
+                    r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+                    r.effects.lens_vignette = -0.5;
+                }),
                 true,
                 true,
             ),

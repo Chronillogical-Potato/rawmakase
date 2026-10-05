@@ -87,6 +87,12 @@ Lightroom's manual Distortion (Lens Corrections > Manual, `crs:LensManualDistort
 
 The `lens-manual-distortion*` corpus cases (±50, and +50 with Vertical +30) sit at mean ΔE00 1.3–1.7 from Camera Raw (the default render is 0.9), against 16–21 if it were ignored. The Lens Corrections panel's Distortion › Amount slider sets it, from process version 4. Constrain Crop crops the white out ([transform](transform.md#constrain-crop)).
 
+## Manual vignetting
+
+Lens Corrections > Manual > Vignetting (`crs:VignetteAmount`, `VignetteMidpoint`) follows Camera Raw 18.7, measured on flat synthetic DNGs at three brightnesses, a 3:2 and a square frame, and four crops (`effects::lens_vignette`). Camera Raw multiplies scene-linear light by a radial gain over the whole photo, before the tone curve: the crop neither moves nor resizes it, and the gain is the same at every brightness. Positive amounts lighten the corners. With `r` the distance from the centre over the half diagonal, `ln gain = amount × c·r^p / (1 + k·r^p)`, where Midpoint (0–100) raises `p` from 2.1 to 9.8 and moves `c` and `k` a little. The fit's log error is 0.018 RMS over 32 renders.
+
+RAWmakase applies it while sampling the camera image, in one table with the lens profile's vignetting (on the GPU as well), so it also works without lens data. On the chart cases `lens-vignetting-50`, `+50` and `-50-midpoint20`, mean ΔE00 to Camera Raw went from about 5.1 (7.5 at Midpoint 20) to 0.8–1.0, the default render's own distance. Before, RAWmakase darkened the finished pixels inside the crop with the opposite sign: `Recipe::lens_vignette_model` keeps that operator (`Original`, the default when the field is missing) for recipes saved before, and new edits and imports are `Measured`. Copying Lens Vignetting copies the model with the sliders.
+
 ## Defringe
 
 Lightroom's Defringe (`crs:DefringePurpleAmount`, `…GreenAmount` and their Hue ranges) reduces the chroma of hues inside the Purple and Green ranges. `Effects::defringe_color` does it per pixel in Oklab, after the colour controls:
