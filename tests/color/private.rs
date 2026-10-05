@@ -331,6 +331,14 @@ fn photos_camera_raw_parity_does_not_regress() {
                             if ours.len() != r.blocks.len() {
                                 return Err("block grid differs".into());
                             }
+                            // RAWmakase's blocks for scripts/corpus/parity-report.py.
+                            if let Some(dir) = std::env::var_os("RAWMAKASE_PARITY_DUMP") {
+                                let path =
+                                    Path::new(&dir).join("photos").join(format!("{name}.json"));
+                                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                                std::fs::write(path, serde_json::to_string(&ours).unwrap())
+                                    .unwrap();
+                            }
                             Ok(compare(&r.blocks, &ours, |_| true))
                         });
                     (name.clone(), result, r.camera_raw.clone())

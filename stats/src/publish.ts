@@ -1,11 +1,10 @@
 // What the public page shows. Only completed weeks are published, and each
-// breakdown merges small groups so no published number describes fewer than
-// MIN_GROUP installations. This reduces exposure; it is not an anonymity
-// guarantee.
+// breakdown merges groups of fewer than MIN_GROUP installations into "other".
+// This reduces exposure; it is not an anonymity guarantee.
 
 import { DIMENSIONS, type DimensionName } from "./dimensions";
 
-export const MIN_GROUP = 10;
+export const MIN_GROUP = 5;
 
 export interface Group {
   key: string;
@@ -44,23 +43,21 @@ export interface Week {
   breakdowns: Record<DimensionName, Breakdown | null> | null;
 }
 
-/// Groups below MIN_GROUP go to "other". "Other" must itself reach MIN_GROUP
-/// and merge at least two groups: the set of platforms is public, so a lone
-/// merged group could be named by elimination. Until it does, the smallest
-/// shown group joins it.
+/// Groups below MIN_GROUP go to "other", which must merge at least two
+/// groups: the set of platforms is public, so a lone merged group could be
+/// named by elimination. Until it does, the smallest shown group joins it.
 export function suppress(groups: Group[]): Breakdown {
   const sorted = [...groups].sort(
     (a, b) => b.count - a.count || a.key.localeCompare(b.key),
   );
   const shown = sorted.filter((g) => g.count >= MIN_GROUP);
   const hidden = sorted.filter((g) => g.count < MIN_GROUP);
-  const sum = () => hidden.reduce((n, g) => n + g.count, 0);
-  while (hidden.length > 0 && (sum() < MIN_GROUP || hidden.length < 2)) {
+  if (hidden.length === 1) {
     const smallest = shown.pop();
-    if (!smallest) break;
-    hidden.push(smallest);
+    if (smallest) hidden.push(smallest);
   }
-  return { shown, other: hidden.length > 0 ? sum() : null };
+  const other = hidden.reduce((n, g) => n + g.count, 0);
+  return { shown, other: hidden.length > 0 ? other : null };
 }
 
 /// One published week from its tallies. A week whose total is below
