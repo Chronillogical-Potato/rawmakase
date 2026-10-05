@@ -20,9 +20,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Dial ticks closer together than this are one edit in History, like a drag.
-const GESTURE: Duration = Duration::from_millis(400);
-
 /// A pause this long ends a turn of the photo dial.
 const PHOTO_IDLE: Duration = Duration::from_millis(600);
 
@@ -151,11 +148,7 @@ fn action_spec(action: Action) -> String {
         parts
     };
     match action {
-        Action::Named(a) => commands::Action::NAMES
-            .iter()
-            .find(|n| commands::Action::parse(n) == Some(a))
-            .expect("named action")
-            .to_string(),
+        Action::Named(a) => a.name().into(),
         Action::ToggleMono => "toggle:bw".into(),
         Action::Mixer(c) => format!("mixer:{}", ["hue", "sat", "lum"][c]),
         Action::Hold(m) => format!("hold:{}", modifiers(m).join("+")),
@@ -486,8 +479,6 @@ pub(super) struct Surface {
     photo_ticks: i32,
     photo_dir: i32,
     last_photo: Option<Instant>,
-    last_turn: Option<Instant>,
-    turn_scope: Option<(Param, Option<usize>, u64, usize)>,
     midi_epoch: u64,
     status: Arc<Mutex<Status>>,
     stop_midi: Arc<AtomicBool>,
@@ -522,8 +513,6 @@ impl Surface {
             photo_ticks: 0,
             photo_dir: 0,
             last_photo: None,
-            last_turn: None,
-            turn_scope: None,
             midi_epoch: 0,
             status: Arc::default(),
             stop_midi: Arc::default(),
@@ -553,19 +542,6 @@ impl Surface {
             self.socket = socket::start(tx.clone(), ctx.clone());
         }
     }
-    pub(super) fn turning(&self) -> bool {
-        self.last_turn.is_some_and(|t| t.elapsed() < GESTURE)
-    }
-    pub(super) fn end_turn(&mut self) {
-        self.last_turn = None;
-        self.turn_scope = None;
-    }
-    pub(super) fn continues_turn(&self, scope: Option<(Param, Option<usize>, u64, usize)>) -> bool {
-        self.turning() && self.turn_scope == scope
-    }
-    pub(super) fn set_turn_scope(&mut self, scope: Option<(Param, Option<usize>, u64, usize)>) {
-        self.turn_scope = scope;
-    }
     fn reset_midi_state(&mut self) {
         self.held = Modifiers::NONE;
         self.photo_ticks = 0;
@@ -578,10 +554,6 @@ impl Surface {
             self.midi_epoch = epoch;
             self.reset_midi_state();
         }
-    }
-    pub(super) fn begin_turn(&mut self, ctx: &egui::Context) {
-        self.last_turn = Some(Instant::now());
-        ctx.request_repaint_after(GESTURE + Duration::from_millis(50));
     }
     fn photo_turn(&mut self, t: i32) -> i32 {
         if t == 0 {
@@ -736,7 +708,11 @@ impl Editor {
                     }
                     let result = self.control_messages(request.messages, ctx);
                     let state = self.command_state();
-                    let _=request.reply.send(result.map(|result|serde_json::json!({"state":state,"result":result,"status":"applied"})));
+                    let _ = request.reply.send(result.map(|result| commands::Reply {
+                        state,
+                        result,
+                        status: "applied",
+                    }));
                 }
                 message => {
                     if let Err(error) = self.control_messages(vec![message], ctx) {
@@ -753,11 +729,18 @@ impl Editor {
         &mut self,
         messages: Vec<Msg>,
         ctx: &egui::Context,
-    ) -> commands::Result<serde_json::Value> {
-        let mut result = serde_json::Value::Null;
+    ) -> commands::Result<commands::Outcome> {
+        let mut result = commands::Outcome::Empty;
         for msg in messages {
             self.sync_command_revision();
             self.surface.sync_midi_epoch();
+            let source = commands::Source::Socket;
+            #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+            let source = if matches!(msg, Msg::Midi(..)) {
+                commands::Source::Midi
+            } else {
+                source
+            };
             #[cfg(any(test, target_os = "macos", target_os = "windows"))]
             let msg = match msg {
                 Msg::Midi(source, epoch, msg)
@@ -799,7 +782,7 @@ impl Editor {
                 {
                     *advance |= self.auto_advance;
                 }
-                result = self.execute_command(command, ctx)?;
+                result = self.execute_command_from(command, source, ctx)?;
             }
         }
         Ok(result)
@@ -1090,6 +1073,35 @@ mod integration_tests {
         assert!(e.library_mode);
         assert!(e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
+        // Semantic API navigation and device arrows preserve Loupe too.
+        e.control_messages(
+            vec![Msg::Command(Command::new(commands::Operation::Navigate(
+                -1,
+            )))],
+            &ctx,
+        )
+        .unwrap();
+        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
+        e.control_messages(
+            vec![Msg::Command(Command::new(commands::Operation::Action(
+                commands::Action::Next,
+            )))],
+            &ctx,
+        )
+        .unwrap();
+        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
+        e.library.as_mut().unwrap().show_grid();
+        e.control_messages(
+            vec![Msg::Command(Command::new(commands::Operation::Action(
+                commands::Action::Previous,
+            )))],
+            &ctx,
+        )
+        .unwrap();
+        assert!(e.library_mode && !e.library.as_ref().unwrap().loupe_open());
+        assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
         e.library_mode = false;
         e.document.catalog_photo = Some(second);
         e.control_messages(vec![Msg::Cc(48, 127)], &ctx).unwrap();

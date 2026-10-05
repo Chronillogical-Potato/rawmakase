@@ -21,7 +21,7 @@ const MAX_CLIENTS: usize = 16;
 
 pub(super) struct Request {
     pub messages: Vec<Msg>,
-    pub reply: mpsc::SyncSender<commands::Result<Value>>,
+    pub reply: mpsc::SyncSender<commands::Result<commands::Reply>>,
     phase: Arc<AtomicU8>, // pending, executing, cancelled
     deadline: Instant,
     stop: Arc<AtomicBool>,
@@ -213,7 +213,9 @@ fn handle(
     })?;
     ctx.request_repaint();
     match rx.recv_timeout(timeout) {
-        Ok(result) => result,
+        Ok(result) => {
+            result.map(|reply| serde_json::to_value(reply).expect("serializable command reply"))
+        }
         Err(_) => {
             if phase
                 .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst)
@@ -388,7 +390,7 @@ fn start_at(
 #[cfg(test)]
 pub(super) fn test_request(
     messages: Vec<Msg>,
-) -> (Request, mpsc::Receiver<commands::Result<Value>>) {
+) -> (Request, mpsc::Receiver<commands::Result<commands::Reply>>) {
     let (reply, rx) = mpsc::sync_channel(1);
     (
         Request {
@@ -466,10 +468,29 @@ mod tests {
             else {
                 panic!()
             };
-            request.reply.send(Ok(json!({"id":id}))).unwrap();
+            let ctx = egui::Context::default();
+            let mut editor = super::super::Editor::with_context(
+                &ctx,
+                None,
+                crate::storage::Session::default(),
+                None,
+            );
+            request
+                .reply
+                .send(Ok(commands::Reply {
+                    state: editor.command_state(),
+                    result: commands::Outcome::Search {
+                        query: id.to_string(),
+                    },
+                    status: "applied",
+                }))
+                .unwrap();
         }
         for (index, client) in clients.into_iter().enumerate() {
-            assert_eq!(client.join().unwrap()["id"], index + 1);
+            assert_eq!(
+                client.join().unwrap()["result"]["query"],
+                (index + 1).to_string()
+            );
         }
     }
     #[test]
@@ -508,7 +529,10 @@ mod tests {
         assert_eq!(reply["ok"], true);
         assert_eq!(reply["protocol"], 1);
         assert_eq!(reply["request_id"], "state-1");
-        assert_eq!(reply["state"], editor.command_state());
+        assert_eq!(
+            reply["state"],
+            serde_json::to_value(editor.command_state()).unwrap()
+        );
         drop(handle);
     }
     #[test]

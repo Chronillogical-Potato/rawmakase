@@ -3,7 +3,6 @@
 use super::{Error, Result};
 use crate::export::{ExportSettings, Format, Replace, job};
 use serde::Serialize;
-use serde_json::Value;
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -13,15 +12,15 @@ use std::{
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
     Running,
     Completed,
     Failed,
 }
-#[derive(Clone, Serialize)]
-struct OutputState {
+#[derive(Debug, Clone, Serialize)]
+pub(in crate::app) struct OutputState {
     job_id: u64,
     status: Status,
     generation: u64,
@@ -48,16 +47,14 @@ impl Drop for Outputs {
     }
 }
 impl Outputs {
-    pub fn state(&self, id: u64) -> Result<Value> {
+    pub fn state(&self, id: u64) -> Result<OutputState> {
         self.jobs
             .get(&id)
             .map(|j| {
-                serde_json::to_value(
-                    &*j.state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner),
-                )
-                .expect("output state")
+                j.state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
             })
             .ok_or_else(|| {
                 Error::new(
@@ -74,7 +71,7 @@ impl Outputs {
         generation: u64,
         revision: u64,
         ctx: eframe::egui::Context,
-    ) -> Result<Value> {
+    ) -> Result<OutputState> {
         let active = self
             .jobs
             .values()
@@ -179,6 +176,6 @@ impl Outputs {
             })
             .map_err(|e| Error::new("start_failed", e.to_string()))?;
         self.jobs.insert(id, Job { state, cancel });
-        Ok(serde_json::to_value(initial).expect("output state"))
+        Ok(initial)
     }
 }

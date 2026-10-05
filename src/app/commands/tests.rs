@@ -1,4 +1,8 @@
 use super::*;
+use serde_json::Value;
+fn json(value: impl serde::Serialize) -> Value {
+    serde_json::to_value(value).unwrap()
+}
 use std::sync::Arc;
 fn editor() -> (Editor, egui::Context) {
     let ctx = egui::Context::default();
@@ -24,7 +28,7 @@ fn editor() -> (Editor, egui::Context) {
     }));
     (e, ctx)
 }
-fn set(e: &mut Editor, ctx: &egui::Context, value: f32) -> Result<Value> {
+fn set(e: &mut Editor, ctx: &egui::Context, value: f32) -> Result<Outcome> {
     e.execute_command(Command::new(Operation::Set(Param::Exposure, value)), ctx)
 }
 #[test]
@@ -32,7 +36,7 @@ fn command_edit_records_history_and_undo_returns_post_action_state() {
     let (mut e, ctx) = editor();
     let initial = e.document.recipe.exposure;
     set(&mut e, &ctx, 1.25).unwrap();
-    assert_eq!(e.command_state()["values"]["exposure"], 1.25);
+    assert_eq!(json(e.command_state())["values"]["exposure"], 1.25);
     assert!(e.document.save.needs_save());
     assert!(e.automation.revision > 0);
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
@@ -115,8 +119,8 @@ fn black_white_action_matches_existing_treatment_workflow() {
 }
 #[test]
 fn named_actions_are_discoverable_and_parameter_values_are_finite() {
-    for name in Action::NAMES {
-        assert!(Action::parse(name).is_some(), "{name}");
+    for name in Action::names() {
+        assert_eq!(Action::parse(name).unwrap().name(), name);
     }
     let (mut e, ctx) = editor();
     assert_eq!(
@@ -126,6 +130,7 @@ fn named_actions_are_discoverable_and_parameter_values_are_finite() {
     let capabilities = e
         .execute_command(Command::new(Operation::Capabilities), &ctx)
         .unwrap();
+    let capabilities = json(capabilities);
     assert_eq!(capabilities["protocol"], PROTOCOL);
     assert!(
         capabilities["parameters"]
@@ -182,6 +187,7 @@ fn output_job_publishes_the_captured_revision_and_never_clobbers() -> anyhow::Re
             &ctx,
         )
         .unwrap();
+    let result = json(result);
     let id = result["job_id"].as_u64().unwrap();
     let revision = result["revision"].clone();
     set(&mut e, &ctx, 1.).unwrap();
@@ -190,6 +196,7 @@ fn output_job_publishes_the_captured_revision_and_never_clobbers() -> anyhow::Re
         let job = e
             .execute_command(Command::new(Operation::Job(id)), &ctx)
             .unwrap();
+        let job = json(job);
         if job["status"] != "running" {
             break job;
         }
@@ -257,7 +264,7 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
     let result = e
         .execute_command(Command::new(Operation::Save), &ctx)
         .unwrap();
-    assert_eq!(result["saved"], true);
+    assert_eq!(json(result)["saved"], true);
     assert!(!e.document.save.needs_save());
     assert_eq!(
         e.library
@@ -277,7 +284,7 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
 fn curve_save_is_modal_for_commands_and_state() {
     let (mut e, ctx) = editor();
     e.choose_point_curve(super::super::curve_menu::CurveChoice::Save);
-    assert_eq!(e.command_state()["modal"], true);
+    assert_eq!(json(e.command_state())["modal"], true);
     assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "busy");
     assert_eq!(
         e.execute_command(Command::new(Operation::Action(Action::Reset)), &ctx)
@@ -294,7 +301,7 @@ fn curve_save_is_modal_for_commands_and_state() {
 #[test]
 fn asynchronous_edits_and_out_of_frame_undo_invalidate_guards() {
     let (mut e, ctx) = editor();
-    let initial = e.command_state()["revision"].as_u64().unwrap();
+    let initial = json(e.command_state())["revision"].as_u64().unwrap();
     let mut auto = e.document.recipe.clone();
     auto.exposure = 1.25;
     e.auto_ready(super::super::worker::AutoKind::Settings, Ok(Box::new(auto)));
@@ -304,16 +311,16 @@ fn asynchronous_edits_and_out_of_frame_undo_invalidate_guards() {
         e.execute_command(command, &ctx).unwrap_err().code,
         "stale_target"
     );
-    let after_auto = e.command_state()["revision"].as_u64().unwrap();
+    let after_auto = json(e.command_state())["revision"].as_u64().unwrap();
     assert!(after_auto > initial);
     e.undo();
-    let after_undo = e.command_state()["revision"].as_u64().unwrap();
+    let after_undo = json(e.command_state())["revision"].as_u64().unwrap();
     assert!(after_undo > after_auto);
     // Direct worker-style recipe changes must also be caught before a frame snapshot.
     e.document.recipe.straighten = 1.;
     let frame = e.begin_edit_frame();
     e.finish_edit_frame(frame, &ctx);
-    assert!(e.command_state()["revision"].as_u64().unwrap() > after_undo);
+    assert!(json(e.command_state())["revision"].as_u64().unwrap() > after_undo);
 }
 
 #[test]
@@ -328,7 +335,7 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     set(&mut e, &ctx, 100.).unwrap();
     e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
         .unwrap();
-    e.surface.end_turn();
+    e.automation.end_turn();
     e.finish_gesture();
     let old = e.document.recipe.clone();
     e.document.recipe.preset_name = "Another".into();
@@ -384,7 +391,10 @@ fn point_curve_edits_validate_preserve_channels_and_undo() {
     .unwrap();
     assert_eq!(e.document.recipe.effects.channels[0].points, points);
     assert_eq!(e.document.recipe.curve, original.curve);
-    assert_eq!(e.command_state()["tone_curve"]["red"]["points"][1][0], 0.25);
+    assert_eq!(
+        json(e.command_state())["tone_curve"]["red"]["points"][1][0],
+        0.25
+    );
     let before = e.document.recipe.clone();
     for points in [
         vec![[0., 0.]],
@@ -416,4 +426,104 @@ fn point_curve_edits_validate_preserve_channels_and_undo() {
         e.document.recipe.effects.channels,
         original.effects.channels
     );
+}
+
+#[test]
+fn auto_rejects_an_already_running_job() {
+    let (mut e, ctx) = editor();
+    let (id, _) = e.document.auto.start();
+    for action in [Action::AutoTone, Action::AutoWhiteBalance] {
+        assert_eq!(
+            e.execute_command(Command::new(Operation::Action(action)), &ctx)
+                .unwrap_err()
+                .code,
+            "busy"
+        );
+        assert_eq!(e.document.auto.id(), id);
+        assert!(e.document.auto.is_running());
+    }
+}
+
+#[test]
+fn ui_edit_during_dial_gesture_has_its_own_undo_step() {
+    let (mut e, ctx) = editor();
+    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 3)), &ctx)
+        .unwrap();
+    let exposure = e.document.recipe.exposure;
+    let frame = e.begin_edit_frame();
+    e.toggle_treatment();
+    e.finish_edit_frame(frame, &ctx);
+    assert!(e.document.recipe.effects.monochrome);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert!(!e.document.recipe.effects.monochrome);
+    assert_eq!(e.document.recipe.exposure, exposure);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, 0.);
+}
+
+#[test]
+fn idle_frames_keep_turns_grouped_but_transport_changes_split_them() {
+    let (mut e, ctx) = editor();
+    for _ in 0..2 {
+        e.execute_command_from(
+            Command::new(Operation::Adjust(Param::Exposure, 1)),
+            Source::Midi,
+            &ctx,
+        )
+        .unwrap();
+        let frame = e.begin_edit_frame();
+        e.finish_edit_frame(frame, &ctx);
+    }
+    let midi_exposure = e.document.recipe.exposure;
+    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
+        .unwrap();
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, midi_exposure);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, 0.);
+}
+
+#[test]
+fn library_metadata_requires_stable_id_despite_selection_changes() -> anyhow::Result<()> {
+    let (mut e, ctx) = editor();
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    for name in ["a.DNG", "b.DNG"] {
+        std::fs::write(photos.join(name), b"synthetic")?;
+    }
+    let db = dir.path().join("catalog.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&db)?;
+    catalog.add_folder(&photos)?;
+    drop(catalog);
+    e.library = Some(Box::new(super::super::library::Library::load(
+        &db,
+        ctx.clone(),
+    )?));
+    e.library_mode = true;
+    let library = e.library.as_mut().unwrap();
+    let first = library.photos[0].id;
+    let second = library.photos[1].id;
+    library.make_active(first);
+    let state = e.command_state();
+    e.library.as_mut().unwrap().make_active(second);
+    let mut command = Command::new(Operation::Action(Action::Rating(4)));
+    command.target.generation = Some(state.generation);
+    command.target.revision = Some(state.revision);
+    assert_eq!(
+        e.execute_command(command.clone(), &ctx).unwrap_err().code,
+        "target_required"
+    );
+    // A previously open Develop photo must not override an explicit Library ID.
+    e.document.catalog_photo = Some(second);
+    command.target.photo_id = Some(first);
+    e.execute_command(command, &ctx).unwrap();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.photo(first).unwrap().rating, 4);
+    assert_eq!(library.photo(second).unwrap().rating, 0);
+    Ok(())
 }

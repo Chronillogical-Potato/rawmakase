@@ -160,7 +160,16 @@ use target guards for a sequence that must refer to the same edit.
 The legacy `action` shortcut notation (`cmd+shift+z`, etc.) resolves to supported
 named actions. Unknown shortcuts fail explicitly. Legacy requests may omit
 `protocol`; explicit unsupported versions are rejected. `target` accepts only
-`photo_id`, `generation`, `revision`, and `mask`.
+`photo_id`, `generation`, `revision`, and `mask`. In Library, semantic rating,
+flag and label actions require an explicit `target.photo_id` from `photos`;
+they never act on an unguarded selection. Physical device controls retain their
+selection-based behavior. `photo` and named `next`/`previous` preserve the current
+Library grid or Loupe view, or navigate the open photo in Develop.
+
+Consecutive `turn` commands group into one undo step only for the same transport,
+parameter, mask, photo generation and mixer channel within 400 ms. A UI edit or a
+different command ends that group. Auto tone and white-balance commands return
+`busy` if an automatic adjustment is already running.
 
 Common error codes include `invalid_request`, `unsupported_protocol`,
 `unauthorized`, `busy`, `stale_target`, `target_required`, `no_document`,
@@ -196,3 +205,18 @@ An agent can invoke the CLI directly or implement an adapter over this protocol.
 The bundled `rawmakase mcp` adapter exposes editing tools and preview images over
 stdio without knowing MIDI numbers or keyboard shortcuts. See [MCP setup and
 editing workflow](mcp.md).
+
+
+## Application boundaries
+
+Application commands return typed state snapshots and results; the socket adapter
+encodes them as protocol JSON. A single action-name table supports parsing,
+discovery and device mapping serialization. Gesture ownership belongs to the
+application command layer, with separate MIDI and socket scopes.
+
+Further architectural work can move the queue/listener lifecycle out of
+`control_surface` into an automation owner, route remaining UI shortcuts through
+these operations, and share parameter descriptors with all editing panels.
+The standalone client still includes its shared implementation by path; a
+workspace protocol/client crate would also let MCP schemas reuse those types.
+These follow-ups do not require a new editing engine or MIDI-specific commands.

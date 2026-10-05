@@ -2,20 +2,46 @@
 //! Adapters translate input; only the Editor executes commands and owns history.
 mod output;
 mod parameter;
+mod reply;
+use reply::{
+    Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
+};
+pub(super) use reply::{Outcome, Reply};
 
 #[derive(Default)]
 pub(super) struct Automation {
     pub revision: u64,
     observed: Option<(u64, crate::develop::Recipe)>,
     outputs: output::Outputs,
+    turn: Option<(std::time::Instant, TurnScope)>,
 }
 pub(super) use parameter::Param;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Source {
+    Socket,
+    #[cfg(any(test, target_os = "macos", target_os = "windows"))]
+    Midi,
+}
+#[derive(Clone, Copy, PartialEq)]
+struct TurnScope(Source, Param, Option<usize>, u64, usize);
+impl Automation {
+    pub(super) fn turning(&self) -> bool {
+        self.turn
+            .is_some_and(|(at, _)| at.elapsed() < std::time::Duration::from_millis(400))
+    }
+    pub(super) fn has_turn(&self) -> bool {
+        self.turn.is_some()
+    }
+    pub(super) fn end_turn(&mut self) {
+        self.turn = None;
+    }
+}
 
 use super::{Editor, state::Tool};
 use crate::catalog::Photo;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 pub(super) const PROTOCOL: u32 = 1;
 
@@ -127,60 +153,60 @@ pub(super) enum Action {
     Previous,
 }
 impl Action {
-    pub const NAMES: &[&str] = &[
-        "undo",
-        "redo",
-        "rating:0",
-        "rating:1",
-        "rating:2",
-        "rating:3",
-        "rating:4",
-        "rating:5",
-        "pick",
-        "reject",
-        "unflag",
-        "label:red",
-        "label:yellow",
-        "label:green",
-        "label:blue",
-        "label:purple",
-        "label:none",
-        "toggle_label:red",
-        "toggle_label:yellow",
-        "toggle_label:green",
-        "toggle_label:blue",
-        "toggle_label:purple",
-        "copy",
-        "paste",
-        "paste_previous",
-        "sync",
-        "reset",
-        "auto_tone",
-        "auto_white_balance",
-        "curve:linear",
-        "curve:medium_contrast",
-        "curve:strong_contrast",
-        "export_dialog",
-        "export_previous",
-        "toggle:bw",
-        "treatment:bw",
-        "treatment:color",
-        "compare",
-        "clipping",
-        "zoom",
-        "fit",
-        "crop",
-        "remove",
-        "white_balance",
-        "mask",
-        "mixer:hue",
-        "mixer:sat",
-        "mixer:lum",
-        "library",
-        "develop",
-        "loupe",
-        "next",
-        "previous",
+    const NAMED: &[(&'static str, Self)] = &[
+        ("undo", Self::Undo),
+        ("redo", Self::Redo),
+        ("rating:0", Self::Rating(0)),
+        ("rating:1", Self::Rating(1)),
+        ("rating:2", Self::Rating(2)),
+        ("rating:3", Self::Rating(3)),
+        ("rating:4", Self::Rating(4)),
+        ("rating:5", Self::Rating(5)),
+        ("pick", Self::Flag(1)),
+        ("reject", Self::Flag(-1)),
+        ("unflag", Self::Flag(0)),
+        ("label:red", Self::Label(0)),
+        ("label:yellow", Self::Label(1)),
+        ("label:green", Self::Label(2)),
+        ("label:blue", Self::Label(3)),
+        ("label:purple", Self::Label(4)),
+        ("label:none", Self::Label(5)),
+        ("toggle_label:red", Self::ToggleLabel(0)),
+        ("toggle_label:yellow", Self::ToggleLabel(1)),
+        ("toggle_label:green", Self::ToggleLabel(2)),
+        ("toggle_label:blue", Self::ToggleLabel(3)),
+        ("toggle_label:purple", Self::ToggleLabel(4)),
+        ("copy", Self::Copy),
+        ("paste", Self::Paste),
+        ("paste_previous", Self::PastePrevious),
+        ("sync", Self::Sync),
+        ("reset", Self::Reset),
+        ("auto_tone", Self::AutoTone),
+        ("auto_white_balance", Self::AutoWhiteBalance),
+        ("curve:linear", Self::CurveLinear),
+        ("curve:medium_contrast", Self::CurveMedium),
+        ("curve:strong_contrast", Self::CurveStrong),
+        ("export_dialog", Self::ExportDialog),
+        ("export_previous", Self::ExportPrevious),
+        ("toggle:bw", Self::ToggleMono),
+        ("treatment:bw", Self::Treatment(true)),
+        ("treatment:color", Self::Treatment(false)),
+        ("compare", Self::Compare),
+        ("clipping", Self::Clipping),
+        ("zoom", Self::Zoom),
+        ("fit", Self::Fit),
+        ("crop", Self::Crop),
+        ("remove", Self::Remove),
+        ("white_balance", Self::WhiteBalance),
+        ("mask", Self::Mask),
+        ("mixer:hue", Self::Mixer(0)),
+        ("mixer:sat", Self::Mixer(1)),
+        ("mixer:lum", Self::Mixer(2)),
+        ("library", Self::Library),
+        ("develop", Self::Develop),
+        ("loupe", Self::Loupe),
+        ("next", Self::Next),
+        ("previous", Self::Previous),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};
@@ -194,62 +220,21 @@ impl Action {
             _ => return None,
         })
     }
-    pub fn parse(s: &str) -> Option<Self> {
-        Some(match s {
-            "undo" => Self::Undo,
-            "redo" => Self::Redo,
-            "pick" => Self::Flag(1),
-            "reject" => Self::Flag(-1),
-            "unflag" => Self::Flag(0),
-            "toggle_label:red" => Self::ToggleLabel(0),
-            "toggle_label:yellow" => Self::ToggleLabel(1),
-            "toggle_label:green" => Self::ToggleLabel(2),
-            "toggle_label:blue" => Self::ToggleLabel(3),
-            "toggle_label:purple" => Self::ToggleLabel(4),
-            "label:red" => Self::Label(0),
-            "label:yellow" => Self::Label(1),
-            "label:green" => Self::Label(2),
-            "label:blue" => Self::Label(3),
-            "label:purple" => Self::Label(4),
-            "label:none" => Self::Label(5),
-            "copy" => Self::Copy,
-            "paste" => Self::Paste,
-            "paste_previous" => Self::PastePrevious,
-            "sync" => Self::Sync,
-            "reset" => Self::Reset,
-            "auto_tone" => Self::AutoTone,
-            "auto_white_balance" => Self::AutoWhiteBalance,
-            "curve:linear" => Self::CurveLinear,
-            "curve:medium_contrast" => Self::CurveMedium,
-            "curve:strong_contrast" => Self::CurveStrong,
-            "export_dialog" => Self::ExportDialog,
-            "export_previous" => Self::ExportPrevious,
-            "toggle:bw" => Self::ToggleMono,
-            "treatment:bw" => Self::Treatment(true),
-            "treatment:color" => Self::Treatment(false),
-            "compare" => Self::Compare,
-            "clipping" => Self::Clipping,
-            "zoom" => Self::Zoom,
-            "fit" => Self::Fit,
-            "crop" => Self::Crop,
-            "remove" => Self::Remove,
-            "white_balance" => Self::WhiteBalance,
-            "mask" => Self::Mask,
-            "mixer:hue" => Self::Mixer(0),
-            "mixer:sat" => Self::Mixer(1),
-            "mixer:lum" => Self::Mixer(2),
-            "library" => Self::Library,
-            "develop" => Self::Develop,
-            "loupe" => Self::Loupe,
-            "next" => Self::Next,
-            "previous" => Self::Previous,
-            _ => Self::Rating(
-                s.strip_prefix("rating:")?
-                    .parse::<u8>()
-                    .ok()
-                    .filter(|n| *n <= 5)?,
-            ),
-        })
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::NAMED
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, action)| *action)
+    }
+    pub fn name(self) -> &'static str {
+        Self::NAMED
+            .iter()
+            .find(|(_, action)| *action == self)
+            .expect("named action")
+            .0
+    }
+    pub fn names() -> Vec<&'static str> {
+        Self::NAMED.iter().map(|(name, _)| *name).collect()
     }
 }
 
@@ -284,56 +269,77 @@ impl Editor {
         }
         self.automation.observed = Some((generation, self.document.recipe.clone()));
     }
-    pub(super) fn command_state(&mut self) -> Value {
+    pub(super) fn command_state(&mut self) -> State {
         self.sync_command_revision();
         let develop = !self.library_mode && self.document.metadata.is_some();
         let mut recipe = self.document.recipe.clone();
-        let mut values = serde_json::Map::new();
+        let mut values = std::collections::BTreeMap::new();
         if develop {
             for (name, param) in Param::all() {
                 values.insert(
                     name,
-                    param
-                        .shown(&mut recipe, self.view.mixer_adjust.min(2))
-                        .into(),
+                    param.shown(&mut recipe, self.view.mixer_adjust.min(2)),
                 );
             }
         }
-        let masks: Vec<Value> = recipe
+        let masks: Vec<MaskState> = recipe
             .masks
             .iter()
             .enumerate()
             .map(|(index, mask)| {
-                let values: serde_json::Map<String, Value> = Param::NAMED
+                let values: std::collections::BTreeMap<String, f32> = Param::NAMED
                     .iter()
                     .filter_map(|(name, param)| {
-                        param
-                            .local_shown(&mask.adjust)
-                            .map(|v| ((*name).into(), v.into()))
+                        param.local_shown(&mask.adjust).map(|v| ((*name).into(), v))
                     })
                     .collect();
-                json!({"index":index,"name":mask.name,"hidden":mask.hidden,"values":values})
+                MaskState {
+                    index,
+                    name: mask.name.clone(),
+                    hidden: mask.hidden,
+                    values,
+                }
             })
             .collect();
-        json!({
-            "protocol": PROTOCOL,
-            "message":self.status,
-            "mode": if self.library_mode {"library"} else {"develop"},
-            "photo": develop.then(|| self.document.path.as_ref().map(|p| p.display().to_string())).flatten(),
-            "photo_id": develop.then_some(self.document.catalog_photo).flatten(),
-            "generation":self.load.id(), "revision":self.automation.revision,
-            "loaded":develop && self.document.full().is_some() && !self.load.is_running(),
-            "busy":self.activity.is_busy(), "modal":self.command_modal(),
-            "black_and_white":develop && recipe.effects.monochrome,
-            "mixer_channel":(["hue","sat","lum"][self.view.mixer_adjust.min(2)]),
-            "values":values, "masks":masks,
-            "tone_curve":{"rgb":recipe.curve,"red":recipe.effects.channels[0],"green":recipe.effects.channels[1],"blue":recipe.effects.channels[2]},
-            "selected_mask":self.view.masking.selected,
-            "exporting": self.exporting(),
-            "auto_running": self.document.auto.is_running(),
-            "treatment_pending": self.document.pending_treatment.is_some(),
-            "save_state": match self.document.save { super::save_state::SaveState::Clean => "saved", super::save_state::SaveState::Pending(_) => "pending", super::save_state::SaveState::Saving {..} => "saving", super::save_state::SaveState::Failed {..} => "failed", super::save_state::SaveState::Protected(_) => "protected" },
-        })
+        State {
+            protocol: PROTOCOL,
+            message: self.status.clone(),
+            mode: if self.library_mode {
+                "library"
+            } else {
+                "develop"
+            },
+            photo: develop
+                .then(|| self.document.path.as_ref().map(|p| p.display().to_string()))
+                .flatten(),
+            photo_id: develop.then_some(self.document.catalog_photo).flatten(),
+            generation: self.load.id(),
+            revision: self.automation.revision,
+            loaded: develop && self.document.full().is_some() && !self.load.is_running(),
+            busy: self.activity.is_busy(),
+            modal: self.command_modal(),
+            black_and_white: develop && recipe.effects.monochrome,
+            mixer_channel: (["hue", "sat", "lum"][self.view.mixer_adjust.min(2)]),
+            values,
+            masks,
+            tone_curve: Curves {
+                rgb: recipe.curve,
+                red: recipe.effects.channels[0].clone(),
+                green: recipe.effects.channels[1].clone(),
+                blue: recipe.effects.channels[2].clone(),
+            },
+            selected_mask: self.view.masking.selected,
+            exporting: self.exporting(),
+            auto_running: self.document.auto.is_running(),
+            treatment_pending: self.document.pending_treatment.is_some(),
+            save_state: match self.document.save {
+                super::save_state::SaveState::Clean => "saved",
+                super::save_state::SaveState::Pending(_) => "pending",
+                super::save_state::SaveState::Saving { .. } => "saving",
+                super::save_state::SaveState::Failed { .. } => "failed",
+                super::save_state::SaveState::Protected(_) => "protected",
+            },
+        }
     }
     pub(super) fn command_modal(&self) -> bool {
         self.preferences.open
@@ -380,25 +386,60 @@ impl Editor {
     }
     /// Each command is a complete edit transaction. The reply is built only
     /// afterward, including history and rendering invalidation, on the UI thread.
+    #[cfg(test)]
     pub(super) fn execute_command(
         &mut self,
         command: Command,
         ctx: &egui::Context,
-    ) -> Result<Value> {
+    ) -> Result<Outcome> {
+        self.execute_command_from(command, Source::Socket, ctx)
+    }
+    pub(super) fn execute_command_from(
+        &mut self,
+        command: Command,
+        source: Source,
+        ctx: &egui::Context,
+    ) -> Result<Outcome> {
         self.sync_command_revision();
         let Command { operation, target } = command;
         match operation {
-            Operation::State => return Ok(Value::Null),
-            Operation::Job(id) => return self.automation.outputs.state(id),
+            Operation::State => return Ok(Outcome::Empty),
+            Operation::Job(id) => return self.automation.outputs.state(id).map(Outcome::Output),
             Operation::Capabilities => {
-                return Ok(
-                    json!({"protocol":PROTOCOL,"actions":Action::NAMES,"parameters":Param::capabilities(),
-                "commands":["state","capabilities","photos","curve","set","turn","action","open","search","module","photo","save","export","preview","job"],
-                "tone_curve":{"channels":["rgb","red","green","blue"],"point_count":[2,32],"coordinate_range":[0,1],"minimum_input_spacing":0.00049,"interpolation":"natural_cubic"},
-                "target_fields":["photo_id","generation","revision","mask"],
-                "completion":"applied; loaded/exporting/save_state describe asynchronous work", "headless":false}),
-                );
+                return Ok(Outcome::Capabilities(Capabilities {
+                    protocol: PROTOCOL,
+                    actions: Action::names(),
+                    parameters: Param::capabilities(),
+                    commands: &[
+                        "state",
+                        "capabilities",
+                        "photos",
+                        "curve",
+                        "set",
+                        "turn",
+                        "action",
+                        "open",
+                        "search",
+                        "module",
+                        "photo",
+                        "save",
+                        "export",
+                        "preview",
+                        "job",
+                    ],
+                    tone_curve: CurveCapabilities {
+                        channels: ["rgb", "red", "green", "blue"],
+                        point_count: [2, 32],
+                        coordinate_range: [0, 1],
+                        minimum_input_spacing: 0.00049,
+                        interpolation: "natural_cubic",
+                    },
+                    target_fields: &["photo_id", "generation", "revision", "mask"],
+                    completion: "applied; loaded/exporting/save_state describe asynchronous work",
+                    headless: false,
+                }));
             }
+
             Operation::Photos {
                 query,
                 offset,
@@ -414,12 +455,30 @@ impl Editor {
                     .iter()
                     .filter(|p| query.is_empty() || p.filename.to_lowercase().contains(&query))
                     .collect();
-                let photos: Vec<_> = all.iter().skip(offset).take(limit).map(|p| json!({"id":p.id,"filename":p.filename,"path":p.path,"rating":p.rating,"flag":p.flag,"label":p.label})).collect();
-                return Ok(json!({"total":all.len(),"offset":offset,"photos":photos}));
+                let photos = all
+                    .iter()
+                    .skip(offset)
+                    .take(limit)
+                    .map(|p| PhotoSummary::from(*p))
+                    .collect();
+                return Ok(Outcome::Photos {
+                    total: all.len(),
+                    offset,
+                    photos,
+                });
             }
             _ => {}
         }
-        self.check_target(&target)?;
+        let library_metadata = self.library_mode
+            && matches!(operation, Operation::Action(a) if a.metadata().is_some());
+        let mut checked = target.clone();
+        if library_metadata && let Some(id) = target.photo_id {
+            if !self.library.as_ref().is_some_and(|l| l.photo(id).is_some()) {
+                return Err(Error::new("not_found", "No catalog photo has this ID"));
+            }
+            checked.photo_id = None;
+        }
+        self.check_target(&checked)?;
         if self.activity.is_busy() || self.command_modal() {
             return Err(Error::new(
                 "busy",
@@ -434,7 +493,8 @@ impl Editor {
             ));
         }
         let turn = match operation {
-            Operation::Adjust(param, _) => Some((
+            Operation::Adjust(param, _) => Some(TurnScope(
+                source,
                 param,
                 target.mask,
                 self.load.id(),
@@ -442,13 +502,16 @@ impl Editor {
             )),
             _ => None,
         };
-        if turn.is_none() || !self.surface.continues_turn(turn) {
-            self.surface.end_turn();
+        if turn.is_none()
+            || !(self.automation.turning() && self.automation.turn.map(|(_, scope)| scope) == turn)
+        {
+            self.automation.end_turn();
             self.finish_gesture();
         }
-        self.surface.set_turn_scope(turn);
+        self.automation.turn = turn.map(|scope| (std::time::Instant::now(), scope));
         let save = matches!(operation, Operation::Save);
-        let frame = self.begin_edit_frame();
+        let mut frame = self.begin_edit_frame();
+        frame.command_adjust = turn.is_some();
         let result = self.apply_command(operation, &target, ctx);
         self.finish_edit_frame(frame, ctx);
         self.sync_undo();
@@ -457,7 +520,7 @@ impl Editor {
             {
                 return Err(Error::new("save_failed", "The edit could not be saved"));
             }
-            return Ok(json!({"saved":true}));
+            return Ok(Outcome::Saved { saved: true });
         }
         result
     }
@@ -466,7 +529,7 @@ impl Editor {
         operation: Operation,
         target: &Target,
         ctx: &egui::Context,
-    ) -> Result<Value> {
+    ) -> Result<Outcome> {
         match operation {
             Operation::Set(param, value) => {
                 self.command_parameter(param, Some(value), 0, target, ctx)?
@@ -497,7 +560,7 @@ impl Editor {
             }
             Operation::Adjust(param, ticks) => {
                 self.command_parameter(param, None, ticks, target, ctx)?;
-                self.surface.begin_turn(ctx);
+                ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
             Operation::Action(action) => return self.execute_action(action, target.photo_id),
             Operation::Metadata { edit, advance } => {
@@ -513,19 +576,13 @@ impl Editor {
                 layout.query = text.clone();
                 layout.filters_off = false;
                 library.apply_layout(&layout);
-                return Ok(json!({"query":text}));
+                return Ok(Outcome::Search { query: text });
             }
             Operation::Module(develop) => return self.command_module(develop),
             Operation::Navigate(step) => return self.command_navigate(step),
             Operation::DeviceNavigate(step) => {
-                if !self.library_mode {
+                if !self.library_mode || self.library.as_ref().is_some_and(|l| l.loupe_open()) {
                     return self.command_navigate(step);
-                }
-                if let Some(library) = &mut self.library
-                    && library.loupe_open()
-                    && let Some(next) = library.selected().and_then(|id| library.navigate(id, step))
-                {
-                    library.make_active(next);
                 }
             }
             Operation::Output { path, max_edge } => {
@@ -533,14 +590,18 @@ impl Editor {
                 let photo = self
                     .export_photo()
                     .ok_or_else(|| Error::new("not_ready", "The photo is not ready to export"))?;
-                return self.automation.outputs.start(
-                    photo,
-                    path,
-                    max_edge,
-                    self.load.id(),
-                    self.automation.revision,
-                    ctx.clone(),
-                );
+                return self
+                    .automation
+                    .outputs
+                    .start(
+                        photo,
+                        path,
+                        max_edge,
+                        self.load.id(),
+                        self.automation.revision,
+                        ctx.clone(),
+                    )
+                    .map(Outcome::Output);
             }
             Operation::Save => {
                 self.require_develop()?;
@@ -566,7 +627,7 @@ impl Editor {
             | Operation::Photos { .. }
             | Operation::Job(_) => unreachable!(),
         }
-        Ok(Value::Null)
+        Ok(Outcome::Empty)
     }
     fn command_parameter(
         &mut self,
@@ -614,11 +675,17 @@ impl Editor {
         }
         Ok(())
     }
-    pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Value> {
+    pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Outcome> {
         use Action::*;
         if let Some(edit) = action.metadata() {
+            if self.library_mode && photo.is_none() {
+                return Err(Error::new(
+                    "target_required",
+                    "Library metadata actions require an explicit photo_id; use photos to find it",
+                ));
+            }
             self.command_metadata(edit, photo, false)?;
-            return Ok(Value::Null);
+            return Ok(Outcome::Empty);
         }
         match action {
             Undo | Redo => {
@@ -671,8 +738,20 @@ impl Editor {
                         self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
                     }
                     Reset => self.reset_settings(),
-                    AutoTone => self.start_auto(super::worker::AutoKind::Settings),
-                    AutoWhiteBalance => self.start_auto(super::worker::AutoKind::WhiteBalance),
+                    AutoTone | AutoWhiteBalance => {
+                        if self.document.auto.is_running() {
+                            return Err(Error::new(
+                                "busy",
+                                "An automatic adjustment is already running",
+                            ));
+                        }
+                        let kind = if action == AutoTone {
+                            super::worker::AutoKind::Settings
+                        } else {
+                            super::worker::AutoKind::WhiteBalance
+                        };
+                        self.start_auto(kind);
+                    }
                     CurveLinear | CurveMedium | CurveStrong => {
                         use crate::presets::curves::BuiltinCurve;
                         let curve = match action {
@@ -710,7 +789,7 @@ impl Editor {
                 }
             }
         }
-        Ok(Value::Null)
+        Ok(Outcome::Empty)
     }
     pub(super) fn command_metadata(
         &mut self,
@@ -747,10 +826,10 @@ impl Editor {
         }
         Ok(())
     }
-    fn command_module(&mut self, develop: bool) -> Result<Value> {
+    fn command_module(&mut self, develop: bool) -> Result<Outcome> {
         if develop {
             if !self.library_mode {
-                return Ok(Value::Null);
+                return Ok(Outcome::Empty);
             }
             let id = self
                 .library
@@ -769,10 +848,10 @@ impl Editor {
             if let Some(library) = &mut self.library {
                 library.show_grid();
             }
-            Ok(Value::Null)
+            Ok(Outcome::Empty)
         }
     }
-    fn command_navigate(&mut self, step: i32) -> Result<Value> {
+    fn command_navigate(&mut self, step: i32) -> Result<Outcome> {
         let library = self
             .library
             .as_ref()
@@ -785,9 +864,16 @@ impl Editor {
         let next = current
             .and_then(|id| library.navigate(id, step))
             .ok_or_else(|| Error::new("end_of_list", "No next photo in this direction"))?;
+        if self.library_mode {
+            self.library
+                .as_mut()
+                .expect("checked above")
+                .make_active(next);
+            return Ok(Outcome::Empty);
+        }
         self.command_open(PhotoTarget::Id(next))
     }
-    fn command_open(&mut self, target: PhotoTarget) -> Result<Value> {
+    fn command_open(&mut self, target: PhotoTarget) -> Result<Outcome> {
         let library = self
             .library
             .as_ref()
@@ -825,7 +911,9 @@ impl Editor {
         if let Some(library) = &mut self.library {
             library.reveal(id);
         }
-        Ok(json!({"opened":{"id":id,"filename":photo.filename,"path":photo.path}}))
+        Ok(Outcome::Opened {
+            opened: PhotoIdentity::from(&photo),
+        })
     }
 }
 

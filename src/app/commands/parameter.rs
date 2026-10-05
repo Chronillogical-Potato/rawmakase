@@ -215,20 +215,36 @@ impl Param {
             }))
             .collect()
     }
-    pub(in crate::app) fn capabilities() -> serde_json::Value {
-        let items: Vec<_> = Self::all().into_iter().map(|(name, param)| {
-            let (unit,min,max) = match param {
-                Self::Exposure => ("EV",-5.,5.),
-                Self::Temperature => ("kelvin",TEMPERATURE_MIN,TEMPERATURE_MAX),
-                Self::Tint => ("tint",-TINT_LIMIT,TINT_LIMIT),
-                _ => ("percent",-100.,100.),
-            };
-            let local = param.local_shown(&crate::develop::masks::LocalAdjust::default()).is_some();
-            serde_json::json!({"name":name,"unit":unit,"min":min,"max":max,"mask":local,
-                "mask_unit":if param==Self::Exposure {"EV"} else {"percent"},
-                "mask_min":if param==Self::Exposure {-4.} else {-100.},"mask_max":if param==Self::Exposure {4.} else {100.}})
-        }).collect();
-        items.into()
+    pub(in crate::app) fn capabilities() -> Vec<super::reply::Parameter> {
+        let items: Vec<_> = Self::all()
+            .into_iter()
+            .map(|(name, param)| {
+                let (unit, min, max) = match param {
+                    Self::Exposure => ("EV", -5., 5.),
+                    Self::Temperature => ("kelvin", TEMPERATURE_MIN, TEMPERATURE_MAX),
+                    Self::Tint => ("tint", -TINT_LIMIT, TINT_LIMIT),
+                    _ => ("percent", -100., 100.),
+                };
+                let local = param
+                    .local_shown(&crate::develop::masks::LocalAdjust::default())
+                    .is_some();
+                super::reply::Parameter {
+                    name,
+                    unit,
+                    min,
+                    max,
+                    mask: local,
+                    mask_unit: if param == Self::Exposure {
+                        "EV"
+                    } else {
+                        "percent"
+                    },
+                    mask_min: if param == Self::Exposure { -4. } else { -100. },
+                    mask_max: if param == Self::Exposure { 4. } else { 100. },
+                }
+            })
+            .collect();
+        items
     }
     fn local_value(self, a: &mut crate::develop::masks::LocalAdjust) -> Option<&mut f32> {
         Some(match self {

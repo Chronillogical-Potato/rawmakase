@@ -9,10 +9,11 @@ account, login, or API key. The desktop app must be running and responsive.
 1. Start RAWmakase and open a catalog.
 2. Enable **Preferences > Automation > Allow local scripts and applications**.
 3. Configure your MCP client to launch the RAWmakase executable with argument
-   `mcp`. Use an absolute executable path. On macOS the installed executable is
-   `/Applications/RAWmakase.app/Contents/MacOS/rawmakase`.
+   `mcp`. Use the absolute path for your installation, as shown below.
 
-For Codex, add this to your MCP configuration, adjusting the executable path:
+### macOS
+
+For the app installed in `/Applications`, add this to your Codex configuration:
 
 ```toml
 [mcp_servers.rawmakase]
@@ -21,15 +22,67 @@ args = ["mcp"]
 tool_timeout_sec = 150
 ```
 
-Alternatively, register the command with the CLI, then set `tool_timeout_sec`
-in that server's configuration to allow the preview's 120-second wait:
+Or register it from Terminal:
 
 ```sh
 codex mcp add rawmakase -- /Applications/RAWmakase.app/Contents/MacOS/rawmakase mcp
 ```
 
+### Linux
+
+Find your installed executable with `command -v rawmakase`. For a package
+installed in `/usr/bin`, use:
+
+```toml
+[mcp_servers.rawmakase]
+command = "/usr/bin/rawmakase"
+args = ["mcp"]
+tool_timeout_sec = 150
+```
+
+Or register it from your shell:
+
+```sh
+codex mcp add rawmakase -- /usr/bin/rawmakase mcp
+```
+
+Replace `/usr/bin/rawmakase` with the absolute path reported by
+`command -v rawmakase` if different. For a portable installation, use the
+executable inside the extracted bundle and keep its accompanying files.
+
+### Windows
+
+The installer defaults to `%LOCALAPPDATA%\Programs\RAWmakase`. Register that
+installation from PowerShell:
+
+```powershell
+$rawmakaseExe = Join-Path $env:LOCALAPPDATA 'Programs\RAWmakase\rawmakase.exe'
+codex mcp add rawmakase -- $rawmakaseExe mcp
+```
+
+Or add the following to your Codex configuration, replacing `YOUR_NAME` with
+your Windows profile directory. The single quotes preserve backslashes in TOML;
+use the full path rather than `%LOCALAPPDATA%` in the configuration:
+
+```toml
+[mcp_servers.rawmakase]
+command = 'C:\Users\YOUR_NAME\AppData\Local\Programs\RAWmakase\rawmakase.exe'
+args = ["mcp"]
+tool_timeout_sec = 150
+```
+
+For a custom install directory or portable ZIP, use the absolute path to that
+`rawmakase.exe` instead, keeping the accompanying DLLs in the extracted bundle.
+
+### Other clients and options
+
+After registering with `codex mcp add` on any platform, set `tool_timeout_sec = 150`
+in that server's configuration to allow the preview's 120-second wait.
+
 See the [official Codex MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
-For clients using `mcpServers` JSON, the equivalent entry is:
+For clients using `mcpServers` JSON, this macOS example has the same settings.
+Substitute your Linux or Windows executable path; JSON requires Windows
+backslashes to be doubled (for example, `C:\\Users\\YOUR_NAME\\...`):
 
 ```json
 {
@@ -76,7 +129,8 @@ natural cubic interpolation. They are global; masks do not support curves.
 All editing tools require a `target` containing the latest `generation` and
 `revision`; include `photo_id` for catalog photos. Only parameter edits accept
 an optional `mask` index. Use fresh guards returned in `structuredContent.state`
-after each edit. Stale guards produce a tool error without applying the command.
+after each edit. Library rating, flag and label actions always require an explicit
+`photo_id` from `find_photos`, even if a photo is selected. Stale guards produce a tool error without applying the command.
 
 ## Example workflow
 
