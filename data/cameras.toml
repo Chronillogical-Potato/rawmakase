@@ -537,6 +537,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure -0.25 plus -0.05 fo
 [[camera]]
 make = "Hasselblad"
 model = "CFV-100c"
+aliases = ["CFV 100C"]
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -545,6 +546,7 @@ sample = "raw.pixls.us, 1 photo at ISO 800"
 [[camera]]
 make = "Hasselblad"
 model = "X2D 100C-100c"
+aliases = ["X2D 100C"]
 baseline_exposure = -0.2
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1136,10 +1138,10 @@ sample = "raw.pixls.us, 1 photo at ISO 800; BaselineExposure +0.70 plus +0.01 fo
 [[camera]]
 make = "Pentax"
 model = "K-70"
-baseline_exposure = 0.5
-source = "adobe-dng"
+baseline_exposure = 0.35
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.50 plus +0.01 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.50 plus +0.01 for the white level; Adobe's value 0.5 left the Camera Raw 18.7 render -0.15 EV away, so fitted to it"
 
 [[camera]]
 make = "Pentax"

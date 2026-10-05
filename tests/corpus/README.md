@@ -41,7 +41,7 @@ When a color change is intended, run the tests with `RAWMAKASE_BLESS=1` and comm
 
 ## Private tier
 
-Kept outside the repository in `RAWMAKASE_CORPUS` (Piotr: `~/RAWmakase Corpus`, 5 GB cap):
+Kept outside the repository in `RAWMAKASE_CORPUS` (Piotr: `~/RAWmakase Corpus`, 7 GB cap):
 
 ```
 raws/own/…              symlinks to your own RAWs (nothing is copied or written next to them)

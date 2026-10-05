@@ -84,12 +84,34 @@ def from_dngs(folder, libraw_white):
 MIDTONE_GAIN = 1.17
 
 
+# raw.pixls.us makes whose LibRaw name differs; models differ through table aliases.
+PIXLS_MAKES = {'OM System': 'OM Digital'}
+
+
+def identity(table, camera):
+    """'OM System OM-1' (a report's raw.pixls.us label) -> ('OM Digital', 'OM-1'), the
+    table's names when a row matches. None for private photos, named by folder."""
+    makes = {c['make'] for c in table} | PIXLS_MAKES.keys()
+    make = max((m for m in makes if camera.lower().startswith(m.lower() + ' ')), key=len, default=None)
+    if make is None:
+        make, _, model = camera.partition(' ')
+        return (make, model) if model else None
+    model = camera[len(make) + 1:]
+    make = PIXLS_MAKES.get(make, make)
+    same = lambda a, b: a.lower() == b.lower()
+    for c in table:
+        if same(c['make'], make) and any(same(m, model) for m in [c['model'], *c.get('aliases', [])]):
+            return c['make'], c['model']
+    return make, model
+
+
 def from_report(path):
     table = rows()
     for p in json.loads(Path(path).read_text()).get('photos') or sys.exit('No photos in the report; run it with --photos'):
-        make, _, model = p['camera'].partition(' ')
-        if not model:  # private photos, named by folder
+        found = identity(table, p['camera'])
+        if found is None:
             continue
+        make, model = found
         print(f'# {p["camera"]}: Camera Raw {p["ev"]:+.2f} EV from RAWmakase')
         print(row(make, model, applied_baseline(table, make, model) + p['ev'] / MIDTONE_GAIN, 'fitted',
                   f'raw.pixls.us, {p["photos"]} photo{"s" * (p["photos"] > 1)}'))

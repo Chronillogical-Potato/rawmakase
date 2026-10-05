@@ -35,7 +35,8 @@ REPOSITORY = 'https://raw.pixls.us/json/getrepository.php'
 # Cameras whose synthetic chart LibRaw does not decode at full size, which would
 # move the patches.
 NO_CHART = {'leica-sl2': 'LibRaw trims 19 rows from DNGs made by this model'}
-RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf'}
+RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf', '.ori', '.pef',
+                  '.rwl', '.fff', '.3fr'}
 
 # Recent bodies (Piotr, 2026-09-26: Sony, Canon, Nikon, Leica, Fujifilm), and popular
 # bodies of the last decade from those and other makers (Piotr, 2026-10-05), for the
@@ -193,7 +194,7 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     sub.add_parser('manifest').set_defaults(run=build_manifest)
     d = sub.add_parser('download')
-    d.add_argument('--budget-gb', type=float, default=5.)
+    d.add_argument('--budget-gb', type=float, default=7.)
     d.set_defaults(run=download)
     c = sub.add_parser('cameras')
     c.add_argument('--rawmakase', type=Path, default=ROOT / 'target/release/rawmakase')
