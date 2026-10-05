@@ -199,7 +199,16 @@ def fit(refs):
         [[curve(f'L{a:+d}-m{m}') - GRID for m in MIDTONE_SPLITS] for a in AMOUNTS],
         [[curve(f'DL{d:+d}{l:+d}') - GRID for l in JOINT] for d in JOINT],
     ]
-    out = np.concatenate([np.asarray(t, '<f4').ravel() for t in tables])
+    # Every table keeps its ends: 0 and 1 overall, and the midtone split for Shadows
+    # and Highlights, so the regions join without a step. The fits miss them by at
+    # most about 0.01, which a correction fading out over the outer 15% removes.
+    def fade(v):
+        v = np.clip(v, 0, 1)
+        return v * v * (3 - 2 * v)
+    tables = [np.asarray(t) for t in tables]
+    tables = [t - t[..., :1] * fade((0.15 - GRID) / 0.15) - t[..., -1:] * fade((GRID - 0.85) / 0.15)
+              for t in tables]
+    out = np.concatenate([t.astype('<f4').ravel() for t in tables])
     path = ROOT / 'src/develop/parametric.bin'
     path.write_bytes(out.tobytes())
     print(f'{path.relative_to(ROOT)}: {out.size} values')

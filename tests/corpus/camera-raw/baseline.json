@@ -359,15 +359,15 @@
         2.959
       ],
       "look-parametric-100": [
-        0.963,
+        0.962,
         2.597
       ],
       "look-parametric-200": [
-        1.547,
+        1.546,
         3.009
       ],
       "look-parametric-50": [
-        0.866,
+        0.865,
         2.349
       ],
       "look-parametric-darks+30": [
@@ -523,8 +523,8 @@
         4.195
       ],
       "parametric-all+50": [
-        1.943,
-        10.873
+        1.947,
+        10.874
       ],
       "parametric-darks+100": [
         0.762,
@@ -555,7 +555,7 @@
         2.89
       ],
       "parametric-highlights+100": [
-        2.315,
+        2.316,
         12.605
       ],
       "parametric-highlights+50": [
@@ -595,15 +595,15 @@
         2.359
       ],
       "parametric-s-curve": [
-        2.308,
+        2.306,
         11.359
       ],
       "parametric-shadows+100": [
-        0.927,
+        0.938,
         2.229
       ],
       "parametric-shadows+50": [
-        0.866,
+        0.869,
         2.117
       ],
       "parametric-shadows+50-splits-10-50-75": [
@@ -611,11 +611,11 @@
         2.131
       ],
       "parametric-shadows-100": [
-        1.349,
-        5.36
+        1.348,
+        5.297
       ],
       "parametric-shadows-50": [
-        1.022,
+        1.021,
         3.324
       ],
       "pc-blue-lum-60": [

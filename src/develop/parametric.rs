@@ -80,12 +80,12 @@ pub fn samples(
     count: usize,
 ) -> Vec<f32> {
     let at = |i: usize| i as f32 / count as f32;
-    match model {
-        ParametricModel::Measured if e.parametric != [0.; 4] => {
-            let shape = Shape::new(e.parametric, e.splits);
-            (0..=count).map(|i| shape.eval(at(i))).collect()
-        }
-        _ => (0..=count).map(|i| e.parametric(at(i))).collect(),
+    // The rendered table, with its monotone clean-up, so the panel shows what renders.
+    match ParametricCurve::new(e.parametric, e.splits)
+        .filter(|_| model == ParametricModel::Measured)
+    {
+        Some(curve) => (0..=count).map(|i| curve.eval(at(i))).collect(),
+        None => (0..=count).map(|i| e.parametric(at(i))).collect(),
     }
 }
 
@@ -375,6 +375,27 @@ mod tests {
             } else if x > midtone + 0.02 {
                 assert!((s - x).abs() < 1e-3, "{x}: {s}");
                 assert!(h > x - 1e-3, "{x}: {h}");
+            }
+        }
+    }
+
+    #[test]
+    fn regions_join_the_identity_at_the_midtone_split() {
+        let midtone = crate::color_math::srgb_encode(0.5f32.powf(GAMMA));
+        for regions in [
+            [1., 0., 0., 0.],
+            [-1., 0., 0., 0.],
+            [0., 0., 0., 1.],
+            [0., 0., 0., -1.],
+        ] {
+            for splits in [[0.32, 0.5, 0.75], [0.1, 0.5, 0.6], [0.4, 0.5, 0.9]] {
+                let c = ParametricCurve::new(regions, splits).unwrap();
+                for x in [midtone - 1e-3, midtone + 1e-3] {
+                    assert!(
+                        (c.eval(x) - x).abs() < 0.3 / 255.,
+                        "{regions:?} {splits:?} {x}"
+                    );
+                }
             }
         }
     }
