@@ -9,9 +9,48 @@
 //! slider to 0.0002–0.0066 MAE. Slider positions scale the hue shift, the value factor's
 //! log and positive saturation's log linearly; negative saturation scales the factor
 //! itself linearly, which matches Camera Raw at −25 and −50. Several sliders add their
-//! changes. See docs/color-mixer.md.
+//! changes. New edits use the band tables refitted on a dense synthetic chart
+//! (`color_mixer_chart.bin`, `MixerModel::Chart`). See docs/color-mixer.md.
 use super::Recipe;
 use crate::color_math::mul;
+use serde::{Deserialize, Serialize};
+
+/// Which measured tables render a recipe's color mixer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MixerModel {
+    /// Tables measured on nine photos: what recipes saved before the chart tables
+    /// keep, so they render as they did.
+    #[default]
+    Original,
+    /// The eight bands' tables refitted to Camera Raw 18.7 on a dense synthetic
+    /// chart (docs/color-mixer.md#chart-tables); Saturation and Vibrance as before.
+    Chart,
+}
+impl MixerModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+    /// How much of a slider's measured change at ±100 applies at `s`. Camera Raw's
+    /// band Luminance is not linear: at −50 it applies about a third of the −100
+    /// change, at +50 about 58% of the +100 one (both measured on Blue and Purple).
+    fn strength(self, kind: usize, s: f32) -> f32 {
+        let s_abs = s.abs().min(1.);
+        match self {
+            Self::Chart if kind == LUMINANCE => s_abs.powf(if s < 0. {
+                LUMINANCE_DARKEN
+            } else {
+                LUMINANCE_LIGHTEN
+            }),
+            _ => s_abs,
+        }
+    }
+    fn data(self) -> &'static [u8] {
+        match self {
+            Self::Original => ORIGINAL,
+            Self::Chart => CHART,
+        }
+    }
+}
 
 const HUES: usize = 36;
 const SATS: usize = 6;
@@ -21,11 +60,18 @@ const TABLE: usize = 3 * CELLS;
 /// 8 bands × (hue, saturation, luminance) × (−, +), then Saturation −/+, Vibrance −/+.
 const TABLES: usize = 52;
 const SCALE: f32 = 1. / 8000.;
-static DATA: &[u8] = include_bytes!("color_mixer.bin");
+/// The slider kind of a band's Luminance tables.
+const LUMINANCE: usize = 2;
+/// Exponents of the slider position for band Luminance (`MixerModel::strength`).
+const LUMINANCE_DARKEN: f32 = 1.6;
+const LUMINANCE_LIGHTEN: f32 = 0.79;
+static ORIGINAL: &[u8] = include_bytes!("color_mixer.bin");
+static CHART: &[u8] = include_bytes!("color_mixer_chart.bin");
 
-fn value(table: usize, channel: usize, cell: usize) -> f32 {
+fn value(model: MixerModel, table: usize, channel: usize, cell: usize) -> f32 {
+    let data = model.data();
     let i = 2 * (table * TABLE + channel * CELLS + cell);
-    i16::from_le_bytes([DATA[i], DATA[i + 1]]) as f32 * SCALE
+    i16::from_le_bytes([data[i], data[i + 1]]) as f32 * SCALE
 }
 
 /// The combined change of all active sliders, one grid.
@@ -34,13 +80,14 @@ pub(crate) struct ColorMixer {
 }
 impl ColorMixer {
     pub(crate) fn new(r: &Recipe) -> Option<Self> {
-        debug_assert_eq!(DATA.len(), TABLES * TABLE * 2);
+        let model = r.mixer_model;
+        debug_assert_eq!(model.data().len(), TABLES * TABLE * 2);
         let mut active: Vec<(usize, f32)> = Vec::new();
         for (band, controls) in r.hsl.iter().enumerate() {
             for (kind, s) in controls.iter().enumerate() {
                 if *s != 0. {
                     let sign = usize::from(*s > 0.);
-                    active.push(((band * 3 + kind) * 2 + sign, s.abs().min(1.)));
+                    active.push(((band * 3 + kind) * 2 + sign, model.strength(kind, *s)));
                 }
             }
         }
@@ -59,7 +106,7 @@ impl ColorMixer {
                     active
                         .iter()
                         .map(|(t, w)| {
-                            let v = value(*t, c, cell);
+                            let v = value(model, *t, c, cell);
                             // Negative saturation sliders scale the saturation factor
                             // linearly, as Camera Raw does: scaling the log factor of a
                             // strong measured desaturation overshoots at −25 and −50.
@@ -110,14 +157,15 @@ impl ColorMixer {
 /// How strongly each band's `channel` slider (0 hue, 1 saturation, 2 luminance)
 /// changes the color `prophoto` (linear ProPhoto RGB, as the mixer sees it): the
 /// sizes of its measured changes at ±100 there, which are what the slider scales.
-pub(crate) fn band_responses(prophoto: [f32; 3], channel: usize) -> [f32; 8] {
+pub(crate) fn band_responses(prophoto: [f32; 3], channel: usize, model: MixerModel) -> [f32; 8] {
     let Some([h, s, v]) = hsv(prophoto.map(|c| c.max(0.))) else {
         return [0.; 8];
     };
     std::array::from_fn(|band| {
         let [minus, plus] = [0, 1].map(|sign| (band * 3 + channel) * 2 + sign);
         lookup_with(h, s, v, |cell| {
-            let size = value(minus, channel, cell).abs() + value(plus, channel, cell).abs();
+            let size =
+                value(model, minus, channel, cell).abs() + value(model, plus, channel, cell).abs();
             [size; 3]
         })[0]
     })
@@ -174,15 +222,41 @@ mod tests {
     use super::*;
     #[test]
     fn table_blob_has_expected_size_and_neutrals_stay_neutral() {
-        assert_eq!(DATA.len(), TABLES * TABLE * 2);
+        for model in [MixerModel::Original, MixerModel::Chart] {
+            assert_eq!(model.data().len(), TABLES * TABLE * 2);
+        }
         assert!(ColorMixer::new(&Recipe::default()).is_none());
-        let mut r = Recipe::default();
-        r.hsl[1] = [0.5, 1., -1.];
-        r.saturation = 0.3;
-        let m = ColorMixer::new(&r).unwrap();
-        let gray = m.apply([0.2; 3]);
-        assert!((gray[0] - gray[1]).abs() < 1e-4 && (gray[1] - gray[2]).abs() < 1e-4);
-        assert!(m.apply([0.3, 0.2, 0.1]).iter().all(|v| v.is_finite()));
+        for mixer_model in [MixerModel::Original, MixerModel::Chart] {
+            let mut r = Recipe {
+                mixer_model,
+                ..Default::default()
+            };
+            r.hsl[1] = [0.5, 1., -1.];
+            r.saturation = 0.3;
+            let m = ColorMixer::new(&r).unwrap();
+            let gray = m.apply([0.2; 3]);
+            assert!((gray[0] - gray[1]).abs() < 1e-4 && (gray[1] - gray[2]).abs() < 1e-4);
+            assert!(m.apply([0.3, 0.2, 0.1]).iter().all(|v| v.is_finite()));
+            if mixer_model == MixerModel::Original {
+                continue;
+            }
+            // No band's Luminance moves a neutral, as in Camera Raw (the photo
+            // tables move one by up to 1.5% at Red ±100).
+            for band in 0..8 {
+                for amount in [-1., 1.] {
+                    let mut r = Recipe {
+                        mixer_model,
+                        ..Default::default()
+                    };
+                    r.hsl[band][2] = amount;
+                    let gray = ColorMixer::new(&r).unwrap().apply([0.2; 3]);
+                    assert!(
+                        gray.iter().all(|v| (v - 0.2).abs() < 2e-3),
+                        "{mixer_model:?} {band} {gray:?}"
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn orange_luminance_darkens_skin_tones() {
@@ -204,6 +278,33 @@ mod tests {
             p.iter().fold(0f32, |a, b| a.max(*b)) - p.iter().fold(1f32, |a, b| a.min(*b))
         };
         assert!(spread(p) < spread(skin) * 0.3);
+    }
+    #[test]
+    fn chart_luminance_follows_camera_raws_slider_curve() {
+        let at = |mixer_model, s: f32| {
+            let mut r = Recipe {
+                mixer_model,
+                ..Default::default()
+            };
+            r.hsl[5][2] = s;
+            ColorMixer::new(&r).unwrap().delta
+        };
+        for (full, half, expected) in [(-1., -0.5, 0.33), (1., 0.5, 0.58)] {
+            let (f, h) = (at(MixerModel::Chart, full), at(MixerModel::Chart, half));
+            for (f, h) in f.iter().zip(&h) {
+                assert!((h[2] - f[2] * expected).abs() < 0.01 * f[2].abs() + 1e-6);
+            }
+            // The photo tables keep scaling linearly.
+            let (f, h) = (
+                at(MixerModel::Original, full),
+                at(MixerModel::Original, half),
+            );
+            assert!(
+                f.iter()
+                    .zip(&h)
+                    .all(|(f, h)| (h[2] - f[2] * 0.5).abs() < 1e-6)
+            );
+        }
     }
     #[test]
     fn negative_saturation_scales_the_factor_linearly() {

@@ -100,7 +100,7 @@ impl TargetWeights {
                 shares
             }
             Target::Hsl(channel) if measured_mixer(r) => normalized(
-                super::color_mixer::band_responses(sample.mixer, channel.index()),
+                super::color_mixer::band_responses(sample.mixer, channel.index(), r.mixer_model),
             ),
             Target::Hsl(_) | Target::BlackWhite => hue_shares(sample.color),
         };

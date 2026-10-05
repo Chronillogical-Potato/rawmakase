@@ -13,6 +13,7 @@
 mod black_render;
 mod chart;
 mod dng;
+mod fit_chart;
 mod measure;
 mod private;
 mod red_eye;
