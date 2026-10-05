@@ -479,3 +479,44 @@ fn the_queue_runs_one_batch_at_a_time_and_a_waiting_one_can_be_removed() -> Resu
     );
     Ok(())
 }
+
+#[test]
+fn a_preset_watermark_is_read_once_for_the_whole_batch() -> Result<()> {
+    let f = fixture(&["a.dng", "b.dng"])?;
+    let photos = f.batch_photos()?;
+    // Its image is gone: read once, so every photo says why, and nothing is
+    // written.
+    let gone = crate::watermark::Watermark {
+        name: "Gone".into(),
+        style: crate::watermark::Style::Graphic,
+        image: Some("rawmakase-test-missing-watermark.png".into()),
+        ..Default::default()
+    };
+    let batch = Batch {
+        watermark: Some(gone),
+        ..f.batch(photos.clone(), settings(&f.out().join("gone")))
+    };
+    let outcomes = run_all(&batch);
+    assert!(
+        outcomes.iter().all(
+            |o| matches!(o, Outcome::Failed(reason) if reason.contains("Watermark image not found"))
+        ),
+        "{outcomes:?}"
+    );
+    assert!(listing(&f.out().join("gone")).is_empty());
+    // A text preset marks every photo, as an export of one photo does.
+    let text = crate::watermark::Watermark {
+        name: "Text".into(),
+        text: "RAWmakase".into(),
+        ..Default::default()
+    };
+    let marked = run_all(&Batch {
+        watermark: Some(text),
+        ..f.batch(photos.clone(), settings(&f.out().join("marked")))
+    });
+    let plain = run_all(&f.batch(photos, settings(&f.out().join("plain"))));
+    for (marked, plain) in marked.iter().zip(&plain) {
+        assert_ne!(pixels(exported(marked)), pixels(exported(plain)));
+    }
+    Ok(())
+}

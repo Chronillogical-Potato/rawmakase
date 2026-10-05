@@ -319,6 +319,15 @@ pub struct Progress {
 /// counts as exported.
 pub fn run(batch: &Batch, cancel: &AtomicBool, progress: impl Fn(Progress)) -> Vec<Outcome> {
     let total = batch.photos.len();
+    // A preset's image or font, read once: every photo gets the same watermark,
+    // however long the batch runs. The Simple Copyright Watermark takes each
+    // photo's own copyright, so it is made photo by photo.
+    let preset = match &batch.watermark {
+        Some(w) if w.name != crate::watermark::SIMPLE_COPYRIGHT => {
+            Some(w.ready().map_err(|e| format!("{e:#}")))
+        }
+        _ => None,
+    };
     let mut reserved = batch.plan.reserved.clone();
     let mut outcomes = Vec::with_capacity(total);
     for (done, (photo, planned)) in batch.photos.iter().zip(&batch.plan.entries).enumerate() {
@@ -337,8 +346,20 @@ pub fn run(batch: &Batch, cancel: &AtomicBool, progress: impl Fn(Progress)) -> V
         let outcome = match planned.write {
             Write::Skip => Outcome::Skipped("a file with its name already exists".into()),
             // A panic fails its own photo; the others keep their outcomes.
-            _ => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                export(batch, photo, planned, &mut reserved, cancel, &report)
+            _ => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &preset {
+                Some(Err(reason)) => Outcome::Failed(reason.clone()),
+                preset => {
+                    let preset = preset.as_ref().and_then(|p| p.as_ref().ok());
+                    export(
+                        batch,
+                        photo,
+                        planned,
+                        preset,
+                        &mut reserved,
+                        cancel,
+                        &report,
+                    )
+                }
             }))
             .unwrap_or_else(|_| Outcome::Failed("the export failed unexpectedly".into())),
         };
@@ -368,12 +389,13 @@ fn export(
     batch: &Batch,
     photo: &BatchPhoto,
     planned: &Planned,
+    preset: Option<&crate::watermark::Ready>,
     reserved: &mut Reservations,
     cancel: &AtomicBool,
     progress: &impl Fn(f32),
 ) -> Outcome {
     let result = (|| -> Result<(PathBuf, Vec<String>), Stop> {
-        let (prepared, mut notes) = render(batch, photo, cancel, progress)?;
+        let (prepared, mut notes) = render(batch, photo, preset, cancel, progress)?;
         if let Some(parent) = planned.target.parent() {
             std::fs::create_dir_all(parent).map_err(anyhow::Error::from)?;
         }
@@ -404,6 +426,7 @@ fn export(
 fn render(
     batch: &Batch,
     photo: &BatchPhoto,
+    preset: Option<&crate::watermark::Ready>,
     cancel: &AtomicBool,
     progress: &impl Fn(f32),
 ) -> Result<(job::Prepared, Vec<String>)> {
@@ -445,18 +468,23 @@ fn render(
     {
         notes.push(issue.message().into());
     }
-    let prepared = job::prepare(
+    let mut prepared = job::prepare(
         &job::Photo {
             image,
             source: photo.source.clone(),
             recipe,
             values: photo.values.clone(),
-            watermark: batch.watermark.clone(),
+            watermark: batch.watermark.clone().filter(|_| preset.is_none()),
         },
         &batch.settings,
         cancel,
         &|p| progress(p * 0.9),
     )?;
+    if let Some(preset) = preset
+        && !preset.apply(&mut prepared.rendered)
+    {
+        notes.push("the watermark's text has no characters its font can draw".into());
+    }
     notes.extend(prepared.notice.clone());
     Ok((prepared, notes))
 }
@@ -477,6 +505,8 @@ fn commit(
     }
     let mut target = planned.target.clone();
     if planned.write == Write::Overwrite {
+        // The file as it is spelled now, should it have been renamed meanwhile.
+        let target = spelled_otherwise(&target).unwrap_or(target);
         overwrite(staged, &target, &photo.source)?;
         return Ok((target, None));
     }
