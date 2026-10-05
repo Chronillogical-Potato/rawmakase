@@ -8,10 +8,10 @@ Tests that RAWmakase's colors don't change unnoticed, and how far they are from 
 | --- | --- |
 | `charts/*.dng` | Synthetic chart DNGs (970×742 RGGB mosaic, lossless JPEG, about 0.27 MB each), written by the generator in `tests/color/chart.rs` and `dng.rs`. |
 | `charts/layout.json` | The patch areas every chart shares: 24-step gray ramp (−8 to +3.5 EV), 24 hues × 3 lightness × 3 chroma, a wide-gamut row, ColorChecker, skin tones, near-neutrals, two sweeps, and colors on black and white surrounds. |
-| `cases.json` | 232 settings cases (sliders one at a time, pairs, parametric curve regions with moved splits and together, one combined look, Profile Amounts, RGB-table looks, settings inside looks, Point Color swatches) as Camera Raw XMP attributes. A case's `look` names a file in `looks/` and its Amount; its `curves` are written as XMP sequences, which also carry `PointColors` and `ColorVariance`. |
+| `cases.json` | 294 settings cases (sliders one at a time and at their extremes, Clarity, Texture, Dehaze, detail, grain, lens vignetting and Transform sliders, pairs, parametric curve regions with moved splits and together, one combined look, Profile Amounts, RGB-table looks, settings inside looks, Point Color swatches) as Camera Raw XMP attributes. A case's `look` names a file in `looks/` and its Amount; its `curves` are written as XMP sequences, which also carry `PointColors` and `ColorVariance`. |
 | `looks/*.xmp` | Synthetic look profiles with Profile Amount, RGB tables and develop settings, written by `scripts/corpus/synthetic-looks.py` from simple formulas (no Adobe data). |
 | `snapshots/*.json` | RAWmakase's own render of every chart and case. |
-| `camera-raw/*.json` | Camera Raw 18.6 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
+| `camera-raw/*.json` | Camera Raw 18.7 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
 | `camera-raw/baseline.json` | RAWmakase's accepted distance from those renders, per case. |
 | `cameras.json` | LibRaw color matrices of the cameras that get their own chart. |
 | `pixls.json` | CC0 sample RAWs from raw.pixls.us (URL, SHA-256, size). The files themselves are not committed. |
@@ -73,6 +73,12 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
 - `scripts/corpus/parametric-curve.py`: renders the parametric curve's fitting cases (about 380 region and split settings) on `synthetic-d65` and fits `src/develop/parametric.bin` from them. The renders' patch means stay outside the repository.
 - `scripts/corpus/pixls.py`: `manifest` (rebuild `pixls.json`), `download` (checks hashes and the budget), `cameras` (rebuild `cameras.json` from the corpus RAWs).
 - `scripts/corpus/migrate-references.py`: reduce existing reference TIFFs (sweeps, Lightroom exports) to block files.
+- `scripts/corpus/parity-report.py`: groups the Camera Raw comparison by Develop control (mean and p95 ΔE00, distance above the default render, worst cases and patches) into `report.json` and a self-contained `report.html`; `--previous` marks changes against an earlier report. It reads RAWmakase's patch values from the parity test:
+
+  ```
+  RAWMAKASE_PARITY_DUMP=<dir> cargo test --release --test color camera_raw_parity -- --nocapture
+  python3 scripts/corpus/parity-report.py <dir> --out <report dir>
+  ```
 
 ## TODO
 
@@ -86,7 +92,7 @@ Known limitations, not yet addressed:
 - **Private tier is slow.** Photo parity against Camera Raw (1,305 references) takes about an hour and accepted renders about 20 minutes with `--release`. Trim to a representative subset (a few photos per camera, the `photos` cases) for routine runs.
 - **Bad sample files are accepted.** Nikon Z5II and Z50II samples decode as "data corrupted" with LibRaw 0.22.0, yet their renders were recorded in `accepted/`. Exclude files LibRaw can't decode cleanly (also Z 8, Z6III, Sony A7 V, A1 II lossless, which don't open) until LibRaw supports them.
 - **Presets are not used.** The plan included about 40 of Piotr's Lightroom presets as realistic combinations; only 12 hand-picked pairs and one combined look exist.
-- **Parity numbers are not in docs/parity-gaps.md.** The report printed by `camera_raw_parity_does_not_regress` should feed that document instead of ad-hoc scorecard runs.
+- **Parity numbers are not in docs/parity-gaps.md.** `scripts/corpus/parity-report.py` summarises them per control; that document still quotes ad-hoc scorecard runs.
 - **Known RAWmakase gaps the tests expose** (tests record them as the baseline, or fail on purpose):
   - Matrix-only DNGs (`synthetic-d65-matrix-only`) now render from the file's own D65 colour matrix and sit about ΔE00 0.9 from Camera Raw, the same as the fully-profiled `synthetic-d65` chart.
   - A DNG's embedded profile is rejected when it has no ProfileName ("Invalid profile identity").
