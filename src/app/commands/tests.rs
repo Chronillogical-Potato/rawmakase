@@ -469,7 +469,7 @@ fn idle_frames_keep_turns_grouped_but_transport_changes_split_them() {
     for _ in 0..2 {
         e.execute_command_from(
             Command::new(Operation::Adjust(Param::Exposure, 1)),
-            Source::Midi,
+            Source::Midi(1, 0),
             &ctx,
         )
         .unwrap();
@@ -526,4 +526,42 @@ fn library_metadata_requires_stable_id_despite_selection_changes() -> anyhow::Re
     assert_eq!(library.photo(first).unwrap().rating, 4);
     assert_eq!(library.photo(second).unwrap().rating, 0);
     Ok(())
+}
+
+#[test]
+fn absolute_controls_use_parameter_ranges_and_devices_have_separate_undo() {
+    let (mut e, ctx) = editor();
+    e.execute_command_from(
+        Command::new(Operation::ControlValue(Param::Exposure, 127)),
+        Source::Midi(1, 0),
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(e.document.recipe.exposure, 5.);
+    e.execute_command_from(
+        Command::new(Operation::ControlValue(Param::Exposure, 0)),
+        Source::Midi(2, 0),
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(e.document.recipe.exposure, -5.);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, 5.);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.exposure, 0.);
+    e.document.recipe.masks.push(Default::default());
+    let state = e.command_state();
+    let mut command = Command::new(Operation::ControlValue(Param::Exposure, 127));
+    command.target = Target {
+        mask: Some(0),
+        generation: Some(state.generation),
+        revision: Some(state.revision),
+        ..Default::default()
+    };
+    e.execute_command_from(command, Source::Midi(1, 1), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.masks[0].adjust.exposure, 4.);
+    assert_eq!(e.document.recipe.exposure, 0.);
 }

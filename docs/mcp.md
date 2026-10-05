@@ -7,9 +7,10 @@ account, login, or API key. The desktop app must be running and responsive.
 ## Connect
 
 1. Start RAWmakase and open a catalog.
-2. Enable **Preferences > Automation > Allow local scripts and applications**.
-3. Configure your MCP client to launch the RAWmakase executable with argument
-   `mcp`. Use the absolute path for your installation, as shown below.
+2. Enable **Preferences > Automation > Scripts and AI > Allow local scripts and applications**.
+3. Open **MCP setup** to read this guide in your default browser. Configure your
+   MCP client to launch the RAWmakase executable with argument `mcp`, using an
+   absolute path as shown below. Close Preferences before asking the client to edit.
 
 ### macOS
 

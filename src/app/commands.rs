@@ -21,7 +21,7 @@ pub(super) use parameter::Param;
 pub(super) enum Source {
     Socket,
     #[cfg(any(test, target_os = "macos", target_os = "windows"))]
-    Midi,
+    Midi(u64, u64),
 }
 #[derive(Clone, Copy, PartialEq)]
 struct TurnScope(Source, Param, Option<usize>, u64, usize);
@@ -91,6 +91,7 @@ pub(super) enum Operation {
     Set(Param, f32),
     Curve(CurveChannel, Vec<[f32; 2]>),
     Adjust(Param, i32),
+    ControlValue(Param, u8),
     Action(Action),
     Metadata {
         edit: super::photo_metadata::Edit,
@@ -485,7 +486,11 @@ impl Editor {
                 "Close the dialog or wait for the current operation",
             ));
         }
-        if target.mask.is_some() && !matches!(operation, Operation::Set(..) | Operation::Adjust(..))
+        if target.mask.is_some()
+            && !matches!(
+                operation,
+                Operation::Set(..) | Operation::Adjust(..) | Operation::ControlValue(..)
+            )
         {
             return Err(Error::new(
                 "unsupported_scope",
@@ -493,7 +498,7 @@ impl Editor {
             ));
         }
         let turn = match operation {
-            Operation::Adjust(param, _) => Some(TurnScope(
+            Operation::Adjust(param, _) | Operation::ControlValue(param, _) => Some(TurnScope(
                 source,
                 param,
                 target.mask,
@@ -557,6 +562,17 @@ impl Editor {
                         format!("{channel:?}"),
                     );
                 }
+            }
+            Operation::ControlValue(param, value) => {
+                let (min, max) = param.range(target.mask.is_some());
+                self.command_parameter(
+                    param,
+                    Some(min + (max - min) * f32::from(value) / 127.),
+                    0,
+                    target,
+                    ctx,
+                )?;
+                ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
             Operation::Adjust(param, ticks) => {
                 self.command_parameter(param, None, ticks, target, ctx)?;

@@ -341,11 +341,6 @@ pub(super) struct Handle {
     token: String,
     path: std::path::PathBuf,
 }
-impl Handle {
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-}
 impl Drop for Handle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -500,7 +495,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut editor =
             crate::app::Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
-        editor.surface = super::super::Surface::new(super::super::Config::defaults(), rx);
+        editor.controls = super::super::Hub::new(super::super::Settings::default(), rx);
         let handle = start_at(tx, ctx.clone(), dir.path().join("control.json")).unwrap();
         let port = handle.port;
         let token = handle.token.clone();

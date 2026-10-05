@@ -61,7 +61,7 @@ default = ["telemetry"]
 # reporting are then left out.
 telemetry = []
 
-# MIDI control surfaces (src/app/control_surface.rs). Linux would need ALSA headers.
+# MIDI input adapters (src/app/automation/midi.rs). Linux would need ALSA headers.
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 midir = "0.11"
 

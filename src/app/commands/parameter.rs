@@ -215,15 +215,26 @@ impl Param {
             }))
             .collect()
     }
+    pub(in crate::app) fn range(self, mask: bool) -> (f32, f32) {
+        match self {
+            Self::Exposure if mask => (-4., 4.),
+            Self::Exposure => (-5., 5.),
+            Self::Temperature if !mask => (TEMPERATURE_MIN, TEMPERATURE_MAX),
+            Self::Tint if !mask => (-TINT_LIMIT, TINT_LIMIT),
+            _ => (-100., 100.),
+        }
+    }
     pub(in crate::app) fn capabilities() -> Vec<super::reply::Parameter> {
         let items: Vec<_> = Self::all()
             .into_iter()
             .map(|(name, param)| {
-                let (unit, min, max) = match param {
-                    Self::Exposure => ("EV", -5., 5.),
-                    Self::Temperature => ("kelvin", TEMPERATURE_MIN, TEMPERATURE_MAX),
-                    Self::Tint => ("tint", -TINT_LIMIT, TINT_LIMIT),
-                    _ => ("percent", -100., 100.),
+                let (min, max) = param.range(false);
+                let (mask_min, mask_max) = param.range(true);
+                let unit = match param {
+                    Self::Exposure => "EV",
+                    Self::Temperature => "kelvin",
+                    Self::Tint => "tint",
+                    _ => "percent",
                 };
                 let local = param
                     .local_shown(&crate::develop::masks::LocalAdjust::default())
@@ -239,8 +250,8 @@ impl Param {
                     } else {
                         "percent"
                     },
-                    mask_min: if param == Self::Exposure { -4. } else { -100. },
-                    mask_max: if param == Self::Exposure { 4. } else { 100. },
+                    mask_min,
+                    mask_max,
                 }
             })
             .collect();

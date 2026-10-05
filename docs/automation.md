@@ -150,7 +150,7 @@ use target guards for a sequence that must refer to the same edit.
 | `open` | catalog `id` or `name` | `opened` identity; poll `loaded` |
 | `search` | `text` | Applied Library query |
 | `module` | `module`: `develop` or `library` | Post-action state |
-| `photo` | `step`: −1 or 1 | Opened identity |
+| `photo` | `step`: −1 or 1 | Selection change in Library; opened identity in Develop |
 | `save` | optional `target` | `saved: true` |
 | `preview`, `export` | absolute `path`, optional `max_edge`, optional `target` | Captured output job |
 | `job` | `job_id` | Output status |
@@ -191,7 +191,8 @@ control, not a headless daemon. For unattended rendering without a GUI, use
 ## Configuration and compatibility
 
 `automation.json` in the data directory stores `{"protocol":1,"socket":true}`.
-MIDI device mappings stay in `midi.json`. An explicit legacy `socket` choice in
+MIDI device instances and their independent mappings stay in version 2
+`midi.json`. Legacy single-device files migrate to one device entry. An explicit legacy `socket` choice in
 `midi.json` is read when no `automation.json` exists; saving Automation preferences
 moves that setting to `automation.json`. A fresh installation never enables the
 socket implicitly. Turning it off removes the connection file and rejects queued
@@ -205,18 +206,3 @@ An agent can invoke the CLI directly or implement an adapter over this protocol.
 The bundled `rawmakase mcp` adapter exposes editing tools and preview images over
 stdio without knowing MIDI numbers or keyboard shortcuts. See [MCP setup and
 editing workflow](mcp.md).
-
-
-## Application boundaries
-
-Application commands return typed state snapshots and results; the socket adapter
-encodes them as protocol JSON. A single action-name table supports parsing,
-discovery and device mapping serialization. Gesture ownership belongs to the
-application command layer, with separate MIDI and socket scopes.
-
-Further architectural work can move the queue/listener lifecycle out of
-`control_surface` into an automation owner, route remaining UI shortcuts through
-these operations, and share parameter descriptors with all editing panels.
-The standalone client still includes its shared implementation by path; a
-workspace protocol/client crate would also let MCP schemas reuse those types.
-These follow-ups do not require a new editing engine or MIDI-specific commands.

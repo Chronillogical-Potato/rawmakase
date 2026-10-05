@@ -1,19 +1,42 @@
-# MIDI control surfaces (Loupedeck+)
+# MIDI devices
 
-RAWmakase listens for a MIDI control surface on macOS and Windows. The built-in
-defaults match the **Loupedeck+** (USB 0x2EC2:0x0002), which shows up as a MIDI
-port named `Loupedeck+` and sends channel-1 messages. Dials and faders send
-relative control changes (`1` is clockwise or up, `127` counter-clockwise or
-down); buttons send `note_on` and `note_off`. The code is in
-[src/app/control_surface.rs](../src/app/control_surface.rs). Linux builds have no
-MIDI backend and ignore all of this.
+Preferences > Automation separates **MIDI devices** from **Scripts and AI**.
+MIDI input is currently available on macOS and Windows. Scripts and MCP also
+work on Linux and do not need a MIDI device.
 
-The listener finds the device again when it is plugged back in. It works while
-you are in Develop; dials do nothing in the Library grid. A dial turn that
-continues without a 400 ms pause is one History step, named like the slider
-("Exposure +0.50"), so one Cmd+Z undoes the turn.
+## Add a device
 
-## Default mapping
+1. Connect your controller and open **Preferences > Automation**.
+2. Under **MIDI devices**, choose **Add device** and a profile: **Loupedeck+**
+   for its supplied layout, or **Custom MIDI device** for an empty mapping.
+3. Give the device a name and choose its **MIDI input**. Use **Refresh inputs**
+   after connecting another controller. Inputs are bound by their port identity;
+   a disconnected controller is not silently replaced by another with the same name.
+4. Expand **Control mappings**. Move a control to discover its CC or note number,
+   or use **Add a control** to enter a number manually. Assign its parameter or action.
+5. Choose each dial/slider's **Control format**. Absolute controls map 0–127 to
+   the parameter range; relative formats support 1/127, 65/63, or 1/65 encoders.
+   The Loupedeck+ profile uses 1/127; custom controls default to absolute.
+
+Each device has its own mappings, enabled state, connection status and held
+modifiers. Add more devices using the same menu, including several of one type.
+One physical input can belong to only one enabled entry. Disable or remove the
+old entry before assigning that input elsewhere. Ambiguous name matches are
+rejected; choose a specific input to resolve them.
+
+**Advanced connection** provides offline port-name matching, a MIDI-channel
+filter (1–16 or all), relative turn speed and photo-dial detents. A photo dial
+requires a relative format. **Reset mappings to profile** affects only the
+selected device; a custom profile resets to an empty mapping.
+
+MIDI controls follow the selected mask in Masking where that parameter supports
+local adjustments. Other controls affect the global edit. Edits are blocked
+while a dialog or blocking operation is active. Photo navigation preserves
+Library/Loupe; the photo dial ignores the Library grid. Continuous parameter
+controls group into one undo step until a 400 ms pause, another control/source,
+or a UI edit. Different devices never share held modifiers or an undo gesture.
+
+## Loupedeck+ profile
 
 | Control | CC | Does |
 |---|---|---|
@@ -52,72 +75,62 @@ Not bound: D1 (CC 41), D2 (CC 42), C2, L1–L3, Col, Fn, Tab, Custom Mode, and t
 Texture and Dehaze sliders. [tools/loupedeck/controls.json](../tools/loupedeck/controls.json)
 lists every control the device sends.
 
-## Changing the mapping in Preferences
+## Saved configuration and migration
 
-Preferences > Automation lists every dial, fader and button the Loupedeck+
-sends, each with the action it runs. Pick another from the list, or type an action name or supported shortcut
-(`cmd+shift+z`, `hold:shift`, `toggle:bw`) into the field beside a button. Changes
-apply at once and are saved to `midi.json` (device mappings) and `automation.json` (external control), as described below, so
-only what you changed is written. The page also shows whether the device is
-connected and the last message it sent, and Restore Default Actions undoes every
-change to the dials and buttons.
-
-The same page has a **External control** checkbox: with it off, RAWmakase does not
-listen for `rawmakase-ctl`, and `control.json` is removed. Turning it on listens
-again on a new port with a new token.
-
-## Changing the mapping in midi.json
-
-Put a `midi.json` in the data folder (`~/Library/Application Support/RAWmakase`
-on macOS, `%APPDATA%\RAWmakase` on Windows). It changes the defaults above:
+`midi.json` in the app's data folder stores version 2 with a `devices` array.
+Each entry has a stable `id`, display `name`, `enabled`, `profile` (`loupedeck` or
+`custom`), `port`, optional `port_id`, `exact`, optional `channel`, and `mapping`.
+Mappings are stored in full, so a custom controller never inherits Loupedeck controls.
+For example, a custom absolute exposure slider on CC 7 and an Undo button on note 40:
 
 ```json
 {
-  "port": "Loupedeck",
-  "photo_dial": 48,
-  "photo_detent": 2,
-  "dials": { "41": "texture", "42": "dehaze", "33": null },
-  "buttons": { "50": "cmd+shift+u", "95": null, "114": "hold:shift" }
+  "version": 2,
+  "devices": [{
+    "id": 1,
+    "name": "Desk controller",
+    "enabled": true,
+    "profile": "custom",
+    "port": "Desk controller MIDI",
+    "port_id": null,
+    "exact": true,
+    "channel": 1,
+    "mapping": {
+      "dials": {"7": "exposure"},
+      "buttons": {"40": "undo"},
+      "photo_dial": null,
+      "photo_detent": 1,
+      "default_encoder": "absolute",
+      "encoders": {},
+      "sensitivity": 1
+    }
+  }]
 }
 ```
 
-- `port`: part of the MIDI port's name.
-- `photo_dial`: the CC that moves between photos, or `null` for none.
-  `photo_detent`: its ticks per photo (1–64).
-- `dials`: CC number to `exposure`, `contrast`, `highlights`, `shadows`,
-  `whites`, `blacks`, `texture`, `clarity`, `dehaze`, `vibrance`, `saturation`,
-  `temperature`, `tint` or `band1`–`band8`.
-- `buttons`: note number to a key (`"z"`, `"backslash"`, `"cmd+shift+z"`,
-  `"alt+arrowleft"`), `"hold:shift"` (a modifier held while the button is down),
-  `"mixer:hue"` / `"mixer:sat"` / `"mixer:lum"`, or `"toggle:bw"`.
-- `null` removes a default. Other devices work if they send the same kinds of
-  message; set `port` and the numbers.
+`encoders` optionally overrides the default by CC number. Formats are `absolute`,
+`twos_complement`, `offset`, and `sign_magnitude`. Parameter names and button
+operations are listed by `rawmakase control capabilities`. Buttons also support
+legacy shortcut notation and held modifiers such as `hold:shift`.
 
-## Controlling it from a script
+An existing unversioned `midi.json` becomes one Loupedeck-profile device,
+retaining port matching, mapping overrides, unassigned controls and photo-dial
+settings. It is written as version 2 when settings are next changed. A fresh
+installation starts with no devices. Invalid or unsupported configuration files
+are left intact and reported in Preferences.
 
-Use the built-in `rawmakase control` command or the optional `rawmakase-ctl`
-client. Enable external control in Preferences first; it is off by default.
-See [External control](automation.md) for commands, explicit photo/mask targets,
-preview/export completion, the versioned protocol and timeout behavior.
+`automation.json` stores script/MCP access independently. An existing legacy
+`socket` preference is honored only when `automation.json` does not exist.
+Enabling scripts does not add a device, and removing devices does not stop MCP.
 
-```sh
-rawmakase control capabilities
-rawmakase control open --id 17
-rawmakase control set exposure 0.5
-rawmakase control action undo
-rawmakase control preview /absolute/path/preview.jpg
-```
+## Scripts and AI
 
-`dial` and `press` retain the Loupedeck names and use the configured MIDI mapping.
-`set`, `turn` and named `action` commands use application operations independently
-of device mappings. Supported legacy key names also resolve to those operations;
-they do not inject keyboard events.
-
-In Masking, device dials adjust the selected mask where a local parameter exists.
-Unsupported local parameters are rejected instead of changing the global edit.
-Outside Masking they adjust the global controls. No dials edit while a modal or
-blocking operation is active. Semantic scripts use global scope by default and
-can explicitly address masks with generation/revision guards.
+Enable **Scripts and AI > Allow local scripts and applications** in Preferences.
+See [External control](automation.md) for the CLI and [MCP setup](mcp.md) for Codex
+and other MCP clients. Semantic `set`, `turn` and named `action` commands are
+independent of MIDI mappings. Legacy `dial`/`press` commands retain the bundled
+Loupedeck layout in a separate compatibility adapter; they do not borrow any
+physical device's mappings or modifier state.
 
 ## Mapping another device
 
