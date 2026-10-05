@@ -330,7 +330,10 @@ impl SettingGroup {
                 e.calibration = f.calibration;
                 e.shadow_tint = f.shadow_tint;
             }
-            SpotRemoval => to.retouch = from.retouch.clone(),
+            SpotRemoval => {
+                to.retouch = from.retouch.clone();
+                to.retouch_model = from.retouch_model;
+            }
             Crop => {
                 to.crop = from.crop;
                 to.straighten = from.straighten;
@@ -566,6 +569,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         grain_model: _,
         contrast_model: _,
         lens_vignette_model: _,
+        retouch_model: _,
         grading_model: _,
         mixer_model: _,
         whites_model: _,
@@ -703,6 +707,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("flip_x", PhotosOwn),
         ("flip_y", PhotosOwn),
         ("retouch", Group(SpotRemoval)),
+        ("retouch_model", Group(SpotRemoval)),
         // As in Lightroom, whose Copy Settings has no red eye group.
         ("red_eye", PhotosOwn),
         ("masks", Group(Masking)),

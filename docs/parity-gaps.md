@@ -57,8 +57,8 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Local and finishing adjustments
 
-- **Spot removal and masks are experimental and early** ([retouching](retouching.md), [masking](masking.md)). Heal and Clone, and brush, linear, radial, color range and luminance range masks with local sliders render, but none of it is measured against Camera Raw:
-  - Heal's algorithm, feather profile and automatic source choice are our own; results look alike but are not compared numerically.
+- **Spot removal and masks are experimental and early** ([retouching](retouching.md), [masking](masking.md)). Heal and Clone, and brush, linear, radial, color range and luminance range masks with local sliders render; little of it is measured against Camera Raw yet:
+  - Heal and Clone's feather is measured in Camera Raw 18.7 (mean coverage error 0.003 on Clone spots), and Heal's tone matching is within 0.5 L* of Camera Raw on flat, gradient and textured tests ([retouching](retouching.md)); the heal algorithm and automatic source choice are our own.
   - Local Contrast, Highlights, Shadows, Whites, Blacks and Dehaze reuse the measured global responses. Local Temp, Tint, Hue, Saturation, Color, Texture, Clarity, Sharpness and Noise are approximations; Noise only reduces noise, and local Moiré, Defringe, Grain and tone curves are not implemented.
   - Gradient transition and brush feather profiles, Flow build-up, Auto Mask edges and range-mask Refine/Smoothness are approximations.
   - AI selections (Subject, Sky, Background, Objects, People, Depth), the AI Remove mode, AI Denoise, Enhance and Lens Blur are not implemented.

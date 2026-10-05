@@ -540,6 +540,11 @@ fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
     assert_eq!(skipped.len(), 1, "{skipped:?}");
     assert!(skipped[0].contains("Select Subject"));
     assert_eq!(r.exposure, 0.2);
+    // Lightroom's spots render with Camera Raw's feather.
+    assert_eq!(
+        r.retouch_model,
+        crate::develop::retouch::RetouchModel::Measured
+    );
     let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
     let spot = &r.retouch[0];
     assert_eq!(

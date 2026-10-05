@@ -56,6 +56,7 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
 pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
     use crate::develop::panels::Panel;
     preset.retouch = photo.retouch.clone();
+    preset.retouch_model = photo.retouch_model;
     preset.red_eye = photo.red_eye.clone();
     for panel in [Panel::SpotRemoval, Panel::RedEye] {
         preset.panels.set(panel, photo.panels.state(panel));
@@ -84,8 +85,10 @@ mod tests {
             pupil_size: 0.5,
             darken: 0.5,
         });
+        // The photo's spots keep the feather they were made with.
         let mut preset = Recipe {
             exposure: 0.5,
+            retouch_model: crate::develop::retouch::RetouchModel::Measured,
             ..Default::default()
         };
         preset.panels.set(Panel::RedEye, PanelState::Off);
@@ -93,6 +96,7 @@ mod tests {
         let applied = applied_to(preset, &photo);
         assert_eq!(applied.exposure, 0.5);
         assert_eq!(applied.red_eye, photo.red_eye);
+        assert_eq!(applied.retouch_model, photo.retouch_model);
         assert_eq!(applied.panels.state(Panel::RedEye), PanelState::On);
         assert_eq!(applied.panels.state(Panel::SpotRemoval), PanelState::On);
     }

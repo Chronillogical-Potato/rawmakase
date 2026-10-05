@@ -1128,6 +1128,8 @@ impl Preset {
         }
         let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
         if let Some(retouch) = edits.retouch {
+            // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
+            r.retouch_model = crate::develop::retouch::RetouchModel::Measured;
             r.retouch = retouch;
         }
         if let Some(red_eye) = edits.red_eye {

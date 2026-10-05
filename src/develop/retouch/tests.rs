@@ -163,7 +163,13 @@ fn log_heal_beats_linear_on_lit_texture() {
     let (cx, cy, r) = (150usize, 50usize, 10usize);
     let grid = [cx - r - 2, cy - r - 2, cx + r + 3, cy + r + 3].map(|v| v as i32);
     let (gw, gh) = ((grid[2] - grid[0]) as usize, (grid[3] - grid[1]) as usize);
-    let alpha = heal::coverage(&[[cx as f32, cy as f32]], r as f32, 0., grid);
+    let alpha = heal::coverage(
+        &[[cx as f32, cy as f32]],
+        r as f32,
+        0.,
+        FeatherProfile::Smoothstep,
+        grid,
+    );
     let pixel = |x: i32, y: i32| im.pixels[y as usize * w + x as usize];
     let dest: Vec<[f32; 3]> = (0..gw * gh)
         .map(|i| pixel(grid[0] + (i % gw) as i32, grid[1] + (i / gw) as i32))
@@ -240,6 +246,15 @@ fn incremental_tiles_match_a_full_rebuild() {
             );
         }
     }
+    // Another feather changes every spot.
+    let measured = Retouching {
+        model: RetouchModel::Measured,
+        ..heals(&ops)
+    };
+    let incremental = cache.get(&base, measured, &cancel).unwrap();
+    assert_eq!(incremental.pixels, apply(&base, measured).pixels);
+    assert_ne!(incremental.pixels, apply(&base, heals(&ops)).pixels);
+    check(&mut cache, &ops);
     check(&mut cache, &[]);
 
     // Red eye corrections apply first; a heal copying from one sees the corrected eye.
@@ -257,6 +272,7 @@ fn incremental_tiles_match_a_full_rebuild() {
         let ops = Retouching {
             red_eye: eyes,
             retouch: ops,
+            model: RetouchModel::Original,
         };
         let incremental = cache.get(&base, ops, &cancel).unwrap();
         assert_eq!(incremental.pixels, apply(&base, ops).pixels);
@@ -274,6 +290,7 @@ fn heals(ops: &[RetouchOp]) -> Retouching<'_> {
     Retouching {
         red_eye: &[],
         retouch: ops,
+        model: RetouchModel::Original,
     }
 }
 fn frame_of(im: &CameraImage) -> crate::develop::ImageFrame {
@@ -328,12 +345,59 @@ fn placed_brush_covers_its_path() {
         opacity: 1.,
         offset: [0., 0.2],
     };
-    let p = Placed::new(&op, &frame);
+    let p = Placed::new(&op, &frame, FeatherProfile::Smoothstep);
     assert_eq!(p.radius, 4.);
     let rect = [30, 40, 90, 60];
-    let a = heal::coverage(&p.points, p.radius, 0., rect);
+    let a = heal::coverage(&p.points, p.radius, 0., FeatherProfile::Smoothstep, rect);
     let at = |x: i32, y: i32| a[((y - rect[1]) * 60 + x - rect[0]) as usize];
     assert_eq!(at(60, 49), 1.);
     assert_eq!(at(60, 55), 0.);
     assert_eq!(p.offset, [0., 20.]);
+}
+
+/// Camera Raw 18.7's soft edge on Clone spots: the source's weight in the linear blend
+/// reaches one half at 0.95 of the radius at Feather 25, 0.89 at 50, 0.79 at 75 and
+/// 0.65 at 100 (where the rendered output, after the tone curve, is half way at 0.96,
+/// 0.91, 0.83 and 0.71). The original smoothstep crossed much further in.
+#[test]
+fn measured_feather_crosses_half_where_camera_raw_does() {
+    let half = |profile: FeatherProfile, feather: f32| {
+        let radius = 200.;
+        let row = heal::coverage(&[[0., 0.]], radius, feather, profile, [0, 0, 220, 1]);
+        row.iter().position(|a| *a < 0.5).unwrap() as f32 / radius
+    };
+    for (feather, camera_raw) in [(0.25, 0.952), (0.5, 0.89), (0.75, 0.788), (1., 0.648)] {
+        let ours = half(FeatherProfile::Measured, feather);
+        assert!(
+            (ours - camera_raw).abs() < 0.015,
+            "{feather}: {ours} against {camera_raw}"
+        );
+    }
+    assert!(half(FeatherProfile::Smoothstep, 0.5) < 0.78);
+    // A hard edge is the same either way.
+    assert_eq!(
+        half(FeatherProfile::Measured, 0.),
+        half(FeatherProfile::Smoothstep, 0.)
+    );
+}
+/// Recipes saved before keep the original feather; new edits, a first spot and
+/// Lightroom's spots take the measured one.
+#[test]
+fn old_spots_keep_their_feather() {
+    use crate::develop::Recipe;
+    let im = image(64, 48, |_, _| [0.2; 3]);
+    let op = spot(RetouchMode::Clone, &im, [20., 20.], 6., [20., 0.]);
+    let mut old = Recipe::default();
+    old.retouch.push(op.clone());
+    let json = serde_json::to_value(&old).unwrap();
+    assert!(json.get("retouch_model").is_none());
+    let mut old: Recipe = serde_json::from_value(json).unwrap();
+    assert_eq!(old.retouch_model, RetouchModel::Original);
+    old.add_retouch(op.clone());
+    assert_eq!(old.retouch_model, RetouchModel::Original);
+    let mut first = Recipe::default();
+    first.add_retouch(op);
+    assert_eq!(first.retouch_model, RetouchModel::Measured);
+    let back: Recipe = serde_json::from_value(serde_json::to_value(&first).unwrap()).unwrap();
+    assert_eq!(back.retouch_model, RetouchModel::Measured);
 }
