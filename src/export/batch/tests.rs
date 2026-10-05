@@ -520,3 +520,28 @@ fn a_preset_watermark_is_read_once_for_the_whole_batch() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn the_open_photo_is_not_exported_over_a_file_replaced_since() -> Result<()> {
+    let f = fixture(&["a.dng", "b.dng"])?;
+    let mut photos = f.batch_photos()?;
+    let (a, b) = (&f.photos[0].1, &f.photos[1].1);
+    let shown = |file| Edit::Shown {
+        recipe: Box::new(Recipe::default()),
+        unsaved: false,
+        file,
+    };
+    photos[0].edit = shown(Some(crate::storage::Identity::read(a)?));
+    // Another file than the one shown.
+    photos[1].edit = shown(Some(crate::storage::Identity::read(b)?));
+    let mut bytes = std::fs::read(b)?;
+    bytes.extend_from_slice(b"replaced");
+    std::fs::write(b, bytes)?;
+    let outcomes = run_all(&f.batch(photos, settings(&f.out())));
+    exported(&outcomes[0]);
+    match &outcomes[1] {
+        Outcome::Failed(reason) => assert!(reason.contains("changed"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+    Ok(())
+}

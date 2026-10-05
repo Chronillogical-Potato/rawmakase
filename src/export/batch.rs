@@ -39,8 +39,14 @@ pub enum Edit {
     /// As the catalog stores it, worked out when the photo's turn comes, as
     /// Develop would open it (`catalog::resolve`).
     Catalog(EditRecord),
-    /// The open photo's edit as shown; `unsaved` when saving it failed.
-    Shown { recipe: Box<Recipe>, unsaved: bool },
+    /// The open photo's edit as shown; `unsaved` when saving it failed. `file` is
+    /// the photo's file when Export was pressed: a file replaced since is not
+    /// exported with an edit made for another.
+    Shown {
+        recipe: Box<Recipe>,
+        unsaved: bool,
+        file: Option<crate::storage::Identity>,
+    },
 }
 
 impl BatchPhoto {
@@ -452,13 +458,25 @@ fn render(
             };
             (resolved.recipe, notes)
         }
-        Edit::Shown { recipe, unsaved } => (
-            (**recipe).clone(),
-            unsaved
-                .then(|| "exported using unsaved adjustments".to_string())
-                .into_iter()
-                .collect(),
-        ),
+        Edit::Shown {
+            recipe,
+            unsaved,
+            file,
+        } => {
+            if let Some(file) = file {
+                ensure!(
+                    crate::storage::Identity::read(&photo.source)? == *file,
+                    "the photo's file changed since it was shown; open it again to export it"
+                );
+            }
+            (
+                (**recipe).clone(),
+                unsaved
+                    .then(|| "exported using unsaved adjustments".to_string())
+                    .into_iter()
+                    .collect(),
+            )
+        }
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     let image = Arc::new(job::decode_full(raw, &photo.source, cancel)?);

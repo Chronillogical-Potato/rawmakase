@@ -57,15 +57,37 @@ struct Queued {
     left_out: Vec<(String, String)>,
 }
 
-/// What a finished export could not do, kept until it is read.
+/// What finished exports could not do, kept until it is dismissed.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
-    /// The line the top bar shows.
-    line: String,
-    /// Photos not exported, with why, grouped as Lightroom's report groups them.
-    problems: Vec<(String, String)>,
+    exported: usize,
+    total: usize,
     /// Photos exported with something to say.
+    noted: usize,
+    /// Photos not exported, with why.
+    problems: Vec<(String, String)>,
+    /// What exported photos had to say, each note on its own.
     notes: Vec<(String, String)>,
+}
+impl Summary {
+    /// "Exported 148 of 150 · 2 not exported · 1 with notes".
+    fn line(&self) -> String {
+        let mut line = format!("Exported {} of {}", self.exported, self.total);
+        if !self.problems.is_empty() {
+            line.push_str(&format!(" · {} not exported", self.problems.len()));
+        }
+        if self.noted > 0 {
+            line.push_str(&format!(" · {} with notes", self.noted));
+        }
+        line
+    }
+    fn add(&mut self, other: Summary) {
+        self.exported += other.exported;
+        self.total += other.total;
+        self.noted += other.noted;
+        self.problems.extend(other.problems);
+        self.notes.extend(other.notes);
+    }
 }
 
 #[derive(Default)]
@@ -339,6 +361,7 @@ impl Editor {
                     photo.edit = Edit::Shown {
                         recipe: Box::new(self.document.recipe.clone()),
                         unsaved,
+                        file: crate::storage::Identity::read(&chosen.source).ok(),
                     };
                 }
                 photo
@@ -402,12 +425,16 @@ impl Editor {
         let (summary, single) = summarize(&queued, &outcomes);
         self.status = match single {
             Some(path) => format!("Exported {}", path.display()),
-            None => summary.line.clone(),
+            None => summary.line(),
         };
-        // The next export's report replaces this one's.
-        self.exports.report = false;
-        self.exports.summary =
-            (!summary.problems.is_empty() || !summary.notes.is_empty()).then_some(summary);
+        // Unread reports add up until they are dismissed: a later export that went
+        // well never hides an earlier one that did not.
+        if !summary.problems.is_empty() || !summary.notes.is_empty() {
+            match &mut self.exports.summary {
+                Some(unread) => unread.add(summary),
+                None => self.exports.summary = Some(summary),
+            }
+        }
     }
 
     /// Lightroom's activity indicator: while exports run, "Exporting 24 / 150"
@@ -490,7 +517,7 @@ impl Editor {
         let Some(summary) = &self.exports.summary else {
             return;
         };
-        let line = egui::RichText::new(&summary.line)
+        let line = egui::RichText::new(summary.line())
             .size(11.)
             .color(Color32::from_rgb(230, 170, 100));
         if ui
@@ -577,6 +604,7 @@ fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Option<PathBuf>
         let problem = match outcome {
             Outcome::Exported { path, notes } => {
                 exported.push(path.clone());
+                summary.noted += usize::from(!notes.is_empty());
                 for note in notes {
                     summary.notes.push((name.clone(), note.clone()));
                 }
@@ -594,21 +622,10 @@ fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Option<PathBuf>
             .problems
             .push((name.clone(), format!("can't be exported: {why}")));
     }
-    let total = queued.names.len() + queued.left_out.len();
-    let not_exported = summary.problems.len();
-    summary.line = format!("Exported {} of {total}", exported.len());
-    if not_exported > 0 {
-        summary
-            .line
-            .push_str(&format!(" · {not_exported} not exported"));
-    }
-    if !summary.notes.is_empty() {
-        summary
-            .line
-            .push_str(&format!(" · {} with notes", summary.notes.len()));
-    }
-    let single =
-        (total == 1 && exported.len() == 1 && summary.notes.is_empty()).then(|| exported.remove(0));
+    summary.exported = exported.len();
+    summary.total = queued.names.len() + queued.left_out.len();
+    let single = (summary.total == 1 && summary.exported == 1 && summary.noted == 0)
+        .then(|| exported.remove(0));
     (summary, single)
 }
 

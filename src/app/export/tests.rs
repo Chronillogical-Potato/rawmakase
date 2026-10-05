@@ -108,6 +108,11 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
     e.plan_export(pending, Some(Existing::Unique));
     wait(&mut e, &ctx);
     assert_eq!(listing(&out), ["a-2.tif", "a.tif", "b-2.tif", "b.tif"]);
+    // That export went well, but the first one's report is unread: it stays, and
+    // the two add up until it is dismissed.
+    let summary = e.exports.summary.clone().expect("the unread report");
+    // The JPEG was left out of both.
+    assert_eq!(summary.line(), "Exported 4 of 6 · 2 not exported");
     Ok(())
 }
 
