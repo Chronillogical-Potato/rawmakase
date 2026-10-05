@@ -179,7 +179,8 @@ impl Editor {
                         crate::app::library::copy_suffix(photo)
                     );
                     let open = open == Some(id) && shown;
-                    match l.export_refusal(id).filter(|_| !open) {
+                    // The open photo too: it is decoded again from its file.
+                    match l.export_refusal(id) {
                         Some(refusal) => scope.left_out.push((name, refusal.label())),
                         None => scope.photos.push(Chosen {
                             id: Some(id),

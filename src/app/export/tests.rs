@@ -165,5 +165,10 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
     assert!(scope.photos[0].open);
     let batch = e.batch_photos(&scope, true)?;
     assert!(matches!(&batch[0].edit, Edit::Shown { unsaved: true, .. }));
+    // Its file gone offline since it was opened: said before the dialog, as it is
+    // decoded again from the file.
+    std::fs::remove_file(e.document.path.clone().unwrap())?;
+    assert!(e.export_scope().is_none());
+    assert!(e.status.contains("can't be exported"), "{}", e.status);
     Ok(())
 }

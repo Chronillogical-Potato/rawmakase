@@ -545,3 +545,31 @@ fn the_open_photo_is_not_exported_over_a_file_replaced_since() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn an_overwrite_takes_the_exact_name_over_one_in_other_case() {
+    // Both, as a case-sensitive volume can hold them.
+    let dir = PathBuf::from("/out");
+    let mut reserved = Reservations::default();
+    reserved.on_disk.insert(
+        dir.clone(),
+        [(
+            "a.tif".to_string(),
+            vec![OsString::from("A.TIF"), OsString::from("a.tif")],
+        )]
+        .into(),
+    );
+    assert_eq!(
+        reserved.existing(&dir.join("a.tif")),
+        Some(dir.join("a.tif"))
+    );
+    assert_eq!(
+        reserved.existing(&dir.join("A.TIF")),
+        Some(dir.join("A.TIF"))
+    );
+    // No exact match: the one in other case.
+    assert_eq!(
+        reserved.existing(&dir.join("A.tif")),
+        Some(dir.join("A.TIF"))
+    );
+}
