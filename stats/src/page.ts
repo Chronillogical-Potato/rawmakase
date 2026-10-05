@@ -32,7 +32,7 @@ ${latest ? breakdowns(latest) : ""}
 <ul>
 <li>An opted-in RAWmakase sends at most one report per calendar week: app version, operating system and its major release, CPU architecture, build channel, graphics backend, and on Linux the distribution family and display server. No identifier, file, photo or setting is ever included.</li>
 <li>Each field is added to its own weekly tally, and the report to a daily count, on arrival; the report itself is not stored. The service never reads or records IP addresses; Cloudflare, which hosts it, sees them as for any website.</li>
-<li>This week's total counts reports through the end of yesterday (UTC) and updates daily. Breakdowns are shown only for completed weeks (ISO weeks, UTC). Groups of fewer than ${MIN_GROUP} installations are merged into "other", and weeks with fewer than ${MIN_GROUP} reports show no numbers.</li>
+<li>This week's total counts reports through the end of yesterday (UTC) and updates daily. Breakdowns are shown only for completed weeks (ISO weeks, UTC). Groups of fewer than ${MIN_GROUP} installations are merged into "other", which always merges at least two groups, and weeks with fewer than ${MIN_GROUP} reports show no numbers.</li>
 <li>The numbers are estimates of opted-in installations, not of people: one person may use several computers, and most installations never opt in.</li>
 <li>Anyone can send a report, and there's no easy way to stop fake ones: an open-source app can't prove a report is genuine. Checks and rate limits keep out junk and floods from one address, but a determined person could still inflate the numbers.</li>
 <li>Tallies are deleted after 24 months.</li>
@@ -102,7 +102,7 @@ function breakdowns(week: Week): string {
       ? `<div class="tables">
 ${tables.join("\n")}
 </div>`
-      : `<p class="empty">Too few installations to break down yet. A group is shown once it and the remaining installations each reach ${MIN_GROUP}.</p>`;
+      : `<p class="empty">Too few installations to break down yet. A group is shown once it reaches ${MIN_GROUP} installations and at least one other group remains.</p>`;
   return `<section>
 <h2>Week ${week.week}: ${week.total} installations</h2>
 ${body}

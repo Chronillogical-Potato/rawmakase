@@ -267,7 +267,7 @@ describe("publishing", () => {
     const now = new Date("2026-10-01T12:00:00Z");
     await seed("2026-W40", 50);
     await seed("2026-W39", 20);
-    await seed("2026-W38", 4);
+    await seed("2026-W38", 1);
     const { weeks } = await published(env, now);
     expect(weeks.map((w) => [w.week, w.total])).toEqual([
       ["2026-W39", 23],
@@ -278,13 +278,13 @@ describe("publishing", () => {
 
   it("totals the current week through yesterday", async () => {
     await env.DB.prepare(
-      `INSERT INTO daily_counts VALUES ('2026-09-27', 50), ('2026-09-28', 7), ('2026-09-30', 6), ('2026-10-01', 9)`,
+      `INSERT INTO daily_counts VALUES ('2026-09-27', 50), ('2026-09-28', 3), ('2026-09-30', 6), ('2026-10-01', 9)`,
     ).run();
     // Thursday: Monday to Wednesday count, today doesn't, last Sunday doesn't.
     expect((await published(env, new Date("2026-10-01T12:00:00Z"))).thisWeek).toEqual({
       week: "2026-W40",
       through: "2026-09-30",
-      total: 13,
+      total: 9,
     });
     // Tuesday: only Monday so far, below the minimum.
     expect((await published(env, new Date("2026-09-29T08:00:00Z"))).thisWeek).toEqual({
