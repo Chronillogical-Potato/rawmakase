@@ -55,7 +55,7 @@ pub use pipeline::{
 pub(crate) use pipeline::{profile_matrix, render_base};
 pub use recipe::{
     LocalEdits, ProfileCorrections, ProfilePreference, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN,
-    TINT_LIMIT,
+    TINT_LIMIT, camera_matching_names, camera_matching_profile,
 };
 pub(crate) use rendered::unit_to_u8;
 pub use rendered::{ClipOverlay, Clipped, HIGHLIGHT_CLIP, Histogram, Rendered, SHADOW_CLIP};

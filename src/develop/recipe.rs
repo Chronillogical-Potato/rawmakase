@@ -279,6 +279,31 @@ pub enum ProfilePreference {
     Adobe,
     /// RAWmakase Color wherever it fits the camera, else as `Adobe`.
     Rawmakase,
+    /// Lightroom's Camera Settings: the imported profile matching the camera's
+    /// standard look (see [`camera_matching_profile`]), else as `Adobe`.
+    Camera,
+}
+/// Names of the camera-matching profile Adobe ships for a camera's standard
+/// look, by maker. RAWmakase doesn't read the picture style set in the camera,
+/// so Camera Settings always starts from this one.
+pub fn camera_matching_names(m: &Metadata) -> &'static [&'static str] {
+    let make = m.make.trim().to_ascii_lowercase();
+    if make.starts_with("fujifilm") {
+        &["Camera PROVIA/Standard"]
+    } else {
+        &["Camera Standard"]
+    }
+}
+/// The imported camera-matching profile for this camera's standard look.
+pub fn camera_matching_profile<'a>(
+    m: &Metadata,
+    profiles: &'a [std::sync::Arc<crate::camera_profiles::CameraProfile>],
+) -> Option<&'a std::sync::Arc<crate::camera_profiles::CameraProfile>> {
+    camera_matching_names(m).iter().find_map(|name| {
+        profiles
+            .iter()
+            .find(|p| p.name == *name && p.ensure_camera(m).is_ok())
+    })
 }
 impl Recipe {
     /// The look at its Profile Amount, and its internal controls added to the user's
@@ -407,6 +432,7 @@ impl Recipe {
         let own = match preference {
             ProfilePreference::Adobe => None,
             ProfilePreference::Rawmakase => find(crate::camera_profiles::open::COLOR),
+            ProfilePreference::Camera => camera_matching_profile(m, profiles),
         };
         // As in Lightroom: Adobe Color, else Adobe Standard. Without those, a DNG
         // keeps the profile it embeds, and any other file gets RAWmakase Color.
