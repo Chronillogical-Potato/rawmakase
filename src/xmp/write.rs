@@ -657,13 +657,14 @@ pub(super) const MARKERS: &str = "2";
 /// The RAWmakase release each operator's measured version first shipped in. A packet
 /// or preset without `RAWmakaseMarkers` could not name operators measured after the
 /// release that wrote it, so it keeps those.
-pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 7] = [
+pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 8] = [
     (ORIGINAL_SHARPENING, (0, 1, 15)),
     (ORIGINAL_LENS_VIGNETTE, (0, 1, 15)),
     (ORIGINAL_GRAIN, (0, 1, 15)),
     (ORIGINAL_COLOR_MIXER, (0, 1, 15)),
     (ORIGINAL_CLARITY, (0, 1, 16)),
     (ORIGINAL_CALIBRATION, (0, 1, 16)),
+    (ORIGINAL_COLOR_NOISE, (0, 1, 16)),
     (ORIGINAL_SATURATION, (0, 1, 16)),
 ];
 
@@ -708,6 +709,7 @@ pub(super) fn operator_keys(operator: &str) -> &'static [OperatorKey] {
             Exact("BlueHue"),
             Exact("BlueSaturation"),
         ],
+        ORIGINAL_COLOR_NOISE => &[Exact("ColorNoiseReduction")],
         ORIGINAL_SATURATION => &[Exact("Saturation")],
         _ => &[],
     }
