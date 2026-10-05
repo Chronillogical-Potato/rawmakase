@@ -30,6 +30,15 @@ pub(super) struct Target {
     pub mask: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum CurveChannel {
+    Rgb,
+    Red,
+    Green,
+    Blue,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Command {
     pub operation: Operation,
@@ -54,6 +63,7 @@ pub(super) enum Operation {
         limit: usize,
     },
     Set(Param, f32),
+    Curve(CurveChannel, Vec<[f32; 2]>),
     Adjust(Param, i32),
     Action(Action),
     Metadata {
@@ -93,6 +103,10 @@ pub(super) enum Action {
     Sync,
     Reset,
     AutoTone,
+    AutoWhiteBalance,
+    CurveLinear,
+    CurveMedium,
+    CurveStrong,
     ExportDialog,
     ExportPrevious,
     ToggleMono,
@@ -142,6 +156,10 @@ impl Action {
         "sync",
         "reset",
         "auto_tone",
+        "auto_white_balance",
+        "curve:linear",
+        "curve:medium_contrast",
+        "curve:strong_contrast",
         "export_dialog",
         "export_previous",
         "toggle:bw",
@@ -200,6 +218,10 @@ impl Action {
             "sync" => Self::Sync,
             "reset" => Self::Reset,
             "auto_tone" => Self::AutoTone,
+            "auto_white_balance" => Self::AutoWhiteBalance,
+            "curve:linear" => Self::CurveLinear,
+            "curve:medium_contrast" => Self::CurveMedium,
+            "curve:strong_contrast" => Self::CurveStrong,
             "export_dialog" => Self::ExportDialog,
             "export_previous" => Self::ExportPrevious,
             "toggle:bw" => Self::ToggleMono,
@@ -295,6 +317,7 @@ impl Editor {
             .collect();
         json!({
             "protocol": PROTOCOL,
+            "message":self.status,
             "mode": if self.library_mode {"library"} else {"develop"},
             "photo": develop.then(|| self.document.path.as_ref().map(|p| p.display().to_string())).flatten(),
             "photo_id": develop.then_some(self.document.catalog_photo).flatten(),
@@ -304,6 +327,7 @@ impl Editor {
             "black_and_white":develop && recipe.effects.monochrome,
             "mixer_channel":(["hue","sat","lum"][self.view.mixer_adjust.min(2)]),
             "values":values, "masks":masks,
+            "tone_curve":{"rgb":recipe.curve,"red":recipe.effects.channels[0],"green":recipe.effects.channels[1],"blue":recipe.effects.channels[2]},
             "selected_mask":self.view.masking.selected,
             "exporting": self.exporting(),
             "auto_running": self.document.auto.is_running(),
@@ -369,7 +393,8 @@ impl Editor {
             Operation::Capabilities => {
                 return Ok(
                     json!({"protocol":PROTOCOL,"actions":Action::NAMES,"parameters":Param::capabilities(),
-                "commands":["state","capabilities","photos","set","turn","action","open","search","module","photo","save","export","preview","job"],
+                "commands":["state","capabilities","photos","curve","set","turn","action","open","search","module","photo","save","export","preview","job"],
+                "tone_curve":{"channels":["rgb","red","green","blue"],"point_count":[2,32],"coordinate_range":[0,1],"minimum_input_spacing":0.00049,"interpolation":"natural_cubic"},
                 "target_fields":["photo_id","generation","revision","mask"],
                 "completion":"applied; loaded/exporting/save_state describe asynchronous work", "headless":false}),
                 );
@@ -445,6 +470,30 @@ impl Editor {
         match operation {
             Operation::Set(param, value) => {
                 self.command_parameter(param, Some(value), 0, target, ctx)?
+            }
+            Operation::Curve(channel, points) => {
+                self.require_develop()?;
+                let curve = crate::develop::curve::ToneCurve {
+                    points,
+                    ..Default::default()
+                };
+                curve
+                    .validate()
+                    .map_err(|e| Error::new("invalid_curve", e.to_string()))?;
+                let current = match channel {
+                    CurveChannel::Rgb => &mut self.document.recipe.curve,
+                    CurveChannel::Red => &mut self.document.recipe.effects.channels[0],
+                    CurveChannel::Green => &mut self.document.recipe.effects.channels[1],
+                    CurveChannel::Blue => &mut self.document.recipe.effects.channels[2],
+                };
+                if *current != curve {
+                    *current = curve;
+                    super::widgets::name_frame_step(
+                        ctx,
+                        "Point Curve".into(),
+                        format!("{channel:?}"),
+                    );
+                }
             }
             Operation::Adjust(param, ticks) => {
                 self.command_parameter(param, None, ticks, target, ctx)?;
@@ -623,6 +672,16 @@ impl Editor {
                     }
                     Reset => self.reset_settings(),
                     AutoTone => self.start_auto(super::worker::AutoKind::Settings),
+                    AutoWhiteBalance => self.start_auto(super::worker::AutoKind::WhiteBalance),
+                    CurveLinear | CurveMedium | CurveStrong => {
+                        use crate::presets::curves::BuiltinCurve;
+                        let curve = match action {
+                            CurveLinear => BuiltinCurve::Linear,
+                            CurveMedium => BuiltinCurve::MediumContrast,
+                            _ => BuiltinCurve::StrongContrast,
+                        };
+                        self.choose_point_curve(super::curve_menu::CurveChoice::Builtin(curve));
+                    }
                     ExportDialog => self.open_export_dialog(),
                     ExportPrevious => self.export_with_previous(),
                     ToggleMono => self.toggle_treatment(),

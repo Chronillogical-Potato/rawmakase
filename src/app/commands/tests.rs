@@ -371,3 +371,49 @@ fn turns_group_only_the_same_parameter_and_scope() {
     assert_eq!(e.document.recipe.masks[0].adjust.exposure, 0.);
     assert_eq!(e.document.recipe.exposure, global);
 }
+
+#[test]
+fn point_curve_edits_validate_preserve_channels_and_undo() {
+    let (mut e, ctx) = editor();
+    let original = e.document.recipe.clone();
+    let points = vec![[0., 0.], [0.25, 0.2], [0.75, 0.8], [1., 1.]];
+    e.execute_command(
+        Command::new(Operation::Curve(CurveChannel::Red, points.clone())),
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(e.document.recipe.effects.channels[0].points, points);
+    assert_eq!(e.document.recipe.curve, original.curve);
+    assert_eq!(e.command_state()["tone_curve"]["red"]["points"][1][0], 0.25);
+    let before = e.document.recipe.clone();
+    for points in [
+        vec![[0., 0.]],
+        vec![[0.5, 0.], [0.5, 1.]],
+        vec![[0., -1.], [1., 1.]],
+        vec![[0., f32::NAN], [1., 1.]],
+    ] {
+        assert_eq!(
+            e.execute_command(
+                Command::new(Operation::Curve(CurveChannel::Rgb, points)),
+                &ctx
+            )
+            .unwrap_err()
+            .code,
+            "invalid_curve"
+        );
+        assert_eq!(e.document.recipe, before);
+    }
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe, original);
+    e.execute_command(Command::new(Operation::Action(Action::CurveMedium)), &ctx)
+        .unwrap();
+    assert_eq!(
+        e.document.recipe.curve,
+        crate::presets::curves::BuiltinCurve::MediumContrast.curve()
+    );
+    assert_eq!(
+        e.document.recipe.effects.channels,
+        original.effects.channels
+    );
+}

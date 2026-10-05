@@ -43,8 +43,14 @@ clamped to their supported ranges. `capabilities` lists these ranges and whether
 a parameter supports masks. Mixer channels are explicit: `band3.sat`,
 `band3.hue`, `band3.lum`, `band3.gray`. Bare `band3` is a device mapping only.
 
+Point curves are available through the `curve` protocol command and MCP tools.
+`state.tone_curve` includes RGB and individual color-channel points. Inputs and
+outputs range from 0 to 1; inputs must increase by at least 0.00049. Invalid curves
+fail without changing the recipe. Built-in presets are `curve:linear`,
+`curve:medium_contrast` and `curve:strong_contrast`.
+
 Actions include `undo`, `redo`, `rating:3`, `pick`, `reject`, `label:red`,
-`treatment:bw`, `treatment:color`, `copy`, `paste`, `auto_tone`, `export_dialog`
+`treatment:bw`, `treatment:color`, `copy`, `paste`, `auto_tone`, `auto_white_balance`, `export_dialog`
 and `export_previous`; see `capabilities` for the complete list. Actions do not
 simulate typing and do not depend on text focus or physical modifier keys.
 Device rating/flag buttons retain Shift and Photo > Auto Advance behavior; label
@@ -138,6 +144,7 @@ use target guards for a sequence that must refer to the same edit.
 | `capabilities` | — | Protocol, actions, parameters, ranges and scope support |
 | `photos` | optional `query`, `offset`, `limit` (maximum 500) | Catalog entries and total |
 | `set` | `param`, finite `value`, optional `target` | Post-edit state |
+| `curve` | `channel`: `rgb`, `red`, `green` or `blue`; `points`: 2–32 normalized input/output pairs; optional `target` | Post-edit state |
 | `turn` | `param`, integer `ticks` (−1000…1000), optional `target` | Post-edit state; grouped gesture |
 | `action` | named `action`, optional `target` | Post-action state |
 | `open` | catalog `id` or `name` | `opened` identity; poll `loaded` |
@@ -186,5 +193,6 @@ app's data-directory policy (`RAWMAKASE_DATA_DIR` or the platform default).
 `--data-dir` can point the client to an app using an isolated data directory.
 
 An agent can invoke the CLI directly or implement an adapter over this protocol.
-A future MCP adapter can use the same commands without knowing MIDI numbers or
-keyboard shortcuts. No MCP server is included in this change.
+The bundled `rawmakase mcp` adapter exposes editing tools and preview images over
+stdio without knowing MIDI numbers or keyboard shortcuts. See [MCP setup and
+editing workflow](mcp.md).

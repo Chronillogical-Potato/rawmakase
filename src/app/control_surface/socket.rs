@@ -80,6 +80,13 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
                 .min(usize::MAX as u64) as usize,
             limit: request["limit"].as_u64().unwrap_or(100).clamp(1, 500) as usize,
         },
+        "curve" => {
+            let channel = serde_json::from_value(request["channel"].clone())
+                .map_err(|_| invalid("channel must be rgb, red, green or blue"))?;
+            let points = serde_json::from_value(request["points"].clone())
+                .map_err(|_| invalid("points must be an array of [input, output] pairs"))?;
+            Operation::Curve(channel, points)
+        }
         "set" => {
             let value = request["value"]
                 .as_f64()

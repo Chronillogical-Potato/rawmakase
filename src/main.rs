@@ -3,6 +3,7 @@
 use anyhow::Result;
 #[path = "../tools/rawmakase-ctl/src/client.rs"]
 mod control_client;
+mod mcp;
 use clap::{Parser, Subcommand};
 use rawmakase::{
     develop::{self, Recipe},
@@ -22,6 +23,8 @@ struct Args {
 enum Command {
     /// Control the running desktop app (enable external control in Preferences first).
     Control(control_client::Cli),
+    /// Serve editing tools over MCP stdio, connected to the running desktop app.
+    Mcp(mcp::Cli),
     /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
     ImportProfiles {
         #[arg(required = true, num_args = 1..)]
@@ -141,6 +144,7 @@ fn main() -> Result<()> {
         .ok();
     let a = Args::parse_from(&launch.arguments);
     match a.command {
+        Some(Command::Mcp(cli)) => mcp::run(cli)?,
         Some(Command::Control(cli)) => control_client::run(cli).map_err(anyhow::Error::msg)?,
         Some(Command::ImportLensProfiles { files }) => {
             for p in rawmakase::lens::lcp::import_files(&files)? {

@@ -6,7 +6,7 @@
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, TcpStream},
     path::PathBuf,
     time::{Duration, Instant},
@@ -211,18 +211,18 @@ fn dial_values(ticks: i32) -> Vec<u8> {
 }
 
 /// Where RAWmakase keeps its data, as src/storage/files.rs works it out.
-fn default_data_dir() -> PathBuf {
+pub fn default_data_dir() -> PathBuf {
     storage_paths::data_dir()
 }
 #[path = "../../../src/storage/paths.rs"]
 mod storage_paths;
 
-struct Connection {
+pub struct Connection {
     port: u16,
     token: String,
 }
 impl Connection {
-    fn read(dir: &std::path::Path) -> Result<Self, String> {
+    pub fn read(dir: &std::path::Path) -> Result<Self, String> {
         let path = dir.join("control.json");
         let text = std::fs::read_to_string(&path).map_err(|e| {
             format!(
@@ -245,7 +245,7 @@ impl Connection {
         })
     }
     /// Sends a request and returns the app's state after it.
-    fn ask(&self, mut request: Value) -> Result<Value, String> {
+    pub fn request(&self, mut request: Value) -> Result<Value, String> {
         request["token"] = self.token.clone().into();
         request["protocol"] = 1.into();
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -265,16 +265,32 @@ impl Connection {
                 self.port
             )
         })?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| e.to_string())?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .map_err(|e| e.to_string())?;
         writeln!(stream, "{request}").map_err(|e| e.to_string())?;
         let mut line = String::new();
-        BufReader::new(stream)
+        BufReader::new(stream.take(16 * 1024 * 1024))
             .read_line(&mut line)
             .map_err(|e| e.to_string())?;
+        if !line.ends_with('\n') {
+            return Err(
+                "incomplete or oversized control reply; inspect state before retrying a mutation"
+                    .into(),
+            );
+        }
         let reply: Value = serde_json::from_str(&line).map_err(|e| format!("bad reply: {e}"))?;
         if reply["protocol"] != 1 || reply["request_id"] != id {
             return Err("incompatible or mismatched control reply".into());
         }
+        Ok(reply)
+    }
+    /// CLI view of a validated reply. MCP retains the structured error and state.
+    fn ask(&self, request: Value) -> Result<Value, String> {
+        let reply = self.request(request)?;
         if reply["ok"] == true {
             let mut state = reply["state"].clone();
             state["result"] = reply["result"].clone();

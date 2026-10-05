@@ -210,3 +210,11 @@ output. The protocol and CLI are documented in [External control](automation.md)
 The built-in `rawmakase control` subcommand and optional `tools/rawmakase-ctl`
 client share source and the data-directory policy in `storage::paths`. The CLI
 performs transport and polling only, without creating an Editor or GUI context.
+
+`rawmakase mcp` is a stdio adapter built with the official Rust MCP SDK. It shares
+connection discovery and request/reply validation with the command-line client,
+and sends the same guarded commands through the local socket. It owns tool
+schemas and temporary preview images, but no recipe state or editing logic.
+Point-curve validation, history, auto adjustment and target checks remain in the
+application command layer. MCP errors retain application error codes; output
+jobs retain their captured edit revision. See [MCP](mcp.md) for setup and tools.
