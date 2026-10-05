@@ -786,21 +786,30 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     let mut gpu = Processor::new()?;
     let cancel = AtomicBool::new(false);
     let source = Source::from(image.as_ref());
-    let mut params = pixel_params(source, &r).expect("GPU port covers this recipe");
-    assert!(params.set_masks(source, &r, Some(&weights)));
-    let expected = develop_samples(source, &r, &samples, &cancel, Some(&weights))?;
-    let actual = gpu.develop(&samples, &params, &cancel)?;
-    let d: Vec<f32> = actual
-        .pixels
-        .iter()
-        .flatten()
-        .zip(expected.pixels.iter().flatten())
-        .map(|(a, b)| (a - b).abs())
-        .collect();
-    let mean = d.iter().sum::<f32>() / d.len() as f32;
-    let max = d.iter().copied().fold(0., f32::max);
-    eprintln!("masks: max {max:.6}, mean {mean:.8}");
-    assert!(max < 2e-3 && mean < 2e-5, "max {max}, mean {mean}");
+    for model in [
+        crate::develop::ContrastModel::Original,
+        crate::develop::ContrastModel::Adaptive,
+    ] {
+        r.contrast_model = model;
+        let mut params = pixel_params(source, &r).expect("GPU port covers this recipe");
+        assert!(params.set_masks(source, &r, Some(&weights)));
+        let expected = develop_samples(source, &r, &samples, &cancel, Some(&weights))?;
+        let actual = gpu.develop(&samples, &params, &cancel)?;
+        let d: Vec<f32> = actual
+            .pixels
+            .iter()
+            .flatten()
+            .zip(expected.pixels.iter().flatten())
+            .map(|(a, b)| (a - b).abs())
+            .collect();
+        let mean = d.iter().sum::<f32>() / d.len() as f32;
+        let max = d.iter().copied().fold(0., f32::max);
+        eprintln!("masks, {model:?}: max {max:.6}, mean {mean:.8}");
+        assert!(
+            max < 2e-3 && mean < 2e-5,
+            "{model:?}: max {max}, mean {mean}"
+        );
+    }
     Ok(())
 }
 

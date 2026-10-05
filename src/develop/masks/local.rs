@@ -122,13 +122,18 @@ impl LocalMath {
 }
 /// Local Contrast, Whites, Blacks and Dehaze: the measured global curves at the pixel's
 /// slider values, applied to ProPhoto-encoded values as DNG RGBTone does.
-pub(crate) fn tone(d: &LocalDelta, p: [f32; 3]) -> [f32; 3] {
+pub(crate) fn tone(
+    d: &LocalDelta,
+    p: [f32; 3],
+    contrast: crate::develop::basic_tone::ContrastCurve,
+) -> [f32; 3] {
     let curve = |x| {
         crate::develop::basic_tone::compose(
             d[slot::CONTRAST],
             d[slot::WHITES],
             d[slot::BLACKS],
             d[slot::DEHAZE],
+            contrast,
             x,
         )
     };
@@ -183,16 +188,21 @@ mod tests {
     }
     #[test]
     fn local_tone_is_the_global_curve_and_hue_rotates() {
+        use crate::develop::basic_tone::{BasicTone, ContrastCurve};
         let mut d = [0.; LEN];
-        assert_eq!(tone(&d, [0.2, 0.4, 0.6]), [0.2, 0.4, 0.6]);
+        let original = ContrastCurve::Original;
+        assert_eq!(tone(&d, [0.2, 0.4, 0.6], original), [0.2, 0.4, 0.6]);
         d[slot::CONTRAST] = 0.5;
-        let global = crate::develop::basic_tone::BasicTone::new(0.5, 0., 0., 0.).unwrap();
-        for p in [[0.2; 3], [0.1, 0.5, 0.9]] {
-            let (a, b) = (tone(&d, p), global.apply(p));
-            assert!(
-                a.iter().zip(b).all(|(x, y)| (x - y).abs() < 2e-3),
-                "{a:?} {b:?}"
-            );
+        d[slot::BLACKS] = -0.3;
+        for curve in [original, ContrastCurve::Pivot(0.45)] {
+            let global = BasicTone::new(0.5, 0., -0.3, 0., curve).unwrap();
+            for p in [[0.2; 3], [0.1, 0.5, 0.9]] {
+                let (a, b) = (tone(&d, p, curve), global.apply(p));
+                assert!(
+                    a.iter().zip(b).all(|(x, y)| (x - y).abs() < 2e-3),
+                    "{curve:?}: {a:?} {b:?}"
+                );
+            }
         }
         d[slot::HUE] = 90.;
         let lab = hue_saturation(&d, [0.5, 0.1, 0.]);

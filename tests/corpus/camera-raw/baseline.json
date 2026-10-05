@@ -27,12 +27,12 @@
     },
     "synthetic-d65": {
       "amount-contrast-200": [
-        2.792,
-        7.768
+        1.639,
+        7.269
       ],
       "amount-contrast-50": [
-        1.331,
-        3.397
+        1.046,
+        3.528
       ],
       "amount-curve-200": [
         2.591,
@@ -67,16 +67,16 @@
         2.991
       ],
       "amount-mono-100": [
-        1.595,
-        5.216
+        1.447,
+        5.163
       ],
       "amount-mono-200": [
-        2.564,
-        9.083
+        2.413,
+        8.418
       ],
       "amount-mono-50": [
-        1.203,
-        4.441
+        1.149,
+        4.394
       ],
       "amount-table-200": [
         1.349,
@@ -163,16 +163,16 @@
         2.328
       ],
       "contrast+100": [
-        3.798,
-        10.772
+        2.112,
+        9.642
       ],
       "contrast+50": [
-        2.159,
-        6.006
+        1.382,
+        5.821
       ],
       "contrast-50": [
-        1.598,
-        2.61
+        0.797,
+        2.217
       ],
       "curve-green-blue": [
         1.44,
@@ -407,8 +407,8 @@
         3.931
       ],
       "look-warm-contrast": [
-        3.975,
-        8.414
+        3.475,
+        7.789
       ],
       "luminance-aqua+100": [
         1.287,
@@ -478,21 +478,41 @@
         1.872,
         5.572
       ],
+      "pair-contrast+100-blacks+50": [
+        2.245,
+        9.329
+      ],
+      "pair-contrast+50-blacks-50": [
+        1.613,
+        8.25
+      ],
       "pair-contrast+50-saturation+50": [
-        2.765,
-        8.763
+        2.368,
+        8.808
+      ],
+      "pair-contrast+50-whites+50": [
+        1.774,
+        8.831
+      ],
+      "pair-contrast-50-blacks-50": [
+        0.973,
+        2.366
+      ],
+      "pair-contrast-50-whites-50": [
+        1.062,
+        2.238
       ],
       "pair-exposure+1-hue-red+50": [
         2.532,
         8.592
       ],
       "pair-exposure-1-contrast+50": [
-        2.194,
-        4.405
+        1.065,
+        3.145
       ],
       "pair-grading-shadows-contrast+50": [
-        2.716,
-        6.491
+        2.508,
+        6.551
       ],
       "pair-highlights-60-whites+50": [
         4.628,
@@ -521,6 +541,14 @@
       "pair-vibrance+50-saturation-50": [
         1.578,
         4.195
+      ],
+      "pair-whites+50-blacks-50": [
+        1.645,
+        7.952
+      ],
+      "pair-whites-50-blacks+50": [
+        1.539,
+        2.648
       ],
       "parametric-all+50": [
         1.947,
@@ -743,8 +771,8 @@
         2.317
       ],
       "rgb-table-contrast+50": [
-        1.679,
-        3.885
+        0.908,
+        2.568
       ],
       "rgb-table-exposure+1": [
         1.561,

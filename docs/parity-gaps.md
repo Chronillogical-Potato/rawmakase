@@ -9,7 +9,7 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## Tone
 
 - **Whites above about +50** adapt to the photo's highlights in Camera Raw. RAWmakase uses a median curve: extra error +0.009 at +50 and +0.058 at +100 on dim-highlight photos.
-- **Contrast pivot** moves with the photo in Camera Raw (0.41–0.51 of the range). RAWmakase uses the averaged curve, within about 0.005.
+- **Contrast** follows Camera Raw's curve, after Whites and Blacks, at a pivot predicted from the photo ([tone controls](tone-controls.md#contrast)); the prediction is within about 0.03 of the pivot that fits each photo best, and its extra error over the default render on photos is 0.003–0.007. Edits saved before this keep the averaged curve.
 - **Dehaze at ±100** adapts per photo and has a spatial part. RAWmakase uses one averaged curve: extra error +0.036/+0.044, while ±40 is within +0.014.
 - **Shadows +100 / Highlights −100** reach +0.010/+0.006 extra error, because the strength also adapts per photo.
 - **Clarity** changes luminance only, but single- and multi-scale local models reproduce only about a third of it: +50 leaves about 0.019 unexplained. The earlier operator is still used. **Texture** is small (+0.001) and unchanged.
