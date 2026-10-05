@@ -10,6 +10,7 @@
 //! against their last accepted renders.
 //!
 //! RAWMAKASE_BLESS=1 rewrites charts, snapshots and baselines instead of comparing.
+mod black_render;
 mod chart;
 mod dng;
 mod measure;
@@ -101,6 +102,7 @@ pub fn generate(spec: &ChartSpec, layout: &Layout) -> Vec<u8> {
             camera: &rendered.camera,
             as_shot_neutral: rendered.as_shot_neutral,
             profile: spec.profile,
+            black_render: dng::BlackRender::Auto,
         },
         &spec.camera,
     )

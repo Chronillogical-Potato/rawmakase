@@ -52,6 +52,22 @@ pub struct CameraProfile {
     look: Option<Table>,
     tone: Vec<[f32; 2]>,
     exposure: f32,
+    #[serde(default, skip_serializing_if = "BlackRender::is_auto")]
+    black_render: BlackRender,
+}
+/// The DNG `DefaultBlackRender` tag: whether the raw converter subtracts its
+/// default black (the exposure ramp at Shadows 5) under this profile. Adobe's
+/// camera-matching profiles say `None`, which keeps the camera's lifted shadows.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlackRender {
+    #[default]
+    Auto,
+    None,
+}
+impl BlackRender {
+    fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
 }
 /// How far `t` sits from the first calibration illuminant towards the second,
 /// interpolated in inverse temperature as the DNG specification does.
@@ -435,6 +451,9 @@ impl Table {
     }
 }
 impl CameraProfile {
+    pub fn black_render(&self) -> BlackRender {
+        self.black_render
+    }
     pub(crate) fn gpu_tables(&self, temperature: f32) -> GpuTables<'_> {
         GpuTables {
             hue: self
@@ -551,6 +570,7 @@ impl CameraProfile {
                 .map(|(i, y)| [i as f32 / 1024., *y])
                 .collect(),
             exposure: 0.,
+            black_render: BlackRender::Auto,
         };
         p.validate().ok()?;
         Some(p)

@@ -232,6 +232,12 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
         look: d.table(50981, 50982, 51108)?,
         tone,
         exposure: d.scalar(51109, 0.)?,
+        // DNG 1.4: 1 is None; 0 and values the specification reserves are Auto.
+        black_render: if d.scalar(51110, 0.)? == 1. {
+            super::BlackRender::None
+        } else {
+            super::BlackRender::Auto
+        },
     };
     p.validate()?;
     Ok(p)
