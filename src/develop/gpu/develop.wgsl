@@ -549,7 +549,7 @@ fn reference_curves(rgb: vec3<f32>) -> vec3<f32> {
     return PRO_TO_RGB * channels;
 }
 // color_mixer::ColorMixer (36 hues × 6 saturations × 6 values).
-fn mixer(rgb: vec3<f32>) -> vec3<f32> {
+fn mixer(rgb: vec3<f32>, base: i32) -> vec3<f32> {
     let q = max(RGB_TO_PRO * rgb, vec3(0.0));
     let max_v = max(max(max(q.x, q.y), q.z), 0.0);
     let min_v = min(min(q.x, q.y), q.z);
@@ -570,7 +570,6 @@ fn mixer(rgb: vec3<f32>) -> vec3<f32> {
     let v0 = u32(fv);
     let s1 = min(s0 + 1u, 5u);
     let v1 = min(v0 + 1u, 5u);
-    let base = offset(P_MIXER);
     var delta = vec3(0.0);
     for (var dh = 0; dh < 2; dh++) {
         let hi = u32(rem_euclid(h0 + f32(dh), 36.0));
@@ -945,9 +944,14 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     // color_stage
     rgb = reference_curves(rgb);
     if offset(P_MIXER) >= 0 {
-        // SaturationModel::Gray: below −50, a fade to the color's luminance.
-        let y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-        rgb = mixer(rgb);
+        // SaturationModel::Gray: below −50, a fade to the luminance the color has
+        // through the other sliders.
+        var source = rgb;
+        if offset(P_GRAY_SOURCE) >= 0 {
+            source = mixer(rgb, offset(P_GRAY_SOURCE));
+        }
+        let y = dot(source, vec3(0.2126, 0.7152, 0.0722));
+        rgb = mixer(rgb, offset(P_MIXER));
         rgb = mix(rgb, vec3(y), p(P_SATURATION_GRAY));
     }
     if offset(P_POINT) >= 0 {

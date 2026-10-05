@@ -667,6 +667,46 @@ pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 7] = [
     (ORIGINAL_SATURATION, (0, 1, 16)),
 ];
 
+/// A setting key, or the start of one, that belongs to an operator.
+pub(super) enum OperatorKey {
+    Exact(&'static str),
+    Prefix(&'static str),
+}
+impl OperatorKey {
+    pub(super) fn matches(&self, key: &str) -> bool {
+        match self {
+            Self::Exact(k) => key == *k,
+            Self::Prefix(p) => key.starts_with(p),
+        }
+    }
+}
+
+/// The settings whose presence in a packet means it carried that operator.
+pub(super) fn operator_keys(operator: &str) -> &'static [OperatorKey] {
+    use OperatorKey::*;
+    match operator {
+        ORIGINAL_SHARPENING => &[Exact("Sharpness")],
+        ORIGINAL_LENS_VIGNETTE => &[Exact("VignetteAmount")],
+        ORIGINAL_GRAIN => &[Exact("GrainAmount")],
+        ORIGINAL_CLARITY => &[Exact("Clarity2012")],
+        ORIGINAL_COLOR_MIXER => &[
+            Prefix("HueAdjustment"),
+            Prefix("SaturationAdjustment"),
+            Prefix("LuminanceAdjustment"),
+        ],
+        ORIGINAL_CALIBRATION => &[
+            Exact("RedHue"),
+            Exact("RedSaturation"),
+            Exact("GreenHue"),
+            Exact("GreenSaturation"),
+            Exact("BlueHue"),
+            Exact("BlueSaturation"),
+        ],
+        ORIGINAL_SATURATION => &[Exact("Saturation")],
+        _ => &[],
+    }
+}
+
 /// The release a RAWmakase `xmp:CreatorTool` names, such as "RAWmakase 0.1.15".
 pub(super) fn rawmakase_version(creator_tool: &str) -> Option<(u32, u32, u32)> {
     let mut parts = creator_tool

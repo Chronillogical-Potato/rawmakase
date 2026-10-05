@@ -1374,6 +1374,24 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
     )?
     .apply(&fresh, &m, &[], None)?;
     assert_eq!(new_preset.saturation_model, SaturationModel::Gray);
+    // The marker written as a child element counts too.
+    let child = parse(
+        Path::new("p.xmp"),
+        &xml(
+            &format!(r#"c:RAWmakasePreset="1" {settings}"#),
+            "<c:RAWmakaseMarkers>2</c:RAWmakaseMarkers>",
+        ),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(child.saturation_model, SaturationModel::Gray);
+    // An old preset without these settings leaves the photo's operators alone.
+    let exposure = parse(
+        Path::new("p.xmp"),
+        &xml(r#"c:RAWmakasePreset="1" c:Exposure2012="0.5""#, ""),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(exposure.saturation_model, SaturationModel::Gray);
+    assert_eq!(exposure.calibration_model, CalibrationModel::Measured);
     Ok(())
 }
 #[test]

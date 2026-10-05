@@ -101,6 +101,9 @@ pub(crate) struct ColorMixer {
     /// `SaturationModel::Gray`: how far colors fade to their luminance after the
     /// tables, from 0 (not at all) to 1 (gray).
     pub(crate) saturation_gray: f32,
+    /// The other sliders' grid, whose result gives the gray its luminance while
+    /// colors fade; `None` when they are all at 0 and the color's own is used.
+    pub(crate) gray_source: Option<Vec<[f32; 3]>>,
 }
 impl ColorMixer {
     pub(crate) fn new(r: &Recipe) -> Option<Self> {
@@ -135,70 +138,83 @@ impl ColorMixer {
         if active.is_empty() {
             return None;
         }
-        let delta = (0..CELLS)
-            .map(|cell| {
-                std::array::from_fn(|c| {
-                    active
-                        .iter()
-                        .map(|(t, w)| {
-                            let v = value(model, *t, c, cell);
-                            // Negative saturation sliders scale the saturation factor
-                            // linearly, as Camera Raw does: scaling the log factor of a
-                            // strong measured desaturation overshoots at −25 and −50.
-                            // Even tables are the negative extremes.
-                            if c == 1 && t % 2 == 0 {
-                                (1. + w * (v.exp2() - 1.)).max(1e-3).log2()
-                            } else {
-                                v * w
-                            }
-                        })
-                        .sum::<f32>()
-                })
-            })
+        // While colors fade to gray, the other sliders still set its brightness.
+        let others: Vec<_> = active
+            .iter()
+            .copied()
+            .filter(|(t, _)| *t != 48 && *t != 49)
             .collect();
+        let gray_source =
+            (saturation_gray > 0. && !others.is_empty()).then(|| grid(model, &others));
         Some(Self {
-            delta,
+            delta: grid(model, &active),
             saturation_gray,
+            gray_source,
         })
     }
-    /// Trilinear lookup between grid centres; hue wraps.
-    fn lookup(&self, h: f32, s: f32, v: f32) -> [f32; 3] {
-        lookup_with(h, s, v, |cell| self.delta[cell])
-    }
+
     /// `rgb` is linear display RGB (sRGB primaries).
     pub(crate) fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let mixed = self.tables(rgb);
+        let mixed = tables(&self.delta, rgb);
         if self.saturation_gray == 0. {
             return mixed;
         }
-        // The gray of the color as it came: Camera Raw's −100 keeps its luminance.
-        let y = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        // Camera Raw's −100 keeps the luminance the color has without Saturation.
+        let source = self.gray_source.as_ref().map_or(rgb, |g| tables(g, rgb));
+        let y = 0.2126 * source[0] + 0.7152 * source[1] + 0.0722 * source[2];
         mixed.map(|v| v + self.saturation_gray * (y - v))
     }
-    fn tables(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| v.max(0.));
-        let Some([h, s, max]) = hsv(p) else {
-            return rgb;
-        };
-        let [dh, ds, dv] = self.lookup(h, s, max);
-        let h = (h + dh).rem_euclid(1.) * 6.;
-        let s = (s * ds.exp2()).clamp(0., 1.);
-        let v = max * dv.exp2();
-        let c = v * s;
-        let x = c * (1. - (h % 2. - 1.).abs());
-        let q = match h as usize {
-            0 => [c, x, 0.],
-            1 => [x, c, 0.],
-            2 => [0., c, x],
-            3 => [0., x, c],
-            4 => [x, 0., c],
-            _ => [c, 0., x],
-        };
-        mul(
-            crate::camera_profiles::PRO_TO_RGB,
-            q.map(|v| v + (max * dv.exp2()) - c),
-        )
-    }
+}
+
+/// `rgb` (linear display RGB) through a grid of changes.
+fn tables(delta: &[[f32; 3]], rgb: [f32; 3]) -> [f32; 3] {
+    let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| v.max(0.));
+    let Some([h, s, max]) = hsv(p) else {
+        return rgb;
+    };
+    let [dh, ds, dv] = lookup_with(h, s, max, |cell| delta[cell]);
+    let h = (h + dh).rem_euclid(1.) * 6.;
+    let s = (s * ds.exp2()).clamp(0., 1.);
+    let v = max * dv.exp2();
+    let c = v * s;
+    let x = c * (1. - (h % 2. - 1.).abs());
+    let q = match h as usize {
+        0 => [c, x, 0.],
+        1 => [x, c, 0.],
+        2 => [0., c, x],
+        3 => [0., x, c],
+        4 => [x, 0., c],
+        _ => [c, 0., x],
+    };
+    mul(
+        crate::camera_profiles::PRO_TO_RGB,
+        q.map(|v| v + (max * dv.exp2()) - c),
+    )
+}
+
+/// The summed change of the `active` tables (index, strength), one grid.
+fn grid(model: MixerModel, active: &[(usize, f32)]) -> Vec<[f32; 3]> {
+    (0..CELLS)
+        .map(|cell| {
+            std::array::from_fn(|c| {
+                active
+                    .iter()
+                    .map(|(t, w)| {
+                        let v = value(model, *t, c, cell);
+                        // Negative saturation sliders scale the saturation factor
+                        // linearly, as Camera Raw does: scaling the log factor of a
+                        // strong measured desaturation overshoots at −25 and −50.
+                        // Even tables are the negative extremes.
+                        if c == 1 && t % 2 == 0 {
+                            (1. + w * (v.exp2() - 1.)).max(1e-3).log2()
+                        } else {
+                            v * w
+                        }
+                    })
+                    .sum::<f32>()
+            })
+        })
+        .collect()
 }
 
 /// How strongly each band's `channel` slider (0 hue, 1 saturation, 2 luminance)
@@ -350,6 +366,20 @@ mod tests {
         let half = at(SaturationModel::Gray, -0.75);
         let from = at(SaturationModel::Gray, -0.5);
         assert!((half[0] - (from[0] + y) / 2.).abs() < 1e-5);
+        // Band Luminance still sets the gray's brightness, as without Saturation.
+        let mut darker = recipe(SaturationModel::Gray, -1.);
+        darker.hsl[1][2] = -1.;
+        let mixer = ColorMixer::new(&darker).unwrap();
+        let toned = mixer.apply(orange);
+        let mut no_saturation = darker.clone();
+        no_saturation.saturation = 0.;
+        let alone = ColorMixer::new(&no_saturation).unwrap().apply(orange);
+        let y_alone = 0.2126 * alone[0] + 0.7152 * alone[1] + 0.0722 * alone[2];
+        assert!(
+            toned.iter().all(|v| (v - y_alone).abs() < 1e-5),
+            "{toned:?}"
+        );
+        assert!(y_alone < y * 0.95);
         // The photo tables' extrapolated −100 leaves some color.
         let old = at(SaturationModel::Original, -1.);
         assert!(old[0] - old[2] > 0.02, "{old:?}");
