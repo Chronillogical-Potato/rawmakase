@@ -720,6 +720,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         calibration::CalibrationModel,
         clarity::ClarityModel,
         color_mixer::MixerModel,
+        color_noise::NoiseModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
     };
@@ -753,7 +754,9 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     old.effects.clarity = 0.3;
     old.hsl[5][2] = -0.4;
     old.effects.calibration[0][0] = 0.3;
+    old.noise_chroma = 0.3;
     let back = read(&old)?;
+    assert_eq!(back.noise_model, NoiseModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
     assert_eq!(back.clarity_model, ClarityModel::Original);
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
@@ -771,6 +774,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.clarity_model, ClarityModel::Original);
     assert_eq!(back.mixer_model, MixerModel::Original);
     assert_eq!(back.calibration_model, CalibrationModel::Original);
+    assert_eq!(back.noise_model, NoiseModel::Original);
     let measured = Recipe {
         sharpening_model: SharpeningModel::Measured,
         lens_vignette_model: LensVignetteModel::Measured,
@@ -778,6 +782,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         clarity_model: ClarityModel::Measured,
         mixer_model: MixerModel::Chart,
         calibration_model: CalibrationModel::Measured,
+        noise_model: NoiseModel::Measured,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
@@ -788,5 +793,6 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.clarity_model, ClarityModel::Measured);
     assert_eq!(back.mixer_model, MixerModel::Chart);
     assert_eq!(back.calibration_model, CalibrationModel::Measured);
+    assert_eq!(back.noise_model, NoiseModel::Measured);
     Ok(())
 }

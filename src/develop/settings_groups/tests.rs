@@ -61,6 +61,7 @@ fn everything_changed() -> Recipe {
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
         retouch_model: crate::develop::retouch::RetouchModel::Measured,
+        noise_model: crate::develop::color_noise::NoiseModel::Measured,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
         calibration_model: crate::develop::calibration::CalibrationModel::Measured,

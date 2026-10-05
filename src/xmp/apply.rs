@@ -440,6 +440,20 @@ impl Preset {
         }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
+        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        if [
+            "ColorNoiseReduction",
+            "ColorNoiseReductionDetail",
+            "ColorNoiseReductionSmoothness",
+        ]
+        .iter()
+        .any(|k| settings.values.contains_key(*k))
+        {
+            r.noise_model = crate::develop::color_noise::NoiseModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_COLOR_NOISE) {
+            r.noise_model = crate::develop::color_noise::NoiseModel::Original;
+        }
         Ok(())
     }
 

@@ -104,6 +104,7 @@ pub fn auto_tone_basis(r: &Recipe) -> Recipe {
         grading: d.grading,
         noise_luma: d.noise_luma,
         noise_chroma: d.noise_chroma,
+        noise_model: d.noise_model,
         sharpening: d.sharpening,
         sharpening_radius: d.sharpening_radius,
         sharpening_detail: d.sharpening_detail,

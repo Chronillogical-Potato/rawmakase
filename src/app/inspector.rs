@@ -1204,7 +1204,12 @@ impl Editor {
                 slider(ui, "Detail", &mut r.effects.luma_detail, 0. ..=1., 0.5);
                 slider(ui, "Contrast", &mut r.effects.luma_contrast, 0. ..=1., 0.);
             });
-            slider(ui, "Color", &mut r.noise_chroma, 0. ..=1., 0.);
+            let color_default = if r.noise_model.is_original() {
+                0.
+            } else {
+                0.25
+            };
+            slider(ui, "Color", &mut r.noise_chroma, 0. ..=1., color_default);
             ui.push_id("color-nr", |ui| {
                 slider(ui, "Detail", &mut r.effects.chroma_detail, 0. ..=1., 0.5);
                 slider(
@@ -1218,11 +1223,9 @@ impl Editor {
         }) {
             let d = Recipe::default().effects;
             r.noise_luma = 0.;
-            r.noise_chroma = 0.;
             r.effects.luma_detail = d.luma_detail;
             r.effects.luma_contrast = d.luma_contrast;
-            r.effects.chroma_detail = d.chroma_detail;
-            r.effects.chroma_smoothness = d.chroma_smoothness;
+            r.set_color_noise_defaults(crate::develop::color_noise::NoiseModel::Measured);
             // Reset brings the current defaults, with the measured operator.
             r.set_sharpening_defaults(SharpeningModel::Measured);
         }
