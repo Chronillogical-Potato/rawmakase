@@ -349,6 +349,7 @@ impl Editor {
             status,
             ..
         } = header;
+        self.document.file = crate::storage::Identity::read(&p).ok();
         self.document.metadata = Some(m);
         self.document.recipe = r;
         self.document.export = ex;

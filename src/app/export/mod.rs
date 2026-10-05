@@ -191,9 +191,13 @@ impl Editor {
                     }
                 }
             }
-            // A photo opened without a catalog.
+            // A photo opened without a catalog, still where it was opened from.
             _ if shown && open.is_none() => {
                 let source = self.document.path.clone().unwrap_or_default();
+                if !source.is_file() {
+                    self.status = format!("{} can't be exported: Offline", source.display());
+                    return None;
+                }
                 scope.photos.push(Chosen {
                     id: None,
                     name: source
@@ -362,7 +366,7 @@ impl Editor {
                     photo.edit = Edit::Shown {
                         recipe: Box::new(self.document.recipe.clone()),
                         unsaved,
-                        file: crate::storage::Identity::read(&chosen.source).ok(),
+                        file: self.document.file.clone(),
                     };
                 }
                 photo

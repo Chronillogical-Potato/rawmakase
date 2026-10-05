@@ -493,13 +493,24 @@ impl Editor {
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         // Export… and Export with Previous work in the Library too, on its selection.
-        if !self.export_modal() && !self.activity.is_busy() && !ctx.text_edit_focused() {
+        // Behind any dialog they don't; the chord is read from the key press itself.
+        if !self.command_modal() && !self.activity.is_busy() && !ctx.text_edit_focused() {
             let export = ctx.input(|i| {
-                let e = i.events.iter().any(|event| {
-                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
-                        if *key == egui::Key::E || *physical_key == Some(egui::Key::E))
-                });
-                (e && i.modifiers.command && i.modifiers.shift).then_some(i.modifiers.alt)
+                i.events.iter().find_map(|event| match event {
+                    egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    } if (*key == egui::Key::E || *physical_key == Some(egui::Key::E))
+                        && modifiers.command
+                        && modifiers.shift =>
+                    {
+                        Some(modifiers.alt)
+                    }
+                    _ => None,
+                })
             });
             match export {
                 Some(true) => self.export_with_previous(),

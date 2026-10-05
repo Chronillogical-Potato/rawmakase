@@ -172,3 +172,35 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
     assert!(e.status.contains("can't be exported"), "{}", e.status);
     Ok(())
 }
+
+#[test]
+fn a_photo_opened_without_a_catalog_is_exported_only_while_its_file_is_there() -> anyhow::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("a.dng");
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/charts/synthetic-d65.dng"),
+        &path,
+    )?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    e.document.path = Some(path.clone());
+    e.document.metadata = Some(Default::default());
+    e.document.set_image(Arc::new(crate::raw::CameraImage {
+        recovered: Default::default(),
+        width: 1,
+        height: 1,
+        pixels: vec![[0.1; 3]],
+        metadata: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    let scope = e.export_scope().expect("the open photo");
+    assert!(scope.photos[0].open && scope.photos[0].id.is_none());
+    std::fs::remove_file(&path)?;
+    assert!(e.export_scope().is_none());
+    assert!(e.status.contains("Offline"), "{}", e.status);
+    Ok(())
+}

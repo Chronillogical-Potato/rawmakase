@@ -34,6 +34,9 @@ pub(super) struct Document {
     /// The photo's Lightroom settings, as read with its edit, to apply once its
     /// profiles arrive.
     pub(super) pending_lightroom: Option<String>,
+    /// The photo's file as it was when it was opened: what an export of the edit
+    /// shown checks it still has.
+    pub(super) file: Option<crate::storage::Identity>,
     /// Where the edit on screen started from.
     pub(super) origin: EditOrigin,
     /// The raw defaults for this photo, once its profiles are known: what Reset

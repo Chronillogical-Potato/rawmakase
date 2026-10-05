@@ -539,7 +539,13 @@ fn commit(
     loop {
         // A file under the name in other case is the same name here; an exact-name
         // check alone misses it on a case-sensitive volume.
-        let appeared = match spelled_otherwise(&target) {
+        // The exact name first, then the name in other case.
+        let found = if exactly(&target) {
+            Some(target.clone())
+        } else {
+            spelled_otherwise(&target)
+        };
+        let appeared = match found {
             Some(existing) => existing,
             None => match staged.persist_noclobber(&target) {
                 Ok(_) => {
