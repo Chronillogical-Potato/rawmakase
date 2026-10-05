@@ -391,9 +391,31 @@ fn measured(t: i32, values: i32, s_in: f32, x: f32) -> f32 {
 fn local_tone_curve(x_in: f32) -> f32 {
     let t = offset(P_LOCAL_TONE);
     var x = measured(t, t + 1536, delta[L_DEHAZE], x_in);
-    x = measured(t + 384, t + 1542, delta[L_CONTRAST], x);
+    let pivot = p(P_LOCAL_PIVOT);
+    if pivot < 0.0 {
+        x = measured(t + 384, t + 1542, delta[L_CONTRAST], x);
+        x = measured(t + 768, t + 1542, delta[L_WHITES], x);
+        return measured(t + 1152, t + 1542, delta[L_BLACKS], x);
+    }
     x = measured(t + 768, t + 1542, delta[L_WHITES], x);
-    return measured(t + 1152, t + 1542, delta[L_BLACKS], x);
+    x = measured(t + 1152, t + 1542, delta[L_BLACKS], x);
+    return contrast_at(t + 1548, table(t + 1932), pivot, t + 1542, delta[L_CONTRAST], x);
+}
+// basic_tone::contrast_at: the chart's Contrast table at `t` (pivoting at `chart`)
+// moved to `pivot` by a power warp of gamma-2.2 encoded values.
+fn contrast_at(t: i32, chart: f32, pivot: f32, values: i32, s: f32, x: f32) -> f32 {
+    if s == 0.0 {
+        return x;
+    }
+    let k = log(gamma22(chart)) / log(gamma22(pivot));
+    let y = measured(t, values, s, from_gamma22(powf(gamma22(x), k)));
+    return from_gamma22(powf(gamma22(y), 1.0 / k));
+}
+fn gamma22(v: f32) -> f32 {
+    return powf(srgb_decode(clamp(v, 0.0, 1.0)), 1.0 / 2.2);
+}
+fn from_gamma22(w: f32) -> f32 {
+    return srgb_encode(powf(clamp(w, 0.0, 1.0), 2.2));
 }
 fn local_gain(pos: vec2<f32>, rgb: vec3<f32>) -> f32 {
     let w = u32(p(P_LOCAL_SIZE));

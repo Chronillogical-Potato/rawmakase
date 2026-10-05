@@ -660,7 +660,7 @@ fn local_stage(
     // The engine 4 Shadows/Highlights map starts from a reduced copy of the toned image,
     // for the global sliders or a mask's.
     if let Some(cache) = cache
-        && develop::pipeline::pixel_params::needs_map(r)
+        && develop::pipeline::pixel_params::needs_reduced(r)
     {
         let key = ReducedKey::new(&toned);
         let bytes = |im: &CameraImage| im.pixels.len() * 12;
@@ -803,7 +803,7 @@ fn render_resident(
             return Ok(None);
         }
     }
-    if develop::pipeline::pixel_params::needs_map(&base) {
+    if develop::pipeline::pixel_params::needs_reduced(&base) {
         let edge = develop::local_tone::MAP_EDGE;
         let size = if source.width.max(source.height) <= edge {
             (source.width, source.height)

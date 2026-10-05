@@ -55,6 +55,7 @@ fn everything_changed() -> Recipe {
         reference_calibration: true,
         reference_color: true,
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         temperature: 4000.,
         tint: 12.,
         wb: [1.5, 1., 0.8],

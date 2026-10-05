@@ -44,6 +44,7 @@ fn old_recipes_keep_original_profile_tones() {
         "reference_calibration",
         "reference_color",
         "parametric_model",
+        "contrast_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -58,14 +59,20 @@ fn old_recipes_keep_original_profile_tones() {
         old.parametric_model,
         crate::develop::parametric::ParametricModel::Original
     );
+    assert_eq!(
+        old.contrast_model,
+        crate::develop::basic_tone::ContrastModel::Original
+    );
     assert!(Recipe::default().profile_tone);
     // The measured parametric curve is saved, and read back.
     let measured = Recipe {
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
     assert_eq!(back.parametric_model, measured.parametric_model);
+    assert_eq!(back.contrast_model, measured.contrast_model);
 }
 
 #[test]

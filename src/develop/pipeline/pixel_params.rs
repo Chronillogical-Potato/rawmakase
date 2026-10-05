@@ -61,6 +61,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("EXPOSURE_EV", 1),
     ("LOCAL_WB", 6),
     ("LOCAL_TONE", 1),
+    // The masks' Contrast pivot, or -1 for the original Contrast before Whites and Blacks.
+    ("LOCAL_PIVOT", 1),
     ("LOCAL_FAMILIES", 1),
     ("LOCAL_KEYS", 2),
     ("GLOBAL_SH", 2),
@@ -157,6 +159,11 @@ pub(crate) fn needs_map(r: &Recipe) -> bool {
     r.engine >= 4
         && r.reference_curves
         && (r.shadows != 0. || r.highlights != 0. || masks_need_map(r))
+}
+/// Whether a render needs the photo reduced for the Shadows/Highlights map or for
+/// measuring the photo's Contrast pivot; the stage cache keeps it between renders.
+pub(crate) fn needs_reduced(r: &Recipe) -> bool {
+    needs_map(r) || super::measures_contrast_pivot(r)
 }
 /// Parameters that stop after the tone stage (`tone_stage`, before the map), to tone
 /// the reduced photo the Shadows/Highlights map is built from on the GPU.
@@ -268,6 +275,13 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("BASIC", &[basic]);
+    p.set(
+        "LOCAL_PIVOT",
+        &[match lut.contrast {
+            crate::develop::basic_tone::ContrastCurve::Original => -1.,
+            crate::develop::basic_tone::ContrastCurve::Pivot(pivot) => pivot,
+        }],
+    );
     p.set("LEVELS", &[r.black_point, r.white_point, r.midtone]);
     let e = &r.effects;
     // The original per-channel curve runs in `level`, the measured one after it.

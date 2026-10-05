@@ -12,7 +12,7 @@ Adobe's rendering subtracts a small black level before the tone curve: the DNG S
 
 ## Engine 4 implementation
 
-`src/develop/basic_tone.rs` applies Contrast → Whites → Blacks as one composed curve after the camera profile's tone curve and before the user's point curve. The curves are the measured averages in `basic_tone_data.rs`, interpolated between slider positions with 0 as the identity. They replace the earlier power-S contrast and luminance-weighted Whites/Blacks for engine 4. Older recipes keep their operators.
+`src/develop/basic_tone.rs` applies Whites → Blacks → Contrast as one composed curve after the camera profile's tone curve and before the user's point curve (recipes saved before the [adaptive Contrast](#contrast) keep Contrast → Whites → Blacks and the averaged Contrast below). The curves are the measured averages in `basic_tone_data.rs`, interpolated between slider positions with 0 as the identity. They replace the earlier power-S contrast and luminance-weighted Whites/Blacks for engine 4. Older recipes keep their operators.
 
 Extra MAE over the default render, averaged across the five photos (previous operators in parentheses):
 
@@ -21,6 +21,17 @@ Extra MAE over the default render, averaged across the five photos (previous ope
 | Contrast | −0.0009 | −0.0004 (+0.0107) | −0.0001 | +0.0001 | +0.0002 (+0.0061) | +0.0002 |
 | Blacks | −0.0008 | +0.0007 (+0.0189) | +0.0007 | −0.0005 | −0.0004 (+0.0009) | +0.0005 |
 | Whites | −0.0011 | −0.0010 (+0.0031) | −0.0005 | +0.0019 | +0.0091 (+0.0152) | +0.0577 |
+
+### Contrast
+
+Camera Raw's Contrast is one curve whose pivot (the level it leaves alone) depends on the photo, not on the user's Exposure, and it comes after Whites and Blacks:
+
+- On the synthetic chart rendered at Exposure −1.5, −0.75, 0 and +0.75 the pivot stays at 0.56–0.57 (encoded), so it is measured on the photo before the user's Exposure.
+- Rendered together, Blacks then Contrast and Whites then Contrast explain Camera Raw to 0.05–0.17/255 on the gray ramp; RAWmakase's earlier order, Contrast first, was 0.8–3.4/255 off. Whites comes before Blacks (0.02–0.09/255).
+- The chart's Contrast curve, moved to another pivot by a power warp of gamma-2.2 encoded values, explains every photo's Camera Raw Contrast at all six measured amounts with one pivot per photo (0.002–0.01 MAE on 33 photos, block means). The pivots range from 0.36 to 0.63.
+- The pivot follows the photo's default rendering: it rises with its mean encoded luminance and falls with the middle of its range (halfway between the 1st and 99th percentiles of 48-across block means): pivot = 0.577 + 0.568 · mean − 0.689 · middle. In leave-one-out tests on the 33 photos and the chart this predicts the pivot to 0.031, against a spread of 0.058 (`scripts/corpus/contrast-curve.py`).
+
+Engine 4 renders this (`ContrastModel::Adaptive`): the chart's measured Contrast (`CONTRAST_CHART`, Camera Raw 18.7) moved to the pivot measured on the photo's reduced copy, as its profile, white balance and calibration render it at the camera's exposure, after Whites and Blacks. Masks' Contrast uses the same pivot. Extra MAE over the default render on the private photos, compared with RAWmakase's own default render, falls from 0.0046 to 0.0033 on the five sweep photos (Contrast ±25, ±50, ±100) and from 0.0095 to 0.0066 on 14 sample photos (Contrast +50). On the chart, `contrast±*` cases go from 1.6–3.8 to 0.8–2.1 mean ΔE00 and Contrast with Blacks or Whites from 1.8–3.4 to 1.0–2.2. Recipes saved before it keep the averaged curve before Whites and Blacks (`contrast_model` missing means `Original`).
 
 ### Shadows and Highlights
 
@@ -111,6 +122,6 @@ A photo takes one render of the reduced copy, after highlight recovery and the r
 ## Remaining
 
 - Positive Whites needs the image-adaptive white point. The table is a median, which is poor on photos with dim highlights at +100.
-- Contrast's photo-dependent pivot is not yet modeled. The averaged curve already matches within about 0.005.
+- Contrast's pivot is predicted from two statistics of the photo to about 0.03; what Camera Raw measures exactly is unknown.
 - Auto's Whites: Lightroom's choice follows the brightest percentiles only loosely (90th percentile error about 30).
 - Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.

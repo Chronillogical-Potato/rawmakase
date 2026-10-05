@@ -946,6 +946,55 @@
    }
   },
   {
+   "name": "pair-contrast+50-blacks-50",
+   "settings": {
+    "Contrast2012": "+50",
+    "Blacks2012": "-50"
+   }
+  },
+  {
+   "name": "pair-contrast-50-blacks-50",
+   "settings": {
+    "Contrast2012": "-50",
+    "Blacks2012": "-50"
+   }
+  },
+  {
+   "name": "pair-contrast+100-blacks+50",
+   "settings": {
+    "Contrast2012": "+100",
+    "Blacks2012": "+50"
+   }
+  },
+  {
+   "name": "pair-contrast+50-whites+50",
+   "settings": {
+    "Contrast2012": "+50",
+    "Whites2012": "+50"
+   }
+  },
+  {
+   "name": "pair-contrast-50-whites-50",
+   "settings": {
+    "Contrast2012": "-50",
+    "Whites2012": "-50"
+   }
+  },
+  {
+   "name": "pair-whites+50-blacks-50",
+   "settings": {
+    "Whites2012": "+50",
+    "Blacks2012": "-50"
+   }
+  },
+  {
+   "name": "pair-whites-50-blacks+50",
+   "settings": {
+    "Whites2012": "-50",
+    "Blacks2012": "+50"
+   }
+  },
+  {
    "name": "pair-vibrance+50-saturation-50",
    "settings": {
     "Vibrance": "+50",
