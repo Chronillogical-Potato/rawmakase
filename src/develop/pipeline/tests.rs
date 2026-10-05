@@ -1291,6 +1291,12 @@ fn a_looks_parametric_curve_follows_the_users() {
     for x in [0.1, 0.3, 0.5, 0.7, 0.9] {
         assert!((curve.eval(x) - own.eval(user.eval(x))).abs() < 1e-3, "{x}");
     }
+    // Off the measured path the layered curve has no curve of its own for the look,
+    // so the look's regions join the user's there.
+    r.reference_curves = false;
+    let legacy = r.with_profile_adjustments().into_owned();
+    assert!((legacy.effects.parametric[1] - 0.15).abs() < 1e-6);
+    r.reference_curves = true;
     r.parametric_model = ParametricModel::Measured;
     let added = r.with_profile_adjustments().into_owned();
     assert!((added.effects.parametric[1] - 0.15).abs() < 1e-6);
