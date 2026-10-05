@@ -564,10 +564,9 @@ impl Editor {
                 }
             }
             Operation::ControlValue(param, value) => {
-                let (min, max) = param.range(target.mask.is_some());
                 self.command_parameter(
                     param,
-                    Some(min + (max - min) * f32::from(value) / 127.),
+                    Some(param.control_value(value, target.mask.is_some())),
                     0,
                     target,
                     ctx,

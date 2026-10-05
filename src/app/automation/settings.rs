@@ -349,10 +349,8 @@ impl Editor {
                 .clicked()
             {
                 // This build omits eframe's links feature. Use the same platform
-                // launcher as app updates; the permalink survives branch deletion.
-                match crate::platform::web::open(
-                    "https://github.com/pch/rawmakase/blob/74dab09ddce1c376427a81b5cba85728e50482bb/docs/mcp.md",
-                ) {
+                // launcher as app updates; build.rs selects matching documentation.
+                match crate::platform::web::open(env!("RAWMAKASE_MCP_GUIDE")) {
                     Ok(()) => {
                         ui.data_mut(|d| d.remove_temp::<String>(error_id));
                     }

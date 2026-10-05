@@ -224,6 +224,20 @@ impl Param {
             _ => (-100., 100.),
         }
     }
+    /// Preserve both endpoints and the neutral centre of bipolar controls.
+    pub(in crate::app) fn control_value(self, value: u8, mask: bool) -> f32 {
+        let (min, max) = self.range(mask);
+        let value = f32::from(value.min(127));
+        if min < 0. && max > 0. {
+            if value <= 64. {
+                min * (64. - value) / 64.
+            } else {
+                max * (value - 64.) / 63.
+            }
+        } else {
+            min + (max - min) * value / 127.
+        }
+    }
     pub(in crate::app) fn capabilities() -> Vec<super::reply::Parameter> {
         let items: Vec<_> = Self::all()
             .into_iter()

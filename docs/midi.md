@@ -15,7 +15,8 @@ work on Linux and do not need a MIDI device.
 4. Expand **Control mappings**. Move a control to discover its CC or note number,
    or use **Add a control** to enter a number manually. Assign its parameter or action.
 5. Choose each dial/slider's **Control format**. Absolute controls map 0–127 to
-   the parameter range; relative formats support 1/127, 65/63, or 1/65 encoders.
+   the parameter range, with 64 exactly zero for bipolar parameters such as
+   Exposure and Contrast. Temperature in kelvin remains linear. Relative formats support 1/127, 65/63, or 1/65 encoders.
    The Loupedeck+ profile uses 1/127; custom controls default to absolute.
 
 Each device has its own mappings, enabled state, connection status and held

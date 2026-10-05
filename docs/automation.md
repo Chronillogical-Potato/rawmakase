@@ -157,6 +157,11 @@ use target guards for a sequence that must refer to the same edit.
 | `cc` | integer `cc`, `value` (0…127) | Legacy device mapping |
 | `note` | integer `note` (0…127), `press`: `click`, `down`, `up` | Legacy device mapping |
 
+Raw socket `cc` and `note` requests use the fixed Loupedeck+ default mapping,
+independent of configured MIDI devices and their custom mappings. Their held
+modifiers are separate from physical devices. Use semantic `set`, `turn` and
+`action` commands for device-independent scripting.
+
 The legacy `action` shortcut notation (`cmd+shift+z`, etc.) resolves to supported
 named actions. Unknown shortcuts fail explicitly. Legacy requests may omit
 `protocol`; explicit unsupported versions are rejected. `target` accepts only

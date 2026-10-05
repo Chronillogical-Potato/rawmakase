@@ -565,3 +565,25 @@ fn absolute_controls_use_parameter_ranges_and_devices_have_separate_undo() {
     assert_eq!(e.document.recipe.masks[0].adjust.exposure, 4.);
     assert_eq!(e.document.recipe.exposure, 0.);
 }
+
+#[test]
+fn absolute_controls_preserve_endpoints_neutral_and_monotonicity() {
+    for (_, param) in Param::all() {
+        for mask in [false, true] {
+            let (min, max) = param.range(mask);
+            assert_eq!(param.control_value(0, mask), min);
+            assert_eq!(param.control_value(127, mask), max);
+            if min < 0. && max > 0. {
+                assert_eq!(param.control_value(64, mask), 0.);
+            } else {
+                assert_eq!(
+                    param.control_value(64, mask),
+                    min + (max - min) * 64. / 127.
+                );
+            }
+            for value in 1..=127 {
+                assert!(param.control_value(value, mask) > param.control_value(value - 1, mask));
+            }
+        }
+    }
+}
