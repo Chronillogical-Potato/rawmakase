@@ -14,6 +14,7 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub(crate) use heal::FeatherProfile;
 pub(crate) use heal::profile;
 pub(crate) use layer::{RetouchCache, Retouching, apply};
 pub use search::find_source;
@@ -35,6 +36,27 @@ pub enum RetouchShape {
         points: Arc<[[f32; 2]]>,
         radius: f32,
     },
+}
+/// Which soft edge a recipe's Heal and Clone operations render with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RetouchModel {
+    /// RAWmakase's first feather, a smoothstep over the feathered width: what recipes
+    /// saved before the measured one keep, so they render as they did.
+    #[default]
+    Original,
+    /// The feather measured in Camera Raw.
+    Measured,
+}
+impl RetouchModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+    pub(crate) fn feather(self) -> FeatherProfile {
+        match self {
+            Self::Original => FeatherProfile::Smoothstep,
+            Self::Measured => FeatherProfile::Measured,
+        }
+    }
 }
 /// One Heal or Clone operation. Operations apply in list order; later ones see the
 /// result of earlier ones, as in Lightroom.

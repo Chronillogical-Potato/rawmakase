@@ -64,11 +64,12 @@ pub(crate) struct Placed {
     pub(crate) points: Vec<[f32; 2]>,
     pub(crate) radius: f32,
     pub(crate) feather: f32,
+    pub(crate) profile: FeatherProfile,
     /// Source minus destination, in decoded pixels.
     pub(crate) offset: [f32; 2],
 }
 impl Placed {
-    pub(crate) fn new(op: &RetouchOp, frame: &ImageFrame) -> Self {
+    pub(crate) fn new(op: &RetouchOp, frame: &ImageFrame, profile: FeatherProfile) -> Self {
         let points: Vec<[f32; 2]> = match &op.shape {
             RetouchShape::Spot { center, .. } => vec![frame.to_source(*center)],
             RetouchShape::Brush { points, .. } => {
@@ -84,6 +85,7 @@ impl Placed {
             points,
             radius: (op.radius() * frame.long_edge()).max(0.5),
             feather: op.feather,
+            profile,
             offset: [b[0] - a[0], b[1] - a[1]],
         }
     }
@@ -115,13 +117,73 @@ impl Placed {
         [d, s]
     }
 }
+/// How coverage falls off over a feathered edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FeatherProfile {
+    /// 1 inside `1 - feather` of the radius, smoothstep down to 0 at the radius.
+    Smoothstep,
+    /// Camera Raw 18.7's, measured on Clone spots: see [`measured`].
+    Measured,
+}
+/// Camera Raw's coverage at Feather 25, 50, 75 and 100, at distances 0, 0.04, …, 1 of
+/// the radius: the weight of the source in the linear blend, measured on Clone spots of
+/// a flat gray copied from a brighter flat (Opacity 100, radius 46 pixels) and taken
+/// back through the tone curve with RAWmakase's own spots of known weight. Feather 0
+/// is a hard edge.
+const MEASURED_FEATHERS: [f32; 4] = [0.25, 0.5, 0.75, 1.];
+const MEASURED_STEP: f32 = 0.04;
+const MEASURED: [[f32; 26]; 4] = [
+    [
+        1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0.999, 0.995,
+        0.98, 0.935, 0.794, 0.429, 0.,
+    ],
+    [
+        1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0.999, 0.998, 0.995, 0.991, 0.982, 0.967,
+        0.939, 0.893, 0.818, 0.706, 0.551, 0.347, 0.127, 0.,
+    ],
+    [
+        1., 1., 1., 1., 1., 0.999, 0.999, 0.997, 0.994, 0.99, 0.982, 0.972, 0.956, 0.932, 0.902,
+        0.861, 0.811, 0.748, 0.669, 0.575, 0.467, 0.352, 0.237, 0.126, 0.039, 0.,
+    ],
+    [
+        1., 1., 0.998, 0.995, 0.989, 0.978, 0.964, 0.946, 0.921, 0.892, 0.856, 0.815, 0.766, 0.709,
+        0.649, 0.583, 0.514, 0.443, 0.368, 0.292, 0.218, 0.152, 0.094, 0.046, 0.013, 0.,
+    ],
+];
+/// Camera Raw's coverage at distance `d` (a fraction of the radius) for `feather`,
+/// interpolated in the measured table, and from a hard edge below Feather 25.
+fn measured(d: f32, feather: f32) -> f32 {
+    if d > 1. {
+        return 0.;
+    }
+    let at = |row: &[f32; 26]| {
+        let x = d / MEASURED_STEP;
+        let i = (x as usize).min(row.len() - 2);
+        let t = x - i as f32;
+        row[i] + (row[i + 1] - row[i]) * t
+    };
+    let feather = feather.clamp(0., 1.);
+    let j = MEASURED_FEATHERS.partition_point(|f| *f < feather);
+    let (lo, lo_value) = match j {
+        0 => (0., 1.),
+        j => (MEASURED_FEATHERS[j - 1], at(&MEASURED[j - 1])),
+    };
+    match MEASURED_FEATHERS.get(j) {
+        Some(hi) => {
+            let t = (feather - lo) / (hi - lo);
+            lo_value + (at(&MEASURED[j]) - lo_value) * t
+        }
+        None => lo_value,
+    }
+}
 /// Feathered coverage of dabs of `radius` along `points` over `rect` of some pixel
-/// grid (pixel centres at integer coordinates): 1 inside `1 - feather` of the
-/// radius, falling smoothly to 0 at the radius.
+/// grid (pixel centres at integer coordinates), 1 well inside the radius and 0 from
+/// it, over a feathered edge that `profile` shapes.
 pub(crate) fn coverage(
     points: &[[f32; 2]],
     radius: f32,
     feather: f32,
+    profile: FeatherProfile,
     rect: PixelRect,
 ) -> Vec<f32> {
     let (w, h) = ((rect[2] - rect[0]) as usize, (rect[3] - rect[1]) as usize);
@@ -156,7 +218,10 @@ pub(crate) fn coverage(
     }
     let inner = radius * (1. - feather);
     dist.into_iter()
-        .map(|d2| profile(d2.sqrt(), inner, radius))
+        .map(|d2| match profile {
+            FeatherProfile::Smoothstep => self::profile(d2.sqrt(), inner, radius),
+            FeatherProfile::Measured => measured(d2.sqrt() / radius, feather),
+        })
         .collect()
 }
 /// 1 up to `inner`, smoothstep down to 0 at `outer`.
@@ -195,7 +260,7 @@ pub(crate) fn apply(im: &mut CameraImage, op: &Placed) -> PixelRect {
         im.height,
     );
     let (w, h) = ((grid[2] - grid[0]) as usize, (grid[3] - grid[1]) as usize);
-    let alpha = coverage(&op.points, op.radius, op.feather, grid);
+    let alpha = coverage(&op.points, op.radius, op.feather, op.profile, grid);
     // Where the shape reaches the photo's edge there is no ring; the solver treats the
     // edge as mirrored.
     let at = |x: usize, y: usize| (grid[1] as usize + y) * im.width as usize + grid[0] as usize + x;
