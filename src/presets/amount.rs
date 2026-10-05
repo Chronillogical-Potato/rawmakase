@@ -178,6 +178,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.reference_color = full.reference_color;
     r.parametric_model = full.parametric_model;
     r.contrast_model = full.contrast_model;
+    r.grading_model = full.grading_model;
 }
 
 /// A slider between `a` and `b`, kept within `lo..=hi` above 100%. Imported values may
@@ -386,6 +387,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         reference_color: _,
         parametric_model: _,
         contrast_model: _,
+        grading_model: _,
         temperature,
         tint,
         wb,

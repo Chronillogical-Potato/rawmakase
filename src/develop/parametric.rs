@@ -128,7 +128,7 @@ fn blend(tables: &[(Table, f32)]) -> Table {
 }
 /// The bracketing positions of `v` in `values` (clamped to their range) and the
 /// weight of the upper one.
-fn bracket(values: &[f32], v: f32) -> (usize, f32) {
+pub(super) fn bracket(values: &[f32], v: f32) -> (usize, f32) {
     let v = v.clamp(values[0], values[values.len() - 1]);
     let j = values
         .windows(2)

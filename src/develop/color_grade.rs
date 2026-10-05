@@ -1,24 +1,74 @@
-//! Engine 4 color grading, as measured Camera Raw responses. Each region's tint is a
-//! per-channel gain of linear ProPhoto RGB that depends on the pixel's luminance;
-//! Luminance sliders shift sRGB-encoded ProPhoto values by luminance. Tables are
-//! measured at Saturation 50 for six hues and interpolated in hue; saturation scales
-//! the log gain linearly. Only the default Blending and Balance were measured, so other
-//! settings keep the previous operator (see `ColorGrade::new`).
+//! Engine 4 color grading. Two operators, chosen by the recipe's [`GradingModel`]:
+//!
+//! - [`GradingModel::Measured`]: per-channel curves measured in Camera Raw 18.7 on the
+//!   synthetic chart, for every hue, saturation, Luminance, Blending and Balance (see
+//!   `color_grade_curves`).
+//! - [`GradingModel::Original`], what recipes saved before it keep: Camera Raw 18.6
+//!   responses measured on photos, where each region's tint is a per-channel gain of
+//!   linear ProPhoto RGB that depends on the pixel's luminance and Luminance sliders
+//!   shift sRGB-encoded ProPhoto values by luminance. Tables are measured at Saturation
+//!   50 for six hues and interpolated in hue; saturation scales the log gain linearly.
+//!   Only the default Blending and Balance were measured, so other settings keep the
+//!   earlier operator in `color::grade`.
+use serde::{Deserialize, Serialize};
+
 use super::{
     Recipe,
+    color_grade_curves::ChannelCurves,
     color_grade_data::{BINS, LUMINANCE, TINT},
 };
 use crate::color_math::{mul, srgb_decode, srgb_encode};
 
-pub(crate) struct ColorGrade {
+/// Which operator renders a recipe's color grading.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GradingModel {
+    /// Luminance-driven tables at the default Blending and Balance, and RAWmakase's
+    /// first approximation elsewhere: what recipes saved before the measured curves
+    /// keep, so they render as they did.
+    #[default]
+    Original,
+    /// Camera Raw 18.7's per-channel curves, for every setting.
+    Measured,
+}
+impl GradingModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+}
+
+/// Engine 4 grading, applied to linear display RGB after the color mixer.
+pub(crate) enum ColorGrade {
+    Luminance(LuminanceGrade),
+    Channels(ChannelCurves),
+}
+impl ColorGrade {
+    /// `None` when grading is inactive, or for [`GradingModel::Original`] with
+    /// Blending/Balance settings its tables do not cover.
+    pub(crate) fn new(r: &Recipe) -> Option<Self> {
+        match r.grading_model {
+            GradingModel::Original => LuminanceGrade::new(r).map(Self::Luminance),
+            GradingModel::Measured => ChannelCurves::new(r).map(Self::Channels),
+        }
+    }
+    /// `rgb` is linear display RGB (sRGB primaries).
+    pub(crate) fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Luminance(g) => g.apply(rgb),
+            Self::Channels(c) => {
+                let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb);
+                mul(crate::camera_profiles::PRO_TO_RGB, c.apply(p))
+            }
+        }
+    }
+}
+
+pub(crate) struct LuminanceGrade {
     /// Per luminance bin: log2 gains and encoded offsets, summed over regions.
     pub(crate) gain: [[f32; 3]; BINS],
     pub(crate) offset: [[f32; 3]; BINS],
 }
-impl ColorGrade {
-    /// `None` when grading is inactive or uses Blending/Balance settings the tables do
-    /// not cover.
-    pub(crate) fn new(r: &Recipe) -> Option<Self> {
+impl LuminanceGrade {
+    fn new(r: &Recipe) -> Option<Self> {
         let regions = [
             r.grading[0],
             r.grading[1],
@@ -63,8 +113,7 @@ impl ColorGrade {
         let t = f - i as f32;
         std::array::from_fn(|c| table[i][c] * (1. - t) + table[i + 1][c] * t)
     }
-    /// `rgb` is linear display RGB (sRGB primaries).
-    pub(crate) fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+    fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
         let y = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]).max(0.);
         let l = srgb_encode(y.min(1.));
         let g = Self::at(&self.gain, l);
@@ -89,6 +138,9 @@ mod tests {
         assert!(ColorGrade::new(&r).is_some());
         r.effects.balance = 0.3;
         assert!(ColorGrade::new(&r).is_none());
+        // The measured curves cover every Blending and Balance.
+        r.grading_model = GradingModel::Measured;
+        assert!(matches!(ColorGrade::new(&r), Some(ColorGrade::Channels(_))));
     }
     #[test]
     fn blue_shadow_tint_cools_shadows_more_than_highlights() {
