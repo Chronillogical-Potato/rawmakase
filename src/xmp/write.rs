@@ -595,6 +595,21 @@ pub fn keyword_lists(keywords: &[KeywordPath]) -> (Vec<String>, Vec<String>) {
 }
 
 /// The XMP packet for an exported photo.
+/// The operators this recipe keeps from before they were measured in Camera Raw.
+/// Lightroom's values for them would read back as the measured ones, so RAWmakase
+/// names them for itself to render the recipe as it was.
+fn original_operators(r: &Recipe) -> Vec<&'static str> {
+    [
+        (r.sharpening_model.is_original(), ORIGINAL_SHARPENING),
+        (r.lens_vignette_model.is_original(), ORIGINAL_LENS_VIGNETTE),
+    ]
+    .into_iter()
+    .filter_map(|(original, name)| original.then_some(name))
+    .collect()
+}
+pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
+pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
+
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     let mut attributes: Vec<(String, String)> = vec![
         ("xmp:CreatorTool".into(), crate::export::SOFTWARE.into()),
@@ -632,6 +647,10 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
                 .into_iter()
                 .map(|(k, v)| (format!("crs:{k}"), v)),
         );
+        let original = original_operators(r);
+        if !original.is_empty() {
+            attributes.push(("crs:RAWmakaseOriginal".into(), original.join(",")));
+        }
         attributes.push(("crs:AlreadyApplied".into(), "True".into()));
     }
     let mut out = format!(

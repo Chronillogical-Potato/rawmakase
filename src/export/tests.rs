@@ -710,3 +710,50 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
     assert!(packet.contains("xmp:CreateDate=\"2024-05-01T12:30:15.120456+02:00\""));
     Ok(())
 }
+/// A recipe that keeps the sharpening and lens vignetting from before they were
+/// measured reads back from its own exported XMP with the same operators, while
+/// Lightroom's packets, and RAWmakase's for measured recipes, set the measured ones.
+#[test]
+fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
+    use crate::develop::{Recipe, effects::LensVignetteModel, sharpening::SharpeningModel};
+    let m = Metadata {
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let photo = crate::xmp::write::Photo {
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let read = |r: &Recipe| -> Result<Recipe> {
+        let packet = crate::xmp::write::packet(r, &m, &photo);
+        crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
+            &Recipe::default(),
+            &m,
+            &[],
+            None,
+        )
+    };
+    let mut old = Recipe {
+        sharpening: 0.4,
+        ..Default::default()
+    };
+    old.effects.lens_vignette = -0.3;
+    let back = read(&old)?;
+    assert_eq!(back.sharpening_model, SharpeningModel::Original);
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
+    let measured = Recipe {
+        sharpening_model: SharpeningModel::Measured,
+        lens_vignette_model: LensVignetteModel::Measured,
+        ..old
+    };
+    let packet = crate::xmp::write::packet(&measured, &m, &photo);
+    assert!(!packet.contains("RAWmakaseOriginal"));
+    let back = read(&measured)?;
+    assert_eq!(back.sharpening_model, SharpeningModel::Measured);
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    Ok(())
+}

@@ -108,6 +108,7 @@ pub fn auto_tone_basis(r: &Recipe) -> Recipe {
         sharpening_radius: d.sharpening_radius,
         sharpening_detail: d.sharpening_detail,
         sharpening_masking: d.sharpening_masking,
+        sharpening_model: d.sharpening_model,
         retouch: Vec::new(),
         red_eye: Default::default(),
         masks: Vec::new(),
@@ -387,6 +388,15 @@ mod tests {
             scale_factor: 1.,
             scale_clipped: 0,
         }
+    }
+    /// Auto measures every photo with the same sharpening, whichever operator and
+    /// Detail settings the edit uses.
+    #[test]
+    fn auto_measures_with_the_default_sharpening_operator() {
+        let mut r = Recipe::default();
+        r.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        r.sharpening_detail = 0.9;
+        assert_eq!(auto_tone_basis(&r), auto_tone_basis(&Recipe::default()));
     }
     #[test]
     fn white_balance_neutralises_a_colour_cast() {

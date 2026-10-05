@@ -116,6 +116,8 @@ impl Panel {
                 r.sharpening_radius = defaults.sharpening_radius;
                 r.sharpening_detail = defaults.sharpening_detail;
                 r.sharpening_masking = defaults.sharpening_masking;
+                // Renders nothing at Amount 0; Detail's reset sets the measured one.
+                r.sharpening_model = defaults.sharpening_model;
                 r.noise_luma = 0.;
                 r.noise_chroma = 0.;
                 e.luma_detail = d.luma_detail;
@@ -226,5 +228,11 @@ mod tests {
         after.effects.lens_vignette = -0.4;
         after.adopt_measured_vignette(0.);
         assert!(Panel::LensCorrections.holds_change(&before, &after));
+        // Detail's reset on an old recipe also sets the measured sharpening.
+        let mut before = before.clone();
+        before.sharpening = 0.35;
+        let mut after = before.clone();
+        after.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        assert!(Panel::Detail.holds_change(&before, &after));
     }
 }
