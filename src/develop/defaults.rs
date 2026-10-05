@@ -7,7 +7,7 @@
 //! Default, and a saved edit stays as it is until Reset.
 use crate::{
     camera_profiles::CameraProfile,
-    develop::{ProfilePreference, Recipe},
+    develop::{ProfilePreference, Recipe, camera_matching_names, camera_matching_profile},
     raw::Metadata,
     xmp::Preset,
 };
@@ -36,6 +36,10 @@ pub enum DefaultChoice {
     Adobe,
     /// The same settings with RAWmakase Color wherever it fits the camera.
     Rawmakase,
+    /// Lightroom's Camera Settings: the same settings with the imported
+    /// camera-matching profile for the camera's standard look (Camera Standard,
+    /// say), else Adobe Default.
+    CameraSettings,
     /// A Develop preset applied over Adobe Default.
     Preset {
         /// `Preset::id`: "builtin:<UUID>" or the installed file's path.
@@ -49,6 +53,7 @@ impl DefaultChoice {
         match self {
             DefaultChoice::Adobe => "Adobe Default".into(),
             DefaultChoice::Rawmakase => "RAWmakase Default".into(),
+            DefaultChoice::CameraSettings => "Camera Settings".into(),
             DefaultChoice::Preset { name, .. } => crate::presets::display_name(name),
         }
     }
@@ -238,7 +243,8 @@ impl DevelopDefaults {
         &self.settings
     }
     /// What a photo from this camera starts from. Never fails: a preset that is
-    /// missing or does not apply leaves Adobe Default, with a note saying so.
+    /// missing or does not apply, or a camera-matching profile that isn't
+    /// imported, leaves Adobe Default, with a note saying so.
     pub fn resolve(&self, m: &Metadata, profiles: &[Arc<CameraProfile>]) -> Resolved {
         let choice = self.settings.choice_for(m);
         let adobe = || Recipe::with_profiles(m, profiles);
@@ -258,6 +264,20 @@ impl DevelopDefaults {
                 name: choice.label(),
                 note: None,
             },
+            DefaultChoice::CameraSettings => {
+                if camera_matching_profile(m, profiles).is_none() {
+                    return fallback(format!(
+                        "Camera Settings: no {} profile for {} is imported; using Adobe Default",
+                        camera_matching_names(m).join(" or "),
+                        camera_name(m)
+                    ));
+                }
+                Resolved {
+                    recipe: Recipe::with_profile_preference(m, profiles, ProfilePreference::Camera),
+                    name: choice.label(),
+                    note: None,
+                }
+            }
             DefaultChoice::Preset { id, .. } => {
                 let Some(preset) = self.presets.iter().find(|p| p.id == *id) else {
                     return fallback(format!(
@@ -484,6 +504,95 @@ mod tests {
         assert!(r.note.unwrap().contains("another camera"));
     }
 
+    /// `profiles` plus a camera-matching profile by this name.
+    fn with_camera_profile(m: &Metadata, name: &str) -> Vec<Arc<CameraProfile>> {
+        let mut camera = open::standard(m).unwrap();
+        camera.name = name.into();
+        let mut all = profiles(m);
+        all.push(Arc::new(camera));
+        all
+    }
+    fn sony() -> Metadata {
+        Metadata {
+            make: "Sony".into(),
+            model: "ILCE-7M2".into(),
+            ..x100f()
+        }
+    }
+
+    #[test]
+    fn camera_settings_start_from_the_camera_matching_profile() {
+        let defaults = load(RawDefaults {
+            master: DefaultChoice::CameraSettings,
+            ..Default::default()
+        });
+        let m = sony();
+        let profiles = with_camera_profile(&m, "Camera Standard");
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.name, "Camera Settings");
+        assert!(r.note.is_none());
+        assert_eq!(r.recipe.profile.as_ref().unwrap().name, "Camera Standard");
+        // Only the profile differs from Adobe Default.
+        let adobe = Recipe::with_profiles(&m, &profiles);
+        assert_eq!(
+            Recipe {
+                profile: adobe.profile.clone(),
+                ..r.recipe
+            },
+            adobe
+        );
+        // Fujifilm names its standard look after the film simulation.
+        let m = x100f();
+        let profiles = with_camera_profile(&m, "Camera PROVIA/Standard");
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe.profile.unwrap().name, "Camera PROVIA/Standard");
+    }
+
+    #[test]
+    fn camera_settings_without_an_imported_camera_profile_are_adobe_default_with_a_note() {
+        let defaults = load(RawDefaults {
+            master: DefaultChoice::CameraSettings,
+            ..Default::default()
+        });
+        let m = sony();
+        let profiles = profiles(&m);
+        let r = defaults.resolve(&m, &profiles);
+        assert_eq!(r.recipe, Recipe::with_profiles(&m, &profiles));
+        assert_eq!(r.name, "Adobe Default");
+        let note = r.note.unwrap();
+        assert!(note.contains("Camera Standard"), "{note}");
+        assert!(note.contains("Sony ILCE-7M2"), "{note}");
+        // Another camera's Camera Standard doesn't fit this one.
+        let mut other = open::standard(&other_camera()).unwrap();
+        other.name = "Camera Standard".into();
+        other.camera = "Canon EOS R5".into();
+        let mut with_other = profiles.clone();
+        with_other.push(Arc::new(other));
+        assert_eq!(defaults.resolve(&m, &with_other).name, "Adobe Default");
+        // Nothing imported at all: RAWmakase's own profile, as Adobe Default.
+        let r = defaults.resolve(&m, &[]);
+        assert_eq!(r.recipe, Recipe::with_profiles(&m, &[]));
+        assert!(r.note.is_some());
+    }
+
+    #[test]
+    fn camera_settings_can_be_one_cameras_own_default() {
+        let mut settings = RawDefaults {
+            camera_overrides: true,
+            ..Default::default()
+        };
+        settings.set_camera("ILCE-7M2", DefaultChoice::CameraSettings);
+        let defaults = load(settings);
+        let m = sony();
+        let r = defaults.resolve(&m, &with_camera_profile(&m, "Camera Standard"));
+        assert_eq!(r.recipe.profile.unwrap().name, "Camera Standard");
+        // Another camera keeps the master, Adobe Default.
+        let other = other_camera();
+        let r = defaults.resolve(&other, &with_camera_profile(&other, "Camera Standard"));
+        assert_eq!(r.name, "Adobe Default");
+        assert_eq!(r.recipe.profile.unwrap().name, "Adobe Color");
+    }
+
     #[test]
     fn a_camera_has_one_default_whichever_name_it_was_set_under() {
         let mut settings = RawDefaults::default();
@@ -575,7 +684,9 @@ mod tests {
             ..Default::default()
         };
         settings.set_camera("Canon EOS R5", DefaultChoice::Rawmakase);
+        settings.set_camera("Sony ILCE-7M2", DefaultChoice::CameraSettings);
         let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#"{"kind":"camera_settings"}"#), "{json}");
         assert_eq!(
             serde_json::from_str::<RawDefaults>(&json).unwrap(),
             settings
@@ -587,7 +698,7 @@ mod tests {
         );
         // A choice from a newer release is Adobe Default; its camera entries that
         // don't read are left out, the rest kept.
-        let newer = r#"{"master":{"kind":"camera_settings"},"camera_overrides":true,
+        let newer = r#"{"master":{"kind":"auto_tone"},"camera_overrides":true,
             "cameras":[{"camera":"A","choice":{"kind":"hdr"}},
                        {"camera":"B","choice":{"kind":"rawmakase"}}],"later":1}"#;
         let read: RawDefaults = serde_json::from_str(newer).unwrap();
