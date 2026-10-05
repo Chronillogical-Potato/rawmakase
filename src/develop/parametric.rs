@@ -15,12 +15,20 @@ pub enum ParametricModel {
     /// before the measured curve keep, so they render as they did.
     #[default]
     Original,
-    /// The curve measured in Camera Raw, applied as DNG RGBTone.
+    /// The curve measured in Camera Raw, applied as DNG RGBTone; a look's own
+    /// parametric curve is added to the user's regions.
     Measured,
+    /// As `Measured`, with a look's own parametric curve applied as a second curve
+    /// after the user's, as Camera Raw 18.7 renders it.
+    Layered,
 }
 impl ParametricModel {
     pub(crate) fn is_original(&self) -> bool {
         *self == Self::Original
+    }
+    /// Whether the measured curve renders the regions.
+    pub(crate) fn is_measured(&self) -> bool {
+        *self != Self::Original
     }
 }
 
@@ -48,6 +56,15 @@ impl ParametricCurve {
             })
             .collect();
         Some(Self { lut })
+    }
+    /// `first`, then `then`, as one curve: the user's, then a look's.
+    pub(crate) fn then(first: Option<Self>, then: Option<Self>) -> Option<Self> {
+        match (first, then) {
+            (Some(a), Some(b)) => Some(Self {
+                lut: a.lut.iter().map(|y| b.eval(*y)).collect(),
+            }),
+            (a, b) => a.or(b),
+        }
     }
     pub(crate) fn values(&self) -> &[f32] {
         &self.lut
@@ -81,9 +98,7 @@ pub fn samples(
 ) -> Vec<f32> {
     let at = |i: usize| i as f32 / count as f32;
     // The rendered table, with its monotone clean-up, so the panel shows what renders.
-    match ParametricCurve::new(e.parametric, e.splits)
-        .filter(|_| model == ParametricModel::Measured)
-    {
+    match ParametricCurve::new(e.parametric, e.splits).filter(|_| model.is_measured()) {
         Some(curve) => (0..=count).map(|i| curve.eval(at(i))).collect(),
         None => (0..=count).map(|i| e.parametric(at(i))).collect(),
     }

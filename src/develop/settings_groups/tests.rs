@@ -54,7 +54,7 @@ fn everything_changed() -> Recipe {
         reference_curves: true,
         reference_calibration: true,
         reference_color: true,
-        parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        parametric_model: crate::develop::parametric::ParametricModel::Layered,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
         grading_model: crate::develop::color_grade::GradingModel::Measured,

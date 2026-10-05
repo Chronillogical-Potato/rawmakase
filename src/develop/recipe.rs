@@ -366,7 +366,10 @@ impl Recipe {
             }
         }
         let e = &mut self.effects;
-        if s.parametric != [0.; 4] {
+        // The layered curve renders a look's parametric curve as a curve of its own.
+        let merge_parametric =
+            self.parametric_model != crate::develop::parametric::ParametricModel::Layered;
+        if s.parametric != [0.; 4] && merge_parametric {
             for (v, l) in e.parametric.iter_mut().zip(s.parametric) {
                 *v = add(*v, l);
             }
@@ -453,7 +456,7 @@ impl Recipe {
         recipe.reference_color = true;
         recipe.reference_curves = true;
         recipe.reference_calibration = true;
-        recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
+        recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;

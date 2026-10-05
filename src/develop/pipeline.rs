@@ -594,19 +594,26 @@ impl CurveSet {
                 r.effects.calibration,
                 r.effects.shadow_tint,
             ),
-            parametric: (basic_curves
-                && r.parametric_model == crate::develop::parametric::ParametricModel::Measured)
-                .then(|| {
-                    crate::develop::parametric::ParametricCurve::new(
-                        r.effects.parametric,
-                        r.effects.splits,
-                    )
-                })
+            parametric: (basic_curves && r.parametric_model.is_measured())
+                .then(|| parametric_curve(r))
                 .flatten(),
             master: CurveLut::new(&r.curve),
             channels: std::array::from_fn(|c| CurveLut::new(&r.effects.channels[c])),
         }
     }
+}
+/// The measured parametric curve: the user's regions, then (layered) a look's own
+/// curve at its Profile Amount, as Camera Raw applies it.
+fn parametric_curve(r: &Recipe) -> Option<crate::develop::parametric::ParametricCurve> {
+    use crate::develop::parametric::{ParametricCurve, ParametricModel};
+    let user = ParametricCurve::new(r.effects.parametric, r.effects.splits);
+    let look = r
+        .profile
+        .as_ref()
+        .filter(|_| r.parametric_model == ParametricModel::Layered)
+        .and_then(|p| p.enhanced.as_ref())
+        .and_then(|look| ParametricCurve::new(look.settings.parametric, look.settings.splits));
+    ParametricCurve::then(user, look)
 }
 /// Whether the recipe's Contrast pivots where the photo's own measure puts it.
 pub(crate) fn measures_contrast_pivot(r: &Recipe) -> bool {
