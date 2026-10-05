@@ -85,6 +85,20 @@ fn names_never_collide_within_a_batch() -> Result<()> {
     unique.existing = Existing::Unique;
     let plan = super::plan(&[photo(Path::new("/one/c.dng"))], &unique, None).unwrap();
     assert_eq!(names(&plan), [s("c-2.tif", Write::Create)]);
+    // Overwrite replaces the file that is there, as it is spelled, and Ask names it
+    // so: never a second file beside it in other case.
+    let ask = settings(&out);
+    assert_eq!(
+        super::plan(&[photo(Path::new("/one/c.dng"))], &ask, None).unwrap_err(),
+        Unplanned::Conflicts(vec![out.join("C.TIF")])
+    );
+    let plan = super::plan(
+        &[photo(Path::new("/one/c.dng"))],
+        &ask,
+        Some(Existing::Overwrite),
+    )
+    .unwrap();
+    assert_eq!(names(&plan), [s("C.TIF", Write::Overwrite)]);
     Ok(())
 }
 
@@ -404,19 +418,26 @@ fn the_queue_runs_one_batch_at_a_time_and_a_waiting_one_can_be_removed() -> Resu
     let done = Arc::new(Mutex::new(Vec::new()));
     let finished = done.clone();
     let (tx, rx) = std::sync::mpsc::channel();
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let changed = changes.clone();
     let queue = crate::export::queue::Queue::new(
         move |ticket, outcomes| {
             finished.lock().unwrap().push((ticket, outcomes));
             let _ = tx.send(ticket);
         },
-        || {},
+        move || {
+            changed.fetch_add(1, Ordering::Relaxed);
+        },
     );
     let batch = |name: &str| f.batch(photos.clone(), settings(&f.out().join(name)));
     let first = queue.submit(batch("first"));
     let second = queue.submit(batch("second"));
     let third = queue.submit(batch("third"));
-    // Nothing runs beside the first; the second waits and is removed.
+    // Nothing runs beside the first; the second waits and is removed, which those
+    // showing the queue hear about.
+    let heard = changes.load(Ordering::Relaxed);
     assert!(queue.remove(second));
+    assert!(changes.load(Ordering::Relaxed) > heard);
     assert!(!queue.cancel(second));
     let mut finished = vec![rx.recv_timeout(std::time::Duration::from_secs(120))?];
     finished.push(rx.recv_timeout(std::time::Duration::from_secs(120))?);

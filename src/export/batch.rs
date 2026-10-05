@@ -119,8 +119,9 @@ impl std::fmt::Display for Unplanned {
 /// can rename a file that did not need it.
 #[derive(Clone, Debug, Default)]
 struct Reservations {
-    /// Names already in each folder when the batch was planned.
-    on_disk: HashMap<PathBuf, HashSet<String>>,
+    /// Names already in each folder when the batch was planned, folded, with the
+    /// file's own name.
+    on_disk: HashMap<PathBuf, HashMap<String, OsString>>,
     /// Names given to the batch's own files.
     batch: HashMap<PathBuf, HashSet<String>>,
 }
@@ -128,17 +129,28 @@ fn fold(name: &std::ffi::OsStr) -> String {
     name.to_string_lossy().to_lowercase()
 }
 impl Reservations {
-    fn folder(&mut self, dir: &Path) -> &HashSet<String> {
+    fn folder(&mut self, dir: &Path) -> &HashMap<String, OsString> {
         self.on_disk.entry(dir.to_path_buf()).or_insert_with(|| {
             std::fs::read_dir(dir)
-                .map(|entries| entries.flatten().map(|e| fold(&e.file_name())).collect())
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|e| (fold(&e.file_name()), e.file_name()))
+                        .collect()
+                })
                 .unwrap_or_default()
         })
     }
-    fn on_disk(&mut self, path: &Path) -> bool {
+    /// The file already in `path`'s folder under its name in any case, as it is
+    /// spelled there.
+    fn existing(&mut self, path: &Path) -> Option<PathBuf> {
         let name = fold(path.file_name().unwrap_or_default());
-        self.folder(crate::storage::parent_dir(path))
-            .contains(&name)
+        let dir = crate::storage::parent_dir(path);
+        let found = self.folder(dir).get(&name)?.clone();
+        Some(dir.join(found))
+    }
+    fn on_disk(&mut self, path: &Path) -> bool {
+        self.existing(path).is_some()
     }
     fn in_batch(&self, path: &Path) -> bool {
         let name = fold(path.file_name().unwrap_or_default());
@@ -155,10 +167,13 @@ impl Reservations {
     }
     /// A file found while the batch runs: no later photo takes its name.
     fn found(&mut self, path: &Path) {
-        let name = fold(path.file_name().unwrap_or_default());
+        let name = path.file_name().unwrap_or_default();
         let dir = crate::storage::parent_dir(path).to_path_buf();
         self.folder(&dir);
-        self.on_disk.entry(dir).or_default().insert(name);
+        self.on_disk
+            .entry(dir)
+            .or_default()
+            .insert(fold(name), name.to_os_string());
     }
     /// The first of `path`, "name-2", "name-3"… that is neither in the folder nor
     /// the batch's, reserved for the batch.
@@ -202,8 +217,10 @@ pub fn plan(
     let mut reserved = Reservations::default();
     let mut conflicts: Vec<PathBuf> = Vec::new();
     for target in &targets {
-        if reserved.on_disk(target) && !conflicts.contains(target) {
-            conflicts.push(target.clone());
+        if let Some(existing) = reserved.existing(target)
+            && !conflicts.contains(&existing)
+        {
+            conflicts.push(existing);
         }
     }
     let choice = match (settings.existing, answer) {
@@ -232,7 +249,10 @@ pub fn plan(
                 };
             }
             match choice {
+                // The file that is there, as it is spelled: not a second one beside
+                // it in other case.
                 Existing::Overwrite => {
+                    let target = reserved.existing(&target).unwrap_or(target);
                     reserved.reserve(&target);
                     Planned {
                         target,
@@ -316,7 +336,11 @@ pub fn run(batch: &Batch, cancel: &AtomicBool, progress: impl Fn(Progress)) -> V
         report(0.);
         let outcome = match planned.write {
             Write::Skip => Outcome::Skipped("a file with its name already exists".into()),
-            _ => export(batch, photo, planned, &mut reserved, cancel, &report),
+            // A panic fails its own photo; the others keep their outcomes.
+            _ => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                export(batch, photo, planned, &mut reserved, cancel, &report)
+            }))
+            .unwrap_or_else(|_| Outcome::Failed("the export failed unexpectedly".into())),
         };
         outcomes.push(outcome);
     }

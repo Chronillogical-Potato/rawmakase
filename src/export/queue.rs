@@ -19,6 +19,7 @@ pub struct Queue {
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
+    changed: Box<dyn Fn() + Send + Sync>,
 }
 
 #[derive(Default)]
@@ -49,38 +50,32 @@ impl Queue {
     /// photos' order, and `changed` is called whenever its status changes.
     pub fn new(
         finished: impl Fn(u64, Vec<Outcome>) + Send + 'static,
-        changed: impl Fn() + Send + 'static,
+        changed: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State::default()),
             wake: Condvar::new(),
+            changed: Box::new(changed),
         });
         let worker = shared.clone();
         std::thread::spawn(move || {
             while let Some((ticket, batch, cancel)) = worker.next() {
-                changed();
-                let outcomes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    batch::run(&batch, &cancel, |progress| {
-                        if let Ok(mut state) = worker.state.lock()
-                            && let Some(running) = &mut state.running
-                        {
-                            running.progress = progress;
-                        }
-                        changed();
-                    })
-                }))
-                // A panic still finishes the batch, with what was not exported said.
-                .unwrap_or_else(|_| {
-                    vec![
-                        Outcome::Failed("the export failed unexpectedly".into());
-                        batch.photos.len()
-                    ]
+                (worker.changed)();
+                // Each photo's panic is caught by the batch, which keeps the others'
+                // outcomes.
+                let outcomes = batch::run(&batch, &cancel, |progress| {
+                    if let Ok(mut state) = worker.state.lock()
+                        && let Some(running) = &mut state.running
+                    {
+                        running.progress = progress;
+                    }
+                    (worker.changed)();
                 });
                 if let Ok(mut state) = worker.state.lock() {
                     state.running = None;
                 }
                 finished(ticket, outcomes);
-                changed();
+                (worker.changed)();
             }
         });
         Self { shared }
@@ -92,7 +87,9 @@ impl Queue {
         state.next += 1;
         let ticket = state.next;
         state.waiting.push_back((ticket, batch));
+        drop(state);
         self.shared.wake.notify_one();
+        (self.shared.changed)();
         ticket
     }
 
@@ -101,7 +98,12 @@ impl Queue {
         let mut state = self.shared.state.lock().expect("export queue");
         let before = state.waiting.len();
         state.waiting.retain(|(t, _)| *t != ticket);
-        state.waiting.len() != before
+        let removed = state.waiting.len() != before;
+        drop(state);
+        if removed {
+            (self.shared.changed)();
+        }
+        removed
     }
 
     /// Cancels the running batch if it is `ticket`; false otherwise.
