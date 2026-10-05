@@ -1311,6 +1311,32 @@ fn lens_profile_identity_round_trips() -> Result<()> {
     Ok(())
 }
 #[test]
+fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
+    use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+    // Recipe::default() stands for a recipe saved before the measured operators.
+    let apply = |attrs: &str| {
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )
+    };
+    let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20""#)?;
+    assert_eq!(r.mixer_model, MixerModel::Chart);
+    assert_eq!(r.calibration_model, CalibrationModel::Measured);
+    let r = apply(r#"c:Exposure2012="0.5""#)?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
+    // RAWmakase's own packet for a recipe that kept them.
+    let r = apply(
+        r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:RAWmakaseOriginal="ColorMixer,Calibration""#,
+    )?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
+    Ok(())
+}
+#[test]
 fn lightroom_manual_vignetting_takes_the_measured_operator() -> Result<()> {
     use crate::develop::effects::LensVignetteModel;
     // Recipe::default() stands for a recipe saved before the measured operator.

@@ -717,6 +717,8 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
 fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     use crate::develop::{
         Recipe,
+        calibration::CalibrationModel,
+        color_mixer::MixerModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
     };
@@ -747,10 +749,14 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     };
     old.effects.lens_vignette = -0.3;
     old.effects.grain = 0.4;
+    old.hsl[5][2] = -0.4;
+    old.effects.calibration[0][0] = 0.3;
     let back = read(&old)?;
     assert_eq!(back.grain_model, GrainModel::Original);
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
+    assert_eq!(back.mixer_model, MixerModel::Original);
+    assert_eq!(back.calibration_model, CalibrationModel::Original);
     // Also onto a new photo's settings, which start on the measured operators.
     let packet = crate::xmp::write::packet(&old, &m, &photo);
     let fresh = Recipe::with_profiles(&m, &[]);
@@ -759,10 +765,14 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
+    assert_eq!(back.mixer_model, MixerModel::Original);
+    assert_eq!(back.calibration_model, CalibrationModel::Original);
     let measured = Recipe {
         sharpening_model: SharpeningModel::Measured,
         lens_vignette_model: LensVignetteModel::Measured,
         grain_model: GrainModel::Measured,
+        mixer_model: MixerModel::Chart,
+        calibration_model: CalibrationModel::Measured,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
@@ -770,5 +780,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     let back = read(&measured)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    assert_eq!(back.mixer_model, MixerModel::Chart);
+    assert_eq!(back.calibration_model, CalibrationModel::Measured);
     Ok(())
 }
