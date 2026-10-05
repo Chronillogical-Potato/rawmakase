@@ -86,7 +86,7 @@ impl Editor {
     }
 
     /// The open photo as it is now, with its catalog rating, label and keywords.
-    fn export_photo(&mut self) -> Option<Photo> {
+    pub(super) fn export_photo(&mut self) -> Option<Photo> {
         let catalog = self
             .document
             .catalog_photo

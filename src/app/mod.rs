@@ -94,6 +94,9 @@ pub struct Editor {
     /// Preferences > Raw Defaults, ready to apply; shared with the loader and the
     /// Library's previews.
     raw_defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
+    /// Shared automation queue and independently configured input adapters.
+    controls: automation::Hub,
+    automation: commands::Automation,
 }
 impl Editor {
     pub fn new(
@@ -116,6 +119,7 @@ impl Editor {
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
+        editor.controls = automation::Hub::start(&cc.egui_ctx);
         editor.updates.launched(launch, &mut editor.status);
         cc.egui_ctx
             .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
@@ -264,6 +268,8 @@ impl Editor {
             raw_defaults: std::sync::Arc::new(crate::develop::defaults::DevelopDefaults::load(
                 session.raw_defaults.clone(),
             )),
+            controls: automation::Hub::inactive(),
+            automation: commands::Automation::default(),
         };
         app.reload_presets(ctx);
         // A catalog passed on the command line opens instead of the last one;
@@ -413,12 +419,14 @@ fn survive_surface_errors(device: &wgpu::Device) {
 }
 
 mod auto;
+mod automation;
 mod before_after;
 mod brush_scroll;
 mod bulk_import;
 mod catalog;
 mod clipping;
 mod color_grading;
+mod commands;
 mod crop_tool;
 mod curve_menu;
 mod dialogs;

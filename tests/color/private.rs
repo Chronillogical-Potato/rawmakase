@@ -102,7 +102,8 @@ pub fn blocks(width: u32, height: u32) -> Vec<Patch> {
 }
 
 const RAW_EXTENSIONS: &[&str] = &[
-    "arw", "raf", "nef", "nrw", "cr2", "cr3", "dng", "rw2", "orf",
+    "arw", "raf", "nef", "nrw", "cr2", "cr3", "dng", "rw2", "orf", "ori", "pef", "rwl", "fff",
+    "3fr",
 ];
 const PHOTO_EDGE: u32 = 1200;
 

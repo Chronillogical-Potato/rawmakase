@@ -6,8 +6,7 @@ tests/corpus/pixls.json (URL, SHA-256, size and camera of each file); this scrip
 downloads them into $RAWMAKASE_CORPUS/raws/pixls/ and checks their hashes.
 
   manifest   rebuild tests/corpus/pixls.json from raw.pixls.us for MODELS below
-             (recent Sony, Canon, Nikon, Leica and Fujifilm bodies; smallest CC0
-             file per model)
+             (about 200 recent and popular bodies; smallest CC0 file per model)
   download   fetch missing files; refuses to exceed the corpus budget (--budget-gb)
   cameras    write tests/corpus/cameras.json with each camera's LibRaw color matrix,
              read from the downloaded files and any other RAWs in the corpus; the
@@ -36,27 +35,48 @@ REPOSITORY = 'https://raw.pixls.us/json/getrepository.php'
 # Cameras whose synthetic chart LibRaw does not decode at full size, which would
 # move the patches.
 NO_CHART = {'leica-sl2': 'LibRaw trims 19 rows from DNGs made by this model'}
-RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf'}
+RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf', '.ori', '.pef',
+                  '.rwl', '.fff', '.3fr'}
 
 # Recent bodies (Piotr, 2026-09-26: Sony, Canon, Nikon, Leica, Fujifilm), and popular
 # bodies of the last decade from those and other makers (Piotr, 2026-10-05), for the
-# per-camera default exposure in scripts/corpus/parity-report.py.
+# per-camera default exposure in scripts/corpus/parity-report.py; extended to about 200
+# bodies (Piotr, 2026-10-05) for data/cameras.toml: interchangeable-lens and premium
+# compact models on raw.pixls.us, current and recent lineups first.
 MODELS = {
     'Sony': ['ILCE-7M5', 'ILCE-7M4', 'ILCE-1M2', 'ILCE-7CM2', 'ILCE-6700', 'ILCE-9M3', 'ILCE-7RM5',
              'ILCE-7M3', 'ILCE-7RM4', 'ILCE-7RM3', 'ILCE-7C', 'ILCE-7SM3', 'ILCE-1', 'ILCE-6400',
-             'ILCE-6600', 'ILCE-6000', 'ZV-E10', 'DSC-RX100M7'],
+             'ILCE-6600', 'ILCE-6000', 'ZV-E10', 'DSC-RX100M7', 'ILCE-9', 'ILCE-9M2', 'ILCE-6100',
+             'ILCE-6300', 'ILCE-6500', 'ILCE-7RM2', 'ILCE-7SM2', 'ILME-FX3', 'ILME-FX30', 'ILME-FX2',
+             'ZV-E1', 'ZV-E10M2', 'ZV-1', 'ZV-1M2', 'DSC-RX100M6', 'DSC-RX100M5A', 'DSC-RX10M4',
+             'DSC-RX1RM2', 'DSC-RX1RM3', 'ILCA-99M2'],
     'Canon': ['EOS R6 Mark III', 'EOS R5 Mark II', 'EOS R8', 'EOS R7', 'EOS R50', 'EOS R100', 'EOS R3',
               'EOS R6 Mark II', 'EOS R6', 'EOS R5', 'EOS R', 'EOS RP', 'EOS R10', 'EOS 5D Mark IV',
-              'EOS 6D Mark II', 'EOS 90D', 'EOS M50'],
-    'Nikon': ['Z 8', 'Z f', 'Z6_3', 'Z5_2', 'Z50_2', 'Z 30', 'Z 9', 'Z 6_2', 'Z 7_2', 'Z 6', 'Z 7',
-              'Z 5', 'Z 50', 'Z fc', 'D850', 'D780', 'D750', 'D7500'],
+              'EOS 6D Mark II', 'EOS 90D', 'EOS M50', 'EOS R50 V', 'EOS-1D X Mark III', 'EOS-1D X Mark II',
+              'EOS 5DS R', 'EOS 7D Mark II', 'EOS 80D', 'EOS 77D', 'EOS 800D', 'EOS 850D', 'EOS 250D',
+              'EOS 200D', 'EOS M6 Mark II', 'EOS M200', 'EOS M50 Mark II', 'EOS M5',
+              'PowerShot G7 X Mark III', 'PowerShot G5 X Mark II', 'PowerShot G1 X Mark III',
+              'PowerShot G9 X Mark II', 'PowerShot V1'],
+    'Nikon': ['Z 8', 'Z f', 'Z6_3', 'Z5_2', 'Z50_2', 'Z 30', 'Z 9', 'Z 6_2', 'Z 7_2', 'Z 6', 'Z 7', 'Z 5',
+              'Z 50', 'Z fc', 'D850', 'D780', 'D750', 'D7500', 'D6', 'D5', 'D500', 'D7200', 'D5600', 'D3500',
+              'D3400', 'D810', 'Df', 'D610', 'COOLPIX P950', 'Coolpix P1100', 'Coolpix A1000'],
     'Fujifilm': ['X100VI', 'X-T5', 'X-H2S', 'X-S20', 'X-T50', 'X-E5', 'X-H2', 'X-T4', 'X-T3', 'X100V',
-                 'X-T30 II', 'X-S10', 'X-Pro3', 'X-E4'],
-    'Leica': ['M10-R', 'SL2', 'Q2'],
-    'Panasonic': ['DC-S5M2', 'DC-S5', 'DC-S1', 'DC-GH6', 'DC-GH5', 'DC-G9M2', 'DC-G9'],
-    'Olympus': ['E-M1MarkIII', 'E-M1MarkII'],
-    'Ricoh': ['GR III'],
+                 'X-T30 II', 'X-S10', 'X-Pro3', 'X-E4', 'GFX100 II', 'GFX100S', 'GFX100S II', 'GFX50S II',
+                 'GFX 100', 'GFX 50R', 'GFX 50S', 'GFX100RF', 'X-M5', 'X-T30 III', 'X-T30', 'X-T20', 'X-T2',
+                 'X-H1', 'X-Pro2', 'X-E3', 'X-A7', 'X-T200', 'XF10'],
+    'Leica': ['M10-R', 'SL2', 'Q2', 'Q (Typ 116)', 'CL', 'M10', 'SL (Typ 601)', 'D-Lux 7', 'V-Lux 5'],
+    'Panasonic': ['DC-S5M2', 'DC-S5', 'DC-S1', 'DC-GH6', 'DC-GH5', 'DC-G9M2', 'DC-G9', 'DC-S1R', 'DC-S1H',
+                  'DC-S1M2', 'DC-S1RM2', 'DC-S9', 'DC-GH7', 'DC-GH5M2', 'DC-GH5S', 'DC-G100', 'DC-G90',
+                  'DC-G95', 'DC-GX9', 'DC-LX100M2', 'DC-TZ200', 'DC-S5M2X'],
+    'Olympus': ['E-M1MarkIII', 'E-M1MarkII', 'E-M1X', 'E-M5 Mark III', 'E-M10 Mark IV', 'E-M10 Mark III',
+                'E-PL10', 'PEN-F', 'E-P7'],
+    'Ricoh': ['GR III', 'GR IIIx', 'GR II'],
+    'OM System': ['OM-1', 'OM-1 Mark II', 'OM-3', 'OM-5', 'OM-5 Mark II', 'TG-7'],
+    'Pentax': ['K-1 Mark II', 'K-3 Mark III', 'KP', 'K-70', 'KF', '645Z'],
+    'Hasselblad': ['X2D 100C', 'X1D II 50C', 'CFV 100C', 'X1D'],
+    'Sigma': ['fp', 'fp L'],
 }
+
 
 
 def corpus():
@@ -174,7 +194,7 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     sub.add_parser('manifest').set_defaults(run=build_manifest)
     d = sub.add_parser('download')
-    d.add_argument('--budget-gb', type=float, default=5.)
+    d.add_argument('--budget-gb', type=float, default=7.)
     d.set_defaults(run=download)
     c = sub.add_parser('cameras')
     c.add_argument('--rawmakase', type=Path, default=ROOT / 'target/release/rawmakase')

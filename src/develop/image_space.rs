@@ -129,8 +129,12 @@ impl<'a> LensMap<'a> {
         let chromatic = crate::lens::auto_ca::measured(im).filter(|_| r.lens_ca && r.engine >= 4);
         let lens = match r.lens_correction(&im.metadata) {
             Some(lens) => lens,
+            // Measured chromatic aberration and manual Vignetting are applied while
+            // sampling, as lens corrections are, also without lens data.
             None => {
-                chromatic?;
+                if chromatic.is_none() && r.manual_vignette().is_none() {
+                    return None;
+                }
                 &crate::lens::NO_CORRECTION
             }
         };

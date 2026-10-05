@@ -106,26 +106,10 @@ impl Editor {
             .enumerate()
         {
             if fits(r) {
-                // An imported Guided correction without guides has nothing to solve it
-                // again from; guides are solved again beside the new analysis.
-                let guided = r
-                    .upright
-                    .corrections
-                    .get(UprightMode::Guided.code())
-                    .copied()
-                    .filter(|_| r.upright.guides.is_empty());
-                r.upright.corrections = corrections.clone();
-                r.upright.corrections.extend(guided);
-                // Lightroom's own analysis details no longer describe these corrections.
-                r.upright.lightroom.clear();
-                if !r.upright.guides.is_empty()
-                    && let Some(m) = &metadata
-                {
-                    let solved = crate::develop::guided::store(r, m);
-                    // Only the photo as shown speaks in the status line.
-                    if i == 0 {
-                        issue = solved;
-                    }
+                let solved = crate::develop::upright::store(r, &corrections, metadata.as_ref());
+                // Only the photo as shown speaks in the status line.
+                if i == 0 {
+                    issue = solved;
                 }
             }
         }

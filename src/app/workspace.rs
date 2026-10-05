@@ -27,47 +27,21 @@ impl Editor {
         if shortcut.is_some() {
             self.finish_wheel_gesture();
         }
-        let Some(library) = &mut self.library else {
-            return;
-        };
-        if self.library_mode {
-            match shortcut {
-                Some((edit, advance)) => {
-                    // As Lightroom applies it: to the grid's selection, or
-                    // the photo a Loupe, Compare or Survey has active.
-                    match library.edit_shown(edit, advance) {
-                        Ok(_) => self.status = library.message.clone(),
-                        Err(e) => self.status = format!("Metadata could not be saved: {e}"),
-                    }
-                    // Logged now, as a Library change, whatever this frame does next.
-                    self.sync_undo();
-                }
-                None => library.selection_keys(ctx),
+        if let Some((edit, advance)) = shortcut {
+            if self.library.is_some()
+                && let Err(error) = self.command_metadata(edit, None, advance)
+            {
+                self.status = format!("Metadata could not be saved: {}", error.message);
             }
-            return;
-        }
-        let (Some(id), Some((edit, advance))) = (self.document.catalog_photo, shortcut) else {
-            return;
-        };
-        match library.edit_metadata(id, edit, advance) {
-            Ok(next) => {
-                self.status = library.message.clone();
-                // Logged now, while this photo is still the one in Develop.
-                self.sync_undo();
-                if let Some(next) = next {
-                    self.develop_catalog_photo(next);
-                    if self.document.catalog_photo != Some(next)
-                        && let Some(library) = &mut self.library
-                    {
-                        library.make_active(id);
-                    }
-                }
-            }
-            Err(e) => self.status = format!("Metadata could not be saved: {e}"),
+        } else if self.library_mode
+            && let Some(library) = &mut self.library
+        {
+            library.selection_keys(ctx);
         }
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.control_commands(&ctx);
         self.events(&ctx);
         self.poll_updates(&ctx);
         self.themes.poll(&ctx);

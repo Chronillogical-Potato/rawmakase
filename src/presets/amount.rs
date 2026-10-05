@@ -180,6 +180,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.contrast_model = full.contrast_model;
     r.grading_model = full.grading_model;
     r.whites_model = full.whites_model;
+    r.gamut_model = full.gamut_model;
 }
 
 /// A slider between `a` and `b`, kept within `lo..=hi` above 100%. Imported values may
@@ -388,8 +389,10 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         reference_color: _,
         parametric_model: _,
         contrast_model: _,
+        lens_vignette_model,
         grading_model: _,
         whites_model: _,
+        gamut_model: _,
         temperature,
         tint,
         wb,
@@ -464,6 +467,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         lens_vignetting: *lens_vignetting,
         lens_manual_distortion: *lens_manual_distortion,
         lens_ca: *lens_ca,
+        lens_vignette_model: *lens_vignette_model,
         effects: effects(&a.effects, b_effects, t),
         preset_name: preset_name.clone(),
         preset_settings: preset_settings.clone(),

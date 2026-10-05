@@ -47,6 +47,7 @@ fn old_recipes_keep_original_profile_tones() {
         "contrast_model",
         "grading_model",
         "whites_model",
+        "gamut_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -70,16 +71,18 @@ fn old_recipes_keep_original_profile_tones() {
         crate::develop::basic_tone::WhitesModel::Original
     );
     assert!(Recipe::default().profile_tone);
+    assert_eq!(old.gamut_model, crate::develop::GamutModel::Compress);
     assert_eq!(
         old.grading_model,
         crate::develop::color_grade::GradingModel::Original
     );
     // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
-        parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        parametric_model: crate::develop::parametric::ParametricModel::Layered,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         grading_model: crate::develop::color_grade::GradingModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
+        gamut_model: crate::develop::GamutModel::Clip,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
@@ -87,6 +90,7 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.contrast_model, measured.contrast_model);
     assert_eq!(back.grading_model, measured.grading_model);
     assert_eq!(back.whites_model, measured.whites_model);
+    assert_eq!(back.gamut_model, measured.gamut_model);
 }
 
 #[test]
@@ -1258,4 +1262,116 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         .collect();
     let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.photo, plain.photo);
+}
+
+/// A look's parametric curve: added to the user's regions by the measured model, a
+/// second curve after the user's by the layered one, as Camera Raw 18.7 renders it.
+#[test]
+fn a_looks_parametric_curve_follows_the_users() {
+    use crate::develop::parametric::{ParametricCurve, ParametricModel};
+    let mut m = fixture().metadata;
+    m.cam_xyz = [
+        [1.1434, -0.4948, -0.121],
+        [-0.3746, 1.2042, 0.1903],
+        [-0.0666, 0.1479, 0.52],
+    ];
+    let mut look = crate::camera_profiles::CameraProfile::creative_for_test(&m);
+    let settings = &mut look.enhanced.as_mut().unwrap().settings;
+    settings.parametric = [0., -0.15, -0.2, -0.33];
+    settings.splits = [0.25, 0.5, 0.75];
+    let mut r = Recipe {
+        profile: Some(std::sync::Arc::new(look)),
+        engine: 4,
+        reference_curves: true,
+        ..Default::default()
+    };
+    r.effects.parametric = [0., 0.3, 0., 0.];
+    let user = ParametricCurve::new([0., 0.3, 0., 0.], [0.25, 0.5, 0.75]).unwrap();
+    let own = ParametricCurve::new([0., -0.15, -0.2, -0.33], [0.25, 0.5, 0.75]).unwrap();
+    r.parametric_model = ParametricModel::Layered;
+    let layered = r.with_profile_adjustments().into_owned();
+    assert_eq!(layered.effects.parametric, [0., 0.3, 0., 0.]);
+    let curve = CurveSet::new(&layered).parametric.unwrap();
+    for x in [0.1, 0.3, 0.5, 0.7, 0.9] {
+        assert!((curve.eval(x) - own.eval(user.eval(x))).abs() < 1e-3, "{x}");
+    }
+    // Off the measured path the layered curve has no curve of its own for the look,
+    // so the look's regions join the user's there.
+    r.reference_curves = false;
+    let legacy = r.with_profile_adjustments().into_owned();
+    assert!((legacy.effects.parametric[1] - 0.15).abs() < 1e-6);
+    r.reference_curves = true;
+    r.parametric_model = ParametricModel::Measured;
+    let added = r.with_profile_adjustments().into_owned();
+    assert!((added.effects.parametric[1] - 0.15).abs() < 1e-6);
+    let curve = CurveSet::new(&added).parametric.unwrap();
+    assert!((curve.eval(0.3) - own.eval(user.eval(0.3))).abs() > 1e-3);
+}
+
+#[test]
+fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
+    use crate::develop::effects::LensVignetteModel;
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let mut r = Recipe::for_metadata(&im.metadata);
+    r.lens_vignette_model = LensVignetteModel::Measured;
+    r.effects.lens_vignette = -0.5;
+    let lum = |p: [f32; 3]| p.iter().sum::<f32>();
+    let full = render(&im, &r, 0).unwrap();
+    let at = |im: &Rendered, x: u32, y: u32| lum(im.pixels[(y * im.width + x) as usize]);
+    let (corner, centre) = (at(&full, 11, 0), at(&full, 6, 4));
+    assert!(corner < centre * 0.9, "{corner} {centre}");
+    // Lightroom's positive amounts lighten the corners.
+    let lighter = Recipe {
+        effects: crate::develop::effects::Effects {
+            lens_vignette: 0.5,
+            ..r.effects.clone()
+        },
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &lighter, 0).unwrap(), 11, 0) > centre * 1.1);
+    // The gain belongs to the whole photo: a crop keeps each pixel's.
+    let cropped = Recipe {
+        crop: [0.5, 0., 1., 1.],
+        ..r.clone()
+    };
+    let half = render(&im, &cropped, 0).unwrap();
+    assert!((at(&half, half.width - 1, 0) - corner).abs() < 1e-3);
+    // Recipes saved before keep the original operator, which lightened at -0.5.
+    let original = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..r.clone()
+    };
+    assert!(at(&render(&im, &original, 0).unwrap(), 11, 0) > centre);
+    let json = serde_json::to_value(&original).unwrap();
+    assert!(json.get("lens_vignette_model").is_none());
+    let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
+    // An old recipe takes the measured operator once its Amount leaves 0, not before.
+    let mut old = Recipe {
+        lens_vignette_model: LensVignetteModel::Original,
+        ..Recipe::default()
+    };
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Original);
+    old.effects.lens_vignette = 0.3;
+    let mut kept = old.clone();
+    kept.adopt_measured_vignette(0.2);
+    assert_eq!(kept.lens_vignette_model, LensVignetteModel::Original);
+    old.adopt_measured_vignette(0.);
+    assert_eq!(old.lens_vignette_model, LensVignetteModel::Measured);
+}
+
+#[test]
+fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
+    use crate::develop::GamutModel;
+    let im = fixture();
+    let r = Recipe::with_profiles(&im.metadata, &[]);
+    assert_eq!(r.gamut_model, GamutModel::Clip);
+    // Clipping keeps the channels inside sRGB as they are; compression desaturates
+    // every channel toward the color's neutral.
+    let out_of_gamut = [1.3, 0.2, -0.1];
+    assert_eq!(GamutModel::Clip.into_srgb(out_of_gamut, 0.7), [1., 0.2, 0.]);
+    let compressed = GamutModel::Compress.into_srgb(out_of_gamut, 0.7);
+    assert!(compressed[1] > 0.2 && compressed[2] > 0., "{compressed:?}");
 }

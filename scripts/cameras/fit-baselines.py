@@ -2,9 +2,14 @@
 """Suggest data/cameras.toml rows. Optional: a camera can always be added by hand.
 
 From Adobe DNGs (preferred): convert copies of sample raws with Adobe DNG Converter,
-outside the repository, and pass the folder; each DNG's BaselineExposure is read
-with exiftool.
-  python3 scripts/cameras/fit-baselines.py --dng <folder of DNGs>
+outside the repository, in one call so it starts once:
+  "/Applications/Adobe DNG Converter.app/Contents/MacOS/Adobe DNG Converter" -c -d <out> <copies>
+then pass the folder; each DNG's BaselineExposure, black and white level are read with
+exiftool. When LibRaw's white level for the raw differs from Adobe's, add
+log2((LibRaw white - black) / (Adobe white - black)) to the printed value (see
+docs/cameras.md); --libraw-white gives LibRaw's white per file: a file of
+"<DNG name without .dng> <white>" lines, since it varies by camera and, for Canon, ISO.
+  python3 scripts/cameras/fit-baselines.py --dng <folder of DNGs> [--libraw-white whites.txt]
 
 From Camera Raw renders: run the exposure check in tests/corpus/README.md
 (parity-report.py --photos), then fit from its report:
@@ -53,27 +58,75 @@ def row(make, model, ev, source, sample, how=None):
     return '\n'.join(lines) + '\n'
 
 
-def from_dngs(folder):
+def libraw_whites(path):
+    if path is None:
+        return {}
+    whites = {}
+    for line in Path(path).read_text().splitlines():
+        if line.strip() and not line.startswith('#'):
+            name, _, white = line.rpartition(' ')
+            whites[name.strip()] = float(white)
+    return whites
+
+
+def from_dngs(folder, whites):
+    import math
+
     for dng in sorted(Path(folder).rglob('*.dng'), key=lambda p: p.name.lower()):
-        out = subprocess.run(['exiftool', '-j', '-n', '-Make', '-UniqueCameraModel', '-Model',
-                              '-BaselineExposure', str(dng)], capture_output=True, text=True, check=True)
+        out = subprocess.run(['exiftool', '-j', '-n', '-Make', '-Model', '-ISO', '-BaselineExposure',
+                              '-SubIFD:BlackLevel', '-SubIFD:WhiteLevel', str(dng)],
+                             capture_output=True, text=True, check=True)
         tags = json.loads(out.stdout)[0]
         if 'BaselineExposure' not in tags:
             print(f'# {dng.name}: no BaselineExposure', file=sys.stderr)
             continue
-        print(row(tags.get('Make', '?'), tags.get('Model', '?'), float(tags['BaselineExposure']),
-                  'adobe-dng', 'Adobe DNG Converter'))
+        ev = float(tags['BaselineExposure'])
+        black = statistics.mean(float(v) for v in str(tags.get('BlackLevel', 0)).split())
+        white = float(str(tags.get('WhiteLevel', 0)).split()[0])
+        libraw_white = whites.get(dng.stem)
+        if whites and libraw_white is None:
+            print(f'# {dng.name}: no LibRaw white level given, white-level term left out', file=sys.stderr)
+        if libraw_white and white > black:
+            ev += math.log2((libraw_white - black) / (white - black))
+        print(f'# {dng.name}: BaselineExposure {tags["BaselineExposure"]}, black {black:g}, white {white:g}')
+        make, model = str(tags.get('Make', '?')), str(tags.get('Model', '?'))
+        model = model[len(make):].strip() if model.lower().startswith(make.lower()) else model
+        # Check make and model against LibRaw's names (raw-identify -v).
+        print(row(make, model, ev, 'adobe-dng',
+                  f'1 photo at ISO {tags.get("ISO", "?")}, Adobe DNG Converter'))
 
 
 MIDTONE_GAIN = 1.17
 
 
+# raw.pixls.us makes whose LibRaw name differs; models differ through table aliases.
+PIXLS_MAKES = {'OM System': 'OM Digital'}
+
+
+def identity(table, camera):
+    """'OM System OM-1' (a report's raw.pixls.us label) -> ('OM Digital', 'OM-1'), the
+    table's names when a row matches. None for private photos, named by folder."""
+    makes = {c['make'] for c in table} | PIXLS_MAKES.keys()
+    make = max((m for m in makes if camera.lower().startswith(m.lower() + ' ')), key=len, default=None)
+    if make is None:
+        make, _, model = camera.partition(' ')
+        return (make, model) if model else None
+    model = camera[len(make) + 1:]
+    make = PIXLS_MAKES.get(make, make)
+    same = lambda a, b: a.lower() == b.lower()
+    for c in table:
+        if same(c['make'], make) and any(same(m, model) for m in [c['model'], *c.get('aliases', [])]):
+            return c['make'], c['model']
+    return make, model
+
+
 def from_report(path):
     table = rows()
     for p in json.loads(Path(path).read_text()).get('photos') or sys.exit('No photos in the report; run it with --photos'):
-        make, _, model = p['camera'].partition(' ')
-        if not model:  # private photos, named by folder
+        found = identity(table, p['camera'])
+        if found is None:
             continue
+        make, model = found
         print(f'# {p["camera"]}: Camera Raw {p["ev"]:+.2f} EV from RAWmakase')
         print(row(make, model, applied_baseline(table, make, model) + p['ev'] / MIDTONE_GAIN, 'fitted',
                   f'raw.pixls.us, {p["photos"]} photo{"s" * (p["photos"] > 1)}'))
@@ -84,8 +137,10 @@ def main():
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument('--dng', type=Path, help='folder of DNGs written by Adobe DNG Converter')
     g.add_argument('--report', type=Path, help='report.json of scripts/corpus/parity-report.py --photos')
+    p.add_argument('--libraw-white', type=Path,
+                   help="file of '<DNG name without .dng> <LibRaw white level>' lines")
     args = p.parse_args()
-    from_dngs(args.dng) if args.dng else from_report(args.report)
+    from_dngs(args.dng, libraw_whites(args.libraw_white)) if args.dng else from_report(args.report)
 
 
 if __name__ == '__main__':

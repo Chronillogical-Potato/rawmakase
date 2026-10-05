@@ -10,37 +10,9 @@ use tempfile::NamedTempFile;
 /// Per-user data: ~/Library/Application Support/RAWmakase on macOS,
 /// %APPDATA%\RAWmakase on Windows, and $XDG_DATA_HOME/rawmakase (default
 /// ~/.local/share/rawmakase) elsewhere. RAWMAKASE_DATA_DIR overrides all of them.
-pub fn data_dir() -> PathBuf {
-    std::env::var_os("RAWMAKASE_DATA_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            // Windows has no HOME; without this the data would land in the
-            // current directory.
-            cfg!(windows)
-                .then(|| std::env::var_os("APPDATA"))
-                .flatten()
-                .map(|p| PathBuf::from(p).join("RAWmakase"))
-        })
-        .unwrap_or_else(|| {
-            if cfg!(target_os = "macos") {
-                home().join("Library/Application Support/RAWmakase")
-            } else if cfg!(windows) {
-                // XDG_DATA_HOME is not consulted on Windows.
-                home().join(".local/share/rawmakase")
-            } else {
-                xdg_data_home().join("rawmakase")
-            }
-        })
-}
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-}
-/// $XDG_DATA_HOME, or its default ~/.local/share.
-fn xdg_data_home() -> PathBuf {
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local/share"))
-}
+pub use super::paths::data_dir;
+use super::paths::xdg_data_home;
+
 /// What persisting does when the destination already exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Replace {

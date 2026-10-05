@@ -1333,6 +1333,7 @@ impl Editor {
             }
             defringe_sliders(ui, &mut r.effects);
             subheading(ui, "Vignetting");
+            let previous_vignette = r.effects.lens_vignette;
             ui.push_id("lens-vignette", |ui| {
                 slider(ui, "Amount", &mut r.effects.lens_vignette, -1. ..=1., 0.);
                 slider(
@@ -1343,6 +1344,7 @@ impl Editor {
                     0.5,
                 );
             });
+            r.adopt_measured_vignette(previous_vignette);
         }) {
             if let Some(m) = &metadata {
                 r.lens_builtin = m.lens.as_ref().is_none_or(|l| l.default_on);
@@ -1705,7 +1707,7 @@ pub(super) const ASPECTS: [(f32, &str); 9] = [
     (16. / 9., "16 x 9"),
     (65. / 24., "65 x 24 (XPan)"),
 ];
-const BANDS: [&str; 8] = [
+pub(super) const BANDS: [&str; 8] = [
     "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta",
 ];
 fn band_color(i: usize) -> Color32 {

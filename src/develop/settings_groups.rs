@@ -287,6 +287,7 @@ impl SettingGroup {
                 e.defringe_ranges = f.defringe_ranges;
             }
             LensVignetting => {
+                to.lens_vignette_model = from.lens_vignette_model;
                 e.lens_vignette = f.lens_vignette;
                 e.lens_vignette_midpoint = f.lens_vignette_midpoint;
             }
@@ -320,6 +321,7 @@ impl SettingGroup {
                 to.contrast_model = from.contrast_model;
                 to.grading_model = from.grading_model;
                 to.whites_model = from.whites_model;
+                to.gamut_model = from.gamut_model;
             }
             Calibration => {
                 e.calibration = f.calibration;
@@ -558,8 +560,10 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         reference_color: _,
         parametric_model: _,
         contrast_model: _,
+        lens_vignette_model: _,
         grading_model: _,
         whites_model: _,
+        gamut_model: _,
         temperature: _,
         tint: _,
         wb: _,
@@ -654,8 +658,10 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("reference_color", Group(ProcessVersion)),
         ("parametric_model", Group(ProcessVersion)),
         ("contrast_model", Group(ProcessVersion)),
+        ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
+        ("gamut_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
         ("wb", Derived),

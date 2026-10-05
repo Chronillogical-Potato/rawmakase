@@ -4,6 +4,7 @@ use crate::develop::Recipe;
 use eframe::egui;
 
 pub(super) struct EditFrame {
+    pub(super) command_adjust: bool,
     generation: u64,
     recipe: Recipe,
     modes: RenderModes,
@@ -32,10 +33,12 @@ impl Editor {
         }
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
+        self.sync_command_revision();
         self.document.history.begin_frame();
         // Before the frame looks at it, so reading it changes no crop.
         self.read_aspect();
         let frame = EditFrame {
+            command_adjust: false,
             generation: self.load.id(),
             recipe: self.document.recipe.clone(),
             modes: self.render_modes(),
@@ -68,6 +71,13 @@ impl Editor {
             super::brush_scroll::Edit::Changed
         };
         if self.view.wheel.ends_before(edit) {
+            self.document.history.finish_gesture(&frame.recipe);
+        }
+        if self.automation.has_turn()
+            && !frame.command_adjust
+            && (self.document.recipe != frame.recipe || clicked)
+        {
+            self.automation.end_turn();
             self.document.history.finish_gesture(&frame.recipe);
         }
         if let Some((name, value)) = step {
@@ -108,7 +118,10 @@ impl Editor {
         if let Some(left) = self.view.wheel.remaining() {
             ctx.request_repaint_after(left);
         }
-        let gesture = ctx.input(|i| i.pointer.primary_down()) || self.view.wheel.active();
+        // A dial turned on a control surface is one too.
+        let gesture = ctx.input(|i| i.pointer.primary_down())
+            || self.view.wheel.active()
+            || self.automation.turning();
         if !self.document.history.is_replaying() {
             turn_on_edited_panels(&frame.recipe, &mut self.document.recipe);
         }
@@ -120,6 +133,7 @@ impl Editor {
         // Presets panel is open.
         self.end_stale_preset_amount();
         if edited {
+            self.sync_command_revision();
             self.document.save.mark_changed();
             // A conversion waiting for the photo lapses with any other edit, Undo
             // included.

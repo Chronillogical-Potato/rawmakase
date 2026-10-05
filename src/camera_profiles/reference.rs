@@ -45,15 +45,15 @@ mod tests {
         assert_eq!(baseline_exposure(&m), 0.);
         m.model = "X-T5".into();
         m.fuji_dynamic_range = 100;
-        assert_eq!(baseline_exposure(&m), -0.15);
+        assert_eq!(baseline_exposure(&m), -0.1);
         m.model = "X100V".into();
         assert_eq!(neutral_calibration(&m), [1.; 3]);
     }
     #[test]
     fn baseline_covers_measured_cameras() {
         assert_eq!(baseline_exposure(&camera("SONY", "ILCE-7M2")), 0.3);
-        assert_eq!(baseline_exposure(&camera("Sony", "ILCE-7M4")), 0.3);
-        assert_eq!(baseline_exposure(&camera("Canon", "EOS R7")), 0.35);
+        assert_eq!(baseline_exposure(&camera("Sony", "ILCE-7M4")), 0.35);
+        assert_eq!(baseline_exposure(&camera("Canon", "EOS R7")), 0.4);
         assert_eq!(baseline_exposure(&camera("Nikon", "Z 30")), 0.35);
         // An unlisted body follows its make.
         assert_eq!(

@@ -627,6 +627,29 @@ impl PhotoProfiles {
         }
     }
 }
+/// Lens profiles imported one by one, so a file that can't be used doesn't
+/// stop the rest.
+#[derive(Debug, Default)]
+pub struct EachImported {
+    pub imported: Vec<PathBuf>,
+    /// Files left out, with why.
+    pub refused: Vec<(PathBuf, String)>,
+}
+/// Validates and copies each lens profile into the data directory, going on
+/// past the ones that can't be imported.
+pub fn import_each(paths: &[PathBuf]) -> EachImported {
+    import_each_into(paths, &crate::storage::data_dir().join("lens-profiles"))
+}
+fn import_each_into(paths: &[PathBuf], destination: &Path) -> EachImported {
+    let mut out = EachImported::default();
+    for path in paths {
+        match import_into(std::slice::from_ref(path), destination) {
+            Ok(done) => out.imported.extend(done),
+            Err(e) => out.refused.push((path.clone(), format!("{e:#}"))),
+        }
+    }
+    out
+}
 /// Validates and copies lens profiles into the data directory.
 pub fn import_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     import_into(paths, &crate::storage::data_dir().join("lens-profiles"))
@@ -714,6 +737,32 @@ mod tests {
   <stCamera:VignetteModel stCamera:VignetteModelParam1="-2.871602" stCamera:VignetteModelParam2="-4.473586" stCamera:VignetteModelParam3="33.881413"/>
  </rdf:Description></stCamera:PerspectiveModel></rdf:Description></rdf:li>
 </rdf:Seq></photoshop:CameraProfiles></rdf:Description></rdf:RDF></x:xmpmeta>"#;
+    #[test]
+    fn one_unusable_file_does_not_stop_the_others() {
+        let temp = tempfile::tempdir().unwrap();
+        let good = temp.path().join("good.lcp");
+        std::fs::write(&good, SAMPLE).unwrap();
+        // Parses, but has no usable entry, as some of Adobe's own files.
+        let empty = temp.path().join("empty.lcp");
+        std::fs::write(
+            &empty,
+            SAMPLE.replace("FocalLength=\"55\"", "FocalLength=\"0\""),
+        )
+        .unwrap();
+        let destination = temp.path().join("library");
+        let paths = vec![empty.clone(), good.clone()];
+        // All or nothing, as before.
+        assert!(import_into(&paths, &destination).is_err());
+        let done = import_each_into(&paths, &destination);
+        assert_eq!(done.imported, [destination.join("good.lcp")]);
+        assert_eq!(done.refused.len(), 1);
+        assert_eq!(done.refused[0].0, empty);
+        assert!(
+            done.refused[0].1.contains("No usable lens profile entries"),
+            "{}",
+            done.refused[0].1
+        );
+    }
     fn a7ii(aperture: f32) -> Metadata {
         Metadata {
             make: "Sony".into(),

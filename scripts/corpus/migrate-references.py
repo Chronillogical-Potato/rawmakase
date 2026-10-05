@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import blocks  # noqa: E402
 import tiff16  # noqa: E402
 
-RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf'}
+RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf', '.ori', '.pef',
+                  '.rwl', '.fff', '.3fr'}
 
 
 def packets(folder):

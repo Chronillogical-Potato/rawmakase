@@ -41,7 +41,7 @@ When a color change is intended, run the tests with `RAWMAKASE_BLESS=1` and comm
 
 ## Private tier
 
-Kept outside the repository in `RAWMAKASE_CORPUS` (Piotr: `~/RAWmakase Corpus`, 5 GB cap):
+Kept outside the repository in `RAWMAKASE_CORPUS` (Piotr: `~/RAWmakase Corpus`, 7 GB cap):
 
 ```
 raws/own/…              symlinks to your own RAWs (nothing is copied or written next to them)
@@ -104,7 +104,7 @@ Known limitations, not yet addressed:
 - **Local operators are barely covered by charts.** Clarity, Texture and Dehaze have chart cases, but Shadows, Highlights, Dehaze and Clarity adapt to image content, so flat patches (even with the black/white surrounds) say little about them; only the private real photos test them properly.
 - **sRGB only.** RAWmakase outputs sRGB, so the wide-gamut row and very saturated colors are clipped before comparison and saturation errors outside sRGB are invisible. Needs a wide-gamut (ProPhoto or linear) render output in RAWmakase.
 - **Private tier is slow.** Photo parity against Camera Raw (1,305 references) takes about an hour and accepted renders about 20 minutes with `--release`. Trim to a representative subset (a few photos per camera, the `photos` cases) for routine runs.
-- **Bad sample files are accepted.** Nikon Z5II and Z50II samples decode as "data corrupted" with LibRaw 0.22.0, yet their renders were recorded in `accepted/`. Exclude files LibRaw can't decode cleanly (also Z 8, Z6III, Sony A7 V, A1 II lossless, which don't open) until LibRaw supports them.
+- **Bad sample files are accepted.** Nikon Z5II and Z50II samples decode as "data corrupted" with LibRaw 0.22.0, yet their renders were recorded in `accepted/`. Exclude files LibRaw can't decode cleanly (also Z 8, Z6III and A1 II lossless, which don't open; the Sony A7 V opens since the LibRaw update) until LibRaw supports them.
 - **Presets are not used.** The plan included about 40 of Piotr's Lightroom presets as realistic combinations; only 12 hand-picked pairs and one combined look exist.
 - **Parity numbers are not in docs/parity-gaps.md.** `scripts/corpus/parity-report.py` summarises them per control; that document still quotes ad-hoc scorecard runs.
 - **Known RAWmakase gaps the tests expose** (tests record them as the baseline, or fail on purpose):
