@@ -47,6 +47,7 @@ fn old_recipes_keep_original_profile_tones() {
         "contrast_model",
         "grading_model",
         "mixer_model",
+        "saturation_model",
         "calibration_model",
         "whites_model",
         "gamut_model",
@@ -83,6 +84,10 @@ fn old_recipes_keep_original_profile_tones() {
         crate::develop::color_mixer::MixerModel::Original
     );
     assert_eq!(
+        old.saturation_model,
+        crate::develop::color_mixer::SaturationModel::Original
+    );
+    assert_eq!(
         old.calibration_model,
         crate::develop::calibration::CalibrationModel::Original
     );
@@ -94,6 +99,7 @@ fn old_recipes_keep_original_profile_tones() {
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         gamut_model: crate::develop::GamutModel::Clip,
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
+        saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
         calibration_model: crate::develop::calibration::CalibrationModel::Measured,
         ..Recipe::default()
     };
@@ -104,6 +110,7 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.whites_model, measured.whites_model);
     assert_eq!(back.gamut_model, measured.gamut_model);
     assert_eq!(back.mixer_model, measured.mixer_model);
+    assert_eq!(back.saturation_model, measured.saturation_model);
     assert_eq!(back.calibration_model, measured.calibration_model);
 }
 
