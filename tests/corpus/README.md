@@ -81,6 +81,17 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
   python3 scripts/corpus/parity-report.py <dir> --out <report dir>
   ```
 
+  `--photos` adds the default exposure per camera: how much brighter Camera Raw renders each unedited corpus photo with Adobe Standard (median log2 luminance ratio over midtone blocks, in EV) and its mean ΔE00, listed by camera only. To repeat it from scratch:
+
+  ```
+  python3 scripts/corpus/pixls.py download                                  # CC0 samples listed in pixls.json, hash-checked
+  python3 scripts/corpus/camera-raw-photos.py --raws pixls --cases default  # Camera Raw renders, needs Photoshop
+  RAWMAKASE_PHOTO_FILTER=/default RAWMAKASE_PARITY_DUMP=<dir> cargo test --release --test color photos_camera_raw -- --ignored
+  python3 scripts/corpus/parity-report.py <dir> --out <report dir> --photos
+  ```
+
+  with `RAWMAKASE_CORPUS` and `RAWMAKASE_PROFILES` set as for the private tier.
+
 ## TODO
 
 Known limitations, not yet addressed:

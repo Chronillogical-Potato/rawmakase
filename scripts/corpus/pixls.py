@@ -38,13 +38,24 @@ REPOSITORY = 'https://raw.pixls.us/json/getrepository.php'
 NO_CHART = {'leica-sl2': 'LibRaw trims 19 rows from DNGs made by this model'}
 RAW_EXTENSIONS = {'.arw', '.raf', '.nef', '.nrw', '.cr2', '.cr3', '.dng', '.rw2', '.orf'}
 
-# Recent bodies only (Piotr, 2026-09-26: Sony, Canon, Nikon, Leica, Fujifilm).
+# Recent bodies (Piotr, 2026-09-26: Sony, Canon, Nikon, Leica, Fujifilm), and popular
+# bodies of the last decade from those and other makers (Piotr, 2026-10-05), for the
+# per-camera default exposure in scripts/corpus/parity-report.py.
 MODELS = {
-    'Sony': ['ILCE-7M5', 'ILCE-7M4', 'ILCE-1M2', 'ILCE-7CM2', 'ILCE-6700', 'ILCE-9M3', 'ILCE-7RM5'],
-    'Canon': ['EOS R6 Mark III', 'EOS R5 Mark II', 'EOS R8', 'EOS R7', 'EOS R50', 'EOS R100', 'EOS R3'],
-    'Nikon': ['Z 8', 'Z f', 'Z6_3', 'Z5_2', 'Z50_2', 'Z 30'],
-    'Fujifilm': ['X100VI', 'X-T5', 'X-H2S', 'X-S20', 'X-T50', 'X-E5'],
-    'Leica': ['M10-R', 'SL2'],
+    'Sony': ['ILCE-7M5', 'ILCE-7M4', 'ILCE-1M2', 'ILCE-7CM2', 'ILCE-6700', 'ILCE-9M3', 'ILCE-7RM5',
+             'ILCE-7M3', 'ILCE-7RM4', 'ILCE-7RM3', 'ILCE-7C', 'ILCE-7SM3', 'ILCE-1', 'ILCE-6400',
+             'ILCE-6600', 'ILCE-6000', 'ZV-E10', 'DSC-RX100M7'],
+    'Canon': ['EOS R6 Mark III', 'EOS R5 Mark II', 'EOS R8', 'EOS R7', 'EOS R50', 'EOS R100', 'EOS R3',
+              'EOS R6 Mark II', 'EOS R6', 'EOS R5', 'EOS R', 'EOS RP', 'EOS R10', 'EOS 5D Mark IV',
+              'EOS 6D Mark II', 'EOS 90D', 'EOS M50'],
+    'Nikon': ['Z 8', 'Z f', 'Z6_3', 'Z5_2', 'Z50_2', 'Z 30', 'Z 9', 'Z 6_2', 'Z 7_2', 'Z 6', 'Z 7',
+              'Z 5', 'Z 50', 'Z fc', 'D850', 'D780', 'D750', 'D7500'],
+    'Fujifilm': ['X100VI', 'X-T5', 'X-H2S', 'X-S20', 'X-T50', 'X-E5', 'X-H2', 'X-T4', 'X-T3', 'X100V',
+                 'X-T30 II', 'X-S10', 'X-Pro3', 'X-E4'],
+    'Leica': ['M10-R', 'SL2', 'Q2'],
+    'Panasonic': ['DC-S5M2', 'DC-S5', 'DC-S1', 'DC-GH6', 'DC-GH5', 'DC-G9M2', 'DC-G9'],
+    'Olympus': ['E-M1MarkIII', 'E-M1MarkII'],
+    'Ricoh': ['GR III'],
 }
 
 
