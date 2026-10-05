@@ -101,9 +101,11 @@ sample's ISO and may be off by a few tenths at others.
 Adobe's value also follows some shooting settings, which the rows leave out: Canon
 Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO 50,
 Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
-so in `sample`.
+so in `sample`. RAWmakase adds the stop for Highlight Tone Priority itself, reading it
+from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured);
+the other settings are not handled yet.
 
-After the table, 142 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
+After the table, 144 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
 RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
 master of 2026-10-02). For 15 bodies Adobe's value alone left the render more than
 0.1 EV off, so their rows are `fitted` to the render instead and say Adobe's value in
@@ -114,8 +116,7 @@ fitted too: its Adobe DNG is 16-bit, so its white level does not compare with Li
 Camera Raw renders most of those Fujifilm bodies darker than their baseline explains,
 for a reason not found yet.
 
-Still about 1 EV off, for the shooting settings above or a decoding problem: Canon
-EOS R3 and R8 (Highlight Tone Priority), Fujifilm X-E5, X-H2S and X-T30 III (DR200),
+Still about 1 EV off, for the shooting settings above or a decoding problem: Fujifilm X-E5, X-H2S and X-T30 III (DR200),
 X-T30, Olympus E-M10 Mark III and Sony A7R IV (extended low ISO), and the Canon EOS R6
 Mark III, whose black level LibRaw reads as 0 instead of 512. Fujifilm photos whose
 raw does not say its DR mode (the XF10 sample) get no baseline yet, about 0.3 EV off;
