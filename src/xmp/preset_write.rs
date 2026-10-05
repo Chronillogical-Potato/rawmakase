@@ -114,6 +114,16 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         .filter(|(key, _)| !attributes.iter().any(|(k, _)| k == key))
         .collect();
     attributes.extend(dormant);
+    // Operators of the chosen groups that the photo keeps from before they were
+    // measured, so applying the preset renders them as the photo does.
+    let original: Vec<_> = super::write::original_operators(r)
+        .into_iter()
+        .filter(|(_, key)| group_of_key(key).is_some_and(|g| groups.contains(g)))
+        .map(|(name, _)| name)
+        .collect();
+    if !original.is_empty() {
+        attributes.push(("RAWmakaseOriginal".into(), original.join(",")));
+    }
     // Each chosen panel's switch as the photo has it, on or off, so applying the
     // preset also sets that panel the same way.
     for panel in crate::develop::panels::Panel::ALL {
@@ -359,6 +369,36 @@ mod tests {
             let text = preset(&edited(), &info, &with);
             assert!(text.contains(r#"crs:SupportsAmount="False""#), "{group:?}");
         }
+        Ok(())
+    }
+    /// A preset made from a photo that keeps the original sharpening renders it the
+    /// same way where it's applied; without the Sharpening group it says nothing of it.
+    #[test]
+    fn presets_carry_the_original_sharpening_of_their_photo() -> anyhow::Result<()> {
+        use crate::develop::sharpening::SharpeningModel;
+        let info = PresetInfo::new("Crisp", "User Presets");
+        let source = Recipe {
+            sharpening: 0.5,
+            ..Default::default()
+        };
+        assert_eq!(source.sharpening_model, SharpeningModel::Original);
+        let m = crate::raw::Metadata {
+            wb: [2., 1., 1.8],
+            daylight_wb: [2., 1., 1.8],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        let target = Recipe::with_profiles(&m, &[]);
+        assert_eq!(target.sharpening_model, SharpeningModel::Measured);
+        let mut sharpening = GroupSelection::none();
+        sharpening.set(SettingGroup::Sharpening, GroupInclusion::Included);
+        let text = preset(&source, &info, &sharpening);
+        let applied =
+            crate::xmp::parse(Path::new("Crisp.xmp"), &text)?.apply(&target, &m, &[], None)?;
+        assert_eq!(applied.sharpening_model, SharpeningModel::Original);
+        let mut exposure = GroupSelection::none();
+        exposure.set(SettingGroup::Exposure, GroupInclusion::Included);
+        assert!(!preset(&source, &info, &exposure).contains("RAWmakaseOriginal"));
         Ok(())
     }
     #[test]
