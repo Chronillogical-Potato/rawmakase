@@ -587,3 +587,18 @@ fn absolute_controls_preserve_endpoints_neutral_and_monotonicity() {
         }
     }
 }
+#[test]
+fn clarity_added_by_command_takes_the_measured_operator() {
+    use crate::develop::clarity::ClarityModel;
+    let (mut e, ctx) = editor();
+    e.document.recipe.clarity_model = ClarityModel::Original;
+    e.execute_command(Command::new(Operation::Set(Param::Clarity, 30.)), &ctx)
+        .unwrap();
+    assert_ne!(e.document.recipe.effects.clarity, 0.);
+    assert_eq!(e.document.recipe.clarity_model, ClarityModel::Measured);
+    // Clarity an old recipe already had keeps its operator.
+    e.document.recipe.clarity_model = ClarityModel::Original;
+    e.execute_command(Command::new(Operation::Set(Param::Clarity, 50.)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.clarity_model, ClarityModel::Original);
+}
