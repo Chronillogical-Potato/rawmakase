@@ -274,6 +274,7 @@ impl SettingGroup {
             }
             ColorNoiseReduction => {
                 to.noise_chroma = from.noise_chroma;
+                to.noise_model = from.noise_model;
                 e.chroma_detail = f.chroma_detail;
                 e.chroma_smoothness = f.chroma_smoothness;
             }
@@ -601,6 +602,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         grading: _,
         noise_luma: _,
         noise_chroma: _,
+        noise_model: _,
         sharpening: _,
         crop: _,
         straighten: _,
@@ -704,6 +706,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("grading", Group(ColorGrading)),
         ("noise_luma", Group(LuminanceNoiseReduction)),
         ("noise_chroma", Group(ColorNoiseReduction)),
+        ("noise_model", Group(ColorNoiseReduction)),
         ("sharpening", Group(Sharpening)),
         ("crop", Group(Crop)),
         ("straighten", Group(Crop)),

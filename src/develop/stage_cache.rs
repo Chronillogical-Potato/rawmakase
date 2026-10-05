@@ -137,6 +137,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         upright,
         noise_luma,
         noise_chroma,
+        // The measured operator changes the source image, which every key holds.
+        noise_model: _,
         lens_vignette_model,
         effects,
         // Shadows/Highlights and their exposure are keyed by `LocalKey`; spot removal

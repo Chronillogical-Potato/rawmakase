@@ -9,6 +9,7 @@ use super::{
 use crate::{
     develop::{
         ImageFrame,
+        color_noise::ChromaDenoise,
         red_eye::{self, RedEyeOp},
     },
     raw::CameraImage,
@@ -185,6 +186,8 @@ pub(crate) struct RetouchCache {
     /// The previous image (weakly, so its pixels are freed) and the rectangles where
     /// the current one differs from it.
     change: Option<(Weak<CameraImage>, Vec<PixelRect>)>,
+    /// The last Color noise reduction: its source, settings and result.
+    denoised: Option<(Arc<CameraImage>, ChromaDenoise, Arc<CameraImage>)>,
 }
 impl RetouchCache {
     /// `base` with `ops` applied. The previous result is reused where no change
@@ -243,6 +246,34 @@ impl RetouchCache {
         self.red_eye = ops.red_eye.to_vec();
         self.image = Some(image.clone());
         Ok(image)
+    }
+    /// `source` with Color noise reduction `d`, reused while neither changes; without
+    /// one, `source` itself, and the last result is let go.
+    pub(crate) fn denoised(
+        &mut self,
+        source: &Arc<CameraImage>,
+        d: Option<ChromaDenoise>,
+        cancel: &AtomicBool,
+    ) -> Result<Arc<CameraImage>> {
+        let Some(d) = d else {
+            self.denoised = None;
+            return Ok(source.clone());
+        };
+        if let Some((s, last, out)) = &self.denoised
+            && Arc::ptr_eq(s, source)
+            && *last == d
+        {
+            return Ok(out.clone());
+        }
+        // Free the previous result, and the retouched image built on it, before making
+        // the next; spot removal is then rebuilt on the new one.
+        self.denoised = None;
+        self.base = None;
+        self.image = None;
+        self.change = None;
+        let out = Arc::new(d.apply(source, cancel)?);
+        self.denoised = Some((source.clone(), d, out.clone()));
+        Ok(out)
     }
     /// What the last change replaced, and where the images differ.
     /// Whether `image` is what the last change replaced; then the current image

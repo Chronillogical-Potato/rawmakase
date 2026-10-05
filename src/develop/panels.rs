@@ -120,6 +120,8 @@ impl Panel {
                 r.sharpening_model = defaults.sharpening_model;
                 r.noise_luma = 0.;
                 r.noise_chroma = 0.;
+                // Renders nothing at Amount 0; Detail's reset sets the measured one.
+                r.noise_model = defaults.noise_model;
                 e.luma_detail = d.luma_detail;
                 e.luma_contrast = d.luma_contrast;
                 e.chroma_detail = d.chroma_detail;

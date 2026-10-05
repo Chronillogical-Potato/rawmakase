@@ -10,6 +10,7 @@ pub mod color_grade;
 mod color_grade_curves;
 mod color_grade_data;
 pub mod color_mixer;
+pub mod color_noise;
 mod crop_constraint;
 pub mod curve;
 pub mod defaults;
