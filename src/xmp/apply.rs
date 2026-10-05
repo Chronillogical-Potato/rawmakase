@@ -431,9 +431,12 @@ impl Preset {
         ]
         .iter()
         .any(|k| settings.values.contains_key(*k))
-            && !settings.keeps_original(super::write::ORIGINAL_SHARPENING)
         {
             r.sharpening_model = crate::develop::sharpening::SharpeningModel::Measured;
+        }
+        // RAWmakase's own packet for a recipe that kept the original operator.
+        if settings.keeps_original(super::write::ORIGINAL_SHARPENING) {
+            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Original;
         }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
@@ -803,9 +806,11 @@ impl Preset {
         if ["VignetteAmount", "VignetteMidpoint"]
             .iter()
             .any(|k| settings.values.contains_key(*k))
-            && !settings.keeps_original(super::write::ORIGINAL_LENS_VIGNETTE)
         {
             r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_LENS_VIGNETTE) {
+            r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Original;
         }
         for (i, name) in ["Purple", "Green"].iter().enumerate() {
             settings.assign(

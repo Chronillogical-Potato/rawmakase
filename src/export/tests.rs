@@ -745,6 +745,13 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     let back = read(&old)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
+    // Also onto a new photo's settings, which start on the measured operators.
+    let packet = crate::xmp::write::packet(&old, &m, &photo);
+    let fresh = Recipe::with_profiles(&m, &[]);
+    assert_eq!(fresh.sharpening_model, SharpeningModel::Measured);
+    let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(&fresh, &m, &[], None)?;
+    assert_eq!(back.sharpening_model, SharpeningModel::Original);
+    assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     let measured = Recipe {
         sharpening_model: SharpeningModel::Measured,
         lens_vignette_model: LensVignetteModel::Measured,
