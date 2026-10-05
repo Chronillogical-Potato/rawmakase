@@ -6,8 +6,11 @@ use crate::{
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+mod grain;
 mod lens_vignette;
 mod vignette;
+pub(crate) use grain::GrainField;
+pub use grain::GrainModel;
 pub use lens_vignette::LensVignetteModel;
 pub(crate) use lens_vignette::{ManualVignette, combined_table};
 pub(crate) use vignette::PostCropVignette;
@@ -323,27 +326,6 @@ fn defringe_strength(amount: f32, chroma: f32) -> f32 {
     (1. - DEFRINGE_KEEP * (-chroma / DEFRINGE_CHROMA).exp())
         * (1. - (-amount * 20. / DEFRINGE_RATE).exp())
 }
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut v = (x as u32).wrapping_mul(0x9e3779b9) ^ (y as u32).wrapping_mul(0x85ebca6b) ^ seed;
-    v ^= v >> 16;
-    v = v.wrapping_mul(0x7feb352d);
-    v ^= v >> 15;
-    v = v.wrapping_mul(0x846ca68b);
-    v ^= v >> 16;
-    (v as f64 / u32::MAX as f64 * 2. - 1.) as f32
-}
-fn grain(x: f32, y: f32, size: f32, seed: u32) -> f32 {
-    let x = x / size;
-    let y = y / size;
-    let ix = x.floor() as i32;
-    let iy = y.floor() as i32;
-    let smooth = |v: f32| v * v * (3. - 2. * v);
-    let a = smooth(x - ix as f32);
-    let b = smooth(y - iy as f32);
-    let n = hash(ix, iy, seed) * (1. - a) + hash(ix + 1, iy, seed) * a;
-    let m = hash(ix, iy + 1, seed) * (1. - a) + hash(ix + 1, iy + 1, seed) * a;
-    n * (1. - b) + m * b
-}
 pub fn spatial_finish(im: &mut Rendered, r: &Recipe, origin: [u32; 2], full: [u32; 2]) {
     spatial_finish_scaled(im, r, origin, full, 1.);
 }
@@ -363,6 +345,9 @@ pub(crate) fn spatial_finish_scaled(
         return;
     }
     let vignette = PostCropVignette::new(e, full);
+    // `full` is the whole output, `scale` its pixels per full-resolution pixel.
+    let edge = full[0].max(full[1]) as f32 / scale;
+    let grain = GrainField::new(e, r.grain_model, edge);
     im.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         let x = origin[0] + i as u32 % im.width;
         let y = origin[1] + i as u32 / im.width;
@@ -376,7 +361,6 @@ pub(crate) fn spatial_finish_scaled(
             / (2. - e.lens_vignette_midpoint))
             .clamp(0., 1.);
         let gain = 2f32.powf(-lens_vignette * lens * 2.);
-        let size = 0.75 + e.grain_size * 5.;
         let (gx, gy) = if scale == 1. {
             (x as f32, y as f32)
         } else {
@@ -385,13 +369,7 @@ pub(crate) fn spatial_finish_scaled(
                 (y as f32 + 0.5) / scale - 0.5,
             )
         };
-        let coarse = grain(gx, gy, size, e.grain_seed) * (size * scale).min(1.) / size.min(1.);
-        let fine =
-            hash(gx.round() as i32, gy.round() as i32, e.grain_seed ^ 0x21f09) * scale.min(1.);
-        let noise = (coarse * (1. - e.grain_roughness) + fine * e.grain_roughness)
-            * e.grain
-            * 0.13
-            * (4. * l * (1. - l)).max(0.2);
+        let noise = grain.noise(gx, gy, scale, l);
         for v in p {
             *v = (*v * gain + noise).clamp(0., 1.);
         }

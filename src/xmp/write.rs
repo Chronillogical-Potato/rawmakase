@@ -610,6 +610,7 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             ORIGINAL_LENS_VIGNETTE,
             "VignetteAmount",
         ),
+        (r.grain_model.is_original(), ORIGINAL_GRAIN, "GrainAmount"),
     ]
     .into_iter()
     .filter_map(|(original, name, key)| original.then_some((name, key)))
@@ -617,6 +618,7 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
 }
 pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
 pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
+pub(super) const ORIGINAL_GRAIN: &str = "Grain";
 
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {

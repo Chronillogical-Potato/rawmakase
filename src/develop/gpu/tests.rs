@@ -500,6 +500,10 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         recipe.lens_vignette_model = lens_vignette;
         if spatial {
             recipe.effects.grain = 0.4;
+            // The measured grain on Color Priority cases, the original on the others.
+            if style == ColorPriority {
+                recipe.grain_model = crate::develop::effects::GrainModel::Measured;
+            }
             recipe.effects.vignette = vignette;
             recipe.effects.vignette_style = style;
             recipe.effects.vignette_highlights = 0.6;

@@ -48,6 +48,14 @@ pub struct Recipe {
     #[serde(default)]
     pub profile_tone: bool,
     pub effects: crate::develop::effects::Effects,
+    /// Which operator renders Grain. Missing means the original grain, so recipes
+    /// saved before the measured one look as they did; omitted at that default, and
+    /// kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::effects::GrainModel::is_original"
+    )]
+    pub grain_model: crate::develop::effects::GrainModel,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -238,6 +246,7 @@ impl Default for Recipe {
             lens_ca: false,
             profile_tone: true,
             effects: Default::default(),
+            grain_model: Default::default(),
             preset_name: String::new(),
             preset_settings: Default::default(),
             profile: None,
@@ -486,6 +495,7 @@ impl Recipe {
         recipe.reference_calibration = true;
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
         recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        recipe.grain_model = crate::develop::effects::GrainModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
@@ -745,6 +755,13 @@ impl Recipe {
         self.sharpening_radius = d.radius;
         self.sharpening_detail = d.detail;
         self.sharpening_masking = d.masking;
+    }
+    /// After an edit of Grain from Amount `previous`: grain added from none has nothing
+    /// of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_grain(&mut self, previous: f32) {
+        if previous == 0. && self.effects.grain != 0. {
+            self.grain_model = crate::develop::effects::GrainModel::Measured;
+        }
     }
     pub(crate) fn lens_correction<'a>(
         &self,

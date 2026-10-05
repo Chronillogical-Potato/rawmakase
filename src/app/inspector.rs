@@ -1504,6 +1504,7 @@ impl Editor {
                 0.5,
             );
             subheading(ui, "Grain");
+            let previous_grain = r.effects.grain;
             ui.push_id("grain", |ui| {
                 slider(ui, "Amount", &mut r.effects.grain, 0. ..=1., 0.);
                 slider(ui, "Size", &mut r.effects.grain_size, 0. ..=1., 0.25);
@@ -1515,6 +1516,7 @@ impl Editor {
                     0.5,
                 );
             });
+            r.adopt_measured_grain(previous_grain);
         }) {
             r.effects.reset_post_crop();
         }

@@ -146,7 +146,11 @@ impl Panel {
                 r.upright = defaults.upright.clone();
                 r.constrain_crop = defaults.constrain_crop;
             }
-            Panel::Effects => e.reset_post_crop(),
+            Panel::Effects => {
+                e.reset_post_crop();
+                // Renders nothing at Amount 0; a first Grain edit sets it.
+                r.grain_model = defaults.grain_model;
+            }
             Panel::Calibration => {
                 e.calibration = d.calibration;
                 e.shadow_tint = d.shadow_tint;
@@ -228,6 +232,11 @@ mod tests {
         after.effects.lens_vignette = -0.4;
         after.adopt_measured_vignette(0.);
         assert!(Panel::LensCorrections.holds_change(&before, &after));
+        // A first Grain on an old recipe also sets the measured grain.
+        let mut after = before.clone();
+        after.effects.grain = 0.4;
+        after.adopt_measured_grain(0.);
+        assert!(Panel::Effects.holds_change(&before, &after));
         // Detail's reset on an old recipe also sets the measured sharpening.
         let mut before = before.clone();
         before.sharpening = 0.35;
