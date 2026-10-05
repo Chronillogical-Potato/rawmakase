@@ -61,6 +61,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("EXPOSURE_EV", 1),
     ("LOCAL_WB", 6),
     ("LOCAL_TONE", 1),
+    // The masks' Contrast pivot, or -1 for the original Contrast before Whites and Blacks.
+    ("LOCAL_PIVOT", 1),
     ("LOCAL_FAMILIES", 1),
     ("LOCAL_KEYS", 2),
     ("GLOBAL_SH", 2),
@@ -96,6 +98,18 @@ impl PixelParams {
                 assert_eq!(values.len(), *len, "{name}");
                 self.params[at..at + len].copy_from_slice(values);
                 return;
+            }
+            at += len;
+        }
+        unreachable!("Unknown parameter {name}");
+    }
+    /// The values of parameter `name`.
+    #[cfg(test)]
+    pub(crate) fn get(&self, name: &str) -> &[f32] {
+        let mut at = 0;
+        for (field, len) in FIELDS {
+            if *field == name {
+                return &self.params[at..at + len];
             }
             at += len;
         }
@@ -158,6 +172,11 @@ pub(crate) fn needs_map(r: &Recipe) -> bool {
         && r.reference_curves
         && (r.shadows != 0. || r.highlights != 0. || masks_need_map(r))
 }
+/// Whether a render needs the photo reduced for the Shadows/Highlights map or for
+/// measuring the photo's Contrast pivot; the stage cache keeps it between renders.
+pub(crate) fn needs_reduced(r: &Recipe) -> bool {
+    needs_map(r) || super::measures_contrast_pivot(r)
+}
 /// Parameters that stop after the tone stage (`tone_stage`, before the map), to tone
 /// the reduced photo the Shadows/Highlights map is built from on the GPU.
 pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
@@ -165,7 +184,9 @@ pub(crate) fn tone_params(im: Source, r: &Recipe) -> Option<PixelParams> {
         return None;
     }
     let matrix = profile_matrix(&im.metadata, r);
-    let mut p = fill(r, CurveSet::new(r), matrix)?;
+    // The same parameters run the final pass once the map is built (`with_map`), so
+    // they carry this photo's Contrast pivot.
+    let mut p = fill(r, CurveSet::with_contrast_pivot(im, r, matrix), matrix)?;
     p.set("TONE_ONLY", &[1.]);
     Some(p)
 }
@@ -268,6 +289,13 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("BASIC", &[basic]);
+    p.set(
+        "LOCAL_PIVOT",
+        &[match lut.contrast {
+            crate::develop::basic_tone::ContrastCurve::Original => -1.,
+            crate::develop::basic_tone::ContrastCurve::Pivot(pivot) => pivot,
+        }],
+    );
     p.set("LEVELS", &[r.black_point, r.white_point, r.midtone]);
     let e = &r.effects;
     // The original per-channel curve runs in `level`, the measured one after it.

@@ -1,17 +1,115 @@
 //! Global Basic-panel tone sliders (Dehaze, Contrast, Whites, Blacks) for engine 4, as measured
 //! Lightroom responses. Each slider is a curve over the rendered image; values between
 //! the measured slider positions are interpolated linearly, with 0 as the identity.
-use super::basic_tone_data::{BLACKS, CONTRAST, DEHAZE, DEHAZE_VALUES, SLIDER_VALUES, WHITES};
+use super::basic_tone_data::{
+    BLACKS, CONTRAST, CONTRAST_CHART, CONTRAST_PIVOT, DEHAZE, DEHAZE_VALUES, SLIDER_VALUES, WHITES,
+};
+use crate::color_math::{srgb_decode, srgb_encode};
+use serde::{Deserialize, Serialize};
+
+/// How a recipe's Contrast renders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContrastModel {
+    /// The curve averaged over five photos, before Whites and Blacks: what recipes
+    /// saved before the adaptive one keep, so they render as they did.
+    #[default]
+    Original,
+    /// Camera Raw's curve, measured on the synthetic chart and moved to the photo's own
+    /// pivot, after Whites and Blacks (docs/tone-controls.md#contrast).
+    Adaptive,
+}
+impl ContrastModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+}
+
+/// The Contrast curve one render uses.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ContrastCurve {
+    /// [`ContrastModel::Original`].
+    Original,
+    /// [`ContrastModel::Adaptive`], pivoting at this encoded level.
+    Pivot(f32),
+}
+/// The pivot of a photo whose own isn't measured: about the middle of the photos'.
+pub(crate) const TYPICAL_PIVOT: f32 = 0.5;
+
+/// Camera Raw's Contrast pivot for a photo, from its default rendering (encoded sRGB)
+/// reduced to blocks: it rises with the mean luminance and falls with the middle of
+/// its range (the 1st and 99th percentiles), fitted on 33 photos and the chart.
+pub(crate) fn photo_pivot(blocks: &[[f32; 3]]) -> f32 {
+    let mut lum: Vec<f32> = blocks
+        .iter()
+        .map(|p| {
+            let [r, g, b] = p.map(|v| srgb_decode(v.clamp(0., 1.)));
+            srgb_encode((0.2126 * r + 0.7152 * g + 0.0722 * b).clamp(1e-5, 1.))
+        })
+        .collect();
+    if lum.is_empty() {
+        return TYPICAL_PIVOT;
+    }
+    let mean = lum.iter().sum::<f32>() / lum.len() as f32;
+    lum.sort_by(f32::total_cmp);
+    let last = lum.len() - 1;
+    let percentile = |q: f32| {
+        let at = last as f32 * q;
+        let i = at as usize;
+        let j = (i + 1).min(last);
+        lum[i] + (lum[j] - lum[i]) * (at - i as f32)
+    };
+    let middle = (percentile(0.01) + percentile(0.99)) / 2.;
+    (PIVOT_FIT[0] + PIVOT_FIT[1] * mean + PIVOT_FIT[2] * middle).clamp(0.3, 0.75)
+}
+/// `pixels` (`width` × `height`, encoded) averaged into blocks 48 across, as the
+/// photos [`photo_pivot`] was fitted on were measured.
+pub(crate) fn blocks(pixels: &[[f32; 3]], width: usize, height: usize) -> Vec<[f32; 3]> {
+    const COLUMNS: usize = 48;
+    let rows = ((COLUMNS * height) as f32 / width.max(1) as f32)
+        .round()
+        .max(1.) as usize;
+    let edge = |i: usize, n: usize, size: usize| i * size / n;
+    let mut out = Vec::with_capacity(rows * COLUMNS);
+    for r in 0..rows {
+        for c in 0..COLUMNS {
+            let (x0, x1) = (edge(c, COLUMNS, width), edge(c + 1, COLUMNS, width));
+            let (y0, y1) = (edge(r, rows, height), edge(r + 1, rows, height));
+            let mut sum = [0f32; 3];
+            let mut n = 0;
+            for y in y0..y1.max(y0 + 1).min(height) {
+                for x in x0..x1.max(x0 + 1).min(width) {
+                    let p = pixels[y * width + x];
+                    (0..3).for_each(|k| sum[k] += p[k]);
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                out.push(sum.map(|v| v / n as f32));
+            }
+        }
+    }
+    out
+}
+/// Constant, mean and range-middle weights of [`photo_pivot`].
+const PIVOT_FIT: [f32; 3] = [0.577, 0.568, -0.689];
 
 const SIZE: usize = 1024;
 
-/// Composed Dehaze → Contrast → Whites → Blacks curve, sampled at `SIZE + 1` points over 0–1.
+/// Composed Dehaze, Contrast, Whites and Blacks curve, sampled at `SIZE + 1` points
+/// over 0–1. Contrast comes before Whites and Blacks in the original model and after
+/// them, as in Camera Raw, in the adaptive one.
 #[derive(Clone)]
 pub(crate) struct BasicTone {
     pub(crate) lut: Vec<f32>,
 }
 impl BasicTone {
-    pub(crate) fn new(contrast: f32, whites: f32, blacks: f32, dehaze: f32) -> Option<Self> {
+    pub(crate) fn new(
+        contrast: f32,
+        whites: f32,
+        blacks: f32,
+        dehaze: f32,
+        curve: ContrastCurve,
+    ) -> Option<Self> {
         if contrast == 0. && whites == 0. && blacks == 0. && dehaze == 0. {
             return None;
         }
@@ -19,9 +117,18 @@ impl BasicTone {
             .map(|i| {
                 let x = i as f32 / SIZE as f32;
                 let x = slider(&DEHAZE_VALUES, &DEHAZE, dehaze, x);
-                let x = slider(&SLIDER_VALUES, &CONTRAST, contrast, x);
-                let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
-                slider(&SLIDER_VALUES, &BLACKS, blacks, x)
+                match curve {
+                    ContrastCurve::Original => {
+                        let x = slider(&SLIDER_VALUES, &CONTRAST, contrast, x);
+                        let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
+                        slider(&SLIDER_VALUES, &BLACKS, blacks, x)
+                    }
+                    ContrastCurve::Pivot(pivot) => {
+                        let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
+                        let x = slider(&SLIDER_VALUES, &BLACKS, blacks, x);
+                        contrast_at(contrast, pivot, x)
+                    }
+                }
             })
             // Measured tables carry small non-monotone noise; tone must never invert.
             .scan(0f32, |max, y| {
@@ -51,17 +158,33 @@ impl BasicTone {
     }
 }
 
-/// Dehaze → Contrast → Whites → Blacks at `x`, without `BasicTone`'s table and
-/// monotone clean-up: the local adjustments evaluate it per pixel.
-pub(crate) fn compose(contrast: f32, whites: f32, blacks: f32, dehaze: f32, x: f32) -> f32 {
+/// The curve `BasicTone` tables at `x`, without its table and monotone clean-up: the
+/// local adjustments evaluate it per pixel.
+pub(crate) fn compose(
+    contrast: f32,
+    whites: f32,
+    blacks: f32,
+    dehaze: f32,
+    curve: ContrastCurve,
+    x: f32,
+) -> f32 {
     let x = slider(&DEHAZE_VALUES, &DEHAZE, dehaze, x);
-    let x = slider(&SLIDER_VALUES, &CONTRAST, contrast, x);
-    let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
-    slider(&SLIDER_VALUES, &BLACKS, blacks, x)
+    match curve {
+        ContrastCurve::Original => {
+            let x = slider(&SLIDER_VALUES, &CONTRAST, contrast, x);
+            let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
+            slider(&SLIDER_VALUES, &BLACKS, blacks, x)
+        }
+        ContrastCurve::Pivot(pivot) => {
+            let x = slider(&SLIDER_VALUES, &WHITES, whites, x);
+            let x = slider(&SLIDER_VALUES, &BLACKS, blacks, x);
+            contrast_at(contrast, pivot, x)
+        }
+    }
 }
 /// The measured tables in the order `develop.wgsl`'s local curves read them: Dehaze,
 /// Contrast, Whites, Blacks, each 6 × 64 values, then the slider positions (Dehaze's,
-/// then the others').
+/// then the others'), the chart's Contrast (6 × 64) and its pivot.
 pub(crate) fn gpu_tables() -> Vec<f32> {
     let mut out: Vec<f32> = [&DEHAZE, &CONTRAST, &WHITES, &BLACKS]
         .into_iter()
@@ -69,6 +192,8 @@ pub(crate) fn gpu_tables() -> Vec<f32> {
         .collect();
     out.extend(DEHAZE_VALUES);
     out.extend(SLIDER_VALUES);
+    out.extend(CONTRAST_CHART.iter().flatten());
+    out.push(CONTRAST_PIVOT);
     out
 }
 /// One measured table: curve for slider `s` at input `x`.
@@ -96,6 +221,20 @@ fn slider(values: &[f32; 6], table: &[[f32; 64]; 6], s: f32, x: f32) -> f32 {
     y0 + (y1 - y0) * w
 }
 
+/// The chart's Contrast at slider `s`, moved so it pivots at `pivot` instead of
+/// [`CONTRAST_PIVOT`]: a power warp of gamma-2.2 encoded values takes one pivot to the
+/// other, which fits each photo's Camera Raw Contrast to 0.002–0.01 at every amount.
+fn contrast_at(s: f32, pivot: f32, x: f32) -> f32 {
+    if s == 0. {
+        return x;
+    }
+    let to = |v: f32| srgb_decode(v.clamp(0., 1.)).powf(1. / 2.2);
+    let from = |w: f32| srgb_encode(w.clamp(0., 1.).powf(2.2));
+    let k = to(CONTRAST_PIVOT).ln() / to(pivot).ln();
+    let y = slider(&SLIDER_VALUES, &CONTRAST_CHART, s, from(to(x).powf(k)));
+    from(to(y).powf(1. / k))
+}
+
 /// Linear interpolation between bin centres; linear extrapolation to 0 and 1.
 fn curve(t: &[f32; 64], x: f32) -> f32 {
     let f = (x * 64. - 0.5).clamp(-0.5, 63.5);
@@ -109,7 +248,7 @@ mod tests {
     use super::*;
     #[test]
     fn neutral_sliders_are_identity_and_curves_are_monotone() {
-        assert!(BasicTone::new(0., 0., 0., 0.).is_none());
+        assert!(BasicTone::new(0., 0., 0., 0., ContrastCurve::Original).is_none());
         for s in [-1., -0.6, -0.1, 0.1, 0.4, 1.] {
             for (c, w, b, d) in [
                 (s, 0., 0., 0.),
@@ -117,7 +256,7 @@ mod tests {
                 (0., 0., s, 0.),
                 (0., 0., 0., s),
             ] {
-                let t = BasicTone::new(c, w, b, d).unwrap();
+                let t = BasicTone::new(c, w, b, d, ContrastCurve::Pivot(TYPICAL_PIVOT)).unwrap();
                 assert!(
                     t.lut.windows(2).all(|p| p[1] >= p[0] - 1e-4),
                     "{c} {w} {b} {d}"
@@ -126,12 +265,75 @@ mod tests {
             }
         }
         // A small slider value changes the curve only slightly.
-        let t = BasicTone::new(0.01, 0., 0., 0.).unwrap();
+        let t = BasicTone::new(0.01, 0., 0., 0., ContrastCurve::Pivot(TYPICAL_PIVOT)).unwrap();
         assert!((0..=10).all(|i| (t.eval(i as f32 / 10.) - i as f32 / 10.).abs() < 0.01));
         // Positive contrast darkens shadows and brightens highlights.
-        let t = BasicTone::new(0.5, 0., 0., 0.).unwrap();
+        let t = BasicTone::new(0.5, 0., 0., 0., ContrastCurve::Pivot(TYPICAL_PIVOT)).unwrap();
         assert!(t.eval(0.2) < 0.2 && t.eval(0.8) > 0.8);
         let gray = t.apply([0.3; 3]);
         assert!((gray[0] - gray[1]).abs() < 1e-6 && (gray[1] - gray[2]).abs() < 1e-6);
+    }
+
+    /// Camera Raw 18.7 on the synthetic chart's gray ramp, whose Contrast pivot is the
+    /// chart's: the default level and the level with these sliders (encoded, 0–1).
+    #[test]
+    fn contrast_after_whites_and_blacks_matches_camera_raw_on_the_chart() {
+        let cases: [(f32, f32, [[f32; 2]; 3]); 4] = [
+            (
+                0.5,
+                0.,
+                [[0.2372, 0.1823], [0.4798, 0.4527], [0.6915, 0.7256]],
+            ),
+            (
+                -1.,
+                0.,
+                [[0.1803, 0.2759], [0.4798, 0.5181], [0.7847, 0.7118]],
+            ),
+            (
+                0.5,
+                -0.5,
+                [[0.1803, 0.0649], [0.3845, 0.2861], [0.6915, 0.7046]],
+            ),
+            (
+                1.,
+                0.5,
+                [[0.1345, 0.0628], [0.3845, 0.3394], [0.6915, 0.7817]],
+            ),
+        ];
+        for (contrast, blacks, levels) in cases {
+            let t = BasicTone::new(
+                contrast,
+                0.,
+                blacks,
+                0.,
+                ContrastCurve::Pivot(CONTRAST_PIVOT),
+            )
+            .unwrap();
+            for [x, expected] in levels {
+                let y = t.eval(x);
+                assert!(
+                    (y - expected).abs() < 2. / 255.,
+                    "Contrast {contrast}, Blacks {blacks}: {x} gives {y}, Camera Raw {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn contrast_pivots_where_the_photo_puts_it() {
+        for pivot in [0.35, 0.45, 0.6] {
+            let t = BasicTone::new(0.8, 0., 0., 0., ContrastCurve::Pivot(pivot)).unwrap();
+            assert!((t.eval(pivot) - pivot).abs() < 0.01, "{pivot}");
+            assert!(t.eval(pivot - 0.1) < pivot - 0.1 && t.eval(pivot + 0.1) > pivot + 0.1);
+        }
+        // An even photo pivots a little below the middle, and one whose levels sit low
+        // in their range (dark, with a few bright highlights) lower still.
+        let flat = |level: f32| vec![[level; 3]; 100];
+        assert!((photo_pivot(&flat(0.5)) - (0.577 + 0.568 * 0.5 - 0.689 * 0.5)).abs() < 1e-3);
+        let mut dark = flat(0.3);
+        dark.extend(flat(0.95).into_iter().take(5));
+        assert!(photo_pivot(&dark) < photo_pivot(&flat(0.3)) - 0.15);
+        assert_eq!(photo_pivot(&[]), TYPICAL_PIVOT);
+        assert_eq!(blocks(&vec![[0.5; 3]; 960 * 640], 960, 640).len(), 48 * 32);
     }
 }

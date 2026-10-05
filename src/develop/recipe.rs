@@ -79,6 +79,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::parametric::ParametricModel::is_original"
     )]
     pub parametric_model: crate::develop::parametric::ParametricModel,
+    /// Whether Contrast comes before or after Whites and Blacks. Missing means before,
+    /// so recipes saved before the measured order look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::basic_tone::ContrastModel::is_original"
+    )]
+    pub contrast_model: crate::develop::basic_tone::ContrastModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -198,6 +206,7 @@ impl Default for Recipe {
             reference_calibration: false,
             reference_color: false,
             parametric_model: Default::default(),
+            contrast_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -390,6 +399,7 @@ impl Recipe {
         recipe.reference_curves = true;
         recipe.reference_calibration = true;
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
+        recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe

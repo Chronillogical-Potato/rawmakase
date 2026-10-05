@@ -44,6 +44,7 @@ fn old_recipes_keep_original_profile_tones() {
         "reference_calibration",
         "reference_color",
         "parametric_model",
+        "contrast_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -58,14 +59,20 @@ fn old_recipes_keep_original_profile_tones() {
         old.parametric_model,
         crate::develop::parametric::ParametricModel::Original
     );
+    assert_eq!(
+        old.contrast_model,
+        crate::develop::basic_tone::ContrastModel::Original
+    );
     assert!(Recipe::default().profile_tone);
     // The measured parametric curve is saved, and read back.
     let measured = Recipe {
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
+        contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
     assert_eq!(back.parametric_model, measured.parametric_model);
+    assert_eq!(back.contrast_model, measured.contrast_model);
 }
 
 #[test]
@@ -1178,4 +1185,57 @@ fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
     let before = profile_recipe(LensProfileSetup::Auto, "");
     let after = profile_recipe(LensProfileSetup::Custom, MINE);
     assert!(Panel::LensCorrections.holds_change(&before, &after));
+}
+
+/// The Contrast pivot is the photo's: the same for the GPU's map pass (whose
+/// parameters also run the final pass) as for the plain per-pixel parameters, and not
+/// moved by Clarity's or Texture's gain.
+#[test]
+fn the_contrast_pivot_is_measured_on_the_photo_alone() {
+    use crate::develop::basic_tone::{ContrastCurve, ContrastModel, TYPICAL_PIVOT};
+    let mut im = fixture();
+    im.metadata.cam_xyz = [
+        [1.1434, -0.4948, -0.121],
+        [-0.3746, 1.2042, 0.1903],
+        [-0.0666, 0.1479, 0.52],
+    ];
+    // Dark with a few bright pixels, so the pivot is not the typical one.
+    for (i, p) in im.pixels.iter_mut().enumerate() {
+        *p = if i % 9 == 0 {
+            [0.9; 3]
+        } else {
+            p.map(|v| v * 0.3)
+        };
+    }
+    let profile =
+        crate::camera_profiles::CameraProfile::camera_matrix_default(&im.metadata).unwrap();
+    let r = Recipe {
+        profile: Some(std::sync::Arc::new(profile)),
+        reference_curves: true,
+        reference_color: true,
+        reference_calibration: true,
+        contrast_model: ContrastModel::Adaptive,
+        contrast: 0.6,
+        shadows: 0.3,
+        ..Default::default()
+    };
+    let matrix = profile_matrix(&im.metadata, &r);
+    let plain = CurveSet::for_image((&im).into(), &r, matrix, false);
+    let ContrastCurve::Pivot(pivot) = plain.contrast else {
+        panic!("{:?}", plain.contrast);
+    };
+    assert!((pivot - TYPICAL_PIVOT).abs() > 0.01, "{pivot}");
+    let tone = pixel_params::tone_params((&im).into(), &r).unwrap();
+    assert_eq!(tone.get("LOCAL_PIVOT"), [pivot]);
+    let map_pass = CurveSet::with_contrast_pivot((&im).into(), &r, matrix);
+    assert_eq!(map_pass.contrast, plain.contrast);
+    assert_eq!(
+        map_pass.basic.as_ref().map(|b| &b.lut),
+        plain.basic.as_ref().map(|b| &b.lut)
+    );
+    let gain: Vec<f32> = (0..im.pixels.len())
+        .map(|i| 0.5 + (i % 7) as f32 * 0.2)
+        .collect();
+    let gained = CurveSet::with_contrast_pivot(Source::new(&im, Some(&gain)), &r, matrix);
+    assert_eq!(gained.contrast, plain.contrast);
 }
