@@ -1,8 +1,8 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
-use super::{Conflict, Editor};
+use super::Editor;
 use crate::app::theme;
-use crate::export::{Destination, Existing, Format, Include, Replace, settings::unique};
+use crate::export::{Destination, Existing, Format, Include};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -35,6 +35,7 @@ impl Editor {
             self.export_dialog(ctx);
         }
         self.watermark_editor(ctx);
+        self.export_report(ctx);
     }
 
     fn export_dialog(&mut self, ctx: &egui::Context) {
@@ -42,7 +43,16 @@ impl Editor {
             self.exports.draft.folder = Some(folder);
             self.exports.draft.destination = Destination::Folder;
         }
-        let source = self.document.path.clone().unwrap_or_default();
+        // Names and folders are shown for the first photo.
+        let source = self
+            .exports
+            .scope
+            .photos
+            .first()
+            .map(|p| p.source.clone())
+            .unwrap_or_default();
+        let count = self.exports.scope.photos.len();
+        let left_out = self.exports.scope.left_out.clone();
         let mut confirmed = None;
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
             .backdrop_color(Color32::from_black_alpha(140))
@@ -52,13 +62,53 @@ impl Editor {
                 ui.painter().text(
                     rect.left_top() + Vec2::new(24., 26.),
                     egui::Align2::LEFT_CENTER,
-                    format!(
-                        "Export {}",
-                        source.file_name().unwrap_or_default().to_string_lossy()
-                    ),
+                    if count == 1 {
+                        "Export One File".to_string()
+                    } else {
+                        format!("Export {count} Files")
+                    },
                     egui::FontId::proportional(16.),
                     theme::gray(236),
                 );
+                // Said before the export starts: what will not be exported, and why.
+                if !left_out.is_empty() {
+                    let mut reasons: Vec<(String, usize)> = Vec::new();
+                    for (_, why) in &left_out {
+                        match reasons.iter_mut().find(|(r, _)| r == why) {
+                            Some((_, n)) => *n += 1,
+                            None => reasons.push((why.clone(), 1)),
+                        }
+                    }
+                    let reasons = reasons
+                        .iter()
+                        .map(|(why, n)| format!("{why} ({n})"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let line = format!(
+                        "{} won't be exported: {reasons}",
+                        crate::app::widgets::plural(left_out.len(), "photo", "photos")
+                    );
+                    let at = egui::Rect::from_min_size(
+                        rect.left_top() + Vec2::new(200., 16.),
+                        Vec2::new(WIDTH - 224., 20.),
+                    );
+                    ui.put(
+                        at,
+                        egui::Label::new(
+                            egui::RichText::new(line)
+                                .size(12.)
+                                .color(Color32::from_rgb(230, 170, 100)),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(
+                        left_out
+                            .iter()
+                            .map(|(name, why)| format!("{name}: {why}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    );
+                }
                 let body = egui::Rect::from_min_max(
                     rect.left_top() + Vec2::new(16., 52.),
                     rect.right_bottom() - Vec2::new(16., 64.),
@@ -368,37 +418,48 @@ impl Editor {
         });
     }
 
+    /// Ask's question for a batch, once for all its files that exist, in
+    /// Lightroom's words; the answer applies to every one of them.
     fn conflict_window(&mut self, ctx: &egui::Context) {
-        let Some(conflict) = self.exports.conflict.clone() else {
+        let Some(pending) = &self.exports.pending else {
             return;
         };
+        let shown = 12;
+        let mut files: Vec<String> = pending
+            .conflicts
+            .iter()
+            .take(shown)
+            .map(|p| pretty_path(p))
+            .collect();
+        if pending.conflicts.len() > shown {
+            files.push(format!("and {} more", pending.conflicts.len() - shown));
+        }
+        let detail = format!(
+            "{}\n\nDo you wish to overwrite the existing files, skip the existing files, or rename the exported files to avoid collision?",
+            files.join("\n")
+        );
         let Some(choice) = confirm_modal(
             ctx,
             "export-conflict",
-            "A file with this name already exists",
-            &conflict.target.display().to_string(),
-            true,
+            "The following files already exist.",
+            &detail,
+            false,
             &[
-                ("Skip", Existing::Skip),
-                ("Use Unique Name", Existing::Unique),
-                ("Overwrite", Existing::Overwrite),
+                ("Cancel", None),
+                ("Skip", Some(Existing::Skip)),
+                ("Use Unique Names", Some(Existing::Unique)),
+                ("Overwrite", Some(Existing::Overwrite)),
             ],
-            Existing::Skip,
+            None,
         ) else {
             return;
         };
-        self.exports.conflict = None;
-        let Conflict {
-            target,
-            settings,
-            photo,
-        } = conflict;
+        let Some(pending) = self.exports.pending.take() else {
+            return;
+        };
         match choice {
-            Existing::Overwrite => self.start_export(photo, target, settings, Replace::Overwrite),
-            Existing::Unique => {
-                self.start_export(photo, unique(&target), settings, Replace::NoClobber)
-            }
-            _ => self.status = "Export skipped".into(),
+            Some(answer) => self.plan_export(pending, Some(answer)),
+            None => self.status = "Export cancelled".into(),
         }
     }
 }

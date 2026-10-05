@@ -271,9 +271,7 @@ impl Editor {
                 Event::DialogClosed => {
                     self.activity.finish_dialog();
                 }
-                Event::Exported(s) => {
-                    self.status = s;
-                }
+                Event::BatchExported { ticket, outcomes } => self.batch_exported(ticket, outcomes),
                 _ => {}
             }
         }

@@ -492,6 +492,21 @@ impl Editor {
     }
     fn library_workspace(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        // Export… and Export with Previous work in the Library too, on its selection.
+        if !self.export_modal() && !self.activity.is_busy() && !ctx.text_edit_focused() {
+            let export = ctx.input(|i| {
+                let e = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
+                        if *key == egui::Key::E || *physical_key == Some(egui::Key::E))
+                });
+                (e && i.modifiers.command && i.modifiers.shift).then_some(i.modifiers.alt)
+            });
+            match export {
+                Some(true) => self.export_with_previous(),
+                Some(false) => self.open_export_dialog(),
+                None => {}
+            }
+        }
         egui::Panel::bottom("library-status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(work) = &self.catalog_work {
@@ -541,6 +556,31 @@ impl Editor {
             .max_size(500.)
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
+                // Lightroom's Export… at the foot of the Library's left panel, for the
+                // photos selected.
+                let mut export = false;
+                if self.library.is_some() {
+                    egui::Panel::bottom("library-export")
+                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 8)))
+                        .show_separator_line(false)
+                        .show(ui, |ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                export = super::widgets::action_button(
+                                    ui,
+                                    "Export…",
+                                    Some(super::icons::Icon::Export),
+                                    super::widgets::ButtonKind::Primary,
+                                    true,
+                                )
+                                .on_hover_text(if cfg!(target_os = "macos") {
+                                    "Export the selected photos · ⇧⌘E"
+                                } else {
+                                    "Export the selected photos · Ctrl+Shift+E"
+                                })
+                                .clicked();
+                            });
+                        });
+                }
                 // In the Loupe, the Navigator controls the zoom: Develop's for
                 // a RAW, the same one for other photos.
                 let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
@@ -563,6 +603,9 @@ impl Editor {
                         }
                         None => {}
                     }
+                }
+                if export {
+                    self.open_export_dialog();
                 }
                 if let Some(library) = &mut self.library {
                     action = action.then(library.sidebar(ui, !loupe));
