@@ -281,6 +281,14 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     // Calibration measured on Camera Raw, between its measured slider positions.
     measured.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
     measured.effects.calibration = [[0.3, -0.75], [-0.4, 0.5], [0.9, 0.1]];
+    recipes.push(measured.clone());
+    // Saturation fading to gray below −50, with and without band sliders.
+    measured.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+    measured.saturation = -0.7;
+    recipes.push(measured.clone());
+    measured.hsl = [[0.; 3]; 8];
+    measured.vibrance = 0.;
+    measured.saturation = -1.;
     recipes.push(measured);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
     let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);

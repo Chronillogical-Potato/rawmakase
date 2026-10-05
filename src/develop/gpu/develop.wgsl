@@ -945,7 +945,10 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     // color_stage
     rgb = reference_curves(rgb);
     if offset(P_MIXER) >= 0 {
+        // SaturationModel::Gray: below −50, a fade to the color's luminance.
+        let y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
         rgb = mixer(rgb);
+        rgb = mix(rgb, vec3(y), p(P_SATURATION_GRAY));
     }
     if offset(P_POINT) >= 0 {
         rgb = point_colors(rgb);

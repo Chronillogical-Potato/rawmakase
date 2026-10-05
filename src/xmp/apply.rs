@@ -412,6 +412,14 @@ impl Preset {
         settings.assign("Blacks2012", &mut r.blacks, 0.01, -1., 1.)?;
         settings.assign("Saturation", &mut r.saturation, 0.01, -1., 1.)?;
         settings.assign("Vibrance", &mut r.vibrance, 0.01, -1., 1.)?;
+        // Lightroom's Saturation means Camera Raw's fade to gray, also on a recipe saved
+        // before; RAWmakase's own packet names it when a recipe kept the tables.
+        if settings.values.contains_key("Saturation") {
+            r.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_SATURATION) {
+            r.saturation_model = crate::develop::color_mixer::SaturationModel::Original;
+        }
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
         settings.assign("SharpenDetail", &mut r.sharpening_detail, 0.01, 0., 1.)?;

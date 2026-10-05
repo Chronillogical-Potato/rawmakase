@@ -139,6 +139,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
     )]
     pub mixer_model: crate::develop::color_mixer::MixerModel,
+    /// Which operator renders the global Saturation slider. Missing means the
+    /// photo-measured tables, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_mixer::SaturationModel::is_original"
+    )]
+    pub saturation_model: crate::develop::color_mixer::SaturationModel,
     /// Which fit renders Camera Calibration's primary sliders. Missing means the
     /// original coefficients, so older recipes look as they did; omitted at that default.
     #[serde(
@@ -296,6 +303,7 @@ impl Default for Recipe {
             retouch_model: Default::default(),
             grading_model: Default::default(),
             mixer_model: Default::default(),
+            saturation_model: Default::default(),
             calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
@@ -535,6 +543,7 @@ impl Recipe {
         recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
         recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;

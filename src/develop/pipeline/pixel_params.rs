@@ -40,6 +40,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("REFINE_SATURATION", 1),
     ("CHANNELS", 3),
     ("MIXER", 1),
+    // `ColorMixer::saturation_gray`: how far colors fade to their luminance.
+    ("SATURATION_GRAY", 1),
     // Point Color: table offset and number of swatches (see `point_color::params`).
     ("POINT", 2),
     // A look's RGB table: samples offset, dimensions, divisions, gamma, gamut and
@@ -337,6 +339,10 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("MIXER", &[mixer]);
+    p.set(
+        "SATURATION_GRAY",
+        &[lut.mixer.as_ref().map_or(0., |m| m.saturation_gray)],
+    );
     let point = match &lut.point_colors {
         Some(pc) => [p.push(pc.params()), pc.len() as f32],
         None => [-1., 0.],

@@ -180,6 +180,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.contrast_model = full.contrast_model;
     r.grading_model = full.grading_model;
     r.mixer_model = full.mixer_model;
+    r.saturation_model = full.saturation_model;
     r.calibration_model = full.calibration_model;
     r.whites_model = full.whites_model;
     r.gamut_model = full.gamut_model;
@@ -398,6 +399,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         retouch_model,
         grading_model: _,
         mixer_model: _,
+        saturation_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,

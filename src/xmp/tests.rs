@@ -1327,7 +1327,11 @@ fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
             None,
         )
     };
-    let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20""#)?;
+    let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:Saturation="-30""#)?;
+    assert_eq!(
+        r.saturation_model,
+        crate::develop::color_mixer::SaturationModel::Gray
+    );
     assert_eq!(r.mixer_model, MixerModel::Chart);
     assert_eq!(r.calibration_model, CalibrationModel::Measured);
     let r = apply(r#"c:Exposure2012="0.5""#)?;

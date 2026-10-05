@@ -719,7 +719,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         Recipe,
         calibration::CalibrationModel,
         clarity::ClarityModel,
-        color_mixer::MixerModel,
+        color_mixer::{MixerModel, SaturationModel},
         color_noise::NoiseModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
@@ -755,6 +755,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     old.hsl[5][2] = -0.4;
     old.effects.calibration[0][0] = 0.3;
     old.noise_chroma = 0.3;
+    old.saturation = -0.3;
     let back = read(&old)?;
     assert_eq!(back.noise_model, NoiseModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
@@ -763,6 +764,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     assert_eq!(back.mixer_model, MixerModel::Original);
     assert_eq!(back.calibration_model, CalibrationModel::Original);
+    assert_eq!(back.saturation_model, SaturationModel::Original);
     // Also onto a new photo's settings, which start on the measured operators.
     let packet = crate::xmp::write::packet(&old, &m, &photo);
     let fresh = Recipe::with_profiles(&m, &[]);
@@ -783,6 +785,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         mixer_model: MixerModel::Chart,
         calibration_model: CalibrationModel::Measured,
         noise_model: NoiseModel::Measured,
+        saturation_model: SaturationModel::Gray,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
@@ -794,5 +797,6 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.mixer_model, MixerModel::Chart);
     assert_eq!(back.calibration_model, CalibrationModel::Measured);
     assert_eq!(back.noise_model, NoiseModel::Measured);
+    assert_eq!(back.saturation_model, SaturationModel::Gray);
     Ok(())
 }
