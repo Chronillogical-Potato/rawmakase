@@ -789,7 +789,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
-    assert!(!packet.contains("RAWmakaseOriginal"));
+    assert!(packet.contains(r#"crs:RAWmakaseOriginal="""#), "{packet}");
     let back = read(&measured)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);

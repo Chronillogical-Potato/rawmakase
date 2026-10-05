@@ -66,6 +66,24 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         .filter(|a| a.namespace() == Some(CRS))
         .map(|a| (a.name().to_string(), a.value().to_string()))
         .collect();
+    // A packet from a RAWmakase that predates the marker keeps the operators
+    // measured only since; packets that have it say so themselves.
+    let implied = description
+        .attribute((super::ns::XMP, "CreatorTool"))
+        .filter(|_| !settings.contains_key("RAWmakaseOriginal"))
+        .map(super::write::implied_original)
+        .unwrap_or_default();
+    if !implied.is_empty() {
+        let kept = settings.entry("RAWmakaseOriginal".to_string()).or_default();
+        for name in implied {
+            if !kept.split(',').any(|n| n.trim() == name) {
+                if !kept.is_empty() {
+                    kept.push(',');
+                }
+                kept.push_str(name);
+            }
+        }
+    }
     let mut curves = BTreeMap::new();
     let mut blockers = Vec::new();
     let mut look = String::new();

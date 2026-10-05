@@ -1315,6 +1315,41 @@ fn lens_profile_identity_round_trips() -> Result<()> {
     );
     Ok(())
 }
+/// A packet exported by RAWmakase before the kept-operator marker existed keeps the
+/// operators it could not have rendered with; Lightroom's values select them.
+#[test]
+fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<()> {
+    use crate::develop::{
+        calibration::CalibrationModel,
+        color_mixer::{MixerModel, SaturationModel},
+    };
+    let m = Metadata::default();
+    let fresh = Recipe::with_profiles(&m, &[]);
+    let settings = r#"c:Saturation="-80" c:RedHue="20" c:HueAdjustmentBlue="30""#;
+    let apply = |creator: &str| {
+        let attrs = format!(
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="{creator}" {settings}"#
+        );
+        parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)
+    };
+    let old = apply("RAWmakase 0.1.15")?;
+    assert_eq!(old.saturation_model, SaturationModel::Original);
+    assert_eq!(old.calibration_model, CalibrationModel::Original);
+    // The chart mixer shipped in 0.1.15, so its values there mean it.
+    assert_eq!(old.mixer_model, MixerModel::Chart);
+    let older = apply("RAWmakase 0.1.14")?;
+    assert_eq!(older.mixer_model, MixerModel::Original);
+    let lightroom = apply("Adobe Photoshop Lightroom Classic 14.5 (Macintosh)")?;
+    assert_eq!(lightroom.saturation_model, SaturationModel::Gray);
+    assert_eq!(lightroom.calibration_model, CalibrationModel::Measured);
+    // A packet that carries the marker, even empty, says it itself.
+    let attrs = format!(
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseOriginal="" {settings}"#
+    );
+    let current = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
+    assert_eq!(current.saturation_model, SaturationModel::Gray);
+    Ok(())
+}
 #[test]
 fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
     use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};

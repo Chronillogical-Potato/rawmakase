@@ -650,6 +650,37 @@ pub(super) const ORIGINAL_COLOR_MIXER: &str = "ColorMixer";
 pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 pub(super) const ORIGINAL_COLOR_NOISE: &str = "ColorNoise";
 pub(super) const ORIGINAL_SATURATION: &str = "Saturation";
+/// The RAWmakase release each operator's measured version first shipped in. Packets
+/// written before 0.1.16 have no `RAWmakaseOriginal`, so such a packet keeps the
+/// operators that were not measured yet when it was written.
+pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 7] = [
+    (ORIGINAL_SHARPENING, (0, 1, 15)),
+    (ORIGINAL_LENS_VIGNETTE, (0, 1, 15)),
+    (ORIGINAL_GRAIN, (0, 1, 15)),
+    (ORIGINAL_COLOR_MIXER, (0, 1, 15)),
+    (ORIGINAL_CLARITY, (0, 1, 16)),
+    (ORIGINAL_CALIBRATION, (0, 1, 16)),
+    (ORIGINAL_SATURATION, (0, 1, 16)),
+];
+
+/// The operators a packet written by `creator_tool` kept without naming them: those
+/// measured only in a later RAWmakase release.
+pub(super) fn implied_original(creator_tool: &str) -> Vec<&'static str> {
+    let Some(version) = creator_tool.strip_prefix("RAWmakase ") else {
+        return Vec::new();
+    };
+    let mut parts = version.split(['.', '-', '+']).map(|p| p.parse::<u32>());
+    let (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch))) =
+        (parts.next(), parts.next(), parts.next())
+    else {
+        return Vec::new();
+    };
+    MEASURED_SINCE
+        .iter()
+        .filter(|(_, since)| (major, minor, patch) < *since)
+        .map(|(name, _)| *name)
+        .collect()
+}
 
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
@@ -689,13 +720,13 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
                 .into_iter()
                 .map(|(k, v)| (format!("crs:{k}"), v)),
         );
+        // Always written, empty when nothing was kept: its absence marks a packet
+        // from a RAWmakase that predates it (see `implied_original`).
         let original: Vec<_> = original_operators(r)
             .into_iter()
             .map(|(name, _)| name)
             .collect();
-        if !original.is_empty() {
-            attributes.push(("crs:RAWmakaseOriginal".into(), original.join(",")));
-        }
+        attributes.push(("crs:RAWmakaseOriginal".into(), original.join(",")));
         attributes.push(("crs:AlreadyApplied".into(), "True".into()));
     }
     let mut out = format!(
