@@ -35,6 +35,7 @@ const PROFILE_TAGS: &[u16] = &[
     50981, 50982, // ProfileLookTable dims, data
     51107, 51108, // ProfileHueSatMapEncoding, ProfileLookTableEncoding
     51109, // BaselineExposureOffset
+    51110, // DefaultBlackRender
 ];
 
 /// `None` unless the file is a DNG.

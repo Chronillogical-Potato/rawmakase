@@ -182,7 +182,7 @@ fn tone_stage(
         if exposure != 0. {
             // The ramp's black point follows exposure, as for the global slider.
             let ramp = ExposureRamp::new(
-                DNG_SHADOWS_BLACK * (r.exposure + r.camera_exposure + exposure).exp2(),
+                default_black(r) * (r.exposure + r.camera_exposure + exposure).exp2(),
             );
             rgb = rgb.map(|v| ramp.eval(v));
         } else {
@@ -564,7 +564,7 @@ impl CurveSet {
                 .then(|| crate::develop::color_grade::ColorGrade::new(r))
                 .flatten(),
             black_ramp: basic_curves.then(|| {
-                ExposureRamp::new(DNG_SHADOWS_BLACK * 2f32.powf(r.exposure + r.camera_exposure))
+                ExposureRamp::new(default_black(r) * 2f32.powf(r.exposure + r.camera_exposure))
             }),
             rgb_table: r
                 .profile
@@ -963,6 +963,14 @@ fn detail_sample(im: Source, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
 /// Black level of the DNG SDK's exposure ramp at its default Shadows setting of 5
 /// (5 × 0.001, in scene-linear units before exposure).
 const DNG_SHADOWS_BLACK: f32 = 0.0015;
+/// The ramp's black before exposure: none under a profile whose DefaultBlackRender
+/// is None, as Camera Raw renders it.
+fn default_black(r: &Recipe) -> f32 {
+    match r.profile.as_ref().map(|p| p.black_render()) {
+        Some(crate::camera_profiles::BlackRender::None) => 0.,
+        _ => DNG_SHADOWS_BLACK,
+    }
+}
 /// dng_function_exposure_ramp with white at 1: values below `black` go to zero through
 /// a quadratic toe, the rest are stretched back to full range.
 struct ExposureRamp {

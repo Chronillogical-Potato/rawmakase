@@ -16,6 +16,16 @@ pub struct Image<'a> {
     /// Also write ForwardMatrix tags and a ProfileName, as Adobe's DNG Converter
     /// does; otherwise the file has color matrices only.
     pub profile: bool,
+    /// The DefaultBlackRender tag written with the profile.
+    pub black_render: BlackRender,
+}
+
+/// DefaultBlackRender: `Auto` writes no tag, as the committed charts have.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BlackRender {
+    Auto,
+    /// Tag value 1, as Adobe's camera-matching profiles carry it.
+    None,
 }
 
 enum Value {
@@ -164,6 +174,9 @@ pub fn write(image: &Image, camera: &Camera) -> Vec<u8> {
         ));
         let (f1, f2) = camera.forward_matrices();
         tags.push((50964, srational(&f1)));
+        if image.black_render == BlackRender::None {
+            tags.push((51110, Value::Long(vec![1])));
+        }
         if let Some(f2) = f2 {
             tags.push((50965, srational(&f2)));
         }
