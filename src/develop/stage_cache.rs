@@ -146,6 +146,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         shadows: _,
         highlights: _,
         retouch: _,
+        retouch_model: _,
         red_eye: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         profile_tone: _,
@@ -166,6 +167,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         contrast_model: _,
         grading_model: _,
         mixer_model: _,
+        calibration_model: _,
         whites_model: _,
         gamut_model: _,
         contrast: _,

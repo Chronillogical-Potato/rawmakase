@@ -117,6 +117,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
     )]
     pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
+    /// The soft edge Heal and Clone render with. Missing means the original one, so
+    /// recipes saved before the measured feather look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::retouch::RetouchModel::is_original"
+    )]
+    pub retouch_model: crate::develop::retouch::RetouchModel,
     /// How color grading renders. Missing means the original operator, so recipes
     /// saved before the measured curves look as they did; omitted at that default.
     #[serde(
@@ -131,6 +139,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
     )]
     pub mixer_model: crate::develop::color_mixer::MixerModel,
+    /// Which fit renders Camera Calibration's primary sliders. Missing means the
+    /// original coefficients, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::calibration::CalibrationModel::is_original"
+    )]
+    pub calibration_model: crate::develop::calibration::CalibrationModel,
     /// Whether positive Whites follows the photo's highlights. Missing means the
     /// original median curve, so older recipes look as they did; omitted at that
     /// default, and kept by releases that predate it.
@@ -270,8 +285,10 @@ impl Default for Recipe {
             parametric_model: Default::default(),
             contrast_model: Default::default(),
             lens_vignette_model: Default::default(),
+            retouch_model: Default::default(),
             grading_model: Default::default(),
             mixer_model: Default::default(),
+            calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
             temperature: 6500.,
@@ -506,8 +523,10 @@ impl Recipe {
         recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
         recipe.use_camera_baseline(m);
@@ -723,6 +742,14 @@ impl Recipe {
             self.effects.lens_vignette,
             self.effects.lens_vignette_midpoint,
         )
+    }
+    /// Adds a Heal or Clone operation. The first on a recipe has no spots of the
+    /// original feather to keep, so it takes the measured one.
+    pub fn add_retouch(&mut self, op: crate::develop::retouch::RetouchOp) {
+        if self.retouch.is_empty() {
+            self.retouch_model = crate::develop::retouch::RetouchModel::Measured;
+        }
+        self.retouch.push(op);
     }
     /// After an edit of manual Vignetting from Amount `previous`: an Amount moved from 0
     /// has nothing of the original operator's to keep, so it takes the measured one.

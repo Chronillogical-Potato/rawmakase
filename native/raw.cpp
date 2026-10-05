@@ -27,6 +27,7 @@ struct Metadata {
     char lens[128];
     float focal_35mm;
     int highlight_tone_priority;
+    float fuji_exposure_shift;
 };
 typedef int (*Cancel)(void*);
 }
@@ -54,6 +55,45 @@ public:
             for(int c=0;c<4;++c) scale_clipped += imgdata.image[i][c] == 65535;
     }
 };
+// The black level an optical-black border says, when LibRaw's is far below it (LibRaw
+// reads the EOS R6 Mark III's maker notes at the wrong offsets and gets 0 plus small
+// per-channel values; Adobe and the border say 512). Returns -1 to keep LibRaw's: too
+// few values, a border that is not dark and even (image, not masked pixels), or a black
+// (the mean over the four channels) LibRaw reads at a quarter of the border or more:
+// some bodies' borders sit above their true black (Pentax K-70: 130 against 64).
+extern "C" int ora_masked_black(const unsigned short* border, size_t n, unsigned black, unsigned maximum) {
+    if(n < 1000) return -1;
+    std::vector<unsigned short> v(border, border+n);
+    auto at = [&](size_t i) { std::nth_element(v.begin(), v.begin()+i, v.end()); return unsigned(v[i]); };
+    const unsigned p10=at(n/10), p50=at(n/2), p90=at(n*9/10);
+    if(p50 < 64 || p50 > maximum/8 || p90-p10 > std::max(64u, p50/4)) return -1;
+    if(black*4 >= p50) return -1;
+    return int(p50);
+}
+// Replaces LibRaw's black with the left optical-black border's when ora_masked_black
+// finds it wrong. dcraw_process and ora_cfa_copy both read rawdata.color afterwards.
+static void correct_black(LibRaw& raw) {
+    auto& d=raw.imgdata;
+    auto& col=d.rawdata.color;
+    const unsigned left=d.sizes.left_margin;
+    if(!d.rawdata.raw_image || left < 16) return;
+    unsigned black=col.black + (col.cblack[0]+col.cblack[1]+col.cblack[2]+col.cblack[3])/4;
+    const unsigned pattern=col.cblack[4]*col.cblack[5];
+    if(pattern) {
+        unsigned sum=0;
+        for(unsigned i=0;i<pattern && i<LIBRAW_CBLACK_SIZE-6;++i) sum+=col.cblack[6+i];
+        black+=sum/pattern;
+    }
+    const size_t pitch=d.sizes.raw_pitch/2;
+    std::vector<unsigned short> border;
+    // Skip the outermost columns and those next to the image, which can be lit.
+    for(unsigned y=d.sizes.top_margin; y<d.sizes.top_margin+d.sizes.height && y<d.sizes.raw_height; y+=3)
+        for(unsigned x=4; x+8<left; ++x) border.push_back(d.rawdata.raw_image[y*pitch+x]);
+    const int masked=ora_masked_black(border.data(), border.size(), black, col.maximum);
+    if(masked < 0) return;
+    col.black=unsigned(masked);
+    std::fill(std::begin(col.cblack), std::end(col.cblack), 0u);
+}
 struct Handle {
     Raw raw;
     Cancel cancel = nullptr;
@@ -64,6 +104,7 @@ struct Handle {
         if(unpacked) return 0;
         int rc=raw.unpack();
         unpacked = rc==0;
+        if(unpacked) correct_black(raw);
         return rc;
     }
 };
@@ -110,6 +151,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->aperture=d.other.aperture; m->focal=d.other.focal_len;
         m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         m->highlight_tone_priority=d.makernotes.canon.HighlightTonePriority;
+        m->fuji_exposure_shift=d.makernotes.fuji.ExpoMidPointShift;
         for(int c=0;c<3;++c) {
             m->daylight_wb[c] = d.color.pre_mul[c];
             m->wb[c] = d.color.cam_mul[c] > 0 ? d.color.cam_mul[c] : d.color.pre_mul[c];

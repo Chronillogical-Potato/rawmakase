@@ -47,6 +47,7 @@ fn old_recipes_keep_original_profile_tones() {
         "contrast_model",
         "grading_model",
         "mixer_model",
+        "calibration_model",
         "whites_model",
         "gamut_model",
     ] {
@@ -81,6 +82,10 @@ fn old_recipes_keep_original_profile_tones() {
         old.mixer_model,
         crate::develop::color_mixer::MixerModel::Original
     );
+    assert_eq!(
+        old.calibration_model,
+        crate::develop::calibration::CalibrationModel::Original
+    );
     // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
         parametric_model: crate::develop::parametric::ParametricModel::Layered,
@@ -89,6 +94,7 @@ fn old_recipes_keep_original_profile_tones() {
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         gamut_model: crate::develop::GamutModel::Clip,
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
+        calibration_model: crate::develop::calibration::CalibrationModel::Measured,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
@@ -98,6 +104,7 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.whites_model, measured.whites_model);
     assert_eq!(back.gamut_model, measured.gamut_model);
     assert_eq!(back.mixer_model, measured.mixer_model);
+    assert_eq!(back.calibration_model, measured.calibration_model);
 }
 
 #[test]

@@ -616,6 +616,17 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             ORIGINAL_CLARITY,
             "Clarity2012",
         ),
+        // These travel with Process Version, as copying settings does.
+        (
+            r.mixer_model.is_original(),
+            ORIGINAL_COLOR_MIXER,
+            "ProcessVersion",
+        ),
+        (
+            r.calibration_model.is_original(),
+            ORIGINAL_CALIBRATION,
+            "ProcessVersion",
+        ),
     ]
     .into_iter()
     .filter_map(|(original, name, key)| original.then_some((name, key)))
@@ -625,6 +636,8 @@ pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
 pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
 pub(super) const ORIGINAL_GRAIN: &str = "Grain";
 pub(super) const ORIGINAL_CLARITY: &str = "Clarity";
+pub(super) const ORIGINAL_COLOR_MIXER: &str = "ColorMixer";
+pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {

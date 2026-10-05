@@ -1,7 +1,7 @@
 //! Automatic source selection for a new spot, as Lightroom picks one: the nearby area
 //! whose border matches the destination's border best and whose texture is similar,
 //! avoiding other spots, strong edges and clipped highlights.
-use super::{RetouchOp, heal};
+use super::{FeatherProfile, RetouchOp, heal};
 use crate::{develop::ImageFrame, raw::CameraImage};
 
 /// The search runs on a reduced copy of the neighbourhood, with the shape's radius at
@@ -90,8 +90,14 @@ struct Shape {
 impl Shape {
     fn new(points: &[[f32; 2]], radius: f32, patch: &Patch) -> Self {
         let rect = [0, 0, patch.width as i32, patch.height as i32];
-        let core = heal::coverage(points, radius, 0., rect);
-        let outer = heal::coverage(points, radius * 1.4 + 1., 0., rect);
+        let core = heal::coverage(points, radius, 0., FeatherProfile::Smoothstep, rect);
+        let outer = heal::coverage(
+            points,
+            radius * 1.4 + 1.,
+            0.,
+            FeatherProfile::Smoothstep,
+            rect,
+        );
         let (mut inside, mut ring) = (Vec::new(), Vec::new());
         for i in 0..core.len() {
             let p = ((i % patch.width) as i32, (i / patch.width) as i32);
@@ -115,7 +121,7 @@ pub fn find_source(
     avoid: &[[f32; 2]],
 ) -> Option<[f32; 2]> {
     let frame = ImageFrame::new(image);
-    let placed = heal::Placed::new(op, &frame);
+    let placed = heal::Placed::new(op, &frame, FeatherProfile::Smoothstep);
     let dest = placed.dest();
     // Brushed areas search at distances relative to their size, not the dab radius.
     let extent = ((dest[2] - dest[0]).max(dest[3] - dest[1]) as f32 * 0.5).max(placed.radius);
@@ -147,9 +153,9 @@ pub fn find_source(
         let mut o = vec![false; patch.width * patch.height];
         let r = [0, 0, patch.width as i32, patch.height as i32];
         for other in others.iter().filter(|o| *o != op) {
-            let p = heal::Placed::new(other, &frame);
+            let p = heal::Placed::new(other, &frame, FeatherProfile::Smoothstep);
             let pts: Vec<[f32; 2]> = p.points.iter().map(|q| patch.to_patch(*q)).collect();
-            for (i, c) in heal::coverage(&pts, p.radius / scale, 0., r)
+            for (i, c) in heal::coverage(&pts, p.radius / scale, 0., FeatherProfile::Smoothstep, r)
                 .iter()
                 .enumerate()
             {

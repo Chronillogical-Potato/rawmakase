@@ -12,7 +12,8 @@
 #   measured       measured by hand; say how in `how`
 # checked is the date of the check and sample what it was checked on.
 # Values hold at standard settings (no Highlight Tone Priority, DR100, no extended
-# low ISO); Fujifilm rows apply to DR100 photos only.
+# low ISO). RAWmakase moves Fujifilm rows with the raw's exposure midpoint shift
+# (DR200/DR400, extended ISO) unless the row says fujifilm_exposure_shift = "ignored".
 
 [[camera]]
 make = "Canon"
@@ -257,10 +258,10 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.25 plus +0.04 fo
 [[camera]]
 make = "Canon"
 model = "PowerShot V1"
-baseline_exposure = 0.25
-source = "fitted"
+baseline_exposure = 0.5
+source = "adobe-dng"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level; Adobe's value 0.5 left the Camera Raw 18.7 render -0.30 EV away, so fitted to it"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level"
 
 [[camera]]
 make = "Fujifilm"
@@ -338,6 +339,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "Fujifilm"
 model = "X-E3"
 baseline_exposure = 0.15
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 250"
@@ -362,6 +364,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.02 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X-H1"
 baseline_exposure = 0.2
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 800"
@@ -377,10 +380,10 @@ sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 
 [[camera]]
 make = "Fujifilm"
 model = "X-H2S"
-baseline_exposure = 0.05
-source = "adobe-dng"
+baseline_exposure = -0.05
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 320; Adobe +1.07 at DR200, which adds 1 EV"
+sample = "raw.pixls.us, 1 photo at ISO 320, DR200; Adobe's +1.07 (0.07 at DR100) left the Camera Raw 18.7 render -0.14 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -394,6 +397,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 make = "Fujifilm"
 model = "X-Pro2"
 baseline_exposure = 0.15
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 500"
@@ -426,6 +430,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera R
 make = "Fujifilm"
 model = "X-T2"
 baseline_exposure = 0.15
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 400"
@@ -434,6 +439,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400"
 make = "Fujifilm"
 model = "X-T20"
 baseline_exposure = 0.15
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
@@ -506,6 +512,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.02 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X100F"
 baseline_exposure = 0.15
+fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-09-26"
 sample = "2 Lightroom DNGs (ISO 200 and 400), see docs/macos-lightroom-validation.md"

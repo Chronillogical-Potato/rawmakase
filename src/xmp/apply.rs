@@ -558,6 +558,31 @@ impl Preset {
             )?;
         }
         settings.assign("ShadowTint", &mut r.effects.shadow_tint, 0.01, -1., 1.)?;
+        // Lightroom's values mean the measured operators, also on a recipe saved
+        // before; RAWmakase's own packet names the ones a recipe kept from before.
+        let mixer_keys = bands.iter().flat_map(|band| {
+            ["Hue", "Saturation", "Luminance"].map(|control| format!("{control}Adjustment{band}"))
+        });
+        if mixer_keys.into_iter().any(|key| v.contains_key(&key)) {
+            r.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_COLOR_MIXER) {
+            r.mixer_model = crate::develop::color_mixer::MixerModel::Original;
+        }
+        let primaries = [
+            "RedHue",
+            "RedSaturation",
+            "GreenHue",
+            "GreenSaturation",
+            "BlueHue",
+            "BlueSaturation",
+        ];
+        if primaries.iter().any(|key| v.contains_key(*key)) {
+            r.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_CALIBRATION) {
+            r.calibration_model = crate::develop::calibration::CalibrationModel::Original;
+        }
         if [
             "RedHue",
             "RedSaturation",
@@ -1135,6 +1160,8 @@ impl Preset {
         }
         let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
         if let Some(retouch) = edits.retouch {
+            // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
+            r.retouch_model = crate::develop::retouch::RetouchModel::Measured;
             r.retouch = retouch;
         }
         if let Some(red_eye) = edits.red_eye {

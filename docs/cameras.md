@@ -20,7 +20,15 @@ RAWmakase applies, in order:
 3. For a camera without a row, the median of the rows of the same make, or the
    median of all rows when the make has none.
 
-Fujifilm rows hold for DR100 photos; DR200 and DR400 photos get no baseline yet.
+Fujifilm rows hold at DR100 and base ISO. Camera Raw's value for a Fujifilm raw is a
+per-body constant minus the exposure midpoint shift in its maker notes, which is about
+−0.72 EV at DR100 on X-Trans bodies (−0.49 on GFX, 0 on the small Bayer bodies), a
+stop lower for each DR step and a stop higher at extended low ISO. RAWmakase adds the
+difference from that DR100 shift to the row, so DR200 and DR400 photos work even when
+the raw does not record the DR mode itself. Camera Raw keeps one value whatever the
+shift for the X-T2 (measured at DR200) and, inferred from their equal values, the other
+X-Trans III bodies (X-E3, X-Pro2, X-T20, X100F, X-H1); their rows say
+`fujifilm_exposure_shift = "ignored"`.
 
 The baseline is stored per edit, apart from the Exposure slider, so changing the table
 changes photos opened afterwards. An existing edit keeps its value; Develop's
@@ -102,30 +110,32 @@ Adobe's value also follows some shooting settings, which the rows leave out: Can
 Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO 50,
 Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
 so in `sample`. RAWmakase adds the stop for Highlight Tone Priority itself, reading it
-from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured);
-the other settings are not handled yet.
+from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured),
+and follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
+is not handled yet.
 
-After the table, 144 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
+After the table, 151 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
 RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
 master of 2026-10-02). For 15 bodies Adobe's value alone left the render more than
 0.1 EV off, so their rows are `fitted` to the render instead and say Adobe's value in
 `sample`: the Fujifilm X-H2 (0.40 EV darker in Camera Raw), X-T30 II (0.38 darker), X-S10,
-X-S20, X-T5 and X100VI, the Canon PowerShot V1 and G5 X Mark II, the Nikon D500,
-D5600, D850 and Z 7, the Olympus PEN-F, the Pentax K-70 and the Sony RX100 VII. The Sony A7 V row is
+X-S20, X-T5 and X100VI, the Canon PowerShot G5 X Mark II, the Nikon D500,
+D5600, D850 and Z 7, the Olympus PEN-F, the Pentax K-70 and the Sony RX100 VII, and since the exposure shift is
+followed, the Fujifilm X-H2S (0.14 darker at DR200). The Sony A7 V row is
 fitted too: its Adobe DNG is 16-bit, so its white level does not compare with LibRaw's.
 Camera Raw renders most of those Fujifilm bodies darker than their baseline explains,
 for a reason not found yet.
 
-Still about 1 EV off, for the shooting settings above or a decoding problem: Fujifilm X-E5, X-H2S and X-T30 III (DR200),
-X-T30, Olympus E-M10 Mark III and Sony A7R IV (extended low ISO), and the Canon EOS R6
-Mark III, whose black level LibRaw reads as 0 instead of 512. Fujifilm photos whose
-raw does not say its DR mode (the XF10 sample) get no baseline yet, about 0.3 EV off;
-the X-T2 sample (Auto DR200) is 0.15 EV off. The Leica Q, Ricoh GR III and Sigma fp L
+Still about 1 EV off, for the shooting settings above or a decoding problem: the
+Olympus E-M10 Mark III and Sony A7R IV (extended low ISO). LibRaw reads the black level
+of the Canon EOS R6 Mark III and PowerShot V1 as 0 plus small per-channel values instead
+of 512; RAWmakase takes the black from the raw's masked left border when LibRaw's is
+below a quarter of it, which brings both within 0.1 EV. The Leica Q, Ricoh GR III and Sigma fp L
 raws are DNGs with their own value and render 0.11 to 0.13 EV brighter than Camera Raw.
 
-Not compared yet: the Hasselblad, OM System and Olympus ORI samples, for which
-RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
-and 645Z, whose default crop differs from Camera Raw's.
+Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
+GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
+and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
 Three rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`) and the A7 II and A7CR, fitted to Camera Raw 18.6

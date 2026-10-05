@@ -619,6 +619,7 @@ impl CurveSet {
             calibration: crate::develop::calibration::Calibration::new(
                 r.effects.calibration,
                 r.effects.shadow_tint,
+                r.calibration_model,
             ),
             parametric: (basic_curves && r.parametric_model.is_measured())
                 .then(|| parametric_curve(r))

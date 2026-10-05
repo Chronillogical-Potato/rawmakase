@@ -540,6 +540,11 @@ fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
     assert_eq!(skipped.len(), 1, "{skipped:?}");
     assert!(skipped[0].contains("Select Subject"));
     assert_eq!(r.exposure, 0.2);
+    // Lightroom's spots render with Camera Raw's feather.
+    assert_eq!(
+        r.retouch_model,
+        crate::develop::retouch::RetouchModel::Measured
+    );
     let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
     let spot = &r.retouch[0];
     assert_eq!(
@@ -1308,6 +1313,32 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(r#"crs:LensProfileFilename="Gone (24mm) - RAW.lcp""#),
         "{packet}"
     );
+    Ok(())
+}
+#[test]
+fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
+    use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+    // Recipe::default() stands for a recipe saved before the measured operators.
+    let apply = |attrs: &str| {
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )
+    };
+    let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20""#)?;
+    assert_eq!(r.mixer_model, MixerModel::Chart);
+    assert_eq!(r.calibration_model, CalibrationModel::Measured);
+    let r = apply(r#"c:Exposure2012="0.5""#)?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
+    // RAWmakase's own packet for a recipe that kept them.
+    let r = apply(
+        r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:RAWmakaseOriginal="ColorMixer,Calibration""#,
+    )?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
     Ok(())
 }
 #[test]
