@@ -594,7 +594,6 @@ pub fn keyword_lists(keywords: &[KeywordPath]) -> (Vec<String>, Vec<String>) {
     (subject, hierarchical)
 }
 
-/// The XMP packet for an exported photo.
 /// The operators this recipe keeps from before they were measured in Camera Raw,
 /// each with a Lightroom setting it renders. Lightroom's values for them would read
 /// back as the measured ones, so RAWmakase names them for itself to render the recipe
@@ -619,6 +618,7 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
 pub(super) const ORIGINAL_SHARPENING: &str = "Sharpening";
 pub(super) const ORIGINAL_LENS_VIGNETTE: &str = "LensVignette";
 
+/// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     let mut attributes: Vec<(String, String)> = vec![
         ("xmp:CreatorTool".into(), crate::export::SOFTWARE.into()),
