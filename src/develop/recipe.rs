@@ -95,6 +95,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
     )]
     pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
+    /// How color grading renders. Missing means the original operator, so recipes
+    /// saved before the measured curves look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_grade::GradingModel::is_original"
+    )]
+    pub grading_model: crate::develop::color_grade::GradingModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -216,6 +223,7 @@ impl Default for Recipe {
             parametric_model: Default::default(),
             contrast_model: Default::default(),
             lens_vignette_model: Default::default(),
+            grading_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
             wb: [1.; 3],
@@ -332,7 +340,10 @@ impl Recipe {
                 e.splits = s.splits;
             }
         }
-        if let Some(t) = s.toning {
+        // The measured grading renders a look's split toning as a pass of its own.
+        let merge_toning =
+            self.grading_model == crate::develop::color_grade::GradingModel::Original;
+        if let Some(t) = s.toning.filter(|_| merge_toning) {
             // Split toning, as Lightroom's looks store it, overlaps all tones; the
             // user's own toning of shadows or highlights wins over the look's.
             if self.grading.iter().all(|g| g[1] == 0. && g[2] == 0.) && e.global_grade == [0.; 3] {
@@ -410,6 +421,7 @@ impl Recipe {
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe

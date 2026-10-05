@@ -773,7 +773,25 @@ fn grade_at(base: i32, l: f32) -> vec3<f32> {
     let t = f - f32(i);
     return table3(base + i32(i) * 3) * (1.0 - t) + table3(base + i32(i + 1u) * 3) * t;
 }
+// color_grade_curves::ChannelCurves: a gain curve per channel of linear ProPhoto RGB.
+fn grade_channels(rgb: vec3<f32>) -> vec3<f32> {
+    let bins = u32(p(P_GRADE + 2u));
+    let base = offset(P_GRADE);
+    let q = RGB_TO_PRO * rgb;
+    var out: vec3<f32>;
+    for (var c = 0; c < 3; c++) {
+        let f = powf(clamp(q[c], 0.0, 1.0), 1.0 / 2.2) * f32(bins - 1u);
+        let i = min(u32(f), bins - 2u);
+        let t = f - f32(i);
+        let g = table(base + i32(i) * 3 + c) * (1.0 - t) + table(base + i32(i + 1u) * 3 + c) * t;
+        out[c] = q[c] * g;
+    }
+    return PRO_TO_RGB * out;
+}
 fn grade(rgb: vec3<f32>) -> vec3<f32> {
+    if p(P_GRADE + 3u) == 1.0 {
+        return grade_channels(rgb);
+    }
     let y = max(0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z, 0.0);
     let l = srgb_encode(min(y, 1.0));
     let g = grade_at(offset(P_GRADE), l);

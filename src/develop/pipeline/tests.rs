@@ -45,6 +45,7 @@ fn old_recipes_keep_original_profile_tones() {
         "reference_color",
         "parametric_model",
         "contrast_model",
+        "grading_model",
     ] {
         json.as_object_mut().unwrap().remove(field);
     }
@@ -64,15 +65,21 @@ fn old_recipes_keep_original_profile_tones() {
         crate::develop::basic_tone::ContrastModel::Original
     );
     assert!(Recipe::default().profile_tone);
-    // The measured parametric curve is saved, and read back.
+    assert_eq!(
+        old.grading_model,
+        crate::develop::color_grade::GradingModel::Original
+    );
+    // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
         parametric_model: crate::develop::parametric::ParametricModel::Measured,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
+        grading_model: crate::develop::color_grade::GradingModel::Measured,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
     assert_eq!(back.parametric_model, measured.parametric_model);
     assert_eq!(back.contrast_model, measured.contrast_model);
+    assert_eq!(back.grading_model, measured.grading_model);
 }
 
 #[test]

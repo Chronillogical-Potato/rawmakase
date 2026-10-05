@@ -47,7 +47,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("RGB", 6),
     ("RGB_INTO", 9),
     ("RGB_BACK", 9),
-    ("GRADE", 3),
+    // Color grading: tables, samples and operator (see `color_grade::ColorGrade`).
+    ("GRADE", 4),
     ("ADJUST", 1),
     ("DEFRINGE", 2),
     ("DEFRINGE_RANGES", 4),
@@ -144,7 +145,8 @@ pub(crate) fn supported(r: &Recipe) -> bool {
         && r.reference_calibration
         && r.profile_tone
         && r.profile.is_some()
-        // Blending and Balance outside the measured tables use the older operator.
+        // The original operator's Blending and Balance outside its tables use the
+        // older operator.
         && (!grading || crate::develop::color_grade::ColorGrade::new(r).is_some())
 }
 /// Parameters for `im`'s per-pixel stage with the resolved recipe `r`, or `None` when
@@ -329,13 +331,21 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     };
     p.set("POINT", &point);
     set_rgb_table(&mut p, lut.rgb_table.as_ref());
+    use crate::develop::color_grade::ColorGrade;
     let grade = match &lut.grade {
-        Some(g) => [
+        Some(ColorGrade::Luminance(g)) => [
             p.push(g.gain.iter().flatten().copied()),
             p.push(g.offset.iter().flatten().copied()),
             g.gain.len() as f32,
+            0.,
         ],
-        None => [-1., -1., 0.],
+        Some(ColorGrade::Channels(c)) => [
+            p.push(c.gain.iter().flatten().copied()),
+            -1.,
+            c.gain.len() as f32,
+            1.,
+        ],
+        None => [-1., -1., 0., 0.],
     };
     p.set("GRADE", &grade);
     p.set("ADJUST", &[lut.color_adjustments as u8 as f32]);

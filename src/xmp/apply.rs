@@ -1122,6 +1122,28 @@ impl Preset {
         // Lightroom 15 records whether the crop is kept inside the image; it only
         // constrains the crop tool and does not change rendering.
         settings.seen.insert("CropConstrainToUnitSquare".into());
+        // Lightroom 15 writes these into every record. Glow's own controls do nothing
+        // while Glow is 0 (an active Glow is refused above), the SDR and HDR values
+        // apply only in HDR editing, and Distraction Removal's switch changes nothing
+        // without removals, which are reported on their own.
+        let at_rest = |key: &str| v.get(key).is_none_or(|value| value.parse() == Ok(0f32));
+        let mut neutral = vec!["EnableDistractionRemoval"];
+        if at_rest("Glow") {
+            neutral.extend(["GlowRange", "GlowSpread", "GlowStyle", "GlowWarmth"]);
+        }
+        if at_rest("HDREditMode") {
+            neutral.extend([
+                "HDRMaxValue",
+                "SDRBlend",
+                "SDRBrightness",
+                "SDRClarity",
+                "SDRContrast",
+                "SDRHighlights",
+                "SDRShadows",
+                "SDRWhites",
+            ]);
+        }
+        settings.seen.extend(neutral.into_iter().map(String::from));
         let unknown: Vec<_> = v
             .keys()
             .filter(|k| !settings.seen.contains(*k))

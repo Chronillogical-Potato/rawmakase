@@ -1328,3 +1328,19 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
     assert_eq!(cat.snapshots(40)?.len(), 1);
     Ok(())
 }
+#[test]
+fn lightroom_15_controls_at_rest_are_not_reported() -> Result<()> {
+    // Lightroom 15 writes these into every Develop record. Glow's own controls do
+    // nothing while Glow is 0, and the SDR and HDR values only apply in HDR editing.
+    let text = r#"s = { Exposure2012 = 0.5, Glow = 0, GlowRange = 50, GlowSpread = 50, GlowStyle = 0, GlowWarmth = 0, HDREditMode = 0, HDRMaxValue = 2.3, SDRBlend = 0, SDRBrightness = 0, SDRClarity = 0, SDRContrast = 0, SDRHighlights = 0, SDRShadows = 0, SDRWhites = 0, EnableDistractionRemoval = true }"#;
+    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.exposure, 0.5);
+    // Active, they are still reported.
+    for active in ["Glow = 20", "HDREditMode = 1"] {
+        let text = format!("s = {{ {active}, GlowRange = 50, HDRMaxValue = 2.3 }}");
+        let (_, w) = convert_develop(&text, &crate::raw::Metadata::default(), &[], None)?;
+        assert!(!w.is_empty(), "{active}");
+    }
+    Ok(())
+}
