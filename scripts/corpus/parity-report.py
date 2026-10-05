@@ -12,13 +12,18 @@ RAWmakase's renders come from the parity test:
 (the dump is written before the test compares with its baseline, so new cases
 without a baseline still produce values).
 
+--photos adds the default exposure of real photos per camera, from the private tier:
+  RAWMAKASE_CORPUS=... RAWMAKASE_PROFILES=... RAWMAKASE_PHOTO_FILTER=/default \
+  RAWMAKASE_PARITY_DUMP=<dir> cargo test --release --test color photos_camera_raw -- --ignored
+
 Requires numpy. Run from the repository root:
-  python3 scripts/corpus/parity-report.py <dump dir> --out <dir> [--previous <report.json>]
+  python3 scripts/corpus/parity-report.py <dump dir> --out <dir> [--previous <report.json>] [--photos]
 """
 import argparse
 import datetime
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -55,6 +60,7 @@ CONTROLS = [
     ('Color Mixer', 'Hue', rf'^hue-({BANDS})'),
     ('Color Mixer', 'Saturation', rf'^saturation-({BANDS})'),
     ('Color Mixer', 'Luminance', rf'^luminance-({BANDS})'),
+    ('Color Mixer', 'Band combinations', r'^mixer-'),
     ('Color Mixer', 'B&W mix', r'^bw-'),
     ('Color Mixer', 'Point Color', r'^pc-'),
     ('Color Grading', 'Hue and saturation', r'^grading-(shadows|midtones|highlights|global)-h'),
@@ -195,6 +201,46 @@ def measure(dump):
     return summary, cases, versions
 
 
+def luminance(rgb16):
+    v = np.asarray(rgb16, float) / 65535.
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4) @ [0.2126, 0.7152, 0.0722]
+
+
+def camera_of(reference):
+    """'pixls/Sony/ILCE-7M4/<file>/default' -> 'Sony ILCE-7M4'; 'own/sony-a7ii/<photo>/default' -> 'sony-a7ii'.
+    Photo names stay out of the report."""
+    parts = reference.split('/')
+    return f'{parts[1]} {parts[2]}' if parts[0] == 'pixls' else parts[1]
+
+
+def photo_exposure(dump, corpus):
+    """Default render of every corpus photo against Camera Raw: the median exposure
+    offset in EV over midtone blocks (positive: Camera Raw is brighter) and mean ΔE00,
+    per camera. Photos are listed by camera only."""
+    per_camera = {}
+    for ours_path in sorted(dump.rglob('default.json')):
+        reference = ours_path.relative_to(dump).with_suffix('').as_posix()
+        ref_path = corpus / 'camera-raw-photos' / f'{reference}.json'
+        if not ref_path.exists():
+            continue
+        ref = json.loads(ref_path.read_text())['blocks']
+        ours = json.loads(ours_path.read_text())
+        a, b = luminance(ref), luminance(ours)
+        mid = (a > 0.01) & (b > 0.01) & (a < 0.85) & (b < 0.85)
+        if mid.sum() < 50:
+            continue
+        ev = float(np.median(np.log2(a[mid] / b[mid])))
+        de = float(ciede2000(lab(ref), lab(ours)).mean())
+        per_camera.setdefault(camera_of(reference), []).append((ev, de))
+    return [{'camera': camera, 'photos': len(v), 'ev': float(np.median([e for e, _ in v])),
+             'ev_min': min(e for e, _ in v), 'ev_max': max(e for e, _ in v),
+             'mean': float(np.mean([d for _, d in v]))}
+            for camera, v in sorted(per_camera.items())]
+
+
+MIXER = re.compile(rf'^(hue|saturation|luminance)-({BANDS})([+-]\d+)$')
+
+
 def label(case, chart):
     return case + ('' if chart == 'synthetic-d65' else f' · {chart}')
 
@@ -257,6 +303,42 @@ def render_html(report, previous):
             f'<td class="n">{c["mean"]:.2f}</td><td class="n">{c["p95"]:.2f}</td><td class="n">{c["max"]:.1f}</td>'
             f'<td class="n">{c["tone"]:+.2f}</td><td class="n">{c["hue"]:.1f}</td><td class="n">{c["chroma"]:+.1f}</td>'
             f'<td>{html.escape(w["patch"])} <span class="dim">{w["de"]:.1f}</span></td></tr>')
+    mixer = {}
+    for c in measured:
+        m = MIXER.match(c['case'])
+        if m and c['chart'] == 'synthetic-d65':
+            mixer[(m.group(2), m.group(1), int(m.group(3)))] = c['mean']
+    mixer_html = ''
+    if mixer:
+        steps = sorted({k[2] for k in mixer})
+        head = ''.join(f'<th class="n">{kind[0].upper()} {v:+d}</th>' for kind in ('hue', 'saturation', 'luminance')
+                       for v in steps)
+        body = []
+        for band in BANDS.split('|'):
+            cells = ''.join(
+                f'<td class="n"><span class="pill {grade(mixer[(band, kind, v)])}">{mixer[(band, kind, v)]:.2f}</span></td>'
+                if (band, kind, v) in mixer else '<td class="n dim">–</td>'
+                for kind in ('hue', 'saturation', 'luminance') for v in steps)
+            body.append(f'<tr><th scope="row">{band.capitalize()}</th>{cells}</tr>')
+        mixer_html = ('<section><h2>Color mixer by band</h2><p class="note">Mean ΔE00 of each Hue (H), Saturation (S) and '
+                      'Luminance (L) slider position on the main chart, one band at a time.</p>'
+                      '<div class="frame"><table><thead><tr><th>Band</th>' + head + '</tr></thead><tbody>'
+                      + '\n'.join(body) + '</tbody></table></div></section>')
+    exposure_html = ''
+    if report.get('photos'):
+        body = ''.join(
+            f'<tr><th scope="row">{html.escape(p["camera"])}</th><td class="n">{p["photos"]}</td>'
+            f'<td class="n"><span class="pill {"ok" if abs(p["ev"]) < 0.1 else "warn" if abs(p["ev"]) < 0.25 else "bad"}">{p["ev"]:+.2f}</span></td>'
+            f'<td class="n">{p["ev_min"]:+.2f} to {p["ev_max"]:+.2f}</td><td class="n">{p["mean"]:.2f}</td></tr>'
+            for p in sorted(report['photos'], key=lambda p: -abs(p['ev'])))
+        exposure_html = ('<section><h2>Default exposure on photos</h2><p class="note">Unedited photos with Adobe Standard: '
+                         'how much brighter Camera Raw renders them (median over midtone blocks, in EV; positive means '
+                         'Camera Raw is brighter) and the mean ΔE00 of the whole frame. CC0 samples from raw.pixls.us '
+                         'and private photos, listed by camera only. Large offsets with a wide range point to more than '
+                         'exposure (highlight recovery, decoding or crop).</p>'
+                         '<div class="frame"><table><thead><tr><th>Camera</th><th class="n">Photos</th><th class="n">Offset EV</th>'
+                         '<th class="n">Range</th><th class="n">Mean ΔE00</th></tr></thead><tbody>' + body
+                         + '</tbody></table></div></section>')
     errors = [c for c in report['cases'] if 'error' in c]
     error_html = ''
     if errors:
@@ -274,6 +356,7 @@ def render_html(report, previous):
         'default_mean': f'{d["mean"]:.2f}', 'default_p95': f'{d["p95"]:.2f}',
         'prev_note': prev_note, 'rows': '\n'.join(rows), 'worst_rows': '\n'.join(worst_rows),
         'all_rows': '\n'.join(all_rows), 'errors': error_html,
+        'mixer': mixer_html, 'exposure': exposure_html,
     }
     return re.sub(r'\{\{(\w+)\}\}', lambda m: str(values[m.group(1)]), PAGE)
 
@@ -349,6 +432,8 @@ ul { margin: 0; padding-left: 1.2em; }
 {{rows}}
     </tbody></table></div>
 </section>
+{{exposure}}
+{{mixer}}
 <section>
   <h2>Worst cases</h2>
   <p class="note">The 25 cases furthest from Camera Raw. Tone is the mean L* offset on the gray ramp (−6 to +2 EV), hue the chroma-weighted hue error in degrees, chroma the mean relative chroma difference on the hue grid; positive means RAWmakase is lighter or more saturated.</p>
@@ -378,6 +463,9 @@ def main():
     p.add_argument('dump', type=Path, help='RAWMAKASE_PARITY_DUMP folder of RAWmakase renders')
     p.add_argument('--out', type=Path, required=True, help='folder for report.json and report.html')
     p.add_argument('--previous', type=Path, help='an earlier report.json to show changes against')
+    p.add_argument('--photos', action='store_true',
+                   help='also compare default photo renders (<dump>/photos from photos_camera_raw_parity) '
+                        'with $RAWMAKASE_CORPUS/camera-raw-photos')
     args = p.parse_args()
 
     controls, cases, versions = measure(args.dump)
@@ -390,6 +478,11 @@ def main():
         'controls': controls,
         'cases': cases,
     }
+    if args.photos:
+        corpus = os.environ.get('RAWMAKASE_CORPUS')
+        if not corpus:
+            sys.exit('Set RAWMAKASE_CORPUS for --photos')
+        report['photos'] = photo_exposure(args.dump / 'photos', Path(corpus))
     previous = json.loads(args.previous.read_text()) if args.previous else None
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / 'report.json').write_text(json.dumps(report, indent=1) + '\n')

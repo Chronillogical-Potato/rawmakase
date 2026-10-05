@@ -2297,6 +2297,371 @@
     "Dehaze": "+50",
     "Saturation": "-30"
    }
+  },
+  {
+   "name": "hue-red-50",
+   "settings": {
+    "HueAdjustmentRed": "-50"
+   }
+  },
+  {
+   "name": "hue-red+50",
+   "settings": {
+    "HueAdjustmentRed": "+50"
+   }
+  },
+  {
+   "name": "hue-orange-50",
+   "settings": {
+    "HueAdjustmentOrange": "-50"
+   }
+  },
+  {
+   "name": "hue-orange+50",
+   "settings": {
+    "HueAdjustmentOrange": "+50"
+   }
+  },
+  {
+   "name": "hue-yellow-50",
+   "settings": {
+    "HueAdjustmentYellow": "-50"
+   }
+  },
+  {
+   "name": "hue-yellow+50",
+   "settings": {
+    "HueAdjustmentYellow": "+50"
+   }
+  },
+  {
+   "name": "hue-green-50",
+   "settings": {
+    "HueAdjustmentGreen": "-50"
+   }
+  },
+  {
+   "name": "hue-green+50",
+   "settings": {
+    "HueAdjustmentGreen": "+50"
+   }
+  },
+  {
+   "name": "hue-aqua-50",
+   "settings": {
+    "HueAdjustmentAqua": "-50"
+   }
+  },
+  {
+   "name": "hue-aqua+50",
+   "settings": {
+    "HueAdjustmentAqua": "+50"
+   }
+  },
+  {
+   "name": "hue-blue-50",
+   "settings": {
+    "HueAdjustmentBlue": "-50"
+   }
+  },
+  {
+   "name": "hue-blue+50",
+   "settings": {
+    "HueAdjustmentBlue": "+50"
+   }
+  },
+  {
+   "name": "hue-purple-50",
+   "settings": {
+    "HueAdjustmentPurple": "-50"
+   }
+  },
+  {
+   "name": "hue-purple+50",
+   "settings": {
+    "HueAdjustmentPurple": "+50"
+   }
+  },
+  {
+   "name": "hue-magenta-50",
+   "settings": {
+    "HueAdjustmentMagenta": "-50"
+   }
+  },
+  {
+   "name": "hue-magenta+50",
+   "settings": {
+    "HueAdjustmentMagenta": "+50"
+   }
+  },
+  {
+   "name": "saturation-red-50",
+   "settings": {
+    "SaturationAdjustmentRed": "-50"
+   }
+  },
+  {
+   "name": "saturation-red+50",
+   "settings": {
+    "SaturationAdjustmentRed": "+50"
+   }
+  },
+  {
+   "name": "saturation-orange-50",
+   "settings": {
+    "SaturationAdjustmentOrange": "-50"
+   }
+  },
+  {
+   "name": "saturation-orange+50",
+   "settings": {
+    "SaturationAdjustmentOrange": "+50"
+   }
+  },
+  {
+   "name": "saturation-yellow-50",
+   "settings": {
+    "SaturationAdjustmentYellow": "-50"
+   }
+  },
+  {
+   "name": "saturation-yellow+50",
+   "settings": {
+    "SaturationAdjustmentYellow": "+50"
+   }
+  },
+  {
+   "name": "saturation-green-50",
+   "settings": {
+    "SaturationAdjustmentGreen": "-50"
+   }
+  },
+  {
+   "name": "saturation-green+50",
+   "settings": {
+    "SaturationAdjustmentGreen": "+50"
+   }
+  },
+  {
+   "name": "saturation-aqua-50",
+   "settings": {
+    "SaturationAdjustmentAqua": "-50"
+   }
+  },
+  {
+   "name": "saturation-aqua+50",
+   "settings": {
+    "SaturationAdjustmentAqua": "+50"
+   }
+  },
+  {
+   "name": "saturation-blue-50",
+   "settings": {
+    "SaturationAdjustmentBlue": "-50"
+   }
+  },
+  {
+   "name": "saturation-blue+50",
+   "settings": {
+    "SaturationAdjustmentBlue": "+50"
+   }
+  },
+  {
+   "name": "saturation-purple-50",
+   "settings": {
+    "SaturationAdjustmentPurple": "-50"
+   }
+  },
+  {
+   "name": "saturation-purple+50",
+   "settings": {
+    "SaturationAdjustmentPurple": "+50"
+   }
+  },
+  {
+   "name": "saturation-magenta-50",
+   "settings": {
+    "SaturationAdjustmentMagenta": "-50"
+   }
+  },
+  {
+   "name": "saturation-magenta+50",
+   "settings": {
+    "SaturationAdjustmentMagenta": "+50"
+   }
+  },
+  {
+   "name": "luminance-red-50",
+   "settings": {
+    "LuminanceAdjustmentRed": "-50"
+   }
+  },
+  {
+   "name": "luminance-red+50",
+   "settings": {
+    "LuminanceAdjustmentRed": "+50"
+   }
+  },
+  {
+   "name": "luminance-orange-50",
+   "settings": {
+    "LuminanceAdjustmentOrange": "-50"
+   }
+  },
+  {
+   "name": "luminance-orange+50",
+   "settings": {
+    "LuminanceAdjustmentOrange": "+50"
+   }
+  },
+  {
+   "name": "luminance-yellow-50",
+   "settings": {
+    "LuminanceAdjustmentYellow": "-50"
+   }
+  },
+  {
+   "name": "luminance-yellow+50",
+   "settings": {
+    "LuminanceAdjustmentYellow": "+50"
+   }
+  },
+  {
+   "name": "luminance-green-50",
+   "settings": {
+    "LuminanceAdjustmentGreen": "-50"
+   }
+  },
+  {
+   "name": "luminance-green+50",
+   "settings": {
+    "LuminanceAdjustmentGreen": "+50"
+   }
+  },
+  {
+   "name": "luminance-aqua-50",
+   "settings": {
+    "LuminanceAdjustmentAqua": "-50"
+   }
+  },
+  {
+   "name": "luminance-aqua+50",
+   "settings": {
+    "LuminanceAdjustmentAqua": "+50"
+   }
+  },
+  {
+   "name": "luminance-blue-50",
+   "settings": {
+    "LuminanceAdjustmentBlue": "-50"
+   }
+  },
+  {
+   "name": "luminance-blue+50",
+   "settings": {
+    "LuminanceAdjustmentBlue": "+50"
+   }
+  },
+  {
+   "name": "luminance-purple-50",
+   "settings": {
+    "LuminanceAdjustmentPurple": "-50"
+   }
+  },
+  {
+   "name": "luminance-purple+50",
+   "settings": {
+    "LuminanceAdjustmentPurple": "+50"
+   }
+  },
+  {
+   "name": "luminance-magenta-50",
+   "settings": {
+    "LuminanceAdjustmentMagenta": "-50"
+   }
+  },
+  {
+   "name": "luminance-magenta+50",
+   "settings": {
+    "LuminanceAdjustmentMagenta": "+50"
+   }
+  },
+  {
+   "name": "mixer-all-hue+50",
+   "settings": {
+    "HueAdjustmentRed": "+50",
+    "HueAdjustmentOrange": "+50",
+    "HueAdjustmentYellow": "+50",
+    "HueAdjustmentGreen": "+50",
+    "HueAdjustmentAqua": "+50",
+    "HueAdjustmentBlue": "+50",
+    "HueAdjustmentPurple": "+50",
+    "HueAdjustmentMagenta": "+50"
+   }
+  },
+  {
+   "name": "mixer-all-saturation-50",
+   "settings": {
+    "SaturationAdjustmentRed": "-50",
+    "SaturationAdjustmentOrange": "-50",
+    "SaturationAdjustmentYellow": "-50",
+    "SaturationAdjustmentGreen": "-50",
+    "SaturationAdjustmentAqua": "-50",
+    "SaturationAdjustmentBlue": "-50",
+    "SaturationAdjustmentPurple": "-50",
+    "SaturationAdjustmentMagenta": "-50"
+   }
+  },
+  {
+   "name": "mixer-all-luminance+50",
+   "settings": {
+    "LuminanceAdjustmentRed": "+50",
+    "LuminanceAdjustmentOrange": "+50",
+    "LuminanceAdjustmentYellow": "+50",
+    "LuminanceAdjustmentGreen": "+50",
+    "LuminanceAdjustmentAqua": "+50",
+    "LuminanceAdjustmentBlue": "+50",
+    "LuminanceAdjustmentPurple": "+50",
+    "LuminanceAdjustmentMagenta": "+50"
+   }
+  },
+  {
+   "name": "mixer-alternate-luminance",
+   "settings": {
+    "LuminanceAdjustmentRed": "-60",
+    "LuminanceAdjustmentOrange": "+60",
+    "LuminanceAdjustmentYellow": "-60",
+    "LuminanceAdjustmentGreen": "+60",
+    "LuminanceAdjustmentAqua": "-60",
+    "LuminanceAdjustmentBlue": "+60",
+    "LuminanceAdjustmentPurple": "-60",
+    "LuminanceAdjustmentMagenta": "+60"
+   }
+  },
+  {
+   "name": "mixer-neighbours-saturation+100",
+   "settings": {
+    "SaturationAdjustmentOrange": "+100",
+    "SaturationAdjustmentYellow": "+100"
+   }
+  },
+  {
+   "name": "mixer-hue-sat-lum-blue",
+   "settings": {
+    "HueAdjustmentBlue": "-40",
+    "SaturationAdjustmentBlue": "+40",
+    "LuminanceAdjustmentBlue": "-40"
+   }
+  },
+  {
+   "name": "mixer-skin",
+   "settings": {
+    "HueAdjustmentOrange": "+10",
+    "SaturationAdjustmentOrange": "-20",
+    "LuminanceAdjustmentOrange": "+20",
+    "HueAdjustmentRed": "+10",
+    "SaturationAdjustmentRed": "-10"
+   }
   }
  ]
 }

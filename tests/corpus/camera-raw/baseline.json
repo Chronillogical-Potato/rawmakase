@@ -398,65 +398,129 @@
         1.204,
         4.589
       ],
+      "hue-aqua+50": [
+        1.039,
+        2.995
+      ],
       "hue-aqua-100": [
         1.048,
         3.046
+      ],
+      "hue-aqua-50": [
+        0.992,
+        2.412
       ],
       "hue-blue+100": [
         1.293,
         4.407
       ],
+      "hue-blue+50": [
+        1.142,
+        3.636
+      ],
       "hue-blue-100": [
         1.657,
         6.013
+      ],
+      "hue-blue-50": [
+        1.361,
+        4.648
       ],
       "hue-green+100": [
         1.122,
         3.608
       ],
+      "hue-green+50": [
+        1.111,
+        3.879
+      ],
       "hue-green-100": [
         1.067,
         3.337
+      ],
+      "hue-green-50": [
+        0.962,
+        2.382
       ],
       "hue-magenta+100": [
         0.964,
         2.373
       ],
+      "hue-magenta+50": [
+        0.94,
+        2.305
+      ],
       "hue-magenta-100": [
         0.931,
+        2.305
+      ],
+      "hue-magenta-50": [
+        0.925,
         2.305
       ],
       "hue-orange+100": [
         1.189,
         3.791
       ],
+      "hue-orange+50": [
+        1.033,
+        2.656
+      ],
       "hue-orange-100": [
         1.304,
         4.119
+      ],
+      "hue-orange-50": [
+        1.143,
+        3.921
       ],
       "hue-purple+100": [
         1.334,
         4.994
       ],
+      "hue-purple+50": [
+        1.115,
+        3.915
+      ],
       "hue-purple-100": [
         1.502,
         5.882
+      ],
+      "hue-purple-50": [
+        1.222,
+        4.326
       ],
       "hue-red+100": [
         1.166,
         4.141
       ],
+      "hue-red+50": [
+        1.023,
+        2.58
+      ],
       "hue-red-100": [
         1.125,
         3.601
+      ],
+      "hue-red-50": [
+        1.033,
+        2.677
       ],
       "hue-yellow+100": [
         1.175,
         3.295
       ],
+      "hue-yellow+50": [
+        1.006,
+        2.382
+      ],
       "hue-yellow-100": [
         1.249,
         3.808
+      ],
+      "hue-yellow-50": [
+        1.055,
+        2.645
       ],
       "lens-manual-distortion+50": [
         1.338,
@@ -566,65 +630,157 @@
         1.287,
         4.648
       ],
+      "luminance-aqua+50": [
+        1.077,
+        3.473
+      ],
       "luminance-aqua-100": [
         1.484,
         5.882
+      ],
+      "luminance-aqua-50": [
+        1.074,
+        3.337
       ],
       "luminance-blue+100": [
         1.381,
         4.968
       ],
+      "luminance-blue+50": [
+        1.195,
+        4.126
+      ],
       "luminance-blue-100": [
         2.257,
         9.093
+      ],
+      "luminance-blue-50": [
+        1.458,
+        5.825
       ],
       "luminance-green+100": [
         1.383,
         5.453
       ],
+      "luminance-green+50": [
+        1.17,
+        4.144
+      ],
       "luminance-green-100": [
         1.997,
         9.468
+      ],
+      "luminance-green-50": [
+        1.199,
+        4.672
       ],
       "luminance-magenta+100": [
         1.102,
         4.326
       ],
+      "luminance-magenta+50": [
+        1.002,
+        3.337
+      ],
       "luminance-magenta-100": [
         1.406,
         5.574
+      ],
+      "luminance-magenta-50": [
+        1.046,
+        3.806
       ],
       "luminance-orange+100": [
         1.422,
         5.08
       ],
+      "luminance-orange+50": [
+        1.202,
+        3.413
+      ],
       "luminance-orange-100": [
         1.793,
         7.087
+      ],
+      "luminance-orange-50": [
+        0.988,
+        2.997
       ],
       "luminance-purple+100": [
         1.536,
         7.22
       ],
+      "luminance-purple+50": [
+        1.288,
+        5.346
+      ],
       "luminance-purple-100": [
         2.367,
         11.706
+      ],
+      "luminance-purple-50": [
+        1.431,
+        5.879
       ],
       "luminance-red+100": [
         1.102,
         3.154
       ],
+      "luminance-red+50": [
+        1.013,
+        2.786
+      ],
       "luminance-red-100": [
         1.387,
         4.56
+      ],
+      "luminance-red-50": [
+        0.983,
+        2.433
       ],
       "luminance-yellow+100": [
         1.375,
         4.336
       ],
+      "luminance-yellow+50": [
+        1.14,
+        3.422
+      ],
       "luminance-yellow-100": [
         1.548,
         5.89
+      ],
+      "luminance-yellow-50": [
+        1.096,
+        3.636
+      ],
+      "mixer-all-hue+50": [
+        1.442,
+        4.326
+      ],
+      "mixer-all-luminance+50": [
+        2.265,
+        6.228
+      ],
+      "mixer-all-saturation-50": [
+        1.873,
+        4.53
+      ],
+      "mixer-alternate-luminance": [
+        3.044,
+        9.3
+      ],
+      "mixer-hue-sat-lum-blue": [
+        1.814,
+        6.907
+      ],
+      "mixer-neighbours-saturation+100": [
+        1.162,
+        3.098
+      ],
+      "mixer-skin": [
+        1.068,
+        2.656
       ],
       "noise-color+25": [
         0.924,
@@ -958,65 +1114,129 @@
         1.069,
         3.337
       ],
+      "saturation-aqua+50": [
+        0.984,
+        2.722
+      ],
       "saturation-aqua-100": [
         1.086,
         3.017
+      ],
+      "saturation-aqua-50": [
+        1.01,
+        2.88
       ],
       "saturation-blue+100": [
         1.749,
         6.283
       ],
+      "saturation-blue+50": [
+        1.2,
+        4.324
+      ],
       "saturation-blue-100": [
         1.464,
         5.631
+      ],
+      "saturation-blue-50": [
+        1.553,
+        5.364
       ],
       "saturation-green+100": [
         1.051,
         3.372
       ],
+      "saturation-green+50": [
+        0.991,
+        3.03
+      ],
       "saturation-green-100": [
         1.162,
         4.113
+      ],
+      "saturation-green-50": [
+        1.005,
+        2.646
       ],
       "saturation-magenta+100": [
         0.99,
         2.983
       ],
+      "saturation-magenta+50": [
+        0.95,
+        2.416
+      ],
       "saturation-magenta-100": [
         1.005,
         3.438
+      ],
+      "saturation-magenta-50": [
+        0.935,
+        2.323
       ],
       "saturation-orange+100": [
         1.054,
         3.017
       ],
+      "saturation-orange+50": [
+        0.964,
+        2.305
+      ],
       "saturation-orange-100": [
         1.467,
         6.069
+      ],
+      "saturation-orange-50": [
+        1.108,
+        3.163
       ],
       "saturation-purple+100": [
         1.209,
         4.326
       ],
+      "saturation-purple+50": [
+        1.025,
+        3.337
+      ],
       "saturation-purple-100": [
         1.478,
         5.631
+      ],
+      "saturation-purple-50": [
+        1.08,
+        3.771
       ],
       "saturation-red+100": [
         1.083,
         3.662
       ],
+      "saturation-red+50": [
+        0.986,
+        2.787
+      ],
       "saturation-red-100": [
         1.216,
         4.69
+      ],
+      "saturation-red-50": [
+        1.006,
+        3.18
       ],
       "saturation-yellow+100": [
         1.059,
         2.653
       ],
+      "saturation-yellow+50": [
+        0.981,
+        2.305
+      ],
       "saturation-yellow-100": [
         1.248,
         4.253
+      ],
+      "saturation-yellow-50": [
+        1.048,
+        3.459
       ],
       "shadows+100": [
         8.448,
