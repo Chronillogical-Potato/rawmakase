@@ -44,7 +44,7 @@ mod tests {
         assert_eq!(baseline_exposure(&m), 0.);
         m.model = "X-T5".into();
         m.fuji_dynamic_range = 100;
-        assert_eq!(baseline_exposure(&m), 0.);
+        assert_eq!(baseline_exposure(&m), -0.1);
         m.model = "X100V".into();
         assert_eq!(neutral_calibration(&m), [1.; 3]);
     }

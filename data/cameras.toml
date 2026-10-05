@@ -233,10 +233,10 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.04 fo
 [[camera]]
 make = "Canon"
 model = "PowerShot G5 X Mark II"
-baseline_exposure = 0.35
-source = "adobe-dng"
+baseline_exposure = 0.25
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 for the white level; Adobe's value 0.35 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
 
 [[camera]]
 make = "Canon"
@@ -257,10 +257,10 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.25 plus +0.04 fo
 [[camera]]
 make = "Canon"
 model = "PowerShot V1"
-baseline_exposure = 0.5
-source = "adobe-dng"
+baseline_exposure = 0.25
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level; Adobe's value 0.5 left the Camera Raw 18.7 render -0.30 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -369,10 +369,10 @@ sample = "raw.pixls.us, 1 photo at ISO 800"
 [[camera]]
 make = "Fujifilm"
 model = "X-H2"
-baseline_exposure = 0
-source = "adobe-dng"
+baseline_exposure = -0.35
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 125"
+sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.40 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -409,18 +409,18 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 [[camera]]
 make = "Fujifilm"
 model = "X-S10"
-baseline_exposure = 0.05
-source = "adobe-dng"
+baseline_exposure = -0.1
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 160"
+sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera Raw 18.7 render -0.17 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
 model = "X-S20"
-baseline_exposure = 0.05
-source = "adobe-dng"
+baseline_exposure = -0.05
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 160"
+sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -465,10 +465,10 @@ sample = "raw.pixls.us, 1 photo at ISO 100; Adobe -0.88 at extended ISO 100, whi
 [[camera]]
 make = "Fujifilm"
 model = "X-T30 II"
-baseline_exposure = 0.1
-source = "adobe-dng"
+baseline_exposure = -0.2
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 160"
+sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.1 left the Camera Raw 18.7 render -0.38 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -489,10 +489,10 @@ sample = "raw.pixls.us, 1 photo at ISO 160"
 [[camera]]
 make = "Fujifilm"
 model = "X-T5"
-baseline_exposure = 0
-source = "adobe-dng"
+baseline_exposure = -0.1
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 125"
+sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.14 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -521,10 +521,10 @@ sample = "raw.pixls.us, 1 photo at ISO 160"
 [[camera]]
 make = "Fujifilm"
 model = "X100VI"
-baseline_exposure = 0
-source = "adobe-dng"
+baseline_exposure = -0.15
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 125"
+sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.18 EV away, so fitted to it"
 
 [[camera]]
 make = "Fujifilm"
@@ -617,18 +617,18 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.08 fo
 [[camera]]
 make = "Nikon"
 model = "D500"
-baseline_exposure = 0.45
-source = "adobe-dng"
+baseline_exposure = 0.3
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.08 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.08 for the white level; Adobe's value 0.45 left the Camera Raw 18.7 render -0.17 EV away, so fitted to it"
 
 [[camera]]
 make = "Nikon"
 model = "D5600"
-baseline_exposure = 0.25
-source = "adobe-dng"
+baseline_exposure = 0.15
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.20 plus +0.05 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.20 plus +0.05 for the white level; Adobe's value 0.25 left the Camera Raw 18.7 render -0.12 EV away, so fitted to it"
 
 [[camera]]
 make = "Nikon"
@@ -681,10 +681,10 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.20 plus +0.08 fo
 [[camera]]
 make = "Nikon"
 model = "D850"
-baseline_exposure = 0.45
-source = "adobe-dng"
+baseline_exposure = 0.3
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure +0.35 plus +0.08 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure +0.35 plus +0.08 for the white level; Adobe's value 0.45 left the Camera Raw 18.7 render -0.19 EV away, so fitted to it"
 
 [[camera]]
 make = "Nikon"
@@ -737,10 +737,10 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.20 plus +0.08 fo
 [[camera]]
 make = "Nikon"
 model = "Z 7"
-baseline_exposure = 0.25
-source = "adobe-dng"
+baseline_exposure = 0.35
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure +0.15 plus +0.08 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure +0.15 plus +0.08 for the white level; Adobe's value 0.25 left the Camera Raw 18.7 render +0.11 EV away, so fitted to it"
 
 [[camera]]
 make = "Nikon"
@@ -877,10 +877,10 @@ sample = "raw.pixls.us, 1 photo at ISO 1000; BaselineExposure +0.50 plus +0.04 f
 [[camera]]
 make = "Olympus"
 model = "PEN-F"
-baseline_exposure = 0.7
-source = "adobe-dng"
+baseline_exposure = 0.6
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.64 plus +0.04 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.64 plus +0.04 for the white level; Adobe's value 0.7 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
 
 [[camera]]
 make = "OM Digital"
@@ -1176,10 +1176,10 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M7"
-baseline_exposure = -0.25
-source = "adobe-dng"
+baseline_exposure = -0.4
+source = "fitted"
 checked = "2026-10-05"
-sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25 plus +0.01 for the white level"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25 plus +0.01 for the white level; Adobe's value -0.25 left the Camera Raw 18.7 render -0.20 EV away, so fitted to it"
 
 [[camera]]
 make = "Sony"
@@ -1330,6 +1330,15 @@ baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640"
+
+[[camera]]
+make = "Sony"
+model = "ILCE-7M5"
+aliases = ["A7 V"]
+baseline_exposure = 0.5
+source = "fitted"
+checked = "2026-10-05"
+sample = "raw.pixls.us, 1 photo at ISO 100; Adobe's BaselineExposure 0.35 on a 16-bit DNG left the Camera Raw 18.7 render +0.20 EV away, so fitted to it"
 
 [[camera]]
 make = "Sony"

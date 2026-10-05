@@ -28,14 +28,14 @@ changes photos opened afterwards. An existing edit keeps its value; Develop's
 
 ### How good the fallback is
 
-Predicting each of the 179 bodies in the table on 2026-10-05 from the other rows
-(leave-one-out) misses Adobe's value by:
+Predicting each of the 180 bodies in the table on 2026-10-05 from the other rows
+(leave-one-out) misses its row by:
 
 | Rule | Mean error | 90th percentile | Worst |
 |---|---|---|---|
-| No baseline | 0.28 EV | 0.50 EV | 0.85 EV |
-| Median of all rows | 0.19 EV | 0.45 EV | 0.80 EV |
-| Median of the same make | 0.13 EV | 0.35 EV | 1.00 EV |
+| No baseline | 0.29 EV | 0.50 EV | 0.85 EV |
+| Median of all rows | 0.20 EV | 0.45 EV | 0.90 EV |
+| Median of the same make | 0.14 EV | 0.35 EV | 1.00 EV |
 
 The worst cases are bodies unlike the rest of their make: Pentax's 645Z (−0.5 among
 +0.5 bodies), Panasonic's GH5 II and G9, and the 1-inch compacts (Sony RX100 and ZV-1
@@ -103,10 +103,24 @@ Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO
 Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
 so in `sample`.
 
-The fitted rows agree with Adobe's: on the 56 bodies measured both ways, the median
-midtone fit is within 0.05 EV of Adobe's value for 35 and averages 0.04 EV lower. The
-exceptions are the Fujifilm X-H2 (0.37), X-T30 II (0.32), X-S10, X-T5 and X100VI
-(0.17): Camera Raw renders those darker than their baseline explains.
+After the table, 136 of the 150 raw.pixls.us samples that Camera Raw 18.7 and
+RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
+master of 2026-10-02). For 14 bodies Adobe's value alone left the render more than
+0.1 EV off, so their rows are `fitted` to the render instead and say Adobe's value in
+`sample`: the Fujifilm X-H2 (0.40 EV darker in Camera Raw), X-T30 II (0.38 darker), X-S10,
+X-S20, X-T5 and X100VI, the Canon PowerShot V1 and G5 X Mark II, the Nikon D500,
+D5600, D850 and Z 7, the Olympus PEN-F and the Sony RX100 VII. The Sony A7 V row is
+fitted too: its Adobe DNG is 16-bit, so its white level does not compare with LibRaw's.
+Camera Raw renders most of those Fujifilm bodies darker than their baseline explains,
+for a reason not found yet.
+
+Still about 1 EV off, for the shooting settings above or a decoding problem: Canon
+EOS R3 and R8 (Highlight Tone Priority), Fujifilm X-E5, X-H2S and X-T30 III (DR200),
+X-T30, Olympus E-M10 Mark III and Sony A7R IV (extended low ISO), and the Canon EOS R6
+Mark III, whose black level LibRaw reads as 0 instead of 512. Fujifilm photos whose
+raw does not say its DR mode (the XF10 sample) get no baseline yet, about 0.3 EV off;
+the X-T2 sample (Auto DR200) is 0.15 EV off. The Leica Q, Ricoh GR III and Sigma fp L
+raws are DNGs with their own value and render 0.11 to 0.13 EV brighter than Camera Raw.
 
 Three rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`) and the A7 II and A7CR, fitted to Camera Raw 18.6
