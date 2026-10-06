@@ -16,7 +16,7 @@ fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>, egui::Contex
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    e.raw_defaults = Arc::new(crate::develop::defaults::DevelopDefaults::with_presets(
+    e.raw_defaults = Arc::new(crate::raw_defaults::DevelopDefaults::with_presets(
         Default::default(),
         |_| None,
     ));

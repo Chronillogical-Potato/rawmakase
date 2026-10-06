@@ -552,8 +552,8 @@ mod tests {
         editor.document.reset(Some(other));
         editor.set_reference(open);
         wait_for_reference(editor);
-        editor.set_raw_defaults(crate::develop::defaults::RawDefaults {
-            master: crate::develop::defaults::DefaultChoice::Rawmakase,
+        editor.set_raw_defaults(crate::raw_defaults::RawDefaults {
+            master: crate::raw_defaults::DefaultChoice::Rawmakase,
             ..Default::default()
         })?;
         assert!(editor.reference.loading());

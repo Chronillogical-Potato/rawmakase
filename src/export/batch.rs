@@ -9,7 +9,8 @@ use super::{Replace, assemble::Values, job};
 use crate::export_settings::{Existing, ExportSettings};
 use crate::{
     catalog::resolve::{self, EditRecord, Origin, PhotoRecord},
-    develop::{Recipe, defaults::DevelopDefaults},
+    develop::Recipe,
+    raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, bail, ensure};
 use std::{

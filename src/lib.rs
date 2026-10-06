@@ -34,6 +34,7 @@ pub mod optics;
 pub mod platform;
 pub mod presets;
 pub mod raw;
+pub mod raw_defaults;
 #[cfg(feature = "telemetry")]
 pub mod stats;
 pub mod storage;

@@ -95,7 +95,7 @@ pub struct Editor {
     loupe_tried: Option<i64>,
     /// Preferences > Raw Defaults, ready to apply; shared with the loader and the
     /// Library's previews.
-    raw_defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
+    raw_defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
     /// Shared automation queue and independently configured input adapters.
     controls: automation::Hub,
     automation: commands::Automation,
@@ -268,7 +268,7 @@ impl Editor {
                 treatment::FirstConversion::AutoMix
             },
             loupe_tried: None,
-            raw_defaults: std::sync::Arc::new(crate::develop::defaults::DevelopDefaults::load(
+            raw_defaults: std::sync::Arc::new(crate::raw_defaults::DevelopDefaults::load(
                 session.raw_defaults.clone(),
             )),
             controls: automation::Hub::inactive(),

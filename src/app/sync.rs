@@ -14,10 +14,10 @@ use crate::{
     },
     develop::{
         Recipe,
-        defaults::DevelopDefaults,
         settings_groups::{self, GroupSelection, Source, Target},
     },
     export_settings::ExportOptions,
+    raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;
@@ -865,7 +865,7 @@ mod tests {
             settings_groups::SettingGroup::Clarity,
             settings_groups::GroupInclusion::Included,
         );
-        let defaults = crate::develop::defaults::brighter_defaults();
+        let defaults = crate::raw_defaults::brighter_defaults();
         let result = synchronize(
             &c,
             &source,
@@ -892,8 +892,8 @@ mod tests {
 
         // A raw default that can't be used is reported as such, not as a Lightroom edit.
         let missing = DevelopDefaults::with_presets(
-            crate::develop::defaults::RawDefaults {
-                master: crate::develop::defaults::DefaultChoice::Preset {
+            crate::raw_defaults::RawDefaults {
+                master: crate::raw_defaults::DefaultChoice::Preset {
                     id: "gone".into(),
                     name: "Gone".into(),
                 },

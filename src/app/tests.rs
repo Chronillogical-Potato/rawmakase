@@ -4205,7 +4205,7 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     // Not this machine's own raw defaults. Adobe Default needs no preset, so the
     // preset scan the editor starts leaves them as they are.
-    editor.raw_defaults = Arc::new(develop::defaults::DevelopDefaults::with_presets(
+    editor.raw_defaults = Arc::new(crate::raw_defaults::DevelopDefaults::with_presets(
         Default::default(),
         |_| None,
     ));
@@ -4344,7 +4344,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    let defaults = Arc::new(develop::defaults::DevelopDefaults::with_presets(
+    let defaults = Arc::new(crate::raw_defaults::DevelopDefaults::with_presets(
         Default::default(),
         |_| None,
     ));

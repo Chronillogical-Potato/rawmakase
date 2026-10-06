@@ -1,11 +1,11 @@
-//! Preferences > Raw Defaults (see `develop::defaults`): choosing them, and keeping
+//! Preferences > Raw Defaults (see `crate::raw_defaults`): choosing them, and keeping
 //! the open photo and the Library's previews in step when they change.
 use super::Editor;
 use super::preferences::{group, hint};
 use super::state::EditOrigin;
 use super::widgets::form_row;
 use crate::app::theme;
-use crate::develop::defaults::{
+use crate::raw_defaults::{
     DefaultChoice, DevelopDefaults, RawDefaults, Resolved, camera_name, same_camera, same_name,
 };
 use crate::xmp::Preset;
@@ -361,7 +361,7 @@ mod tests {
         let m = x100f();
         editor.document.profiles = profiles(&m);
         editor.document.metadata = Some(m.clone());
-        editor.raw_defaults = Arc::new(crate::develop::defaults::brighter_defaults());
+        editor.raw_defaults = Arc::new(crate::raw_defaults::brighter_defaults());
         editor.document.recipe.exposure = -1.;
         editor.reset_settings();
         assert_eq!(editor.document.recipe.exposure, 0.7);
@@ -503,7 +503,7 @@ mod tests {
             &path,
             ctx.clone(),
         )?));
-        editor.raw_defaults = Arc::new(crate::develop::defaults::brighter_defaults());
+        editor.raw_defaults = Arc::new(crate::raw_defaults::brighter_defaults());
         editor.document.reset(Some(id));
         let (generation, _) = editor.load.start();
         for event in [
@@ -621,7 +621,7 @@ mod tests {
             .join("tests/corpus/charts/synthetic-d65.dng");
         let (tx, rx) = std::sync::mpsc::channel();
         let loader = crate::app::worker::loader(tx, egui::Context::default());
-        let defaults = Arc::new(crate::develop::defaults::brighter_defaults());
+        let defaults = Arc::new(crate::raw_defaults::brighter_defaults());
         loader.submit(crate::app::worker::LoadJob {
             id: 1,
             path: chart,
