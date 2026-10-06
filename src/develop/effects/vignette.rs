@@ -15,7 +15,7 @@
 //!   highlights darken more, and lightens like Highlight Priority at about half the
 //!   strength.
 use super::{Effects, VignetteStyle};
-use crate::color_math::{srgb_decode, srgb_encode};
+use crate::color::{srgb_decode, srgb_encode};
 
 /// Camera Raw's neutral tone response at default settings, measured on the chart's gray
 /// ramp: log2 of linear sRGB output from EV −8 to +4 in half stops, EV 0 being middle

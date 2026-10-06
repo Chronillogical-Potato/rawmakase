@@ -601,7 +601,7 @@ impl Editor {
             }
             Operation::Curve(channel, points) => {
                 self.require_develop()?;
-                let curve = crate::develop::curve::ToneCurve {
+                let curve = crate::color::curve::ToneCurve {
                     points,
                     ..Default::default()
                 };

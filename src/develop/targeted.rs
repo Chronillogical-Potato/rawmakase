@@ -284,7 +284,7 @@ mod tests {
             reference_curves: true,
             ..Default::default()
         };
-        let pro_to_rgb = |p| crate::color_math::mul(crate::camera_profiles::PRO_TO_RGB, p);
+        let pro_to_rgb = |p| crate::color::mul(crate::camera_profiles::PRO_TO_RGB, p);
         for channel in HslChannel::ALL {
             let w = TargetWeights::new(
                 Target::Hsl(channel),

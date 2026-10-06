@@ -17,7 +17,7 @@ use super::{
     color_grade_curves::ChannelCurves,
     color_grade_data::{BINS, LUMINANCE, TINT},
 };
-use crate::color_math::{mul, srgb_decode, srgb_encode};
+use crate::color::{mul, srgb_decode, srgb_encode};
 
 /// Which operator renders a recipe's color grading.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

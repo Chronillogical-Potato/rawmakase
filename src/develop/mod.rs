@@ -12,7 +12,8 @@ mod color_grade_data;
 pub mod color_mixer;
 pub mod color_noise;
 mod crop_constraint;
-pub mod curve;
+// Develop code names the curve primitives as `develop::curve`, where they began.
+use crate::color::curve;
 pub mod defaults;
 pub mod effects;
 mod geometry;
@@ -45,7 +46,7 @@ pub mod retouch;
 mod stage_cache;
 mod white_balance;
 
-pub use crate::color_math::{mul, srgb_encode};
+pub use crate::color::{mul, srgb_encode};
 pub use auto::{
     AutoTone, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,

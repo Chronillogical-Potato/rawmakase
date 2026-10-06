@@ -6,7 +6,7 @@ pub(crate) mod look;
 mod parse;
 pub mod preset_write;
 pub mod write;
-use crate::develop::curve::ToneCurve;
+use crate::color::curve::ToneCurve;
 pub use parse::parse;
 use std::{collections::BTreeMap, path::PathBuf};
 

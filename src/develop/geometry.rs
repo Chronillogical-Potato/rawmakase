@@ -123,7 +123,7 @@ impl Transform {
             [0., 0., 1.],
         ];
         let forward = mat(offset, mat(scale, mat(perspective, rotate)));
-        crate::color_math::inverse(forward)
+        crate::color::inverse(forward)
     }
 }
 /// Lightroom's Upright modes, in Adobe's `crs:PerspectiveUpright` order.
@@ -452,7 +452,7 @@ impl Geometry {
             source_height: height,
             inset: frame.inset,
             transform,
-            forward: transform.map(crate::color_math::inverse),
+            forward: transform.map(crate::color::inverse),
             manual,
         };
         if r.constrain_crop && (g.transform.is_some() || g.manual.is_some()) {
@@ -508,12 +508,12 @@ impl Geometry {
             // 0–1 coordinates to the sliders' centred, long-edge units.
             let centred = [[sx, 0., -0.5 * sx], [0., sy, -0.5 * sy], [0., 0., 1.]];
             h = mat(
-                crate::color_math::inverse(centred),
+                crate::color::inverse(centred),
                 mat(r.transform.inverse(sx, sy), centred),
             );
         }
         if let Some(u) = upright {
-            h = mat(crate::color_math::inverse(u), h);
+            h = mat(crate::color::inverse(u), h);
         }
         Some(h)
     }
@@ -717,10 +717,7 @@ mod tests {
                 let (dw, dh) = if swapped { (h, w) } else { (w, h) };
                 // Displayed centred coordinates to recorded ones.
                 let to = [[m[0][0], m[0][1], 0.], [m[1][0], m[1][1], 0.], [0., 0., 1.]];
-                let expected = mat(
-                    crate::color_math::inverse(to),
-                    mat(stored.inverse(w, h), to),
-                );
+                let expected = mat(crate::color::inverse(to), mat(stored.inverse(w, h), to));
                 let got = shown.inverse(dw, dh);
                 for i in 0..3 {
                     for j in 0..3 {

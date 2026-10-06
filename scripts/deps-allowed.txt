@@ -3,7 +3,7 @@
 # fits the layering in docs/architecture.md.
 app -> camera_profiles
 app -> catalog
-app -> color_math
+app -> color
 app -> decode_cache
 app -> develop
 app -> exif
@@ -19,12 +19,12 @@ app -> updates
 app -> watermark
 app -> xmp
 camera_profiles -> cameras
-camera_profiles -> color_math
-camera_profiles -> develop
+camera_profiles -> color
 camera_profiles -> raw
 camera_profiles -> storage
 camera_profiles -> xml
 catalog -> camera_profiles
+catalog -> color
 catalog -> develop
 catalog -> exif
 catalog -> export
@@ -41,7 +41,7 @@ comparison -> raw
 decode_cache -> raw
 decode_cache -> storage
 develop -> camera_profiles
-develop -> color_math
+develop -> color
 develop -> lens
 develop -> presets
 develop -> raw
@@ -71,6 +71,7 @@ lens -> raw
 lens -> storage
 lens -> tiff
 lens -> xml
+presets -> color
 presets -> develop
 presets -> raw
 presets -> storage
@@ -91,6 +92,7 @@ watermark -> storage
 xmp -> build_info
 xmp -> camera_profiles
 xmp -> catalog
+xmp -> color
 xmp -> develop
 xmp -> exif
 xmp -> lens

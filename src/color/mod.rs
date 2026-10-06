@@ -1,4 +1,7 @@
-//! Color arithmetic shared by camera profiles and the develop pipeline.
+//! Color arithmetic and tone-curve primitives shared by camera profiles, the
+//! develop pipeline, XMP and the interface. Depends on nothing else in the crate.
+pub mod curve;
+
 pub fn mul(m: [[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
     m.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
 }

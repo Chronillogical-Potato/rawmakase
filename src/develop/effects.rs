@@ -254,7 +254,7 @@ impl Effects {
     /// fringe colour `rgb` (encoded sRGB, as shown) and turns that Amount on if it is
     /// off. Returns which (0 purple, 1 green), or `None` when the colour is neither.
     pub fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
-        let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+        let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color::srgb_decode));
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         self.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
     }
@@ -506,7 +506,7 @@ mod tests {
         assert!((hi - lo - 0.2).abs() < 1e-6 && (0. ..=1.).contains(&lo) && hi <= 1.);
         // The picked hue is inside the new range and is removed.
         let lab = crate::develop::pipeline::srgb_to_lab(
-            [0.6f32, 0.3, 0.8].map(crate::color_math::srgb_decode),
+            [0.6f32, 0.3, 0.8].map(crate::color::srgb_decode),
         );
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         e.defringe[0] = 1.;

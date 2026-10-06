@@ -21,8 +21,9 @@
 //! crop, geometry, Upright, spots, masks and Point Color swatches added or taken away
 //! don't scale: a preset that changes any of them gets no Amount.
 use crate::{
+    color::curve::ToneCurve,
     develop::{
-        Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, curve::ToneCurve, effects::Effects,
+        Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, effects::Effects,
         settings_groups::SettingGroup,
     },
     raw::Metadata,

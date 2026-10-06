@@ -2,8 +2,8 @@
 //! Assets are read from the user's installation, never bundled with RAWmakase.
 use super::{CameraProfile, Table, look_settings::LookSettings, rgb_table::RgbTable};
 use crate::{
-    color_math::{srgb_decode, srgb_encode},
-    develop::curve::{CurveLut, ToneCurve},
+    color::curve::{CurveLut, ToneCurve},
+    color::{srgb_decode, srgb_encode},
     xml::ns::{CRS, RDF, XML},
 };
 use anyhow::{Context, Result, ensure};

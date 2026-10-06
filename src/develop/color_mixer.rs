@@ -12,7 +12,7 @@
 //! changes. New edits use the band tables refitted on a dense synthetic chart
 //! (`color_mixer_chart.bin`, `MixerModel::Chart`). See docs/color-mixer.md.
 use super::Recipe;
-use crate::color_math::mul;
+use crate::color::mul;
 use serde::{Deserialize, Serialize};
 
 /// Which measured tables render a recipe's color mixer.
