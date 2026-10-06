@@ -43,6 +43,14 @@ pub enum ParameterId {
     ColorNoise,
     ColorNoiseDetail,
     ColorNoiseSmoothness,
+    /// Effects: Post-Crop Vignetting.
+    VignetteAmount,
+    VignetteMidpoint,
+    VignetteFeather,
+    /// Effects: Grain.
+    GrainAmount,
+    GrainSize,
+    GrainRoughness,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -125,7 +133,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 24] = [
+const DESCRIPTORS: [Descriptor; 30] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -211,10 +219,16 @@ const DESCRIPTORS: [Descriptor; 24] = [
     amount(ParameterId::ColorNoise, "Color"),
     amount(ParameterId::ColorNoiseDetail, "Detail"),
     amount(ParameterId::ColorNoiseSmoothness, "Smoothness"),
+    percent(ParameterId::VignetteAmount, "Amount"),
+    amount(ParameterId::VignetteMidpoint, "Midpoint"),
+    amount(ParameterId::VignetteFeather, "Feather"),
+    amount(ParameterId::GrainAmount, "Amount"),
+    amount(ParameterId::GrainSize, "Size"),
+    amount(ParameterId::GrainRoughness, "Roughness"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 30] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -239,6 +253,12 @@ impl ParameterId {
         Self::ColorNoise,
         Self::ColorNoiseDetail,
         Self::ColorNoiseSmoothness,
+        Self::VignetteAmount,
+        Self::VignetteMidpoint,
+        Self::VignetteFeather,
+        Self::GrainAmount,
+        Self::GrainSize,
+        Self::GrainRoughness,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -270,6 +290,12 @@ impl ParameterId {
             Self::ColorNoise => &mut r.noise_chroma,
             Self::ColorNoiseDetail => &mut r.effects.chroma_detail,
             Self::ColorNoiseSmoothness => &mut r.effects.chroma_smoothness,
+            Self::VignetteAmount => &mut r.effects.vignette,
+            Self::VignetteMidpoint => &mut r.effects.vignette_midpoint,
+            Self::VignetteFeather => &mut r.effects.vignette_feather,
+            Self::GrainAmount => &mut r.effects.grain,
+            Self::GrainSize => &mut r.effects.grain_size,
+            Self::GrainRoughness => &mut r.effects.grain_roughness,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.
