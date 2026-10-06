@@ -10,6 +10,7 @@ build:
 	cargo build --release --locked
 
 check:
+	python3 scripts/deps.py check
 	cargo fmt --check
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --all-targets --no-default-features -- -D warnings

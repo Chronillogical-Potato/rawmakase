@@ -63,6 +63,12 @@ New edits render positive Clarity with that model (`src/develop/clarity.rs`, `Cl
 
 Checked against Camera Raw on the five photos above, Clarity +25 / +50 / +100 change the block averages to within 0.0080 / 0.0156 / 0.0301 of Camera Raw's change, against 0.0118 / 0.0231 / 0.0453 with the earlier operator (doing nothing scores 0.0118 / 0.0232 / 0.0456). Every photo is closer at every amount. Negative Clarity, a mask's Clarity and recipes saved before keep the earlier operator (`clarity_model` missing means `Original`).
 
+### Texture
+
+Camera Raw 18.7's Texture, measured on synthetic charts (sine gratings of 0.004 to 0.25 cycles per pixel at ±0.1 to ±2 EV, large flats and edges, Texture −100 to +100), is a local contrast of log values over scales of a few to about thirty pixels of the full-resolution photo: an image twice the size renders the same per pixel. It leaves large flats alone, boosts faint detail most (×1.78 at ±0.1 EV and +100) and strong contrast hardly at all (×1.05 at ±2 EV), and works on each colour channel, so colour edges gain chroma (up to +19 beside a saturated red).
+
+New edits render Texture with that model (`src/develop/texture.rs`, `TextureModel::Measured`): a six-level Laplacian pyramid of the log of each camera channel, each level compressed where it is strong and weighted, scaled by a strength that Texture sets, made once per render resolution and cached by amount. It is fitted to the gratings within 0.04 RMS (gain ratio) and to the edges' halos within 2.4% of the step in one dimension; on the chart's 2D edges the halo right at the edge is still about 1.5 times Camera Raw's. On the `texture±50/±100` corpus cases the mean ΔE00 to Camera Raw drops from 1.46–2.16 to 1.10–1.57 (the default render is 0.66). Edits saved before keep the original 3-pixel operator; a Lightroom XMP or preset that sets Texture, or Texture added to a photo that had none, switches to the measured one. A mask's Texture keeps the original operator, and previews with the measured Texture develop on the CPU.
+
 ## Parametric curve
 
 The Tone Curve's region sliders (Shadows, Darks, Lights, Highlights) and their three splits were measured with Camera Raw 18.7 on the synthetic chart: about 380 settings, each region at ±25, ±50, ±75 and ±100 with moved splits, and Darks with Lights together (`scripts/corpus/parametric-curve.py`). What the renders show:
@@ -141,4 +147,4 @@ A photo takes one render of the reduced copy, after highlight recovery and the r
 - Positive Whites' offset between photos and the chart is fitted on five photos; Lightroom's own measure of the highlights is unknown.
 - Contrast's pivot is predicted from two statistics of the photo to about 0.03; what Camera Raw measures exactly is unknown.
 - Auto's Whites: Lightroom's choice follows the brightest percentiles only loosely (90th percentile error about 30).
-- Positive Clarity at +100 is still 0.030 from Camera Raw on block averages (was 0.045). Negative Clarity, a mask's Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.
+- Positive Clarity at +100 is still 0.030 from Camera Raw on block averages (was 0.045). Negative Clarity and a mask's Clarity and Texture still use the earlier operators. Dehaze at ±100 needs its per-photo adaptation (airlight estimate) and spatial component.

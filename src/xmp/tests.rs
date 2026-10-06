@@ -353,7 +353,7 @@ fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
     // resets an earlier Amount.
     let earlier = Recipe {
         profile_amount: 0.3,
-        ..base.clone()
+        ..base
     };
     let r = parse(
         Path::new("look.xmp"),
@@ -1183,7 +1183,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         r.lens_profile_choice,
         LensProfileChoice {
             setup: LensProfileSetup::Custom,
-            id: Some(id.clone()),
+            id: Some(id),
         }
     );
     assert!(r.lens_correction(&m).is_none());

@@ -448,7 +448,7 @@ mod tests {
         darker.hsl[1][2] = -1.;
         let mixer = ColorMixer::new(&darker).unwrap();
         let toned = mixer.apply(orange);
-        let mut no_saturation = darker.clone();
+        let mut no_saturation = darker;
         no_saturation.saturation = 0.;
         let alone = ColorMixer::new(&no_saturation).unwrap().apply(orange);
         let y_alone = 0.2126 * alone[0] + 0.7152 * alone[1] + 0.0722 * alone[2];

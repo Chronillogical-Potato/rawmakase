@@ -357,7 +357,7 @@ mod tests {
         // White balance is part of what Auto measures: cooling the same photo does the same.
         let cooler = Recipe {
             wb: [0.8, 1., 1.6],
-            ..r.clone()
+            ..r
         };
         let cooled = percent(
             AutoMix {
@@ -434,7 +434,7 @@ mod tests {
         r.engine = r.engine.max(3);
         r.profile = Some(mono.clone());
         let other = monochrome_profile(&m);
-        r.profile = Some(other.clone());
+        r.profile = Some(other);
         r.follow_profile_treatment(Some(&mono), auto);
         assert_eq!(r.treatment(), Treatment::BlackWhite);
         assert_eq!(r.effects.gray_mix, [0.; 8]);

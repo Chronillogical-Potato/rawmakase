@@ -263,7 +263,7 @@ fn prepare(
     // Guided solves this photo's own guides beside that analysis.
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let image = raw.develop(false, &cancel)?;
+        let image = raw.develop(crate::raw::Decode::full(), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
             && after.upright.mode == crate::develop::UprightMode::Guided
         {
@@ -319,7 +319,8 @@ pub(super) fn capture_stops(m: &crate::raw::Metadata) -> Option<f32> {
 /// source: a photo that let in a stop more light gets a stop less Exposure.
 fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
-    Some((source.recipe.exposure + difference).clamp(-5., 5.))
+    let limit = crate::develop::EXPOSURE_LIMIT;
+    Some((source.recipe.exposure + difference).clamp(-limit, limit))
 }
 
 /// Writes one side of a Sync back, in one transaction, keeping each photo's History,

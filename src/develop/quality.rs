@@ -4,7 +4,7 @@ use crate::develop::sharpening::Sharpener;
 use crate::develop::{
     pipeline::Toned,
     preview_renderer::Stages,
-    stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache},
+    stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache, TextureKey},
 };
 use crate::{
     develop::{self, Geometry, Recipe, Rendered},
@@ -623,6 +623,31 @@ fn stage_means<const N: usize>(
 }
 /// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the
 /// camera image, plus the recipe for the per-pixel stage that follows.
+/// `im` with the measured Texture `amount`: its detail made once per image and kept,
+/// with the result for the amount, in the stage cache when there is one.
+fn textured(
+    im: &Arc<CameraImage>,
+    amount: f32,
+    scale: f32,
+    cancel: &AtomicBool,
+    cache: Option<&mut StageCache>,
+) -> Result<Arc<CameraImage>> {
+    let Some(cache) = cache else {
+        return Ok(Arc::new(
+            develop::texture::TextureDetail::of(im, scale, cancel)?.apply(im, amount),
+        ));
+    };
+    let detail = cache.texture_detail.get_or_try(
+        TextureKey::new(im, scale, 0.),
+        develop::texture::TextureDetail::bytes,
+        || develop::texture::TextureDetail::of(im, scale, cancel),
+    )?;
+    cache.textured.get_or_try(
+        TextureKey::new(im, scale, amount),
+        |im: &CameraImage| im.pixels.len() * 12,
+        || Ok(detail.apply(im, amount)),
+    )
+}
 fn local_stage(
     im: &Arc<CameraImage>,
     r: &Recipe,
@@ -647,14 +672,25 @@ fn local_stage(
         tonal.shadows = 0.;
         tonal.highlights = 0.;
     }
+    let mut cache = cache;
+    // The measured Texture makes a new camera image, channel by channel (texture.rs);
+    // the gain below then carries the rest.
+    let texture = develop::texture::measured(r);
+    let untextured = (texture != 0.).then(|| im.clone());
+    let im = &if texture != 0. {
+        spatial.effects.texture = 0.;
+        textured(im, texture, scale, cancel, cache.as_deref_mut())?
+    } else {
+        im.clone()
+    };
     let mut toned = Toned {
         image: im.clone(),
         scale,
         gain: None,
         gain_key: None,
         reduced: None,
+        untextured,
     };
-    let mut cache = cache;
     if spatial.shadows != 0.
         || spatial.highlights != 0.
         || spatial.effects.clarity != 0.
@@ -758,6 +794,15 @@ fn render_resident(
     }) {
         return Ok(None);
     }
+    // The measured Texture's image is made on the CPU, its detail once per image.
+    let texture = develop::texture::measured(&base);
+    let untextured = (texture != 0.).then(|| source.clone());
+    let source = &if texture != 0. {
+        base.effects.texture = 0.;
+        textured(source, texture, scale, cancel, Some(&mut *stages.cache))?
+    } else {
+        source.clone()
+    };
     let mut spatial = base.clone();
     spatial.shadows = 0.;
     spatial.highlights = 0.;
@@ -770,6 +815,7 @@ fn render_resident(
         gain: None,
         gain_key: None,
         reduced: None,
+        untextured,
     };
     let mut tones = None;
     if spatial.effects.clarity != 0. || spatial.effects.texture != 0. {

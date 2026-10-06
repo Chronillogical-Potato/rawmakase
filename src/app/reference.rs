@@ -167,6 +167,7 @@ impl Editor {
             path: source.path,
             edit: source.edit,
             cancel,
+            demosaic: crate::raw::demosaic(),
         });
     }
     /// Develops the reference photo again even when its edit and file are as they

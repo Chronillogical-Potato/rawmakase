@@ -8,7 +8,7 @@
 //! modification time, so a rebuilt or updated app never reads another build's output.
 //! The directory is capped; the least recently used entries are removed first. Only
 //! derived pixels are stored: RAW files, sidecars and catalogs are never touched.
-use crate::raw::{CameraImage, Metadata};
+use crate::raw::{CameraImage, Demosaic, Metadata};
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -69,8 +69,8 @@ impl DecodeCache {
     pub fn new(dir: PathBuf, limit: u64) -> Self {
         Self { dir, limit }
     }
-    /// The key of `path` as the current build would develop it at full size.
-    pub fn key(path: &Path) -> Result<String> {
+    /// The key of `path` as the current build develops it at full size with `demosaic`.
+    pub fn key(path: &Path, demosaic: Demosaic) -> Result<String> {
         let id = crate::storage::Identity::read(path)?;
         let exe = std::env::current_exe()
             .and_then(fs::metadata)
@@ -85,10 +85,7 @@ impl DecodeCache {
             .unwrap_or_default();
         Ok(format!(
             "{}-{}-{}-{:?}-{exe}",
-            id.prefix_hash,
-            id.size,
-            id.modified_ns,
-            crate::raw::demosaic()
+            id.prefix_hash, id.size, id.modified_ns, demosaic
         ))
     }
     fn file(&self, key: &str) -> PathBuf {

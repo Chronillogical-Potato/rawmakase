@@ -638,7 +638,7 @@ mod tests {
         let start = e.document.recipe.clone();
         e.document.recipe.exposure = 1.;
         e.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
-        e.history(start.clone());
+        e.history(start);
         let edited = e.document.recipe.clone();
         // After's settings to Before: the edit and its History are left as they are.
         e.document.before = Some(Recipe {
