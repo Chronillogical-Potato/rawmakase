@@ -8,8 +8,8 @@
 //! a step of its own: [`crate::develop::upright::complete`].
 use super::{Catalog, SavedEdit, edits::local_edits};
 use crate::{
-    camera_profiles::CameraProfile, develop::Recipe, export_settings::ExportOptions,
-    raw::Metadata, raw_defaults::DevelopDefaults, storage::Identity,
+    camera_profiles::CameraProfile, develop::Recipe, export_settings::ExportOptions, raw::Metadata,
+    raw_defaults::DevelopDefaults, storage::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};
