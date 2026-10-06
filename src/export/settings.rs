@@ -141,6 +141,26 @@ impl NameContext<'_> {
     };
 }
 
+/// Lightroom's Post-Processing: what happens once an export is written.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AfterExport {
+    #[default]
+    Nothing,
+    /// The exported files, in the system's file manager.
+    Show,
+}
+impl AfterExport {
+    pub const ALL: [Self; 2] = [Self::Nothing, Self::Show];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Nothing => "Do Nothing",
+            Self::Show if cfg!(target_os = "macos") => "Show in Finder",
+            Self::Show if cfg!(windows) => "Show in Explorer",
+            Self::Show => "Show in File Manager",
+        }
+    }
+}
+
 /// Lightroom's Metadata "Include" choice, or Custom: the four switches
 /// earlier releases had, which settings saved by them become.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -216,6 +236,8 @@ pub struct ExportSettings {
     /// the Simple Copyright Watermark.
     pub watermark: bool,
     pub watermark_name: String,
+    /// Lightroom's After Export.
+    pub after_export: AfterExport,
 }
 impl Default for ExportSettings {
     fn default() -> Self {
@@ -243,6 +265,7 @@ impl Default for ExportSettings {
             remove_location: false,
             watermark: false,
             watermark_name: crate::watermark::SIMPLE_COPYRIGHT.into(),
+            after_export: AfterExport::Nothing,
         }
     }
 }
