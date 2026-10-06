@@ -2,7 +2,7 @@
 //! straight into a texture the viewport draws, so a preview is never read back or
 //! uploaded again. Only the histogram and, when asked, a small thumbnail or the
 //! shown pixels for the white balance loupe come back.
-use super::{Processor, develop::Input};
+use super::{Processor, develop::Input, uniforms::PresentParams};
 use crate::develop::{
     ClipOverlay, Histogram, Recipe,
     effects::{GrainField, GrainModel, PostCropVignette},
@@ -428,7 +428,6 @@ impl Processor {
         let lens_vignette = recipe.finished_lens_vignette();
         let effects = e.grain != 0. || e.vignette != 0. || lens_vignette != 0.;
         let [cx, cy, cw, ch] = finish.crop;
-        let f = f32::to_bits;
         let vignette = PostCropVignette::new(e, finish.full);
         let grain = GrainField::new(
             e,
@@ -436,59 +435,57 @@ impl Processor {
             finish.full[0].max(finish.full[1]) as f32 / finish.scale,
         );
         let parameters = |shown: bool| -> wgpu::Buffer {
-            let values: [u32; 40] = [
+            let values = PresentParams {
                 width,
                 height,
-                cx,
-                cy,
-                cw,
-                ch,
-                radius as u32,
-                sharpen as u32,
-                f(recipe.sharpening * sharpener.gain),
-                f(sharpener.threshold),
-                if shown {
+                crop_x: cx,
+                crop_y: cy,
+                crop_w: cw,
+                crop_h: ch,
+                radius: radius as u32,
+                sharpen: sharpen as u32,
+                amount: recipe.sharpening * sharpener.gain,
+                threshold: sharpener.threshold,
+                clipping: if shown {
                     display.clipping.shader_flags()
                 } else {
                     0
                 },
-                display
+                lut_size: display
                     .monitor
                     .as_ref()
                     .filter(|_| shown)
                     .map_or(0, |l| l.size),
-                finish.origin[0],
-                finish.origin[1],
-                finish.full[0],
-                finish.full[1],
-                f(finish.scale),
-                f(grain.amount),
-                f(grain.cell),
-                f(grain.coarse),
-                grain.seed,
-                f(vignette.map_or(0., |v| v.amount)),
-                vignette.map_or(0, |v| v.style.code() as u32),
-                f(vignette.map_or(0., |v| v.highlights)),
-                f(vignette.map_or(1., |v| v.scale[0])),
-                f(vignette.map_or(1., |v| v.scale[1])),
-                f(vignette.map_or(2., |v| v.power)),
-                f(vignette.map_or(0., |v| v.midpoint)),
-                f(vignette.map_or(1., |v| v.feather)),
-                f(lens_vignette),
-                f(e.lens_vignette_midpoint),
-                effects as u32,
-                shown as u32,
-                f(sharpener.halo),
-                f(sharpener.dark),
-                0,
-                f(grain.fine),
-                (grain.model == GrainModel::Measured) as u32,
-                0,
-                0,
-            ];
+                origin_x: finish.origin[0],
+                origin_y: finish.origin[1],
+                full_w: finish.full[0],
+                full_h: finish.full[1],
+                scale: finish.scale,
+                grain: grain.amount,
+                grain_cell: grain.cell,
+                grain_coarse: grain.coarse,
+                grain_seed: grain.seed,
+                vignette: vignette.map_or(0., |v| v.amount),
+                vignette_style: vignette.map_or(0, |v| v.style.code() as u32),
+                vignette_highlights: vignette.map_or(0., |v| v.highlights),
+                vignette_scale_x: vignette.map_or(1., |v| v.scale[0]),
+                vignette_scale_y: vignette.map_or(1., |v| v.scale[1]),
+                vignette_power: vignette.map_or(2., |v| v.power),
+                vignette_midpoint: vignette.map_or(0., |v| v.midpoint),
+                vignette_feather: vignette.map_or(1., |v| v.feather),
+                lens_vignette,
+                lens_vignette_midpoint: e.lens_vignette_midpoint,
+                effects: effects as u32,
+                count: shown as u32,
+                halo: sharpener.halo,
+                dark: sharpener.dark,
+                grain_fine: grain.fine,
+                grain_measured: (grain.model == GrainModel::Measured) as u32,
+                ..Default::default()
+            };
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Present parameters"),
-                contents: bytemuck::cast_slice(&values),
+                contents: bytemuck::bytes_of(&values),
                 usage: wgpu::BufferUsages::UNIFORM,
             })
         };
