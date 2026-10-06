@@ -28,6 +28,21 @@ pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Op
     }
 }
 
+/// Turns a switched-off panel back on when the change from `before` touched only
+/// its settings, as Lightroom does, so the change shows: a slider in it, or an edit
+/// made another way (B&W Auto, Clear Guides, the fringe picker, a swatch).
+pub fn turn_on_edited_panel(before: &Recipe, after: &mut Recipe) {
+    use super::panels::{Panel, PanelState};
+    let edited = Panel::ALL.into_iter().find(|panel| {
+        before.panels.state(*panel) == PanelState::Off
+            && after.panels.state(*panel) == PanelState::Off
+            && panel.holds_change(before, after)
+    });
+    if let Some(panel) = edited {
+        after.panels.set(panel, PanelState::On);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +69,23 @@ mod tests {
         r.effects.lens_vignette = 0.3;
         setting_changed(&mut r, ParameterId::LensVignetteAmount, 0., None);
         assert_eq!(r.lens_vignette_model, LensVignetteModel::Measured);
+    }
+
+    #[test]
+    fn only_a_change_to_one_switched_off_panel_turns_it_on() {
+        use crate::develop::panels::{Panel, PanelState};
+        let mut before = Recipe::default();
+        before.panels.set(Panel::Detail, PanelState::Off);
+        let mut after = before.clone();
+        after.sharpening = 0.5;
+        turn_on_edited_panel(&before, &mut after);
+        assert_eq!(after.panels.state(Panel::Detail), PanelState::On);
+        // Not when the change reaches beyond it, as a preset's does.
+        let mut after = before.clone();
+        after.sharpening = 0.5;
+        after.exposure = 1.;
+        turn_on_edited_panel(&before, &mut after);
+        assert_eq!(after.panels.state(Panel::Detail), PanelState::Off);
     }
 
     #[test]
