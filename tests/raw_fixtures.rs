@@ -2,7 +2,7 @@ use rawmakase::{
     develop::{self, Recipe},
     export,
     export_settings::ExportOptions,
-    raw::{Decode, Raw},
+    raw::Decode,
     storage,
 };
 use std::{path::PathBuf, sync::atomic::AtomicBool};
@@ -29,14 +29,14 @@ fn raw_development_and_export() -> anyhow::Result<()> {
     for (index, path) in files.iter().enumerate() {
         let before = storage::Identity::read(path)?;
         assert!(
-            Raw::open(path)?
+            rawmakase::photo::open(path)?
                 .develop(Decode::full(), &AtomicBool::new(true))
                 .is_err()
         );
-        let fast = Raw::open(path)?.develop(Decode::Half, &AtomicBool::new(false))?;
+        let fast = rawmakase::photo::open(path)?.develop(Decode::Half, &AtomicBool::new(false))?;
         assert!(fast.width < fast.metadata.width && fast.height < fast.metadata.height);
         drop(fast);
-        let mut raw = Raw::open(path)?;
+        let mut raw = rawmakase::photo::open(path)?;
         assert!(!raw.thumbnail()?.is_empty());
         let image = raw.develop(Decode::full(), &AtomicBool::new(false))?;
         assert_eq!(image.scale_clipped, 0);
@@ -127,7 +127,7 @@ fn navigation_memory_stress() -> anyhow::Result<()> {
     let mut warm = 0;
     for i in 0..50 {
         {
-            let im = Raw::open(&files[i % files.len()])?
+            let im = rawmakase::photo::open(&files[i % files.len()])?
                 .develop(Decode::full(), &AtomicBool::new(false))?;
             let small = develop::preview(&im, 1600);
             let r = Recipe::for_metadata(&im.metadata);

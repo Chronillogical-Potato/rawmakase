@@ -235,7 +235,7 @@ fn read(path: &Path) -> Option<Option<PhotoInfo>> {
         // A RAW LibRaw cannot open now (still copying, a network error) is
         // tried again later.
         Some(PhotoInfo::from_metadata(
-            &crate::raw::Raw::open(path).ok()?.metadata,
+            &crate::photo::open(path).ok()?.metadata,
         ))
     } else {
         let mut info = crate::exif::photo_info(path).unwrap_or_default();

@@ -31,6 +31,7 @@ pub mod lens;
 pub mod lr_develop;
 pub mod metadata;
 pub mod optics;
+pub mod photo;
 pub mod platform;
 pub mod presets;
 pub mod raw;

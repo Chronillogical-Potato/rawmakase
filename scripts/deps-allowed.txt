@@ -12,6 +12,7 @@ app -> export_settings
 app -> lens
 app -> lr_develop
 app -> metadata
+app -> photo
 app -> platform
 app -> presets
 app -> raw
@@ -42,6 +43,7 @@ catalog -> xml
 catalog -> xmp
 comparison -> camera_profiles
 comparison -> develop
+comparison -> photo
 comparison -> presets
 comparison -> raw
 decode_cache -> raw
@@ -67,6 +69,7 @@ export -> exif
 export -> export_settings
 export -> jpeg
 export -> metadata
+export -> photo
 export -> raw
 export -> raw_defaults
 export -> storage
@@ -87,6 +90,9 @@ lr_develop -> color
 lr_develop -> develop
 lr_develop -> raw
 lr_develop -> xmp
+photo -> dng
+photo -> lens
+photo -> raw
 presets -> color
 presets -> develop
 presets -> raw
@@ -95,7 +101,6 @@ presets -> xml
 presets -> xmp
 raw -> camera_profiles
 raw -> demosaic
-raw -> dng
 raw -> lens
 raw -> metadata
 raw -> optics

@@ -41,7 +41,7 @@ pub(super) fn available_paths(photos: &[Photo]) -> HashSet<PathBuf> {
 
 pub(super) fn thumbnail(path: &std::path::Path) -> Result<image::RgbImage> {
     let image = if crate::storage::is_raw(path) {
-        let mut raw = crate::raw::Raw::open(path)?;
+        let mut raw = crate::photo::open(path)?;
         crate::raw::thumbnail(&mut raw)?
     } else {
         raster(path)?

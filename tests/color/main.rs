@@ -209,7 +209,7 @@ pub fn cases() -> Cases {
 
 pub fn develop(path: &Path) -> CameraImage {
     charts_ready();
-    rawmakase::raw::Raw::open(path)
+    rawmakase::photo::open(path)
         .and_then(|r| r.develop(rawmakase::raw::Decode::full(), &AtomicBool::new(false)))
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }

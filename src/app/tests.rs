@@ -4168,7 +4168,7 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     c.add_folder(&photos)?;
     let ids: Vec<(i64, std::path::PathBuf)> =
         c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
-    let metadata = crate::raw::Raw::open(&ids[0].1)?.metadata;
+    let metadata = crate::photo::open(&ids[0].1)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let mut saved = Recipe::with_profiles(&metadata, &profiles);
     saved.exposure = 0.4;
@@ -4267,7 +4267,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     c.add_folder(&photos)?;
     let mut ids: Vec<(i64, std::path::PathBuf)> =
         c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
-    let metadata = crate::raw::Raw::open(&ids[0].1)?.metadata;
+    let metadata = crate::photo::open(&ids[0].1)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let base = Recipe::with_profiles(&metadata, &profiles);
     let save = |c: &crate::catalog::Catalog, (id, path): &(i64, std::path::PathBuf), r: &Recipe| {

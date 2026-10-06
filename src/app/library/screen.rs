@@ -280,7 +280,7 @@ fn render(path: &Path, edge: u32, edit: Option<&EditSource>) -> anyhow::Result<i
     if !crate::storage::is_raw(path) {
         return Ok(thumbnails::downscale(&thumbnails::raster(path)?, edge));
     }
-    let raw = crate::raw::Raw::open(path)?;
+    let raw = crate::photo::open(path)?;
     let recipe = EditSource::recipe(edit, &raw)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let image = raw.develop(crate::raw::Decode::Half, &cancel)?;

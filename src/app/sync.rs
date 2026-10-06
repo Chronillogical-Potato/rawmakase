@@ -206,7 +206,7 @@ fn prepare(
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
-    let raw = crate::raw::Raw::open(&target.path)
+    let raw = crate::photo::open(&target.path)
         .with_context(|| format!("{} can't be read", target.name))?;
     let metadata = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
@@ -591,7 +591,7 @@ mod tests {
             catalog: c,
             photos,
         } = catalog()?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let mut source = Recipe::with_profiles(&metadata, &profiles);
         source.exposure = 0.5;
@@ -755,7 +755,7 @@ mod tests {
             catalog: c,
             photos,
         } = catalog()?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let source = Settings {
             recipe: Recipe {
                 exposure: 0.3,
@@ -801,7 +801,7 @@ mod tests {
             catalog: c,
             photos,
         } = catalog()?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let mut recipe = Recipe::default();
         recipe.upright.mode = crate::develop::UprightMode::Guided;
         recipe.exposure = 0.3;
@@ -848,7 +848,7 @@ mod tests {
             "UPDATE photos SET lightroom_develop=? WHERE id=?",
             rusqlite::params![lightroom_text, photos[1].0],
         )?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let mut source = Recipe::with_profiles(&metadata, &profiles);
         source.effects.clarity = 0.2;

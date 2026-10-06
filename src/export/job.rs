@@ -173,7 +173,7 @@ fn full_size(
         .and_then(|key| DecodeCache::default().load(&key, &image.metadata));
     Ok(Arc::new(match cached {
         Some(full) => full,
-        None => Raw::open(source)?.develop(Decode::Full(demosaic), cancel)?,
+        None => crate::photo::open(source)?.develop(Decode::Full(demosaic), cancel)?,
     }))
 }
 

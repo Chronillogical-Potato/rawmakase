@@ -213,7 +213,7 @@ fn main() -> Result<()> {
             )?;
         }
         Some(Command::Inspect { input }) => {
-            let r = raw::Raw::open(&input)?;
+            let r = rawmakase::photo::open(&input)?;
             let (profiles, errors) = rawmakase::camera_profiles::installed(&r.metadata);
             eprintln!(
                 "Profile folders: {:?}\nAvailable profiles: {:?}\nProfile errors: {:?}",
@@ -229,7 +229,7 @@ fn main() -> Result<()> {
         }
         Some(Command::Thumbnail { input, output }) => {
             use std::io::Write;
-            let data = raw::Raw::open(&input)?.thumbnail()?;
+            let data = rawmakase::photo::open(&input)?.thumbnail()?;
             let mut f = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -251,7 +251,7 @@ fn main() -> Result<()> {
             auto_wb,
         }) => {
             let t = Instant::now();
-            let r = raw::Raw::open(&input)?;
+            let r = rawmakase::photo::open(&input)?;
             let mut edit = if let Some(p) = recipe {
                 rawmakase::presets::load_preset(&p)?
             } else {
@@ -364,8 +364,8 @@ fn main() -> Result<()> {
                 "Iterations must be 1–1000"
             );
             let t = Instant::now();
-            let im =
-                raw::Raw::open(&input)?.develop(raw::Decode::full(), &AtomicBool::new(false))?;
+            let im = rawmakase::photo::open(&input)?
+                .develop(raw::Decode::full(), &AtomicBool::new(false))?;
             let decode = t.elapsed();
             let small = develop::preview(&im, 1600);
             let mut r = Recipe::for_metadata(&im.metadata);

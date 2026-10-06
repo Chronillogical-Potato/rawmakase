@@ -257,7 +257,7 @@ fn spawn_edited_with(
 /// A 640 px preview of `path` developed with `source`, from the fast
 /// half-size decode.
 fn render_edited(path: &Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
-    let raw = crate::raw::Raw::open(path)?;
+    let raw = crate::photo::open(path)?;
     let recipe = EditSource::recipe(Some(source), &raw)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let image = raw.develop(crate::raw::Decode::Half, &cancel)?;
