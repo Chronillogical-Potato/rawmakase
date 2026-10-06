@@ -43,6 +43,52 @@ pub enum ParameterId {
     ColorNoise,
     ColorNoiseDetail,
     ColorNoiseSmoothness,
+    /// Effects: Post-Crop Vignetting.
+    VignetteAmount,
+    VignetteMidpoint,
+    VignetteFeather,
+    /// Effects: Grain.
+    GrainAmount,
+    GrainSize,
+    GrainRoughness,
+    /// Transform, stored along the photo's own axes; the panel shows them along the
+    /// displayed photo's.
+    TransformVertical,
+    TransformHorizontal,
+    /// In degrees.
+    TransformRotate,
+    TransformAspect,
+    TransformScale,
+    TransformOffsetX,
+    TransformOffsetY,
+    /// Lens Corrections: how much of the lens profile's correction applies, 0..2.
+    LensDistortion,
+    LensVignetting,
+    /// Lens Corrections: Manual.
+    ManualDistortion,
+    LensVignetteAmount,
+    LensVignetteMidpoint,
+    /// Calibration.
+    ShadowTint,
+    RedPrimaryHue,
+    RedPrimarySaturation,
+    GreenPrimaryHue,
+    GreenPrimarySaturation,
+    BluePrimaryHue,
+    BluePrimarySaturation,
+    /// Tone Curve: the parametric curve's regions, darkest first.
+    ParametricShadows,
+    ParametricDarks,
+    ParametricLights,
+    ParametricHighlights,
+    /// Tone Curve: Refine Saturation. Camera Raw stores up to 2 and renders above
+    /// 1 as 1; the slider covers 0..1.
+    CurveSaturation,
+    /// Tone Curve: Levels' Midtone, a gamma.
+    Midtone,
+    /// Color Grading.
+    GradingBlending,
+    GradingBalance,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -112,6 +158,15 @@ const fn amount(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
+/// A 0..200 slider stored as 0..2, where 100 applies a profile's correction as it is.
+const fn profile_amount(id: ParameterId, label: &'static str) -> Descriptor {
+    Descriptor {
+        interactive: 0. ..=2.,
+        valid: 0. ..=2.,
+        ..amount(id, label)
+    }
+}
+
 /// A −100..100 slider stored as −1..1.
 const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     Descriptor {
@@ -125,7 +180,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 24] = [
+const DESCRIPTORS: [Descriptor; 57] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -211,10 +266,95 @@ const DESCRIPTORS: [Descriptor; 24] = [
     amount(ParameterId::ColorNoise, "Color"),
     amount(ParameterId::ColorNoiseDetail, "Detail"),
     amount(ParameterId::ColorNoiseSmoothness, "Smoothness"),
+    percent(ParameterId::VignetteAmount, "Amount"),
+    amount(ParameterId::VignetteMidpoint, "Midpoint"),
+    amount(ParameterId::VignetteFeather, "Feather"),
+    amount(ParameterId::GrainAmount, "Amount"),
+    amount(ParameterId::GrainSize, "Size"),
+    amount(ParameterId::GrainRoughness, "Roughness"),
+    percent(ParameterId::TransformVertical, "Vertical"),
+    percent(ParameterId::TransformHorizontal, "Horizontal"),
+    Descriptor {
+        id: ParameterId::TransformRotate,
+        label: "Rotate",
+        interactive: -10. ..=10.,
+        valid: -10. ..=10.,
+        tick: Tick::Linear(0.1),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 1,
+            signed: true,
+        },
+    },
+    percent(ParameterId::TransformAspect, "Aspect"),
+    Descriptor {
+        id: ParameterId::TransformScale,
+        label: "Scale",
+        interactive: 0.5..=1.5,
+        valid: 0.5..=1.5,
+        tick: Tick::Linear(0.01),
+        drag_step: None,
+        display: Display {
+            scale: 100.,
+            decimals: 0,
+            signed: false,
+        },
+    },
+    percent(ParameterId::TransformOffsetX, "Offset X"),
+    percent(ParameterId::TransformOffsetY, "Offset Y"),
+    profile_amount(ParameterId::LensDistortion, "Distortion"),
+    profile_amount(ParameterId::LensVignetting, "Vignetting"),
+    percent(ParameterId::ManualDistortion, "Amount"),
+    percent(ParameterId::LensVignetteAmount, "Amount"),
+    amount(ParameterId::LensVignetteMidpoint, "Midpoint"),
+    percent(ParameterId::ShadowTint, "Tint"),
+    percent(ParameterId::RedPrimaryHue, "Hue"),
+    percent(ParameterId::RedPrimarySaturation, "Saturation"),
+    percent(ParameterId::GreenPrimaryHue, "Hue"),
+    percent(ParameterId::GreenPrimarySaturation, "Saturation"),
+    percent(ParameterId::BluePrimaryHue, "Hue"),
+    percent(ParameterId::BluePrimarySaturation, "Saturation"),
+    percent(ParameterId::ParametricShadows, "Shadows"),
+    percent(ParameterId::ParametricDarks, "Darks"),
+    percent(ParameterId::ParametricLights, "Lights"),
+    percent(ParameterId::ParametricHighlights, "Highlights"),
+    Descriptor {
+        valid: 0. ..=2.,
+        ..amount(ParameterId::CurveSaturation, "Saturation")
+    },
+    Descriptor {
+        id: ParameterId::Midtone,
+        label: "Midtone",
+        interactive: 0.1..=4.,
+        valid: 0.1..=4.,
+        tick: Tick::Linear(0.01),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 2,
+            signed: false,
+        },
+    },
+    amount(ParameterId::GradingBlending, "Blending"),
+    percent(ParameterId::GradingBalance, "Balance"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 24] = [
+    /// The parametric curve's regions, in the order of `Effects::parametric`.
+    pub const PARAMETRIC: [Self; 4] = [
+        Self::ParametricShadows,
+        Self::ParametricDarks,
+        Self::ParametricLights,
+        Self::ParametricHighlights,
+    ];
+    /// Calibration's Hue and Saturation of each primary, red to blue.
+    pub const PRIMARIES: [[Self; 2]; 3] = [
+        [Self::RedPrimaryHue, Self::RedPrimarySaturation],
+        [Self::GreenPrimaryHue, Self::GreenPrimarySaturation],
+        [Self::BluePrimaryHue, Self::BluePrimarySaturation],
+    ];
+    pub const ALL: [Self; 57] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -239,6 +379,39 @@ impl ParameterId {
         Self::ColorNoise,
         Self::ColorNoiseDetail,
         Self::ColorNoiseSmoothness,
+        Self::VignetteAmount,
+        Self::VignetteMidpoint,
+        Self::VignetteFeather,
+        Self::GrainAmount,
+        Self::GrainSize,
+        Self::GrainRoughness,
+        Self::TransformVertical,
+        Self::TransformHorizontal,
+        Self::TransformRotate,
+        Self::TransformAspect,
+        Self::TransformScale,
+        Self::TransformOffsetX,
+        Self::TransformOffsetY,
+        Self::LensDistortion,
+        Self::LensVignetting,
+        Self::ManualDistortion,
+        Self::LensVignetteAmount,
+        Self::LensVignetteMidpoint,
+        Self::ShadowTint,
+        Self::RedPrimaryHue,
+        Self::RedPrimarySaturation,
+        Self::GreenPrimaryHue,
+        Self::GreenPrimarySaturation,
+        Self::BluePrimaryHue,
+        Self::BluePrimarySaturation,
+        Self::ParametricShadows,
+        Self::ParametricDarks,
+        Self::ParametricLights,
+        Self::ParametricHighlights,
+        Self::CurveSaturation,
+        Self::Midtone,
+        Self::GradingBlending,
+        Self::GradingBalance,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -270,6 +443,39 @@ impl ParameterId {
             Self::ColorNoise => &mut r.noise_chroma,
             Self::ColorNoiseDetail => &mut r.effects.chroma_detail,
             Self::ColorNoiseSmoothness => &mut r.effects.chroma_smoothness,
+            Self::VignetteAmount => &mut r.effects.vignette,
+            Self::VignetteMidpoint => &mut r.effects.vignette_midpoint,
+            Self::VignetteFeather => &mut r.effects.vignette_feather,
+            Self::GrainAmount => &mut r.effects.grain,
+            Self::GrainSize => &mut r.effects.grain_size,
+            Self::GrainRoughness => &mut r.effects.grain_roughness,
+            Self::TransformVertical => &mut r.transform.vertical,
+            Self::TransformHorizontal => &mut r.transform.horizontal,
+            Self::TransformRotate => &mut r.transform.rotate,
+            Self::TransformAspect => &mut r.transform.aspect,
+            Self::TransformScale => &mut r.transform.scale,
+            Self::TransformOffsetX => &mut r.transform.offset_x,
+            Self::TransformOffsetY => &mut r.transform.offset_y,
+            Self::LensDistortion => &mut r.lens_distortion,
+            Self::LensVignetting => &mut r.lens_vignetting,
+            Self::ManualDistortion => &mut r.lens_manual_distortion,
+            Self::LensVignetteAmount => &mut r.effects.lens_vignette,
+            Self::LensVignetteMidpoint => &mut r.effects.lens_vignette_midpoint,
+            Self::ShadowTint => &mut r.effects.shadow_tint,
+            Self::RedPrimaryHue => &mut r.effects.calibration[0][0],
+            Self::RedPrimarySaturation => &mut r.effects.calibration[0][1],
+            Self::GreenPrimaryHue => &mut r.effects.calibration[1][0],
+            Self::GreenPrimarySaturation => &mut r.effects.calibration[1][1],
+            Self::BluePrimaryHue => &mut r.effects.calibration[2][0],
+            Self::BluePrimarySaturation => &mut r.effects.calibration[2][1],
+            Self::ParametricShadows => &mut r.effects.parametric[0],
+            Self::ParametricDarks => &mut r.effects.parametric[1],
+            Self::ParametricLights => &mut r.effects.parametric[2],
+            Self::ParametricHighlights => &mut r.effects.parametric[3],
+            Self::CurveSaturation => &mut r.curve_saturation,
+            Self::Midtone => &mut r.midtone,
+            Self::GradingBlending => &mut r.effects.blending,
+            Self::GradingBalance => &mut r.effects.balance,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.

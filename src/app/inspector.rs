@@ -7,9 +7,8 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, TINT_GRADIENT, adjustment_section, name_history_step, parametric_curve_ui,
-    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented,
+    setting_slider, slider, slider_with, switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -797,14 +796,10 @@ impl Editor {
                     moving.and_then(|w| (0..4).find(|i| w.shares[*i] > 0.)),
                 );
                 subheading(ui, "Region");
-                for (i, name) in [
-                    (3, "Highlights"),
-                    (2, "Lights"),
-                    (1, "Darks"),
-                    (0, "Shadows"),
-                ] {
+                // Lightroom lists them lightest first.
+                for (i, id) in ParameterId::PARAMETRIC.into_iter().enumerate().rev() {
                     let row = ui.push_id(("parametric", i), |ui| {
-                        slider(ui, name, &mut r.effects.parametric[i], -1. ..=1., 0.)
+                        setting_slider(ui, id, id.value_mut(r), 0.)
                     });
                     highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
                 }
@@ -874,7 +869,7 @@ impl Editor {
                 let mut shown = r.curve_saturation.min(1.);
                 let before = shown;
                 ui.add_enabled_ui(view.selected_curve == 0, |ui| {
-                    slider(ui, "Saturation", &mut shown, 0. ..=1., 1.);
+                    setting_slider(ui, ParameterId::CurveSaturation, &mut shown, 1.);
                 });
                 if shown != before {
                     r.curve_saturation = shown;
@@ -895,7 +890,7 @@ impl Editor {
                 r.black_point + 0.01..=1.,
                 1.,
             );
-            slider(ui, "Midtone", &mut r.midtone, 0.1..=4., 1.);
+            setting_slider(ui, ParameterId::Midtone, &mut r.midtone, 1.);
         }) {
             r.black_point = 0.;
             r.white_point = 1.;
@@ -1194,6 +1189,7 @@ impl Editor {
 
         let mut switch = PanelSwitch::new(r, Panel::LensCorrections);
         if switched_section(ui, "Lens Corrections", &mut switch.state, |ui| {
+            let photo = metadata.as_ref();
             subheading(ui, "Profile");
             ui.add_enabled_ui(r.engine >= 4, |ui| {
                 control_row(ui, "", |ui| {
@@ -1247,24 +1243,8 @@ impl Editor {
             if r.lens_profile {
                 subheading(ui, "Amount");
                 ui.push_id("lens-amount", |ui| {
-                    slider_with(
-                        ui,
-                        "Distortion",
-                        &mut r.lens_distortion,
-                        0. ..=2.,
-                        1.,
-                        Some((100., 0)),
-                        None,
-                    );
-                    slider_with(
-                        ui,
-                        "Vignetting",
-                        &mut r.lens_vignetting,
-                        0. ..=2.,
-                        1.,
-                        Some((100., 0)),
-                        None,
-                    );
+                    setting_control(ui, r, ParameterId::LensDistortion, 1., photo);
+                    setting_control(ui, r, ParameterId::LensVignetting, 1., photo);
                 });
             }
             control_row(ui, "", |ui| {
@@ -1287,7 +1267,7 @@ impl Editor {
             subheading(ui, "Distortion");
             ui.push_id("manual-distortion", |ui| {
                 ui.add_enabled_ui(r.engine >= 4, |ui| {
-                    slider(ui, "Amount", &mut r.lens_manual_distortion, -1. ..=1., 0.);
+                    setting_control(ui, r, ParameterId::ManualDistortion, 0., photo);
                 });
             });
             let row = subheading(ui, "Defringe");
@@ -1311,18 +1291,10 @@ impl Editor {
             }
             defringe_sliders(ui, &mut r.effects);
             subheading(ui, "Vignetting");
-            let previous_vignette = r.effects.lens_vignette;
             ui.push_id("lens-vignette", |ui| {
-                slider(ui, "Amount", &mut r.effects.lens_vignette, -1. ..=1., 0.);
-                slider(
-                    ui,
-                    "Midpoint",
-                    &mut r.effects.lens_vignette_midpoint,
-                    0. ..=1.,
-                    0.5,
-                );
+                setting_control(ui, r, ParameterId::LensVignetteAmount, 0., photo);
+                setting_control(ui, r, ParameterId::LensVignetteMidpoint, 0.5, photo);
             });
-            r.adopt_measured_vignette(previous_vignette);
         }) {
             if let Some(m) = &metadata {
                 r.lens_builtin = m.lens.as_ref().is_none_or(|l| l.default_on);
@@ -1433,13 +1405,13 @@ impl Editor {
                 let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
                 let mut shown = r.transform.displayed(axes);
                 let t = &mut shown;
-                slider(ui, "Vertical", &mut t.vertical, -1. ..=1., 0.);
-                slider(ui, "Horizontal", &mut t.horizontal, -1. ..=1., 0.);
-                slider_with(ui, "Rotate", &mut t.rotate, -10. ..=10., 0., Some((1., 1)), None);
-                slider(ui, "Aspect", &mut t.aspect, -1. ..=1., 0.);
-                slider_with(ui, "Scale", &mut t.scale, 0.5..=1.5, 1., Some((100., 0)), None);
-                slider(ui, "Offset X", &mut t.offset_x, -1. ..=1., 0.);
-                slider(ui, "Offset Y", &mut t.offset_y, -1. ..=1., 0.);
+                setting_slider(ui, ParameterId::TransformVertical, &mut t.vertical, 0.);
+                setting_slider(ui, ParameterId::TransformHorizontal, &mut t.horizontal, 0.);
+                setting_slider(ui, ParameterId::TransformRotate, &mut t.rotate, 0.);
+                setting_slider(ui, ParameterId::TransformAspect, &mut t.aspect, 0.);
+                setting_slider(ui, ParameterId::TransformScale, &mut t.scale, 1.);
+                setting_slider(ui, ParameterId::TransformOffsetX, &mut t.offset_x, 0.);
+                setting_slider(ui, ParameterId::TransformOffsetY, &mut t.offset_y, 0.);
                 if shown != r.transform.displayed(axes) {
                     r.transform = shown.recorded(axes);
                 }
@@ -1453,36 +1425,17 @@ impl Editor {
 
         let mut switch = PanelSwitch::new(r, Panel::Effects);
         if switched_section(ui, "Effects", &mut switch.state, |ui| {
+            let photo = metadata.as_ref();
             subheading(ui, "Post-Crop Vignetting");
-            slider(ui, "Amount", &mut r.effects.vignette, -1. ..=1., 0.);
-            slider(
-                ui,
-                "Midpoint",
-                &mut r.effects.vignette_midpoint,
-                0. ..=1.,
-                0.5,
-            );
-            slider(
-                ui,
-                "Feather",
-                &mut r.effects.vignette_feather,
-                0. ..=1.,
-                0.5,
-            );
+            setting_control(ui, r, ParameterId::VignetteAmount, 0., photo);
+            setting_control(ui, r, ParameterId::VignetteMidpoint, 0.5, photo);
+            setting_control(ui, r, ParameterId::VignetteFeather, 0.5, photo);
             subheading(ui, "Grain");
-            let previous_grain = r.effects.grain;
             ui.push_id("grain", |ui| {
-                slider(ui, "Amount", &mut r.effects.grain, 0. ..=1., 0.);
-                slider(ui, "Size", &mut r.effects.grain_size, 0. ..=1., 0.25);
-                slider(
-                    ui,
-                    "Roughness",
-                    &mut r.effects.grain_roughness,
-                    0. ..=1.,
-                    0.5,
-                );
+                setting_control(ui, r, ParameterId::GrainAmount, 0., photo);
+                setting_control(ui, r, ParameterId::GrainSize, 0.25, photo);
+                setting_control(ui, r, ParameterId::GrainRoughness, 0.5, photo);
             });
-            r.adopt_measured_grain(previous_grain);
         }) {
             r.effects.reset_post_crop();
         }
@@ -1542,15 +1495,7 @@ impl Editor {
                 .on_hover_text("Neutral-preserving primary adjustments and corrected shadow tint. Older edits keep their saved behavior until enabled.");
             subheading(ui, "Shadows");
             ui.push_id("calibration-shadows", |ui| {
-                slider_with(
-                    ui,
-                    "Tint",
-                    &mut r.effects.shadow_tint,
-                    -1. ..=1.,
-                    0.,
-                    None,
-                    Some(TINT_GRADIENT),
-                );
+                setting_slider(ui, ParameterId::ShadowTint, &mut r.effects.shadow_tint, 0.);
             });
             for (i, name) in ["Red Primary", "Green Primary", "Blue Primary"]
                 .iter()
@@ -1558,14 +1503,10 @@ impl Editor {
             {
                 subheading(ui, name);
                 ui.push_id(("calibration", i), |ui| {
-                    slider(ui, "Hue", &mut r.effects.calibration[i][0], -1. ..=1., 0.);
-                    slider(
-                        ui,
-                        "Saturation",
-                        &mut r.effects.calibration[i][1],
-                        -1. ..=1.,
-                        0.,
-                    );
+                    let primary = ParameterId::PRIMARIES[i];
+                    for id in primary {
+                        setting_slider(ui, id, id.value_mut(r), 0.);
+                    }
                 });
             }
         }) {

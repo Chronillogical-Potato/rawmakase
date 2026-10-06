@@ -7,7 +7,8 @@ use crate::raw::Metadata;
 /// Brings the recipe in line after setting `id` changed from `previous`:
 /// - a new Temp or Tint recomputes the white balance multipliers for `photo`,
 ///   which then no longer come from Auto;
-/// - Texture or Clarity added from none renders with the measured operator.
+/// - Texture, Clarity, Grain or the lens Vignetting Amount added from none renders
+///   with the measured operator.
 pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Option<&Metadata>) {
     let current = *id.value_mut(r);
     match id {
@@ -21,6 +22,8 @@ pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Op
         }
         ParameterId::Texture => r.adopt_measured_texture(previous),
         ParameterId::Clarity => r.adopt_measured_clarity(previous),
+        ParameterId::GrainAmount => r.adopt_measured_grain(previous),
+        ParameterId::LensVignetteAmount => r.adopt_measured_vignette(previous),
         _ => {}
     }
 }
@@ -43,6 +46,30 @@ pub fn turn_on_edited_panel(before: &Recipe, after: &mut Recipe) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grain_added_from_none_takes_the_measured_operator() {
+        use crate::develop::effects::GrainModel;
+        let mut r = Recipe::default();
+        assert_eq!(r.grain_model, GrainModel::Original);
+        // Size alone is not grain added.
+        r.effects.grain_size = 0.5;
+        setting_changed(&mut r, ParameterId::GrainSize, 0.25, None);
+        assert_eq!(r.grain_model, GrainModel::Original);
+        r.effects.grain = 0.2;
+        setting_changed(&mut r, ParameterId::GrainAmount, 0., None);
+        assert_eq!(r.grain_model, GrainModel::Measured);
+    }
+
+    #[test]
+    fn lens_vignetting_added_from_none_takes_the_measured_operator() {
+        use crate::develop::effects::LensVignetteModel;
+        let mut r = Recipe::default();
+        assert_eq!(r.lens_vignette_model, LensVignetteModel::Original);
+        r.effects.lens_vignette = 0.3;
+        setting_changed(&mut r, ParameterId::LensVignetteAmount, 0., None);
+        assert_eq!(r.lens_vignette_model, LensVignetteModel::Measured);
+    }
 
     #[test]
     fn only_a_change_to_one_switched_off_panel_turns_it_on() {

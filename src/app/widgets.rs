@@ -924,7 +924,7 @@ pub(super) fn setting_slider(
         display: Some((d.display.scale, d.display.decimals)),
         gradient: match id {
             ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
-            ParameterId::Tint => Some(TINT_GRADIENT),
+            ParameterId::Tint | ParameterId::ShadowTint => Some(TINT_GRADIENT),
             _ => None,
         },
         reciprocal: matches!(d.tick, params::Tick::Mireds(_)),
