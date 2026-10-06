@@ -74,6 +74,9 @@ pub struct PhotoRecord {
     pub keywords: Vec<super::Keyword>,
     pub rating: i32,
     pub label: String,
+    /// The capture time the catalog sorts by ("2026-05-04 10:21:33.000"), empty
+    /// when unknown.
+    pub captured: String,
 }
 
 impl Catalog {
@@ -84,11 +87,11 @@ impl Catalog {
         let records = ids
             .iter()
             .map(|&id| {
-                let (rating, label) =
-                    self.db
-                        .query_row("SELECT rating,label FROM photos WHERE id=?", [id], |r| {
-                            Ok((r.get(0)?, r.get(1)?))
-                        })?;
+                let (rating, label, captured) = self.db.query_row(
+                    "SELECT rating,label,captured FROM photos WHERE id=?",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?;
                 Ok(PhotoRecord {
                     id,
                     edit: self.edit_record(id)?,
@@ -96,6 +99,7 @@ impl Catalog {
                     keywords: self.keywords(id)?,
                     rating,
                     label,
+                    captured,
                 })
             })
             .collect::<Result<_>>()?;
