@@ -1432,7 +1432,7 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
     let ctx = egui::Context::default();
     let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
-    let library = library::Library::load(&path, ctx.clone())?;
+    let library = library::Library::load(&path, ctx)?;
     // The filmstrip order, first to last.
     let mut order = vec![library.photos[0].id];
     while let Some(previous) = library.navigate(order[0], -1).filter(|p| *p != order[0]) {
@@ -1767,7 +1767,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.upright.mode = UprightMode::Vertical;
-    e.history(original.clone());
+    e.history(original);
     // The analysis arrives after the click that chose the mode.
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.recipe.clone();
@@ -2008,7 +2008,7 @@ fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Edi
     crate::catalog::Catalog::create(&path)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
-    let library = crate::app::library::Library::load(&path, ctx.clone())?;
+    let library = crate::app::library::Library::load(&path, ctx)?;
     let ids = library.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
     e.library_mode = true;
@@ -2802,7 +2802,7 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.document.catalog_photo = Some(id);
-    editor.document.path = Some(photo.clone());
+    editor.document.path = Some(photo);
     // A slider still held down when Left or Right leaves the photo.
     let before = editor.document.recipe.clone();
     editor.document.recipe.exposure = 0.6;
@@ -3997,7 +3997,7 @@ fn up_and_down_nudge_the_hovered_slider_but_never_while_typing_or_scrolling() {
     draw(&mut value, false, vec![], 0.);
     let row = row.get();
     let over = egui::Event::PointerMoved(Pos2::new(row.center().x, row.top() + 12.));
-    draw(&mut value, false, vec![over.clone()], 1.);
+    draw(&mut value, false, vec![over], 1.);
     draw(
         &mut value,
         false,
@@ -4285,7 +4285,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     save(&c, &ids[4], &guided)?;
     // A virtual copy of f, with an edit of its own.
     let copy = c.create_virtual_copy(ids[5].0)?;
-    let mut copied = base.clone();
+    let mut copied = base;
     copied.contrast = 0.4;
     ids.push((copy, ids[5].1.clone()));
     save(&c, &ids[6], &copied)?;
@@ -4420,4 +4420,39 @@ fn eframes_reason_for_giving_up_is_kept() {
         Some("No suitable GPU adapter")
     );
     assert_eq!(EframeErrors::take(), None);
+}
+#[test]
+fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
+    let ctx = egui::Context::default();
+    let row = std::cell::Cell::new(Rect::NOTHING);
+    let draw = |value: &mut f32, events: Vec<egui::Event>, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let top = ui.cursor().min;
+            super::widgets::slider(ui, "Exposure", value, -5. ..=5., 0.);
+            row.set(Rect::from_min_max(
+                top,
+                Pos2::new(ui.max_rect().right(), ui.cursor().top()),
+            ));
+        })
+    };
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // An imported +6 EV, beyond the slider's ±5.
+    let mut value = 6.;
+    draw(&mut value, vec![], 0.);
+    assert_eq!(value, 6., "showing the slider changed the value");
+    let over = egui::Event::PointerMoved(row.get().center());
+    draw(&mut value, vec![over.clone()], 1.);
+    assert_eq!(value, 6.);
+    // Up moves it no further out; Down moves it one step toward the range,
+    // not to its end.
+    draw(&mut value, vec![over.clone(), key(egui::Key::ArrowUp)], 2.);
+    assert_eq!(value, 6.);
+    draw(&mut value, vec![over, key(egui::Key::ArrowDown)], 3.);
+    assert!(5. < value && value < 6., "{value}");
 }

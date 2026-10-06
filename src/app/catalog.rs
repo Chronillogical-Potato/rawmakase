@@ -1,5 +1,6 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
+use super::folder_locations::{FolderQuestion, folder_added, reopened};
 use super::widgets::confirm_modal;
 use super::worker::Event;
 use eframe::egui;
@@ -8,7 +9,7 @@ use std::path::PathBuf;
 impl Editor {
     /// Whether no work in progress stops a catalog change and the open edit
     /// is saved; it is saved only when nothing is in progress.
-    fn ready_for_catalog(&mut self) -> bool {
+    pub(super) fn ready_for_catalog(&mut self) -> bool {
         !self.activity.is_busy() && self.flush()
     }
     pub(super) fn load_catalog(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -40,8 +41,10 @@ impl Editor {
         let ctx = ctx.clone();
         let current = self.library.as_ref().map(|l| l.catalog.path.clone());
         std::thread::spawn(move || {
-            // Sidecars of the folder added that could not be read.
+            // Sidecars of the folder added that could not be read, and
+            // folders it skipped.
             let mut report = crate::catalog::SidecarReport::default();
+            let mut conflicts = Vec::new();
             let result = (|| -> anyhow::Result<Option<PathBuf>> {
                 Ok(match kind {
                     CatalogDialog::Create => {
@@ -83,29 +86,55 @@ impl Editor {
                     }
                     CatalogDialog::Folder(action) => {
                         crate::platform::network::prepare_filesystem_bridge();
-                        let Some(path) = rfd::FileDialog::new()
-                            .set_title(if matches!(action, FolderAction::Add) {
-                                "Add photo folder"
-                            } else {
-                                "Select replacement folder"
-                            })
-                            .pick_folder()
-                        else {
-                            return Ok(None);
-                        };
                         let current =
                             current.ok_or_else(|| anyhow::anyhow!("Open a catalog first"))?;
                         let mut cat = crate::catalog::Catalog::open(&current)?;
+                        let mut dialog = rfd::FileDialog::new().set_title(match action {
+                            FolderAction::Add => "Add photo folder",
+                            _ => "Find missing folder on this computer",
+                        });
+                        // Where another computer has it, when that is here too.
+                        if let Some(there) = suggestion(&cat, action) {
+                            dialog = dialog.set_directory(there);
+                        }
+                        let Some(path) = dialog.pick_folder() else {
+                            return Ok(None);
+                        };
+                        let ask = |question| {
+                            let _ = tx.send(Event::FolderQuestion(Box::new(question)));
+                        };
                         match action {
                             FolderAction::Add => {
-                                report = cat
-                                    .add_folder_with(
-                                        &path,
-                                        &crate::catalog::MetadataDefaults::load(),
-                                    )?
-                                    .1;
+                                let added = cat.import_folder(
+                                    &path,
+                                    &crate::catalog::MetadataDefaults::load(),
+                                    &[],
+                                )?;
+                                if !added.ambiguous.is_empty() {
+                                    ask(FolderQuestion::Ambiguous {
+                                        catalog: current,
+                                        folder: path,
+                                        open: added.ambiguous,
+                                        chosen: Vec::new(),
+                                    });
+                                    return Ok(None);
+                                }
+                                report = added.report;
+                                conflicts = added.conflicts;
                             }
-                            FolderAction::RelinkRoot(id) => cat.relink_root(id, &path)?,
+                            FolderAction::RelinkRoot(id) => {
+                                let overrides = cat.root_overrides(id)?;
+                                if !overrides.is_empty() {
+                                    ask(FolderQuestion::Overrides {
+                                        catalog: current,
+                                        root: id,
+                                        path,
+                                        overrides,
+                                    });
+                                    return Ok(None);
+                                }
+                                cat.relink_root(id, &path)?
+                            }
                             FolderAction::RelinkFolder(id) => cat.relink_folder(id, &path)?,
                         }
                         Some(current)
@@ -120,19 +149,17 @@ impl Editor {
                 ctx.request_repaint();
             }
             let event = match result {
-                Ok(Some(path)) => Event::CatalogReady(
-                    crate::app::library::Library::load(&path, ctx.clone())
-                        .map(|mut l| {
-                            if matches!(kind, CatalogDialog::Folder(FolderAction::RelinkRoot(_) | FolderAction::RelinkFolder(_))) {
-                                l.wait_for_availability();
-                                let available=l.available_count();
-                                l.message=format!("Folder relinked. {available} of {} photos are available.",l.photos.len());
-                                if available==0 {l.message.push_str(" No files matched this location; check that the selected folder contains the expected subfolders.");}
-                            }
-                            folder_added(&mut l, &report);
-                            Box::new(l)
-                        })
-                        .map_err(|e| format!("{e:#}")),
+                Ok(Some(path)) => reopened(
+                    &path,
+                    matches!(
+                        kind,
+                        CatalogDialog::Folder(
+                            FolderAction::RelinkRoot(_) | FolderAction::RelinkFolder(_)
+                        )
+                    ),
+                    &report,
+                    &conflicts,
+                    &ctx,
                 ),
                 Ok(None) => Event::DialogClosed,
                 Err(e) => Event::CatalogReady(Err(format!("{e:#}"))),
@@ -177,10 +204,19 @@ impl Editor {
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<_> {
-                let (_, report) = crate::catalog::Catalog::open(&current)?
-                    .add_folder_with(&folder, &crate::catalog::MetadataDefaults::load())?;
+                let added = crate::catalog::Catalog::open(&current)?.import_folder(
+                    &folder,
+                    &crate::catalog::MetadataDefaults::load(),
+                    &[],
+                )?;
+                anyhow::ensure!(
+                    added.ambiguous.is_empty(),
+                    "{} matches more than one folder of the catalog; add it with Add Folder…",
+                    folder.display()
+                );
                 let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
-                folder_added(&mut library, &report);
+                // Says why the photo wasn't added when its folder is linked elsewhere.
+                folder_added(&mut library, &added.report, &added.conflicts);
                 Ok(library)
             })()
             .map(Box::new)
@@ -196,7 +232,13 @@ impl Editor {
             .as_ref()?
             .photos
             .iter()
-            .filter(|p| p.path == path)
+            // A location stored through a symlink spells the path differently;
+            // only photos of the same name are looked up on disk.
+            .filter(|p| {
+                p.path == path
+                    || (path.file_name() == Some(std::ffi::OsStr::new(&p.filename))
+                        && p.path.canonicalize().is_ok_and(|real| real == path))
+            })
             .min_by_key(|p| p.master.is_some())
             .map(|p| p.id)
     }
@@ -211,10 +253,14 @@ impl Editor {
         } else if !added {
             self.add_to_library(path);
         } else {
-            self.status = format!(
-                "{} could not be added to the Library",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            );
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            // Adding its folder may have said why (linked elsewhere).
+            self.status = match self.library.as_ref().map(|l| l.message.as_str()) {
+                Some(why) if !why.is_empty() => {
+                    format!("{name} could not be added to the Library · {why}")
+                }
+                _ => format!("{name} could not be added to the Library"),
+            };
         }
     }
     pub(super) fn develop_catalog_photo(&mut self, id: i64) {
@@ -431,13 +477,34 @@ impl Editor {
 fn catalog_file_dialog() -> rfd::FileDialog {
     rfd::FileDialog::new().add_filter("RAWmakase catalog", &["rawmakase"])
 }
-/// Reports the sidecars a folder added could not read, if any, on the
-/// Library's status line.
-fn folder_added(
-    library: &mut crate::app::library::Library,
-    report: &crate::catalog::SidecarReport,
-) {
-    if let Some(summary) = report.summary() {
-        library.set_message_with_detail(format!("Folder added · {summary}"), report.details());
+/// Where another computer has the root or folder of `action`, when that
+/// path is on this computer too: the place Find Missing Folder starts.
+fn suggestion(catalog: &crate::catalog::Catalog, action: FolderAction) -> Option<PathBuf> {
+    let (root, relative) = match action {
+        FolderAction::Add => return None,
+        FolderAction::RelinkRoot(id) => (id, String::new()),
+        FolderAction::RelinkFolder(id) => {
+            let folder = catalog.folders().ok()?.into_iter().find(|f| f.id == id)?;
+            (folder.root, folder.relative)
+        }
+    };
+    let locations = catalog
+        .folder_locations()
+        .ok()?
+        .into_iter()
+        .find(|r| r.root == root)?;
+    // Each other computer's own rows, so a folder found there through its
+    // root or a parent is suggested too.
+    let mut by_computer: std::collections::BTreeMap<&str, Vec<(String, PathBuf)>> =
+        Default::default();
+    for (computer, at, path) in &locations.elsewhere {
+        by_computer
+            .entry(computer)
+            .or_default()
+            .push((at.clone(), path.clone()));
     }
+    by_computer.values().find_map(|rows| {
+        crate::catalog::locations::resolve_in(&locations.original, rows, &relative, cfg!(windows))
+            .filter(|path| path.is_dir())
+    })
 }

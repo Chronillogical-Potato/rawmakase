@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Dependency ratchet for the top-level modules of the library crate.
+
+Production code in `src/<module>` may use another top-level module only when
+`scripts/deps-allowed.txt` lists that edge. `check` fails on an edge missing
+from the list, so no new dependency appears unnoticed, and on a listed edge the
+code no longer has, so a removed dependency cannot quietly come back. The
+target layering is in docs/architecture.md.
+
+    python3 scripts/deps.py check    # what CI runs
+    python3 scripts/deps.py report   # every edge with its sites, and the cycles
+    python3 scripts/deps.py write    # rewrite the allow-list from the code
+
+The scan reads `crate::` paths, `use` trees and `super::` chains that climb to
+the crate root. Comments, string literals and test code (`tests.rs` files and
+`#[cfg(test)]` items) are ignored. Method calls on values of another module's
+types are not paths, so they are not seen.
+"""
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
+ALLOWED = ROOT / "scripts" / "deps-allowed.txt"
+
+
+def blank(text):
+    """Replace every character except newlines with a space, keeping line numbers."""
+    return re.sub(r"[^\n]", " ", text)
+
+
+def strip_comments_and_literals(text):
+    """Blank comments, string literals and char literals, so only code is scanned."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+        elif text.startswith("/*", i):
+            depth, end = 1, i + 2
+            while end < n and depth:
+                if text.startswith("/*", end):
+                    depth, end = depth + 1, end + 2
+                elif text.startswith("*/", end):
+                    depth, end = depth - 1, end + 2
+                else:
+                    end += 1
+        elif (raw := re.match(r'b?r(#*)"', text[i : i + 260])) and (
+            i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")
+        ):
+            close = '"' + raw.group(1)
+            end = text.find(close, i + raw.end())
+            end = n if end < 0 else end + len(close)
+        elif text[i] == '"':
+            end = i + 1
+            while end < n and text[end] != '"':
+                end += 2 if text[end] == "\\" else 1
+            end += 1
+        elif char := re.match(r"'(\\.[^']*|[^\\'])'", text[i : i + 12]):
+            end = i + char.end()
+        else:
+            out.append(text[i])
+            i += 1
+            continue
+        out.append(blank(text[i:end]))
+        i = end
+    return "".join(out)
+
+
+def after_closing_brace(code, open_brace):
+    """Position just after the brace that closes the one at `open_brace`."""
+    depth = 0
+    for k in range(open_brace, len(code)):
+        depth += {"{": 1, "}": -1}.get(code[k], 0)
+        if depth == 0:
+            return k + 1
+    return len(code)
+
+
+def attributed_end(code, start):
+    """End of what an attribute at `start` applies to: an item's `;` or closing
+    brace, a field's, variant's or match arm's `,`, or the end of the block
+    around it."""
+    depth = 0
+    for k in range(start, len(code)):
+        if code[k] in "([{":
+            depth += 1
+        elif code[k] in ")]}":
+            depth -= 1
+            if depth < 0:
+                return k
+            if depth == 0 and code[k] == "}":
+                return k + 1
+        elif code[k] in ";," and depth == 0:
+            return k + 1
+    return len(code)
+
+
+TEST_ATTRIBUTE = re.compile(r"#\[cfg\((?:test|all\([^()]*\btest\b[^()]*\))\)\]")
+
+
+def test_spans(code):
+    """Spans of `#[cfg(test)]` items: inline modules, functions, imports, impls."""
+    return [(m.start(), attributed_end(code, m.end())) for m in TEST_ATTRIBUTE.finditer(code)]
+
+
+def test_module_files():
+    """Files declared as `#[cfg(test)] mod name;`, and directories under them."""
+    paths = set()
+    for path in SRC.rglob("*.rs"):
+        code = strip_comments_and_literals(path.read_text(encoding="utf-8"))
+        parent = path.parent if path.name in ("mod.rs", "lib.rs", "main.rs") else path.with_suffix("")
+        declaration = r"(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;"
+        for m in re.finditer(TEST_ATTRIBUTE.pattern + r"\s*" + declaration, code):
+            name = m.group(1)
+            paths.update({parent / f"{name}.rs", parent / name})
+    return paths
+
+
+def is_test_file(path, test_paths):
+    if path.name == "tests.rs" or path.name.endswith("_tests.rs"):
+        return True
+    return any(path == t or t in path.parents for t in test_paths)
+
+
+def top_level_modules():
+    """Modules declared in src/lib.rs, which are the nodes of the graph."""
+    code = strip_comments_and_literals((SRC / "lib.rs").read_text(encoding="utf-8"))
+    return sorted(re.findall(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", code, re.M))
+
+
+def inline_module_depth(code):
+    """For each position, how many inline `mod name { ... }` blocks enclose it."""
+    opens = {m.end() - 1 for m in re.finditer(r"\bmod\s+\w+\s*\{", code)}
+    depths, stack, braces = [], [], 0
+    for i, ch in enumerate(code):
+        if ch == "{":
+            braces += 1
+            if i in opens:
+                stack.append(braces)
+        elif ch == "}":
+            if stack and stack[-1] == braces:
+                stack.pop()
+            braces -= 1
+        depths.append(len(stack))
+    return depths
+
+
+def group_heads(body):
+    """First segment of each top-level entry of a `{...}` use group."""
+    heads, depth, current = [], 0, ""
+    for ch in body + ",":
+        if ch == "," and depth == 0:
+            if current.strip():
+                heads.append(re.split(r"::|\s", current.strip())[0])
+            current = ""
+            continue
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        current += ch
+    return heads
+
+
+def heads_after(code, match):
+    """Module names a path reaches: one name, or every head of a `{...}` group."""
+    if match.group("group"):
+        open_brace = match.end() - 1
+        return group_heads(code[open_brace + 1 : after_closing_brace(code, open_brace) - 1])
+    return [match.group("name")]
+
+
+ROOT_PATH = re.compile(r"(?<![\w$])crate\s*::\s*(?:(?P<group>\{)|(?P<name>\w+))")
+SUPER_PATH = re.compile(r"(?<![\w:])(?P<supers>(?:super\s*::\s*)+)(?:(?P<group>\{)|(?P<name>\w+))")
+
+
+def production_edges():
+    """{(from, to): [site, ...]} for every production use of another module."""
+    modules = set(top_level_modules())
+    test_paths = test_module_files()
+    edges = defaultdict(list)
+    for path in sorted(SRC.rglob("*.rs")):
+        parts = path.relative_to(SRC).with_suffix("").parts
+        if parts[-1] == "mod":
+            parts = parts[:-1]
+        source = parts[0]
+        if source not in modules or is_test_file(path, test_paths):
+            continue
+        code = strip_comments_and_literals(path.read_text(encoding="utf-8"))
+        excluded = test_spans(code)
+        depths = inline_module_depth(code)
+        hits = []
+        for m in ROOT_PATH.finditer(code):
+            hits += [(m.start(), head) for head in heads_after(code, m)]
+        for m in SUPER_PATH.finditer(code):
+            if m.group("supers").count("super") == len(parts) + depths[m.start()]:
+                hits += [(m.start(), head) for head in heads_after(code, m)]
+        for position, target in hits:
+            if target == source or target not in modules:
+                continue
+            if any(start <= position < end for start, end in excluded):
+                continue
+            line = code.count("\n", 0, position) + 1
+            edges[(source, target)].append(f"{path.relative_to(ROOT)}:{line}")
+    return edges
+
+
+def cycles(edges):
+    """Strongly connected components with more than one module (Tarjan)."""
+    graph = defaultdict(set)
+    for source, target in edges:
+        graph[source].add(target)
+    index, low, stack, on_stack, found = {}, {}, [], set(), []
+
+    def visit(node):
+        index[node] = low[node] = len(index)
+        stack.append(node)
+        on_stack.add(node)
+        for next_node in sorted(graph[node]):
+            if next_node not in index:
+                visit(next_node)
+                low[node] = min(low[node], low[next_node])
+            elif next_node in on_stack:
+                low[node] = min(low[node], index[next_node])
+        if low[node] == index[node]:
+            component = []
+            while not component or component[-1] != node:
+                component.append(stack.pop())
+                on_stack.discard(component[-1])
+            if len(component) > 1:
+                found.append(sorted(component))
+
+    for node in sorted(set(graph) | {t for ts in graph.values() for t in ts}):
+        if node not in index:
+            visit(node)
+    return found
+
+
+def edge_line(edge):
+    return f"{edge[0]} -> {edge[1]}"
+
+
+def read_allowed():
+    lines = ALLOWED.read_text(encoding="utf-8").splitlines()
+    entries = [line.split("#")[0].strip() for line in lines]
+    return {tuple(part.strip() for part in e.split("->")) for e in entries if e}
+
+
+def check(edges):
+    allowed = read_allowed()
+    new = sorted(set(edges) - allowed)
+    stale = sorted(allowed - set(edges))
+    for edge in new:
+        print(f"New dependency {edge_line(edge)}, used at:")
+        for site in edges[edge]:
+            print(f"    {site}")
+    for edge in stale:
+        print(f"{edge_line(edge)} is no longer used: delete it from {ALLOWED.relative_to(ROOT)}")
+    if new:
+        print(
+            "\nA new edge between top-level modules needs a reason. If it fits the layering in\n"
+            "docs/architecture.md, add it to the allow-list in the same pull request."
+        )
+    if not new and not stale:
+        print(f"{len(edges)} module dependencies, all allowed; {len(cycles(edges))} cycle(s) remain.")
+    return 1 if new or stale else 0
+
+
+def report(edges):
+    for edge in sorted(edges):
+        print(f"{edge_line(edge)} ({len(edges[edge])})")
+        for site in edges[edge]:
+            print(f"    {site}")
+    found = cycles(edges)
+    print(f"\n{len(found)} cycle(s)")
+    for component in found:
+        print("    " + ", ".join(component))
+    return 0
+
+
+def write(edges):
+    header = (
+        "# Allowed dependencies between top-level modules, checked by scripts/deps.py.\n"
+        "# Delete a line when the code stops needing it. A new line needs a reason that\n"
+        "# fits the layering in docs/architecture.md.\n"
+    )
+    ALLOWED.write_text(header + "".join(edge_line(e) + "\n" for e in sorted(edges)), encoding="utf-8")
+    print(f"Wrote {len(edges)} edges to {ALLOWED.relative_to(ROOT)}")
+    return 0
+
+
+COMMANDS = {"check": check, "report": report, "write": write}
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
+        sys.exit(f"usage: {sys.argv[0]} {{{'|'.join(COMMANDS)}}}")
+    sys.exit(COMMANDS[sys.argv[1]](production_edges()))

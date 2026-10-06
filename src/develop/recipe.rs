@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 pub const TEMPERATURE_MIN: f32 = 2000.;
 pub const TEMPERATURE_MAX: f32 = 50000.;
 pub const TINT_LIMIT: f32 = 150.;
+/// The Exposure a recipe may hold, in EV. The slider spans ±5; imported edits and
+/// typed values may go further.
+pub const EXPOSURE_LIMIT: f32 = 8.;
 /// A photo's develop settings. Fields this build does not know (from a newer release)
 /// are kept in `unknown` and saved again, so an older build never drops them.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -62,6 +65,12 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::clarity::ClarityModel::is_original"
     )]
     pub clarity_model: crate::develop::clarity::ClarityModel,
+    /// Which operator renders Texture, as `grain_model`.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::texture::TextureModel::is_original"
+    )]
+    pub texture_model: crate::develop::texture::TextureModel,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -146,6 +155,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::SaturationModel::is_original"
     )]
     pub saturation_model: crate::develop::color_mixer::SaturationModel,
+    /// Which tables render Vibrance. Missing means the photo-measured ones, so older
+    /// recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_mixer::VibranceModel::is_original"
+    )]
+    pub vibrance_model: crate::develop::color_mixer::VibranceModel,
     /// Which fit renders Camera Calibration's primary sliders. Missing means the
     /// original coefficients, so older recipes look as they did; omitted at that default.
     #[serde(
@@ -284,6 +300,7 @@ impl Default for Recipe {
             effects: Default::default(),
             grain_model: Default::default(),
             clarity_model: Default::default(),
+            texture_model: Default::default(),
             preset_name: String::new(),
             preset_settings: Default::default(),
             profile: None,
@@ -304,6 +321,7 @@ impl Default for Recipe {
             grading_model: Default::default(),
             mixer_model: Default::default(),
             saturation_model: Default::default(),
+            vibrance_model: Default::default(),
             calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
@@ -538,12 +556,14 @@ impl Recipe {
         recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
         recipe.grain_model = crate::develop::effects::GrainModel::Measured;
         recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        recipe.texture_model = crate::develop::texture::TextureModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
         recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+        recipe.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
         recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
@@ -568,7 +588,7 @@ impl Recipe {
             p.validate()?;
         }
         ensure!(
-            (-8. ..=8.).contains(&self.exposure)
+            (-EXPOSURE_LIMIT..=EXPOSURE_LIMIT).contains(&self.exposure)
                 && self.camera_exposure.is_finite()
                 && self.camera_exposure.abs() <= 5.,
             "Exposure out of bounds"
@@ -861,6 +881,13 @@ impl Recipe {
     pub fn adopt_measured_clarity(&mut self, previous: f32) {
         if previous == 0. && self.effects.clarity != 0. {
             self.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        }
+    }
+    /// After an edit of Texture from `previous`: Texture added from none has nothing
+    /// of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_texture(&mut self, previous: f32) {
+        if previous == 0. && self.effects.texture != 0. {
+            self.texture_model = crate::develop::texture::TextureModel::Measured;
         }
     }
     pub(crate) fn lens_correction<'a>(

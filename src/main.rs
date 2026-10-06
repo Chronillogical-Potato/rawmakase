@@ -184,7 +184,7 @@ fn main() -> Result<()> {
             for (id, source, mapped) in c.roots()? {
                 println!(
                     "Root {id}: {source} → {}",
-                    mapped.unwrap_or_else(|| "not relinked".into())
+                    mapped.unwrap_or_else(|| "where it was added".into())
                 );
             }
         }
@@ -279,7 +279,12 @@ fn main() -> Result<()> {
                 edit.sync_white_balance_controls(&r.metadata);
             }
             edit.validate()?;
-            let im = r.develop(fast, &AtomicBool::new(false))?;
+            let decode = if fast {
+                raw::Decode::Half
+            } else {
+                raw::Decode::full()
+            };
+            let im = r.develop(decode, &AtomicBool::new(false))?;
             if let Some(path) = xmp {
                 let preset = rawmakase::xmp::parse(&path, &std::fs::read_to_string(&path)?)?;
                 let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
@@ -359,7 +364,8 @@ fn main() -> Result<()> {
                 "Iterations must be 1–1000"
             );
             let t = Instant::now();
-            let im = raw::Raw::open(&input)?.develop(false, &AtomicBool::new(false))?;
+            let im =
+                raw::Raw::open(&input)?.develop(raw::Decode::full(), &AtomicBool::new(false))?;
             let decode = t.elapsed();
             let small = develop::preview(&im, 1600);
             let mut r = Recipe::for_metadata(&im.metadata);

@@ -366,6 +366,7 @@ impl Editor {
             || self.remove_copy.is_some()
             || self.read_metadata.is_some()
             || self.not_editable.is_some()
+            || self.folder_question.is_some()
             || self.view.shortcuts
             || self.copy_dialog.is_some()
             || self.preset_rename.is_some()
@@ -740,6 +741,9 @@ impl Editor {
             }
             if param == Param::Clarity {
                 recipe.adopt_measured_clarity(before);
+            }
+            if param == Param::Texture {
+                recipe.adopt_measured_texture(before);
             }
             shown
         };

@@ -59,6 +59,9 @@ pub struct Library {
     /// Each collection's photos, limited to the ones the Library shows.
     collection_photos: HashMap<i64, HashSet<i64>>,
     roots: Vec<(i64, String, Option<String>)>,
+    /// Whether the folders missing on this computer were reported since the
+    /// catalog opened.
+    missing_noted: bool,
     volumes: volumes::Volumes,
     /// The source and filter bar; `visible` is their result.
     filters: filter::Filters,
@@ -115,6 +118,8 @@ pub struct Library {
     loupe_info: photo_info::Overlay,
     /// Photo info was asked for while it was being read.
     info_again: bool,
+    /// Times photo info read from files was saved, so views know to refresh.
+    info_saves: u64,
     /// The hovered grid photo's info, for its tooltip.
     hover_info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
@@ -169,6 +174,7 @@ impl Library {
             collections: Vec::new(),
             collection_photos: HashMap::new(),
             roots: Vec::new(),
+            missing_noted: false,
             volumes: Default::default(),
             filters: Default::default(),
             selected_folder: String::new(),
@@ -202,6 +208,7 @@ impl Library {
             info_reader: None,
             info: None,
             info_again: false,
+            info_saves: 0,
             hover_info: None,
             loupe_info: Default::default(),
             capture_tried: HashSet::new(),

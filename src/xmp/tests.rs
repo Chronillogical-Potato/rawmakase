@@ -353,7 +353,7 @@ fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
     // resets an earlier Amount.
     let earlier = Recipe {
         profile_amount: 0.3,
-        ..base.clone()
+        ..base
     };
     let r = parse(
         Path::new("look.xmp"),
@@ -1183,7 +1183,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         r.lens_profile_choice,
         LensProfileChoice {
             setup: LensProfileSetup::Custom,
-            id: Some(id.clone()),
+            id: Some(id),
         }
     );
     assert!(r.lens_correction(&m).is_none());
@@ -1392,6 +1392,26 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
     .apply(&fresh, &m, &[], None)?;
     assert_eq!(exposure.saturation_model, SaturationModel::Gray);
     assert_eq!(exposure.calibration_model, CalibrationModel::Measured);
+    Ok(())
+}
+/// A packet from 0.2.0 (marker format 2) could not name Vibrance, so it keeps the
+/// earlier Vibrance; format 3 names it when kept.
+#[test]
+fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
+    use crate::develop::color_mixer::{SaturationModel, VibranceModel};
+    let m = Metadata::default();
+    let fresh = Recipe::with_profiles(&m, &[]);
+    let apply = |markers: &str| {
+        let attrs = format!(
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.2.0" c:RAWmakaseMarkers="{markers}" c:Vibrance="-80" c:Saturation="-80""#
+        );
+        parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)
+    };
+    let two = apply("2")?;
+    assert_eq!(two.vibrance_model, VibranceModel::Original);
+    assert_eq!(two.saturation_model, SaturationModel::Gray);
+    let three = apply("3")?;
+    assert_eq!(three.vibrance_model, VibranceModel::Chart);
     Ok(())
 }
 #[test]

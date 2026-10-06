@@ -158,7 +158,8 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog/edits.rs](../src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
 | [catalog/develop_history.rs](../src/catalog/develop_history.rs) | A photo's Develop History, saved in the same transaction as its edit; large settings are stored once per History. |
 | [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
-| [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them. |
+| [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
+| [catalog/locations.rs](../src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
 | [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
 | [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
@@ -194,6 +195,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [treatment.rs](../src/app/treatment.rs) | The Basic panel's Treatment (and V), the B&W panel's Auto and the "Apply auto mix when first converting" preference, each change one History step. |
 | [auto.rs](../src/app/auto.rs) | Runs Auto (the Basic panel's Auto button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs, Lightroom import, folder addition, relinking and applying imported edits. |
+| [folder_locations.rs](../src/app/folder_locations.rs) | Preferences › Catalog › Folder locations, and the questions changing a root or adding a folder can raise. |
 | [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported. |
 | [upright.rs](../src/app/upright.rs) | Runs the Transform panel's Upright analysis off the UI thread. |
 | [stats.rs](../src/app/stats.rs) | The one-time question about sharing usage stats and its Preferences row; the report itself is in `src/stats.rs`. |
@@ -323,6 +325,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [xmp/tests.rs](../src/xmp/tests.rs), [presets/tests.rs](../src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
 | [storage/sidecar/tests.rs](../src/storage/sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
+| [catalog/locations_tests.rs](../src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
 | [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
 | [develop/gpu/tests.rs](../src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
 | [tests/color/](../tests/color/main.rs), [tests/corpus/README.md](../tests/corpus/README.md) | The color corpus: synthetic chart DNGs rendered and compared with committed snapshots and Camera Raw renders on every `cargo test`; private photo and Adobe-profile tiers behind `RAWMAKASE_CORPUS`. |

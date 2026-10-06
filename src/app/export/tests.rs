@@ -204,3 +204,21 @@ fn a_photo_opened_without_a_catalog_is_exported_only_while_its_file_is_there() -
     assert!(e.status.contains("Offline"), "{}", e.status);
     Ok(())
 }
+
+#[test]
+fn show_in_finder_opens_one_window_for_each_folder_exported_to() {
+    let exported: Vec<PathBuf> = ["/a/1.jpg", "/a/2.jpg", "/b/3.jpg", "/a/4.jpg"]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    assert_eq!(
+        to_show(&exported),
+        [PathBuf::from("/a/1.jpg"), PathBuf::from("/b/3.jpg")]
+    );
+    // However many folders, a handful of windows.
+    let many: Vec<PathBuf> = (0..20)
+        .map(|i| PathBuf::from(format!("/{i}/x.jpg")))
+        .collect();
+    assert_eq!(to_show(&many).len(), 5);
+    assert_eq!(folders(&many), 20);
+}

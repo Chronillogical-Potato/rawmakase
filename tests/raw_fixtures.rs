@@ -1,7 +1,7 @@
 use rawmakase::{
     develop::{self, Recipe},
     export::{self, ExportOptions},
-    raw::Raw,
+    raw::{Decode, Raw},
     storage,
 };
 use std::{path::PathBuf, sync::atomic::AtomicBool};
@@ -29,15 +29,15 @@ fn raw_development_and_export() -> anyhow::Result<()> {
         let before = storage::Identity::read(path)?;
         assert!(
             Raw::open(path)?
-                .develop(false, &AtomicBool::new(true))
+                .develop(Decode::full(), &AtomicBool::new(true))
                 .is_err()
         );
-        let fast = Raw::open(path)?.develop(true, &AtomicBool::new(false))?;
+        let fast = Raw::open(path)?.develop(Decode::Half, &AtomicBool::new(false))?;
         assert!(fast.width < fast.metadata.width && fast.height < fast.metadata.height);
         drop(fast);
         let mut raw = Raw::open(path)?;
         assert!(!raw.thumbnail()?.is_empty());
-        let image = raw.develop(false, &AtomicBool::new(false))?;
+        let image = raw.develop(Decode::full(), &AtomicBool::new(false))?;
         assert_eq!(image.scale_clipped, 0);
         assert!(image.pixels.iter().flatten().all(|p| p.is_finite()));
         let mut recipe = Recipe::for_metadata(&image.metadata);
@@ -126,7 +126,8 @@ fn navigation_memory_stress() -> anyhow::Result<()> {
     let mut warm = 0;
     for i in 0..50 {
         {
-            let im = Raw::open(&files[i % files.len()])?.develop(false, &AtomicBool::new(false))?;
+            let im = Raw::open(&files[i % files.len()])?
+                .develop(Decode::full(), &AtomicBool::new(false))?;
             let small = develop::preview(&im, 1600);
             let r = Recipe::for_metadata(&im.metadata);
             let _ = develop::render(&small, &r, 1600)?;

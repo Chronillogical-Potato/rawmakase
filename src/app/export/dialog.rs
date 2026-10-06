@@ -2,7 +2,7 @@
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::Editor;
 use crate::app::theme;
-use crate::export::{Destination, Existing, Format, Include, NameContext, Naming};
+use crate::export::{AfterExport, Destination, Existing, Format, Include, NameContext, Naming};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -424,6 +424,18 @@ impl Editor {
                 form_row(ui, "", |_| {});
             }
         }
+        let s = &mut self.exports.draft;
+        section(ui, "Post-Processing");
+        form_row(ui, "After Export", |ui| {
+            egui::ComboBox::from_id_salt("export-after")
+                .width(220.)
+                .selected_text(s.after_export.label())
+                .show_ui(ui, |ui| {
+                    for after in AfterExport::ALL {
+                        ui.selectable_value(&mut s.after_export, after, after.label());
+                    }
+                });
+        });
         ui.add_space(8.);
         if choose {
             self.choose_export_folder(ui.ctx());

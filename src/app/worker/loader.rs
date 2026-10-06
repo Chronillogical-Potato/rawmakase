@@ -2,7 +2,7 @@ use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     decode_cache::DecodeCache,
     export::ExportOptions,
-    raw::{self, thumbnail},
+    raw::{self, Decode, Demosaic, thumbnail},
 };
 use eframe::egui;
 use std::{
@@ -16,6 +16,7 @@ struct FullJob {
     path: std::path::PathBuf,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     started: Instant,
+    demosaic: Demosaic,
     /// Decode cache key of `path`, when its identity could be read.
     key: Option<String>,
     prefetch: Option<Prefetch>,
@@ -44,14 +45,15 @@ fn prefetcher() -> Latest<Prefetch> {
             return;
         };
         let cache = DecodeCache::default();
-        let Ok(key) = DecodeCache::key(&job.path) else {
+        let Ok(key) = DecodeCache::key(&job.path, job.demosaic) else {
             return;
         };
         if job.cancel.load(Ordering::Relaxed) || cache.contains(&key) {
             return;
         }
         let _ = pool.install(|| -> anyhow::Result<()> {
-            let image = raw::Raw::open(&job.path)?.develop(false, &job.cancel)?;
+            let image =
+                raw::Raw::open(&job.path)?.develop(Decode::Full(job.demosaic), &job.cancel)?;
             crate::develop::quality::recovered(&image, &job.cancel)?;
             if !job.cancel.load(Ordering::Relaxed) {
                 cache.store(&key, &image)?;
@@ -72,7 +74,8 @@ fn full_loader(
                 return Ok(());
             }
             {
-                let image = Arc::new(raw::Raw::open(&job.path)?.develop(false, &job.cancel)?);
+                let decode = Decode::Full(job.demosaic);
+                let image = Arc::new(raw::Raw::open(&job.path)?.develop(decode, &job.cancel)?);
                 // Recovered here rather than by the first render, so the cache holds it.
                 crate::develop::quality::recovered(&image, &job.cancel)?;
                 if job.cancel.load(Ordering::Relaxed) {
@@ -175,7 +178,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 return Ok(());
             }
             let t = Instant::now();
-            let key = DecodeCache::key(&path).ok();
+            let key = DecodeCache::key(&path, job.demosaic).ok();
             let cached = key
                 .as_ref()
                 .and_then(|key| DecodeCache::default().load(key, &raw.metadata));
@@ -197,7 +200,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
             // Lightroom-style two stages: a half-size decode (about 0.2 s) makes
             // the photo editable at once; the full-resolution decode, which can
             // take seconds, then replaces it for 100% views and export.
-            let quick = Arc::new(raw.develop(true, &job.cancel)?);
+            let quick = Arc::new(raw.develop(Decode::Half, &job.cancel)?);
             send(
                 &tx,
                 &ctx,
@@ -212,6 +215,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 path,
                 cancel: job.cancel.clone(),
                 started: t,
+                demosaic: job.demosaic,
                 key,
                 prefetch,
             });

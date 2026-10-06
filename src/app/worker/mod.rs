@@ -62,6 +62,8 @@ pub enum Event {
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
+    /// A folder change waiting for the user's answer.
+    FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     Monitor(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),
@@ -113,6 +115,11 @@ pub enum Event {
         generation: u64,
         analysed: Box<crate::develop::Recipe>,
         result: Result<Option<f32>, String>,
+    },
+    /// The setup assistant's scan for cameras, profiles and presets.
+    OnboardingScanned {
+        generation: u64,
+        found: Box<crate::app::onboarding::Found>,
     },
     XmpLibrary {
         scan: u64,
@@ -203,6 +210,8 @@ pub struct LoadJob {
     pub prefetch: Option<Prefetch>,
     /// What the photo starts from when it has no edit.
     pub defaults: Arc<crate::develop::defaults::DevelopDefaults>,
+    /// The demosaic of the full-size decode and of its decode-cache key.
+    pub demosaic: crate::raw::Demosaic,
 }
 /// A photo to develop into the decode cache ahead of time, so opening it next
 /// skips decoding. It has its own cancel flag: the photo on screen finishing
@@ -210,6 +219,7 @@ pub struct LoadJob {
 pub struct Prefetch {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
+    pub demosaic: crate::raw::Demosaic,
 }
 /// What is drawn over (or instead of) the rendered photo.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

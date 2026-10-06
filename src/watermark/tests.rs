@@ -215,7 +215,7 @@ fn renaming_a_preset_keeps_its_image() -> Result<()> {
         &store,
         &Watermark {
             name: "Office".into(),
-            ..renamed.clone()
+            ..renamed
         },
         Some("Studio"),
         Some(&source),

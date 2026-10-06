@@ -48,6 +48,7 @@ fn old_recipes_keep_original_profile_tones() {
         "grading_model",
         "mixer_model",
         "saturation_model",
+        "vibrance_model",
         "calibration_model",
         "whites_model",
         "gamut_model",
@@ -88,6 +89,10 @@ fn old_recipes_keep_original_profile_tones() {
         crate::develop::color_mixer::SaturationModel::Original
     );
     assert_eq!(
+        old.vibrance_model,
+        crate::develop::color_mixer::VibranceModel::Original
+    );
+    assert_eq!(
         old.calibration_model,
         crate::develop::calibration::CalibrationModel::Original
     );
@@ -100,6 +105,7 @@ fn old_recipes_keep_original_profile_tones() {
         gamut_model: crate::develop::GamutModel::Clip,
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
         saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
+        vibrance_model: crate::develop::color_mixer::VibranceModel::Chart,
         calibration_model: crate::develop::calibration::CalibrationModel::Measured,
         ..Recipe::default()
     };
@@ -111,6 +117,7 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.gamut_model, measured.gamut_model);
     assert_eq!(back.mixer_model, measured.mixer_model);
     assert_eq!(back.saturation_model, measured.saturation_model);
+    assert_eq!(back.vibrance_model, measured.vibrance_model);
     assert_eq!(back.calibration_model, measured.calibration_model);
 }
 
@@ -845,7 +852,7 @@ fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
     let brighter = pick(&masked)?;
     assert!(brighter[2] > 1.3 * before[2], "{before:?} {brighter:?}");
     // A swatch picked there selects that color: Saturation −100 grays the spot.
-    let mut edited = plain.clone();
+    let mut edited = plain;
     let i = add_sample(&mut edited.point_colors, before).unwrap();
     edited.point_colors[i] = PointColor {
         shift: [0., -1., 0.],
@@ -1012,7 +1019,7 @@ fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow:
     }
     assert!(TargetWeights::new(target, &sample(&r, 2)?, &r).is_empty());
     // Black & white: the mix's own hue weights at the patch, and a drag up brightens it.
-    let mut mono = r.clone();
+    let mut mono = r;
     mono.effects.monochrome = true;
     let s = sample(&mono, 1)?;
     let w = TargetWeights::new(Target::BlackWhite, &s, &mono);
@@ -1283,6 +1290,20 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         .collect();
     let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.photo, plain.photo);
+    // Nor the measured Texture, which makes a new image.
+    let textured = crate::develop::texture::TextureDetail::of(
+        &im,
+        1.,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap()
+    .apply(&im, 1.);
+    let source = Source {
+        untextured: Some(&im),
+        ..Source::new(&textured, None)
+    };
+    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    assert_eq!(textured.photo, plain.photo);
 }
 
 /// A look's parametric curve: added to the user's regions by the measured model, a
@@ -1539,7 +1560,7 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     let ratio = on / off;
     assert!((0.35..0.7).contains(&ratio), "{ratio}");
     // The original operator at 25 barely touched it.
-    let mut original = r.clone();
+    let mut original = r;
     original.noise_model = NoiseModel::Original;
     assert!(chroma_noise(&original)? / off > 0.75);
     let saved: Recipe = serde_json::from_value(serde_json::to_value(Recipe::default())?)?;
@@ -1562,4 +1583,34 @@ fn legacy_engines_keep_the_original_colour_noise_filter() {
     r.engine = 4;
     assert!(r.chroma_denoise().is_some());
     assert_eq!(r.sampled_noise_chroma(), 0.);
+}
+/// New edits render Texture with the measured operator; edits saved before keep the
+/// original, until Texture is added to a photo that had none.
+#[test]
+fn texture_operator_is_kept_by_old_edits() {
+    use crate::develop::texture::TextureModel;
+    let im = fixture();
+    assert_eq!(
+        Recipe::with_profiles(&im.metadata, &[]).texture_model,
+        TextureModel::Measured
+    );
+    let mut saved: Recipe = serde_json::from_value(
+        serde_json::to_value(Recipe {
+            effects: crate::develop::effects::Effects {
+                texture: 0.4,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved.texture_model, TextureModel::Original);
+    saved.effects.texture = 0.6;
+    saved.adopt_measured_texture(0.4);
+    assert_eq!(saved.texture_model, TextureModel::Original);
+    let mut none = Recipe::default();
+    none.effects.texture = 0.3;
+    none.adopt_measured_texture(0.);
+    assert_eq!(none.texture_model, TextureModel::Measured);
 }

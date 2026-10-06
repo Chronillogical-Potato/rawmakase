@@ -24,6 +24,8 @@ impl Editor {
                     self.catalog_work = None;
                     self.catalog_ready(result);
                 }
+                // The dialog's own DialogClosed follows.
+                Event::FolderQuestion(question) => self.folder_question = Some(*question),
 
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
@@ -102,6 +104,9 @@ impl Editor {
                 Event::Import(kind, paths) => {
                     self.activity.finish_dialog();
                     self.import(kind, paths, ctx);
+                }
+                Event::OnboardingScanned { generation, found } => {
+                    self.onboarding_scanned(generation, *found)
                 }
                 Event::Imported(summary) => self.imported(summary, ctx),
                 Event::Synced(result) => self.synced(*result),
@@ -278,6 +283,9 @@ impl Editor {
     }
     fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
+        // Folder locations may have changed with it.
+        self.save_computer_name();
+        self.preferences.locations = None;
         match result {
             Ok(mut l) => {
                 self.load.invalidate();

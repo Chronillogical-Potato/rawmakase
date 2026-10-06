@@ -55,6 +55,7 @@ impl Editor {
             || self.remove_copy.is_some()
             || self.read_metadata.is_some()
             || self.not_editable.is_some()
+            || self.folder_question.is_some()
             || self.view.shortcuts
             || self.copy_dialog.is_some()
             || self.preset_rename.is_some()
@@ -110,6 +111,8 @@ impl Editor {
         self.preset_rename_window(&ctx);
         self.curve_save_window(&ctx);
         self.preferences_window(&ctx);
+        // Above Preferences, where Change… asks it.
+        self.folder_question_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);
         #[cfg(feature = "telemetry")]
