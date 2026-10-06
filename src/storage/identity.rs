@@ -49,7 +49,8 @@ impl Identity {
             prefix_hash: format!("{hash:016x}"),
         })
     }
-    pub(super) fn key(&self) -> String {
+    /// A file name for state kept per file, unique to this identity.
+    pub(crate) fn key(&self) -> String {
         format!("{}-{}-{}", self.prefix_hash, self.size, self.modified_ns)
     }
 }

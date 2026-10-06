@@ -144,7 +144,7 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     )?;
     assert_eq!(cat.load_edit(40, &p)?.unwrap().recipe, edit);
     assert!(cat.load_edit(41, &p)?.is_none());
-    assert!(!crate::storage::sidecar_path(&p).exists());
+    assert!(!super::legacy_sidecar::sidecar_path(&p).exists());
     cat.set_metadata(41, 5, 1, "Purple")?;
     assert_eq!(cat.photos()?[0].rating, 4);
     assert_eq!(cat.photos()?[1].rating, 5);
@@ -610,7 +610,7 @@ fn adding_a_folder_imports_sidecar_edits() -> Result<()> {
         exposure: 0.75,
         ..Default::default()
     };
-    crate::storage::save(&edited, &edit, &ExportOptions::default())?;
+    super::legacy_sidecar::save(&edited, &edit, &ExportOptions::default())?;
     let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
     assert_eq!(cat.add_folder(&folder)?, 2);
     let photos = cat.photos()?;
@@ -624,7 +624,7 @@ fn adding_a_folder_imports_sidecar_edits() -> Result<()> {
     );
     assert!(cat.load_edit(plain_photo.id, &plain_photo.path)?.is_none());
     // The sidecar is left as it was.
-    assert!(crate::storage::sidecar_path(&edited).exists());
+    assert!(super::legacy_sidecar::sidecar_path(&edited).exists());
     Ok(())
 }
 #[test]

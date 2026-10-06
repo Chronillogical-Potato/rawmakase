@@ -91,7 +91,7 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
     editor.document.recipe.exposure = 1.2;
     editor.document.save.mark_changed();
     assert!(editor.flush());
-    assert!(!crate::storage::sidecar_path(&photo).exists());
+    assert!(!crate::catalog::legacy_sidecar::sidecar_path(&photo).exists());
     assert_eq!(
         editor
             .library

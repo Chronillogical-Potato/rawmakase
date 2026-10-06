@@ -1,6 +1,10 @@
-//! Identity-checked edits with read-only-folder fallback and conflict protection.
-use super::{atomic_json, data_dir};
+//! Edits saved beside the RAW (`*.rawmakase.json`) by releases before the
+//! catalog: identity-checked, with a fallback store for read-only folders and
+//! conflict protection. Adding a folder imports them; RAWmakase no longer
+//! writes them; the writer stays for the persistence tests. Not to be confused
+//! with [`sidecars`](super::sidecars), the XMP metadata files beside a photo.
 use crate::develop::saved_format::{migrate_recipe, saved_version};
+use crate::storage::{Identity, atomic_json, bitmaps, data_dir};
 use crate::{
     develop::{LocalEdits, Recipe},
     export::ExportOptions,
@@ -12,7 +16,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use super::identity::Identity;
 /// A photo's saved edit. Unknown fields (from a newer release) are kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Sidecar {
@@ -99,10 +102,10 @@ fn load_at(raw: &Path, store: &Path) -> Result<Option<Sidecar>> {
 }
 /// A photo's sidecar edit and the bitmaps its spots and masks refer to, both from
 /// the store `load` chooses, for importing into the catalog.
-pub(crate) fn import(raw: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+pub(crate) fn import(raw: &Path) -> Result<Option<(Sidecar, Vec<bitmaps::Bitmap>)>> {
     import_at(raw, &data_dir())
 }
-fn import_at(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Vec<super::bitmaps::Bitmap>)>> {
+fn import_at(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Vec<bitmaps::Bitmap>)>> {
     let Some((mut sidecar, companion)) = chosen(raw, store)? else {
         return Ok(None);
     };
@@ -111,7 +114,7 @@ fn import_at(raw: &Path, store: &Path) -> Result<Option<(Sidecar, Vec<super::bit
         bitmaps = companion
             .bitmaps
             .values()
-            .map(|text| super::bitmaps::Bitmap::decompress(&super::bitmaps::from_base64(text)?))
+            .map(|text| bitmaps::Bitmap::decompress(&bitmaps::from_base64(text)?))
             .collect::<Result<_>>()?;
         sidecar.recipe = sidecar.recipe.with_local(companion.local);
     }

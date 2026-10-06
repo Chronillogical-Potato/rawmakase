@@ -23,7 +23,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/app/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/storage/sidecar.rs), [format migration](../src/develop/saved_format.rs) | Catalog edits, native presets and persistence tests |
+| Change autosave or saved formats | [Save policy](../src/app/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/develop/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -157,7 +157,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [develop/saved_format.rs](../src/develop/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [identity.rs](../src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
-| [sidecar.rs](../src/storage/sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The library API can still write them. |
+| [catalog/legacy_sidecar.rs](../src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
 | [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults and other preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
 | [catalog/edits.rs](../src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
@@ -328,7 +328,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [develop/pipeline/tests.rs](../src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
 | [camera_profiles/tests.rs](../src/camera_profiles/tests.rs) | Profile parsing and validation. |
 | [xmp/tests.rs](../src/xmp/tests.rs), [presets/tests.rs](../src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
-| [storage/sidecar/tests.rs](../src/storage/sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
+| [catalog/legacy_sidecar/tests.rs](../src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [catalog/locations_tests.rs](../src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
 | [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
