@@ -4378,3 +4378,38 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     }
     Ok(())
 }
+#[test]
+fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
+    let ctx = egui::Context::default();
+    let row = std::cell::Cell::new(Rect::NOTHING);
+    let draw = |value: &mut f32, events: Vec<egui::Event>, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let top = ui.cursor().min;
+            super::widgets::slider(ui, "Exposure", value, -5. ..=5., 0.);
+            row.set(Rect::from_min_max(
+                top,
+                Pos2::new(ui.max_rect().right(), ui.cursor().top()),
+            ));
+        })
+    };
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // An imported +6 EV, beyond the slider's ±5.
+    let mut value = 6.;
+    draw(&mut value, vec![], 0.);
+    assert_eq!(value, 6., "showing the slider changed the value");
+    let over = egui::Event::PointerMoved(row.get().center());
+    draw(&mut value, vec![over.clone()], 1.);
+    assert_eq!(value, 6.);
+    // Up moves it no further out; Down moves it one step toward the range,
+    // not to its end.
+    draw(&mut value, vec![over.clone(), key(egui::Key::ArrowUp)], 2.);
+    assert_eq!(value, 6.);
+    draw(&mut value, vec![over, key(egui::Key::ArrowDown)], 3.);
+    assert!(5. < value && value < 6., "{value}");
+}

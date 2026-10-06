@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 pub const TEMPERATURE_MIN: f32 = 2000.;
 pub const TEMPERATURE_MAX: f32 = 50000.;
 pub const TINT_LIMIT: f32 = 150.;
+/// The Exposure a recipe may hold, in EV. The slider spans ±5; imported edits and
+/// typed values may go further.
+pub const EXPOSURE_LIMIT: f32 = 8.;
 /// A photo's develop settings. Fields this build does not know (from a newer release)
 /// are kept in `unknown` and saved again, so an older build never drops them.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -585,7 +588,7 @@ impl Recipe {
             p.validate()?;
         }
         ensure!(
-            (-8. ..=8.).contains(&self.exposure)
+            (-EXPOSURE_LIMIT..=EXPOSURE_LIMIT).contains(&self.exposure)
                 && self.camera_exposure.is_finite()
                 && self.camera_exposure.abs() <= 5.,
             "Exposure out of bounds"

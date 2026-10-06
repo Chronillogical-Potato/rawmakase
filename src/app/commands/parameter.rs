@@ -1,7 +1,9 @@
 //! Parameter names and units shared by application command adapters.
 use crate::app::inspector::BANDS;
 use crate::app::widgets::slider_text;
-use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+use crate::develop::{
+    EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, params::nudged,
+};
 
 /// The Angle slider's limit either way, in degrees, as `Recipe::validate` allows.
 const STRAIGHTEN_LIMIT: f32 = 45.;
@@ -165,8 +167,9 @@ impl Param {
     pub(in crate::app) fn set(self, r: &mut Recipe, shown: f32, channel: usize) -> String {
         let v = self.value(r, channel);
         match self {
+            // An exact number is an explicit request: anything a recipe may hold.
             Self::Exposure => {
-                *v = shown.clamp(-5., 5.);
+                *v = shown.clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
                 slider_text(f64::from(*v), 2, true)
             }
             Self::Temperature => {
@@ -194,7 +197,7 @@ impl Param {
         let v = self.value(r, channel);
         match self {
             Self::Exposure => {
-                *v = (*v + 0.02 * t).clamp(-5., 5.);
+                *v = nudged(*v, 0.02 * t, -5. ..=5.);
                 slider_text(f64::from(*v), 2, true)
             }
             // Evenly in mireds, as the slider does; clockwise is warmer.
@@ -204,15 +207,19 @@ impl Param {
                 slider_text(f64::from(*v), 0, false)
             }
             Self::Tint => {
-                *v = (*v + t).clamp(-TINT_LIMIT, TINT_LIMIT);
+                *v = nudged(*v, t, -TINT_LIMIT..=TINT_LIMIT);
                 slider_text(f64::from(*v), 0, true)
             }
             Self::Straighten => {
-                *v = (*v + STRAIGHTEN_TICK * t).clamp(-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT);
+                *v = nudged(
+                    *v,
+                    STRAIGHTEN_TICK * t,
+                    -STRAIGHTEN_LIMIT..=STRAIGHTEN_LIMIT,
+                );
                 slider_text(f64::from(*v), 2, true)
             }
             _ => {
-                *v = (*v + 0.01 * t).clamp(-1., 1.);
+                *v = nudged(*v, 0.01 * t, -1. ..=1.);
                 slider_text(f64::from(*v * 100.), 0, true)
             }
         }
