@@ -195,8 +195,9 @@ pub fn same_camera(name: &str, m: &Metadata) -> bool {
 }
 
 /// The raw defaults ready to apply: the choices, with the presets they name read.
-/// Cheap to share between threads behind an `Arc`.
-#[derive(Clone, Debug, Default)]
+/// Cheap to share between threads behind an `Arc`. Equal when the choices and the
+/// presets as read are: a preset file can change under the same id.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct DevelopDefaults {
     settings: RawDefaults,
     presets: Vec<Preset>,
@@ -208,18 +209,6 @@ pub struct Resolved {
     pub recipe: Recipe,
     pub name: String,
     pub note: Option<String>,
-}
-impl PartialEq for DevelopDefaults {
-    fn eq(&self, other: &Self) -> bool {
-        // A preset file can change under the same id.
-        let read = |d: &Self| {
-            d.presets
-                .iter()
-                .map(|p| format!("{p:?}"))
-                .collect::<Vec<_>>()
-        };
-        self.settings == other.settings && read(self) == read(other)
-    }
 }
 impl DevelopDefaults {
     /// Reads the presets `settings` names from the preset library.
@@ -404,6 +393,25 @@ mod tests {
         DevelopDefaults::with_presets(settings, |id| {
             (id == "brighter").then(|| brighter_preset(id))
         })
+    }
+
+    #[test]
+    fn defaults_are_equal_only_when_their_presets_read_the_same() {
+        let settings = RawDefaults {
+            master: preset_choice("brighter"),
+            ..RawDefaults::default()
+        };
+        assert_eq!(load(settings.clone()), load(settings.clone()));
+        assert_ne!(load(settings.clone()), DevelopDefaults::default());
+        // The same id, the file changed since.
+        let edited = DevelopDefaults::with_presets(settings, |id| {
+            let mut preset = brighter_preset(id);
+            preset
+                .settings
+                .insert("Exposure2012".into(), "+0.50".into());
+            Some(preset)
+        });
+        assert_ne!(load(edited.settings.clone()), edited);
     }
 
     #[test]
