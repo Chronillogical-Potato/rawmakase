@@ -66,9 +66,12 @@ with LibRaw 0.22.
 Performance baseline, taken on `b820a4d` (after the dependency moves of Phase 2,
 which change no rendering code) with
 `cargo run --release --example preview_benchmark -- DSCF7853.RAF`: Fujifilm X100F,
-6032×4032, Adobe Color, Apple M1 Pro with its GPU, median of the benchmark's runs.
-Later refactor steps that touch decoding, previews or rendering compare against
-these numbers.
+6032×4032, Adobe Color, Apple M1 Pro with its GPU. Fit and region rows are medians
+of the benchmark's repeated renders; decoding, opening and export rows are single
+timings. `b820a4d` renders differently from the behaviour baseline `9e909ac`
+(Texture, Vibrance and the B&W mix changed in between), so later refactor steps
+that touch decoding, previews or rendering compare against these numbers, not
+older ones.
 
 | Step | Time |
 | --- | ---: |
