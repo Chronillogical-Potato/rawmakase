@@ -1,6 +1,7 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::PanelState;
+use crate::develop::params::format_value;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -953,7 +954,7 @@ pub(super) fn slider_with(
                         .range(start * scale..=end * scale)
                         .clamp_existing_to_range(false)
                         .speed(span * scale / 500.)
-                        .custom_formatter(move |v, _| slider_text(v, decimals, signed))
+                        .custom_formatter(move |v, _| format_value(v, decimals, signed))
                         .custom_parser(|s| s.trim().trim_start_matches('+').parse().ok()),
                 )
             })
@@ -1082,7 +1083,7 @@ pub(super) fn slider_with(
         } else {
             format!("{context} {label}")
         };
-        let shown = slider_text(f64::from(*value * scale), decimals, signed);
+        let shown = format_value(f64::from(*value * scale), decimals, signed);
         name_history_step(ui, name, shown);
     }
     event
@@ -1110,15 +1111,6 @@ fn hovered_nudge(ui: &egui::Ui, row: Rect) -> Option<f32> {
         nudge
     });
     (nudge != 0.).then_some(nudge)
-}
-/// A slider's number as shown: Lightroom's scale, with a sign when it has one.
-pub(super) fn slider_text(v: f64, decimals: usize, signed: bool) -> String {
-    let text = format!("{v:.decimals$}");
-    if signed && v > 0. && !text.trim_start_matches(['0', '.']).is_empty() {
-        format!("+{text}")
-    } else {
-        text
-    }
 }
 /// Size of a segmented control: the track's height and the label size.
 pub(super) struct SegmentStyle {

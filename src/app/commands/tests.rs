@@ -1,4 +1,5 @@
 use super::*;
+use crate::develop::params::ParameterId;
 use serde_json::Value;
 fn json(value: impl serde::Serialize) -> Value {
     serde_json::to_value(value).unwrap()
@@ -29,7 +30,10 @@ fn editor() -> (Editor, egui::Context) {
     (e, ctx)
 }
 fn set(e: &mut Editor, ctx: &egui::Context, value: f32) -> Result<Outcome> {
-    e.execute_command(Command::new(Operation::Set(Param::Exposure, value)), ctx)
+    e.execute_command(
+        Command::new(Operation::Set(Param::Setting(ParameterId::Exposure), value)),
+        ctx,
+    )
 }
 #[test]
 fn command_edit_records_history_and_undo_returns_post_action_state() {
@@ -49,8 +53,11 @@ fn command_edit_records_history_and_undo_returns_post_action_state() {
 #[test]
 fn straighten_is_a_global_parameter_in_degrees() {
     let (mut e, ctx) = editor();
-    e.execute_command(Command::new(Operation::Set(Param::Straighten, 1.5)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Set(Param::Setting(ParameterId::Straighten), 1.5)),
+        &ctx,
+    )
+    .unwrap();
     assert_eq!(e.document.recipe.straighten, 1.5);
     assert_eq!(json(e.command_state())["values"]["straighten"], 1.5);
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
@@ -137,7 +144,7 @@ fn edits_reject_library_loading_modal_and_stale_targets() {
     let (generation, _) = e.load.start();
     assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "not_ready");
     e.load.finish(generation);
-    let mut command = Command::new(Operation::Set(Param::Exposure, 1.));
+    let mut command = Command::new(Operation::Set(Param::Setting(ParameterId::Exposure), 1.));
     command.target.generation = Some(generation + 1);
     assert_eq!(
         e.execute_command(command, &ctx).unwrap_err().code,
@@ -156,7 +163,7 @@ fn explicit_mask_has_local_units_and_rejects_stale_index() {
         ..Default::default()
     };
     let command = Command {
-        operation: Operation::Set(Param::Temperature, 35.),
+        operation: Operation::Set(Param::Setting(ParameterId::Temperature), 35.),
         target: target.clone(),
     };
     let global = e.document.recipe.temperature;
@@ -175,7 +182,7 @@ fn explicit_mask_has_local_units_and_rejects_stale_index() {
     assert_eq!(
         e.execute_command(
             Command {
-                operation: Operation::Set(Param::Vibrance, 20.),
+                operation: Operation::Set(Param::Setting(ParameterId::Vibrance), 20.),
                 target
             },
             &ctx
@@ -394,7 +401,7 @@ fn asynchronous_edits_and_out_of_frame_undo_invalidate_guards() {
     let mut auto = e.document.recipe.clone();
     auto.exposure = 1.25;
     e.auto_ready(super::super::worker::AutoKind::Settings, Ok(Box::new(auto)));
-    let mut command = Command::new(Operation::Set(Param::Contrast, 10.));
+    let mut command = Command::new(Operation::Set(Param::Setting(ParameterId::Contrast), 10.));
     command.target.revision = Some(initial);
     assert_eq!(
         e.execute_command(command, &ctx).unwrap_err().code,
@@ -422,8 +429,11 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     e.history(old);
     assert_eq!(e.document.history.steps().0.last().unwrap().name, "Preset");
     set(&mut e, &ctx, 100.).unwrap();
-    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
+        &ctx,
+    )
+    .unwrap();
     e.automation.end_turn();
     e.finish_gesture();
     let old = e.document.recipe.clone();
@@ -436,12 +446,18 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
 fn turns_group_only_the_same_parameter_and_scope() {
     let (mut e, ctx) = editor();
     for _ in 0..2 {
-        e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
-            .unwrap();
+        e.execute_command(
+            Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
+            &ctx,
+        )
+        .unwrap();
     }
     let exposure = e.document.recipe.exposure;
-    e.execute_command(Command::new(Operation::Adjust(Param::Contrast, 1)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Adjust(Param::Setting(ParameterId::Contrast), 1)),
+        &ctx,
+    )
+    .unwrap();
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
         .unwrap();
     assert_eq!(e.document.recipe.contrast, 0.);
@@ -451,10 +467,13 @@ fn turns_group_only_the_same_parameter_and_scope() {
     assert_eq!(e.document.recipe.exposure, 0.);
     e.document.recipe.masks.push(Default::default());
     e.command_state();
-    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
+        &ctx,
+    )
+    .unwrap();
     let global = e.document.recipe.exposure;
-    let mut command = Command::new(Operation::Adjust(Param::Exposure, 1));
+    let mut command = Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1));
     command.target = Target {
         mask: Some(0),
         generation: Some(e.load.id()),
@@ -536,8 +555,11 @@ fn auto_rejects_an_already_running_job() {
 #[test]
 fn ui_edit_during_dial_gesture_has_its_own_undo_step() {
     let (mut e, ctx) = editor();
-    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 3)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 3)),
+        &ctx,
+    )
+    .unwrap();
     let exposure = e.document.recipe.exposure;
     let frame = e.begin_edit_frame();
     e.toggle_treatment();
@@ -557,7 +579,7 @@ fn idle_frames_keep_turns_grouped_but_transport_changes_split_them() {
     let (mut e, ctx) = editor();
     for _ in 0..2 {
         e.execute_command_from(
-            Command::new(Operation::Adjust(Param::Exposure, 1)),
+            Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
             Source::Midi(1, 0),
             &ctx,
         )
@@ -566,8 +588,11 @@ fn idle_frames_keep_turns_grouped_but_transport_changes_split_them() {
         e.finish_edit_frame(frame, &ctx);
     }
     let midi_exposure = e.document.recipe.exposure;
-    e.execute_command(Command::new(Operation::Adjust(Param::Exposure, 1)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
+        &ctx,
+    )
+    .unwrap();
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
         .unwrap();
     assert_eq!(e.document.recipe.exposure, midi_exposure);
@@ -621,14 +646,20 @@ fn library_metadata_requires_stable_id_despite_selection_changes() -> anyhow::Re
 fn absolute_controls_use_parameter_ranges_and_devices_have_separate_undo() {
     let (mut e, ctx) = editor();
     e.execute_command_from(
-        Command::new(Operation::ControlValue(Param::Exposure, 127)),
+        Command::new(Operation::ControlValue(
+            Param::Setting(ParameterId::Exposure),
+            127,
+        )),
         Source::Midi(1, 0),
         &ctx,
     )
     .unwrap();
     assert_eq!(e.document.recipe.exposure, 5.);
     e.execute_command_from(
-        Command::new(Operation::ControlValue(Param::Exposure, 0)),
+        Command::new(Operation::ControlValue(
+            Param::Setting(ParameterId::Exposure),
+            0,
+        )),
         Source::Midi(2, 0),
         &ctx,
     )
@@ -642,7 +673,10 @@ fn absolute_controls_use_parameter_ranges_and_devices_have_separate_undo() {
     assert_eq!(e.document.recipe.exposure, 0.);
     e.document.recipe.masks.push(Default::default());
     let state = e.command_state();
-    let mut command = Command::new(Operation::ControlValue(Param::Exposure, 127));
+    let mut command = Command::new(Operation::ControlValue(
+        Param::Setting(ParameterId::Exposure),
+        127,
+    ));
     command.target = Target {
         mask: Some(0),
         generation: Some(state.generation),
@@ -681,13 +715,19 @@ fn clarity_added_by_command_takes_the_measured_operator() {
     use crate::develop::clarity::ClarityModel;
     let (mut e, ctx) = editor();
     e.document.recipe.clarity_model = ClarityModel::Original;
-    e.execute_command(Command::new(Operation::Set(Param::Clarity, 30.)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Set(Param::Setting(ParameterId::Clarity), 30.)),
+        &ctx,
+    )
+    .unwrap();
     assert_ne!(e.document.recipe.effects.clarity, 0.);
     assert_eq!(e.document.recipe.clarity_model, ClarityModel::Measured);
     // Clarity an old recipe already had keeps its operator.
     e.document.recipe.clarity_model = ClarityModel::Original;
-    e.execute_command(Command::new(Operation::Set(Param::Clarity, 50.)), &ctx)
-        .unwrap();
+    e.execute_command(
+        Command::new(Operation::Set(Param::Setting(ParameterId::Clarity), 50.)),
+        &ctx,
+    )
+    .unwrap();
     assert_eq!(e.document.recipe.clarity_model, ClarityModel::Original);
 }

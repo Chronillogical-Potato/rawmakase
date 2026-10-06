@@ -1,14 +1,12 @@
 //! Parameter names and units shared by application command adapters.
 use crate::app::inspector::BANDS;
-use crate::app::widgets::slider_text;
 use crate::develop::{
-    EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, params::nudged,
+    Recipe,
+    params::{
+        ParameterId::{self, *},
+        format_value, nudged,
+    },
 };
-
-/// The Angle slider's limit either way, in degrees, as `Recipe::validate` allows.
-const STRAIGHTEN_LIMIT: f32 = 45.;
-/// Degrees a dial tick or `turn` step moves the Angle: fine enough to level a horizon.
-const STRAIGHTEN_TICK: f32 = 0.1;
 
 /// The Color Mixer's channels, in the order of `Recipe::hsl`.
 const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
@@ -16,21 +14,8 @@ const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
 /// A slider a dial can turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::app) enum Param {
-    Exposure,
-    Contrast,
-    Highlights,
-    Shadows,
-    Whites,
-    Blacks,
-    Texture,
-    Clarity,
-    Dehaze,
-    Vibrance,
-    Saturation,
-    Temperature,
-    Tint,
-    /// The Crop panel's Angle, in degrees.
-    Straighten,
+    /// A setting with a descriptor (see `develop::params`).
+    Setting(ParameterId),
     /// A Color Mixer colour band (0 Red .. 7 Magenta), on the channel the
     /// panel's Hue / Sat / Lum selector shows.
     Band(usize),
@@ -44,28 +29,28 @@ impl Param {
     /// The sliders with a name of their own, as `midi.json` and the control
     /// socket spell them.
     pub(in crate::app) const NAMED: [(&'static str, Self); 14] = [
-        ("exposure", Self::Exposure),
-        ("contrast", Self::Contrast),
-        ("highlights", Self::Highlights),
-        ("shadows", Self::Shadows),
-        ("whites", Self::Whites),
-        ("blacks", Self::Blacks),
-        ("texture", Self::Texture),
-        ("clarity", Self::Clarity),
-        ("dehaze", Self::Dehaze),
-        ("vibrance", Self::Vibrance),
-        ("saturation", Self::Saturation),
-        ("temperature", Self::Temperature),
-        ("tint", Self::Tint),
-        ("straighten", Self::Straighten),
+        ("exposure", Self::Setting(Exposure)),
+        ("contrast", Self::Setting(Contrast)),
+        ("highlights", Self::Setting(Highlights)),
+        ("shadows", Self::Setting(Shadows)),
+        ("whites", Self::Setting(Whites)),
+        ("blacks", Self::Setting(Blacks)),
+        ("texture", Self::Setting(Texture)),
+        ("clarity", Self::Setting(Clarity)),
+        ("dehaze", Self::Setting(Dehaze)),
+        ("vibrance", Self::Setting(Vibrance)),
+        ("saturation", Self::Setting(Saturation)),
+        ("temperature", Self::Setting(Temperature)),
+        ("tint", Self::Setting(Tint)),
+        ("straighten", Self::Setting(Straighten)),
     ];
     /// `exposure`, `band3` (the channel the panel shows), `band3.sat` or
     /// `band3.gray`; bands count from 1 (Red). `temp` and `angle` are aliases.
     pub(in crate::app) fn parse(name: &str) -> Option<Self> {
         let name = name.to_ascii_lowercase();
         match name.as_str() {
-            "temp" => return Some(Self::Temperature),
-            "angle" => return Some(Self::Straighten),
+            "temp" => return Some(Self::Setting(Temperature)),
+            "angle" => return Some(Self::Setting(Straighten)),
             _ => {}
         }
         if let Some((_, param)) = Self::NAMED.iter().find(|(n, _)| *n == name) {
@@ -109,23 +94,9 @@ impl Param {
             _ => {}
         }
         match self {
-            Self::Exposure => "Exposure",
-            Self::Contrast => "Contrast",
-            Self::Highlights => "Highlights",
-            Self::Shadows => "Shadows",
-            Self::Whites => "Whites",
-            Self::Blacks => "Blacks",
-            Self::Texture => "Texture",
-            Self::Clarity => "Clarity",
-            Self::Dehaze => "Dehaze",
-            Self::Vibrance => "Vibrance",
-            Self::Saturation => "Saturation",
-            Self::Temperature => "Temp",
-            Self::Tint => "Tint",
-            Self::Straighten => "Angle",
-            Self::Band(_) | Self::Hsl(..) | Self::Gray(_) => unreachable!(),
+            Self::Setting(id) => id.descriptor().label.to_string(),
+            Self::Band(_) | Self::Hsl(..) | Self::Gray(_) => unreachable!("named above"),
         }
-        .to_string()
     }
     pub(in crate::app) fn value(self, r: &mut Recipe, channel: usize) -> &mut f32 {
         match self {
@@ -134,33 +105,20 @@ impl Param {
             Self::Band(i) => &mut r.hsl[i][channel],
             Self::Hsl(i, c) => &mut r.hsl[i][c],
             Self::Gray(i) => &mut r.effects.gray_mix[i],
-            Self::Exposure => &mut r.exposure,
-            Self::Contrast => &mut r.contrast,
-            Self::Highlights => &mut r.highlights,
-            Self::Shadows => &mut r.shadows,
-            Self::Whites => &mut r.whites,
-            Self::Blacks => &mut r.blacks,
-            Self::Texture => &mut r.effects.texture,
-            Self::Clarity => &mut r.effects.clarity,
-            Self::Dehaze => &mut r.effects.dehaze,
-            Self::Vibrance => &mut r.vibrance,
-            Self::Saturation => &mut r.saturation,
-            Self::Temperature => &mut r.temperature,
-            Self::Tint => &mut r.tint,
-            Self::Straighten => &mut r.straighten,
+            Self::Setting(id) => id.value_mut(r),
         }
     }
     pub(in crate::app) fn is_white_balance(self) -> bool {
-        matches!(self, Self::Temperature | Self::Tint)
+        matches!(self, Self::Setting(Temperature | Tint))
     }
     /// The slider's number as it shows: EV, kelvin, tint units or degrees, else
     /// -100..100.
     pub(in crate::app) fn shown(self, r: &mut Recipe, channel: usize) -> f64 {
-        let scale = match self {
-            Self::Exposure | Self::Temperature | Self::Tint | Self::Straighten => 1.,
-            _ => 100.,
-        };
-        (f64::from(*self.value(r, channel)) * scale * 1000.).round() / 1000.
+        let value = *self.value(r, channel);
+        match self {
+            Self::Setting(id) => id.shown(value),
+            _ => (f64::from(value) * 100. * 1000.).round() / 1000.,
+        }
     }
     /// Sets the slider to `shown`, a number as `shown` returns it, and returns
     /// the text for the History step.
@@ -168,59 +126,28 @@ impl Param {
         let v = self.value(r, channel);
         match self {
             // An exact number is an explicit request: anything a recipe may hold.
-            Self::Exposure => {
-                *v = shown.clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
-                slider_text(f64::from(*v), 2, true)
-            }
-            Self::Temperature => {
-                *v = shown.clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-                slider_text(f64::from(*v), 0, false)
-            }
-            Self::Tint => {
-                *v = shown.clamp(-TINT_LIMIT, TINT_LIMIT);
-                slider_text(f64::from(*v), 0, true)
-            }
-            Self::Straighten => {
-                *v = shown.clamp(-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT);
-                slider_text(f64::from(*v), 2, true)
+            Self::Setting(id) => {
+                *v = id.from_shown(shown);
+                id.text(*v)
             }
             _ => {
                 *v = (shown / 100.).clamp(-1., 1.);
-                slider_text(f64::from(*v * 100.), 0, true)
+                format_value(f64::from(*v * 100.), 0, true)
             }
         }
     }
     /// Moves the slider by `ticks` (clockwise positive) and returns the value as
     /// the slider shows it, for the History step.
     pub(in crate::app) fn turn(self, r: &mut Recipe, ticks: i32, channel: usize) -> String {
-        let t = ticks as f32;
         let v = self.value(r, channel);
         match self {
-            Self::Exposure => {
-                *v = nudged(*v, 0.02 * t, -5. ..=5.);
-                slider_text(f64::from(*v), 2, true)
-            }
-            // Evenly in mireds, as the slider does; clockwise is warmer.
-            Self::Temperature => {
-                let mired = (1e6 / *v - 4. * t).max(1e6 / TEMPERATURE_MAX);
-                *v = (1e6 / mired).clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-                slider_text(f64::from(*v), 0, false)
-            }
-            Self::Tint => {
-                *v = nudged(*v, t, -TINT_LIMIT..=TINT_LIMIT);
-                slider_text(f64::from(*v), 0, true)
-            }
-            Self::Straighten => {
-                *v = nudged(
-                    *v,
-                    STRAIGHTEN_TICK * t,
-                    -STRAIGHTEN_LIMIT..=STRAIGHTEN_LIMIT,
-                );
-                slider_text(f64::from(*v), 2, true)
+            Self::Setting(id) => {
+                *v = id.turned(*v, ticks);
+                id.text(*v)
             }
             _ => {
-                *v = nudged(*v, 0.01 * t, -1. ..=1.);
-                slider_text(f64::from(*v * 100.), 0, true)
+                *v = nudged(*v, 0.01 * ticks as f32, -1. ..=1.);
+                format_value(f64::from(*v * 100.), 0, true)
             }
         }
     }
@@ -243,13 +170,17 @@ impl Param {
             }))
             .collect()
     }
+    /// The range a control covers, in the units it shows.
     pub(in crate::app) fn range(self, mask: bool) -> (f32, f32) {
         match self {
-            Self::Exposure if mask => (-4., 4.),
-            Self::Exposure => (-5., 5.),
-            Self::Temperature if !mask => (TEMPERATURE_MIN, TEMPERATURE_MAX),
-            Self::Tint if !mask => (-TINT_LIMIT, TINT_LIMIT),
-            Self::Straighten => (-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT),
+            Self::Setting(Exposure) if mask => (-4., 4.),
+            // On a mask, Temp and Tint are relative shifts of −100..100.
+            Self::Setting(Temperature | Tint) if mask => (-100., 100.),
+            Self::Setting(id) => {
+                let d = id.descriptor();
+                let scale = d.display.scale;
+                (d.interactive.start() * scale, d.interactive.end() * scale)
+            }
             _ => (-100., 100.),
         }
     }
@@ -274,10 +205,10 @@ impl Param {
                 let (min, max) = param.range(false);
                 let (mask_min, mask_max) = param.range(true);
                 let unit = match param {
-                    Self::Exposure => "EV",
-                    Self::Temperature => "kelvin",
-                    Self::Tint => "tint",
-                    Self::Straighten => "degrees",
+                    Self::Setting(Exposure) => "EV",
+                    Self::Setting(Temperature) => "kelvin",
+                    Self::Setting(Tint) => "tint",
+                    Self::Setting(Straighten) => "degrees",
                     _ => "percent",
                 };
                 let local = param
@@ -289,7 +220,7 @@ impl Param {
                     min,
                     max,
                     mask: local,
-                    mask_unit: if param == Self::Exposure {
+                    mask_unit: if param == Self::Setting(Exposure) {
                         "EV"
                     } else {
                         "percent"
@@ -303,25 +234,30 @@ impl Param {
     }
     fn local_value(self, a: &mut crate::develop::masks::LocalAdjust) -> Option<&mut f32> {
         Some(match self {
-            Self::Exposure => &mut a.exposure,
-            Self::Temperature => &mut a.temperature,
-            Self::Tint => &mut a.tint,
-            Self::Contrast => &mut a.contrast,
-            Self::Highlights => &mut a.highlights,
-            Self::Shadows => &mut a.shadows,
-            Self::Whites => &mut a.whites,
-            Self::Blacks => &mut a.blacks,
-            Self::Texture => &mut a.texture,
-            Self::Clarity => &mut a.clarity,
-            Self::Dehaze => &mut a.dehaze,
-            Self::Saturation => &mut a.saturation,
+            Self::Setting(Exposure) => &mut a.exposure,
+            Self::Setting(Temperature) => &mut a.temperature,
+            Self::Setting(Tint) => &mut a.tint,
+            Self::Setting(Contrast) => &mut a.contrast,
+            Self::Setting(Highlights) => &mut a.highlights,
+            Self::Setting(Shadows) => &mut a.shadows,
+            Self::Setting(Whites) => &mut a.whites,
+            Self::Setting(Blacks) => &mut a.blacks,
+            Self::Setting(Texture) => &mut a.texture,
+            Self::Setting(Clarity) => &mut a.clarity,
+            Self::Setting(Dehaze) => &mut a.dehaze,
+            Self::Setting(Saturation) => &mut a.saturation,
             _ => return None,
         })
     }
     pub(in crate::app) fn local_shown(self, a: &crate::develop::masks::LocalAdjust) -> Option<f32> {
         let mut copy = *a;
-        self.local_value(&mut copy)
-            .map(|v| *v * if self == Self::Exposure { 1. } else { 100. })
+        self.local_value(&mut copy).map(|v| {
+            *v * if self == Self::Setting(Exposure) {
+                1.
+            } else {
+                100.
+            }
+        })
     }
     pub(in crate::app) fn local_set(
         self,
@@ -335,7 +271,7 @@ impl Param {
                 "This parameter is not available on masks",
             )
         })?;
-        let exposure = self == Self::Exposure;
+        let exposure = self == Self::Setting(Exposure);
         let scale = if exposure { 1. } else { 100. };
         let limit = if exposure { 4. } else { 1. };
         *v = shown
@@ -344,7 +280,7 @@ impl Param {
                 |n| n / scale,
             )
             .clamp(-limit, limit);
-        Ok(slider_text(
+        Ok(format_value(
             f64::from(*v * scale),
             if exposure { 2 } else { 0 },
             true,

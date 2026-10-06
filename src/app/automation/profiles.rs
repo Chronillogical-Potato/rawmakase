@@ -1,5 +1,6 @@
 //! Device-type presets. Adding a profile does not change the queue or editor.
 use super::*;
+use crate::develop::params::ParameterId;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,17 +46,17 @@ impl Config {
     pub(super) fn loupedeck() -> Self {
         let faders = (0..8).map(|i| (17 + i as u8, Param::Band(i)));
         let dials = [
-            (33, Param::Exposure),
-            (34, Param::Blacks),
-            (35, Param::Whites),
-            (36, Param::Saturation),
-            (37, Param::Vibrance),
-            (38, Param::Temperature),
-            (39, Param::Tint),
-            (40, Param::Highlights),
-            (44, Param::Shadows),
-            (45, Param::Clarity),
-            (46, Param::Contrast),
+            (33, Param::Setting(ParameterId::Exposure)),
+            (34, Param::Setting(ParameterId::Blacks)),
+            (35, Param::Setting(ParameterId::Whites)),
+            (36, Param::Setting(ParameterId::Saturation)),
+            (37, Param::Setting(ParameterId::Vibrance)),
+            (38, Param::Setting(ParameterId::Temperature)),
+            (39, Param::Setting(ParameterId::Tint)),
+            (40, Param::Setting(ParameterId::Highlights)),
+            (44, Param::Setting(ParameterId::Shadows)),
+            (45, Param::Setting(ParameterId::Clarity)),
+            (46, Param::Setting(ParameterId::Contrast)),
         ]
         .into_iter()
         .chain(faders);
