@@ -1,5 +1,6 @@
 use super::lightroom::{develop_fields, import_lightroom};
 use super::*;
+use crate::metadata::{LangAlt, PhotoInfo, Value};
 use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;

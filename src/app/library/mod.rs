@@ -81,7 +81,7 @@ pub struct Library {
     drawn_style: cell::Style,
     /// Grid cells' photo info, read once per photo while expanded cells
     /// show it.
-    cell_info: HashMap<i64, Option<crate::catalog::PhotoInfo>>,
+    cell_info: HashMap<i64, Option<crate::metadata::PhotoInfo>>,
     strip: filmstrip::State,
     /// Counts changes to the photos shown, their order or their metadata,
     /// so the filmstrip notices a change made after it was drawn.
@@ -113,7 +113,7 @@ pub struct Library {
     /// Reads capture times for photos added from folders.
     capture: Option<background::Reader<capture::Read>>,
     /// Reads camera settings and sizes for photos added from folders.
-    info_reader: Option<background::Reader<Option<Option<crate::catalog::PhotoInfo>>>>,
+    info_reader: Option<background::Reader<Option<Option<crate::metadata::PhotoInfo>>>>,
     /// The Loupe's Info overlay.
     loupe_info: photo_info::Overlay,
     /// Photo info was asked for while it was being read.
@@ -121,9 +121,9 @@ pub struct Library {
     /// Times photo info read from files was saved, so views know to refresh.
     info_saves: u64,
     /// The hovered grid photo's info, for its tooltip.
-    hover_info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
+    hover_info: Option<(i64, Option<crate::metadata::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
-    info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
+    info: Option<(i64, Option<crate::metadata::PhotoInfo>)>,
     /// Photos the capture-time backfill tried since the last online check.
     capture_tried: HashSet<i64>,
     /// A photo to keep in place in the grid after a re-sort, with its

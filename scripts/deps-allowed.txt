@@ -9,6 +9,7 @@ app -> develop
 app -> exif
 app -> export
 app -> lens
+app -> metadata
 app -> platform
 app -> presets
 app -> raw
@@ -29,6 +30,7 @@ catalog -> develop
 catalog -> exif
 catalog -> export
 catalog -> jpeg
+catalog -> metadata
 catalog -> raw
 catalog -> storage
 catalog -> tiff
@@ -49,8 +51,8 @@ develop -> xmp
 dng -> camera_profiles
 dng -> lens
 dng -> tiff
-exif -> catalog
 exif -> jpeg
+exif -> metadata
 exif -> raw
 exif -> tiff
 export -> build_info
@@ -60,6 +62,7 @@ export -> decode_cache
 export -> develop
 export -> exif
 export -> jpeg
+export -> metadata
 export -> raw
 export -> storage
 export -> tiff
@@ -80,6 +83,7 @@ raw -> camera_profiles
 raw -> demosaic
 raw -> dng
 raw -> lens
+raw -> metadata
 stats -> storage
 stats -> time
 stats -> updates
@@ -90,10 +94,10 @@ watermark -> develop
 watermark -> storage
 xmp -> build_info
 xmp -> camera_profiles
-xmp -> catalog
 xmp -> develop
 xmp -> exif
 xmp -> lens
+xmp -> metadata
 xmp -> presets
 xmp -> raw
 xmp -> xml

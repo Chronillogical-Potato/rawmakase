@@ -1,4 +1,7 @@
 use super::*;
+use crate::metadata::{
+    Capture, DEFAULT_LANG, Descriptive, LangAlt, Location, PhotoInfo, TextField, Value,
+};
 use rusqlite::Connection;
 
 /// A catalog with `n` photos added from a folder, and their ids.

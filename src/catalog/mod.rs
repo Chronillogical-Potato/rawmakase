@@ -35,17 +35,12 @@ mod sidecar;
 mod snapshots;
 pub use crate::xmp::descriptive::Read as FileMetadata;
 pub use defaults::MetadataDefaults;
-pub use descriptive::{
-    Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, MetadataSnapshot, TextField,
-    Value, keyword_name,
-};
+pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
-pub use models::{
-    Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
-};
+pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION, SavedEdit};
 pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
 // Compatibility for existing clients.

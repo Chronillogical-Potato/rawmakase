@@ -3,7 +3,8 @@ use super::rows::{ROW, caption_at, paint_truncated, value_at};
 use super::{Action, Library};
 use crate::app::theme;
 use crate::app::widgets::section;
-use crate::catalog::{Photo, PhotoInfo};
+use crate::catalog::Photo;
+use crate::metadata::PhotoInfo;
 use eframe::egui::{self, Vec2};
 
 impl Library {

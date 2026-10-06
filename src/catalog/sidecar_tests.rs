@@ -1,5 +1,5 @@
-use super::super::{LangAlt, TextField, Value};
 use super::*;
+use crate::metadata::{LangAlt, TextField, Value};
 
 fn xmp(description: &str, body: &str) -> String {
     format!(
@@ -169,7 +169,7 @@ fn a_photo_whose_values_cant_be_written_is_reported_and_the_rest_imported() -> R
     let (a, b) = (id_of(&cat, "A.NEF")?, id_of(&cat, "B.NEF")?);
     let bad = crate::xmp::descriptive::Read {
         // Not a date the catalog can sort by.
-        capture: Some(crate::catalog::Capture {
+        capture: Some(crate::metadata::Capture {
             captured: "garbage".into(),
             subsec: None,
             offset: None,

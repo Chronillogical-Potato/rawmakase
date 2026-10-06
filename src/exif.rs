@@ -230,7 +230,7 @@ pub fn capture_time(path: &Path) -> Option<String> {
 
 /// Camera, lens and exposure settings of a JPEG, TIFF or TIFF-based RAW
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
-pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
+pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
     let text = |tag| {
         exif.get(tag)
@@ -245,7 +245,7 @@ pub fn photo_info(path: &Path) -> Option<crate::catalog::PhotoInfo> {
         }
         (make, model) => model.or(make),
     };
-    let info = crate::catalog::PhotoInfo {
+    let info = crate::metadata::PhotoInfo {
         camera,
         lens: text(LENS_MODEL),
         focal: number(FOCAL_LENGTH),
