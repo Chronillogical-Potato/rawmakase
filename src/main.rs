@@ -20,6 +20,8 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// Control the running desktop app (enable external control in Preferences first).
+    // The client crate has its own version; this command is part of the app.
+    #[command(version = env!("CARGO_PKG_VERSION"))]
     Control(rawmakase_ctl::Cli),
     /// Serve editing tools over MCP stdio, connected to the running desktop app.
     Mcp(mcp::Cli),

@@ -4,7 +4,12 @@ Use this page to find an implementation or decide where a change belongs. Read
 [architecture.md](architecture.md) for ownership rules, concurrency invariants and
 compatibility constraints. Paths below are relative to this document and clickable.
 Module roots (`mod.rs`) define their public API; implementation helpers generally
-remain private to their domain. This is one Rust package, not a multi-crate workspace.
+remain private to their domain. The workspace has three packages: the app
+(`src/`), [`crates/rawmakase-protocol`](../crates/rawmakase-protocol/src/lib.rs)
+(what the app and its control clients agree on: protocol version, `control.json`
+endpoint, data folder) and [`tools/rawmakase-ctl`](../tools/rawmakase-ctl/src/lib.rs)
+(the control client, used by `rawmakase control`, `rawmakase mcp` and the
+standalone `rawmakase-ctl`). The last two build without the app.
 
 ## Where to start a change
 
