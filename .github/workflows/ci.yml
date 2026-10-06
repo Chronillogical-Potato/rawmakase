@@ -260,6 +260,18 @@ jobs:
           pacman -U --noconfirm packaging/arch/rawmakase-git/*.pkg.tar.zst
           rawmakase --help
 
+  dependencies:
+    name: Module dependencies
+    # scripts/deps-allowed.txt lists the dependencies between top-level modules;
+    # a new one, or a listed one the code no longer has, fails this job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+      - run: python3 scripts/deps.py check
+
   audit:
     name: Dependency licenses and advisories
     runs-on: ubuntu-latest

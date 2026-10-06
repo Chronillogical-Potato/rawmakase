@@ -63,6 +63,11 @@ inject a temporary file, without changing the process-wide environment.
 
 ## Boundaries to preserve
 
+- Dependencies between top-level modules are listed in
+  `scripts/deps-allowed.txt`, and `scripts/deps.py check` (CI and `make check`)
+  fails on a new one. Today 13 modules still form one cycle; the refactor in
+  issue #216 removes lines from the list until none remains. Add a line only
+  when the new dependency points down the intended layering.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate
