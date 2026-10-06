@@ -230,9 +230,9 @@ impl Editor {
     fn update_previous(
         &mut self,
         name: &str,
-        change: impl FnOnce(&mut crate::export::ExportSettings),
+        change: impl FnOnce(&mut crate::export_settings::ExportSettings),
     ) {
-        if let Some(mut previous) = crate::export::ExportSettings::load()
+        if let Some(mut previous) = crate::export_settings::ExportSettings::load()
             && previous.watermark_name == name
         {
             change(&mut previous);

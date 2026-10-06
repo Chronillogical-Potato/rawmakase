@@ -5,7 +5,8 @@
 //! catalog has them then ([`BatchPhoto`]), and no image. [`plan`] decides where
 //! each file goes before anything renders; [`run`] then works out, renders and
 //! writes one photo at a time, so a batch of any size holds one photo's images.
-use super::{Existing, ExportSettings, Replace, assemble::Values, job};
+use super::{Replace, assemble::Values, job};
+use crate::export_settings::{Existing, ExportSettings};
 use crate::{
     catalog::resolve::{self, EditRecord, Origin, PhotoRecord},
     develop::Recipe,
@@ -239,7 +240,7 @@ pub fn plan(
             let (index, total) = p.place.unwrap_or((index, total));
             settings.target_for(
                 &p.source,
-                &super::NameContext {
+                &crate::export_settings::NameContext {
                     index,
                     total,
                     captured: p.captured.as_deref(),

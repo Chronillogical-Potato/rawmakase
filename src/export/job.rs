@@ -1,9 +1,10 @@
 //! One photo's export from start to finish: the full-size image (decoded here when
 //! only a quick preview is loaded), the render, its metadata and the file.
 use super::{
-    Embed, ExportSettings,
+    Embed,
     assemble::{Policy, Values, assemble, copyright},
 };
+use crate::export_settings::ExportSettings;
 use crate::{
     decode_cache::DecodeCache,
     develop::Recipe,
@@ -65,7 +66,7 @@ pub fn run(
 pub struct Prepared {
     pub rendered: crate::develop::Rendered,
     pub metadata: crate::raw::Metadata,
-    pub options: super::ExportOptions,
+    pub options: crate::export_settings::ExportOptions,
     pub embed: Embed,
     /// What the export has to say besides "Exported".
     pub notice: Option<String>,

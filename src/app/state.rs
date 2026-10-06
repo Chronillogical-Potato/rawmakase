@@ -1,7 +1,7 @@
 //! State owned by the document, preview, viewport and preset browser.
 use crate::{
     develop::Recipe,
-    export::ExportOptions,
+    export_settings::ExportOptions,
     raw::{CameraImage, Metadata},
 };
 use eframe::egui::{self, Vec2};

@@ -7,7 +7,7 @@ use crate::develop::saved_format::{migrate_recipe, saved_version};
 use crate::storage::{Identity, atomic_json, bitmaps, data_dir};
 use crate::{
     develop::{LocalEdits, Recipe},
-    export::ExportOptions,
+    export_settings::ExportOptions,
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};

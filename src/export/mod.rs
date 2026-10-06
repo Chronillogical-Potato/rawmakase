@@ -8,48 +8,16 @@ mod extended_xmp;
 pub mod job;
 mod metadata;
 pub mod queue;
-pub mod settings;
 pub use crate::storage::Replace;
 use crate::{
     develop::Rendered,
+    export_settings::{ExportOptions, Format},
     raw::{self, Metadata},
     storage::is_raw,
 };
 use anyhow::{Result, bail, ensure};
-use serde::{Deserialize, Serialize};
-pub use settings::{
-    AfterExport, Destination, Existing, ExportSettings, Format, Include, NameContext, Naming,
-};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ExportOptions {
-    pub quality: u8,
-    pub max_edge: u32,
-}
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            quality: 92,
-            max_edge: 0,
-        }
-    }
-}
-impl ExportOptions {
-    pub fn validate(&self) -> Result<()> {
-        ensure!(
-            (1..=100).contains(&self.quality),
-            "JPEG quality must be 1–100"
-        );
-        ensure!(
-            self.max_edge <= 30_000,
-            "Export edge must not exceed 30000 pixels"
-        );
-        Ok(())
-    }
-}
 
 /// What an export embeds besides pixels.
 #[derive(Clone, Debug)]

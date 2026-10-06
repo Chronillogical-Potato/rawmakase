@@ -4249,9 +4249,10 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
 #[test]
 fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()> {
     use crate::export::{
-        Destination, Existing, ExportSettings, Format, Replace,
+        Replace,
         batch::{self, BatchPhoto, Edit},
     };
+    use crate::export_settings::{Destination, Existing, ExportSettings, Format};
     let dir = tempfile::tempdir()?;
     let photos = dir.path().join("photos");
     std::fs::create_dir(&photos)?;

@@ -2,7 +2,9 @@
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::Editor;
 use crate::app::theme;
-use crate::export::{AfterExport, Destination, Existing, Format, Include, NameContext, Naming};
+use crate::export_settings::{
+    AfterExport, Destination, Existing, Format, Include, NameContext, Naming,
+};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 

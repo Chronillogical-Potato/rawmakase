@@ -10,12 +10,12 @@ use super::{Editor, worker::Event};
 use crate::app::theme;
 use crate::app::widgets::plural;
 use crate::export::{
-    Existing, ExportSettings,
     assemble::Values,
     batch::{self, BatchPhoto, Edit, Outcome, Unplanned},
     job::Photo,
     queue::Queue,
 };
+use crate::export_settings::{Existing, ExportSettings};
 use eframe::egui::{self, Color32, Sense, Vec2};
 use std::{
     collections::HashMap,
@@ -62,7 +62,7 @@ struct Queued {
     names: Vec<String>,
     left_out: Vec<(String, String)>,
     /// What happens once it is written.
-    after: crate::export::AfterExport,
+    after: crate::export_settings::AfterExport,
 }
 
 /// What finished exports could not do, kept until it is dismissed.
@@ -476,7 +476,7 @@ impl Editor {
             None => summary.line(),
         };
         // After the summary, so a file manager that can't be opened is said.
-        if queued.after == crate::export::AfterExport::Show {
+        if queued.after == crate::export_settings::AfterExport::Show {
             self.show_exported(&exported);
         }
         // Unread reports add up until they are dismissed: a later export that went

@@ -176,7 +176,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
 | [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
 | [export/job.rs](../src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
-| [export/settings.rs](../src/export/settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export. |
+| [export_settings.rs](../src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
 
 ## Desktop application
 

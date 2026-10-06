@@ -1,5 +1,5 @@
 use super::*;
-use crate::export::{Destination, Format};
+use crate::export_settings::{Destination, Format};
 
 /// An editor on a catalog of two copies of the synthetic chart DNG and a JPEG.
 fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>, egui::Context)> {

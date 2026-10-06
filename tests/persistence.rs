@@ -3,7 +3,7 @@ use anyhow::Result;
 use rawmakase::{
     catalog::{Catalog, legacy_sidecar},
     develop::Recipe,
-    export::ExportOptions,
+    export_settings::ExportOptions,
     presets, storage,
 };
 use std::{fs, path::Path, process::Command};

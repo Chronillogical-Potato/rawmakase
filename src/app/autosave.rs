@@ -5,7 +5,7 @@
 use crate::{
     catalog::{Catalog, SavedHistory},
     develop::Recipe,
-    export::ExportOptions,
+    export_settings::ExportOptions,
 };
 use eframe::egui;
 use std::{

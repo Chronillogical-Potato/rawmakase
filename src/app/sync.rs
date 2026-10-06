@@ -16,7 +16,7 @@ use crate::{
         Recipe,
         settings_groups::{self, GroupSelection, Source, Target},
     },
-    export::ExportOptions,
+    export_settings::ExportOptions,
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, ensure};

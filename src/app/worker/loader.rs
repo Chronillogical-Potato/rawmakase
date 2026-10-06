@@ -1,7 +1,7 @@
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     decode_cache::DecodeCache,
-    export::ExportOptions,
+    export_settings::ExportOptions,
     raw::{Decode, Demosaic, thumbnail},
 };
 use eframe::egui;
