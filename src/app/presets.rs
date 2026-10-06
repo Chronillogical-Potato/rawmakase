@@ -15,11 +15,24 @@ impl Editor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         let scan = self.presets.next_scan();
-        std::thread::spawn(move || {
-            let library = Arc::new(crate::presets::load_library());
-            let _ = tx.send(Event::XmpLibrary { scan, library });
-            ctx.request_repaint();
-        });
+        super::task::spawn(
+            tx,
+            ctx,
+            move |tx| {
+                let library = Arc::new(crate::presets::load_library());
+                let _ = tx.send(Event::XmpLibrary { scan, library });
+            },
+            move |tx, error| {
+                let _ = tx.send(Event::PresetScanFailed { scan, error });
+            },
+        );
+    }
+    /// A scan that failed: the presets read before stay, and commands stop waiting.
+    pub(super) fn preset_scan_failed(&mut self, scan: u64, error: String) {
+        if self.presets.is_latest(scan) {
+            self.presets.scanned = true;
+            self.status = format!("Presets not read: {error}");
+        }
     }
     /// A finished library scan, unless a later one has started since: scans run in
     /// parallel and may finish in any order.
