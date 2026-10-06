@@ -3,7 +3,7 @@
 //! photos added from folders it is read from the files in the background and
 //! kept in the catalog, a row of nothing for a file without any.
 use super::Library;
-use crate::catalog::PhotoInfo;
+use crate::metadata::PhotoInfo;
 use eframe::egui;
 use std::path::Path;
 

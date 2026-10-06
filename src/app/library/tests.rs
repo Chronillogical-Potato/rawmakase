@@ -1864,7 +1864,7 @@ fn typed_keywords_follow_lightroom_and_refuse_the_separator() -> Result<()> {
 }
 #[test]
 fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> Result<()> {
-    use crate::catalog::{LangAlt, TextField, Value};
+    use crate::metadata::{LangAlt, TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
     let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
     library
@@ -1896,7 +1896,7 @@ fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> R
 #[test]
 fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     use super::descriptive::DescriptiveEdit;
-    use crate::catalog::{TextField, Value};
+    use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
     let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
     library
@@ -1963,7 +1963,7 @@ fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
 }
 #[test]
 fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
-    use crate::catalog::{LangAlt, TextField, Value};
+    use crate::metadata::{LangAlt, TextField, Value};
     let (dir, mut library) = library_of(&["a.ARW"])?;
     let id = library.photos[0].id;
     library
@@ -2008,7 +2008,7 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
 }
 #[test]
 fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> {
-    use crate::catalog::{TextField, Value};
+    use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
     let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
     library
@@ -2044,7 +2044,7 @@ fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
 }
 #[test]
 fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Result<()> {
-    use crate::catalog::{LangAlt, Value};
+    use crate::metadata::{LangAlt, Value};
     let (_dir, mut library) = library_of(&["a.ARW"])?;
     let id = library.photos[0].id;
     library.selection.selected = [id].into();

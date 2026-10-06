@@ -1,7 +1,8 @@
 //! Photo info: camera settings and size, copied from the Lightroom catalog a
 //! photo was imported from, or read from the file for photos added from
 //! folders (`fill_photo_info`).
-use super::{Catalog, PhotoInfo};
+use super::Catalog;
+use crate::metadata::PhotoInfo;
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 

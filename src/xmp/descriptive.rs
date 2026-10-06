@@ -2,7 +2,7 @@
 //! TIFF's embedded XMP, or the XMP a Lightroom catalog keeps per photo.
 //! Namespaces are matched by URI, in attribute and element forms. Lightroom's
 //! and digiKam's properties are read as digiKam documents and writes them.
-use crate::catalog::{Capture, LangAlt, Location, Value};
+use crate::metadata::{Capture, LangAlt, Location, Value};
 use crate::xml::ns::{DC, DIGIKAM, EXIF, LR, PHOTOSHOP, RDF, XML, XMP};
 use anyhow::{Result, ensure};
 use roxmltree::Node;
@@ -233,7 +233,7 @@ fn keywords(p: &Packet) -> Option<Vec<Vec<String>>> {
             let mut paths = paths;
             for name in subject.unwrap_or_default() {
                 let same = |n: &String| {
-                    crate::catalog::keyword_name(n) == crate::catalog::keyword_name(&name)
+                    crate::metadata::keyword_name(n) == crate::metadata::keyword_name(&name)
                 };
                 if !paths.iter().flatten().any(same) {
                     paths.push(vec![name]);

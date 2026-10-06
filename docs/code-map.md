@@ -165,7 +165,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
 | [catalog/locations.rs](../src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
-| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
+| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../src/metadata.rs). |
 | [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |

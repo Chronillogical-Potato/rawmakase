@@ -1,7 +1,8 @@
 //! Default Creator and Copyright from Preferences, written for photos added
 //! from folders where neither the file nor its sidecar has one: below an
 //! edit or an imported value, above the file's EXIF, and never at export.
-use super::{Catalog, LangAlt, Value};
+use super::Catalog;
+use crate::metadata::{LangAlt, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

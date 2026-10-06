@@ -5,7 +5,8 @@
 //! were, absent ones included.
 use super::{Library, Place};
 use crate::app::widgets::plural;
-use crate::catalog::{MetadataSnapshot, TextField};
+use crate::catalog::MetadataSnapshot;
+use crate::metadata::TextField;
 use anyhow::{Result, ensure};
 
 /// Read Metadata from Files while its files are being read.

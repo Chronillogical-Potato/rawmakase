@@ -179,7 +179,7 @@ impl Editor {
                     .metadata
                     .as_ref()
                     .map_or_else(String::new, |m| {
-                        let info = crate::catalog::PhotoInfo::from_metadata(m);
+                        let info = crate::metadata::PhotoInfo::from_metadata(m);
                         [
                             info.iso_text(),
                             info.focal_text(),

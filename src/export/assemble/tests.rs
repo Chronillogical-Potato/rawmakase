@@ -1,5 +1,5 @@
 use super::*;
-use crate::catalog::{Capture, LangAlt, Location, Value};
+use crate::metadata::{Capture, LangAlt, Location, Value};
 
 /// A camera's EXIF with a tag of every group.
 fn camera() -> CameraExif {

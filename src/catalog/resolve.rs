@@ -70,8 +70,8 @@ impl Catalog {
 pub struct PhotoRecord {
     pub id: i64,
     pub edit: EditRecord,
-    pub descriptive: super::Descriptive,
-    pub keywords: Vec<super::Keyword>,
+    pub descriptive: crate::metadata::Descriptive,
+    pub keywords: Vec<crate::metadata::Keyword>,
     pub rating: i32,
     pub label: String,
     /// The capture time the catalog sorts by ("2026-05-04 10:21:33.000"), empty
