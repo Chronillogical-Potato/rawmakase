@@ -1,12 +1,13 @@
 //! A frame edits exactly one document generation, even when navigation happens mid-frame.
 use super::Editor;
 use crate::develop::Recipe;
+use crate::edit_session::FrameOutcome;
 use eframe::egui;
 
 pub(super) struct EditFrame {
     pub(super) command_adjust: bool,
     generation: u64,
-    recipe: Recipe,
+    edit: crate::edit_session::Frame,
     modes: RenderModes,
     overlay: super::worker::Overlay,
     aspect: f32,
@@ -34,13 +35,12 @@ impl Editor {
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
         self.sync_command_revision();
-        self.document.edit.history.begin_frame();
         // Before the frame looks at it, so reading it changes no crop.
         self.read_aspect();
         let frame = EditFrame {
             command_adjust: false,
             generation: self.load.id(),
-            recipe: self.document.edit.recipe.clone(),
+            edit: self.document.edit.begin(),
             modes: self.render_modes(),
             overlay: self.overlay(),
             aspect: self.view.aspect,
@@ -65,20 +65,26 @@ impl Editor {
                 .iter()
                 .any(|e| matches!(e, egui::Event::PointerButton { .. }))
         });
-        let edit = if self.document.edit.recipe == frame.recipe && !clicked {
+        let edit = if self.document.edit.recipe == *frame.edit.before() && !clicked {
             super::brush_scroll::Edit::Unchanged
         } else {
             super::brush_scroll::Edit::Changed
         };
         if self.view.wheel.ends_before(edit) {
-            self.document.edit.history.finish_gesture(&frame.recipe);
+            self.document
+                .edit
+                .history
+                .finish_gesture(frame.edit.before());
         }
         if self.automation.has_turn()
             && !frame.command_adjust
-            && (self.document.edit.recipe != frame.recipe || clicked)
+            && (self.document.edit.recipe != *frame.edit.before() || clicked)
         {
             self.automation.end_turn();
-            self.document.edit.history.finish_gesture(&frame.recipe);
+            self.document
+                .edit
+                .history
+                .finish_gesture(frame.edit.before());
         }
         if let Some((name, value)) = step {
             self.document
@@ -112,7 +118,7 @@ impl Editor {
         }
         // A conversion waiting for the photo, once it is decoded and nothing else
         // changed this frame (any edit drops it below).
-        if self.document.edit.recipe == frame.recipe {
+        if self.document.edit.recipe == *frame.edit.before() {
             self.finish_pending_treatment();
         }
         // A wheel scroll sizing a spot is a gesture like a drag: one step once it pauses.
@@ -123,15 +129,12 @@ impl Editor {
         let held = ctx.input(|i| i.pointer.primary_down())
             || self.view.wheel.active()
             || self.automation.turning();
-        if !self.document.edit.history.is_replaying() {
-            turn_on_edited_panels(&frame.recipe, &mut self.document.edit.recipe);
-        }
         let gesture = if held {
             crate::edit_session::Gesture::Held
         } else {
             crate::edit_session::Gesture::Released
         };
-        let edited = self.document.edit.observe(frame.recipe, gesture);
+        let edited = self.document.edit.finish(frame.edit, gesture) == FrameOutcome::Edited;
         // Any change but the Amount's own ends the preset Amount, whether or not the
         // Presets panel is open.
         self.end_stale_preset_amount();
@@ -152,7 +155,6 @@ impl Editor {
     /// result computed off the UI thread) as one History step, `step` or one named
     /// for what changed, with what an edit frame does after a slider moves.
     pub(super) fn commit_edit(&mut self, before: Recipe, step: Option<super::history::Step>) {
-        turn_on_edited_panels(&before, &mut self.document.edit.recipe);
         if self.document.edit.commit(before, step) {
             self.edited();
         }
@@ -165,20 +167,5 @@ impl Editor {
         self.sync_command_revision();
         // A conversion waiting for the photo lapses with any other edit.
         self.document.pending_treatment = None;
-    }
-}
-
-/// Turns a switched-off panel back on when this frame changed only its settings, as
-/// Lightroom does, so the change shows: a slider in it, or an edit applied later in
-/// the frame (B&W Auto, Clear Guides, the fringe picker).
-fn turn_on_edited_panels(before: &Recipe, after: &mut Recipe) {
-    use crate::develop::panels::{Panel, PanelState};
-    let edited = Panel::ALL.into_iter().find(|panel| {
-        before.panels.state(*panel) == PanelState::Off
-            && after.panels.state(*panel) == PanelState::Off
-            && panel.holds_change(before, after)
-    });
-    if let Some(panel) = edited {
-        after.panels.set(panel, PanelState::On);
     }
 }

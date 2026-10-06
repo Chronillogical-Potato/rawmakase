@@ -16,6 +16,24 @@ pub enum Gesture {
     Released,
 }
 
+/// The settings as a frame of the editor found them, from [`EditSession::begin`].
+pub struct Frame {
+    before: Recipe,
+}
+impl Frame {
+    pub fn before(&self) -> &Recipe {
+        &self.before
+    }
+}
+
+/// What a frame did to the settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameOutcome {
+    Unchanged,
+    /// Changed, by an edit, Undo or a History click, and marked for saving.
+    Edited,
+}
+
 /// The edit of the photo open in Develop: its settings, the History of how they
 /// came to be, and whether they still need saving.
 #[derive(Default)]
@@ -29,6 +47,7 @@ impl EditSession {
     /// step, named `step` or for what changed, to be saved. Returns whether the
     /// settings changed.
     pub fn commit(&mut self, before: Recipe, step: Option<Step>) -> bool {
+        crate::develop::edit::turn_on_edited_panel(&before, &mut self.recipe);
         if let Some(step) = step {
             self.history.label(step);
         }
@@ -38,17 +57,27 @@ impl EditSession {
         }
         changed
     }
-    /// What a frame of the editor did to the settings, from `before`: an edit made
-    /// while a `gesture` is held is recorded once it is released, as one step. Undo and
-    /// History clicks are not recorded again. Returns whether the settings changed
-    /// this frame, to be saved either way.
-    pub fn observe(&mut self, before: Recipe, gesture: Gesture) -> bool {
-        let held = gesture == Gesture::Held;
-        let changed = self.history.observe(before, &self.recipe, held);
-        if changed {
-            self.save.mark_changed();
+    /// Starts a frame of the editor, which may edit the settings.
+    pub fn begin(&mut self) -> Frame {
+        self.history.begin_frame();
+        Frame {
+            before: self.recipe.clone(),
         }
-        changed
+    }
+    /// Ends `frame`: an edit made while a `gesture` is held is recorded once it is
+    /// released, as one step; Undo and History clicks are not recorded again. An
+    /// edit that changed only a switched-off panel turns it on.
+    pub fn finish(&mut self, frame: Frame, gesture: Gesture) -> FrameOutcome {
+        if !self.history.is_replaying() {
+            crate::develop::edit::turn_on_edited_panel(&frame.before, &mut self.recipe);
+        }
+        let held = gesture == Gesture::Held;
+        if self.history.observe(frame.before, &self.recipe, held) {
+            self.save.mark_changed();
+            FrameOutcome::Edited
+        } else {
+            FrameOutcome::Unchanged
+        }
     }
 }
 
@@ -92,14 +121,14 @@ mod tests {
     #[test]
     fn a_gesture_is_saved_as_it_goes_and_recorded_once_it_ends() {
         let mut session = EditSession::default();
-        let start = session.recipe.clone();
+        let frame = session.begin();
         session.recipe.exposure = 0.5;
-        assert!(session.observe(start, Gesture::Held));
+        assert_eq!(session.finish(frame, Gesture::Held), FrameOutcome::Edited);
         assert!(session.save.needs_save());
         assert_eq!(session.history.steps().1, 0);
-        let mid = session.recipe.clone();
+        let frame = session.begin();
         session.recipe.exposure = 1.;
-        session.observe(mid, Gesture::Released);
+        session.finish(frame, Gesture::Released);
         assert_eq!(session.history.steps().1, 1);
         assert!(session.history.undo(&mut session.recipe));
         assert_eq!(session.recipe.exposure, 0.);
