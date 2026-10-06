@@ -40,9 +40,9 @@ pub(super) struct Onboarding {
     pub(super) visible: bool,
     scanned: bool,
     scanned_for: Option<PathBuf>,
-    /// The catalog was still reading photo info from files when it last
-    /// scanned, so the cameras may be incomplete.
-    info_pending: bool,
+    /// How many times the catalog had saved photo info read from files when
+    /// it last scanned; a later save may add cameras.
+    info_saves: u64,
     /// The scan under way; it walks Camera Raw's folders, thousands of files,
     /// so it runs off the UI thread and arrives as [`Event::OnboardingScanned`].
     scan: Task,
@@ -249,12 +249,11 @@ impl Editor {
     pub(super) fn onboarding_ui(&mut self, ui: &mut egui::Ui) {
         // Rescan when opened and whenever a different catalog is loaded.
         let catalog = self.library.as_ref().map(|l| l.catalog.path.clone());
-        // And once the catalog finishes reading cameras from new photos' files.
-        let reading = self
-            .library
-            .as_ref()
-            .is_some_and(|l| l.reading_photo_info());
-        let read = self.onboarding.info_pending && !reading && !self.onboarding.scanning();
+        // And once the catalog has read cameras from new photos' files, when
+        // the reader is done rather than at each of its saves.
+        let read = self.library.as_ref().is_some_and(|l| {
+            !l.reading_photo_info() && l.photo_info_saves() != self.onboarding.info_saves
+        }) && !self.onboarding.scanning();
         if !self.onboarding.scanned || self.onboarding.scanned_for != catalog || read {
             self.start_onboarding_scan(catalog);
         }
@@ -575,10 +574,7 @@ impl Editor {
             .as_ref()
             .and_then(|l| l.catalog.cameras().ok())
             .unwrap_or_default();
-        self.onboarding.info_pending = self
-            .library
-            .as_ref()
-            .is_some_and(|l| l.reading_photo_info());
+        self.onboarding.info_saves = self.library.as_ref().map_or(0, |l| l.photo_info_saves());
         let (generation, cancel) = self.onboarding.scan.start();
         self.onboarding.scanned = true;
         self.onboarding.scanned_for = catalog;

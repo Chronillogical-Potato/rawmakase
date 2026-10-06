@@ -91,6 +91,10 @@ impl Library {
     pub(in crate::app) fn reading_photo_info(&self) -> bool {
         self.info_reader.is_some()
     }
+    /// Counts each save of info read from files.
+    pub(in crate::app) fn photo_info_saves(&self) -> u64 {
+        self.info_saves
+    }
     /// Saves the info read so far.
     pub(super) fn poll_photo_info(&mut self) {
         let Some(reader) = &self.info_reader else {
@@ -111,6 +115,7 @@ impl Library {
         if !infos.is_empty() {
             match self.catalog.fill_photo_info(&infos) {
                 Ok(()) => {
+                    self.info_saves += 1;
                     self.info = None;
                     self.hover_info = None;
                     self.cell_info.clear();
