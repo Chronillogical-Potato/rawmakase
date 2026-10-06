@@ -53,6 +53,12 @@ pub struct Ambiguity {
     pub directories: Vec<PathBuf>,
     pub options: Vec<FolderLocation>,
 }
+/// The answer to an `Ambiguity`: which of its options the folders are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Choice {
+    pub options: Vec<FolderLocation>,
+    pub chosen: FolderLocation,
+}
 /// Where a folder on disk goes in the catalog.
 enum Place {
     /// A folder of an existing root, by logical path.
@@ -96,7 +102,7 @@ impl Catalog {
         &mut self,
         folder: &Path,
         defaults: &super::MetadataDefaults,
-        choices: &[FolderLocation],
+        choices: &[Choice],
     ) -> Result<Added> {
         let folder = folder.canonicalize()?;
         let mut files = Vec::new();
@@ -373,7 +379,7 @@ impl Matcher {
         Ok(Self { locations, roots })
     }
     /// Where `directory`, found below the `chosen` folder, goes.
-    fn place(&self, directory: &Path, chosen: &Path, choices: &[FolderLocation]) -> Matched {
+    fn place(&self, directory: &Path, chosen: &Path, choices: &[Choice]) -> Matched {
         // (specificity, location, logical path, whether it resolves back here)
         let mut candidates = Vec::new();
         for (location, on_disk) in &self.locations {
@@ -417,16 +423,21 @@ impl Matcher {
             let (_, location, logical, _) = closest[0];
             return Matched::Place(Place::Folder(location.root, logical.clone()));
         }
-        if let Some((_, location, logical, _)) = closest.iter().find(|c| {
-            choices
-                .iter()
-                .any(|choice| choice.root == c.1.root && choice.relative == c.1.relative)
-        }) {
-            return Matched::Place(Place::Folder(location.root, logical.clone()));
-        }
         let mut options: Vec<FolderLocation> = closest.iter().map(|c| c.1.clone()).collect();
         options.sort();
         options.dedup();
+        // Only the answer to this very question settles it.
+        let answer = choices
+            .iter()
+            .find(|c| c.options == options)
+            .and_then(|choice| {
+                closest.iter().find(|c| {
+                    c.1.root == choice.chosen.root && c.1.relative == choice.chosen.relative
+                })
+            });
+        if let Some((_, location, logical, _)) = answer {
+            return Matched::Place(Place::Folder(location.root, logical.clone()));
+        }
         Matched::Ambiguous(options)
     }
 }

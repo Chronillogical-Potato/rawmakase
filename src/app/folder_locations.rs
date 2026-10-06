@@ -7,9 +7,7 @@ use super::preferences::{gap, group, hint};
 use super::theme;
 use super::widgets::{confirm_modal, form_row, pretty_path};
 use super::worker::Event;
-use crate::catalog::{
-    Ambiguity, Catalog, Conflict, FolderLocation, Override, Overrides, RootLocations,
-};
+use crate::catalog::{Ambiguity, Catalog, Choice, Conflict, Override, Overrides, RootLocations};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +28,7 @@ pub enum FolderQuestion {
         catalog: PathBuf,
         folder: PathBuf,
         open: Vec<Ambiguity>,
-        chosen: Vec<FolderLocation>,
+        chosen: Vec<Choice>,
     },
 }
 /// What a folder change does once settled.
@@ -42,7 +40,7 @@ enum FolderJob {
     },
     Import {
         folder: PathBuf,
-        choices: Vec<FolderLocation>,
+        choices: Vec<Choice>,
     },
     Clear {
         root: i64,
@@ -391,9 +389,11 @@ impl Editor {
                 };
                 match choice {
                     Some(i) => {
-                        let option = ambiguity.options[i].clone();
-                        open.remove(0);
-                        chosen.push(option);
+                        let answered = open.remove(0);
+                        chosen.push(Choice {
+                            chosen: answered.options[i].clone(),
+                            options: answered.options,
+                        });
                     }
                     None => self.folder_question = None,
                 }

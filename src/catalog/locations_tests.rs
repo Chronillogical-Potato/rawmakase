@@ -1,6 +1,6 @@
 //! One catalog opened on several computers, each with its own folder
 //! locations (issue #187).
-use super::locations::{Computer, FolderLocation, Overrides, resolve_in};
+use super::locations::{Computer, Overrides, resolve_in};
 use super::*;
 
 fn computer(id: &str) -> Computer {
@@ -477,11 +477,14 @@ fn equally_specific_locations_ask_instead_of_choosing() -> Result<()> {
     assert!(cat.add_folder(&share).is_err());
     assert_eq!(cat.photos()?.len(), 2);
 
-    let chosen: Vec<FolderLocation> = options
-        .iter()
-        .filter(|o| o.root == roots[1].0)
-        .cloned()
-        .collect();
+    let chosen = [Choice {
+        options: options.clone(),
+        chosen: options
+            .iter()
+            .find(|o| o.root == roots[1].0)
+            .unwrap()
+            .clone(),
+    }];
     // The folder is now the chosen root's: a.NEF is new to it too.
     let added = cat.import_folder(&share, &Default::default(), &chosen)?;
     assert_eq!(added.added, 2);

@@ -41,7 +41,7 @@ pub use descriptive::{
 };
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
-pub use ingest::{Added, Ambiguity, Conflict};
+pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,

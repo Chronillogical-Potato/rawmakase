@@ -232,7 +232,13 @@ impl Editor {
             .as_ref()?
             .photos
             .iter()
-            .filter(|p| p.path == path)
+            // A location stored through a symlink spells the path differently;
+            // only photos of the same name are looked up on disk.
+            .filter(|p| {
+                p.path == path
+                    || (path.file_name() == Some(std::ffi::OsStr::new(&p.filename))
+                        && p.path.canonicalize().is_ok_and(|real| real == path))
+            })
             .min_by_key(|p| p.master.is_some())
             .map(|p| p.id)
     }
