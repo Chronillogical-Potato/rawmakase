@@ -182,7 +182,7 @@ fn brush_strokes_build_up_to_density_and_erase() {
     let erased = weights(
         &im,
         brush(vec![
-            stroke(line.clone(), 1., 1., false),
+            stroke(line, 1., 1., false),
             stroke(vec![[0.5, 0.2], [0.5, 0.8]], 1., 1., true),
         ]),
         None,
@@ -421,7 +421,7 @@ fn partial_masks_blend_and_amount_scales() {
         &im,
         &Recipe {
             exposure: 0.5,
-            ..base.clone()
+            ..base
         },
         0,
     )

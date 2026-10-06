@@ -641,7 +641,7 @@ fn folder_locations_list_every_root_and_other_computers() -> Result<()> {
     assert_eq!(listed[1].overrides[0].relative, "Trip");
     assert_eq!(
         listed[1].elsewhere,
-        [("mac".to_string(), String::new(), mac_b.clone())]
+        [("mac".to_string(), String::new(), mac_b)]
     );
     Ok(())
 }

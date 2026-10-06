@@ -574,7 +574,7 @@ mod tests {
         let mut other = open::standard(&other_camera()).unwrap();
         other.name = "Camera Standard".into();
         other.camera = "Canon EOS R5".into();
-        let mut with_other = profiles.clone();
+        let mut with_other = profiles;
         with_other.push(Arc::new(other));
         assert_eq!(defaults.resolve(&m, &with_other).name, "Adobe Default");
         // Nothing imported at all: RAWmakase's own profile, as Adobe Default.

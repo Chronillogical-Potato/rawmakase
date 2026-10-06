@@ -188,7 +188,7 @@ impl Library {
                 )
                 .filter(|s| !s.is_empty()),
                 Some(
-                    [info.camera.clone(), info.lens.clone()]
+                    [info.camera.clone(), info.lens]
                         .into_iter()
                         .flatten()
                         .collect::<Vec<_>>()

@@ -1126,7 +1126,7 @@ fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
     // A virtual copy starts with the History of the edit it copies, and takes its
     // own with it when removed.
     let copy = c.create_virtual_copy(id)?;
-    assert_eq!(c.load_history(copy)?, Some(history.clone()));
+    assert_eq!(c.load_history(copy)?, Some(history));
     assert_eq!(count(&c)?, 2);
     c.remove_virtual_copy(copy)?;
     assert_eq!(count(&c)?, 1);
@@ -1231,7 +1231,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
         lens_builtin: false,
         ..Default::default()
     };
-    let mut legacy_on = legacy.clone();
+    let mut legacy_on = legacy;
     legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
     assert!(!legacy_on.lens_builtin);
     assert_eq!(legacy_on.missing_lens_profile(&m), None);

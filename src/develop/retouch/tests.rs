@@ -117,7 +117,7 @@ fn cascaded_membrane_matches_a_converged_dense_solve() {
         .collect();
     let fast = heal::membrane(&values, &inside, w, h);
     // Dense reference: plain Gauss-Seidel until converged.
-    let mut dense = values.clone();
+    let mut dense = values;
     for (v, i) in dense.iter_mut().zip(&inside) {
         if *i {
             *v = 0.;

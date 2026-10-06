@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(image[h / 2 * w], 255.);
         assert!(image[h / 2 * w + w / 2] < 255.);
         // Not with the Lens Corrections panel switched off, which bypasses it.
-        let mut off = r.clone();
+        let mut off = r;
         off.panels.set(
             crate::develop::panels::Panel::LensCorrections,
             crate::develop::panels::PanelState::Off,

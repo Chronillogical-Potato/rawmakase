@@ -427,7 +427,7 @@ mod tests {
         im.metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
         let base = Recipe::for_metadata(&im.metadata);
         let auto = auto_white_balance(&im, &base).unwrap();
-        let mut gray = base.clone();
+        let mut gray = base;
         gray.wb = gray_world(&im.pixels).unwrap();
         gray.sync_white_balance_controls(&im.metadata);
         let (temperature, tint) = lightroom_auto(&gray);
@@ -856,7 +856,7 @@ mod tests {
         let untouched = Recipe {
             exposure: 0.,
             contrast: 0.,
-            ..base.clone()
+            ..base
         };
         let fresh = auto_tone(&im, &untouched).unwrap();
         assert_eq!(fresh.exposure, auto.exposure);
