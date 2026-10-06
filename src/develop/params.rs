@@ -86,6 +86,9 @@ pub enum ParameterId {
     CurveSaturation,
     /// Tone Curve: Levels' Midtone, a gamma.
     Midtone,
+    /// Color Grading.
+    GradingBlending,
+    GradingBalance,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -177,7 +180,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 55] = [
+const DESCRIPTORS: [Descriptor; 57] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -333,6 +336,8 @@ const DESCRIPTORS: [Descriptor; 55] = [
             signed: false,
         },
     },
+    amount(ParameterId::GradingBlending, "Blending"),
+    percent(ParameterId::GradingBalance, "Balance"),
 ];
 
 impl ParameterId {
@@ -349,7 +354,7 @@ impl ParameterId {
         [Self::GreenPrimaryHue, Self::GreenPrimarySaturation],
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 57] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -405,6 +410,8 @@ impl ParameterId {
         Self::ParametricHighlights,
         Self::CurveSaturation,
         Self::Midtone,
+        Self::GradingBlending,
+        Self::GradingBalance,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -467,6 +474,8 @@ impl ParameterId {
             Self::ParametricHighlights => &mut r.effects.parametric[3],
             Self::CurveSaturation => &mut r.curve_saturation,
             Self::Midtone => &mut r.midtone,
+            Self::GradingBlending => &mut r.effects.blending,
+            Self::GradingBalance => &mut r.effects.balance,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.

@@ -9,9 +9,9 @@
 //! luminance −1 to 1), so a grade renders the same however it was set.
 use super::theme;
 use super::widgets::{
-    SliderStyle, name_history_step, set_edit_context, slider, slider_styled, slider_with,
+    SliderStyle, name_history_step, set_edit_context, setting_slider, slider_styled, slider_with,
 };
-use crate::develop::Recipe;
+use crate::develop::{Recipe, params::ParameterId};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use std::f32::consts::TAU;
 
@@ -93,8 +93,13 @@ pub(super) fn color_grading_ui(ui: &mut egui::Ui, r: &mut Recipe, view: &mut Gra
     }
     ui.add_space(4.);
     set_edit_context(ui, "Color Grading");
-    slider(ui, "Blending", &mut r.effects.blending, 0. ..=1., 0.5);
-    slider(ui, "Balance", &mut r.effects.balance, -1. ..=1., 0.);
+    // The wheels' own sliders stay with them: their rails follow the wheel's color.
+    for (id, default) in [
+        (ParameterId::GradingBlending, 0.5),
+        (ParameterId::GradingBalance, 0.),
+    ] {
+        setting_slider(ui, id, id.value_mut(r), default);
+    }
 }
 
 fn view_buttons(ui: &mut egui::Ui, view: &mut GradingView) {
