@@ -67,8 +67,11 @@ fn strength(amount: f32) -> f32 {
 /// The measured Texture's detail of each channel of an image, which any amount
 /// scales: made once per image, so moving the slider only applies it.
 pub(crate) struct TextureDetail {
-    channels: [Vec<f32>; 3],
+    /// In steps of [`DETAIL_STEP`], so a 61-megapixel photo's fits the stage cache.
+    channels: [Vec<i16>; 3],
 }
+/// The log2 detail per stored step: ±4 EV at 1/8192 EV.
+const DETAIL_STEP: f32 = 1. / 8192.;
 impl TextureDetail {
     /// The detail of `im`, an image `scale` times the full-resolution photo's size;
     /// stops with an error when `cancel` is set.
@@ -83,7 +86,7 @@ impl TextureDetail {
         };
         // A reduced image's level 0 is a coarser full-resolution level.
         let offset = (-scale.max(1e-3).log2()).round().max(0.) as usize;
-        let mut channels: [Vec<f32>; 3] = Default::default();
+        let mut channels: [Vec<i16>; 3] = Default::default();
         for (c, out) in channels.iter_mut().enumerate() {
             let logs = Plane {
                 w: im.width as usize,
@@ -94,24 +97,28 @@ impl TextureDetail {
                     .map(|p| p[c].max(1e-6).log2())
                     .collect(),
             };
-            *out = detail(&logs, offset, cancel)?.data;
+            *out = detail(&logs, offset, cancel)?
+                .data
+                .par_iter()
+                .map(|d| (d / DETAIL_STEP).round().clamp(-32767., 32767.) as i16)
+                .collect();
         }
         Ok(Self { channels })
     }
     /// `im`, the image the detail was made from, with Texture `amount`.
     pub(crate) fn apply(&self, im: &CameraImage, amount: f32) -> CameraImage {
-        let s = strength(amount);
+        let s = strength(amount) * DETAIL_STEP;
         let mut out = im.clone();
         out.recovered = Default::default();
         out.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
             for (v, detail) in p.iter_mut().zip(&self.channels) {
-                *v *= (s * detail[i]).exp2();
+                *v *= (s * detail[i] as f32).exp2();
             }
         });
         out
     }
     pub(crate) fn bytes(&self) -> usize {
-        self.channels.iter().map(Vec::len).sum::<usize>() * 4
+        self.channels.iter().map(Vec::len).sum::<usize>() * 2
     }
 }
 /// The compressed, weighted detail of `plane` as pyramid level `level` and coarser,

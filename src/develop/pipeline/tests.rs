@@ -1276,6 +1276,20 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         .collect();
     let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.photo, plain.photo);
+    // Nor the measured Texture, which makes a new image.
+    let textured = crate::develop::texture::TextureDetail::of(
+        &im,
+        1.,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap()
+    .apply(&im, 1.);
+    let source = Source {
+        untextured: Some(&im),
+        ..Source::new(&textured, None)
+    };
+    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    assert_eq!(textured.photo, plain.photo);
 }
 
 /// A look's parametric curve: added to the user's regions by the measured model, a

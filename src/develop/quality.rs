@@ -676,6 +676,7 @@ fn local_stage(
     // The measured Texture makes a new camera image, channel by channel (texture.rs);
     // the gain below then carries the rest.
     let texture = develop::texture::measured(r);
+    let untextured = (texture != 0.).then(|| im.clone());
     let im = &if texture != 0. {
         spatial.effects.texture = 0.;
         textured(im, texture, scale, cancel, cache.as_deref_mut())?
@@ -688,6 +689,7 @@ fn local_stage(
         gain: None,
         gain_key: None,
         reduced: None,
+        untextured,
     };
     if spatial.shadows != 0.
         || spatial.highlights != 0.
@@ -783,6 +785,7 @@ fn render_resident(
     }
     // The measured Texture's image is made on the CPU, its detail once per image.
     let texture = develop::texture::measured(&base);
+    let untextured = (texture != 0.).then(|| source.clone());
     let source = &if texture != 0. {
         base.effects.texture = 0.;
         textured(source, texture, scale, cancel, Some(&mut *stages.cache))?
@@ -812,6 +815,7 @@ fn render_resident(
         gain: None,
         gain_key: None,
         reduced: None,
+        untextured,
     };
     let mut tones = None;
     if spatial.effects.clarity != 0. || spatial.effects.texture != 0. {
