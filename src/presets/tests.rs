@@ -180,10 +180,15 @@ fn builtin_presets_prefer_imported_adobe_profiles() {
     assert!(haze.profile_substitute(&m, &profiles).is_none());
 
     // The DNG's own profile comes before RAWmakase Standard.
-    let mut dng = x100f();
-    let mut own = crate::camera_profiles::open::standard(&m).unwrap();
-    own.name = "Embedded".into();
-    dng.embedded_profile = Some(std::sync::Arc::new(own));
+    let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus/charts/fujifilm-x100f-d65.dng");
+    let dng = crate::raw::Metadata {
+        embedded_dcp: crate::dng::read(&chart)
+            .and_then(|d| d.profile)
+            .map(Into::into),
+        ..x100f()
+    };
+    let embedded = crate::camera_profiles::builtin(&dng).expect("the chart's profile fits");
     let profiles = open_profiles(&dng);
     let r = haze
         .apply(
@@ -193,7 +198,7 @@ fn builtin_presets_prefer_imported_adobe_profiles() {
             None,
         )
         .unwrap();
-    assert_eq!(r.profile.unwrap().name, "Embedded");
+    assert_eq!(r.profile.unwrap().name, embedded.name);
 }
 
 #[test]

@@ -87,9 +87,10 @@ pub struct Metadata {
     /// image made from it (see `crate::lens::auto_ca::prime`).
     #[serde(skip)]
     pub lateral_ca: std::sync::Arc<std::sync::OnceLock<Option<[crate::optics::Radial; 2]>>>,
-    /// Camera profile embedded in a DNG; rebuilt from the file on open.
+    /// The camera profile a DNG embeds, in DCP form, when it reads and fits this
+    /// camera (`camera_profiles::builtin` reads it); rebuilt from the file on open.
     #[serde(skip)]
-    pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
+    pub embedded_dcp: Option<std::sync::Arc<[u8]>>,
 }
 impl Metadata {
     /// Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
@@ -252,7 +253,7 @@ impl Raw {
             baseline_exposure: None,
             lens_profiles: Default::default(),
             lateral_ca: Default::default(),
-            embedded_profile: None,
+            embedded_dcp: None,
         };
         let mut metadata = metadata;
         if let Some(crop) = fuji_crop(path_ref) {

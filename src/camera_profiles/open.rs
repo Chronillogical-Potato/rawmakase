@@ -102,7 +102,7 @@ pub fn standard(m: &Metadata) -> Option<CameraProfile> {
     let mut p = CameraProfile::camera_matrix_default(m).or_else(|| {
         // LibRaw reports no matrix for some DNGs; use the D65 matrix the DNG's own
         // profile carries.
-        let embedded = m.embedded_profile.as_ref()?;
+        let embedded = super::builtin(m)?;
         let mut with_matrix = m.clone();
         with_matrix.cam_xyz = embedded.color_matrix(6504.)?;
         CameraProfile::camera_matrix_default(&with_matrix)
@@ -236,17 +236,29 @@ mod tests {
         assert!(color(&Metadata::default()).is_none());
     }
 
+    /// The camera profile the X100F corpus chart embeds, as a DCP.
+    fn x100f_dcp() -> std::sync::Arc<[u8]> {
+        let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/charts/fujifilm-x100f-d65.dng");
+        crate::dng::read(&chart)
+            .and_then(|dng| dng.profile)
+            .expect("the chart embeds a profile")
+            .into()
+    }
+
     #[test]
     fn dngs_without_a_libraw_matrix_use_their_own_profile_matrix() {
-        let camera = camera();
         let dng = Metadata {
             cam_xyz: [[0.; 3]; 3],
-            embedded_profile: Some(std::sync::Arc::new(
-                CameraProfile::camera_matrix_default(&camera).unwrap(),
-            )),
-            ..camera.clone()
+            embedded_dcp: Some(x100f_dcp()),
+            ..camera()
         };
-        assert_eq!(standard(&dng), standard(&camera));
+        let embedded = super::super::builtin(&dng).unwrap();
+        let with_its_matrix = Metadata {
+            cam_xyz: embedded.color_matrix(6504.).unwrap(),
+            ..camera()
+        };
+        assert_eq!(standard(&dng), standard(&with_its_matrix));
         assert!(color(&dng).is_some());
     }
 
@@ -314,11 +326,12 @@ mod tests {
         let r = Recipe::with_profiles(&m, &with_adobe);
         assert_eq!(r.profile.as_ref().unwrap().name, "Adobe Color");
         // A DNG keeps the profile it embeds.
-        let mut dng = camera();
-        let mut own = standard(&m).unwrap();
-        own.name = "Embedded".into();
-        dng.embedded_profile = Some(Arc::new(own));
+        let dng = Metadata {
+            embedded_dcp: Some(x100f_dcp()),
+            ..camera()
+        };
+        let embedded = super::super::builtin(&dng).unwrap();
         let r = Recipe::with_profiles(&dng, &profiles);
-        assert_eq!(r.profile.as_ref().unwrap().name, "Embedded");
+        assert_eq!(r.profile.as_ref().unwrap().name, embedded.name);
     }
 }

@@ -28,7 +28,8 @@ pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
 /// The profile a DNG embeds for its camera, which Lightroom lists as the file's own.
 /// No Adobe profiles are bundled; RAWmakase's own profiles are in `open`.
 pub fn builtin(m: &Metadata) -> Option<Arc<CameraProfile>> {
-    m.embedded_profile.clone()
+    let dcp = m.embedded_dcp.as_deref()?;
+    super::from_bytes(dcp).ok().map(Arc::new)
 }
 /// User-installed profiles stay outside the source tree and are filtered by camera.
 pub fn library_dirs() -> Vec<std::path::PathBuf> {

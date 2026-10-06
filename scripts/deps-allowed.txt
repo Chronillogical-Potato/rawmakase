@@ -51,7 +51,6 @@ develop -> color
 develop -> lens
 develop -> optics
 develop -> raw
-dng -> camera_profiles
 dng -> optics
 dng -> tiff
 edits -> camera_profiles
@@ -96,6 +95,7 @@ lr_develop -> color
 lr_develop -> develop
 lr_develop -> raw
 lr_develop -> xmp
+photo -> camera_profiles
 photo -> dng
 photo -> lens
 photo -> raw
@@ -105,7 +105,6 @@ presets -> raw
 presets -> storage
 presets -> xml
 presets -> xmp
-raw -> camera_profiles
 raw -> demosaic
 raw -> lens
 raw -> metadata

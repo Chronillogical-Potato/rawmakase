@@ -271,9 +271,7 @@ impl Preset {
                 return None;
             }
             match name {
-                "Adobe Standard" => m
-                    .embedded_profile
-                    .clone()
+                "Adobe Standard" => crate::camera_profiles::builtin(m)
                     .or_else(|| find(crate::camera_profiles::open::STANDARD)),
                 "Adobe Color" => find(crate::camera_profiles::open::COLOR),
                 _ => None,
