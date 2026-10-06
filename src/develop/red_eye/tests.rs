@@ -318,7 +318,7 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     assert_eq!(local.red_eye[0].center, [0.5, 0.5]);
     // Saved and read back unchanged, the later release's correction included, even
     // after an edit here.
-    let mut edited = local.clone();
+    let mut edited = local;
     edited.red_eye[0].darken = 0.8;
     let text = serde_json::to_string(&edited).unwrap();
     assert!(text.contains("\"Cat\""), "{text}");
@@ -411,7 +411,7 @@ fn pet_pupils_turn_black_with_a_catchlight_where_it_is_put() {
     // Darken doesn't change a pet eye.
     let darker = RedEyeOp {
         darken: 1.,
-        ..plain.clone()
+        ..plain
     };
     assert_eq!(rendered(&im, &[darker]).pixels, out.pixels);
     // A catchlight up and to the right, half a semi-axis away (and the falloff's

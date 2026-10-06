@@ -665,10 +665,10 @@ pub(crate) fn measures_whites(r: &Recipe) -> bool {
 /// The photo reduced for measuring it, without Clarity's and Texture's gain: a user
 /// adjustment that depends on the preview size.
 fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
-    match (im.reduced, im.gain) {
-        (Some(small), None) => std::borrow::Cow::Borrowed(small),
+    match (im.reduced, im.gain, im.untextured) {
+        (Some(small), None, None) => std::borrow::Cow::Borrowed(small),
         _ => std::borrow::Cow::Owned(preview_source(
-            Source::new(im.image, None),
+            Source::new(im.untextured.unwrap_or(im.image), None),
             super::local_tone::MAP_EDGE,
         )),
     }
@@ -790,6 +790,8 @@ pub(crate) struct Source<'a> {
     gain: Option<&'a [f32]>,
     /// These pixels reduced for the Shadows/Highlights map, when already made.
     pub(crate) reduced: Option<&'a CameraImage>,
+    /// The image before the measured Texture, which the photo's measures leave out.
+    pub(crate) untextured: Option<&'a CameraImage>,
 }
 impl<'a> Source<'a> {
     pub(crate) fn new(image: &'a CameraImage, gain: Option<&'a [f32]>) -> Self {
@@ -797,6 +799,7 @@ impl<'a> Source<'a> {
             image,
             gain,
             reduced: None,
+            untextured: None,
         }
     }
     fn px(&self, i: usize) -> [f32; 3] {
@@ -829,11 +832,14 @@ pub(crate) struct Toned {
     /// The toned image reduced for the Shadows/Highlights map, kept in the stage cache
     /// so edits do not reduce the full-resolution image again.
     pub(crate) reduced: Option<std::sync::Arc<CameraImage>>,
+    /// `image` before the measured Texture, when it has it.
+    pub(crate) untextured: Option<std::sync::Arc<CameraImage>>,
 }
 impl Toned {
     pub(crate) fn source(&self) -> Source<'_> {
         Source {
             reduced: self.reduced.as_deref(),
+            untextured: self.untextured.as_deref(),
             ..Source::new(&self.image, self.gain.as_deref().map(Vec::as_slice))
         }
     }

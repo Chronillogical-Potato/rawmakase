@@ -224,7 +224,10 @@ impl SettingGroup {
             Shadows => to.shadows = from.shadows,
             Whites => to.whites = from.whites,
             Blacks => to.blacks = from.blacks,
-            Texture => e.texture = f.texture,
+            Texture => {
+                e.texture = f.texture;
+                to.texture_model = from.texture_model;
+            }
             Clarity => {
                 e.clarity = f.clarity;
                 to.clarity_model = from.clarity_model;
@@ -328,6 +331,7 @@ impl SettingGroup {
                 to.grading_model = from.grading_model;
                 to.mixer_model = from.mixer_model;
                 to.saturation_model = from.saturation_model;
+                to.vibrance_model = from.vibrance_model;
                 to.calibration_model = from.calibration_model;
                 to.whites_model = from.whites_model;
                 to.gamut_model = from.gamut_model;
@@ -574,12 +578,14 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         parametric_model: _,
         grain_model: _,
         clarity_model: _,
+        texture_model: _,
         contrast_model: _,
         lens_vignette_model: _,
         retouch_model: _,
         grading_model: _,
         mixer_model: _,
         saturation_model: _,
+        vibrance_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,
@@ -680,11 +686,13 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("parametric_model", Group(ProcessVersion)),
         ("grain_model", Group(Grain)),
         ("clarity_model", Group(Clarity)),
+        ("texture_model", Group(Texture)),
         ("contrast_model", Group(ProcessVersion)),
         ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),
         ("mixer_model", Group(ProcessVersion)),
         ("saturation_model", Group(ProcessVersion)),
+        ("vibrance_model", Group(ProcessVersion)),
         ("calibration_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
         ("gamut_model", Group(ProcessVersion)),

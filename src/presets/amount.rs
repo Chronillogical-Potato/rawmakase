@@ -181,6 +181,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.grading_model = full.grading_model;
     r.mixer_model = full.mixer_model;
     r.saturation_model = full.saturation_model;
+    r.vibrance_model = full.vibrance_model;
     r.calibration_model = full.calibration_model;
     r.whites_model = full.whites_model;
     r.gamut_model = full.gamut_model;
@@ -394,12 +395,14 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         parametric_model: _,
         grain_model,
         clarity_model,
+        texture_model,
         contrast_model: _,
         lens_vignette_model,
         retouch_model,
         grading_model: _,
         mixer_model: _,
         saturation_model: _,
+        vibrance_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,
@@ -483,6 +486,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         effects: effects(&a.effects, b_effects, t),
         grain_model: *grain_model,
         clarity_model: *clarity_model,
+        texture_model: *texture_model,
         preset_name: preset_name.clone(),
         preset_settings: preset_settings.clone(),
         profile: profile.clone(),

@@ -74,10 +74,13 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         ("ContactInfo", ""),
         ("Version", "15.4"),
         ("RAWmakasePreset", "1"),
-        ("RAWmakaseMarkers", super::write::MARKERS),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
+    .chain([(
+        "RAWmakaseMarkers".to_string(),
+        super::write::MARKERS.to_string(),
+    )])
     .collect();
     attributes.extend(
         settings(r, None)

@@ -422,6 +422,12 @@ impl Preset {
         if settings.keeps_original(super::write::ORIGINAL_SATURATION) {
             r.saturation_model = crate::develop::color_mixer::SaturationModel::Original;
         }
+        if settings.values.contains_key("Vibrance") {
+            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_VIBRANCE) {
+            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Original;
+        }
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
         settings.assign("SharpenDetail", &mut r.sharpening_detail, 0.01, 0., 1.)?;
@@ -787,6 +793,13 @@ impl Preset {
             r.clarity_model = crate::develop::clarity::ClarityModel::Original;
         }
         settings.assign("Texture", &mut r.effects.texture, 0.01, -1., 1.)?;
+        // Lightroom's Texture means the measured operator, also on a recipe saved before.
+        if settings.values.contains_key("Texture") {
+            r.texture_model = crate::develop::texture::TextureModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_TEXTURE) {
+            r.texture_model = crate::develop::texture::TextureModel::Original;
+        }
         settings.assign("Dehaze", &mut r.effects.dehaze, 0.01, -1., 1.)?;
         settings.assign("GrainAmount", &mut r.effects.grain, 0.01, 0., 1.)?;
         settings.assign("GrainSize", &mut r.effects.grain_size, 0.01, 0., 1.)?;

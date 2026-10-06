@@ -42,6 +42,21 @@ mod mapping_tests {
         assert_eq!(r.tint, -TINT_LIMIT);
     }
     #[test]
+    fn a_dial_never_clamps_an_imported_exposure_beyond_the_slider() {
+        let mut r = Recipe {
+            exposure: 6.,
+            ..Recipe::default()
+        };
+        // Clockwise would move it further out: it stays.
+        assert_eq!(Param::Exposure.turn(&mut r, 1, 0), "+6.00");
+        // Anticlockwise moves one step toward the slider, not to its end.
+        assert_eq!(Param::Exposure.turn(&mut r, -1, 0), "+5.98");
+        // An exact value may be anything a recipe holds.
+        assert_eq!(Param::Exposure.set(&mut r, 7.5, 0), "+7.50");
+        assert_eq!(Param::Exposure.set(&mut r, 9., 0), "+8.00");
+        assert_eq!(Param::Contrast.set(&mut r, 150., 0), "+100");
+    }
+    #[test]
     fn temperature_clockwise_is_warmer_and_stays_in_range() {
         let mut r = Recipe {
             temperature: 5000.,
@@ -75,7 +90,7 @@ mod mapping_tests {
         assert!((r.contrast - 0.35).abs() < 1e-6);
         assert_eq!(Param::Contrast.shown(&mut r, 0), 35.);
         Param::Exposure.set(&mut r, 99., 0);
-        assert_eq!(r.exposure, 5.);
+        assert_eq!(r.exposure, crate::develop::EXPOSURE_LIMIT);
         Param::Temperature.set(&mut r, 1., 0);
         assert_eq!(r.temperature, TEMPERATURE_MIN);
         // A band addressed by channel ignores the Mixer's selector and B&W.

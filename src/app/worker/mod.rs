@@ -116,6 +116,11 @@ pub enum Event {
         analysed: Box<crate::develop::Recipe>,
         result: Result<Option<f32>, String>,
     },
+    /// The setup assistant's scan for cameras, profiles and presets.
+    OnboardingScanned {
+        generation: u64,
+        found: Box<crate::app::onboarding::Found>,
+    },
     XmpLibrary {
         scan: u64,
         library: Arc<crate::presets::Library>,
@@ -205,6 +210,8 @@ pub struct LoadJob {
     pub prefetch: Option<Prefetch>,
     /// What the photo starts from when it has no edit.
     pub defaults: Arc<crate::develop::defaults::DevelopDefaults>,
+    /// The demosaic of the full-size decode and of its decode-cache key.
+    pub demosaic: crate::raw::Demosaic,
 }
 /// A photo to develop into the decode cache ahead of time, so opening it next
 /// skips decoding. It has its own cancel flag: the photo on screen finishing
@@ -212,6 +219,7 @@ pub struct LoadJob {
 pub struct Prefetch {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
+    pub demosaic: crate::raw::Demosaic,
 }
 /// What is drawn over (or instead of) the rendered photo.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

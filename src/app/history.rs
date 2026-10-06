@@ -773,7 +773,7 @@ mod tests {
         let (steps, applied) = restored.steps();
         assert_eq!(applied, 2);
         assert_eq!(steps[1].name, "White Balance");
-        let mut current = pasted.clone();
+        let mut current = pasted;
         assert!(restored.undo(&mut current));
         assert_eq!(current, recipe);
     }

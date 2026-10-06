@@ -947,8 +947,11 @@ pub(super) fn slider_with(
                 spacing.button_padding.x = 4.;
                 ui.place(
                     value_rect,
+                    // An imported value beyond the range shows as it is, rather
+                    // than being clamped by drawing it.
                     egui::DragValue::new(&mut displayed)
                         .range(start * scale..=end * scale)
+                        .clamp_existing_to_range(false)
                         .speed(span * scale / 500.)
                         .custom_formatter(move |v, _| slider_text(v, decimals, signed))
                         .custom_parser(|s| s.trim().trim_start_matches('+').parse().ok()),
@@ -1039,7 +1042,7 @@ pub(super) fn slider_with(
             // Lightroom's keys over a hovered slider: Up and Down move it by its
             // smallest shown step, ten with Shift.
             let unit = step.unwrap_or(10f32.powi(-(decimals as i32)) / scale);
-            *value = (*value + nudge * unit).clamp(start, end);
+            *value = crate::develop::params::nudged(*value, nudge * unit, start..=end);
         }
         let x = to_rail(*value, rail);
         if gradient.is_none() {

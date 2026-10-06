@@ -28,6 +28,9 @@ pub(crate) struct StageCache {
     pub(crate) local: Lru<LocalKey, Vec<f32>>,
     pub(crate) samples: Lru<SampleKey, Samples>,
     pub(crate) reduced: Lru<ReducedKey, CameraImage>,
+    /// The measured Texture's detail of a camera image, and the image with an amount.
+    pub(crate) texture_detail: Lru<TextureKey, super::texture::TextureDetail>,
+    pub(crate) textured: Lru<TextureKey, CameraImage>,
     /// Mask weights of a region.
     pub(crate) masks: Lru<MaskKey, super::masks::MaskWeights>,
     /// Brush masks rasterised in image space.
@@ -166,10 +169,13 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         // The measured Clarity is in the map, built per render; the original one is
         // keyed by `LocalKey` through `effects.clarity`.
         clarity_model: _,
+        // The measured Texture makes its own image, keyed by `TextureKey`.
+        texture_model: _,
         contrast_model: _,
         grading_model: _,
         mixer_model: _,
         saturation_model: _,
+        vibrance_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,
@@ -336,6 +342,23 @@ impl LocalKey {
                 r.effects.texture,
             ]
             .map(f32::to_bits),
+        }
+    }
+}
+/// The measured Texture's detail and image: the source image, its scale and (for the
+/// image) the amount.
+#[derive(Clone, PartialEq)]
+pub(crate) struct TextureKey {
+    image: Same<CameraImage>,
+    scale: u32,
+    amount: u32,
+}
+impl TextureKey {
+    pub(crate) fn new(image: &Arc<CameraImage>, scale: f32, amount: f32) -> Self {
+        Self {
+            image: Same(image.clone()),
+            scale: scale.to_bits(),
+            amount: amount.to_bits(),
         }
     }
 }
