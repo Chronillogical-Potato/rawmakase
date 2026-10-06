@@ -10,6 +10,7 @@ app -> exif
 app -> export
 app -> export_settings
 app -> lens
+app -> lr_develop
 app -> metadata
 app -> platform
 app -> presets
@@ -26,11 +27,11 @@ camera_profiles -> raw
 camera_profiles -> storage
 camera_profiles -> xml
 catalog -> camera_profiles
-catalog -> color
 catalog -> develop
 catalog -> exif
 catalog -> export_settings
 catalog -> jpeg
+catalog -> lr_develop
 catalog -> metadata
 catalog -> raw
 catalog -> storage
@@ -80,6 +81,11 @@ lens -> raw
 lens -> storage
 lens -> tiff
 lens -> xml
+lr_develop -> camera_profiles
+lr_develop -> color
+lr_develop -> develop
+lr_develop -> raw
+lr_develop -> xmp
 presets -> color
 presets -> develop
 presets -> raw
@@ -97,7 +103,6 @@ stats -> time
 stats -> updates
 storage -> develop
 storage -> export_settings
-storage -> raw
 watermark -> develop
 watermark -> storage
 xmp -> build_info

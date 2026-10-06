@@ -1,5 +1,6 @@
-use super::lightroom::{develop_fields, import_lightroom};
+use super::lightroom::import_lightroom;
 use super::*;
+use crate::lr_develop::{convert_develop, develop_fields};
 use crate::metadata::{LangAlt, PhotoInfo, Value};
 use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {

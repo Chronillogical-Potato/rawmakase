@@ -6,7 +6,7 @@ fn json(value: impl serde::Serialize) -> Value {
 use std::sync::Arc;
 fn editor() -> (Editor, egui::Context) {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.onboarding.visible = false;
     e.library_mode = false;
     let metadata = crate::raw::Metadata {

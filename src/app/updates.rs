@@ -64,7 +64,7 @@ pub(super) struct Updates {
     checked: bool,
 }
 impl Updates {
-    pub(super) fn new(session: &crate::storage::Session, ctx: Option<&egui::Context>) -> Self {
+    pub(super) fn new(session: &crate::app::session::Session, ctx: Option<&egui::Context>) -> Self {
         let automatic = !session.no_update_checks;
         let mut updates = Self {
             automatic,

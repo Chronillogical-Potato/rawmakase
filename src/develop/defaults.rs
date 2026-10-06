@@ -713,24 +713,5 @@ mod tests {
         assert_eq!(read.master, DefaultChoice::Adobe);
         assert_eq!(read.cameras.len(), 1);
         assert_eq!(read.cameras[0].camera, "B");
-        // A session from before raw defaults, or with ones that don't read, keeps
-        // everything else.
-        let old: crate::storage::Session =
-            serde_json::from_str(r#"{"last_path":null,"monitor":null,"auto_advance":true}"#)
-                .unwrap();
-        assert_eq!(old.raw_defaults, RawDefaults::default());
-        let odd: crate::storage::Session = serde_json::from_str(
-            r#"{"last_path":null,"monitor":null,"auto_advance":true,"raw_defaults":7}"#,
-        )
-        .unwrap();
-        assert!(odd.auto_advance);
-        assert_eq!(odd.raw_defaults, RawDefaults::default());
-        let session = crate::storage::Session {
-            raw_defaults: settings.clone(),
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&session).unwrap();
-        let back: crate::storage::Session = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.raw_defaults, settings);
     }
 }

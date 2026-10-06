@@ -102,7 +102,7 @@ impl EditSource {
         Ok(match edit {
             Some(Self::Recipe(json)) => serde_json::from_str(json)?,
             Some(Self::Lightroom(text)) => {
-                crate::catalog::convert_develop(text, m, &profiles, None)?.0
+                crate::lr_develop::convert_develop(text, m, &profiles, None)?.0
             }
             Some(Self::Defaults(defaults)) => defaults.resolve(m, &profiles).recipe,
             None => crate::develop::Recipe::with_profiles(m, &profiles),

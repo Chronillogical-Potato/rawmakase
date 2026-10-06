@@ -486,7 +486,7 @@ mod tests {
             let mut editor = super::super::Editor::with_context(
                 &ctx,
                 None,
-                crate::storage::Session::default(),
+                crate::app::session::Session::default(),
                 None,
             );
             request
@@ -512,8 +512,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (tx, rx) = mpsc::sync_channel(8);
         let ctx = egui::Context::default();
-        let mut editor =
-            crate::app::Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut editor = crate::app::Editor::with_context(
+            &ctx,
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
         editor.controls = super::super::Hub::new(super::super::Settings::default(), rx);
         let handle = start_at(tx, ctx.clone(), dir.path().join("control.json")).unwrap();
         let port = handle.port;

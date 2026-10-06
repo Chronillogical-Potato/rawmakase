@@ -213,7 +213,7 @@ impl Editor {
             SnapshotSettings::Recipe(recipe) => *recipe,
             SnapshotSettings::Lightroom(text) => {
                 let m = self.document.metadata.as_ref()?;
-                match crate::catalog::convert_develop(
+                match crate::lr_develop::convert_develop(
                     &text,
                     m,
                     &self.document.profiles,
@@ -272,7 +272,7 @@ mod tests {
         let path = d.path().join("snapshots.rawmakase");
         crate::catalog::Catalog::create(&path)?.add_folder(&photos)?;
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let library = crate::app::library::Library::load(&path, ctx.clone())?;
         e.document.catalog_photo = Some(library.photos[0].id);
         e.library = Some(Box::new(library));

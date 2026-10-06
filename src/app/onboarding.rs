@@ -791,7 +791,8 @@ mod tests {
         drop(c);
         let ctx = egui::Context::default();
         let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
-        let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         editor.library = Some(Box::new(library));
         editor.open_onboarding();
         let frame = |editor: &mut Editor| {

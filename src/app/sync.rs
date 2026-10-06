@@ -880,7 +880,7 @@ mod tests {
         };
         // The Lightroom edit is relative to Adobe Default, whatever the raw defaults.
         let converted =
-            crate::catalog::convert_develop(lightroom_text, &metadata, &profiles, None)?.0;
+            crate::lr_develop::convert_develop(lightroom_text, &metadata, &profiles, None)?.0;
         assert_eq!(starting(photos[1].0), converted);
         assert_eq!(converted.exposure, 0.25);
         // The photo without one starts from the raw defaults.

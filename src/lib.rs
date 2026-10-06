@@ -4,7 +4,7 @@
 //! for DCP transforms, and [`develop`] for recipes and rendering. [`xmp`] translates
 //! Adobe settings; [`presets`] manages reusable native and XMP presets.
 //!
-//! [`storage`] owns session persistence and legacy sidecar import, [`catalog`] owns
+//! [`storage`] owns file identity, paths and legacy sidecar import, [`catalog`] owns
 //! the photo database, edits and Lightroom import, and [`export`] writes finished images.
 //! [`app`] composes these APIs into the desktop editor; [`comparison`] provides
 //! reference-image validation and [`platform`] isolates OS integration.
@@ -28,6 +28,7 @@ pub mod export;
 pub mod export_settings;
 mod jpeg;
 pub mod lens;
+pub mod lr_develop;
 pub mod metadata;
 pub mod optics;
 pub mod platform;

@@ -833,7 +833,7 @@ impl Editor {
             && let Some(m) = &self.document.metadata
         {
             let step = &self.document.lightroom_history[i];
-            match crate::catalog::convert_develop(
+            match crate::lr_develop::convert_develop(
                 &step.text,
                 m,
                 &self.document.profiles,

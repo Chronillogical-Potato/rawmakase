@@ -18,7 +18,8 @@ fn autosave_writes_the_catalog_in_the_background() -> anyhow::Result<()> {
     let ctx = egui::Context::default();
     let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let id = l.photos[0].id;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo.clone());
@@ -82,7 +83,8 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
     let ctx = egui::Context::default();
     let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let id = l.photos[0].id;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo.clone());
@@ -171,7 +173,7 @@ fn catalog_metadata_keys_work_in_both_modules_without_zoom_or_dialog_edits() -> 
     catalog.add_folder(&photos)?;
     drop(catalog);
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let mut library = crate::app::library::Library::load(&path, ctx.clone())?;
     let ids: Vec<_> = library.photos.iter().map(|p| p.id).collect();
     library.select(Some(ids[0]));
@@ -238,7 +240,7 @@ fn catalog_metadata_keys_work_in_both_modules_without_zoom_or_dialog_edits() -> 
 #[test]
 fn keyboard_fit_and_physical_pixel_region() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     for (key, expected) in [(egui::Key::Z, true), (egui::Key::F, false)] {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
@@ -277,7 +279,8 @@ fn keyboard_fit_and_physical_pixel_region() {
 #[test]
 fn photo_click_zooms_and_drag_pans_without_editing() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 400,
@@ -344,7 +347,8 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
 #[test]
 fn compact_inspector_keeps_canvas_and_before_preserves_edits() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.document.recipe.exposure = 1.25;
     editor.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
     let saved = editor.document.recipe.clone();
@@ -382,7 +386,7 @@ fn compact_inspector_keeps_canvas_and_before_preserves_edits() {
 #[test]
 fn history_snapshot_undo_and_redo() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.exposure = 2.;
     e.history(original.clone());
@@ -397,7 +401,7 @@ fn history_snapshot_undo_and_redo() {
 #[test]
 fn undo_and_redo_keys_work_while_a_button_has_focus() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.exposure = 2.;
     e.history(original.clone());
@@ -441,7 +445,7 @@ fn undo_and_redo_keys_work_while_a_button_has_focus() {
 #[test]
 fn stale_preview_results_are_discarded() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let (old, _) = e.preview.task.start();
     e.preview.task.start();
     e.tx.send(Event::Rendered {
@@ -471,7 +475,7 @@ fn stale_preview_results_are_discarded() {
 fn before_and_after_renders_go_to_their_own_side() {
     use worker::Pane;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     // Each side counts its renders from the same start: ids alone do not tell them apart.
     let (after, _) = e.preview.task.start();
     let (before, _) = e.preview.before.task.start();
@@ -510,7 +514,7 @@ fn before_and_after_renders_go_to_their_own_side() {
 fn a_failed_before_render_renders_the_edit_again_but_not_before() {
     use worker::{Pane, TaskKind};
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 2,
@@ -552,7 +556,7 @@ fn a_failed_before_render_renders_the_edit_again_but_not_before() {
 fn a_failed_edit_render_renders_before_again_but_not_the_edit() {
     use worker::{Pane, TaskKind};
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 2,
@@ -590,7 +594,8 @@ fn a_failed_edit_render_renders_before_again_but_not_the_edit() {
 fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
     use worker::{RenderStage, TaskKind};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let (load_id, _) = editor.load.start();
     let (render_id, _) = editor.preview.task.start();
     editor
@@ -667,7 +672,8 @@ fn catalog_header_keeps_the_recipe_resolved_by_the_loader() -> anyhow::Result<()
     let id = catalog.photos()?[0].id;
     drop(catalog);
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
     editor.document.catalog_photo = Some(id);
     let (generation, _) = editor.load.start();
@@ -721,7 +727,8 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
             .unwrap();
         editor.events(&ctx);
     };
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
     open(&mut editor);
     for exposure in [0.5, 1.] {
@@ -731,7 +738,8 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     }
     assert!(editor.flush());
     // Another photo, or a restart, starts a new document.
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
     open(&mut editor);
     assert_eq!(editor.document.recipe.exposure, 1.);
@@ -744,7 +752,8 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
 #[test]
 fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.document.recipe.exposure = 1.25;
     editor.presets.preview = Some(editor.document.recipe.clone());
     editor.view.crop_drag = Some(([0., 0., 1., 1.], 0));
@@ -766,7 +775,8 @@ fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
 #[test]
 fn refreshing_preset_support_cancels_the_hover_render() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 1,
@@ -801,7 +811,7 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
     let mut editor = Editor::with_context(
         &ctx,
         None,
-        crate::storage::Session::default(),
+        crate::app::session::Session::default(),
         Some(path.clone()),
     );
     editor.document.path = Some(dir.path().join("photo.ARW"));
@@ -810,7 +820,7 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
         .send(Event::Monitor(dir.path().join("display.icc")))
         .unwrap();
     editor.events(&ctx);
-    let saved: crate::storage::Session = serde_json::from_slice(&std::fs::read(path)?)?;
+    let saved: crate::app::session::Session = serde_json::from_slice(&std::fs::read(path)?)?;
     assert_eq!(saved.last_path, editor.document.path);
     assert_eq!(saved.monitor, editor.view.monitor);
     Ok(())
@@ -819,7 +829,8 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
 fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
     use crate::develop::retouch::RetouchShape;
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 400,
@@ -930,7 +941,8 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
 #[test]
 fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let eyes = [([100., 100.], 10.), ([300., 260.], 8.)];
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
@@ -1058,7 +1070,8 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
 fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
     use crate::develop::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 200,
@@ -1097,7 +1110,8 @@ fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
 fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
     use crate::develop::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 200,
@@ -1192,7 +1206,8 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
 #[test]
 fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 400,
@@ -1231,7 +1246,8 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     use crate::develop::masks::MaskShape;
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 400,
@@ -1401,7 +1417,8 @@ fn a_photo_from_outside_the_library_is_added_and_opened() -> anyhow::Result<()> 
     let raw = outside.join("photo.ARW");
     std::fs::write(&raw, b"identity fixture")?;
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
     // As if dropped on the window.
     editor.open(raw.clone());
@@ -1431,7 +1448,8 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     let path = dir.path().join("photos.rawmakase");
     crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let library = library::Library::load(&path, ctx)?;
     // The filmstrip order, first to last.
     let mut order = vec![library.photos[0].id];
@@ -1465,7 +1483,8 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
 #[test]
 fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let (width, height) = (64u32, 48u32);
     editor.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
@@ -1547,7 +1566,8 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
 #[test]
 fn stale_auto_results_are_ignored_after_moving_on() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let before = editor.document.recipe.clone();
     let mut auto = before.clone();
     auto.exposure = 2.;
@@ -1566,7 +1586,7 @@ fn stale_auto_results_are_ignored_after_moving_on() {
 #[test]
 fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let modifiers = egui::Modifiers {
         command: true,
         mac_cmd: cfg!(target_os = "macos"),
@@ -1616,7 +1636,8 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
 #[test]
 fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let start = editor.document.recipe.clone();
     // A Shadows drag is under way when the estimate arrives. Auto sets Shadows too,
     // so the drag does not make the estimate stale.
@@ -1655,7 +1676,8 @@ fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
 #[test]
 fn auto_runs_again_when_the_crop_changed_while_it_ran() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 8,
@@ -1688,7 +1710,8 @@ fn auto_runs_again_when_the_crop_changed_while_it_ran() {
 #[test]
 fn auto_runs_again_when_it_failed_on_settings_changed_since() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 8,
@@ -1722,7 +1745,8 @@ fn auto_runs_again_when_it_failed_on_settings_changed_since() {
 #[test]
 fn auto_is_off_while_its_settings_stand() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     assert!(!editor.auto_in_effect());
     let mut auto = editor.document.recipe.clone();
     auto.exposure = 1.;
@@ -1764,7 +1788,7 @@ fn auto_is_off_while_its_settings_stand() {
 fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     use crate::develop::UprightMode;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.upright.mode = UprightMode::Vertical;
     e.history(original);
@@ -1794,7 +1818,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
 fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     use crate::develop::UprightMode;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
     let mut guided = identity;
     guided[2] = 0.05;
@@ -1825,7 +1849,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
 fn upright_analysis_yields_to_corrections_applied_meanwhile() {
     use crate::develop::UprightMode;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.recipe.upright.mode = UprightMode::Level;
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.recipe.clone();
@@ -1844,7 +1868,8 @@ fn upright_analysis_yields_to_corrections_applied_meanwhile() {
 #[test]
 fn crop_tool_reads_each_photos_own_aspect() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let image = Arc::new(CameraImage {
         recovered: Default::default(),
         width: 300,
@@ -1891,7 +1916,8 @@ fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::
     let ctx = egui::Context::default();
     let l = library::Library::load(&catalog, ctx.clone())?;
     let id = l.photos[0].id;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.library_mode = false;
     editor.document.catalog_photo = Some(id);
@@ -1922,7 +1948,8 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     let mut l = library::Library::load(&catalog, ctx.clone())?;
     let master = l.photos[0].id;
     let copy = l.create_virtual_copy(master)?;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     // The copy was last open in Develop; the user is back in the Library.
     editor.document.catalog_photo = Some(copy);
@@ -1965,7 +1992,8 @@ fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Re
     let copy = l.create_virtual_copy(l.photos[0].id)?;
     // A copy that is gone from the catalog cannot be renamed.
     l.catalog.remove_virtual_copy(copy)?;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor
         .library
@@ -1991,7 +2019,8 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     let copy = l.create_virtual_copy(l.photos[0].id)?;
     l.set_copy_as_master(copy)?;
     let path = l.photo(copy).unwrap().path.clone();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     assert_eq!(editor.catalog_photo_at(&path), Some(copy));
     Ok(())
@@ -2007,7 +2036,7 @@ fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Edi
     let path = d.path().join("test.rawmakase");
     crate::catalog::Catalog::create(&path)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let library = crate::app::library::Library::load(&path, ctx)?;
     let ids = library.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
@@ -2071,7 +2100,7 @@ fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()>
 #[test]
 fn undoing_a_history_click_returns_to_the_exact_step() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     for exposure in [0.25, 0.5, 1.] {
         let before = e.document.recipe.clone();
         e.document.recipe.exposure = exposure;
@@ -2111,7 +2140,7 @@ fn a_library_change_is_undone_in_the_library() -> anyhow::Result<()> {
 #[test]
 fn undoing_a_history_click_after_a_new_branch_restores_its_own_state() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let before = e.document.recipe.clone();
     e.document.recipe.exposure = 0.5;
     e.history(before);
@@ -2275,7 +2304,8 @@ fn quick_collection_toggles_shows_clears_and_undoes() -> anyhow::Result<()> {
 #[test]
 fn the_preset_list_is_kept_until_what_it_shows_changes() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let preset = |id: &str, group: &str, name: &str| crate::xmp::Preset {
         id: id.into(),
         name: name.into(),
@@ -2394,7 +2424,8 @@ fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
 #[test]
 fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_photo() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let camera = |wb: [f32; 3]| Metadata {
         wb,
         daylight_wb: wb,
@@ -2439,7 +2470,8 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
 fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     use crate::develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.document.metadata = Some(Metadata {
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
@@ -2500,7 +2532,7 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
 #[test]
 fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let mut text = String::new();
     let j = || egui::Event::Key {
         key: egui::Key::J,
@@ -2542,7 +2574,7 @@ fn j_toggles_both_clipping_warnings_but_not_while_typing() {
 #[test]
 fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let frame = e.begin_edit_frame();
     // As the histogram does while its highlight triangle is under the pointer.
     e.view
@@ -2663,7 +2695,7 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
         (Guide::Triangle, 0)
     );
     press(&mut e, egui::Key::O, true, false);
-    let saved: crate::storage::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
+    let saved: crate::app::session::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
     assert_eq!(saved.crop_guides.guide, "triangle");
     assert_eq!(saved.crop_guides.orientation, 1);
     // Outside the Crop tool X rejects as before.
@@ -2676,7 +2708,7 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
 #[test]
 fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_turn() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     // Stripes falling 3° to the right.
     let (w, h) = (600usize, 400usize);
     let (s, c) = 3f32.to_radians().sin_cos();
@@ -2760,7 +2792,7 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
 fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
     let ctx = egui::Context::default();
     super::icons::install(&ctx);
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.view.tool = state::Tool::Crop;
     let size = |e: &mut Editor, width: f32| {
         let mut rect = Rect::NOTHING;
@@ -2799,7 +2831,8 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     let ctx = egui::Context::default();
     let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let id = l.photos[0].id;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo);
@@ -2837,7 +2870,8 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
 #[test]
 fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library_mode = false;
     let edit = |editor: &mut Editor, exposure: f32, held: bool| {
         let before = editor.document.recipe.clone();
@@ -2864,7 +2898,7 @@ fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
 fn guided_upright_gestures_are_one_history_step_each() {
     use crate::develop::UprightMode;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.library_mode = false;
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
@@ -2988,7 +3022,7 @@ fn guided_upright_gestures_are_one_history_step_each() {
 /// `decoded` is false.
 fn editor_with_blue_photo(
     ctx: &egui::Context,
-    session: crate::storage::Session,
+    session: crate::app::session::Session,
     decoded: bool,
 ) -> (Editor, Arc<CameraImage>) {
     let mut editor = Editor::with_context(ctx, None, session, None);
@@ -3033,7 +3067,8 @@ fn in_edit_frame(ctx: &egui::Context, editor: &mut Editor, action: impl FnOnce(&
 #[test]
 fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
     let ctx = egui::Context::default();
-    let (mut editor, _) = editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
     let before = editor.document.recipe.clone();
     // V, through a whole frame of the Develop module.
     let mut output = ctx.run_ui(
@@ -3105,7 +3140,7 @@ fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
         ("Black & White Mix", "Auto")
     );
     // With the preference off, the first conversion keeps the mix at zero.
-    let session = crate::storage::Session {
+    let session = crate::app::session::Session {
         no_auto_black_white_mix: true,
         ..Default::default()
     };
@@ -3119,7 +3154,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     let ctx = egui::Context::default();
     // V twice while decoding: the second cancels the first.
     let (mut editor, image) =
-        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), false);
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     editor.document.set_image(image);
@@ -3128,7 +3163,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     assert_eq!(editor.document.history.steps().1, 0);
     // Once: the conversion waits for the photo.
     let (mut editor, image) =
-        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), false);
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     assert!(!editor.document.recipe.effects.monochrome);
     assert_eq!(editor.document.history.steps().1, 0);
@@ -3144,7 +3179,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     );
     // An edit in the frame the photo decodes in drops the request too.
     let (mut editor, image) =
-        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), false);
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     editor.document.set_image(image);
     in_edit_frame(&ctx, &mut editor, |e| e.document.recipe.exposure = 0.3);
@@ -3153,7 +3188,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     assert!(!editor.document.recipe.effects.monochrome);
     // A request lapses when the recipe changes otherwise before the photo decodes.
     let (mut editor, image) =
-        editor_with_blue_photo(&ctx, crate::storage::Session::default(), false);
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), false);
     let before_exposure = editor.document.recipe.exposure;
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     in_edit_frame(&ctx, &mut editor, |e| e.document.recipe.exposure = 0.5);
@@ -3173,7 +3208,7 @@ fn preset_from(name: &str, settings: &str) -> crate::xmp::Preset {
     crate::xmp::parse(std::path::Path::new(&format!("{name}.xmp")), &text).unwrap()
 }
 fn editor_with_presets(ctx: &egui::Context, presets: Vec<crate::xmp::Preset>) -> Editor {
-    let mut editor = Editor::with_context(ctx, None, crate::storage::Session::default(), None);
+    let mut editor = Editor::with_context(ctx, None, crate::app::session::Session::default(), None);
     editor.document.metadata = Some(Metadata {
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
@@ -3288,7 +3323,8 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
 #[test]
 fn red_eye_brackets_resize_the_circle_a_click_uses() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::RedEye;
     let start = editor.view.red_eye.size;
     let mut press = |key| {
@@ -3326,7 +3362,8 @@ fn scrolling_over_the_photo_resizes_the_brush_spot_and_red_eye_circle() {
     use super::brush_scroll::{Adjust, MaskBrush, Scroll};
     use crate::develop::masks::{MaskComponent, MaskGroup, MaskShape};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let size = |lines| Scroll {
         lines,
         adjust: Adjust::Size,
@@ -3429,7 +3466,8 @@ fn wheel_events_carry_their_own_modifiers_and_plain_swipes_sideways_do_nothing()
 #[test]
 fn a_wheel_scroll_resizing_a_spot_is_one_history_step() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::Remove;
     editor
         .document
@@ -3482,7 +3520,8 @@ fn brackets_size_the_red_eye_circle_without_rating_the_photo() -> anyhow::Result
     let ctx = egui::Context::default();
     let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let id = l.photos[0].id;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
     editor.library_mode = false;
     editor.document.catalog_photo = Some(id);
@@ -3511,7 +3550,8 @@ fn brackets_size_the_red_eye_circle_without_rating_the_photo() -> anyhow::Result
 #[test]
 fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::Remove;
     editor
         .document
@@ -3553,7 +3593,8 @@ fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
 #[test]
 fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::Remove;
     editor
         .document
@@ -3605,7 +3646,8 @@ fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
 #[test]
 fn a_wheel_scroll_closes_once_paused_even_while_a_button_goes_down() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::Remove;
     editor
         .document
@@ -3652,7 +3694,8 @@ fn a_wheel_scroll_closes_once_paused_even_while_a_button_goes_down() {
 #[test]
 fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.view.tool = state::Tool::Remove;
     editor
         .document
@@ -3699,7 +3742,8 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
 fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     use crate::develop::point_color::SampleRefusal;
     let ctx = egui::Context::default();
-    let (mut editor, _) = editor_with_blue_photo(&ctx, crate::storage::Session::default(), true);
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
     // The current process, which renders Point Color.
     editor.document.recipe.reference_curves = true;
     editor.document.recipe.reference_color = true;
@@ -3892,7 +3936,8 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
 fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
     use crate::develop::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let frame = |editor: &mut Editor, edit: &dyn Fn(&mut develop::Recipe)| {
         let started = editor.begin_edit_frame();
         edit(&mut editor.document.recipe);
@@ -4156,7 +4201,8 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     drop(c);
     let ctx = egui::Context::default();
     let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     // Not this machine's own raw defaults. Adobe Default needs no preset, so the
     // preset scan the editor starts leaves them as they are.
     editor.raw_defaults = Arc::new(develop::defaults::DevelopDefaults::with_presets(
@@ -4296,7 +4342,8 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
 
     let ctx = egui::Context::default();
     let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
-    let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let defaults = Arc::new(develop::defaults::DevelopDefaults::with_presets(
         Default::default(),
         |_| None,

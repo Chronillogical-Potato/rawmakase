@@ -243,7 +243,7 @@ mod integration_tests {
     #[test]
     fn disconnect_clears_modifiers_even_with_old_input_queued() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let (tx, rx) = mpsc::sync_channel(1);
         e.controls = Hub::new(
             Settings {
@@ -313,7 +313,7 @@ mod integration_tests {
     #[test]
     fn photo_dial_ignores_grid_preserves_loupe_and_navigates_develop() -> anyhow::Result<()> {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.onboarding.visible = false;
         let dir = tempfile::tempdir()?;
         let photos = dir.path().join("photos");
@@ -417,7 +417,7 @@ mod integration_tests {
     #[test]
     fn each_socket_request_runs_and_replies_before_the_next() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.onboarding.visible = false;
         let (tx, rx) = mpsc::sync_channel(4);
         e.controls = Hub::new(
@@ -535,7 +535,7 @@ fn control_formats_and_midi_channels_are_explicit() {
 #[test]
 fn editing_one_device_preserves_others_and_removed_input_is_ignored() {
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let (_, rx) = mpsc::sync_channel(8);
     e.controls = Hub::new(
         Settings {
