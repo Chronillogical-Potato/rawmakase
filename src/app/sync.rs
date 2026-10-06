@@ -263,7 +263,7 @@ fn prepare(
     // Guided solves this photo's own guides beside that analysis.
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let image = raw.develop(false, &cancel)?;
+        let image = raw.develop(crate::raw::Decode::full(), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
             && after.upright.mode == crate::develop::UprightMode::Guided
         {

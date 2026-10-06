@@ -8,7 +8,7 @@ use crate::{
     decode_cache::DecodeCache,
     develop::Recipe,
     exif,
-    raw::{CameraImage, Raw},
+    raw::{CameraImage, Decode, Raw},
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -147,12 +147,13 @@ pub fn prepare(
 /// `raw` at full resolution, as Develop decodes the photo it opens: the decode
 /// cache's copy when it has one.
 pub fn decode_full(raw: Raw, source: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
-    let cached = DecodeCache::key(source)
+    let demosaic = crate::raw::demosaic();
+    let cached = DecodeCache::key(source, demosaic)
         .ok()
         .and_then(|key| DecodeCache::default().load(&key, &raw.metadata));
     match cached {
         Some(full) => Ok(full),
-        None => raw.develop(false, cancel),
+        None => raw.develop(Decode::Full(demosaic), cancel),
     }
 }
 
@@ -165,12 +166,13 @@ fn full_size(
     if !image.fast {
         return Ok(image);
     }
-    let cached = DecodeCache::key(source)
+    let demosaic = crate::raw::demosaic();
+    let cached = DecodeCache::key(source, demosaic)
         .ok()
         .and_then(|key| DecodeCache::default().load(&key, &image.metadata));
     Ok(Arc::new(match cached {
         Some(full) => full,
-        None => Raw::open(source)?.develop(false, cancel)?,
+        None => Raw::open(source)?.develop(Decode::Full(demosaic), cancel)?,
     }))
 }
 

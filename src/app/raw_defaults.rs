@@ -628,6 +628,7 @@ mod tests {
             cancel: Default::default(),
             prefetch: None,
             defaults: defaults.clone(),
+            demosaic: crate::raw::Demosaic::default(),
         });
         let header = loop {
             match rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap() {

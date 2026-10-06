@@ -162,7 +162,7 @@ fn photos_match_accepted_renders() {
             .ok()
             .map(|b| serde_json::from_slice(&b).expect("accepted renders"));
         let im = match rawmakase::raw::Raw::open(raw)
-            .and_then(|r| r.develop(false, &AtomicBool::new(false)))
+            .and_then(|r| r.develop(rawmakase::raw::Decode::full(), &AtomicBool::new(false)))
         {
             Ok(im) => im,
             Err(e) if accepted.is_none() => {
@@ -299,7 +299,7 @@ fn photos_camera_raw_parity_does_not_regress() {
         .iter()
         .flat_map(|(raw, references)| {
             let im = match rawmakase::raw::Raw::open(&corpus.join("raws").join(raw))
-                .and_then(|r| r.develop(false, &AtomicBool::new(false)))
+                .and_then(|r| r.develop(rawmakase::raw::Decode::full(), &AtomicBool::new(false)))
             {
                 Ok(im) => im,
                 Err(e) => {
