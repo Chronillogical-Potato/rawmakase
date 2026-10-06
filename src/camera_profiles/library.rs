@@ -80,7 +80,7 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
             }
             Err(e) => {
                 // Other camera models are expected in a shared user library.
-                if !e.to_string().starts_with("Profile belongs to") {
+                if e.downcast_ref::<super::OtherCamera>().is_none() {
                     errors.push(format!("{}: {e:#}", path.display()));
                 }
             }
@@ -241,12 +241,16 @@ fn import_into(
                 LookFile::parse(std::str::from_utf8(bytes)?).with_context(|| format!("{file}"))?;
             if let LookBase::Named(name) = &look.base {
                 // The base must also be for the camera the look is restricted to.
-                ensure!(
-                    bases
-                        .iter()
-                        .any(|base| look.fits(base) && look.compose(base).is_ok()),
-                    "{file}: Missing base camera profile {name}. Import its matching base DCP together with the XMP profile",
-                );
+                if !bases
+                    .iter()
+                    .any(|base| look.fits(base) && look.compose(base).is_ok())
+                {
+                    return Err(super::MissingBase {
+                        file: file.into_owned(),
+                        name: name.clone(),
+                    }
+                    .into());
+                }
             }
         }
     }

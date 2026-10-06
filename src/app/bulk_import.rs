@@ -303,7 +303,8 @@ fn import_camera_profiles(found: &[Found], progress: &Mutex<String>) -> Summary 
                         // Camera Raw's folder of looks covers every camera; only
                         // looks chosen by name are worth a line each.
                         Err(e)
-                            if e.to_string().contains("Missing base camera profile")
+                            if e.downcast_ref::<crate::camera_profiles::MissingBase>()
+                                .is_some()
                                 && !chosen.contains(path.as_path()) =>
                         {
                             summary.without_base += 1

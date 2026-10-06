@@ -58,6 +58,39 @@ pub struct CameraProfile {
 /// The DNG `DefaultBlackRender` tag: whether the raw converter subtracts its
 /// default black (the exposure ramp at Shadows 5) under this profile. Adobe's
 /// camera-matching profiles say `None`, which keeps the camera's lifted shadows.
+/// A profile made for another camera than the photo's. Expected in a shared
+/// library, so callers listing profiles skip it rather than report it.
+#[derive(Debug)]
+pub struct OtherCamera {
+    pub profile: String,
+    pub photo: String,
+}
+impl std::fmt::Display for OtherCamera {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Profile belongs to {}, not {}", self.profile, self.photo)
+    }
+}
+impl std::error::Error for OtherCamera {}
+
+/// An imported look whose base camera profile was not imported with it.
+#[derive(Debug)]
+pub struct MissingBase {
+    /// The look's file name.
+    pub file: String,
+    /// The base profile it names.
+    pub name: String,
+}
+impl std::fmt::Display for MissingBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: Missing base camera profile {}. Import its matching base DCP together with the XMP profile",
+            self.file, self.name
+        )
+    }
+}
+impl std::error::Error for MissingBase {}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlackRender {
     #[default]
@@ -298,15 +331,16 @@ impl CameraProfile {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        ensure!(
-            key(&self.camera) == key(&format!("{} {}", m.make, m.model))
-                || key(&self.camera) == key(&m.model),
-            "Profile belongs to {}, not {} {}",
-            self.camera,
-            m.make,
-            m.model
-        );
-        Ok(())
+        if key(&self.camera) == key(&format!("{} {}", m.make, m.model))
+            || key(&self.camera) == key(&m.model)
+        {
+            return Ok(());
+        }
+        Err(OtherCamera {
+            profile: self.camera.clone(),
+            photo: format!("{} {}", m.make, m.model),
+        }
+        .into())
     }
     fn neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
         if self.calibration_signature == "com.adobe" {
