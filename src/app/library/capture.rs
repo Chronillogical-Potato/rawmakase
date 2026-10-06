@@ -34,7 +34,7 @@ impl Library {
             .count();
         if missing > 0 {
             self.message = format!(
-                "{} not found on this computer. Locate them in Preferences › Catalog › \
+                "{} found on this computer. Locate them in Preferences › Catalog › \
                  Folder locations, or right-click a folder.",
                 super::super::widgets::plural(missing, "folder isn't", "folders aren't")
             );

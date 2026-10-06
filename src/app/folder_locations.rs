@@ -58,6 +58,8 @@ pub(super) struct LocationsView {
     folders: HashMap<(i64, String), i64>,
     /// This computer's name, as typed.
     computer: String,
+    /// Typed and not saved yet: saved when the field or the page is left.
+    computer_dirty: bool,
     /// Whether each path shown is there, checked off the UI thread: a
     /// missing network share can take seconds to answer.
     found: Arc<Mutex<HashMap<PathBuf, bool>>>,
@@ -100,6 +102,7 @@ impl LocationsView {
             roots,
             folders,
             computer: catalog.computer_name().unwrap_or_default(),
+            computer_dirty: false,
             found,
             error: None,
         }
@@ -125,6 +128,7 @@ impl Editor {
         let mut renamed = false;
         form_row(ui, "This computer", |ui| {
             let field = ui.add(egui::TextEdit::singleline(&mut view.computer).desired_width(220.));
+            view.computer_dirty |= field.changed();
             renamed = field.lost_focus();
         });
         form_row(ui, "", |ui| {
@@ -231,17 +235,26 @@ impl Editor {
         }
         gap(ui);
         if renamed {
-            let name = view.computer.clone();
-            if let Some(library) = &mut self.library
-                && let Err(e) = library.catalog.rename_computer(&name)
-            {
-                self.status = format!("Computer not renamed: {e:#}");
-            }
+            self.save_computer_name();
         }
         match click {
             Some(Click::Change(action)) => self.catalog_dialog(CatalogDialog::Folder(action), &ctx),
             Some(Click::Clear(root, relative)) => self.clear_folder_location(root, &relative),
             None => {}
+        }
+    }
+    /// Saves this computer's name still being typed, once its field or
+    /// page is left.
+    pub(super) fn save_computer_name(&mut self) {
+        let (Some(view), Some(library)) = (&mut self.preferences.locations, &mut self.library)
+        else {
+            return;
+        };
+        if !std::mem::take(&mut view.computer_dirty) {
+            return;
+        }
+        if let Err(e) = library.catalog.rename_computer(&view.computer) {
+            self.status = format!("Computer not renamed: {e:#}");
         }
     }
     /// Clears a location, then opens the catalog again as relinking does,

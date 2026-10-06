@@ -469,13 +469,23 @@ fn suggestion(catalog: &crate::catalog::Catalog, action: FolderAction) -> Option
             (folder.root, folder.relative)
         }
     };
-    catalog
+    let locations = catalog
         .folder_locations()
         .ok()?
         .into_iter()
-        .find(|r| r.root == root)?
-        .elsewhere
-        .into_iter()
-        .find(|(_, at, path)| *at == relative && path.is_dir())
-        .map(|(_, _, path)| path)
+        .find(|r| r.root == root)?;
+    // Each other computer's own rows, so a folder found there through its
+    // root or a parent is suggested too.
+    let mut by_computer: std::collections::BTreeMap<&str, Vec<(String, PathBuf)>> =
+        Default::default();
+    for (computer, at, path) in &locations.elsewhere {
+        by_computer
+            .entry(computer)
+            .or_default()
+            .push((at.clone(), path.clone()));
+    }
+    by_computer.values().find_map(|rows| {
+        crate::catalog::locations::resolve_in(&locations.original, rows, &relative, cfg!(windows))
+            .filter(|path| path.is_dir())
+    })
 }

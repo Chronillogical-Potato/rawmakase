@@ -158,6 +158,7 @@ impl Editor {
             folders: catalog.and_then(|c| c.folders().ok().map(|f| f.len())),
         };
         self.preferences.stale = self.activity.is_dialog();
+        self.save_computer_name();
         self.preferences.locations = None;
     }
     /// ⌘, (Ctrl+, elsewhere) opens Preferences, as in Lightroom.
@@ -190,6 +191,7 @@ impl Editor {
         let closing = ctx.input(|i| i.viewport().close_requested());
         if !self.preferences.open || self.preferences.tab != Tab::Catalog || closing {
             self.save_defaults();
+            self.save_computer_name();
         }
         if !self.preferences.open {
             return;

@@ -281,6 +281,7 @@ impl Editor {
     fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
         // Folder locations may have changed with it.
+        self.save_computer_name();
         self.preferences.locations = None;
         match result {
             Ok(mut l) => {

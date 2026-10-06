@@ -304,8 +304,8 @@ impl Catalog {
 
 /// This computer's locations, for matching folders found on disk.
 struct Matcher {
-    /// Every location: each root's own, or where it was added when it has
-    /// none here, and every folder's; with its path as the disk has it.
+    /// Every location: where each root was added, its own and every
+    /// folder's on this computer; with its path as the disk has it.
     locations: Vec<(FolderLocation, PathBuf)>,
     roots: HashMap<i64, Root>,
 }
@@ -333,17 +333,18 @@ impl Matcher {
         let mut roots = HashMap::new();
         for (root, original, _) in catalog.roots()? {
             let own = rows.remove(&root).unwrap_or_default();
-            if !own.iter().any(|(relative, _)| relative.is_empty()) {
-                let path = PathBuf::from(&original);
-                locations.push((
-                    FolderLocation {
-                        root,
-                        relative: String::new(),
-                        path: path.clone(),
-                    },
-                    real(&path),
-                ));
-            }
+            // Where it was added counts even when it is located elsewhere
+            // here: what is left there is then a stale copy, reported by the
+            // forward check, never a second root.
+            let path = PathBuf::from(&original);
+            locations.push((
+                FolderLocation {
+                    root,
+                    relative: String::new(),
+                    path: path.clone(),
+                },
+                real(&path),
+            ));
             for (relative, path) in &own {
                 locations.push((
                     FolderLocation {

@@ -42,7 +42,7 @@ impl Computer {
     }
     /// The computer whose id is kept in `dir`, made there the first time.
     pub fn load_from(dir: &Path) -> Result<Computer> {
-        let file = dir.join("computer-id");
+        let file = dir.join(id_file());
         let read = |file: &Path| -> Option<String> {
             let id = std::fs::read_to_string(file).ok()?.trim().to_string();
             (!id.is_empty()).then_some(id)
@@ -67,6 +67,21 @@ impl Computer {
             id,
             name: host_name(),
         })
+    }
+}
+/// The name of the file holding the computer id. On Linux the data folder
+/// can be in a home directory several computers share (over NFS, or a synced
+/// XDG_DATA_HOME), so each machine, as /etc/machine-id tells them apart,
+/// keeps its own.
+fn id_file() -> String {
+    let machine = cfg!(target_os = "linux")
+        .then(|| std::fs::read_to_string("/etc/machine-id").ok())
+        .flatten()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()));
+    match machine {
+        Some(machine) => format!("computer-id-{machine}"),
+        None => "computer-id".into(),
     }
 }
 /// The computer's name as its system shows it, for labels only.

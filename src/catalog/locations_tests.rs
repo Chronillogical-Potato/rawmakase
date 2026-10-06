@@ -653,3 +653,24 @@ fn the_computer_id_is_made_once_and_kept() -> Result<()> {
     assert!(!first.name.is_empty());
     Ok(())
 }
+
+#[test]
+fn adding_where_a_relocated_root_used_to_be_is_a_stale_copy() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let old = d.path().join("photos");
+    let new = d.path().join("archive/photos");
+    photo(&old.join("Trip"), "a.NEF")?;
+    photo(&new.join("Trip"), "a.NEF")?;
+    let catalog = new_catalog(d.path())?;
+    let mut cat = Catalog::open_as(&catalog, &linux())?;
+    cat.add_folder(&old)?;
+    let root = cat.roots()?[0].0;
+    cat.relink_root(root, &new)?;
+    // The old copy is still there; adding it again adds nothing.
+    let added = cat.import_folder(&old, &Default::default(), &[])?;
+    assert_eq!(added.added, 0);
+    assert_eq!(added.conflicts.len(), 1);
+    assert_eq!(added.conflicts[0].located, new.join("Trip"));
+    assert_eq!(cat.roots()?.len(), 1);
+    Ok(())
+}
