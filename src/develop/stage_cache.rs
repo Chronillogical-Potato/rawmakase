@@ -170,6 +170,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         grading_model: _,
         mixer_model: _,
         saturation_model: _,
+        vibrance_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,

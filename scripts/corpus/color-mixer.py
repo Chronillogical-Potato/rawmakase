@@ -30,10 +30,15 @@ What the renders show (see docs/color-mixer.md#chart-tables):
   third of −100's log value change and +50 about 58% of +100's, so the chart tables
   scale it by the slider position to the power 1.6 (darkening) or 0.79.
 
+`fit-vibrance` writes src/develop/vibrance_chart.bin from the same renders: the
+photo tables up to ±50 and a grid fitted per position at ±75 and ±100
+(docs/color-mixer.md#vibrance).
+
 Requires numpy. Run from the repository root:
   python3 scripts/corpus/color-mixer.py chart [--work DIR]
   python3 scripts/corpus/color-mixer.py render [--work DIR] [--refs FILE]
   python3 scripts/corpus/color-mixer.py fit [--work DIR] [--refs FILE]
+  python3 scripts/corpus/color-mixer.py fit-vibrance [--work DIR] [--refs FILE]
 """
 import argparse
 import importlib.util
@@ -62,6 +67,9 @@ TABLES = 52
 SCALE = 8000
 ORIGINAL = ROOT / 'src/develop/color_mixer.bin'
 OUTPUT = ROOT / 'src/develop/color_mixer_chart.bin'
+VIBRANCE_OUTPUT = ROOT / 'src/develop/vibrance_chart.bin'
+# Vibrance's rendered positions, in the order of vibrance_chart.bin's grids.
+VIBRANCE_POSITIONS = [-100, -75, -50, -25, 25, 50, 75, 100]
 # Regularization: smoothness between neighbouring cells, and pull toward the photo
 # tables (which is all that constrains cells without chart colors).
 SMOOTH, PRIOR = 0.03, 0.02
@@ -124,6 +132,8 @@ def cases():
         for kind in KINDS:
             for a in amounts:
                 out[f'{kind}-{band}{a:+d}'] = {f'{kind}Adjustment{band}': str(a)}
+    for a in VIBRANCE_POSITIONS:
+        out[f'Vibrance{a:+d}'] = {'Vibrance': str(a)}
     return out
 
 
@@ -363,9 +373,46 @@ def fit(refs):
     print(f'Wrote {OUTPUT.relative_to(ROOT)}')
 
 
+def fit_vibrance(refs):
+    """vibrance_chart.bin: a grid per position in VIBRANCE_POSITIONS. Up to ±50 the
+    photo tables (Saturation and Vibrance tables 50 and 51 of color_mixer.bin, as
+    ColorMixer scales them), which were closer to Camera Raw on real photos there;
+    at ±75 and ±100 a grid fitted to the chart's render at that position, which the
+    photo tables only reached by extrapolating."""
+    data = Data(refs)
+    original = np.frombuffer(ORIGINAL.read_bytes(), '<i2').astype(float).reshape(TABLES, 3, CELLS) / SCALE
+    dtd = smoothness()
+    held_out = data.hue_index % 2 == 1
+    grids = []
+    for a in VIBRANCE_POSITIONS:
+        photo = scaled(original[50 + int(a > 0)], 'Vibrance', min(abs(a) / 50, 2) * np.sign(a))
+        if abs(a) <= 50:
+            grids.append(photo)
+            continue
+        change, weight = data.observed(f'Vibrance{a:+d}')
+        def solve(use):
+            grid = photo.copy()
+            for c in range(3):
+                keep = use & (weight[c] > 0) & np.isfinite(change[:, c])
+                rows, w = data.w[keep], weight[c][keep]
+                normal = rows.T @ (rows * w[:, None]) + SMOOTH * dtd + PRIOR * np.identity(CELLS)
+                grid[c] = np.linalg.solve(normal, rows.T @ (w * change[keep, c]) + PRIOR * photo[c])
+            # No slider moves a gray.
+            grid[2].reshape(HUES, SATS, VALS)[:, 0, :] = 0
+            return grid
+        ref = shown(data.render(f'Vibrance{a:+d}'))[held_out]
+        errors = [de00(shown(apply(g, data.base))[held_out], ref) for g in (photo, solve(~held_out))]
+        print(f'Vibrance{a:+d}: photo tables {errors[0].mean():.2f}, chart grid {errors[1].mean():.2f} '
+              'mean ΔE00 on held-out patches')
+        grids.append(solve(np.ones_like(held_out)))
+    values = np.clip(np.round(np.array(grids) * SCALE), -32768, 32767).astype('<i2')
+    VIBRANCE_OUTPUT.write_bytes(values.tobytes())
+    print(f'Wrote {VIBRANCE_OUTPUT.relative_to(ROOT)}')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('command', choices=['chart', 'render', 'fit'])
+    p.add_argument('command', choices=['chart', 'render', 'fit', 'fit-vibrance'])
     p.add_argument('--work', type=Path, default=Path(tempfile.gettempdir()) / 'rawmakase-color-mixer')
     p.add_argument('--refs', type=Path, help='patch means (default: WORK/refs.json)')
     args = p.parse_args()
@@ -375,8 +422,10 @@ def main():
         chart(args.work)
     elif args.command == 'render':
         render(args.work, refs)
-    else:
+    elif args.command == 'fit':
         fit(refs)
+    else:
+        fit_vibrance(refs)
 
 
 if __name__ == '__main__':
