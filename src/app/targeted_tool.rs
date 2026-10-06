@@ -361,7 +361,8 @@ mod tests {
 
     /// An editor showing a 200 × 200 photo: an orange left half, a gray right one.
     fn editor(ctx: &egui::Context) -> Editor {
-        let mut editor = Editor::with_context(ctx, None, crate::storage::Session::default(), None);
+        let mut editor =
+            Editor::with_context(ctx, None, crate::app::session::Session::default(), None);
         let image = Arc::new(CameraImage {
             recovered: Default::default(),
             width: 200,

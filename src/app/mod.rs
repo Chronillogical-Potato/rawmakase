@@ -68,7 +68,7 @@ pub struct Editor {
     saved_place: (String, Option<i64>, bool),
     /// How the Library showed its photos, as last written to the session;
     /// returned to whenever the catalog is loaded.
-    saved_layout: crate::storage::LibraryLayout,
+    saved_layout: crate::app::session::LibraryLayout,
     status: String,
     /// What a running catalog import or open is doing.
     catalog_work: Option<String>,
@@ -117,7 +117,7 @@ impl Editor {
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
-            crate::storage::load_session(),
+            crate::app::session::load_session(),
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
@@ -133,7 +133,7 @@ impl Editor {
     fn with_context(
         ctx: &egui::Context,
         path: Option<PathBuf>,
-        session: crate::storage::Session,
+        session: crate::app::session::Session,
         session_file: Option<PathBuf>,
     ) -> Self {
         Self::with_backend(ctx, path, session, session_file, worker::RenderBackend::Cpu)
@@ -141,7 +141,7 @@ impl Editor {
     fn with_backend(
         ctx: &egui::Context,
         path: Option<PathBuf>,
-        session: crate::storage::Session,
+        session: crate::app::session::Session,
         session_file: Option<PathBuf>,
         backend: worker::RenderBackend,
     ) -> Self {
@@ -295,7 +295,7 @@ impl Editor {
         if let Some(path) = &self.session_file {
             crate::storage::atomic_json(
                 path,
-                &crate::storage::Session {
+                &crate::app::session::Session {
                     last_path: self.session_path(),
                     monitor: self.view.monitor.clone(),
                     collapsed: self.collapsed.clone(),
@@ -580,6 +580,7 @@ mod activity;
 
 mod autosave;
 mod save_state;
+pub(crate) mod session;
 
 mod editing;
 mod settings_transfer;

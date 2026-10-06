@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn choosing_a_curve_is_one_named_history_step_that_turns_the_panel_on() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.document
             .recipe
             .panels
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn a_saved_curve_is_listed_and_loads_all_four_curves_in_one_step() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let d = tempfile::tempdir().unwrap();
         let store = SavedCurves {
             dir: d.path().join("Curves"),

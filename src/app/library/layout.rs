@@ -6,7 +6,7 @@ use super::cell::Style;
 use super::filter::{Kind, Label, RatingOp};
 use super::sort::Sort;
 use super::views::View;
-use crate::storage::LibraryLayout;
+use crate::app::session::LibraryLayout;
 
 /// A setting saved by key.
 trait Keyed: Copy + PartialEq + Default + 'static {

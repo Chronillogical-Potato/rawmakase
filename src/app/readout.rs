@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn hovering_the_photo_asks_for_its_pixels_and_reads_the_region_first() {
         let ctx = eframe::egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(200., 100.));
         assert!(!e.wants_samples());
         e.update_readout(Some(Pos2::new(50., 50.)), rect, None);
@@ -177,7 +177,7 @@ mod tests {
         crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
         let ctx = eframe::egui::Context::default();
         let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.library = Some(Box::new(library));
         let none = eframe::egui::Modifiers::NONE;
         // Each frame's I events: pressed, released or both, with the modifiers held

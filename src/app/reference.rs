@@ -429,7 +429,8 @@ mod tests {
             &Default::default(),
             crate::catalog::HistoryUpdate::Keep,
         )?;
-        let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         editor.library = Some(Box::new(library));
         editor.document.catalog_photo = Some(open);
         editor.document.path = Some(photos.join("a.dng"));
@@ -709,7 +710,7 @@ mod tests {
     #[test]
     fn shift_r_shows_reference_view_and_r_still_crops() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let press = |modifiers: egui::Modifiers, e: &mut Editor| {
             let key = |pressed| egui::Event::Key {
                 key: egui::Key::R,

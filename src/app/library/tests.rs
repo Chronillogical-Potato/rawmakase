@@ -1833,7 +1833,7 @@ fn the_library_layout_is_kept_and_returned_to() -> Result<()> {
     library.open_survey();
     let layout = library.layout();
     // Through the session file and back.
-    let saved: crate::storage::LibraryLayout =
+    let saved: crate::app::session::LibraryLayout =
         serde_json::from_str(&serde_json::to_string(&layout)?)?;
     let (_other, mut restored) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     restored.select(Some(ids_of(&restored)[1]));
@@ -1841,7 +1841,7 @@ fn the_library_layout_is_kept_and_returned_to() -> Result<()> {
     assert_eq!(restored.layout(), layout);
     assert!(restored.survey_open());
     // A layout from another version keeps what it can.
-    let partial: crate::storage::LibraryLayout =
+    let partial: crate::app::session::LibraryLayout =
         serde_json::from_str(r#"{"sort": "rating", "view": "lightbox", "cell_style": "?"}"#)?;
     restored.apply_layout(&partial);
     assert_eq!(restored.filters.sort, super::sort::Sort::Rating);

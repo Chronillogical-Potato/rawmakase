@@ -1,5 +1,6 @@
-use super::{atomic_json, data_dir, read_json_or_default};
-use anyhow::Result;
+//! The desktop session: the last photo and catalog place, the panels and
+//! layouts as the user left them, and the preferences kept between launches.
+use crate::storage::{data_dir, read_json_or_default};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 #[derive(Default, Serialize, Deserialize)]
@@ -101,6 +102,37 @@ pub struct LibraryLayout {
 pub fn load_session() -> Session {
     read_json_or_default(&data_dir().join("session.json"))
 }
-pub fn save_session(session: &Session) -> Result<()> {
-    atomic_json(&data_dir().join("session.json"), session)
+
+#[cfg(test)]
+mod raw_defaults_tests {
+    use super::Session;
+    use crate::develop::defaults::{DefaultChoice, RawDefaults};
+
+    #[test]
+    fn raw_defaults_survive_the_session_and_unreadable_ones_reset() {
+        let mut settings = RawDefaults {
+            camera_overrides: true,
+            ..Default::default()
+        };
+        settings.set_camera("Canon EOS R5", DefaultChoice::Rawmakase);
+        // A session from before raw defaults, or with ones that don't read, keeps
+        // everything else.
+        let old: Session =
+            serde_json::from_str(r#"{"last_path":null,"monitor":null,"auto_advance":true}"#)
+                .unwrap();
+        assert_eq!(old.raw_defaults, RawDefaults::default());
+        let odd: Session = serde_json::from_str(
+            r#"{"last_path":null,"monitor":null,"auto_advance":true,"raw_defaults":7}"#,
+        )
+        .unwrap();
+        assert!(odd.auto_advance);
+        assert_eq!(odd.raw_defaults, RawDefaults::default());
+        let session = Session {
+            raw_defaults: settings.clone(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let back: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.raw_defaults, settings);
+    }
 }
