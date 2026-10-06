@@ -161,7 +161,7 @@ fn photos_match_accepted_renders() {
         let accepted: Option<Accepted> = std::fs::read(&path)
             .ok()
             .map(|b| serde_json::from_slice(&b).expect("accepted renders"));
-        let im = match rawmakase::raw::Raw::open(raw)
+        let im = match rawmakase::photo::open(raw)
             .and_then(|r| r.develop(rawmakase::raw::Decode::full(), &AtomicBool::new(false)))
         {
             Ok(im) => im,
@@ -298,7 +298,7 @@ fn photos_camera_raw_parity_does_not_regress() {
     let results: Vec<(String, Result<Comparison, String>, String)> = by_raw
         .iter()
         .flat_map(|(raw, references)| {
-            let im = match rawmakase::raw::Raw::open(&corpus.join("raws").join(raw))
+            let im = match rawmakase::photo::open(&corpus.join("raws").join(raw))
                 .and_then(|r| r.develop(rawmakase::raw::Decode::full(), &AtomicBool::new(false)))
             {
                 Ok(im) => im,

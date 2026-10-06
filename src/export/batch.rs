@@ -472,7 +472,7 @@ fn render(
     cancel: &AtomicBool,
     progress: &impl Fn(f32),
 ) -> Result<(job::Prepared, Vec<String>)> {
-    let raw = crate::raw::Raw::open(&photo.source)
+    let raw = crate::photo::open(&photo.source)
         .with_context(|| format!("{} can't be read", photo.source.display()))?;
     let (mut recipe, mut notes) = match &photo.edit {
         Edit::Catalog(record) => {

@@ -2,11 +2,11 @@
 //! DNG's embedded profile, baseline exposure and default crop, and the lens
 //! tables a camera embeds. Moving that interpretation between modules must not
 //! change what an opened photo holds, so this pins a digest of every corpus chart
-//! as opened. Rerun with RAWMAKASE_BLESS=1 only for an intended change.
+//! as `photo::open` returns it. Rerun with RAWMAKASE_BLESS=1 only for an intended change.
 //!
 //! Imported lens profiles are left out: they come from the user's library, which
 //! differs between machines.
-use rawmakase::raw::Raw;
+use rawmakase::photo;
 use std::{collections::BTreeMap, path::Path};
 
 /// FNV-1a, stable across Rust releases unlike the standard hasher.
@@ -18,7 +18,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn opened(path: &Path) -> String {
-    let raw = Raw::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let raw = photo::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let metadata = serde_json::to_vec(&raw.metadata).unwrap();
     let profile = serde_json::to_vec(&raw.metadata.embedded_profile).unwrap();
     digest(&[metadata, profile].concat())

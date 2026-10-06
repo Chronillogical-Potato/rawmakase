@@ -2,7 +2,7 @@ use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     decode_cache::DecodeCache,
     export::ExportOptions,
-    raw::{self, Decode, Demosaic, thumbnail},
+    raw::{Decode, Demosaic, thumbnail},
 };
 use eframe::egui;
 use std::{
@@ -53,7 +53,7 @@ fn prefetcher() -> Latest<Prefetch> {
         }
         let _ = pool.install(|| -> anyhow::Result<()> {
             let image =
-                raw::Raw::open(&job.path)?.develop(Decode::Full(job.demosaic), &job.cancel)?;
+                crate::photo::open(&job.path)?.develop(Decode::Full(job.demosaic), &job.cancel)?;
             crate::develop::quality::recovered(&image, &job.cancel)?;
             if !job.cancel.load(Ordering::Relaxed) {
                 cache.store(&key, &image)?;
@@ -75,7 +75,7 @@ fn full_loader(
             }
             {
                 let decode = Decode::Full(job.demosaic);
-                let image = Arc::new(raw::Raw::open(&job.path)?.develop(decode, &job.cancel)?);
+                let image = Arc::new(crate::photo::open(&job.path)?.develop(decode, &job.cancel)?);
                 // Recovered here rather than by the first render, so the cache holds it.
                 crate::develop::quality::recovered(&image, &job.cancel)?;
                 if job.cancel.load(Ordering::Relaxed) {
@@ -122,7 +122,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
         let prefetch = job.prefetch.take();
         let result = caught(|| -> anyhow::Result<()> {
             let path = job.path.clone();
-            let mut raw = raw::Raw::open(&path)?;
+            let mut raw = crate::photo::open(&path)?;
             let metadata = raw.metadata.clone();
             let (profiles, warnings) = crate::camera_profiles::installed(&metadata);
             // The raw defaults; the catalog's edit replaces them once the header

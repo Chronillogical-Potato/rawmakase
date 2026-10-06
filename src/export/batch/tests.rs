@@ -256,7 +256,7 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
     let [(a, a_path), (b, b_path), _, (d, d_path), (_, e_path)] = &f.photos[..] else {
         panic!("five photos");
     };
-    let m = crate::raw::Raw::open(a_path)?.metadata;
+    let m = crate::photo::open(a_path)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&m);
     let mut brighter = Recipe::with_profiles(&m, &profiles);
     brighter.exposure = 1.;
@@ -413,7 +413,7 @@ fn cancel_before_a_commit_leaves_nothing_and_after_it_counts_as_exported() -> Re
 fn a_batch_exports_the_edits_as_they_were_when_export_was_pressed() -> Result<()> {
     let f = fixture(&["a.dng"])?;
     let (id, path) = &f.photos[0];
-    let m = crate::raw::Raw::open(path)?.metadata;
+    let m = crate::photo::open(path)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&m);
     let mut edit = Recipe::with_profiles(&m, &profiles);
     edit.exposure = 0.5;
