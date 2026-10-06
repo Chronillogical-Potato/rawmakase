@@ -9,6 +9,7 @@ use super::{Recipe, Rendered};
 use anyhow::{Context, Result, ensure};
 use std::{
     sync::{
+        PoisonError, RwLock, RwLockWriteGuard,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -23,6 +24,33 @@ pub(crate) use develop::Input;
 pub(crate) use present::Finish;
 pub use present::{Display, Frame, MonitorLut, Slot};
 pub(crate) use resident::SAMPLE_HEADER;
+
+/// Held by previews while they submit work, and exclusively while the window's
+/// surface is reconfigured for a new size.
+static SURFACE: RwLock<()> = RwLock::new(());
+
+/// Keeps previews from submitting work to the shared device until dropped.
+///
+/// Before configuring a surface, wgpu waits for the GPU to go idle and fails
+/// ("Failed to wait for GPU to come idle") when another thread submits during
+/// that wait. The surface then keeps its old size while egui draws the frame
+/// for the new one, which wgpu rejects. Resizing a tiled window on macOS while
+/// Develop rendered did exactly that, and crashed.
+pub fn reconfiguring_surface() -> RwLockWriteGuard<'static, ()> {
+    SURFACE.write().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs `submit` unless the window's surface is being reconfigured, in which
+/// case it waits for that to finish first.
+fn submitting<T>(submit: impl FnOnce() -> T) -> T {
+    let _surface = SURFACE.read().unwrap_or_else(PoisonError::into_inner);
+    submit()
+}
+
+fn submit(queue: &wgpu::Queue, encoder: wgpu::CommandEncoder) -> wgpu::SubmissionIndex {
+    let commands = encoder.finish();
+    submitting(|| queue.submit([commands]))
+}
 
 /// Waits up to ten seconds for `submission` to finish on the GPU.
 ///
@@ -381,7 +409,7 @@ impl Processor {
             0,
             sizes[2],
         );
-        let submission = self.queue.submit([encoder.finish()]);
+        let submission = submit(&self.queue, encoder);
         let (tx, rx) = mpsc::sync_channel(1);
         b.staging
             .slice(..)

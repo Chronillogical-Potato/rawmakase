@@ -4378,3 +4378,12 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     }
     Ok(())
 }
+#[test]
+fn only_size_changes_hold_previews_gpu_work() {
+    use winit::{dpi::PhysicalSize, event::WindowEvent};
+    assert!(reconfigures_surface(&WindowEvent::Resized(
+        PhysicalSize::new(1512, 491)
+    )));
+    assert!(!reconfigures_surface(&WindowEvent::RedrawRequested));
+    assert!(!reconfigures_surface(&WindowEvent::Focused(true)));
+}
