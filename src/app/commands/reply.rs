@@ -1,6 +1,6 @@
 //! Typed application results. Transports choose how to encode these snapshots.
 use super::output::OutputState;
-use crate::develop::curve::ToneCurve;
+use crate::color::curve::ToneCurve;
 use serde::Serialize;
 use std::collections::BTreeMap;
 

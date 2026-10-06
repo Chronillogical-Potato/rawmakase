@@ -10,7 +10,7 @@
 //!   table.
 use super::{CameraProfile, Table, enhanced::Enhanced};
 use crate::{
-    develop::curve::{CurveLut, ToneCurve},
+    color::curve::{CurveLut, ToneCurve},
     raw::Metadata,
 };
 

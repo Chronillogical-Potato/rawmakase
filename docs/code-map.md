@@ -32,7 +32,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files as RAWmakase sees them: metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
-| [src/color_math.rs](../src/color_math.rs) | Private shared matrix and sRGB transfer primitives. |
+| [src/color/mod.rs](../src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
 | [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
 | [src/cameras.rs](../src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
@@ -90,7 +90,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
 | [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
-| [curve.rs](../src/develop/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
+| [color/curve.rs](../src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |

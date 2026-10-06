@@ -1,7 +1,7 @@
 //! DCP forward-matrix profiles. Unsupported matrix-only/HDR/triple-illuminant profiles
 //! are rejected explicitly. Copyright and rendering data travel with the recipe.
 use crate::{
-    color_math::{mul, srgb_encode},
+    color::{mul, srgb_encode},
     raw::Metadata,
 };
 use anyhow::{Result, ensure};
@@ -344,7 +344,7 @@ impl CameraProfile {
         for pass in 0..30 {
             let temperature = crate::camera_profiles::temperature::from_xy(xy)[0];
             let xyz = mul(
-                crate::color_math::inverse(self.color_matrix(temperature)?),
+                crate::color::inverse(self.color_matrix(temperature)?),
                 neutral,
             );
             let sum: f32 = xyz.iter().sum();
@@ -545,7 +545,7 @@ impl CameraProfile {
         if neutral.iter().any(|v| !v.is_finite() || *v <= 0.) {
             return None;
         }
-        let inv = crate::color_math::inverse(cm);
+        let inv = crate::color::inverse(cm);
         let scaled: Matrix =
             std::array::from_fn(|i| std::array::from_fn(|j| inv[i][j] * neutral[j]));
         let forward = matmul(D65_TO_D50, scaled);

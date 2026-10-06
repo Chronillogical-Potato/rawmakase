@@ -119,7 +119,7 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
 #[test]
 fn curve_pointer_add_drag_and_remove() {
     let ctx = egui::Context::default();
-    let mut curve = crate::develop::curve::ToneCurve::default();
+    let mut curve = crate::color::curve::ToneCurve::default();
     let mut frame = |events: Vec<egui::Event>| {
         let mut output = ctx.run_ui(
             egui::RawInput {

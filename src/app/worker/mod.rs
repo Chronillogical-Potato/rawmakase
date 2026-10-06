@@ -125,6 +125,10 @@ pub enum Event {
         scan: u64,
         library: Arc<crate::presets::Library>,
     },
+    PresetScanFailed {
+        scan: u64,
+        error: String,
+    },
     PresetSave(PathBuf),
     Header(Box<LoadedHeader>),
     Embedded {

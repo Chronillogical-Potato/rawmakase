@@ -160,7 +160,7 @@ pub fn convert_develop(
                     .iter()
                     .map(|p| [p[0] / 255., p[1] / 255.])
                     .collect();
-                let curve = crate::develop::curve::ToneCurve {
+                let curve = crate::color::curve::ToneCurve {
                     points,
                     ..Default::default()
                 };
