@@ -40,8 +40,8 @@ pub(super) struct Onboarding {
     pub(super) visible: bool,
     scanned: bool,
     scanned_for: Option<PathBuf>,
-    /// The scan under way; it opens RAWs and walks Camera Raw's folders, so it
-    /// runs off the UI thread and arrives as [`Event::OnboardingScanned`].
+    /// The scan under way; it walks Camera Raw's folders, thousands of files,
+    /// so it runs off the UI thread and arrives as [`Event::OnboardingScanned`].
     scan: Task,
     found: Found,
     /// The last profile or preset import, shown under the steps.
@@ -50,7 +50,7 @@ pub(super) struct Onboarding {
 /// What the setup view found on disk, refreshed when it opens.
 #[derive(Default)]
 pub struct Found {
-    /// Cameras seen in the catalog ("Sony ILCE-7CR"), from one photo per folder.
+    /// The catalog's cameras as Adobe names them ("Sony ILCE-7CR").
     cameras: BTreeSet<String>,
     /// Adobe base and Camera Matching profiles for those cameras, then looks.
     adobe_profiles: Vec<PathBuf>,
@@ -60,6 +60,8 @@ pub struct Found {
     /// Adobe lens profiles for the catalog's camera makers and common
     /// third-party lens brands, plus your own lens profiles.
     lens_profiles: Vec<PathBuf>,
+    /// The camera models the catalog records, e.g. "ILCE-7M2".
+    models: Vec<String>,
     /// Makers of the catalog's cameras, e.g. "Sony".
     makers: BTreeSet<String>,
     user_presets: Vec<PathBuf>,
@@ -75,32 +77,65 @@ impl Onboarding {
         self.scan.is_running()
     }
 }
-/// One RAW per folder, up to 200: enough to name the catalog's cameras.
-fn sample_raws(library: Option<&crate::app::library::Library>) -> Vec<PathBuf> {
-    let mut folders = BTreeSet::new();
-    let mut raws = Vec::new();
-    for photo in library.map(|l| &l.photos[..]).unwrap_or_default() {
-        if folders.len() >= 200 {
-            break;
-        }
-        if crate::storage::is_raw(&photo.path) && folders.insert(photo.folder) {
-            raws.push(photo.path.clone());
-        }
+/// The full name `model` goes by among `names`, which spell out the maker:
+/// Lightroom records "ILCE-7M2" where Adobe's profiles say "Sony ILCE-7M2", but
+/// "LEICA M10" in both.
+fn full_name<'a>(model: &str, names: &'a [String]) -> Option<&'a String> {
+    let model = model.to_lowercase();
+    if let Some(name) = names.iter().find(|name| name.to_lowercase() == model) {
+        return Some(name);
     }
-    raws
+    // By model alone only when one maker has it: "M10" is a Leica and a Canon.
+    let suffix = format!(" {model}");
+    let mut makers = names
+        .iter()
+        .filter(|name| name.to_lowercase().ends_with(&suffix));
+    let name = makers.next()?;
+    makers.all(|other| other == name).then_some(name)
+}
+/// The cameras Adobe has profiles for, as its folders and files name them.
+fn adobe_cameras(profiles: &std::path::Path) -> Vec<String> {
+    let names = |dir: PathBuf| {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    };
+    let mut cameras = names(profiles.join("Camera"));
+    cameras.extend(
+        names(profiles.join("Adobe Standard"))
+            .into_iter()
+            .filter_map(|n| n.strip_suffix(" Adobe Standard.dcp").map(str::to_string)),
+    );
+    cameras
 }
 impl Found {
-    fn scan(raws: &[PathBuf], cancel: &AtomicBool) -> Self {
+    /// What there is for `models`, the cameras the catalog records.
+    fn scan(models: &[String], cancel: &AtomicBool) -> Self {
         let mut found = Self::default();
-        for path in raws {
-            if cancel.load(Ordering::Relaxed) {
-                return found;
+        let shared = shared_camera_raw();
+        let known = shared
+            .as_ref()
+            .map(|s| adobe_cameras(&s.join("CameraProfiles")))
+            .unwrap_or_default();
+        for model in models {
+            match full_name(model, &known) {
+                Some(name) => {
+                    found.cameras.insert(name.clone());
+                }
+                // Without Adobe's profiles to name the maker, the model is all
+                // there is; with them, a camera Adobe lacks has nothing to find.
+                None if shared.is_none() => {
+                    found.cameras.insert(model.clone());
+                }
+                None => {}
             }
-            if let Ok(raw) = crate::raw::Raw::open(path) {
-                found
-                    .cameras
-                    .insert(format!("{} {}", raw.metadata.make, raw.metadata.model));
-            }
+        }
+        found.models = models.to_vec();
+        if cancel.load(Ordering::Relaxed) {
+            return found;
         }
         found.find_on_disk();
         found
@@ -176,7 +211,7 @@ impl Found {
         // Third-party packs ship a DCP per camera model, often thousands in all;
         // only those for the catalog's cameras are useful. Without a catalog,
         // take them all.
-        let cameras: Vec<String> = self.cameras.iter().map(|c| format!("{c} ")).collect();
+        let cameras: Vec<String> = self.cameras.iter().chain(&self.models).cloned().collect();
         self.user_profiles = user
             .as_ref()
             .map(|d| find_files(&d.join("CameraProfiles"), &["dcp"], &[]))
@@ -184,7 +219,7 @@ impl Found {
             .into_iter()
             .filter(|p| {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                cameras.is_empty() || cameras.iter().any(|c| name.starts_with(c.as_str()))
+                cameras.is_empty() || cameras.iter().any(|c| names_camera(&name, c))
             })
             .collect();
         self.user_presets = user
@@ -512,7 +547,12 @@ impl Editor {
     }
     /// Scans in the background; until the result arrives the steps say so.
     fn start_onboarding_scan(&mut self, catalog: Option<PathBuf>) {
-        let raws = sample_raws(self.library.as_deref());
+        // The catalog already records each photo's camera; no RAW is opened.
+        let models = self
+            .library
+            .as_ref()
+            .and_then(|l| l.catalog.cameras().ok())
+            .unwrap_or_default();
         let (generation, cancel) = self.onboarding.scan.start();
         self.onboarding.scanned = true;
         self.onboarding.scanned_for = catalog;
@@ -520,7 +560,7 @@ impl Editor {
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
-            let found = Found::scan(&raws, &cancel);
+            let found = Found::scan(&models, &cancel);
             if !cancel.load(Ordering::Relaxed) {
                 let _ = tx.send(Event::OnboardingScanned {
                     generation,
@@ -619,6 +659,12 @@ fn body(ui: &mut egui::Ui, value: &str) {
 }
 fn hint(ui: &mut egui::Ui, value: &str) {
     text(ui, value, 12., 135);
+}
+/// Whether a profile file named `name` is for `camera`, by maker and model
+/// ("Sony ILCE-7M2 Portra 400 SO.dcp") or by model alone.
+fn names_camera(name: &str, camera: &str) -> bool {
+    let (name, camera) = (name.to_lowercase(), camera.to_lowercase());
+    name.starts_with(&format!("{camera} ")) || name.contains(&format!(" {camera} "))
 }
 /// A hint with a spinner, while the scan runs.
 fn looking(ui: &mut egui::Ui, value: &str) {
@@ -757,5 +803,29 @@ mod tests {
         assert!(editor.onboarding.scanning());
         assert!(editor.onboarding.found.cameras.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn catalog_models_take_adobe_names() {
+        let adobe = [
+            "Sony ILCE-7M2",
+            "Sony ILCA-77M2",
+            "LEICA M10",
+            "Canon EOS M10",
+        ]
+        .map(str::to_string);
+        let name = |model| full_name(model, &adobe).map(String::as_str);
+        assert_eq!(name("ILCE-7M2"), Some("Sony ILCE-7M2"));
+        assert_eq!(name("leica m10"), Some("LEICA M10"));
+        assert_eq!(name("M10"), None);
+        assert_eq!(name("7M2"), None);
+        assert_eq!(name("iPhone 8"), None);
+        assert!(names_camera(
+            "Sony ILCE-7M2 Portra 400 SO.dcp",
+            "Sony ILCE-7M2"
+        ));
+        assert!(names_camera("Sony ILCE-7M2 Portra 400 SO.dcp", "ILCE-7M2"));
+        assert!(!names_camera("Sony ILCE-7M2 Portra 400 SO.dcp", "7M2"));
+        assert!(!names_camera("Sony ILCE-7M2R Portra.dcp", "ILCE-7M2"));
     }
 }
