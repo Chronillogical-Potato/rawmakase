@@ -108,9 +108,6 @@ impl Param {
             Self::Setting(id) => id.value_mut(r),
         }
     }
-    pub(in crate::app) fn is_white_balance(self) -> bool {
-        matches!(self, Self::Setting(Temperature | Tint))
-    }
     /// The slider's number as it shows: EV, kelvin, tint units or degrees, else
     /// -100..100.
     pub(in crate::app) fn shown(self, r: &mut Recipe, channel: usize) -> f64 {
