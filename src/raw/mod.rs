@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod ffi;
-pub use ffi::{display_transform, srgb_profile, version};
+pub use ffi::{background_thread, display_transform, srgb_profile, version};
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,

@@ -30,6 +30,7 @@ impl<T: Send + 'static> Reader<T> {
         let cancelled = cancel.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            crate::raw::background_thread();
             for batch in photos.chunks(BATCH) {
                 if cancelled.load(Ordering::Relaxed) {
                     return;

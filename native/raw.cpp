@@ -3,6 +3,13 @@
 // After LibRaw, which includes winsock2.h ahead of windows.h as Windows requires.
 #include <windows.h>
 #include <string>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#else
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 #include <lcms2.h>
 #ifdef _OPENMP
@@ -108,6 +115,8 @@ struct Handle {
         return rc;
     }
 };
+// Set by ora_background_thread: this thread's decodes use two OpenMP threads.
+static thread_local bool background_thread = false;
 static int progress(void* p, LibRaw_progress, int, int) {
     auto h = static_cast<Handle*>(p);
     return h->cancel && h->cancel(h->context);
@@ -128,6 +137,24 @@ static int open_path(Raw& raw, const char* path) {
 }
 extern "C" {
 const char* ora_version() { return LibRaw::version(); }
+// Lowers the calling thread's scheduling priority, so it takes only cores the
+// foreground leaves idle, and caps its LibRaw decodes at two OpenMP threads.
+// Threads it starts afterwards, such as its OpenMP team, inherit the priority.
+void ora_background_thread() {
+    background_thread = true;
+#ifdef _OPENMP
+    // For OpenMP regions outside ora_develop too, such as ora_cfa_copy.
+    omp_set_num_threads(2);
+#endif
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(__APPLE__)
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#else
+    // Linux applies a nice value to the one thread named by its id.
+    setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 10);
+#endif
+}
 // So the Rust side can check its mirror of Metadata has the same layout.
 unsigned ora_metadata_size() { return sizeof(Metadata); }
 void* ora_open(const char* path, Metadata* m, char* err) {
@@ -179,7 +206,7 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
         handle.cancel=cancel; handle.context=context;
         raw.set_progress_handler(progress,&handle);
 #ifdef _OPENMP
-        omp_set_num_threads(std::max(1, omp_get_num_procs()));
+        omp_set_num_threads(background_thread ? 2 : std::max(1, omp_get_num_procs()));
 #endif
         auto& p=raw.imgdata.params;
         p.use_camera_wb=1; p.use_auto_wb=0; p.no_auto_bright=1;

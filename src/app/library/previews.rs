@@ -31,6 +31,7 @@ fn spawn_with(
     let (tx, rx) = mpsc::sync_channel::<PathBuf>(24);
     let (result_tx, result_rx) = mpsc::sync_channel(24);
     std::thread::spawn(move || {
+        crate::raw::background_thread();
         let open = || match PreviewCache::open(&cache_path) {
             Ok(cache) => (Some(cache), None),
             Err(error) => (None, Some(error.to_string())),
@@ -169,9 +170,11 @@ fn spawn_edited_with(
     let (tx, rx) = mpsc::channel::<EditJob>();
     let (result_tx, result_rx) = mpsc::channel();
     std::thread::spawn(move || {
+        crate::raw::background_thread();
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .thread_name(|i| format!("edited-preview-{i}"))
+            .start_handler(|_| crate::raw::background_thread())
             .build()
             .ok();
         let mut cache = PreviewCache::open(&cache_path).ok();
