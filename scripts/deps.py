@@ -70,27 +70,41 @@ def strip_comments_and_literals(text):
     return "".join(out)
 
 
-def item_end(code, start):
-    """End of the item starting at `start`: its first `;` or its closing brace."""
+def after_closing_brace(code, open_brace):
+    """Position just after the brace that closes the one at `open_brace`."""
     depth = 0
-    for k in range(start, len(code)):
-        if code[k] == "{":
-            depth += 1
-        elif code[k] == "}":
-            depth -= 1
-            if depth == 0:
-                return k + 1
-        elif code[k] == ";" and depth == 0:
+    for k in range(open_brace, len(code)):
+        depth += {"{": 1, "}": -1}.get(code[k], 0)
+        if depth == 0:
             return k + 1
     return len(code)
 
 
-TEST_ATTRIBUTE = re.compile(r"#\[cfg\((?:test|all\(test\b[^\]]*)\)\]")
+def attributed_end(code, start):
+    """End of what an attribute at `start` applies to: an item's `;` or closing
+    brace, a field's, variant's or match arm's `,`, or the end of the block
+    around it."""
+    depth = 0
+    for k in range(start, len(code)):
+        if code[k] in "([{":
+            depth += 1
+        elif code[k] in ")]}":
+            depth -= 1
+            if depth < 0:
+                return k
+            if depth == 0 and code[k] == "}":
+                return k + 1
+        elif code[k] in ";," and depth == 0:
+            return k + 1
+    return len(code)
+
+
+TEST_ATTRIBUTE = re.compile(r"#\[cfg\((?:test|all\([^()]*\btest\b[^()]*\))\)\]")
 
 
 def test_spans(code):
     """Spans of `#[cfg(test)]` items: inline modules, functions, imports, impls."""
-    return [(m.start(), item_end(code, m.end())) for m in TEST_ATTRIBUTE.finditer(code)]
+    return [(m.start(), attributed_end(code, m.end())) for m in TEST_ATTRIBUTE.finditer(code)]
 
 
 def test_module_files():
@@ -153,7 +167,7 @@ def heads_after(code, match):
     """Module names a path reaches: one name, or every head of a `{...}` group."""
     if match.group("group"):
         open_brace = match.end() - 1
-        return group_heads(code[open_brace + 1 : item_end(code, open_brace) - 1])
+        return group_heads(code[open_brace + 1 : after_closing_brace(code, open_brace) - 1])
     return [match.group("name")]
 
 
