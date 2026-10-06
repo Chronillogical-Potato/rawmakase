@@ -6,7 +6,7 @@
 //! for the best correlation, then Lucas–Kanade steps to a fraction of a pixel. A
 //! robust fit of every tile's shift gives each channel's radial scale relative to
 //! green as a polynomial in the radius, in the [`Radial`] form the renderer applies.
-use super::Radial;
+use crate::optics::Radial;
 use rayon::prelude::*;
 
 /// Largest shift searched, in pixels at full resolution of a 24 MP image.

@@ -564,7 +564,7 @@ fn neutral_color_fast_path_matches_general_processing() {
 }
 #[test]
 fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
-    use crate::lens::{LensCorrection, Radial};
+    use crate::optics::{LensCorrection, Radial};
     let mut im = fixture();
     im.pixels = vec![[0.1; 3]; 96];
     im.metadata.lens = Some(LensCorrection {

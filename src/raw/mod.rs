@@ -50,7 +50,7 @@ pub struct Metadata {
     pub cam_xyz: [[f32; 3]; 3],
     /// Built-in lens correction stored by the camera, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lens: Option<crate::lens::LensCorrection>,
+    pub lens: Option<crate::optics::LensCorrection>,
     /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
@@ -64,7 +64,7 @@ pub struct Metadata {
     /// Lateral chromatic aberration measured from the decoded image, shared by every
     /// image made from it (see `crate::lens::auto_ca::prime`).
     #[serde(skip)]
-    pub lateral_ca: std::sync::Arc<std::sync::OnceLock<Option<[crate::lens::Radial; 2]>>>,
+    pub lateral_ca: std::sync::Arc<std::sync::OnceLock<Option<[crate::optics::Radial; 2]>>>,
     /// Camera profile embedded in a DNG; rebuilt from the file on open.
     #[serde(skip)]
     pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,

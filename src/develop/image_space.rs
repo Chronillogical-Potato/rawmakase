@@ -115,9 +115,9 @@ pub(crate) fn turn(turns: u8, x: f32, y: f32) -> [f32; 2] {
 /// `Geometry::source` returns) to where it samples the decoded image, for green.
 #[derive(Clone, Copy)]
 pub(crate) struct LensMap<'a> {
-    pub(crate) lens: &'a crate::lens::LensCorrection,
+    pub(crate) lens: &'a crate::optics::LensCorrection,
     /// Measured lateral chromatic aberration replacing the lens data's own.
-    pub(crate) chromatic: Option<&'a [crate::lens::Radial; 2]>,
+    pub(crate) chromatic: Option<&'a [crate::optics::Radial; 2]>,
     pub(crate) center: [f32; 2],
     pub(crate) half: f32,
     pub(crate) fill: f32,
@@ -135,7 +135,7 @@ impl<'a> LensMap<'a> {
                 if chromatic.is_none() && r.manual_vignette().is_none() {
                     return None;
                 }
-                &crate::lens::NO_CORRECTION
+                &crate::optics::NO_CORRECTION
             }
         };
         let (w, h) = (im.width as f32, im.height as f32);
@@ -330,8 +330,8 @@ mod tests {
     }
     #[test]
     fn lens_inverse_undoes_forward() {
-        let lens = crate::lens::LensCorrection {
-            distortion: Some(crate::lens::Radial {
+        let lens = crate::optics::LensCorrection {
+            distortion: Some(crate::optics::Radial {
                 knots: vec![0., 0.5, 1.],
                 values: vec![1., 1.02, 1.08],
             }),

@@ -902,7 +902,7 @@ impl Recipe {
     pub(crate) fn lens_correction<'a>(
         &self,
         m: &'a Metadata,
-    ) -> Option<&'a crate::lens::LensCorrection> {
+    ) -> Option<&'a crate::optics::LensCorrection> {
         if self.engine < 4 {
             return None;
         }

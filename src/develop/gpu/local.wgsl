@@ -170,7 +170,7 @@ fn table_eval(field: u32, r: f32) -> f32 {
     let len = su(field + 1u);
     // `Radial::eval`'s `partition_point(|x| *x <= r)`: the knots at or below `r`. The
     // window `i..i + n` shrinks by half each round, so seven reach any table of the 64
-    // knots `lens::Radial` allows.
+    // knots `optics::Radial` allows.
     var i = 0u;
     var n = len;
     for (var k = 0u; k < 7u && n > 0u; k++) {
