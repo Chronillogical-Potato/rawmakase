@@ -56,6 +56,12 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::effects::GrainModel::is_original"
     )]
     pub grain_model: crate::develop::effects::GrainModel,
+    /// Which operator renders positive Clarity, as `grain_model`.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::clarity::ClarityModel::is_original"
+    )]
+    pub clarity_model: crate::develop::clarity::ClarityModel,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -111,6 +117,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
     )]
     pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
+    /// The soft edge Heal and Clone render with. Missing means the original one, so
+    /// recipes saved before the measured feather look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::retouch::RetouchModel::is_original"
+    )]
+    pub retouch_model: crate::develop::retouch::RetouchModel,
     /// How color grading renders. Missing means the original operator, so recipes
     /// saved before the measured curves look as they did; omitted at that default.
     #[serde(
@@ -125,6 +139,20 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
     )]
     pub mixer_model: crate::develop::color_mixer::MixerModel,
+    /// Which operator renders the global Saturation slider. Missing means the
+    /// photo-measured tables, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_mixer::SaturationModel::is_original"
+    )]
+    pub saturation_model: crate::develop::color_mixer::SaturationModel,
+    /// Which fit renders Camera Calibration's primary sliders. Missing means the
+    /// original coefficients, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::calibration::CalibrationModel::is_original"
+    )]
+    pub calibration_model: crate::develop::calibration::CalibrationModel,
     /// Whether positive Whites follows the photo's highlights. Missing means the
     /// original median curve, so older recipes look as they did; omitted at that
     /// default, and kept by releases that predate it.
@@ -140,6 +168,14 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::GamutModel::is_compress"
     )]
     pub gamut_model: crate::develop::GamutModel,
+    /// How Color noise reduction renders. Missing means the original operator, so
+    /// recipes saved before the measured one look as they did; omitted at that
+    /// default, and kept by releases that predate it.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_noise::NoiseModel::is_original"
+    )]
+    pub noise_model: crate::develop::color_noise::NoiseModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -247,6 +283,7 @@ impl Default for Recipe {
             profile_tone: true,
             effects: Default::default(),
             grain_model: Default::default(),
+            clarity_model: Default::default(),
             preset_name: String::new(),
             preset_settings: Default::default(),
             profile: None,
@@ -263,8 +300,11 @@ impl Default for Recipe {
             parametric_model: Default::default(),
             contrast_model: Default::default(),
             lens_vignette_model: Default::default(),
+            retouch_model: Default::default(),
             grading_model: Default::default(),
             mixer_model: Default::default(),
+            saturation_model: Default::default(),
+            calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
             temperature: 6500.,
@@ -289,6 +329,7 @@ impl Default for Recipe {
             grading: [[0.; 3]; 3],
             noise_luma: 0.,
             noise_chroma: 0.,
+            noise_model: Default::default(),
             sharpening: 0.35,
             crop: [0., 0., 1., 1.],
             straighten: 0.,
@@ -496,12 +537,17 @@ impl Recipe {
         recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
         recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
         recipe.grain_model = crate::develop::effects::GrainModel::Measured;
+        recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+        recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+        recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
+        recipe.set_color_noise_defaults(crate::develop::color_noise::NoiseModel::Measured);
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe
@@ -716,6 +762,14 @@ impl Recipe {
             self.effects.lens_vignette_midpoint,
         )
     }
+    /// Adds a Heal or Clone operation. The first on a recipe has no spots of the
+    /// original feather to keep, so it takes the measured one.
+    pub fn add_retouch(&mut self, op: crate::develop::retouch::RetouchOp) {
+        if self.retouch.is_empty() {
+            self.retouch_model = crate::develop::retouch::RetouchModel::Measured;
+        }
+        self.retouch.push(op);
+    }
     /// After an edit of manual Vignetting from Amount `previous`: an Amount moved from 0
     /// has nothing of the original operator's to keep, so it takes the measured one.
     pub fn adopt_measured_vignette(&mut self, previous: f32) {
@@ -745,6 +799,45 @@ impl Recipe {
         }
         self.engine = 4;
     }
+    /// Color noise reduction at its defaults for `model`, which the recipe then uses:
+    /// Lightroom's Amount 25 for raw files with the measured operator (Detail and
+    /// Smoothness 50), off with the original.
+    pub fn set_color_noise_defaults(&mut self, model: crate::develop::color_noise::NoiseModel) {
+        let d = crate::develop::effects::Effects::default();
+        self.noise_model = model;
+        self.noise_chroma = match model {
+            crate::develop::color_noise::NoiseModel::Original => 0.,
+            crate::develop::color_noise::NoiseModel::Measured => 0.25,
+        };
+        self.effects.chroma_detail = d.chroma_detail;
+        self.effects.chroma_smoothness = d.chroma_smoothness;
+    }
+    /// The measured Color noise reduction to run on the camera image; `None` for the
+    /// original operator, which [`Recipe::sampled_noise_chroma`] applies at sampling.
+    pub(crate) fn chroma_denoise(&self) -> Option<crate::develop::color_noise::ChromaDenoise> {
+        if !self.measures_color_noise() {
+            return None;
+        }
+        crate::develop::color_noise::ChromaDenoise::new(
+            self.noise_chroma,
+            self.effects.chroma_detail,
+            self.effects.chroma_smoothness,
+        )
+    }
+    /// The Color amount the original operator applies when sampling the camera image:
+    /// none for the measured one, which runs on the camera image first.
+    pub(crate) fn sampled_noise_chroma(&self) -> f32 {
+        if self.measures_color_noise() {
+            0.
+        } else {
+            self.noise_chroma
+        }
+    }
+    /// Whether the measured Color noise reduction renders: engines before 3 develop
+    /// without it and keep the original filter.
+    fn measures_color_noise(&self) -> bool {
+        !self.noise_model.is_original() && self.engine >= 3
+    }
     /// The Sharpening sliders at their defaults for `model`, which the recipe then
     /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)
     /// with the measured operator, RAWmakase's earlier ones with the original.
@@ -761,6 +854,13 @@ impl Recipe {
     pub fn adopt_measured_grain(&mut self, previous: f32) {
         if previous == 0. && self.effects.grain != 0. {
             self.grain_model = crate::develop::effects::GrainModel::Measured;
+        }
+    }
+    /// After an edit of Clarity from `previous`: Clarity added from none has nothing
+    /// of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_clarity(&mut self, previous: f32) {
+        if previous == 0. && self.effects.clarity != 0. {
+            self.clarity_model = crate::develop::clarity::ClarityModel::Measured;
         }
     }
     pub(crate) fn lens_correction<'a>(

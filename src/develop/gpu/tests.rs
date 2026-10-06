@@ -277,6 +277,18 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     // Out-of-gamut colors clipped per channel.
     measured.gamut_model = crate::develop::GamutModel::Clip;
     measured.saturation = 0.8;
+    recipes.push(measured.clone());
+    // Calibration measured on Camera Raw, between its measured slider positions.
+    measured.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
+    measured.effects.calibration = [[0.3, -0.75], [-0.4, 0.5], [0.9, 0.1]];
+    recipes.push(measured.clone());
+    // Saturation fading to gray below −50, with and without band sliders.
+    measured.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+    measured.saturation = -0.7;
+    recipes.push(measured.clone());
+    measured.hsl = [[0.; 3]; 8];
+    measured.vibrance = 0.;
+    measured.saturation = -1.;
     recipes.push(measured);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
     let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
@@ -503,6 +515,10 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             // The measured grain on Color Priority cases, the original on the others.
             if style == ColorPriority {
                 recipe.grain_model = crate::develop::effects::GrainModel::Measured;
+            }
+            // The measured Clarity, in the map, on Paint Overlay cases.
+            if style == PaintOverlay {
+                recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
             }
             recipe.effects.vignette = vignette;
             recipe.effects.vignette_style = style;

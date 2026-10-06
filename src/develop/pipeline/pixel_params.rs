@@ -26,7 +26,7 @@ const FIELDS: &[(&str, usize)] = &[
     ("LOCAL", 1),
     ("LOCAL_SIZE", 2),
     ("LOCAL_SCALE", 2),
-    ("LOCAL_A", 2),
+    ("LOCAL_A", 3),
     ("SHADOWS", 4),
     ("HIGHLIGHTS", 4),
     ("BASIC", 1),
@@ -40,6 +40,10 @@ const FIELDS: &[(&str, usize)] = &[
     ("REFINE_SATURATION", 1),
     ("CHANNELS", 3),
     ("MIXER", 1),
+    // `ColorMixer::saturation_gray`: how far colors fade to their luminance.
+    ("SATURATION_GRAY", 1),
+    // `ColorMixer::gray_source`: its grid, or -1.
+    ("GRAY_SOURCE", 1),
     // Point Color: table offset and number of swatches (see `point_color::params`).
     ("POINT", 2),
     // A look's RGB table: samples offset, dimensions, divisions, gamma, gamut and
@@ -170,11 +174,15 @@ fn masks_need_map(r: &Recipe) -> bool {
         .iter()
         .any(|m| m.is_active() && (m.adjust.shadows != 0. || m.adjust.highlights != 0.))
 }
-/// Whether `r`'s per-pixel stage needs the Shadows/Highlights map of the photo.
+/// Whether `r`'s per-pixel stage needs the Shadows/Highlights map of the photo, which
+/// also carries the measured Clarity.
 pub(crate) fn needs_map(r: &Recipe) -> bool {
     r.engine >= 4
         && r.reference_curves
-        && (r.shadows != 0. || r.highlights != 0. || masks_need_map(r))
+        && (r.shadows != 0.
+            || r.highlights != 0.
+            || crate::develop::clarity::measured(r) != 0.
+            || masks_need_map(r))
 }
 /// Whether a render needs the photo reduced for the Shadows/Highlights map or for
 /// measuring the photo's Contrast pivot; the stage cache keeps it between renders.
@@ -201,7 +209,11 @@ fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
     p.set("LOCAL_SCALE", &local.scale);
     let a = p.push(local.a.iter().copied());
     let b = p.push(local.b.iter().copied());
-    p.set("LOCAL_A", &[a, b]);
+    let clarity = match &local.clarity {
+        Some(c) => p.push(c.iter().copied()),
+        None => -1.,
+    };
+    p.set("LOCAL_A", &[a, b, clarity]);
     for (name, curve) in [
         ("SHADOWS", &local.shadows),
         ("HIGHLIGHTS", &local.highlights),
@@ -329,6 +341,15 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         None => -1.,
     };
     p.set("MIXER", &[mixer]);
+    p.set(
+        "SATURATION_GRAY",
+        &[lut.mixer.as_ref().map_or(0., |m| m.saturation_gray)],
+    );
+    let gray_source = match lut.mixer.as_ref().and_then(|m| m.gray_source.as_ref()) {
+        Some(g) => p.push(g.iter().flatten().copied()),
+        None => -1.,
+    };
+    p.set("GRAY_SOURCE", &[gray_source]);
     let point = match &lut.point_colors {
         Some(pc) => [p.push(pc.params()), pc.len() as f32],
         None => [-1., 0.],

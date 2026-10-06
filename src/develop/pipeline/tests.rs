@@ -47,6 +47,8 @@ fn old_recipes_keep_original_profile_tones() {
         "contrast_model",
         "grading_model",
         "mixer_model",
+        "saturation_model",
+        "calibration_model",
         "whites_model",
         "gamut_model",
     ] {
@@ -81,6 +83,14 @@ fn old_recipes_keep_original_profile_tones() {
         old.mixer_model,
         crate::develop::color_mixer::MixerModel::Original
     );
+    assert_eq!(
+        old.saturation_model,
+        crate::develop::color_mixer::SaturationModel::Original
+    );
+    assert_eq!(
+        old.calibration_model,
+        crate::develop::calibration::CalibrationModel::Original
+    );
     // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
         parametric_model: crate::develop::parametric::ParametricModel::Layered,
@@ -89,6 +99,8 @@ fn old_recipes_keep_original_profile_tones() {
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         gamut_model: crate::develop::GamutModel::Clip,
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
+        saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
+        calibration_model: crate::develop::calibration::CalibrationModel::Measured,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
@@ -98,6 +110,8 @@ fn old_recipes_keep_original_profile_tones() {
     assert_eq!(back.whites_model, measured.whites_model);
     assert_eq!(back.gamut_model, measured.gamut_model);
     assert_eq!(back.mixer_model, measured.mixer_model);
+    assert_eq!(back.saturation_model, measured.saturation_model);
+    assert_eq!(back.calibration_model, measured.calibration_model);
 }
 
 #[test]
@@ -1454,4 +1468,98 @@ fn new_edits_render_grain_at_camera_raw_strength() -> anyhow::Result<()> {
     assert!((35. ..75.).contains(&gray), "{gray}");
     assert!((5.8..8.8).contains(&deviation), "{deviation}");
     Ok(())
+}
+/// New edits start at Lightroom's Color noise reduction of 25 with the measured
+/// operator, which reduces a flat's colour noise as Camera Raw does: its chart's
+/// chroma noise dropped from 5.0 to 2.7 at that setting. Saved recipes keep the
+/// original operator.
+#[test]
+fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
+    use crate::develop::color_noise::NoiseModel;
+    let (width, height) = (160, 120);
+    let m = Metadata {
+        width,
+        height,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let noise = |x: u32, y: u32, c: u32| {
+        let mut v =
+            x.wrapping_mul(0x9e3779b9) ^ y.wrapping_mul(0x85ebca6b) ^ c.wrapping_mul(0xc2b2ae35);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2c1b3c6d);
+        v ^= v >> 12;
+        (v as f32 / u32::MAX as f32) * 2. - 1.
+    };
+    let im = CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let (x, y) = (i % width, i / width);
+                std::array::from_fn(|c| 0.18 * (1. + 0.08 * noise(x, y, c as u32)))
+            })
+            .collect(),
+        metadata: m.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let mut r = Recipe::with_profiles(&m, &[]);
+    assert_eq!(
+        (r.noise_model, r.noise_chroma),
+        (NoiseModel::Measured, 0.25)
+    );
+    r.sharpening = 0.;
+    let chroma_noise = |r: &Recipe| -> anyhow::Result<f32> {
+        let out = crate::develop::render(&im, r, 0)?;
+        let ab: Vec<[f32; 2]> = out
+            .pixels
+            .iter()
+            .map(|p| [p[0] - p[1], p[2] - p[1]])
+            .collect();
+        let n = ab.len() as f32;
+        let mean = ab
+            .iter()
+            .fold([0.; 2], |a, v| [a[0] + v[0] / n, a[1] + v[1] / n]);
+        Ok((ab
+            .iter()
+            .map(|v| (v[0] - mean[0]).powi(2) + (v[1] - mean[1]).powi(2))
+            .sum::<f32>()
+            / n)
+            .sqrt())
+    };
+    let on = chroma_noise(&r)?;
+    let mut off = r.clone();
+    off.noise_chroma = 0.;
+    let off = chroma_noise(&off)?;
+    let ratio = on / off;
+    assert!((0.35..0.7).contains(&ratio), "{ratio}");
+    // The original operator at 25 barely touched it.
+    let mut original = r.clone();
+    original.noise_model = NoiseModel::Original;
+    assert!(chroma_noise(&original)? / off > 0.75);
+    let saved: Recipe = serde_json::from_value(serde_json::to_value(Recipe::default())?)?;
+    assert_eq!(saved.noise_model, NoiseModel::Original);
+    Ok(())
+}
+/// Engines before 3 develop without the measured Color noise reduction, so a recipe
+/// there keeps applying its Color amount with the original filter.
+#[test]
+fn legacy_engines_keep_the_original_colour_noise_filter() {
+    use crate::develop::color_noise::NoiseModel;
+    let mut r = Recipe {
+        engine: 2,
+        noise_chroma: 0.25,
+        noise_model: NoiseModel::Measured,
+        ..Default::default()
+    };
+    assert!(r.chroma_denoise().is_none());
+    assert_eq!(r.sampled_noise_chroma(), 0.25);
+    r.engine = 4;
+    assert!(r.chroma_denoise().is_some());
+    assert_eq!(r.sampled_noise_chroma(), 0.);
 }

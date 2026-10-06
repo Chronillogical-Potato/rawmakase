@@ -540,6 +540,11 @@ fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
     assert_eq!(skipped.len(), 1, "{skipped:?}");
     assert!(skipped[0].contains("Select Subject"));
     assert_eq!(r.exposure, 0.2);
+    // Lightroom's spots render with Camera Raw's feather.
+    assert_eq!(
+        r.retouch_model,
+        crate::develop::retouch::RetouchModel::Measured
+    );
     let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
     let spot = &r.retouch[0];
     assert_eq!(
@@ -1308,6 +1313,115 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(r#"crs:LensProfileFilename="Gone (24mm) - RAW.lcp""#),
         "{packet}"
     );
+    Ok(())
+}
+/// A packet exported by RAWmakase before the kept-operator marker existed keeps the
+/// operators it could not have rendered with; Lightroom's values select them.
+#[test]
+fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<()> {
+    use crate::develop::{
+        calibration::CalibrationModel,
+        color_mixer::{MixerModel, SaturationModel},
+    };
+    let m = Metadata::default();
+    let fresh = Recipe::with_profiles(&m, &[]);
+    let settings = r#"c:Saturation="-80" c:RedHue="20" c:HueAdjustmentBlue="30""#;
+    let apply = |creator: &str| {
+        let attrs = format!(
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="{creator}" {settings}"#
+        );
+        parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)
+    };
+    let old = apply("RAWmakase 0.1.15")?;
+    assert_eq!(old.saturation_model, SaturationModel::Original);
+    assert_eq!(old.calibration_model, CalibrationModel::Original);
+    // The chart mixer shipped in 0.1.15, so its values there mean it.
+    assert_eq!(old.mixer_model, MixerModel::Chart);
+    let older = apply("RAWmakase 0.1.14")?;
+    assert_eq!(older.mixer_model, MixerModel::Original);
+    let lightroom = apply("Adobe Photoshop Lightroom Classic 14.5 (Macintosh)")?;
+    assert_eq!(lightroom.saturation_model, SaturationModel::Gray);
+    assert_eq!(lightroom.calibration_model, CalibrationModel::Measured);
+    // 0.1.15 already named some kept operators; the newer ones are added to them.
+    let attrs = format!(
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseOriginal="Sharpening" {settings}"#
+    );
+    let named = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
+    assert_eq!(named.saturation_model, SaturationModel::Original);
+    assert_eq!(
+        named.sharpening_model,
+        crate::develop::sharpening::SharpeningModel::Original
+    );
+    // A packet with the current marker says it itself.
+    let attrs = format!(
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:RAWmakaseMarkers="2" {settings}"#
+    );
+    let current = parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
+    assert_eq!(current.saturation_model, SaturationModel::Gray);
+    // A preset from before the marker keeps them too; one written now does not.
+    let old_preset = parse(
+        Path::new("p.xmp"),
+        &xml(&format!(r#"c:RAWmakasePreset="1" {settings}"#), ""),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(old_preset.saturation_model, SaturationModel::Original);
+    let new_preset = parse(
+        Path::new("p.xmp"),
+        &xml(
+            &format!(r#"c:RAWmakasePreset="1" c:RAWmakaseMarkers="2" {settings}"#),
+            "",
+        ),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(new_preset.saturation_model, SaturationModel::Gray);
+    // The marker written as a child element counts too.
+    let child = parse(
+        Path::new("p.xmp"),
+        &xml(
+            &format!(r#"c:RAWmakasePreset="1" {settings}"#),
+            "<c:RAWmakaseMarkers>2</c:RAWmakaseMarkers>",
+        ),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(child.saturation_model, SaturationModel::Gray);
+    // An old preset without these settings leaves the photo's operators alone.
+    let exposure = parse(
+        Path::new("p.xmp"),
+        &xml(r#"c:RAWmakasePreset="1" c:Exposure2012="0.5""#, ""),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(exposure.saturation_model, SaturationModel::Gray);
+    assert_eq!(exposure.calibration_model, CalibrationModel::Measured);
+    Ok(())
+}
+#[test]
+fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
+    use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+    // Recipe::default() stands for a recipe saved before the measured operators.
+    let apply = |attrs: &str| {
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(
+            &Recipe::default(),
+            &Metadata::default(),
+            &[],
+            None,
+        )
+    };
+    let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:Saturation="-30""#)?;
+    assert_eq!(
+        r.saturation_model,
+        crate::develop::color_mixer::SaturationModel::Gray
+    );
+    assert_eq!(r.mixer_model, MixerModel::Chart);
+    assert_eq!(r.calibration_model, CalibrationModel::Measured);
+    let r = apply(r#"c:Exposure2012="0.5""#)?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
+    // RAWmakase's own packet for a recipe that kept them.
+    let r = apply(
+        r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:RAWmakaseOriginal="ColorMixer,Calibration""#,
+    )?;
+    assert_eq!(r.mixer_model, MixerModel::Original);
+    assert_eq!(r.calibration_model, CalibrationModel::Original);
     Ok(())
 }
 #[test]

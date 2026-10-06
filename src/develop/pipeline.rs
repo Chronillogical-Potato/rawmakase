@@ -519,15 +519,15 @@ struct CurveSet {
     channels: [CurveLut; 3],
 }
 impl CurveSet {
-    /// Curves plus, for engine 4, the Shadows/Highlights map of this image; built
-    /// also when `local_tone` (masks change Shadows or Highlights).
+    /// Curves plus, for engine 4, the Shadows/Highlights map of this image (which also
+    /// carries the measured Clarity); built also when `local_tone` (masks change
+    /// Shadows or Highlights).
     fn for_image(im: Source, r: &Recipe, matrix: [[f32; 3]; 3], local_tone: bool) -> Self {
         let mut lut = Self::with_photo_measures(im, r, matrix);
         if lut.basic_curves {
             let local = crate::develop::local_tone::LocalToneMap::build(
                 im,
-                r.shadows,
-                r.highlights,
+                crate::develop::local_tone::Sliders::of(r),
                 local_tone,
                 |p| tone_stage(p, &im.metadata, r, &lut, matrix, None).0,
             );
@@ -619,6 +619,7 @@ impl CurveSet {
             calibration: crate::develop::calibration::Calibration::new(
                 r.effects.calibration,
                 r.effects.shadow_tint,
+                r.calibration_model,
             ),
             parametric: (basic_curves && r.parametric_model.is_measured())
                 .then(|| parametric_curve(r))
@@ -1008,7 +1009,8 @@ pub(crate) fn footprint_spread(footprint: f32) -> f32 {
 }
 fn detail_sample(im: Source, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
     let p = sample(im, x, y);
-    if r.noise_luma == 0. && r.noise_chroma == 0. {
+    let noise_chroma = r.sampled_noise_chroma();
+    if r.noise_luma == 0. && noise_chroma == 0. {
         return p;
     }
     let center = (p[0] + 2. * p[1] + p[2]) / 4.;
@@ -1032,8 +1034,8 @@ fn detail_sample(im: Source, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
     std::array::from_fn(|c| {
         center
             + (avgl - center) * r.noise_luma * (1. - r.effects.luma_contrast * 0.5)
-            + (p[c] - center) * (1. - r.noise_chroma)
-            + (avg[c] - avgl) * r.noise_chroma * (0.5 + r.effects.chroma_smoothness)
+            + (p[c] - center) * (1. - noise_chroma)
+            + (avg[c] - avgl) * noise_chroma * (0.5 + r.effects.chroma_smoothness)
     })
 }
 /// Black level of the DNG SDK's exposure ramp at its default Shadows setting of 5
@@ -1215,8 +1217,7 @@ pub(crate) fn gpu_pixel_params(
         lum,
         [small.width, small.height],
         [im.width, im.height],
-        r.shadows,
-        r.highlights,
+        super::local_tone::Sliders::of(r),
     );
     Some(pixel_params::with_map(tone, &map))
 }

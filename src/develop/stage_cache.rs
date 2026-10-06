@@ -137,6 +137,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         upright,
         noise_luma,
         noise_chroma,
+        // The measured operator changes the source image, which every key holds.
+        noise_model: _,
         lens_vignette_model,
         effects,
         // Shadows/Highlights and their exposure are keyed by `LocalKey`; spot removal
@@ -146,6 +148,7 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         shadows: _,
         highlights: _,
         retouch: _,
+        retouch_model: _,
         red_eye: _,
         // Read only by the per-pixel stage and the finishing stages after these.
         profile_tone: _,
@@ -160,9 +163,14 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         reference_color: _,
         parametric_model: _,
         grain_model: _,
+        // The measured Clarity is in the map, built per render; the original one is
+        // keyed by `LocalKey` through `effects.clarity`.
+        clarity_model: _,
         contrast_model: _,
         grading_model: _,
         mixer_model: _,
+        saturation_model: _,
+        calibration_model: _,
         whites_model: _,
         gamut_model: _,
         contrast: _,

@@ -17,6 +17,18 @@ pub enum Source {
     Measured,
 }
 
+/// Whether Camera Raw moves a Fujifilm body's baseline with the raw's exposure
+/// midpoint shift (DR200/DR400, extended ISO).
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExposureShift {
+    /// Every body measured so far after the X-Trans III generation.
+    #[default]
+    Followed,
+    /// One value whatever the shift.
+    Ignored,
+}
+
 /// One camera body.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,6 +41,14 @@ pub struct Camera {
     pub aliases: Vec<String>,
     /// Exposure Camera Raw adds to an unedited photo with Adobe Standard, in EV.
     pub baseline_exposure: f32,
+    /// Fujifilm only: see [`ExposureShift`].
+    #[serde(default)]
+    pub fujifilm_exposure_shift: ExposureShift,
+    /// Fujifilm only: the body's exposure midpoint shift at DR100 and base ISO, which
+    /// the row holds at, when it is not the sensor's usual one (-0.72 EV for X-Trans,
+    /// 0 for Bayer); the GFX bodies record -0.49.
+    #[serde(default)]
+    pub fujifilm_dr100_shift: Option<f32>,
     pub source: Source,
     /// When the values were checked (YYYY-MM-DD) and on what.
     pub checked: String,
@@ -89,6 +109,8 @@ pub enum BaselineOrigin {
 pub struct Baseline {
     pub ev: f32,
     pub origin: BaselineOrigin,
+    pub exposure_shift: ExposureShift,
+    pub dr100_shift: Option<f32>,
 }
 
 /// Camera Raw's baseline exposure for a camera. A camera without a row takes the
@@ -103,6 +125,8 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
         return Baseline {
             ev: c.baseline_exposure,
             origin: BaselineOrigin::Listed(c.source),
+            exposure_shift: c.fujifilm_exposure_shift,
+            dr100_shift: c.fujifilm_dr100_shift,
         };
     }
     let same_make = rows
@@ -113,11 +137,15 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
         return Baseline {
             ev,
             origin: BaselineOrigin::MakeMedian,
+            exposure_shift: ExposureShift::Followed,
+            dr100_shift: None,
         };
     }
     Baseline {
         ev: median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.),
         origin: BaselineOrigin::TableMedian,
+        exposure_shift: ExposureShift::Followed,
+        dr100_shift: None,
     }
 }
 
@@ -180,6 +208,8 @@ mod tests {
             model: model.into(),
             aliases: vec![],
             baseline_exposure: ev,
+            fujifilm_exposure_shift: ExposureShift::Followed,
+            fujifilm_dr100_shift: None,
             source: Source::Fitted,
             checked: "2026-10-05".into(),
             sample: "test".into(),

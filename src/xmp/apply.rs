@@ -96,6 +96,8 @@ const METADATA: &[&str] = &[
     "RAWmakasePreset",
     // Operators a RAWmakase recipe keeps from before they were measured.
     "RAWmakaseOriginal",
+    // Packets and presets whose RAWmakaseOriginal names every kept operator.
+    "RAWmakaseMarkers",
 ];
 impl Preset {
     /// Apply to a private recipe, publishing only after every stage validates.
@@ -412,6 +414,14 @@ impl Preset {
         settings.assign("Blacks2012", &mut r.blacks, 0.01, -1., 1.)?;
         settings.assign("Saturation", &mut r.saturation, 0.01, -1., 1.)?;
         settings.assign("Vibrance", &mut r.vibrance, 0.01, -1., 1.)?;
+        // Lightroom's Saturation means Camera Raw's fade to gray, also on a recipe saved
+        // before; RAWmakase's own packet names it when a recipe kept the tables.
+        if settings.values.contains_key("Saturation") {
+            r.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_SATURATION) {
+            r.saturation_model = crate::develop::color_mixer::SaturationModel::Original;
+        }
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
         settings.assign("SharpenDetail", &mut r.sharpening_detail, 0.01, 0., 1.)?;
@@ -440,6 +450,20 @@ impl Preset {
         }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
+        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        if [
+            "ColorNoiseReduction",
+            "ColorNoiseReductionDetail",
+            "ColorNoiseReductionSmoothness",
+        ]
+        .iter()
+        .any(|k| settings.values.contains_key(*k))
+        {
+            r.noise_model = crate::develop::color_noise::NoiseModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_COLOR_NOISE) {
+            r.noise_model = crate::develop::color_noise::NoiseModel::Original;
+        }
         Ok(())
     }
 
@@ -558,6 +582,31 @@ impl Preset {
             )?;
         }
         settings.assign("ShadowTint", &mut r.effects.shadow_tint, 0.01, -1., 1.)?;
+        // Lightroom's values mean the measured operators, also on a recipe saved
+        // before; RAWmakase's own packet names the ones a recipe kept from before.
+        let mixer_keys = bands.iter().flat_map(|band| {
+            ["Hue", "Saturation", "Luminance"].map(|control| format!("{control}Adjustment{band}"))
+        });
+        if mixer_keys.into_iter().any(|key| v.contains_key(&key)) {
+            r.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_COLOR_MIXER) {
+            r.mixer_model = crate::develop::color_mixer::MixerModel::Original;
+        }
+        let primaries = [
+            "RedHue",
+            "RedSaturation",
+            "GreenHue",
+            "GreenSaturation",
+            "BlueHue",
+            "BlueSaturation",
+        ];
+        if primaries.iter().any(|key| v.contains_key(*key)) {
+            r.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_CALIBRATION) {
+            r.calibration_model = crate::develop::calibration::CalibrationModel::Original;
+        }
         if [
             "RedHue",
             "RedSaturation",
@@ -730,6 +779,13 @@ impl Preset {
     fn apply_effects(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
         let v = settings.values;
         settings.assign("Clarity2012", &mut r.effects.clarity, 0.01, -1., 1.)?;
+        // Lightroom's Clarity means the measured operator, also on a recipe saved before.
+        if settings.values.contains_key("Clarity2012") {
+            r.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_CLARITY) {
+            r.clarity_model = crate::develop::clarity::ClarityModel::Original;
+        }
         settings.assign("Texture", &mut r.effects.texture, 0.01, -1., 1.)?;
         settings.assign("Dehaze", &mut r.effects.dehaze, 0.01, -1., 1.)?;
         settings.assign("GrainAmount", &mut r.effects.grain, 0.01, 0., 1.)?;
@@ -1128,6 +1184,8 @@ impl Preset {
         }
         let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
         if let Some(retouch) = edits.retouch {
+            // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
+            r.retouch_model = crate::develop::retouch::RetouchModel::Measured;
             r.retouch = retouch;
         }
         if let Some(red_eye) = edits.red_eye {

@@ -225,7 +225,10 @@ impl SettingGroup {
             Whites => to.whites = from.whites,
             Blacks => to.blacks = from.blacks,
             Texture => e.texture = f.texture,
-            Clarity => e.clarity = f.clarity,
+            Clarity => {
+                e.clarity = f.clarity;
+                to.clarity_model = from.clarity_model;
+            }
             Dehaze => e.dehaze = f.dehaze,
             Vibrance => to.vibrance = from.vibrance,
             Saturation => to.saturation = from.saturation,
@@ -271,6 +274,7 @@ impl SettingGroup {
             }
             ColorNoiseReduction => {
                 to.noise_chroma = from.noise_chroma;
+                to.noise_model = from.noise_model;
                 e.chroma_detail = f.chroma_detail;
                 e.chroma_smoothness = f.chroma_smoothness;
             }
@@ -323,6 +327,8 @@ impl SettingGroup {
                 to.contrast_model = from.contrast_model;
                 to.grading_model = from.grading_model;
                 to.mixer_model = from.mixer_model;
+                to.saturation_model = from.saturation_model;
+                to.calibration_model = from.calibration_model;
                 to.whites_model = from.whites_model;
                 to.gamut_model = from.gamut_model;
             }
@@ -330,7 +336,10 @@ impl SettingGroup {
                 e.calibration = f.calibration;
                 e.shadow_tint = f.shadow_tint;
             }
-            SpotRemoval => to.retouch = from.retouch.clone(),
+            SpotRemoval => {
+                to.retouch = from.retouch.clone();
+                to.retouch_model = from.retouch_model;
+            }
             Crop => {
                 to.crop = from.crop;
                 to.straighten = from.straighten;
@@ -564,10 +573,14 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         reference_color: _,
         parametric_model: _,
         grain_model: _,
+        clarity_model: _,
         contrast_model: _,
         lens_vignette_model: _,
+        retouch_model: _,
         grading_model: _,
         mixer_model: _,
+        saturation_model: _,
+        calibration_model: _,
         whites_model: _,
         gamut_model: _,
         temperature: _,
@@ -591,6 +604,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         grading: _,
         noise_luma: _,
         noise_chroma: _,
+        noise_model: _,
         sharpening: _,
         crop: _,
         straighten: _,
@@ -665,10 +679,13 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("reference_color", Group(ProcessVersion)),
         ("parametric_model", Group(ProcessVersion)),
         ("grain_model", Group(Grain)),
+        ("clarity_model", Group(Clarity)),
         ("contrast_model", Group(ProcessVersion)),
         ("lens_vignette_model", Group(LensVignetting)),
         ("grading_model", Group(ProcessVersion)),
         ("mixer_model", Group(ProcessVersion)),
+        ("saturation_model", Group(ProcessVersion)),
+        ("calibration_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
         ("gamut_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),
@@ -692,6 +709,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("grading", Group(ColorGrading)),
         ("noise_luma", Group(LuminanceNoiseReduction)),
         ("noise_chroma", Group(ColorNoiseReduction)),
+        ("noise_model", Group(ColorNoiseReduction)),
         ("sharpening", Group(Sharpening)),
         ("crop", Group(Crop)),
         ("straighten", Group(Crop)),
@@ -703,6 +721,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("flip_x", PhotosOwn),
         ("flip_y", PhotosOwn),
         ("retouch", Group(SpotRemoval)),
+        ("retouch_model", Group(SpotRemoval)),
         // As in Lightroom, whose Copy Settings has no red eye group.
         ("red_eye", PhotosOwn),
         ("masks", Group(Masking)),

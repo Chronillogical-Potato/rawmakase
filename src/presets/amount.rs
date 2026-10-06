@@ -180,6 +180,8 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.contrast_model = full.contrast_model;
     r.grading_model = full.grading_model;
     r.mixer_model = full.mixer_model;
+    r.saturation_model = full.saturation_model;
+    r.calibration_model = full.calibration_model;
     r.whites_model = full.whites_model;
     r.gamut_model = full.gamut_model;
 }
@@ -391,10 +393,14 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         reference_color: _,
         parametric_model: _,
         grain_model,
+        clarity_model,
         contrast_model: _,
         lens_vignette_model,
+        retouch_model,
         grading_model: _,
         mixer_model: _,
+        saturation_model: _,
+        calibration_model: _,
         whites_model: _,
         gamut_model: _,
         temperature,
@@ -418,6 +424,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         grading,
         noise_luma,
         noise_chroma,
+        noise_model,
         sharpening,
         crop,
         straighten,
@@ -472,8 +479,10 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         lens_manual_distortion: *lens_manual_distortion,
         lens_ca: *lens_ca,
         lens_vignette_model: *lens_vignette_model,
+        retouch_model: *retouch_model,
         effects: effects(&a.effects, b_effects, t),
         grain_model: *grain_model,
+        clarity_model: *clarity_model,
         preset_name: preset_name.clone(),
         preset_settings: preset_settings.clone(),
         profile: profile.clone(),
@@ -514,6 +523,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         grading: std::array::from_fn(|i| wheel(a.grading[i], grading[i], t)),
         noise_luma: lerp(a.noise_luma, *noise_luma, t, 0., 1.),
         noise_chroma: lerp(a.noise_chroma, *noise_chroma, t, 0., 1.),
+        noise_model: *noise_model,
         sharpening: lerp(a.sharpening, *sharpening, t, 0., 1.),
         crop: *crop,
         straighten: *straighten,

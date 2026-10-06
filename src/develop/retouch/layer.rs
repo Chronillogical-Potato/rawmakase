@@ -3,12 +3,13 @@
 //! between renders and, when operations change, recompute only the 256-pixel tiles
 //! those changes reach; exports build it at once.
 use super::{
-    RetouchOp,
+    RetouchModel, RetouchOp,
     heal::{self, PixelRect},
 };
 use crate::{
     develop::{
         ImageFrame,
+        color_noise::ChromaDenoise,
         red_eye::{self, RedEyeOp},
     },
     raw::CameraImage,
@@ -29,12 +30,14 @@ const TILE: i32 = 256;
 pub(crate) struct Retouching<'a> {
     pub(crate) red_eye: &'a [RedEyeOp],
     pub(crate) retouch: &'a [RetouchOp],
+    pub(crate) model: RetouchModel,
 }
 impl<'a> Retouching<'a> {
     pub(crate) fn of(r: &'a crate::develop::Recipe) -> Self {
         Self {
             red_eye: &r.red_eye,
             retouch: &r.retouch,
+            model: r.retouch_model,
         }
     }
     pub(crate) fn is_empty(&self) -> bool {
@@ -50,7 +53,7 @@ impl<'a> Retouching<'a> {
         let heals = self
             .retouch
             .iter()
-            .map(|op| Step::Heal(heal::Placed::new(op, frame)));
+            .map(|op| Step::Heal(heal::Placed::new(op, frame, self.model.feather())));
         eyes.chain(heals).collect()
     }
     /// Destination rectangles of the operations that differ between `self` and
@@ -71,9 +74,13 @@ impl<'a> Retouching<'a> {
         let mut rects = diff(self.red_eye, other.red_eye, |op| {
             red_eye::Placed::new(op, frame).dest()
         });
-        rects.extend(diff(self.retouch, other.retouch, |op| {
-            heal::Placed::new(op, frame).dest()
-        }));
+        let dest = |op: &RetouchOp| heal::Placed::new(op, frame, self.model.feather()).dest();
+        if self.model == other.model {
+            rects.extend(diff(self.retouch, other.retouch, dest));
+        } else {
+            // A different feather changes every operation.
+            rects.extend(self.retouch.iter().chain(other.retouch).map(dest));
+        }
         rects
     }
 }
@@ -173,11 +180,14 @@ fn tile_rects(tiles: &BTreeSet<(i32, i32)>, width: u32, height: u32) -> Vec<Pixe
 pub(crate) struct RetouchCache {
     base: Option<Arc<CameraImage>>,
     ops: Vec<RetouchOp>,
+    model: RetouchModel,
     red_eye: Vec<RedEyeOp>,
     image: Option<Arc<CameraImage>>,
     /// The previous image (weakly, so its pixels are freed) and the rectangles where
     /// the current one differs from it.
     change: Option<(Weak<CameraImage>, Vec<PixelRect>)>,
+    /// The last Color noise reduction: its source, settings and result.
+    denoised: Option<(Arc<CameraImage>, ChromaDenoise, Arc<CameraImage>)>,
 }
 impl RetouchCache {
     /// `base` with `ops` applied. The previous result is reused where no change
@@ -194,6 +204,7 @@ impl RetouchCache {
             Retouching {
                 red_eye: &self.red_eye,
                 retouch: &self.ops,
+                model: self.model,
             }
         } else {
             Retouching::default()
@@ -231,9 +242,38 @@ impl RetouchCache {
         self.change = same_base.then(|| (Arc::downgrade(&previous), rects));
         self.base = Some(base.clone());
         self.ops = ops.retouch.to_vec();
+        self.model = ops.model;
         self.red_eye = ops.red_eye.to_vec();
         self.image = Some(image.clone());
         Ok(image)
+    }
+    /// `source` with Color noise reduction `d`, reused while neither changes; without
+    /// one, `source` itself, and the last result is let go.
+    pub(crate) fn denoised(
+        &mut self,
+        source: &Arc<CameraImage>,
+        d: Option<ChromaDenoise>,
+        cancel: &AtomicBool,
+    ) -> Result<Arc<CameraImage>> {
+        let Some(d) = d else {
+            self.denoised = None;
+            return Ok(source.clone());
+        };
+        if let Some((s, last, out)) = &self.denoised
+            && Arc::ptr_eq(s, source)
+            && *last == d
+        {
+            return Ok(out.clone());
+        }
+        // Free the previous result, and the retouched image built on it, before making
+        // the next; spot removal is then rebuilt on the new one.
+        self.denoised = None;
+        self.base = None;
+        self.image = None;
+        self.change = None;
+        let out = Arc::new(d.apply(source, cancel)?);
+        self.denoised = Some((source.clone(), d, out.clone()));
+        Ok(out)
     }
     /// What the last change replaced, and where the images differ.
     /// Whether `image` is what the last change replaced; then the current image

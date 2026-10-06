@@ -180,6 +180,19 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     if repaired {
         notes.push("Recovered duplicated XML Group closing tag; original file unchanged".into());
     }
+    // A packet or preset from a RAWmakase that predates `RAWmakaseMarkers` keeps the
+    // operators measured only since, besides any it names.
+    let creator_tool = description
+        .attribute((super::ns::XMP, "CreatorTool"))
+        .map(str::to_string)
+        .or_else(|| {
+            description
+                .children()
+                .find(|n| n.has_tag_name((super::ns::XMP, "CreatorTool")))
+                .and_then(|n| n.text())
+                .map(|t| t.trim().to_string())
+        });
+    add_implied_original(&mut settings, creator_tool.as_deref());
     let preset = Preset {
         photo_settings: sidecar,
         id,
@@ -199,4 +212,42 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         "No camera settings"
     );
     Ok(preset)
+}
+
+/// Names in `RAWmakaseOriginal` the operators an unmarked packet or preset from an
+/// earlier RAWmakase kept: those measured after its release whose settings it
+/// carries. Presets record no release; theirs is taken as the last one without
+/// `RAWmakaseMarkers`.
+fn add_implied_original(settings: &mut BTreeMap<String, String>, creator_tool: Option<&str>) {
+    if settings.contains_key("RAWmakaseMarkers") {
+        return;
+    }
+    let version = match creator_tool {
+        Some(tool) => super::write::rawmakase_version(tool),
+        None if settings.contains_key("RAWmakasePreset") => Some((0, 1, 15)),
+        None => None,
+    };
+    let Some(version) = version else {
+        return;
+    };
+    let implied: Vec<_> = super::write::implied_original(version)
+        .into_iter()
+        .filter(|name| {
+            super::write::operator_keys(name)
+                .iter()
+                .any(|key| settings.keys().any(|k| key.matches(k)))
+        })
+        .collect();
+    if implied.is_empty() {
+        return;
+    }
+    let kept = settings.entry("RAWmakaseOriginal".to_string()).or_default();
+    for name in implied {
+        if !kept.split(',').any(|n| n.trim() == name) {
+            if !kept.is_empty() {
+                kept.push(',');
+            }
+            kept.push_str(name);
+        }
+    }
 }

@@ -678,6 +678,9 @@ impl Editor {
                 recipe.update_wb(self.document.metadata.as_ref().expect("checked above"));
                 recipe.auto_white_balance = None;
             }
+            if param == Param::Clarity {
+                recipe.adopt_measured_clarity(before);
+            }
             shown
         };
         let label = if let Some(index) = target.mask {

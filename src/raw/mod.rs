@@ -30,6 +30,11 @@ pub struct Metadata {
     /// Canon Highlight Tone Priority, from the maker notes; `Off` for other makes.
     #[serde(default)]
     pub highlight_tone_priority: HighlightTonePriority,
+    /// Fujifilm's exposure midpoint shift in EV (maker note ExpoMidPointShift): about
+    /// −0.7 at DR100, a stop lower for each DR step up, a stop higher at extended
+    /// low ISO. `None` when the raw has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuji_exposure_shift: Option<f32>,
     pub iso: f32,
     pub shutter: f32,
     pub aperture: f32,
@@ -147,6 +152,8 @@ impl Raw {
             xtrans: m.xtrans != 0,
             fuji_dynamic_range: m.fuji_dynamic_range,
             highlight_tone_priority: HighlightTonePriority::from_libraw(m.highlight_tone_priority),
+            // LibRaw leaves -999 when the maker notes have no shift.
+            fuji_exposure_shift: (m.fuji_exposure_shift > -100.).then_some(m.fuji_exposure_shift),
             iso: m.iso,
             shutter: m.shutter,
             aperture: m.aperture,

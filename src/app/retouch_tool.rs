@@ -297,7 +297,7 @@ impl Editor {
                 .automatic_source(&op, &[])
                 .unwrap_or([op.radius() * 3., 0.]);
         }
-        self.document.recipe.retouch.push(op);
+        self.document.recipe.add_retouch(op);
         let i = self.document.recipe.retouch.len() - 1;
         self.view.retouch.select(Some(i));
     }

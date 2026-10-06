@@ -120,6 +120,8 @@ impl Panel {
                 r.sharpening_model = defaults.sharpening_model;
                 r.noise_luma = 0.;
                 r.noise_chroma = 0.;
+                // Renders nothing at Amount 0; Detail's reset sets the measured one.
+                r.noise_model = defaults.noise_model;
                 e.luma_detail = d.luma_detail;
                 e.luma_contrast = d.luma_contrast;
                 e.chroma_detail = d.chroma_detail;
@@ -155,7 +157,11 @@ impl Panel {
                 e.calibration = d.calibration;
                 e.shadow_tint = d.shadow_tint;
             }
-            Panel::SpotRemoval => r.retouch.clear(),
+            Panel::SpotRemoval => {
+                r.retouch.clear();
+                // Renders nothing without spots; the first spot sets it.
+                r.retouch_model = defaults.retouch_model;
+            }
             Panel::RedEye => r.red_eye.clear(),
             Panel::Masks => r.masks.clear(),
         }
@@ -237,6 +243,19 @@ mod tests {
         after.effects.grain = 0.4;
         after.adopt_measured_grain(0.);
         assert!(Panel::Effects.holds_change(&before, &after));
+        // A first spot also sets the measured feather.
+        let mut after = before.clone();
+        after.add_retouch(crate::develop::retouch::RetouchOp {
+            mode: crate::develop::retouch::RetouchMode::Clone,
+            shape: crate::develop::retouch::RetouchShape::Spot {
+                center: [0.3, 0.3],
+                radius: 0.05,
+            },
+            feather: 0.5,
+            opacity: 1.,
+            offset: [0.2, 0.],
+        });
+        assert!(Panel::SpotRemoval.holds_change(&before, &after));
         // Detail's reset on an old recipe also sets the measured sharpening.
         let mut before = before.clone();
         before.sharpening = 0.35;

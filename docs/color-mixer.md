@@ -19,6 +19,12 @@ New edits use band tables refitted to Camera Raw 18.7 on a dense synthetic chart
 
 On the chart's patches left out of the fit (every other hue), the mean ΔE00 over the 60 rendered slider settings goes from 0.50 with the photo tables to 0.15, and no setting gets worse; Blue Luminance −100 goes from 1.40 to 0.54, Purple Luminance −100 from 1.60 to 0.27, Blue Hue −100 from 0.91 to 0.27. On the corpus chart, every case with a mixer slider is closer to Camera Raw (the default render is 0.66): the single-band `hue-*` cases sit at 0.66–0.79 (were 0.69–1.39), `saturation-*` at 0.66–1.02 (0.72–1.35), `luminance-*` at 0.64–1.31 (0.82–2.13), and the combined `mixer-*` cases at 0.75–1.42 (0.90–3.07).
 
+### Saturation
+
+Camera Raw 18.7's Saturation −100 turns every color into a gray of its own luminance (Rec. 709 Y in linear sRGB, within 3% on the corpus chart), where the photo tables, measured at ±50 and extrapolated, left some color (`saturation-100`: mean ΔE00 3.97, p95 15.5). New edits keep the photo tables down to −50 and fade from there to the color's luminance, reaching it at −100 (`SaturationModel::Gray`): `saturation-100` is now 0.65 (p95 1.8), and everything from −50 up renders as before. Edits saved before keep the extrapolated tables.
+
+On the chart, Camera Raw's whole slider behaves as a blend toward luminance, out = Y + k (rgb − Y) with k 0, 0.52, 1.45 and 1.85 at −100, −50, +50 and +100, which reproduces its renders from its own default to mean ΔE00 0.42–0.97. Rendering ±50 that way was worse on real photos, though: on 20 pixls.us photos at Saturation +50 (not used for any fit) the median went from 1.18 to 1.47, and on our own photos at ±50 from 0.64 to 0.79. So only the fade to gray is used. Vibrance is not such a blend (its strength varies with hue as well as chroma) and keeps the photo tables.
+
 Both the mixer and grading run after the tone curves (basic curves and point curves). With them before the point curve, Lightroom references that combine grading with a faded point curve scored worse (e.g. global blue 0.0206, against 0.0083 after).
 
 ## Color grading (engine 4)

@@ -490,9 +490,9 @@ pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<Cam
     let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
-/// The recovered image with the recipe's red eye corrections and spot removal applied:
-/// from the preview's cache, updated where the operations changed, or built at once
-/// (exports).
+/// The recovered image with the measured Color noise reduction, then the recipe's red
+/// eye corrections and spot removal, so those stay within their shapes: from the
+/// preview's cache, updated where the operations changed, or built at once (exports).
 pub(crate) fn retouched(
     im: &CameraImage,
     r: &Recipe,
@@ -501,10 +501,22 @@ pub(crate) fn retouched(
 ) -> Result<Arc<CameraImage>> {
     let recovered = recovered(im, cancel)?;
     let ops = develop::retouch::Retouching::of(r);
+    let denoise = r.chroma_denoise();
     match cache {
-        Some(cache) => cache.get(&recovered, ops, cancel),
-        None if ops.is_empty() => Ok(recovered),
-        None => Ok(Arc::new(develop::retouch::apply(&recovered, ops))),
+        Some(cache) => {
+            let base = cache.denoised(&recovered, denoise, cancel)?;
+            cache.get(&base, ops, cancel)
+        }
+        None => {
+            let base = match denoise {
+                Some(d) => Arc::new(d.apply(&recovered, cancel)?),
+                None => recovered,
+            };
+            Ok(match ops.is_empty() {
+                true => base,
+                false => Arc::new(develop::retouch::apply(&base, ops)),
+            })
+        }
     }
 }
 /// Point Color's dropper at (`u`, `v`) of the shown photo: the color Point Color sees
@@ -626,6 +638,10 @@ fn local_stage(
         spatial.shadows = 0.;
         spatial.highlights = 0.;
     }
+    // The measured positive Clarity is part of the map (clarity.rs).
+    if develop::clarity::measured(r) != 0. {
+        spatial.effects.clarity = 0.;
+    }
     let mut tonal = r.clone();
     if !measured {
         tonal.shadows = 0.;
@@ -641,8 +657,8 @@ fn local_stage(
     let mut cache = cache;
     if spatial.shadows != 0.
         || spatial.highlights != 0.
-        || r.effects.clarity != 0.
-        || r.effects.texture != 0.
+        || spatial.effects.clarity != 0.
+        || spatial.effects.texture != 0.
     {
         let (gain, key) = local_gain(im, &spatial, scale, cancel, cache.as_deref_mut())?;
         (toned.gain, toned.gain_key) = (Some(gain), key);
@@ -745,6 +761,9 @@ fn render_resident(
     let mut spatial = base.clone();
     spatial.shadows = 0.;
     spatial.highlights = 0.;
+    if develop::clarity::measured(&base) != 0. {
+        spatial.effects.clarity = 0.;
+    }
     let mut toned = Toned {
         image: source.clone(),
         scale,
@@ -753,8 +772,8 @@ fn render_resident(
         reduced: None,
     };
     let mut tones = None;
-    if r.effects.clarity != 0. || r.effects.texture != 0. {
-        let texture = r.effects.texture != 0.;
+    if spatial.effects.clarity != 0. || spatial.effects.texture != 0. {
+        let texture = spatial.effects.texture != 0.;
         let blur_key = BlurKey::new(source, &spatial, scale, texture);
         let Some(camera) = pixel_params(Source::from(source.as_ref()), &spatial) else {
             return Ok(None);
@@ -857,7 +876,7 @@ fn render_resident(
     let e = &base.effects;
     sampling[36..42].copy_from_slice(&[
         base.noise_luma,
-        base.noise_chroma,
+        base.sampled_noise_chroma(),
         e.luma_detail,
         e.chroma_detail,
         e.luma_contrast,
