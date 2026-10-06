@@ -4585,3 +4585,23 @@ fn auto_ends_a_conversion_waiting_for_the_photo() {
     assert_eq!(editor.document.edit.recipe.exposure, 1.);
     assert!(editor.document.pending_treatment.is_none());
 }
+#[test]
+fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
+    // Quit on macOS (Cmd-Q) closes the window without a close request, so only the
+    // exit hook sees it; the close guard's flush never runs.
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    let path = d.path().join("photos/a.RAF");
+    e.library_mode = false;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.path = Some(path.clone());
+    let before = e.document.edit.recipe.clone();
+    e.document.edit.recipe.exposure = 0.7;
+    e.commit_edit(before, None);
+    assert!(e.document.edit.save.needs_save());
+    eframe::App::on_exit(&mut e, None);
+    assert!(!e.document.edit.save.needs_save());
+    let library = e.library.as_ref().unwrap();
+    let saved = library.catalog.load_edit(ids[0], &path)?.unwrap();
+    assert_eq!(saved.recipe.exposure, 0.7);
+    Ok(())
+}
