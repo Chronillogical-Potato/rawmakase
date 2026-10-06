@@ -656,23 +656,24 @@ pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 pub(super) const ORIGINAL_COLOR_NOISE: &str = "ColorNoise";
 pub(super) const ORIGINAL_SATURATION: &str = "Saturation";
 pub(super) const ORIGINAL_VIBRANCE: &str = "Vibrance";
-/// Written with every packet and preset whose `RAWmakaseOriginal` names all the
-/// operators below that it keeps. Packets and presets from earlier releases lack it.
-pub(super) const MARKERS: &str = "2";
+/// Written with every packet and preset: the marker format, which says which of the
+/// operators below its `RAWmakaseOriginal` could name (`MEASURED_SINCE`). Packets
+/// and presets from releases before 0.2.0 lack it.
+pub(super) const MARKERS: u32 = 3;
 
-/// The RAWmakase release each operator's measured version first shipped in. A packet
-/// or preset without `RAWmakaseMarkers` could not name operators measured after the
-/// release that wrote it, so it keeps those.
-pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 9] = [
-    (ORIGINAL_SHARPENING, (0, 1, 15)),
-    (ORIGINAL_LENS_VIGNETTE, (0, 1, 15)),
-    (ORIGINAL_GRAIN, (0, 1, 15)),
-    (ORIGINAL_COLOR_MIXER, (0, 1, 15)),
-    (ORIGINAL_CLARITY, (0, 1, 16)),
-    (ORIGINAL_CALIBRATION, (0, 1, 16)),
-    (ORIGINAL_COLOR_NOISE, (0, 1, 16)),
-    (ORIGINAL_SATURATION, (0, 1, 16)),
-    (ORIGINAL_VIBRANCE, (0, 1, 16)),
+/// When each operator's measured version first shipped: the RAWmakase release, and
+/// the marker format from which `RAWmakaseOriginal` names it. A packet or preset
+/// that predates either could not name the operator, so it keeps that one.
+pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32), u32); 9] = [
+    (ORIGINAL_SHARPENING, (0, 1, 15), 2),
+    (ORIGINAL_LENS_VIGNETTE, (0, 1, 15), 2),
+    (ORIGINAL_GRAIN, (0, 1, 15), 2),
+    (ORIGINAL_COLOR_MIXER, (0, 1, 15), 2),
+    (ORIGINAL_CLARITY, (0, 1, 16), 2),
+    (ORIGINAL_CALIBRATION, (0, 1, 16), 2),
+    (ORIGINAL_COLOR_NOISE, (0, 1, 16), 2),
+    (ORIGINAL_SATURATION, (0, 1, 16), 2),
+    (ORIGINAL_VIBRANCE, (0, 2, 1), 3),
 ];
 
 /// A setting key, or the start of one, that belongs to an operator.
@@ -737,8 +738,17 @@ pub(super) fn rawmakase_version(creator_tool: &str) -> Option<(u32, u32, u32)> {
 pub(super) fn implied_original(version: (u32, u32, u32)) -> Vec<&'static str> {
     MEASURED_SINCE
         .iter()
-        .filter(|(_, since)| version < *since)
-        .map(|(name, _)| *name)
+        .filter(|(_, since, _)| version < *since)
+        .map(|(name, _, _)| *name)
+        .collect()
+}
+
+/// The operators a packet or preset of marker format `markers` could not name.
+pub(super) fn unnamed_by_markers(markers: u32) -> Vec<&'static str> {
+    MEASURED_SINCE
+        .iter()
+        .filter(|(_, _, since)| markers < *since)
+        .map(|(name, _, _)| *name)
         .collect()
 }
 
@@ -787,7 +797,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
         if !original.is_empty() {
             attributes.push(("crs:RAWmakaseOriginal".into(), original.join(",")));
         }
-        attributes.push(("crs:RAWmakaseMarkers".into(), MARKERS.into()));
+        attributes.push(("crs:RAWmakaseMarkers".into(), MARKERS.to_string()));
         attributes.push(("crs:AlreadyApplied".into(), "True".into()));
     }
     let mut out = format!(

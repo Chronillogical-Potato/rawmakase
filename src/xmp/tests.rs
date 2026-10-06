@@ -1394,6 +1394,26 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
     assert_eq!(exposure.calibration_model, CalibrationModel::Measured);
     Ok(())
 }
+/// A packet from 0.2.0 (marker format 2) could not name Vibrance, so it keeps the
+/// earlier Vibrance; format 3 names it when kept.
+#[test]
+fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
+    use crate::develop::color_mixer::{SaturationModel, VibranceModel};
+    let m = Metadata::default();
+    let fresh = Recipe::with_profiles(&m, &[]);
+    let apply = |markers: &str| {
+        let attrs = format!(
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.2.0" c:RAWmakaseMarkers="{markers}" c:Vibrance="-80" c:Saturation="-80""#
+        );
+        parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)
+    };
+    let two = apply("2")?;
+    assert_eq!(two.vibrance_model, VibranceModel::Original);
+    assert_eq!(two.saturation_model, SaturationModel::Gray);
+    let three = apply("3")?;
+    assert_eq!(three.vibrance_model, VibranceModel::Chart);
+    Ok(())
+}
 #[test]
 fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
     use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};

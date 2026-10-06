@@ -214,23 +214,28 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     Ok(preset)
 }
 
-/// Names in `RAWmakaseOriginal` the operators an unmarked packet or preset from an
-/// earlier RAWmakase kept: those measured after its release whose settings it
-/// carries. Presets record no release; theirs is taken as the last one without
-/// `RAWmakaseMarkers`.
+/// Names in `RAWmakaseOriginal` the operators a packet or preset from an earlier
+/// RAWmakase kept without naming them, among those whose settings it carries: the
+/// ones its marker format could not name, or, without `RAWmakaseMarkers`, the ones
+/// measured after its release. Presets record no release; theirs is taken as the last
+/// one without the marker.
 fn add_implied_original(settings: &mut BTreeMap<String, String>, creator_tool: Option<&str>) {
-    if settings.contains_key("RAWmakaseMarkers") {
-        return;
-    }
-    let version = match creator_tool {
-        Some(tool) => super::write::rawmakase_version(tool),
-        None if settings.contains_key("RAWmakasePreset") => Some((0, 1, 15)),
-        None => None,
+    let unnamed = if let Some(markers) = settings.get("RAWmakaseMarkers") {
+        // An unreadable format is taken as the current one.
+        let markers = markers.trim().parse().unwrap_or(super::write::MARKERS);
+        super::write::unnamed_by_markers(markers)
+    } else {
+        let version = match creator_tool {
+            Some(tool) => super::write::rawmakase_version(tool),
+            None if settings.contains_key("RAWmakasePreset") => Some((0, 1, 15)),
+            None => None,
+        };
+        let Some(version) = version else {
+            return;
+        };
+        super::write::implied_original(version)
     };
-    let Some(version) = version else {
-        return;
-    };
-    let implied: Vec<_> = super::write::implied_original(version)
+    let implied: Vec<_> = unnamed
         .into_iter()
         .filter(|name| {
             super::write::operator_keys(name)

@@ -192,7 +192,8 @@ impl ColorMixer {
         } else {
             r.saturation
         };
-        let chart_vibrance = r.vibrance_model == VibranceModel::Chart && r.vibrance != 0.;
+        // Up to ±50 the chart model is the photo tables, scaled as before.
+        let chart_vibrance = r.vibrance_model == VibranceModel::Chart && r.vibrance.abs() > 0.5;
         let vibrance = if chart_vibrance { 0. } else { r.vibrance };
         // Measured at ±50: positions beyond extrapolate linearly.
         for (i, s) in [saturation, vibrance].into_iter().enumerate() {
@@ -493,6 +494,13 @@ mod tests {
                 .iter()
                 .all(|v| (v - 0.2).abs() < 2e-3)
         );
+        // Up to ±50 it is the photo tables exactly, between their measured positions too.
+        for v in [-0.5, -0.4, -0.1, 0.3, 0.5] {
+            assert_eq!(
+                at(VibranceModel::Chart, v).delta,
+                at(VibranceModel::Original, v).delta
+            );
+        }
     }
     #[test]
     fn chart_luminance_follows_camera_raws_slider_curve() {
