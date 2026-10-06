@@ -1,4 +1,3 @@
-use crate::{develop::Recipe, export_settings::ExportOptions};
 use std::path::PathBuf;
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
@@ -77,9 +76,4 @@ impl CollectionKind {
             _ => Self::Collection,
         }
     }
-}
-#[derive(Debug)]
-pub struct SavedEdit {
-    pub recipe: Recipe,
-    pub export: ExportOptions,
 }

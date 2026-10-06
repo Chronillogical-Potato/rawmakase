@@ -8,8 +8,8 @@
 use super::{Replace, assemble::Values, job};
 use crate::export_settings::{Existing, ExportSettings};
 use crate::{
-    catalog::resolve::{self, EditRecord, Origin, PhotoRecord},
     develop::Recipe,
+    edits::{self, EditRecord, Origin, PhotoRecord},
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -45,7 +45,7 @@ pub struct BatchPhoto {
 #[derive(Clone, Debug)]
 pub enum Edit {
     /// As the catalog stores it, worked out when the photo's turn comes, as
-    /// Develop would open it (`catalog::resolve`).
+    /// Develop would open it (`crate::edits`).
     Catalog(EditRecord),
     /// The open photo's edit as shown; `unsaved` when saving it failed. `file` is
     /// the photo's file when Export was pressed: a file replaced since is not
@@ -479,7 +479,7 @@ fn render(
     let (mut recipe, mut notes) = match &photo.edit {
         Edit::Catalog(record) => {
             let (profiles, _) = crate::camera_profiles::installed(&raw.metadata);
-            let resolved = resolve::resolve(
+            let resolved = edits::resolve(
                 record,
                 &photo.source,
                 &raw.metadata,

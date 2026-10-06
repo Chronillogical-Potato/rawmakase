@@ -23,6 +23,7 @@ pub mod decode_cache;
 pub mod demosaic;
 pub mod develop;
 pub mod dng;
+pub mod edits;
 pub mod exif;
 pub mod export;
 pub mod export_settings;

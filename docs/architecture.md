@@ -28,6 +28,7 @@ files should preserve.
 | `export_settings` | Export choices as values: the Export dialog's settings and a photo's saved `ExportOptions` | `export_settings.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `metadata` | Photo metadata as values: descriptive fields (title, caption, copyright, creator, capture, location), keywords and camera settings; depends on nothing else | `metadata.rs` |
+| `edits` | Which edit a photo develops with (saved, Lightroom or raw defaults), shared by Develop, Sync and Export; the catalog only reads the stored records | `edits.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
