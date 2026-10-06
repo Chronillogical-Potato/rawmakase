@@ -1149,62 +1149,32 @@ impl Editor {
         let mut switch = PanelSwitch::new(r, Panel::Detail);
         let sharpening = SharpeningSliders::defaults(r.sharpening_model);
         if switched_section(ui, "Detail", &mut switch.state, |ui| {
-            subheading(ui, "Sharpening");
-            slider_with(
-                ui,
-                "Amount",
-                &mut r.sharpening,
-                0. ..=1.,
-                sharpening.amount,
-                Some((150., 0)),
-                None,
-            );
-            if r.engine >= 3 {
-                slider_with(
-                    ui,
-                    "Radius",
-                    &mut r.sharpening_radius,
-                    0.5..=3.,
-                    sharpening.radius,
-                    Some((1., 1)),
-                    None,
-                );
-                slider(
-                    ui,
-                    "Detail",
-                    &mut r.sharpening_detail,
-                    0. ..=1.,
-                    sharpening.detail,
-                );
-                slider(
-                    ui,
-                    "Masking",
-                    &mut r.sharpening_masking,
-                    0. ..=1.,
-                    sharpening.masking,
-                );
-            }
-            subheading(ui, "Noise Reduction");
-            slider(ui, "Luminance", &mut r.noise_luma, 0. ..=1., 0.);
-            ui.push_id("luma-nr", |ui| {
-                slider(ui, "Detail", &mut r.effects.luma_detail, 0. ..=1., 0.5);
-                slider(ui, "Contrast", &mut r.effects.luma_contrast, 0. ..=1., 0.);
-            });
+            let radius_and_masking = r.engine >= 3;
             let color_default = if r.noise_model.is_original() {
                 0.
             } else {
                 0.25
             };
-            slider(ui, "Color", &mut r.noise_chroma, 0. ..=1., color_default);
+            let mut control = |ui: &mut egui::Ui, id: ParameterId, default: f32| {
+                setting_slider(ui, id, id.value_mut(r), default);
+            };
+            subheading(ui, "Sharpening");
+            control(ui, ParameterId::SharpeningAmount, sharpening.amount);
+            if radius_and_masking {
+                control(ui, ParameterId::SharpeningRadius, sharpening.radius);
+                control(ui, ParameterId::SharpeningDetail, sharpening.detail);
+                control(ui, ParameterId::SharpeningMasking, sharpening.masking);
+            }
+            subheading(ui, "Noise Reduction");
+            control(ui, ParameterId::LuminanceNoise, 0.);
+            ui.push_id("luma-nr", |ui| {
+                control(ui, ParameterId::LuminanceDetail, 0.5);
+                control(ui, ParameterId::LuminanceContrast, 0.);
+            });
+            control(ui, ParameterId::ColorNoise, color_default);
             ui.push_id("color-nr", |ui| {
-                slider(ui, "Detail", &mut r.effects.chroma_detail, 0. ..=1., 0.5);
-                slider(
-                    ui,
-                    "Smoothness",
-                    &mut r.effects.chroma_smoothness,
-                    0. ..=1.,
-                    0.5,
-                );
+                control(ui, ParameterId::ColorNoiseDetail, 0.5);
+                control(ui, ParameterId::ColorNoiseSmoothness, 0.5);
             });
         }) {
             let d = Recipe::default().effects;

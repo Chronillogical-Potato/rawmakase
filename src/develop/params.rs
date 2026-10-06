@@ -30,6 +30,19 @@ pub enum ParameterId {
     Tint,
     /// The Crop panel's Angle, in degrees.
     Straighten,
+    /// Detail: Sharpening.
+    SharpeningAmount,
+    /// In pixels.
+    SharpeningRadius,
+    SharpeningDetail,
+    SharpeningMasking,
+    /// Detail: Noise Reduction.
+    LuminanceNoise,
+    LuminanceDetail,
+    LuminanceContrast,
+    ColorNoise,
+    ColorNoiseDetail,
+    ColorNoiseSmoothness,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -82,6 +95,23 @@ const HUNDREDTHS: Display = Display {
     signed: true,
 };
 
+/// A 0..100 slider stored as 0..1.
+const fn amount(id: ParameterId, label: &'static str) -> Descriptor {
+    Descriptor {
+        id,
+        label,
+        interactive: 0. ..=1.,
+        valid: 0. ..=1.,
+        tick: Tick::Linear(0.01),
+        drag_step: None,
+        display: Display {
+            scale: 100.,
+            decimals: 0,
+            signed: false,
+        },
+    }
+}
+
 /// A −100..100 slider stored as −1..1.
 const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     Descriptor {
@@ -95,7 +125,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 14] = [
+const DESCRIPTORS: [Descriptor; 24] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -151,10 +181,40 @@ const DESCRIPTORS: [Descriptor; 14] = [
         drag_step: None,
         display: HUNDREDTHS,
     },
+    Descriptor {
+        // Lightroom's 0..150.
+        display: Display {
+            scale: 150.,
+            decimals: 0,
+            signed: false,
+        },
+        ..amount(ParameterId::SharpeningAmount, "Amount")
+    },
+    Descriptor {
+        id: ParameterId::SharpeningRadius,
+        label: "Radius",
+        interactive: 0.5..=3.,
+        valid: 0.5..=3.,
+        tick: Tick::Linear(0.1),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 1,
+            signed: false,
+        },
+    },
+    amount(ParameterId::SharpeningDetail, "Detail"),
+    amount(ParameterId::SharpeningMasking, "Masking"),
+    amount(ParameterId::LuminanceNoise, "Luminance"),
+    amount(ParameterId::LuminanceDetail, "Detail"),
+    amount(ParameterId::LuminanceContrast, "Contrast"),
+    amount(ParameterId::ColorNoise, "Color"),
+    amount(ParameterId::ColorNoiseDetail, "Detail"),
+    amount(ParameterId::ColorNoiseSmoothness, "Smoothness"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 24] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -169,6 +229,16 @@ impl ParameterId {
         Self::Temperature,
         Self::Tint,
         Self::Straighten,
+        Self::SharpeningAmount,
+        Self::SharpeningRadius,
+        Self::SharpeningDetail,
+        Self::SharpeningMasking,
+        Self::LuminanceNoise,
+        Self::LuminanceDetail,
+        Self::LuminanceContrast,
+        Self::ColorNoise,
+        Self::ColorNoiseDetail,
+        Self::ColorNoiseSmoothness,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -190,6 +260,16 @@ impl ParameterId {
             Self::Temperature => &mut r.temperature,
             Self::Tint => &mut r.tint,
             Self::Straighten => &mut r.straighten,
+            Self::SharpeningAmount => &mut r.sharpening,
+            Self::SharpeningRadius => &mut r.sharpening_radius,
+            Self::SharpeningDetail => &mut r.sharpening_detail,
+            Self::SharpeningMasking => &mut r.sharpening_masking,
+            Self::LuminanceNoise => &mut r.noise_luma,
+            Self::LuminanceDetail => &mut r.effects.luma_detail,
+            Self::LuminanceContrast => &mut r.effects.luma_contrast,
+            Self::ColorNoise => &mut r.noise_chroma,
+            Self::ColorNoiseDetail => &mut r.effects.chroma_detail,
+            Self::ColorNoiseSmoothness => &mut r.effects.chroma_smoothness,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.
@@ -266,6 +346,27 @@ mod tests {
     fn every_parameter_has_its_own_descriptor() {
         for id in ParameterId::ALL {
             assert_eq!(id.descriptor().id, id);
+        }
+    }
+
+    #[test]
+    fn a_recipe_is_valid_exactly_within_each_valid_range() {
+        for id in ParameterId::ALL {
+            let d = id.descriptor();
+            assert!(
+                d.valid.contains(d.interactive.start()) && d.valid.contains(d.interactive.end()),
+                "{id:?}"
+            );
+            for (value, valid) in [
+                (*d.valid.start(), true),
+                (*d.valid.end(), true),
+                (d.valid.start() - 0.01, false),
+                (d.valid.end() + 0.01, false),
+            ] {
+                let mut r = Recipe::default();
+                *id.value_mut(&mut r) = value;
+                assert_eq!(r.validate().is_ok(), valid, "{id:?} at {value}");
+            }
         }
     }
 
