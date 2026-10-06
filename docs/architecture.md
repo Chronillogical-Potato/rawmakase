@@ -16,6 +16,7 @@ files should preserve.
 | `photo` | Opening a photo: LibRaw's facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
 | `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
 | `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
+| `decode` | A photo's full-size image, made one way for Develop, prefetch, Reference View and export: the cache's copy, else a decode with highlights recovered and stored, as a `DecodePolicy` asks | `decode.rs` |
 | `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build | `decode_cache.rs` |
 | `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
 | `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), and Adobe lens profiles (LCP) as data; depends only on `xml` | `mod.rs`, `lcp.rs` |
