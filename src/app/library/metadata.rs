@@ -118,7 +118,7 @@ impl Library {
             return Ok(if advance { next } else { None });
         }
         self.done.push(MetadataCommand {
-            sequence: crate::app::undo::sequence(),
+            sequence: crate::edit_session::sequence(),
             before,
             after: changes,
             place_before,

@@ -6,6 +6,7 @@ app -> catalog
 app -> color
 app -> decode_cache
 app -> develop
+app -> edit_session
 app -> edits
 app -> exif
 app -> export
@@ -54,6 +55,9 @@ develop -> optics
 develop -> raw
 dng -> optics
 dng -> tiff
+edit_session -> catalog
+edit_session -> develop
+edit_session -> presets
 edits -> camera_profiles
 edits -> develop
 edits -> export_settings
