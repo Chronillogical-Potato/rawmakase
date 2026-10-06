@@ -353,9 +353,10 @@ impl ExportSettings {
                 }
             },
         };
-        // Windows' device names can't be file names, extension or not.
-        let name = if reserved(&name) {
-            format!("{name}_")
+        // Windows' device names can't be file names, whatever follows a dot.
+        let head = name.split('.').next().unwrap_or_default();
+        let name = if reserved(head) {
+            format!("{head}_{}", &name[head.len()..])
         } else {
             name
         };
@@ -523,6 +524,8 @@ mod tests {
         // Windows' device names are not left as they are.
         s.custom_text = "con".into();
         assert_eq!(s.file_name_for(source, &at).0, "con_.jpg");
+        s.custom_text = "CON.txt".into();
+        assert_eq!(s.file_name_for(source, &at).0, "CON_.txt.jpg");
         // An empty custom name is the file's own.
         s.custom_text = " ".into();
         s.naming = Some(Naming::CustomName);
