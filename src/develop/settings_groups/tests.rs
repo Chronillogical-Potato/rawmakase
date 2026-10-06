@@ -58,6 +58,7 @@ fn everything_changed() -> Recipe {
         sharpening_model: crate::develop::sharpening::SharpeningModel::Measured,
         grain_model: crate::develop::effects::GrainModel::Measured,
         clarity_model: crate::develop::clarity::ClarityModel::Measured,
+        texture_model: crate::develop::texture::TextureModel::Measured,
         contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
         lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
         retouch_model: crate::develop::retouch::RetouchModel::Measured,

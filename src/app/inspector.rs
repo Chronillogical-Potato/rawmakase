@@ -744,7 +744,9 @@ impl Editor {
             slider(ui, "Whites", &mut r.whites, -1. ..=1., 0.);
             slider(ui, "Blacks", &mut r.blacks, -1. ..=1., 0.);
             subheading(ui, "Presence");
+            let previous_texture = r.effects.texture;
             slider(ui, "Texture", &mut r.effects.texture, -1. ..=1., 0.);
+            r.adopt_measured_texture(previous_texture);
             let previous_clarity = r.effects.clarity;
             slider(ui, "Clarity", &mut r.effects.clarity, -1. ..=1., 0.);
             r.adopt_measured_clarity(previous_clarity);

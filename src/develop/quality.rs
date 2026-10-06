@@ -4,7 +4,7 @@ use crate::develop::sharpening::Sharpener;
 use crate::develop::{
     pipeline::Toned,
     preview_renderer::Stages,
-    stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache},
+    stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache, TextureKey},
 };
 use crate::{
     develop::{self, Geometry, Recipe, Rendered},
@@ -647,6 +647,24 @@ fn local_stage(
         tonal.shadows = 0.;
         tonal.highlights = 0.;
     }
+    let mut cache = cache;
+    // The measured Texture makes a new camera image, channel by channel (texture.rs);
+    // the gain below then carries the rest.
+    let texture = develop::texture::measured(r);
+    let im = &if texture != 0. {
+        spatial.effects.texture = 0.;
+        let make = || develop::texture::apply(im, texture, scale, cancel);
+        match cache.as_deref_mut() {
+            Some(cache) => cache.textured.get_or_try(
+                TextureKey::new(im, scale, texture),
+                |im: &CameraImage| im.pixels.len() * 12,
+                make,
+            )?,
+            None => Arc::new(make()?),
+        }
+    } else {
+        im.clone()
+    };
     let mut toned = Toned {
         image: im.clone(),
         scale,
@@ -654,7 +672,6 @@ fn local_stage(
         gain_key: None,
         reduced: None,
     };
-    let mut cache = cache;
     if spatial.shadows != 0.
         || spatial.highlights != 0.
         || spatial.effects.clarity != 0.
@@ -745,6 +762,10 @@ fn render_resident(
     base.sharpening = 0.;
     base.validate()?;
     if !develop::pipeline::pixel_params::supported(&base) {
+        return Ok(None);
+    }
+    // The measured Texture's image is made on the CPU.
+    if develop::texture::measured(&base) != 0. {
         return Ok(None);
     }
     // Masks whose ranges need developed colours, whose detail changes the samples or

@@ -681,6 +681,9 @@ impl Editor {
             if param == Param::Clarity {
                 recipe.adopt_measured_clarity(before);
             }
+            if param == Param::Texture {
+                recipe.adopt_measured_texture(before);
+            }
             shown
         };
         let label = if let Some(index) = target.mask {

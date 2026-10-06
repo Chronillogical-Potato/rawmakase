@@ -723,6 +723,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         color_noise::NoiseModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
+        texture::TextureModel,
     };
     let m = Metadata {
         wb: [2., 1., 1.5],
@@ -752,6 +753,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     old.effects.lens_vignette = -0.3;
     old.effects.grain = 0.4;
     old.effects.clarity = 0.3;
+    old.effects.texture = 0.3;
     old.hsl[5][2] = -0.4;
     old.effects.calibration[0][0] = 0.3;
     old.noise_chroma = 0.3;
@@ -759,6 +761,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.noise_model, NoiseModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
     assert_eq!(back.clarity_model, ClarityModel::Original);
+    assert_eq!(back.texture_model, TextureModel::Original);
     assert_eq!(back.sharpening_model, SharpeningModel::Original);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     assert_eq!(back.mixer_model, MixerModel::Original);
@@ -772,6 +775,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
     assert_eq!(back.clarity_model, ClarityModel::Original);
+    assert_eq!(back.texture_model, TextureModel::Original);
     assert_eq!(back.mixer_model, MixerModel::Original);
     assert_eq!(back.calibration_model, CalibrationModel::Original);
     assert_eq!(back.noise_model, NoiseModel::Original);
@@ -780,6 +784,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         lens_vignette_model: LensVignetteModel::Measured,
         grain_model: GrainModel::Measured,
         clarity_model: ClarityModel::Measured,
+        texture_model: TextureModel::Measured,
         mixer_model: MixerModel::Chart,
         calibration_model: CalibrationModel::Measured,
         noise_model: NoiseModel::Measured,
@@ -791,6 +796,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
     assert_eq!(back.clarity_model, ClarityModel::Measured);
+    assert_eq!(back.texture_model, TextureModel::Measured);
     assert_eq!(back.mixer_model, MixerModel::Chart);
     assert_eq!(back.calibration_model, CalibrationModel::Measured);
     assert_eq!(back.noise_model, NoiseModel::Measured);
