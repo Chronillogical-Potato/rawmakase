@@ -2,7 +2,6 @@
 //! the embedded camera profile, BaselineExposure, the default crop, and the
 //! FixVignetteRadial (OpcodeList2) and WarpRectilinear (OpcodeList3) lens corrections.
 use crate::{
-    camera_profiles::CameraProfile,
     optics::{LensCorrection, Radial},
     tiff::{Entry, Tiff},
 };
@@ -13,10 +12,9 @@ pub struct Dng {
     pub baseline_exposure: Option<f32>,
     /// Left, top, width, height, relative to the active area.
     pub crop: Option<[u32; 4]>,
-    pub profile: Option<CameraProfile>,
-    /// The file's D65 colour matrix, XYZ to camera, when it has colour matrices
-    /// but no profile to read them from.
-    pub color_matrix: Option<[[f32; 3]; 3]>,
+    /// The profile tags, rewritten as a standalone DCP: the embedded camera
+    /// profile when they make one, else at least the file's colour matrices.
+    pub profile: Option<Vec<u8>>,
     pub lens: Option<LensCorrection>,
 }
 
@@ -43,26 +41,13 @@ pub fn read(path: &Path) -> Option<Dng> {
     let mut t = Tiff::open(File::open(path).ok()?, 0)?;
     let ifd0 = t.ifd(t.first)?;
     ifd0.get(&50706)?; // DNGVersion
-    let tags = profile_tags(&mut t, &ifd0);
-    // A profile needs a forward matrix; one written as colour matrices alone
-    // still describes the camera's colour, so keep that when it is all there is.
-    let profile = tags
-        .as_deref()
-        .and_then(|b| crate::camera_profiles::from_bytes(b).ok());
-    let color_matrix = if profile.is_some() {
-        None
-    } else {
-        tags.as_deref()
-            .and_then(|b| crate::camera_profiles::d65_color_matrix(b).ok().flatten())
-    };
     let mut dng = Dng {
         baseline_exposure: ifd0
             .get(&50730)
             .and_then(|e| t.numbers(e))
             .and_then(|v| v.first().copied())
             .filter(|v| v.is_finite() && v.abs() <= 5.),
-        profile,
-        color_matrix,
+        profile: profile_tags(&mut t, &ifd0),
         ..Default::default()
     };
     // The full-resolution raw image is the SubIFD (or IFD0) with NewSubfileType 0.

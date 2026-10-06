@@ -15,18 +15,29 @@ pub fn open(path: &Path) -> Result<Raw> {
     if let Some(dng) = crate::dng::read(path) {
         // 0 is the DNG default; the camera table is for other raw formats.
         metadata.baseline_exposure = Some(dng.baseline_exposure.unwrap_or(0.));
-        metadata.embedded_profile = dng
+        // A profile needs a forward matrix; one written as colour matrices alone
+        // still describes the camera's colour, so keep that when it is all there is.
+        let profile = dng
             .profile
-            .filter(|p| p.ensure_camera(metadata).is_ok())
-            .map(std::sync::Arc::new);
+            .as_deref()
+            .and_then(|dcp| crate::camera_profiles::from_bytes(dcp).ok());
+        let color_matrix = match profile {
+            Some(_) => None,
+            None => dng
+                .profile
+                .as_deref()
+                .and_then(|dcp| crate::camera_profiles::d65_color_matrix(dcp).ok().flatten()),
+        };
+        let fits = profile.is_some_and(|p| p.ensure_camera(metadata).is_ok());
+        metadata.embedded_dcp = dng.profile.filter(|_| fits).map(std::sync::Arc::from);
         // LibRaw has no XYZ-to-camera matrix for a DNG from a camera it does not
         // know, so one written with colour matrices but no profile would render
         // without a profile at all. Take the file's D65 matrix then: the same
         // matrix in the same direction, so nothing downstream has to know where
         // it came from. A camera LibRaw knows keeps LibRaw's matrix.
-        if metadata.embedded_profile.is_none()
+        if metadata.embedded_dcp.is_none()
             && metadata.cam_xyz.iter().flatten().all(|v| *v == 0.)
-            && let Some(matrix) = dng.color_matrix
+            && let Some(matrix) = color_matrix
             && matrix.iter().flatten().any(|v| *v != 0.)
         {
             metadata.cam_xyz = matrix;

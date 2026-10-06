@@ -20,7 +20,7 @@ fn digest(bytes: &[u8]) -> String {
 fn opened(path: &Path) -> String {
     let raw = photo::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let metadata = serde_json::to_vec(&raw.metadata).unwrap();
-    let profile = serde_json::to_vec(&raw.metadata.embedded_profile).unwrap();
+    let profile = serde_json::to_vec(&rawmakase::camera_profiles::builtin(&raw.metadata)).unwrap();
     digest(&[metadata, profile].concat())
 }
 
