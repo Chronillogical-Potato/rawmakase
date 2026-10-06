@@ -5,6 +5,7 @@ use super::widgets::{section, segmented};
 use super::worker::Event;
 use crate::app::theme;
 use crate::develop::Recipe;
+use anyhow::Context as _;
 use eframe::egui::{self, Sense, Stroke, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,6 +26,7 @@ impl Editor {
     pub(super) fn presets_scanned(&mut self, scan: u64, library: Arc<crate::presets::Library>) {
         if self.presets.is_latest(scan) {
             self.presets.library = library;
+            self.presets.scanned = true;
             // A preset named as a raw default may have been imported or changed.
             if let Err(e) = self.set_raw_defaults(self.raw_defaults.settings().clone()) {
                 self.status = format!("Raw defaults not saved: {e:#}");
@@ -300,7 +302,8 @@ impl Editor {
             self.preset_action(action);
         }
         if let Some(i) = clicked {
-            self.apply_preset(i);
+            // The status bar reports a preset that could not be applied.
+            let _ = self.apply_preset(i);
         } else if let Some(i) = hovered {
             if self.presets.hover.as_ref().is_none_or(|(old, _)| *old != i) {
                 if self.presets.preview.take().is_some() {
@@ -333,6 +336,29 @@ impl Editor {
                 self.schedule();
             }
         }
+    }
+}
+
+/// A preset applied to the open photo, as the status bar and the control API report it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub(super) struct AppliedPreset {
+    pub name: String,
+    /// The profile used in place of one the preset names but this camera lacks.
+    pub substitute: Option<String>,
+    /// The settings that do not fit this photo and were left as they were.
+    pub skipped: Vec<String>,
+}
+
+impl std::fmt::Display for AppliedPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Applied {}", self.name)?;
+        if let Some(used) = &self.substitute {
+            write!(f, " · using {used}")?;
+        }
+        if !self.skipped.is_empty() {
+            write!(f, " · skipped: {}", self.skipped.join("; "))?;
+        }
+        Ok(())
     }
 }
 
@@ -371,55 +397,57 @@ impl AmountSession {
 }
 
 impl Editor {
-    /// Applies preset `i` of the library to the open photo, as a click does.
-    pub(super) fn apply_preset(&mut self, i: usize) {
+    /// Applies preset `i` of the library to the open photo, as a click does, and
+    /// says so in the status bar either way.
+    pub(super) fn apply_preset(&mut self, i: usize) -> anyhow::Result<AppliedPreset> {
+        let applied = self.apply_library_preset(i);
+        self.status = match &applied {
+            Ok(applied) => applied.to_string(),
+            Err(e) => format!("Preset not applied: {e:#}"),
+        };
+        applied
+    }
+    fn apply_library_preset(&mut self, i: usize) -> anyhow::Result<AppliedPreset> {
         self.presets.preview = None;
         self.presets.hover = None;
         self.presets.amount = None;
         let library = self.presets.library.clone();
         let preset = &library.presets[i];
-        let Some(m) = &self.document.metadata else {
-            return;
-        };
-        match preset.apply_lenient(
+        let m = self
+            .document
+            .metadata
+            .as_ref()
+            .context("Open a photo in Develop first")?;
+        let (mut r, skipped) = preset.apply_lenient(
             &self.document.recipe,
             m,
             &self.document.profiles,
             self.document.full().map(|image| image.as_ref()),
-        ) {
-            Ok((mut r, skipped)) => {
-                let substitute = preset
-                    .profile_substitute(m, &self.document.profiles)
-                    .map(|(_, used)| format!(" · using {used}"))
-                    .unwrap_or_default();
-                this_photos_upright(&mut r, &self.document.recipe);
-                let before = std::mem::replace(&mut self.document.recipe, r);
-                self.ensure_upright();
-                // The settings before it are kept once, and every Amount is computed
-                // from them again, so dragging never drifts.
-                let full = self.document.recipe.clone();
-                self.presets.amount =
-                    crate::presets::amount::PresetAmount::new(preset, before, full.clone())
-                        .ok()
-                        .map(|scale| AmountSession {
-                            name: crate::presets::display_name(&preset.name),
-                            amount: 1.,
-                            scale,
-                            shown: full,
-                        });
-                self.presets.selected = preset.id.clone();
-                self.status = if skipped.is_empty() {
-                    format!("Applied {}{substitute}", preset.name)
-                } else {
-                    format!(
-                        "Applied {}{substitute} · skipped: {}",
-                        preset.name,
-                        skipped.join("; ")
-                    )
-                };
-            }
-            Err(e) => self.status = format!("Preset not applied: {e:#}"),
-        }
+        )?;
+        let substitute = preset
+            .profile_substitute(m, &self.document.profiles)
+            .map(|(_, used)| used);
+        this_photos_upright(&mut r, &self.document.recipe);
+        let before = std::mem::replace(&mut self.document.recipe, r);
+        self.ensure_upright();
+        // The settings before it are kept once, and every Amount is computed
+        // from them again, so dragging never drifts.
+        let full = self.document.recipe.clone();
+        self.presets.amount =
+            crate::presets::amount::PresetAmount::new(preset, before, full.clone())
+                .ok()
+                .map(|scale| AmountSession {
+                    name: crate::presets::display_name(&preset.name),
+                    amount: 1.,
+                    scale,
+                    shown: full,
+                });
+        self.presets.selected = preset.id.clone();
+        Ok(AppliedPreset {
+            name: crate::presets::display_name(&preset.name),
+            substitute,
+            skipped,
+        })
     }
     /// Sets the Amount of the preset just applied (0–2, 1 = 100%), and whether that
     /// changed the photo.

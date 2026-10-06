@@ -1010,8 +1010,8 @@ impl Editor {
             if view.mixer_tab == MixerTab::PointColor {
                 // Only the current process renders Point Color.
                 let supported = super::point_color_panel::renders_point_color(r);
-                if !supported {
-                    hint_row(ui, "Update the process in Calibration to use Point Color.");
+                if let Some(steps) = super::point_color_panel::point_color_steps(r) {
+                    hint_row(ui, &format!("{steps} in Calibration to use Point Color."));
                 }
                 ui.add_enabled_ui(supported, |ui| {
                     super::point_color_panel::point_color_panel(ui, &mut r.point_colors, view)

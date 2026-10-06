@@ -12,6 +12,19 @@ pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
     r.engine >= 4 && r.reference_curves
 }
 
+/// What Calibration still needs before Point Color and the targeted tools are on,
+/// worded to finish "… in Calibration to use …", or `None` when the process renders
+/// them. Its Update button is only shown below process 4, so it is named only then,
+/// and Reference tone curves whenever they are off: Update leaves them as they were.
+pub(super) fn point_color_steps(r: &crate::develop::Recipe) -> Option<&'static str> {
+    match (r.engine >= 4, r.reference_curves) {
+        (false, false) => Some("Update the process and turn on Reference tone curves"),
+        (false, true) => Some("Update the process"),
+        (true, false) => Some("Turn on Reference tone curves"),
+        (true, true) => None,
+    }
+}
+
 impl super::Editor {
     /// Whether Point Color's tab is where the photo is edited: Develop (not Before), a
     /// color photo with the current process, and the Color Mixer on its Point Color
@@ -459,5 +472,31 @@ mod tests {
         assert_eq!(nearest(&stacked, 0.02), 1);
         assert_eq!(nearest(&stacked, 0.), 0);
         assert_eq!(nearest(&stacked, 0.7), 2);
+    }
+
+    /// The steps name only controls Calibration shows: Update below process 4, and
+    /// Reference tone curves while they are off, which Update does not turn on.
+    #[test]
+    fn point_color_steps_name_the_controls_that_are_there() {
+        use crate::develop::Recipe;
+        let cases = [
+            (
+                3,
+                false,
+                Some("Update the process and turn on Reference tone curves"),
+            ),
+            (3, true, Some("Update the process")),
+            (4, false, Some("Turn on Reference tone curves")),
+            (4, true, None),
+        ];
+        for (engine, reference_curves, steps) in cases {
+            let r = Recipe {
+                engine,
+                reference_curves,
+                ..Default::default()
+            };
+            assert_eq!(point_color_steps(&r), steps, "engine {engine}");
+            assert_eq!(renders_point_color(&r), steps.is_none(), "engine {engine}");
+        }
     }
 }

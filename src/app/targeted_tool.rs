@@ -46,8 +46,8 @@ impl Editor {
     /// Opens the tool for `target`, or puts it away when it is open, and shows the
     /// sliders it moves.
     pub(super) fn toggle_targeted(&mut self, target: Target) {
-        if !super::point_color_panel::renders_point_color(&self.document.recipe) {
-            self.status = "Update the process in Calibration to use targeted adjustments".into();
+        if let Some(steps) = super::point_color_panel::point_color_steps(&self.document.recipe) {
+            self.status = format!("{steps} in Calibration to use targeted adjustments");
             return;
         }
         if !self.targeted_available(target) {
@@ -534,7 +534,10 @@ mod tests {
         e.document.recipe.reference_curves = false;
         e.toggle_targeted(Target::ToneCurve);
         assert_eq!(e.view.tool, Tool::None);
-        assert!(e.status.contains("Update the process"), "{}", e.status);
+        assert_eq!(
+            e.status,
+            "Turn on Reference tone curves in Calibration to use targeted adjustments"
+        );
     }
 
     #[test]

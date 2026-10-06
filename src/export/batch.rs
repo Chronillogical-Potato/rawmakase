@@ -31,6 +31,12 @@ pub struct BatchPhoto {
     pub name: String,
     pub edit: Edit,
     pub values: Values,
+    /// Its capture time, for Date - Filename.
+    pub captured: Option<String>,
+    /// Its place among the photos chosen, and how many were chosen, for the
+    /// sequence numbers: a photo left out keeps its number. `None` numbers it by
+    /// its place in the batch.
+    pub place: Option<(usize, usize)>,
 }
 
 /// The edit a photo is exported with.
@@ -56,6 +62,8 @@ impl BatchPhoto {
             id: record.id,
             source,
             name,
+            captured: Some(record.captured).filter(|c| !c.is_empty()),
+            place: None,
             edit: Edit::Catalog(record.edit),
             values: Values {
                 descriptive: record.descriptive,
@@ -90,6 +98,8 @@ pub enum Write {
 pub struct Planned {
     pub target: PathBuf,
     pub write: Write,
+    /// What its name has to say, such as a missing capture date.
+    pub note: Option<String>,
 }
 
 /// Where every photo of a batch goes, decided before anything renders.
@@ -218,11 +228,27 @@ pub fn plan(
     settings: &ExportSettings,
     answer: Option<Existing>,
 ) -> Result<Plan, Unplanned> {
-    let targets = photos
+    // Numbered in the order the photos were chosen, so a photo that fails or is
+    // skipped keeps its number and the others theirs.
+    let total = photos.len();
+    let (targets, notes): (Vec<PathBuf>, Vec<Option<String>>) = photos
         .iter()
-        .map(|p| settings.target(&p.source))
+        .enumerate()
+        .map(|(index, p)| {
+            let (index, total) = p.place.unwrap_or((index, total));
+            settings.target_for(
+                &p.source,
+                &super::NameContext {
+                    index,
+                    total,
+                    captured: p.captured.as_deref(),
+                },
+            )
+        })
         .collect::<Option<Vec<_>>>()
-        .ok_or(Unplanned::NoFolder)?;
+        .ok_or(Unplanned::NoFolder)?
+        .into_iter()
+        .unzip();
     let mut reserved = Reservations::default();
     let mut conflicts: Vec<PathBuf> = Vec::new();
     for target in &targets {
@@ -242,12 +268,14 @@ pub fn plan(
     };
     let entries = targets
         .into_iter()
-        .map(|target| {
+        .zip(notes)
+        .map(|(target, note)| {
             if reserved.in_batch(&target) {
                 let target = reserved.unique(&target);
                 return Planned {
                     target,
                     write: Write::Create,
+                    note,
                 };
             }
             if !reserved.on_disk(&target) {
@@ -255,6 +283,7 @@ pub fn plan(
                 return Planned {
                     target,
                     write: Write::Create,
+                    note,
                 };
             }
             match choice {
@@ -266,15 +295,18 @@ pub fn plan(
                     Planned {
                         target,
                         write: Write::Overwrite,
+                        note,
                     }
                 }
                 Existing::Unique => Planned {
                     target: reserved.unique(&target),
                     write: Write::Create,
+                    note,
                 },
                 Existing::Skip | Existing::Ask => Planned {
                     target,
                     write: Write::Skip,
+                    note,
                 },
             }
         })
@@ -405,6 +437,7 @@ fn export(
 ) -> Outcome {
     let result = (|| -> Result<(PathBuf, Vec<String>), Stop> {
         let (prepared, mut notes) = render(batch, photo, preset, cancel, progress)?;
+        notes.extend(planned.note.clone());
         if let Some(parent) = planned.target.parent() {
             std::fs::create_dir_all(parent).map_err(anyhow::Error::from)?;
         }

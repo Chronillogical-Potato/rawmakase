@@ -3205,7 +3205,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     );
     editor.document.recipe.exposure = 0.2;
     let frame = editor.begin_edit_frame();
-    editor.apply_preset(0);
+    editor.apply_preset(0).unwrap();
     editor.finish_edit_frame(frame, &ctx);
     assert_eq!(editor.document.recipe.exposure, 1.);
     // Each drag is one History step, computed again from the settings before the
@@ -3236,7 +3236,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.document.recipe.upright.mode = crate::develop::UprightMode::Level;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
-    editor.apply_preset(0);
+    editor.apply_preset(0).unwrap();
     // Any other edit ends it, as Lightroom hides the slider, even with the Presets
     // panel closed.
     let frame = editor.begin_edit_frame();
@@ -3244,9 +3244,9 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     // A preset without an Amount shows none.
-    editor.apply_preset(1);
+    editor.apply_preset(1).unwrap();
     assert!(editor.presets.amount.is_none());
-    editor.apply_preset(0);
+    editor.apply_preset(0).unwrap();
     assert!(editor.presets.amount.is_some());
     // A preset with only choices that aren't numbers looks the same at every Amount
     // above 0: moving it is no step, and leaves no name for the next one.
@@ -3258,7 +3258,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
         errors: Vec::new(),
     });
     let frame = editor.begin_edit_frame();
-    editor.apply_preset(0);
+    editor.apply_preset(0).unwrap();
     editor.finish_edit_frame(frame, &ctx);
     let frame = editor.begin_edit_frame();
     // As the slider does while it moves.
@@ -3274,7 +3274,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.document.recipe.exposure = 0.9;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
-    editor.apply_preset(0);
+    editor.apply_preset(0).unwrap();
     let (steps, applied) = editor.document.history.steps();
     assert_ne!(steps[applied - 1].name, "Preset Amount");
     // Undo ends it too.

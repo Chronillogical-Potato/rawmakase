@@ -123,6 +123,24 @@ struct Preset {
     target: Target,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PresetQuery {
+    /// Only the presets in this group (folder); omit to list all.
+    group: Option<String>,
+}
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DevelopPreset {
+    /// Preset id from list_presets. Takes precedence over name.
+    id: Option<String>,
+    /// Preset name as list_presets shows it, in any case, or part of it when only one preset has it.
+    name: Option<String>,
+    /// Only look for name in this group.
+    group: Option<String>,
+    target: Target,
+}
+
 #[derive(Clone)]
 struct Server {
     data_dir: PathBuf,
@@ -269,6 +287,20 @@ impl Server {
             CurvePreset::StrongContrast => "curve:strong_contrast",
         };
         self.send(json!({"cmd":"action","action":action,"target":p.target}))
+            .await
+    }
+    #[tool(
+        description = "List develop presets (built-in and imported) with ids, names, groups and, for the open photo, any issue: settings that do not fit it and would be skipped.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_presets(&self, Parameters(p): Parameters<PresetQuery>) -> CallToolResult {
+        self.send(json!({"cmd":"presets","group":p.group})).await
+    }
+    #[tool(
+        description = "Apply a develop preset to the open photo as one undo step, as clicking it in the Presets panel does. Name it by id, or by name with an optional group. Returns the settings skipped as not fitting this photo and any substituted profile."
+    )]
+    async fn apply_preset(&self, Parameters(p): Parameters<DevelopPreset>) -> CallToolResult {
+        self.send(json!({"cmd":"preset","id":p.id,"name":p.name,"group":p.group,"target":p.target}))
             .await
     }
     #[tool(

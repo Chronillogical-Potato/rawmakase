@@ -17,7 +17,9 @@ use crate::{
 };
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-pub use settings::{Destination, Existing, ExportSettings, Format, Include};
+pub use settings::{
+    AfterExport, Destination, Existing, ExportSettings, Format, Include, NameContext, Naming,
+};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 

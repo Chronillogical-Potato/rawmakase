@@ -109,8 +109,10 @@ there is no separate MCP authentication flow. MCP opens no network listener.
 | `get_state` | Reads current photo, generation/revision, values, curves, masks, loading and saving state |
 | `find_photos` | Searches catalog filenames with pagination |
 | `open_photo` | Opens a catalog ID and waits up to 30 seconds for decoding |
-| `set_parameter` | Sets exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, texture, clarity, dehaze, vibrance, saturation or a color-mixer channel |
+| `set_parameter` | Sets exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, texture, clarity, dehaze, vibrance, saturation, straighten or a color-mixer channel |
 | `set_tone_curve` | Sets RGB, red, green or blue point curves; one channel per undo step |
+| `list_presets` | Lists develop presets with ids, groups and how they fit the open photo |
+| `apply_preset` | Applies a develop preset by id or name as one undo step and reports skipped settings |
 | `apply_curve_preset` | Applies linear, medium-contrast or strong-contrast RGB curves, retaining the individual color channels |
 | `auto_tone` | Starts automatic tone adjustment |
 | `auto_white_balance` | Starts automatic white balance |
@@ -121,8 +123,9 @@ there is no separate MCP authentication flow. MCP opens no network listener.
 | `get_job` | Reports export progress, completion or failure |
 
 `set_parameter` uses displayed units: Exposure in EV, Temperature in kelvin,
-Tint in tint units, other basic controls in percent. Explicit masks use local
-units listed by `get_capabilities`. Parameter values clamp to the allowed range.
+Tint in tint units, Straighten in degrees, other basic controls in percent.
+Explicit masks use local units listed by `get_capabilities`. Parameter values
+clamp to the allowed range.
 Curve points instead reject invalid coordinates: 2–32 `[input, output]` pairs,
 both values in 0–1, inputs increasing by at least 0.00049. Curves use the editor's
 natural cubic interpolation. They are global; masks do not support curves.

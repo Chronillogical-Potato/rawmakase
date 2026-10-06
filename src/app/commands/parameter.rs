@@ -3,6 +3,11 @@ use crate::app::inspector::BANDS;
 use crate::app::widgets::slider_text;
 use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 
+/// The Angle slider's limit either way, in degrees, as `Recipe::validate` allows.
+const STRAIGHTEN_LIMIT: f32 = 45.;
+/// Degrees a dial tick or `turn` step moves the Angle: fine enough to level a horizon.
+const STRAIGHTEN_TICK: f32 = 0.1;
+
 /// The Color Mixer's channels, in the order of `Recipe::hsl`.
 const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
 
@@ -22,6 +27,8 @@ pub(in crate::app) enum Param {
     Saturation,
     Temperature,
     Tint,
+    /// The Crop panel's Angle, in degrees.
+    Straighten,
     /// A Color Mixer colour band (0 Red .. 7 Magenta), on the channel the
     /// panel's Hue / Sat / Lum selector shows.
     Band(usize),
@@ -34,7 +41,7 @@ pub(in crate::app) enum Param {
 impl Param {
     /// The sliders with a name of their own, as `midi.json` and the control
     /// socket spell them.
-    pub(in crate::app) const NAMED: [(&'static str, Self); 13] = [
+    pub(in crate::app) const NAMED: [(&'static str, Self); 14] = [
         ("exposure", Self::Exposure),
         ("contrast", Self::Contrast),
         ("highlights", Self::Highlights),
@@ -48,13 +55,16 @@ impl Param {
         ("saturation", Self::Saturation),
         ("temperature", Self::Temperature),
         ("tint", Self::Tint),
+        ("straighten", Self::Straighten),
     ];
     /// `exposure`, `band3` (the channel the panel shows), `band3.sat` or
-    /// `band3.gray`; bands count from 1 (Red).
+    /// `band3.gray`; bands count from 1 (Red). `temp` and `angle` are aliases.
     pub(in crate::app) fn parse(name: &str) -> Option<Self> {
         let name = name.to_ascii_lowercase();
-        if name == "temp" {
-            return Some(Self::Temperature);
+        match name.as_str() {
+            "temp" => return Some(Self::Temperature),
+            "angle" => return Some(Self::Straighten),
+            _ => {}
         }
         if let Some((_, param)) = Self::NAMED.iter().find(|(n, _)| *n == name) {
             return Some(*param);
@@ -110,6 +120,7 @@ impl Param {
             Self::Saturation => "Saturation",
             Self::Temperature => "Temp",
             Self::Tint => "Tint",
+            Self::Straighten => "Angle",
             Self::Band(_) | Self::Hsl(..) | Self::Gray(_) => unreachable!(),
         }
         .to_string()
@@ -134,15 +145,17 @@ impl Param {
             Self::Saturation => &mut r.saturation,
             Self::Temperature => &mut r.temperature,
             Self::Tint => &mut r.tint,
+            Self::Straighten => &mut r.straighten,
         }
     }
     pub(in crate::app) fn is_white_balance(self) -> bool {
         matches!(self, Self::Temperature | Self::Tint)
     }
-    /// The slider's number as it shows: EV, kelvin or tint units, else -100..100.
+    /// The slider's number as it shows: EV, kelvin, tint units or degrees, else
+    /// -100..100.
     pub(in crate::app) fn shown(self, r: &mut Recipe, channel: usize) -> f64 {
         let scale = match self {
-            Self::Exposure | Self::Temperature | Self::Tint => 1.,
+            Self::Exposure | Self::Temperature | Self::Tint | Self::Straighten => 1.,
             _ => 100.,
         };
         (f64::from(*self.value(r, channel)) * scale * 1000.).round() / 1000.
@@ -163,6 +176,10 @@ impl Param {
             Self::Tint => {
                 *v = shown.clamp(-TINT_LIMIT, TINT_LIMIT);
                 slider_text(f64::from(*v), 0, true)
+            }
+            Self::Straighten => {
+                *v = shown.clamp(-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT);
+                slider_text(f64::from(*v), 2, true)
             }
             _ => {
                 *v = (shown / 100.).clamp(-1., 1.);
@@ -189,6 +206,10 @@ impl Param {
             Self::Tint => {
                 *v = (*v + t).clamp(-TINT_LIMIT, TINT_LIMIT);
                 slider_text(f64::from(*v), 0, true)
+            }
+            Self::Straighten => {
+                *v = (*v + STRAIGHTEN_TICK * t).clamp(-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT);
+                slider_text(f64::from(*v), 2, true)
             }
             _ => {
                 *v = (*v + 0.01 * t).clamp(-1., 1.);
@@ -221,6 +242,7 @@ impl Param {
             Self::Exposure => (-5., 5.),
             Self::Temperature if !mask => (TEMPERATURE_MIN, TEMPERATURE_MAX),
             Self::Tint if !mask => (-TINT_LIMIT, TINT_LIMIT),
+            Self::Straighten => (-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT),
             _ => (-100., 100.),
         }
     }
@@ -248,6 +270,7 @@ impl Param {
                     Self::Exposure => "EV",
                     Self::Temperature => "kelvin",
                     Self::Tint => "tint",
+                    Self::Straighten => "degrees",
                     _ => "percent",
                 };
                 let local = param

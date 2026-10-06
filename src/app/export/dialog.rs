@@ -2,7 +2,7 @@
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::Editor;
 use crate::app::theme;
-use crate::export::{Destination, Existing, Format, Include};
+use crate::export::{AfterExport, Destination, Existing, Format, Include, NameContext, Naming};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -44,14 +44,21 @@ impl Editor {
             self.exports.draft.destination = Destination::Folder;
         }
         // Names and folders are shown for the first photo.
-        let source = self
+        let (source, captured, place) = self
             .exports
             .scope
             .photos
             .first()
-            .map(|p| p.source.clone())
+            .map(|p| (p.source.clone(), p.captured.clone(), p.place))
             .unwrap_or_default();
         let count = self.exports.scope.photos.len();
+        let chosen = self.exports.scope.chosen.max(count);
+        // As the export names it.
+        let at = NameContext {
+            index: place,
+            total: chosen,
+            captured: captured.as_deref(),
+        };
         let left_out = self.exports.scope.left_out.clone();
         let mut confirmed = None;
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
@@ -119,7 +126,7 @@ impl Editor {
                     .show(&mut content, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
                         ui.spacing_mut().interact_size.y = 26.;
-                        self.export_sections(ui, &source);
+                        self.export_sections(ui, &source, &at);
                     });
                 ui.painter().hline(
                     rect.x_range(),
@@ -145,7 +152,7 @@ impl Editor {
                 {
                     confirmed = Some(false);
                 }
-                if let Some(target) = self.exports.draft.target(&source) {
+                if let Some((target, _)) = self.exports.draft.target_for(&source, &at) {
                     bar.add_space(12.);
                     bar.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.add(
@@ -173,7 +180,7 @@ impl Editor {
         }
     }
 
-    fn export_sections(&mut self, ui: &mut egui::Ui, source: &Path) {
+    fn export_sections(&mut self, ui: &mut egui::Ui, source: &Path, example: &NameContext) {
         let picking = self.exports.picking.load(Ordering::Relaxed);
         let s = &mut self.exports.draft;
         let mut choose = false;
@@ -217,15 +224,37 @@ impl Editor {
         });
 
         section(ui, "File Naming");
-        form_row(ui, "", |ui| {
-            ui.checkbox(&mut s.rename, "Rename To: Filename -");
+        let mut naming = s.naming();
+        form_row(ui, "Rename To", |ui| {
+            egui::ComboBox::from_id_salt("export-naming")
+                .width(220.)
+                .selected_text(naming.label())
+                .show_ui(ui, |ui| {
+                    for n in Naming::ALL {
+                        ui.selectable_value(&mut naming, n, n.label());
+                    }
+                });
+        });
+        // Once chosen, the template is saved as chosen, whatever the older switch said.
+        if naming != s.naming() {
+            s.naming = Some(naming);
+        }
+        form_row(ui, "Custom Text", |ui| {
             ui.add_enabled(
-                s.rename,
-                egui::TextEdit::singleline(&mut s.custom_text).desired_width(180.),
+                naming.uses_text(),
+                egui::TextEdit::singleline(&mut s.custom_text).desired_width(220.),
+            );
+        });
+        form_row(ui, "Start Number", |ui| {
+            ui.add_enabled(
+                naming.uses_sequence(),
+                egui::DragValue::new(&mut s.start_number).range(0..=999_999),
             );
         });
         form_row(ui, "Example", |ui| {
-            ui.label(egui::RichText::new(s.file_name(source)).color(theme::gray(225)));
+            ui.label(
+                egui::RichText::new(s.file_name_for(source, example).0).color(theme::gray(225)),
+            );
         });
         form_row(ui, "Extensions", |ui| {
             egui::ComboBox::from_id_salt("export-case")
@@ -395,6 +424,18 @@ impl Editor {
                 form_row(ui, "", |_| {});
             }
         }
+        let s = &mut self.exports.draft;
+        section(ui, "Post-Processing");
+        form_row(ui, "After Export", |ui| {
+            egui::ComboBox::from_id_salt("export-after")
+                .width(220.)
+                .selected_text(s.after_export.label())
+                .show_ui(ui, |ui| {
+                    for after in AfterExport::ALL {
+                        ui.selectable_value(&mut s.after_export, after, after.label());
+                    }
+                });
+        });
         ui.add_space(8.);
         if choose {
             self.choose_export_folder(ui.ctx());
