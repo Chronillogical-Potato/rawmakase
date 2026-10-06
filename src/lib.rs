@@ -19,6 +19,7 @@ pub mod cameras;
 pub mod catalog;
 pub mod color;
 pub mod comparison;
+pub mod decode;
 pub mod decode_cache;
 pub mod demosaic;
 pub mod develop;

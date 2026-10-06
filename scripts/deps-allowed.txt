@@ -4,6 +4,7 @@
 app -> camera_profiles
 app -> catalog
 app -> color
+app -> decode
 app -> decode_cache
 app -> develop
 app -> edit_session
@@ -46,6 +47,9 @@ comparison -> develop
 comparison -> photo
 comparison -> presets
 comparison -> raw
+decode -> decode_cache
+decode -> develop
+decode -> raw
 decode_cache -> raw
 decode_cache -> storage
 develop -> camera_profiles
@@ -72,7 +76,7 @@ exif -> raw
 exif -> tiff
 export -> build_info
 export -> camera_profiles
-export -> decode_cache
+export -> decode
 export -> develop
 export -> edits
 export -> exif

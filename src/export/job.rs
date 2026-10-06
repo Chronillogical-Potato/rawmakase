@@ -6,10 +6,10 @@ use super::{
 };
 use crate::export_settings::ExportSettings;
 use crate::{
-    decode_cache::DecodeCache,
+    decode::{DecodePolicy, FullSize},
     develop::Recipe,
     exif,
-    raw::{CameraImage, Decode, Demosaic, Raw},
+    raw::{CameraImage, Demosaic, Raw},
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -155,13 +155,10 @@ pub fn decode_full(
     demosaic: Demosaic,
     cancel: &AtomicBool,
 ) -> Result<CameraImage> {
-    let demosaic = demosaic.effective();
-    let cached = DecodeCache::key(source, demosaic)
-        .ok()
-        .and_then(|key| DecodeCache::default().load(&key, &raw.metadata));
-    match cached {
-        Some(full) => Ok(full),
-        None => raw.develop(Decode::Full(demosaic), cancel),
+    let full = FullSize::new(source, demosaic);
+    match full.cached(&raw.metadata) {
+        Some(image) => Ok(image),
+        None => full.decode(raw, DecodePolicy::Export, cancel),
     }
 }
 
@@ -175,13 +172,10 @@ fn full_size(
     if !image.fast {
         return Ok(image);
     }
-    let demosaic = demosaic.effective();
-    let cached = DecodeCache::key(source, demosaic)
-        .ok()
-        .and_then(|key| DecodeCache::default().load(&key, &image.metadata));
-    Ok(Arc::new(match cached {
-        Some(full) => full,
-        None => crate::photo::open(source)?.develop(Decode::Full(demosaic), cancel)?,
+    let full = FullSize::new(source, demosaic);
+    Ok(Arc::new(match full.cached(&image.metadata) {
+        Some(cached) => cached,
+        None => full.decode(crate::photo::open(source)?, DecodePolicy::Export, cancel)?,
     }))
 }
 

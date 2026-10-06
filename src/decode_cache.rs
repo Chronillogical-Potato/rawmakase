@@ -45,6 +45,7 @@ pub fn cache_dir() -> PathBuf {
         .unwrap_or_else(|| home.join(".cache/rawmakase"))
 }
 
+#[derive(Clone, Debug)]
 pub struct DecodeCache {
     dir: PathBuf,
     limit: u64,
