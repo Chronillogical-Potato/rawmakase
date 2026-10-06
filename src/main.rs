@@ -255,7 +255,7 @@ fn main() -> Result<()> {
             let mut edit = if let Some(p) = recipe {
                 rawmakase::presets::load_preset(&p)?
             } else {
-                rawmakase::storage::load(&input)?
+                rawmakase::catalog::legacy_sidecar::load(&input)?
                     .map(|s| s.recipe)
                     .unwrap_or_else(|| {
                         Recipe::with_profiles(

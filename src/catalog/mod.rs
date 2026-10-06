@@ -27,6 +27,7 @@ mod develop_history;
 mod edits;
 mod info;
 mod ingest;
+pub mod legacy_sidecar;
 pub mod lightroom;
 pub mod locations;
 mod models;
