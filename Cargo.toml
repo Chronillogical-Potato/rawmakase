@@ -13,8 +13,8 @@ repository = "https://github.com/pch/rawmakase"
 members = ["crates/rawmakase-protocol", "tools/rawmakase-ctl"]
 
 [dependencies]
-rawmakase-protocol = { path = "crates/rawmakase-protocol" }
-rawmakase-ctl = { path = "tools/rawmakase-ctl" }
+rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
+rawmakase-ctl = { path = "tools/rawmakase-ctl", version = "0.1.0" }
 # Local MCP adapter; no HTTP server or remote authorization stack.
 rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
