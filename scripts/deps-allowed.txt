@@ -14,6 +14,7 @@ app -> metadata
 app -> platform
 app -> presets
 app -> raw
+app -> raw_defaults
 app -> stats
 app -> storage
 app -> time
@@ -33,6 +34,7 @@ catalog -> jpeg
 catalog -> lr_develop
 catalog -> metadata
 catalog -> raw
+catalog -> raw_defaults
 catalog -> storage
 catalog -> tiff
 catalog -> xml
@@ -47,9 +49,7 @@ develop -> camera_profiles
 develop -> color
 develop -> lens
 develop -> optics
-develop -> presets
 develop -> raw
-develop -> xmp
 dng -> camera_profiles
 dng -> optics
 dng -> tiff
@@ -66,6 +66,7 @@ export -> exif
 export -> jpeg
 export -> metadata
 export -> raw
+export -> raw_defaults
 export -> storage
 export -> tiff
 export -> time
@@ -94,6 +95,11 @@ raw -> dng
 raw -> lens
 raw -> metadata
 raw -> optics
+raw_defaults -> camera_profiles
+raw_defaults -> develop
+raw_defaults -> presets
+raw_defaults -> raw
+raw_defaults -> xmp
 stats -> storage
 stats -> time
 stats -> updates

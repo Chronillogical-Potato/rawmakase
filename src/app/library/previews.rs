@@ -88,7 +88,7 @@ pub(in crate::app) enum EditSource {
     /// Lightroom develop settings from an imported catalog.
     Lightroom(String),
     /// No edit: the raw defaults, as Develop would open the photo.
-    Defaults(Arc<crate::develop::defaults::DevelopDefaults>),
+    Defaults(Arc<crate::raw_defaults::DevelopDefaults>),
 }
 impl EditSource {
     /// The recipe a photo is rendered with: its edit, or the defaults

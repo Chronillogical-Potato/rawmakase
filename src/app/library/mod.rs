@@ -147,7 +147,7 @@ pub struct Library {
     /// Read Metadata from Files finished since the editor last asked.
     reread_finished: bool,
     /// What photos without an edit are previewed with (see `set_defaults`).
-    defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
+    defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
 }
 impl Library {
     pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
@@ -606,7 +606,7 @@ impl Library {
     /// shown with the previous defaults are made again.
     pub(in crate::app) fn set_defaults(
         &mut self,
-        defaults: std::sync::Arc<crate::develop::defaults::DevelopDefaults>,
+        defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
     ) {
         self.defaults = defaults;
         self.screen.clear();
