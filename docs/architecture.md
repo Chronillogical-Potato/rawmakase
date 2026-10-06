@@ -18,7 +18,7 @@ files should preserve.
 | `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
 | `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build | `decode_cache.rs` |
 | `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
-| `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions); depends on nothing else | `optics.rs` |
+| `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), and Adobe lens profiles (LCP) as data; depends only on `xml` | `mod.rs`, `lcp.rs` |
 | `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement, plus profile selection | `embedded.rs`, `lcp.rs`, `auto_ca.rs`, `choice.rs` |
 | `develop` | Validated recipes, geometry, color processing, curves, effects, local adjustments, detail rendering, the GPU port and output pixel buffers | `recipe.rs`, `pipeline.rs`, `quality.rs`, `geometry.rs`, `gpu/` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
@@ -73,9 +73,8 @@ inject a temporary file, without changing the process-wide environment.
 
 - Dependencies between top-level modules are listed in
   `scripts/deps-allowed.txt`, and `scripts/deps.py check` (CI and `make check`)
-  fails on a new one. Today 13 modules still form one cycle; the refactor in
-  issue #216 removes lines from the list until none remains. Add a line only
-  when the new dependency points down the intended layering.
+  fails on a new one. The top-level modules form no cycle (issue #216); add a
+  line only when the new dependency points down the intended layering.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate

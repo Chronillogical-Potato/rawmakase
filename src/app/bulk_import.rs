@@ -337,7 +337,7 @@ fn import_lens_profiles(found: &[Found], progress: &Mutex<String>) -> Summary {
         };
         let parsed = std::str::from_utf8(&bytes)
             .map_err(anyhow::Error::from)
-            .and_then(crate::lens::lcp::parse);
+            .and_then(crate::optics::lcp::parse);
         if let Err(e) = parsed {
             summary.fail(&file.path, format!("not a lens profile: {e:#}"));
         } else if check_name(file, &bytes, &destination, &mut names, &mut summary) {

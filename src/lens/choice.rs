@@ -1,7 +1,7 @@
 //! Which Adobe lens profile a photo uses: Lightroom's Lens Corrections › Profile
 //! Setup, and the profile an edit names (`crs:LensProfileSetup`, `LensProfileName`,
 //! `LensProfileFilename`, `LensProfileDigest`).
-use super::lcp::{Candidate, ImportedProfile, PhotoProfiles};
+use crate::optics::lcp::{Candidate, ImportedProfile, PhotoProfiles};
 use crate::raw::Metadata;
 use serde::{Deserialize, Serialize};
 
