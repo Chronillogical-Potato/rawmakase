@@ -1,6 +1,7 @@
 //! The EXIF directories an export writes: the camera's own when it is included,
 //! with the export's size, orientation, resolution and software.
-use super::{Embed, SOFTWARE, exif::tiff_block};
+use super::{Embed, exif::tiff_block};
+use crate::build_info::SOFTWARE;
 use crate::{
     exif::{
         CameraExif, Field,

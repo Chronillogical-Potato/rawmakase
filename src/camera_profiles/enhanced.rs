@@ -4,7 +4,7 @@ use super::{CameraProfile, Table, look_settings::LookSettings, rgb_table::RgbTab
 use crate::{
     color_math::{srgb_decode, srgb_encode},
     develop::curve::{CurveLut, ToneCurve},
-    xmp::ns::{CRS, RDF, XML},
+    xml::ns::{CRS, RDF, XML},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};

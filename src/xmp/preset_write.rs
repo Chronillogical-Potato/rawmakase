@@ -1,15 +1,12 @@
 //! Writes a Lightroom Develop preset: the chosen setting groups of a recipe as an XMP
 //! file Lightroom and Camera Raw read, laid out as the presets Lightroom writes.
-use super::{
-    ns::CRS,
-    write::{curve, settings},
-    xml::{escape_text, xmpmeta},
-};
+use super::write::{curve, settings};
 use crate::develop::{
     Recipe,
     curve::ToneCurve,
     settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
 };
+use crate::xml::{escape_text, ns::CRS, xmpmeta};
 use std::fmt::Write;
 
 /// A preset's name, group and identity.

@@ -81,7 +81,7 @@ impl UserPresets {
         let element = |name: &str| {
             format!(
                 "<crs:Name>\n    <rdf:Alt>\n     <rdf:li xml:lang=\"x-default\">{}</rdf:li>",
-                crate::xmp::xml::escape_text(name)
+                crate::xml::escape_text(name)
             )
         };
         let old = element(&existing.name);

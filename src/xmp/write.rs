@@ -1,9 +1,9 @@
 //! Writes a recipe back out as Camera Raw settings (`crs:`), the XMP Lightroom
 //! embeds in its exports. The keys and scales mirror `apply`, so reading the
 //! packet back reproduces the edit.
-use super::{
+use crate::xml::{
+    self, escape_text,
     ns::{AUX, CRS, DC, LR, PHOTOSHOP, XMP, XMP_MM},
-    xml::{self, escape_text},
 };
 use crate::{develop::Recipe, develop::curve::ToneCurve, raw::Metadata};
 use std::fmt::Write;
@@ -765,7 +765,7 @@ pub(super) fn unnamed_by_markers(markers: u32) -> Vec<&'static str> {
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
     let mut attributes: Vec<(String, String)> = vec![
-        ("xmp:CreatorTool".into(), crate::export::SOFTWARE.into()),
+        ("xmp:CreatorTool".into(), crate::build_info::SOFTWARE.into()),
         ("xmp:ModifyDate".into(), photo.now.clone()),
         ("xmp:MetadataDate".into(), photo.now.clone()),
     ];

@@ -1,8 +1,6 @@
-use super::{
-    Preset,
-    ns::{CRS, PHOTOSHOP, RDF, XML},
-};
+use super::Preset;
 use crate::develop::curve::ToneCurve;
+use crate::xml::ns::{CRS, PHOTOSHOP, RDF, XML};
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};
 /// A preset's name and description, not settings.
@@ -183,12 +181,12 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
     // A packet or preset from a RAWmakase that predates `RAWmakaseMarkers` keeps the
     // operators measured only since, besides any it names.
     let creator_tool = description
-        .attribute((super::ns::XMP, "CreatorTool"))
+        .attribute((crate::xml::ns::XMP, "CreatorTool"))
         .map(str::to_string)
         .or_else(|| {
             description
                 .children()
-                .find(|n| n.has_tag_name((super::ns::XMP, "CreatorTool")))
+                .find(|n| n.has_tag_name((crate::xml::ns::XMP, "CreatorTool")))
                 .and_then(|n| n.text())
                 .map(|t| t.trim().to_string())
         });

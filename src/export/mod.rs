@@ -23,9 +23,6 @@ pub use settings::{
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 
-/// The Software tag of an export and the creator tool of its XMP.
-pub(crate) const SOFTWARE: &str = concat!("RAWmakase ", env!("CARGO_PKG_VERSION"));
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ExportOptions {

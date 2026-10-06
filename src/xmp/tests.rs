@@ -1,5 +1,5 @@
-use super::ns::{CRS, RDF};
 use super::*;
+use crate::xml::ns::{CRS, RDF};
 use crate::{develop::Recipe, raw::Metadata};
 use anyhow::Result;
 use std::path::Path;

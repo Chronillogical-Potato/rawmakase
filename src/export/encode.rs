@@ -97,7 +97,7 @@ pub(super) fn tiff(
 /// not fit one follows as ExtendedXMP.
 pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
     use super::extended_xmp::{segments, split};
-    use crate::{jpeg::Segments, xmp::ns::JPEG_HEADER};
+    use crate::{jpeg::Segments, xml::ns::JPEG_HEADER};
     ensure!(jpeg.starts_with(&[0xff, 0xd8]), "Not a JPEG");
     let split = split(xmp)?;
     let mut payloads = vec![[JPEG_HEADER, split.standard.as_bytes()].concat()];

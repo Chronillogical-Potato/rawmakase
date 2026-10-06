@@ -4,9 +4,9 @@
 //! `xmpNote:HasExtendedXMP`; the rest follows in chunks of its own segments.
 //! Camera Raw settings move first, as Adobe moves them, then the largest
 //! properties until the standard packet fits.
-use crate::xmp::{
+use crate::xml::{
+    self, escape_attribute,
     ns::{CRS, JPEG_EXTENDED_HEADER, JPEG_HEADER, RDF, XMP_NOTE},
-    xml::{self, escape_attribute},
 };
 use anyhow::{Context, Result, ensure};
 use md5::{Digest, Md5};
