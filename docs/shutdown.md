@@ -49,7 +49,7 @@ keeping them.
 | Command output jobs | `app/commands/output.rs` | One export or preview job | Each job's cancel, between stages | Yes, after cancelling |
 | MIDI listener | `app/automation/midi.rs` | A 2 s wait on its stop channel between port scans | The device dropped, which closes the channel | Yes; it stops at once |
 | Control socket listener | `app/automation/socket.rs` | A blocking `accept` | The stop flag, seen after a wake-up connection | Bounded only: if the wake-up connection fails, `accept` never returns |
-| Control socket connections | `app/automation/socket.rs` | A 5 s read; **a 3 s wait for the UI thread's reply**; a 5 s write | The stop flag; the request queue's receiver dropped | Bounded, and only after the request queue's receiver is dropped |
+| Control socket connections | `app/automation/socket.rs` | A 5 s read; **a wait for the UI thread's reply: 3 s, or up to 8 s for a `wait` command**; a 5 s write | The stop flag; the request queue's receiver dropped | Bounded, and only after the request queue's receiver is dropped |
 | Library thumbnails | `app/library/previews.rs` | The request channel; preview cache and file reads; **a send on a result channel bounded at 24** | Its channels dropped | Yes, after dropping the result receiver |
 | Library edited previews | `app/library/previews.rs` | A queue of renders, none cancellable | Its channels dropped, seen when a result fails to send | Yes, bounded by one render |
 | Library screen previews | `app/library/screen.rs` | A job; renders, none cancellable | `ScreenPreviews` closed | Yes, bounded by one render |

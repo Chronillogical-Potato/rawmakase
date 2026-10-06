@@ -496,6 +496,33 @@ mod integration_tests {
         assert_eq!(r1.recv().unwrap().unwrap_err().code, "no_document");
         assert!(r2.recv().unwrap().is_ok());
     }
+    #[test]
+    fn a_wait_is_answered_when_it_holds_or_when_its_time_is_up() {
+        use std::time::Duration;
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        let (tx, rx) = mpsc::sync_channel(4);
+        e.controls = Hub::new(Settings::default(), rx);
+        let wait = |until, millis| {
+            socket::test_request(vec![Msg::Command(Command::new(commands::Operation::Wait(
+                until,
+                Duration::from_millis(millis),
+            )))])
+        };
+        // A job that does not exist has nothing to wait for.
+        let (done, answer) = wait(commands::Until::Job(7), 5000);
+        tx.send(Msg::Request(done)).unwrap();
+        e.control_commands(&ctx);
+        assert_eq!(answer.try_recv().unwrap().unwrap().status, "applied");
+        // No photo is opened: the wait stays until its time is up.
+        let (pending, answer) = wait(commands::Until::Loaded(1), 30);
+        tx.send(Msg::Request(pending)).unwrap();
+        e.control_commands(&ctx);
+        assert!(answer.try_recv().is_err(), "answered before it held");
+        std::thread::sleep(Duration::from_millis(40));
+        e.control_commands(&ctx);
+        assert_eq!(answer.try_recv().unwrap().unwrap().status, "timed_out");
+    }
 }
 
 #[test]
