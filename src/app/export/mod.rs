@@ -312,6 +312,7 @@ impl Editor {
             recipe: self.document.edit.recipe.clone(),
             values,
             watermark: None,
+            demosaic: self.demosaic,
         })
     }
 
@@ -414,6 +415,7 @@ impl Editor {
                     settings: pending.settings,
                     defaults: self.raw_defaults.clone(),
                     watermark: pending.watermark,
+                    demosaic: self.demosaic,
                 };
                 let ticket = self.export_queue().submit(batch);
                 self.exports.queued.insert(

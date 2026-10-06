@@ -346,6 +346,8 @@ pub struct Batch {
     pub defaults: Arc<DevelopDefaults>,
     /// The watermark chosen in the Export dialog.
     pub watermark: Option<crate::watermark::Watermark>,
+    /// The demosaic each photo is decoded with.
+    pub demosaic: crate::raw::Demosaic,
 }
 
 /// How far a batch is: `done` photos of `total`, and how far the current one is.
@@ -517,7 +519,12 @@ fn render(
         }
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
-    let image = Arc::new(job::decode_full(raw, &photo.source, cancel)?);
+    let image = Arc::new(job::decode_full(
+        raw,
+        &photo.source,
+        batch.demosaic,
+        cancel,
+    )?);
     // Upright's corrections, as Develop works them out once the photo is open.
     if let Some(issue) = crate::develop::upright::complete(&mut recipe, &image)
         && recipe.upright.mode == crate::develop::UprightMode::Guided
@@ -531,6 +538,7 @@ fn render(
             recipe,
             values: photo.values.clone(),
             watermark: batch.watermark.clone().filter(|_| preset.is_none()),
+            demosaic: batch.demosaic,
         },
         &batch.settings,
         cancel,

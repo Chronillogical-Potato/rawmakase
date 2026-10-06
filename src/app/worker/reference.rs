@@ -138,7 +138,7 @@ mod tests {
             Ok(stages)
         };
 
-        let preferred = crate::raw::demosaic();
+        let preferred = Demosaic::default().effective();
         let other = match preferred {
             Demosaic::Rawmakase => Demosaic::Libraw,
             Demosaic::Libraw => Demosaic::Rawmakase,

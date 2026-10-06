@@ -127,8 +127,8 @@ impl HighlightTonePriority {
         }
     }
 }
-/// Which demosaic full-size development uses. A process-wide preference: the app sets
-/// it from its settings, and RAWMAKASE_LIBRAW_DEMOSAIC=1 forces LibRaw.
+/// Which demosaic full-size development uses: the app's preference (Preferences >
+/// Performance), passed to each job that decodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Demosaic {
     /// RAWmakase's own demosaic of LibRaw-unpacked data (`crate::demosaic`): about
@@ -138,17 +138,15 @@ pub enum Demosaic {
     /// LibRaw's AHD (Bayer) and 1-pass Markesteijn (X-Trans).
     Libraw,
 }
-static DEMOSAIC: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-pub fn set_demosaic(d: Demosaic) {
-    DEMOSAIC.store(d as u8, Ordering::Relaxed);
-}
-pub fn demosaic() -> Demosaic {
-    if std::env::var_os("RAWMAKASE_LIBRAW_DEMOSAIC").is_some_and(|v| v != "0")
-        || DEMOSAIC.load(Ordering::Relaxed) == Demosaic::Libraw as u8
-    {
-        Demosaic::Libraw
-    } else {
-        Demosaic::Rawmakase
+impl Demosaic {
+    /// This preference, unless RAWMAKASE_LIBRAW_DEMOSAIC=1 forces LibRaw for the
+    /// whole run; the variable is read once.
+    pub fn effective(self) -> Self {
+        static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let forced = *FORCED.get_or_init(|| {
+            std::env::var_os("RAWMAKASE_LIBRAW_DEMOSAIC").is_some_and(|v| v != "0")
+        });
+        if forced { Self::Libraw } else { self }
     }
 }
 /// What [`Raw::develop`] makes of the sensor data. A job captures it when it is
@@ -162,9 +160,9 @@ pub enum Decode {
     Full(Demosaic),
 }
 impl Decode {
-    /// Full size, with the demosaic preferred now.
-    pub fn full() -> Self {
-        Self::Full(demosaic())
+    /// Full size, with `preferred` unless the environment forces LibRaw.
+    pub fn full(preferred: Demosaic) -> Self {
+        Self::Full(preferred.effective())
     }
 }
 impl crate::metadata::PhotoInfo {

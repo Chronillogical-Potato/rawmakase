@@ -64,6 +64,8 @@ pub struct Editor {
     pending_photo: Option<(PathBuf, bool)>,
     /// Cancels the prefetch started for the photo on screen.
     prefetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Preferences > Performance's demosaic, for every full-size decode.
+    demosaic: crate::raw::Demosaic,
     /// That position as last written to the session.
     saved_place: (String, Option<i64>, bool),
     /// How the Library showed its photos, as last written to the session;
@@ -145,7 +147,6 @@ impl Editor {
         session_file: Option<PathBuf>,
         backend: worker::RenderBackend,
     ) -> Self {
-        crate::raw::set_demosaic(session.demosaic);
         theme::apply(
             ctx,
             theme::Palette::DEFAULT,
@@ -252,6 +253,7 @@ impl Editor {
             saved_layout: session.library_layout.clone(),
             pending_photo: None,
             prefetch_cancel: Default::default(),
+            demosaic: session.demosaic,
             status: "Pick a photo in the Library to begin".into(),
             catalog_work: None,
             importing: None,
@@ -304,7 +306,7 @@ impl Editor {
                     library_source: self.saved_place.0.clone(),
                     selected_photo: self.saved_place.1,
                     develop: self.saved_place.2,
-                    demosaic: crate::raw::demosaic(),
+                    demosaic: self.demosaic,
                     no_update_checks: !self.updates.automatic,
                     skipped_version: self.updates.skipped.clone(),
                     theme: self.themes.chosen().flatten(),

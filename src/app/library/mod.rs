@@ -373,7 +373,11 @@ impl Library {
     /// (checked as Develop checks it), else its Lightroom edit, else the defaults;
     /// for Develop's Reference View. Why not, for a photo Develop cannot open; None
     /// for a photo no longer in the catalog.
-    pub(in crate::app) fn develop_source(&self, id: i64) -> Option<Result<DevelopSource, Refusal>> {
+    pub(in crate::app) fn develop_source(
+        &self,
+        id: i64,
+        demosaic: crate::raw::Demosaic,
+    ) -> Option<Result<DevelopSource, Refusal>> {
         let photo = self.photo(id)?;
         if let Some(refusal) = develop_refusal(photo, photo.path.is_file()) {
             return Some(Err(refusal));
@@ -395,7 +399,7 @@ impl Library {
         // The file and the demosaic too: a RAW replaced in place, or decoded another
         // way, is developed again.
         let file = crate::storage::Stamp::read(&photo.path).ok();
-        let demosaic = crate::raw::demosaic();
+        let demosaic = demosaic.effective();
         Some(Ok(DevelopSource {
             path: photo.path.clone(),
             tag: format!("{}-{file:?}-{demosaic:?}", edit.tag()),

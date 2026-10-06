@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let cancel = AtomicBool::new(false);
     let start = Instant::now();
     let image = rawmakase::photo::open(std::path::Path::new(path))?
-        .develop(raw::Decode::full(), &cancel)?;
+        .develop(raw::Decode::full(Default::default()), &cancel)?;
     println!(
         "Decode {}x{}: {:.1} ms",
         image.width,
