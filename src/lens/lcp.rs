@@ -16,6 +16,7 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::SystemTime,
@@ -469,17 +470,20 @@ impl Library {
                     .any(|e| e.has_model(m) && make_rank(e, m).is_some())
             })
             .collect();
+        // Collected once: with Adobe's whole library imported, over a thousand
+        // profiles can fit one camera, and comparing each pair took seconds.
+        let raw_lenses: HashSet<String> = fits
+            .iter()
+            .filter(|q| q.has_raw())
+            .flat_map(|q| q.entries.iter().flat_map(|e| &e.lens))
+            .map(|l| key(l))
+            .collect();
         let shadowed = |p: &ImportedProfile| {
             !p.has_raw()
-                && fits.iter().any(|q| {
-                    q.has_raw()
-                        && q.entries.iter().flat_map(|e| &e.lens).any(|l| {
-                            p.entries
-                                .iter()
-                                .flat_map(|e| &e.lens)
-                                .any(|k| key(k) == key(l))
-                        })
-                })
+                && p.entries
+                    .iter()
+                    .flat_map(|e| &e.lens)
+                    .any(|k| raw_lenses.contains(&key(k)))
         };
         let candidates: Vec<Candidate> = fits
             .iter()
