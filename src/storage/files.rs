@@ -11,7 +11,22 @@ use tempfile::NamedTempFile;
 /// %APPDATA%\RAWmakase on Windows, and $XDG_DATA_HOME/rawmakase (default
 /// ~/.local/share/rawmakase) elsewhere. RAWMAKASE_DATA_DIR overrides all of them.
 pub use super::paths::data_dir;
-use super::paths::xdg_data_home;
+use super::paths::{home, xdg_data_home};
+
+/// This computer's own data folder, never synced: the platform default even
+/// when RAWMAKASE_DATA_DIR points elsewhere (a shared or synced folder), and
+/// Windows's local rather than roaming AppData.
+pub fn local_data_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home().join("Library/Application Support/RAWmakase")
+    } else if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|p| PathBuf::from(p).join("RAWmakase"))
+            .unwrap_or_else(|| home().join(".local/share/rawmakase"))
+    } else {
+        xdg_data_home().join("rawmakase")
+    }
+}
 
 /// What persisting does when the destination already exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

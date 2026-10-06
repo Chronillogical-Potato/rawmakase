@@ -16,6 +16,8 @@ const VERSION: i64 = 1;
 pub struct Catalog {
     pub path: PathBuf,
     db: Connection,
+    /// The computer it is open on, whose folder locations apply.
+    computer: locations::Computer,
 }
 
 mod copies;
@@ -26,6 +28,7 @@ mod edits;
 mod info;
 mod ingest;
 pub mod lightroom;
+pub mod locations;
 mod models;
 pub mod resolve;
 mod sidecar;
@@ -38,6 +41,8 @@ pub use descriptive::{
 };
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
+pub use ingest::{Added, Ambiguity, Conflict};
+pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
 pub use models::{
     Collection, CollectionKind, Folder, Photo, PhotoInfo, QUICK_COLLECTION, SavedEdit,
 };
@@ -60,8 +65,13 @@ impl Catalog {
         file.persist_noclobber(path)?;
         Self::open(path)
     }
+    /// Opens a catalog on this computer.
     pub fn open(path: &Path) -> Result<Self> {
-        let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        Self::open_as(path, &locations::Computer::this())
+    }
+    /// Opens a catalog on `computer`, whose folder locations apply.
+    pub fn open_as(path: &Path, computer: &locations::Computer) -> Result<Self> {
+        let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         ensure!(
             db.query_row("PRAGMA application_id", [], |r| r.get::<_, i64>(0))? == APPLICATION_ID,
             "Not an RAWmakase catalog"
@@ -75,9 +85,11 @@ impl Catalog {
         // The schema is idempotent: a catalog from an earlier release gains the
         // tables added since.
         db.execute_batch(include_str!("schema.sql"))?;
+        locations::prepare(&mut db, computer)?;
         Ok(Self {
             path: path.into(),
             db,
+            computer: computer.clone(),
         })
     }
     /// The connection, for tests that set up stored state directly.
@@ -101,11 +113,12 @@ impl Catalog {
             Ok(Photo {
                 id: r.get(0)?,
                 folder,
+                // No path where its folder can't be on this computer.
                 path: paths
                     .get(&folder)
-                    .cloned()
-                    .unwrap_or_default()
-                    .join(&filename),
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .map(|path| path.join(&filename))
+                    .unwrap_or_default(),
                 filename,
                 captured: r.get(3)?,
                 rating: r.get(4)?,
@@ -120,66 +133,51 @@ impl Catalog {
         })?
         .collect::<rusqlite::Result<_>>()?)
     }
+    /// Every folder where it is on this computer (see `locations`); an
+    /// empty path where it can't be here.
     pub fn folders(&self) -> Result<Vec<Folder>> {
-        struct F {
-            id: i64,
-            root: i64,
-            relative: String,
-            base: String,
-            mapped: Option<String>,
-            count: usize,
-        }
+        let rows = self.location_rows()?;
         let mut q = self.db.prepare(
-            "SELECT f.id,f.root,f.relative_path,COALESCE(r.mapped_path,r.original_path),m.path,(SELECT count(*)
+            "SELECT f.id,f.root,r.original_path,f.relative_path,p.path,(SELECT count(*)
              FROM photos p WHERE p.folder=f.id)
-             FROM folders f JOIN roots r ON r.id=f.root LEFT JOIN folder_mappings m ON m.folder=f.id
-             ORDER BY r.original_path,f.relative_path",
+             FROM folders f JOIN roots r ON r.id=f.root LEFT JOIN folder_paths p ON p.folder=f.id
+             ORDER BY r.original_path,COALESCE(p.path,f.relative_path)",
         )?;
-        let fs = q
+        let folders = q
             .query_map([], |r| {
-                Ok(F {
-                    id: r.get(0)?,
-                    root: r.get(1)?,
-                    // Folders added on Windows were stored with its separator;
-                    // the Library's tree and saved sources split on '/'.
-                    relative: if cfg!(windows) {
-                        r.get::<_, String>(2)?.replace('\\', "/")
-                    } else {
-                        r.get(2)?
-                    },
-                    base: r.get(3)?,
-                    mapped: r.get(4)?,
-                    count: r.get::<_, i64>(5)? as usize,
-                })
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, i64>(5)? as usize,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(fs
-            .iter()
-            .map(|f| {
-                let mut path = PathBuf::from(&f.base).join(&f.relative);
-                // The most specific explicit mapping wins; descendants inherit a folder relink.
-                let mut best = 0;
-                for parent in &fs {
-                    if parent.root == f.root
-                        && let Some(mapped) = &parent.mapped
-                        && let Ok(tail) = Path::new(&f.relative).strip_prefix(&parent.relative)
-                        && parent.relative.len() >= best
-                    {
-                        path = Path::new(mapped).join(tail);
-                        best = parent.relative.len();
-                    }
-                }
+        Ok(folders
+            .into_iter()
+            .map(|(id, root, original, relative, logical, count)| {
+                // An older release may have added it since this catalog opened.
+                let relative =
+                    logical.unwrap_or_else(|| locations::logical_from_legacy(&original, &relative));
+                let own = rows.get(&root).map_or(&[][..], |r| &r[..]);
+                let path = locations::resolve_in(&original, own, &relative, cfg!(windows))
+                    .unwrap_or_default();
                 Folder {
-                    relative: f.relative.clone(),
-                    id: f.id,
-                    root: f.root,
-                    name: if f.relative.is_empty() {
-                        f.base.clone()
+                    name: if relative.is_empty() {
+                        locations::resolve_in(&original, own, "", false)
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned()
                     } else {
-                        f.relative.clone()
+                        relative.clone()
                     },
+                    relative,
+                    id,
+                    root,
                     path,
-                    count: f.count,
+                    count,
                 }
             })
             .collect())
@@ -280,28 +278,18 @@ impl Catalog {
             .query_map([id], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?)
     }
+    /// Every root: where it was added and this computer's location of it.
     pub fn roots(&self) -> Result<Vec<(i64, String, Option<String>)>> {
         Ok(self
             .db
-            .prepare("SELECT id,original_path,mapped_path FROM roots ORDER BY id")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .prepare(
+                "SELECT r.id,r.original_path,l.path FROM roots r LEFT JOIN folder_locations l
+                 ON l.root=r.id AND l.relative_path='' AND l.computer=? ORDER BY r.id",
+            )?
+            .query_map([&self.computer.id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
             .collect::<rusqlite::Result<_>>()?)
-    }
-    pub fn relink_root(&self, id: i64, path: &Path) -> Result<()> {
-        ensure!(path.is_dir(), "Choose an existing folder");
-        ensure!(
-            self.db.execute(
-                "UPDATE roots SET mapped_path=? WHERE id=?",
-                params![path.to_string_lossy(), id]
-            )? == 1,
-            "Unknown root"
-        );
-        Ok(())
-    }
-    pub fn relink_folder(&self, id: i64, path: &Path) -> Result<()> {
-        ensure!(path.is_dir(), "Choose an existing folder");
-        self.db.execute("INSERT INTO folder_mappings(folder,path) VALUES(?,?) ON CONFLICT(folder) DO UPDATE SET path=excluded.path",params![id,path.to_string_lossy()])?;
-        Ok(())
     }
     /// A fact about the catalog itself, from the `meta` table.
     fn meta(&self, key: &str) -> Result<Option<String>> {
@@ -350,6 +338,8 @@ fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
 pub use sidecar::Merge;
 #[cfg(test)]
 mod descriptive_tests;
+#[cfg(test)]
+mod locations_tests;
 pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;
