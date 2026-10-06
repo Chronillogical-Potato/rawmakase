@@ -45,7 +45,7 @@ use crate::catalog::Photo;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-pub(super) const PROTOCOL: u32 = 1;
+pub(super) use rawmakase_protocol::PROTOCOL;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]

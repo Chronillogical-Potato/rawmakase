@@ -340,11 +340,13 @@ fn write_connection(path: &std::path::Path, port: u16, token: &str) -> std::io::
         file.as_file()
             .set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    write!(
-        file,
-        "{}",
-        json!({"protocol":commands::PROTOCOL,"port":port,"token":token,"pid":std::process::id()})
-    )?;
+    let endpoint = rawmakase_protocol::Endpoint {
+        protocol: commands::PROTOCOL,
+        port,
+        token: token.into(),
+        pid: Some(std::process::id()),
+    };
+    serde_json::to_writer(&mut file, &endpoint)?;
     file.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
@@ -371,9 +373,13 @@ impl Drop for Handle {
     }
 }
 pub(super) fn start(tx: Sender<Msg>, ctx: egui::Context) -> Option<Handle> {
-    start_at(tx, ctx, crate::storage::data_dir().join("control.json"))
-        .map_err(|e| eprintln!("Control socket: {e}"))
-        .ok()
+    start_at(
+        tx,
+        ctx,
+        rawmakase_protocol::Endpoint::path(&crate::storage::data_dir()),
+    )
+    .map_err(|e| eprintln!("Control socket: {e}"))
+    .ok()
 }
 fn start_at(
     tx: Sender<Msg>,

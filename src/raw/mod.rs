@@ -129,6 +129,34 @@ impl Decode {
         Self::Full(demosaic())
     }
 }
+impl crate::metadata::PhotoInfo {
+    /// From a RAW's metadata, as LibRaw reads it.
+    pub fn from_metadata(m: &Metadata) -> Self {
+        let positive = |v: f32| (v > 0.).then_some(v as f64);
+        let text = |t: &str| (!t.trim().is_empty()).then(|| t.trim().to_string());
+        // LibRaw's flip 5 and 6 are quarter turns.
+        // The camera's default crop is the frame shown, when it has one.
+        let (w, h) = if m.crop_width > 0 && m.crop_height > 0 {
+            (m.crop_width, m.crop_height)
+        } else {
+            (m.width, m.height)
+        };
+        let (w, h) = if matches!(m.flip, 5 | 6) {
+            (h, w)
+        } else {
+            (w, h)
+        };
+        Self {
+            camera: text(&m.model).or_else(|| text(&m.make)),
+            lens: text(&m.lens_model),
+            focal: positive(m.focal),
+            aperture: positive(m.aperture),
+            exposure: positive(m.shutter),
+            iso: positive(m.iso),
+            dimensions: (w > 0 && h > 0).then_some((w, h)),
+        }
+    }
+}
 pub struct Raw {
     handle: ffi::Handle,
     pub metadata: Metadata,

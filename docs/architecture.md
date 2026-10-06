@@ -24,6 +24,7 @@ files should preserve.
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
 | `storage` | RAW identity checks, legacy sidecar import, session state, application paths, shared format versions and atomic JSON writes | `identity.rs`, `sidecar.rs`, `session.rs`, `format.rs`, `files.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
+| `metadata` | Photo metadata as values: descriptive fields (title, caption, copyright, creator, capture, location), keywords and camera settings; depends on nothing else | `metadata.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
@@ -215,8 +216,12 @@ recipe masks have no persistent IDs. Output jobs capture the photo and recipe
 revision and call `export::job`; successful queueing is distinct from published
 output. The protocol and CLI are documented in [External control](automation.md).
 
-The built-in `rawmakase control` subcommand and optional `tools/rawmakase-ctl`
-client share source and the data-directory policy in `storage::paths`. The CLI
+The workspace's `crates/rawmakase-protocol` holds what the app and its clients
+agree on: the protocol version, the `control.json` endpoint and the
+data-directory policy. `tools/rawmakase-ctl` is the client library and the
+standalone binary; the built-in `rawmakase control` subcommand and the MCP
+server depend on it rather than including its source. Neither crate depends on
+the app, so the client builds without GUI, GPU or native libraries. The CLI
 performs transport and polling only, without creating an Editor or GUI context.
 
 `rawmakase mcp` is a stdio adapter built with the official Rust MCP SDK. It shares
@@ -238,6 +243,5 @@ The automation owner manages the bounded queue and local socket independently
 of MIDI. Each MIDI device owns its mapping and connection state, using a shared
 profile registry. Further work can route remaining UI shortcuts through these
 operations and share parameter descriptors with all editing panels.
-The standalone client still includes its shared implementation by path; a
-workspace protocol/client crate would also let MCP schemas reuse those types.
-These follow-ups do not require a new editing engine or MIDI-specific commands.
+The protocol crate can also hold the request types, so MCP schemas reuse
+them instead of declaring their own. These follow-ups do not require a new editing engine or MIDI-specific commands.

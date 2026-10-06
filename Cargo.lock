@@ -3197,6 +3197,8 @@ dependencies = [
  "midir",
  "pkg-config",
  "pollster 1.0.1",
+ "rawmakase-ctl",
+ "rawmakase-protocol",
  "rayon",
  "rfd",
  "rmcp",
@@ -3215,6 +3217,23 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
+]
+
+[[package]]
+name = "rawmakase-ctl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "rawmakase-protocol",
+ "serde_json",
+]
+
+[[package]]
+name = "rawmakase-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

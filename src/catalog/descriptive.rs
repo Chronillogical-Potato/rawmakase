@@ -4,121 +4,22 @@
 //! file's own (its EXIF, at export); a cleared one is empty whatever the file
 //! says.
 use super::Catalog;
+use crate::metadata::{
+    Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, TextField, Value, keyword_name,
+};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
-use unicode_normalization::UnicodeNormalization;
 
-/// The default language of a language alternative.
-pub const DEFAULT_LANG: &str = "x-default";
-
-/// The text fields that have languages (XMP language alternatives).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TextField {
-    Title,
-    /// dc:description, EXIF ImageDescription.
-    Caption,
-    /// dc:rights, EXIF Copyright.
-    Copyright,
-}
-impl TextField {
-    pub const ALL: [Self; 3] = [Self::Title, Self::Caption, Self::Copyright];
-    fn key(self) -> &'static str {
-        match self {
-            Self::Title => "title",
-            Self::Caption => "caption",
-            Self::Copyright => "copyright",
-        }
+/// The column value a text field is stored under.
+fn key(field: TextField) -> &'static str {
+    match field {
+        TextField::Title => "title",
+        TextField::Caption => "caption",
+        TextField::Copyright => "copyright",
     }
 }
 const CREATOR: &str = "creator";
-
-/// A field's override: what RAWmakase has instead of the file's value.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Value<T> {
-    Set(T),
-    /// Empty, and the file's value left out.
-    Cleared,
-}
-
-/// A text field's languages, `x-default` first, as (language, text).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LangAlt(pub Vec<(String, String)>);
-impl LangAlt {
-    pub fn new(text: &str) -> Self {
-        Self(vec![(DEFAULT_LANG.into(), text.into())])
-    }
-    /// The default language's text, else the first one's.
-    pub fn default_text(&self) -> Option<&str> {
-        self.0
-            .iter()
-            .find(|(lang, _)| lang == DEFAULT_LANG)
-            .or(self.0.first())
-            .map(|(_, text)| text.as_str())
-    }
-}
-
-/// A capture time from elsewhere than the file.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Capture {
-    /// Local time, "YYYY-MM-DDTHH:MM:SS".
-    pub captured: String,
-    /// The subsecond digits as read, of any length ("12", "120456").
-    pub subsec: Option<String>,
-    /// "+02:00", when known.
-    pub offset: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Location {
-    At {
-        lat: f64,
-        lon: f64,
-        alt: Option<f64>,
-    },
-    /// The file's GPS left out.
-    Cleared,
-}
-
-/// A photo's overrides; `None` is no row, the file's own value.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Descriptive {
-    pub title: Option<Value<LangAlt>>,
-    pub caption: Option<Value<LangAlt>>,
-    pub copyright: Option<Value<LangAlt>>,
-    /// In order.
-    pub creator: Option<Value<Vec<String>>>,
-    pub capture: Option<Capture>,
-    pub location: Option<Location>,
-}
-impl Descriptive {
-    pub fn text(&self, field: TextField) -> Option<&Value<LangAlt>> {
-        match field {
-            TextField::Title => self.title.as_ref(),
-            TextField::Caption => self.caption.as_ref(),
-            TextField::Copyright => self.copyright.as_ref(),
-        }
-    }
-    pub fn text_mut(&mut self, field: TextField) -> &mut Option<Value<LangAlt>> {
-        match field {
-            TextField::Title => &mut self.title,
-            TextField::Caption => &mut self.caption,
-            TextField::Copyright => &mut self.copyright,
-        }
-    }
-}
-
-/// A keyword and the names of its ancestors and itself, top first.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Keyword {
-    pub id: i64,
-    pub name: String,
-    pub path: Vec<String>,
-    /// Which names of `path` an export writes, by Lightroom's Include on
-    /// Export and Export Containing Keywords; none when the keyword itself
-    /// is not exported.
-    pub exported: Vec<bool>,
-}
 
 /// A photo's descriptive metadata and keywords as they were, absent rows
 /// included, to put back on undo.
@@ -130,11 +31,6 @@ pub struct MetadataSnapshot {
     /// The capture time it sorts by (`photos.captured`), which a capture
     /// override changes.
     pub captured: String,
-}
-
-/// A keyword name as stored and compared: NFC, case kept.
-pub fn keyword_name(name: &str) -> String {
-    name.trim().nfc().collect()
 }
 
 impl Catalog {
@@ -413,13 +309,13 @@ pub(super) fn read(db: &Connection, id: i64) -> Result<Descriptive> {
         .collect::<rusqlite::Result<_>>()?;
     let mut d = Descriptive::default();
     for field in TextField::ALL {
-        *d.text_mut(field) = match states.get(field.key()).map(String::as_str) {
+        *d.text_mut(field) = match states.get(key(field)).map(String::as_str) {
             Some("set") => {
                 let langs: Vec<(String, String)> = db
                     .prepare_cached(
                         "SELECT lang, value FROM photo_text WHERE photo=? AND field=? ORDER BY position",
                     )?
-                    .query_map(params![id, field.key()], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .query_map(params![id, key(field)], |r| Ok((r.get(0)?, r.get(1)?)))?
                     .collect::<rusqlite::Result<_>>()?;
                 Some(Value::Set(LangAlt(langs)))
             }
@@ -476,14 +372,14 @@ pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
     for field in TextField::ALL {
         match d.text(field) {
             None => {}
-            Some(Value::Cleared) => state(db, field.key(), false)?,
+            Some(Value::Cleared) => state(db, key(field), false)?,
             Some(Value::Set(langs)) => {
-                state(db, field.key(), true)?;
+                state(db, key(field), true)?;
                 for (position, (lang, value)) in langs.0.iter().enumerate() {
                     db.execute(
                         "INSERT OR REPLACE INTO photo_text(photo, field, lang, position, value)
                          VALUES (?, ?, ?, ?, ?)",
-                        params![id, field.key(), lang, position as i64, value],
+                        params![id, key(field), lang, position as i64, value],
                     )?;
                 }
             }

@@ -1,8 +1,6 @@
 // Release builds on Windows open no console window beside the app.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use anyhow::Result;
-#[path = "../tools/rawmakase-ctl/src/client.rs"]
-mod control_client;
 mod mcp;
 use clap::{Parser, Subcommand};
 use rawmakase::{
@@ -22,7 +20,9 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// Control the running desktop app (enable external control in Preferences first).
-    Control(control_client::Cli),
+    // The client crate has its own version; this command is part of the app.
+    #[command(version = env!("CARGO_PKG_VERSION"))]
+    Control(rawmakase_ctl::Cli),
     /// Serve editing tools over MCP stdio, connected to the running desktop app.
     Mcp(mcp::Cli),
     /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
     let a = Args::parse_from(&launch.arguments);
     match a.command {
         Some(Command::Mcp(cli)) => mcp::run(cli)?,
-        Some(Command::Control(cli)) => control_client::run(cli).map_err(anyhow::Error::msg)?,
+        Some(Command::Control(cli)) => rawmakase_ctl::run(cli).map_err(anyhow::Error::msg)?,
         Some(Command::ImportLensProfiles { files }) => {
             // One unusable file (Adobe ships a few) leaves the rest importing.
             let done = rawmakase::lens::lcp::import_each(&files);

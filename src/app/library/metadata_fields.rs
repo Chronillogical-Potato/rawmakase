@@ -7,7 +7,7 @@ use super::descriptive::{DescriptiveEdit, parse_keywords};
 use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, paint_truncated, panel_edit, value_at};
 use super::{Library, Place};
 use crate::app::theme;
-use crate::catalog::{Descriptive, Keyword, Location, TextField, Value};
+use crate::metadata::{Descriptive, Keyword, Location, TextField, Value};
 use eframe::egui::{self, Vec2};
 
 const MIXED: &str = "< mixed >";

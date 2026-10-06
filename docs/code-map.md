@@ -4,7 +4,12 @@ Use this page to find an implementation or decide where a change belongs. Read
 [architecture.md](architecture.md) for ownership rules, concurrency invariants and
 compatibility constraints. Paths below are relative to this document and clickable.
 Module roots (`mod.rs`) define their public API; implementation helpers generally
-remain private to their domain. This is one Rust package, not a multi-crate workspace.
+remain private to their domain. The workspace has three packages: the app
+(`src/`), [`crates/rawmakase-protocol`](../crates/rawmakase-protocol/src/lib.rs)
+(what the app and its control clients agree on: protocol version, `control.json`
+endpoint, data folder) and [`tools/rawmakase-ctl`](../tools/rawmakase-ctl/src/lib.rs)
+(the control client, used by `rawmakase control`, `rawmakase mcp` and the
+standalone `rawmakase-ctl`). The last two build without the app.
 
 ## Where to start a change
 
@@ -160,7 +165,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
 | [catalog/locations.rs](../src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
-| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. |
+| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../src/metadata.rs). |
 | [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
