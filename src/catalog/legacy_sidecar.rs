@@ -1,7 +1,8 @@
 //! Edits saved beside the RAW (`*.rawmakase.json`) by releases before the
 //! catalog: identity-checked, with a fallback store for read-only folders and
 //! conflict protection. Adding a folder imports them; RAWmakase no longer
-//! writes them, but the writer stays for tests and older workflows.
+//! writes them; the writer stays for the persistence tests. Not to be confused
+//! with [`sidecars`](super::sidecars), the XMP metadata files beside a photo.
 use crate::develop::saved_format::{migrate_recipe, saved_version};
 use crate::storage::{Identity, atomic_json, bitmaps, data_dir};
 use crate::{
