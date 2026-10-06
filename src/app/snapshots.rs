@@ -213,7 +213,7 @@ impl Editor {
             SnapshotSettings::Recipe(recipe) => *recipe,
             SnapshotSettings::Lightroom(text) => {
                 let m = self.document.metadata.as_ref()?;
-                match crate::catalog::convert_develop(
+                match crate::lr_develop::convert_develop(
                     &text,
                     m,
                     &self.document.profiles,

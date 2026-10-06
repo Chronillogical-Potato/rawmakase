@@ -145,7 +145,7 @@ fn imported_enhanced_profiles_match_camera_and_resolve_xmp() -> anyhow::Result<(
             look.uuid
         );
         let (catalog, warnings) =
-            rawmakase::catalog::lightroom::convert_develop(&text, &raw.metadata, &profiles, None)?;
+            rawmakase::lr_develop::convert_develop(&text, &raw.metadata, &profiles, None)?;
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(catalog.profile.as_ref().unwrap().name, name);
     }

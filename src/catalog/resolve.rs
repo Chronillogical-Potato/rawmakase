@@ -143,7 +143,7 @@ pub fn lightroom_edit(
     m: &Metadata,
     profiles: &[Arc<CameraProfile>],
 ) -> Result<(Recipe, Vec<String>)> {
-    super::convert_develop(text, m, profiles, None)
+    crate::lr_develop::convert_develop(text, m, profiles, None)
 }
 
 /// The edit photo `record` at `path` is developed with: its saved edit, else its
@@ -265,7 +265,7 @@ mod tests {
         // From Adobe Default, as Lightroom stores it, whatever the raw defaults.
         assert_eq!(
             resolved.recipe,
-            super::super::convert_develop(text, &metadata, &profiles, None)?.0
+            crate::lr_develop::convert_develop(text, &metadata, &profiles, None)?.0
         );
         assert_eq!(resolved.recipe.exposure, 0.25);
 
