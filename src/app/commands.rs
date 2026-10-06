@@ -17,6 +17,10 @@ pub(super) struct Automation {
     turn: Option<(std::time::Instant, TurnScope)>,
 }
 impl Automation {
+    /// Whether output job `id` has finished, or does not exist.
+    pub(super) fn job_finished(&self, id: u64) -> bool {
+        self.outputs.finished(id)
+    }
     /// Cancels the export and preview jobs commands started.
     pub(super) fn cancel_outputs(&self) {
         self.outputs.cancel_all();
@@ -120,6 +124,18 @@ pub(super) enum Operation {
         path: std::path::PathBuf,
         max_edge: u32,
     },
+    Job(u64),
+    /// Answers once `Until` holds, or after the time given, so a client waiting
+    /// for a photo or an output is woken rather than polling.
+    Wait(Until, std::time::Duration),
+}
+
+/// What a `wait` command waits for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Until {
+    /// The photo is loaded, or no longer the one opened (another replaced it).
+    Loaded(i64),
+    /// The output job has finished, or does not exist.
     Job(u64),
 }
 
@@ -435,7 +451,8 @@ impl Editor {
         self.sync_command_revision();
         let Command { operation, target } = command;
         match operation {
-            Operation::State => return Ok(Outcome::Empty),
+            // A wait sent by a device answers at once; the control socket keeps it.
+            Operation::State | Operation::Wait(..) => return Ok(Outcome::Empty),
             Operation::Job(id) => return self.automation.outputs.state(id).map(Outcome::Output),
             Operation::Capabilities => {
                 return Ok(Outcome::Capabilities(Capabilities {
@@ -460,6 +477,7 @@ impl Editor {
                         "export",
                         "preview",
                         "job",
+                        "wait",
                     ],
                     tone_curve: CurveCapabilities {
                         channels: ["rgb", "red", "green", "blue"],
@@ -709,7 +727,8 @@ impl Editor {
             | Operation::Capabilities
             | Operation::Photos { .. }
             | Operation::Presets { .. }
-            | Operation::Job(_) => unreachable!(),
+            | Operation::Job(_)
+            | Operation::Wait(..) => unreachable!(),
         }
         Ok(Outcome::Empty)
     }

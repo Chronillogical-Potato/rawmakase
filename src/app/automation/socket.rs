@@ -2,7 +2,7 @@
 //! reply channel; a timed-out request still in the queue is cancelled atomically.
 use super::{Action, Msg, Sender, parse_action, shortcut_action};
 use crate::app::commands::{
-    self, Command, Error, Operation, Param, PhotoTarget, PresetTarget, Target,
+    self, Command, Error, Operation, Param, PhotoTarget, PresetTarget, Target, Until,
 };
 use eframe::egui;
 use serde_json::{Value, json};
@@ -170,6 +170,20 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
             }
         }
         "job" => Operation::Job(integer("job_id", 1, i64::MAX)? as u64),
+        // Answered once the photo is loaded or the job finished, or after
+        // timeout_ms (1 s by default, at most 5 s, within clients' read timeout).
+        "wait" => {
+            let until = match text("until")? {
+                "loaded" => Until::Loaded(integer("photo_id", 1, i64::MAX)?),
+                "job" => Until::Job(integer("job_id", 1, i64::MAX)? as u64),
+                _ => return Err(invalid("until must be loaded or job")),
+            };
+            let millis = match request.get("timeout_ms") {
+                None => 1000,
+                Some(_) => integer("timeout_ms", 1, 5000)?,
+            };
+            Operation::Wait(until, Duration::from_millis(millis as u64))
+        }
         // Legacy device-level commands remain an adapter. Explicit targets
         // belong to semantic commands, never to mutable device mappings.
         "cc" | "note" if request.get("target").is_some() => {
@@ -211,6 +225,16 @@ fn handle(
         return Err(Error::new("disabled", "External control is disabled"));
     }
     let messages = command(&request)?;
+    // A wait is answered by its own time, not the usual answer's.
+    let timeout = match messages[..] {
+        [
+            Msg::Command(Command {
+                operation: Operation::Wait(_, wait),
+                ..
+            }),
+        ] => timeout + wait,
+        _ => timeout,
+    };
     let (reply, rx) = mpsc::sync_channel(1);
     let phase = Arc::new(AtomicU8::new(0));
     let queued = Request {
