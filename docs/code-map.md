@@ -23,7 +23,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/app/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/develop/saved_format.rs) | Catalog edits, native presets and persistence tests |
+| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/develop/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -193,11 +193,11 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [app/mod.rs](../src/app/mod.rs) | `Editor`, initialization, lifecycle, worker connections and explicit session-write destination. |
 | [state.rs](../src/app/state.rs) | Separate document, decoded-image pair, preview, viewport and preset-browser state; centralized document reset. |
-| [history.rs](../src/app/history.rs) | Bounded undo/redo, redo-branch invalidation, one transaction per editing gesture, and saving and restoring History with the edit. |
+| [edit_session/history.rs](../src/edit_session/history.rs) | Bounded undo/redo, redo-branch invalidation, one transaction per editing gesture, and saving and restoring History with the edit. |
 | [editing.rs](../src/app/editing.rs) | Before/after frame snapshots bound to a document generation so navigation cannot mix histories. |
 | [activity.rs](../src/app/activity.rs) | Mutually exclusive foreground states: file choice, overwrite confirmation and export. |
 | [task.rs](../src/app/task.rs) | Load/render generations, cancellation and completion ownership. |
-| [save_state.rs](../src/app/save_state.rs) | Clean, pending, saving, failed and protected edits; debounce and retry policy. |
+| [edit_session/save_state.rs](../src/edit_session/save_state.rs) | Clean, pending, saving, failed and protected edits; debounce and retry policy. |
 | [autosave.rs](../src/app/autosave.rs) | The background saver thread and its catalog connection. |
 | [workflow.rs](../src/app/workflow.rs) | Opening/navigating photos, flushing edits, scheduling previews, publishing textures and launching exports. |
 | [events.rs](../src/app/events.rs) | Receives worker messages, rejects stale generations and applies accepted results to editor state. |

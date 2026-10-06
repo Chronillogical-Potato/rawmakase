@@ -2,7 +2,7 @@
 use std::time::{Duration, Instant};
 
 #[derive(Default)]
-pub(super) enum SaveState {
+pub enum SaveState {
     #[default]
     Clean,
     Pending(Instant),

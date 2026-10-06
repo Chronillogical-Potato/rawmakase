@@ -134,7 +134,7 @@ impl Library {
         self.change_collection(collection, &added, &removed)?;
         self.message = summary.clone();
         self.collection_done.push(CollectionCommand {
-            sequence: crate::app::undo::sequence(),
+            sequence: crate::edit_session::sequence(),
             collection,
             added,
             removed,
