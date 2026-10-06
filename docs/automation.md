@@ -42,7 +42,10 @@ Tint in tint units, `straighten` (alias `angle`, the Crop panel's Angle) in
 degrees from −45 to 45, other basic and mixer parameters in percent. `turn`
 moves Straighten 0.1° per tick and has no mask scope. Values are
 clamped to their supported ranges. `capabilities` lists these ranges and whether
-a parameter supports masks. Mixer channels are explicit: `band3.sat`,
+a parameter supports masks. Global Exposure is the exception: `set` accepts
+±8 EV, the most a saved edit may hold, while its listed range is the slider's
+±5. A `turn` never moves a value further outside the listed range, and moves one
+already outside it (an imported +6 EV, say) one step at a time toward it. Mixer channels are explicit: `band3.sat`,
 `band3.hue`, `band3.lum`, `band3.gray`. Bare `band3` is a device mapping only.
 
 Develop presets, built-in and imported, are listed by `presets` and applied by
