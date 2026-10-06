@@ -665,14 +665,8 @@ mod tests {
             (
                 warm.render(&im, &legacy(vec![]), 0, Some([x, y, 1, 1]), &cancel)
                     .unwrap(),
-                warm.render(
-                    &im,
-                    &legacy(vec![op.clone()]),
-                    0,
-                    Some([x, y, 1, 1]),
-                    &cancel,
-                )
-                .unwrap(),
+                warm.render(&im, &legacy(vec![op]), 0, Some([x, y, 1, 1]), &cancel)
+                    .unwrap(),
             ),
         ] {
             let i = if before.width == 1 {

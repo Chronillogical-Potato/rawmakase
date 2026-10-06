@@ -83,7 +83,7 @@ fn presets_changing_settings_that_dont_scale_get_no_amount() {
         assert!(!group_scales(group));
     }
     // The same settings left as they were don't matter.
-    let mut cropped = before.clone();
+    let mut cropped = before;
     cropped.crop = [0.1, 0.1, 0.9, 0.9];
     let mut full = cropped.clone();
     full.exposure = 1.;
@@ -199,7 +199,7 @@ fn point_curves_blend_their_outputs() {
         assert!((red - (0.5 + 0.1 * t)).abs() < 1e-4);
     }
     // Curves with different inputs blend at the inputs of both.
-    let mut bent = before.clone();
+    let mut bent = before;
     bent.curve.points = vec![[0., 0.], [0.4, 0.3], [1., 1.]];
     let r = amount(&bent, &full).at(0.5, &m);
     assert_eq!(r.curve.points.len(), 5);

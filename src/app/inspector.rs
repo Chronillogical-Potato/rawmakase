@@ -630,7 +630,7 @@ impl Editor {
                 && let Some(m) = &metadata
             {
                 r.profile_changed(m);
-                profile_changed_from = Some(old_profile.clone());
+                profile_changed_from = Some(old_profile);
             }
             // White balance is its own group below the profile, as in Lightroom.
             ui.add_space(12.);

@@ -306,7 +306,7 @@ fn keywords_are_found_by_path_in_nfc_and_read_with_their_ancestors() -> Result<(
         paths,
         [
             vec!["AC/DC 🎸".to_string()],
-            vec!["Places".into(), "Poland".into(), nfc.clone()],
+            vec!["Places".into(), "Poland".into(), nfc],
             vec!["Smith, John".into()],
             vec!["places".into()],
         ]

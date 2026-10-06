@@ -286,7 +286,7 @@ impl Raw {
             width: w,
             height: h,
             pixels,
-            metadata: self.metadata.clone(),
+            metadata: self.metadata,
             fast,
             scale_factor: scale,
             scale_clipped: clipped,

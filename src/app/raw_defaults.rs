@@ -465,8 +465,8 @@ mod tests {
             .tx
             .send(Event::Header(Box::new(LoadedHeader {
                 id: generation,
-                path: raw.clone(),
-                metadata: m.clone(),
+                path: raw,
+                metadata: m,
                 recipe: adobe.clone(),
                 export: Default::default(),
                 protected: false,
@@ -509,7 +509,7 @@ mod tests {
         for event in [
             Event::Header(Box::new(LoadedHeader {
                 id: generation,
-                path: raw.clone(),
+                path: raw,
                 metadata: m.clone(),
                 // As the loader resolves it.
                 recipe: editor.raw_defaults.resolve(&m, &profiles(&m)).recipe,

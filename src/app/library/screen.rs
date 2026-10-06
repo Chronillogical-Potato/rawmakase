@@ -362,7 +362,7 @@ mod tests {
         let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
         screen.pending.insert(key.clone(), 0);
         screen.queue.0.lock().unwrap().jobs.push(Job {
-            key: key.clone(),
+            key,
             ticket: 0,
             edit: None,
         });
