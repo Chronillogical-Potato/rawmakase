@@ -9,7 +9,7 @@
 use super::{Catalog, SavedEdit, edits::local_edits};
 use crate::{
     camera_profiles::CameraProfile, develop::Recipe, develop::defaults::DevelopDefaults,
-    export::ExportOptions, raw::Metadata, storage::Identity,
+    export_settings::ExportOptions, raw::Metadata, storage::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};

@@ -1,6 +1,8 @@
 //! Public API regressions, with relative-path work isolated in a child process.
 use anyhow::Result;
-use rawmakase::{catalog::Catalog, develop::Recipe, export::ExportOptions, presets, storage};
+use rawmakase::{
+    catalog::Catalog, develop::Recipe, export_settings::ExportOptions, presets, storage,
+};
 use std::{fs, path::Path, process::Command};
 
 #[test]

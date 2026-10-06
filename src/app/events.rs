@@ -3,7 +3,7 @@ use super::{
     Editor,
     worker::{self, Event, LoadedHeader, Pane, RenderStage, TaskKind},
 };
-use crate::export::ExportOptions;
+use crate::export_settings::ExportOptions;
 use eframe::egui;
 
 impl Editor {

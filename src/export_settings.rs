@@ -1,9 +1,38 @@
 //! The choices of Lightroom's Export dialog: where the file goes, its name, format,
 //! size and metadata. Saved as `export.json` in the data folder, so the next
 //! export (and Export with Previous) starts from them.
-use super::ExportOptions;
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// A photo's own export choices, saved with its edit.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExportOptions {
+    pub quality: u8,
+    pub max_edge: u32,
+}
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self {
+            quality: 92,
+            max_edge: 0,
+        }
+    }
+}
+impl ExportOptions {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=100).contains(&self.quality),
+            "JPEG quality must be 1–100"
+        );
+        ensure!(
+            self.max_edge <= 30_000,
+            "Export edge must not exceed 30000 pixels"
+        );
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Destination {

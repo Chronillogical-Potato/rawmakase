@@ -66,23 +66,6 @@ pub fn offered(preset: &Preset) -> bool {
         .is_some_and(|v| v.eq_ignore_ascii_case("true"))
 }
 
-/// Whether the settings of `group` scale with an Amount, so a preset holding it may
-/// offer one. Adobe's own presets with lens or chromatic aberration corrections don't.
-pub fn group_scales(group: SettingGroup) -> bool {
-    use SettingGroup::*;
-    !matches!(
-        group,
-        LensProfileCorrections
-            | ChromaticAberration
-            | UprightMode
-            | UprightTransforms
-            | TransformAdjustments
-            | SpotRemoval
-            | Crop
-            | Masking
-    )
-}
-
 impl PresetAmount {
     /// The Amount for `preset`, applied over `before` as `full`; refused when the
     /// preset doesn't offer one or changes a setting that doesn't scale.

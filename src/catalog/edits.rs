@@ -1,7 +1,7 @@
 //! A photo's saved edit: its recipe and export options, the spots and masks
 //! kept beside them, and the bitmaps recipes refer to by hash.
 use super::{Catalog, SavedEdit};
-use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
+use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;

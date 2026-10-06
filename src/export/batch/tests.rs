@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     catalog::{Catalog, HistoryUpdate},
-    export::{Destination, Format},
+    export_settings::{Destination, Format},
 };
 use std::sync::Mutex;
 
@@ -583,7 +583,7 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     // b is offline when its turn comes: it keeps 11, and c is still 12.
     std::fs::remove_file(&f.photos[1].1)?;
     let mut s = settings(&f.out());
-    s.naming = Some(crate::export::Naming::CustomNameSequence);
+    s.naming = Some(crate::export_settings::Naming::CustomNameSequence);
     s.custom_text = "Concert".into();
     s.start_number = 10;
     let outcomes = run_all(&f.batch(photos.clone(), s));
@@ -594,7 +594,7 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     placed[0].place = Some((0, 3));
     placed[1].place = Some((2, 3));
     let mut s = settings(&f.out().join("placed"));
-    s.naming = Some(crate::export::Naming::CustomNameOf);
+    s.naming = Some(crate::export_settings::Naming::CustomNameOf);
     s.custom_text = "Show".into();
     run_all(&f.batch(placed, s));
     assert_eq!(
@@ -607,7 +607,7 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     photos[2].captured = None;
     let photos = vec![photos[0].clone(), photos[2].clone()];
     let mut s = settings(&f.out().join("dated"));
-    s.naming = Some(crate::export::Naming::DateFilename);
+    s.naming = Some(crate::export_settings::Naming::DateFilename);
     let outcomes = run_all(&f.batch(photos, s));
     assert_eq!(
         listing(&f.out().join("dated")),

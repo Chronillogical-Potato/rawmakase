@@ -17,7 +17,7 @@ use crate::{
         defaults::DevelopDefaults,
         settings_groups::{self, GroupSelection, Source, Target},
     },
-    export::ExportOptions,
+    export_settings::ExportOptions,
 };
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;

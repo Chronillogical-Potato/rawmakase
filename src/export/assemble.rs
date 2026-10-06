@@ -4,8 +4,8 @@
 //! EXIF Copyright), Contact (creator), Descriptive (title, caption, keywords,
 //! rating, label), capture time, location, Camera (make, model, exposure,
 //! lens) and Camera Raw (the develop settings).
-use super::{Include, settings::ExportSettings};
 use crate::exif::{CameraExif, Field, MAX_VALUE, tag::*};
+use crate::export_settings::{ExportSettings, Include};
 use crate::metadata::{Capture, Descriptive, LangAlt, Location, Value};
 use crate::tiff::kind::{BYTE, RATIONAL};
 use crate::xmp::write::KeywordPath;

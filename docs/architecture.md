@@ -23,6 +23,7 @@ files should preserve.
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
 | `storage` | RAW identity checks, legacy sidecar import, session state, application paths, shared format versions and atomic JSON writes | `identity.rs`, `sidecar.rs`, `session.rs`, `format.rs`, `files.rs` |
+| `export_settings` | Export choices as values: the Export dialog's settings and a photo's saved `ExportOptions` | `export_settings.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `metadata` | Photo metadata as values: descriptive fields (title, caption, copyright, creator, capture, location), keywords and camera settings; depends on nothing else | `metadata.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |

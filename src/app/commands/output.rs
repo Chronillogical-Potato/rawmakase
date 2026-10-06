@@ -1,7 +1,8 @@
 //! Bounded output jobs capture a recipe and its identity before leaving the UI
 //! thread. Polling a job confirms the file was published, not just queued.
 use super::{Error, Result};
-use crate::export::{ExportSettings, Format, Replace, job};
+use crate::export::{Replace, job};
+use crate::export_settings::{ExportSettings, Format};
 use serde::Serialize;
 use std::{
     collections::BTreeMap,

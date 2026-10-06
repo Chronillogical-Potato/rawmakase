@@ -25,6 +25,7 @@ pub mod develop;
 pub mod dng;
 pub mod exif;
 pub mod export;
+pub mod export_settings;
 mod jpeg;
 pub mod lens;
 pub mod metadata;

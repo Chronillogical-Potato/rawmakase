@@ -1,7 +1,7 @@
 use super::lightroom::{develop_fields, import_lightroom};
 use super::*;
 use crate::metadata::{LangAlt, PhotoInfo, Value};
-use crate::{develop::Recipe, export::ExportOptions, storage::Identity};
+use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;
     db.execute_batch("CREATE TABLE AgLibraryRootFolder(id_local INTEGER, absolutePath TEXT);
@@ -1058,7 +1058,7 @@ fn lightroom_keyword_export_options_are_imported_and_backfilled() -> Result<()> 
 #[test]
 fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
     use crate::catalog::{HistoryUpdate, SavedHistory, SavedStep};
-    use crate::export::ExportOptions;
+    use crate::export_settings::ExportOptions;
     let d = tempfile::tempdir()?;
     let photos = d.path().join("photos");
     std::fs::create_dir(&photos)?;

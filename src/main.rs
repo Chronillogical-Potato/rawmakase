@@ -5,7 +5,7 @@ mod mcp;
 use clap::{Parser, Subcommand};
 use rawmakase::{
     develop::{self, Recipe},
-    export::ExportOptions,
+    export_settings::ExportOptions,
     raw,
 };
 use std::{path::PathBuf, sync::atomic::AtomicBool, time::Instant};

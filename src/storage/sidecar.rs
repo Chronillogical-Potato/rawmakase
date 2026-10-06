@@ -2,7 +2,7 @@
 use super::{atomic_json, data_dir, migrate_recipe};
 use crate::{
     develop::{LocalEdits, Recipe},
-    export::ExportOptions,
+    export_settings::ExportOptions,
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};

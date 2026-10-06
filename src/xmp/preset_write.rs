@@ -56,7 +56,7 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
     let supports_amount = groups
         .groups()
         .filter(|g| !matches!(g, SettingGroup::SpotRemoval | SettingGroup::Masking))
-        .all(crate::presets::amount::group_scales);
+        .all(SettingGroup::scales_with_amount);
     let supports_amount = if supports_amount { "True" } else { "False" };
     let mut attributes: Vec<(String, String)> = [
         ("PresetType", "Normal"),

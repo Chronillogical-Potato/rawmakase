@@ -580,7 +580,7 @@ fn exports_match_the_render() {
                 &source,
                 &out,
                 &im.metadata,
-                &rawmakase::export::ExportOptions::default(),
+                &rawmakase::export_settings::ExportOptions::default(),
                 rawmakase::export::Replace::NoClobber,
             )
             .unwrap();

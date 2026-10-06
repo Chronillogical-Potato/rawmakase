@@ -1,4 +1,4 @@
-use crate::{develop::Recipe, export::ExportOptions};
+use crate::{develop::Recipe, export_settings::ExportOptions};
 use std::path::PathBuf;
 #[derive(Clone, Debug, Default)]
 pub struct Photo {

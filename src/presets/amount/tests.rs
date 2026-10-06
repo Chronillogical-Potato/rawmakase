@@ -80,7 +80,7 @@ fn presets_changing_settings_that_dont_scale_get_no_amount() {
             PresetAmount::new(&preset("True"), before.clone(), full),
             Err(NoAmount::Changes(group))
         );
-        assert!(!group_scales(group));
+        assert!(!group.scales_with_amount());
     }
     // The same settings left as they were don't matter.
     let mut cropped = before;

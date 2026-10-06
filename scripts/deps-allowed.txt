@@ -8,6 +8,7 @@ app -> decode_cache
 app -> develop
 app -> exif
 app -> export
+app -> export_settings
 app -> lens
 app -> metadata
 app -> platform
@@ -28,7 +29,7 @@ catalog -> camera_profiles
 catalog -> color
 catalog -> develop
 catalog -> exif
-catalog -> export
+catalog -> export_settings
 catalog -> jpeg
 catalog -> metadata
 catalog -> raw
@@ -62,6 +63,7 @@ export -> catalog
 export -> decode_cache
 export -> develop
 export -> exif
+export -> export_settings
 export -> jpeg
 export -> metadata
 export -> raw
@@ -71,6 +73,8 @@ export -> time
 export -> watermark
 export -> xml
 export -> xmp
+export_settings -> storage
+export_settings -> watermark
 lens -> optics
 lens -> raw
 lens -> storage
@@ -92,7 +96,7 @@ stats -> storage
 stats -> time
 stats -> updates
 storage -> develop
-storage -> export
+storage -> export_settings
 storage -> raw
 watermark -> develop
 watermark -> storage
@@ -103,6 +107,5 @@ xmp -> develop
 xmp -> exif
 xmp -> lens
 xmp -> metadata
-xmp -> presets
 xmp -> raw
 xmp -> xml
