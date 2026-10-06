@@ -10,6 +10,9 @@ use eframe::egui::{self, Sense, Stroke, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// How long a preset is hovered before the photo previews it.
+const HOVER_PREVIEW: Duration = Duration::from_millis(300);
+
 impl Editor {
     pub(super) fn reload_presets(&mut self, ctx: &egui::Context) {
         let tx = self.tx.clone();
@@ -329,7 +332,7 @@ impl Editor {
                     .presets
                     .hover
                     .as_ref()
-                    .is_some_and(|(_, t)| t.elapsed() > Duration::from_millis(300))
+                    .is_some_and(|(_, t)| t.elapsed() > HOVER_PREVIEW)
                 && let Some(m) = &self.document.metadata
                 && let Ok((mut r, _)) = library.presets[i].apply_lenient(
                     &self.document.edit.recipe,
@@ -342,7 +345,14 @@ impl Editor {
                 self.presets.preview = Some(r);
                 self.schedule();
             }
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            // Woken when the hover has lasted long enough to preview.
+            if self.presets.preview.is_none()
+                && let Some((_, t)) = &self.presets.hover
+            {
+                let left = HOVER_PREVIEW.saturating_sub(t.elapsed());
+                ui.ctx()
+                    .request_repaint_after(left + Duration::from_millis(10));
+            }
         } else {
             self.presets.hover = None;
             if self.presets.preview.take().is_some() {

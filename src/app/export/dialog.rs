@@ -371,7 +371,8 @@ impl Editor {
             }
         });
         if let Some(w) = edit {
-            self.exports.watermark_editor = Some(super::watermark_editor::WatermarkEditor::new(w));
+            self.exports.watermark_editor =
+                Some(super::watermark_editor::WatermarkEditor::new(w, ui.ctx()));
             return;
         }
         let s = &mut self.exports.draft;

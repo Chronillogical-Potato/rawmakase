@@ -1,6 +1,9 @@
 //! Autosave policy. Protected edits can be exported, but never become write jobs.
 use std::time::{Duration, Instant};
 
+/// How long edits must pause before autosave writes them.
+const SETTLE: Duration = Duration::from_millis(600);
+
 #[derive(Default)]
 pub enum SaveState {
     #[default]
@@ -34,9 +37,20 @@ impl SaveState {
             _ => *self = Self::Pending(Instant::now()),
         }
     }
+    /// How long until autosave is due, while it waits for edits to pause or for a
+    /// failed save's retry; the interface wakes then rather than polling.
+    pub fn due_in(&self) -> Option<Duration> {
+        match self {
+            Self::Pending(at) => Some(SETTLE.saturating_sub(at.elapsed())),
+            Self::Failed { retry_after, .. } => {
+                Some(retry_after.saturating_duration_since(Instant::now()))
+            }
+            _ => None,
+        }
+    }
     pub fn ready(&self) -> bool {
         match self {
-            Self::Pending(at) => at.elapsed() > Duration::from_millis(600),
+            Self::Pending(at) => at.elapsed() > SETTLE,
             Self::Failed { retry_after, .. } => Instant::now() >= *retry_after,
             _ => false,
         }
@@ -79,6 +93,16 @@ impl SaveState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn autosave_is_due_once_edits_settle_and_never_when_clean() {
+        let mut state = SaveState::default();
+        assert_eq!(state.due_in(), None);
+        state.mark_changed();
+        let due = state.due_in().unwrap();
+        assert!(due <= SETTLE && due > SETTLE / 2, "{due:?}");
+        state.saving();
+        assert_eq!(state.due_in(), None);
+    }
     #[test]
     fn protected_edits_never_autosave_and_failures_remain_pending() {
         let mut state = SaveState::default();

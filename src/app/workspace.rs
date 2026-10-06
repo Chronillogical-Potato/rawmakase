@@ -1128,8 +1128,9 @@ impl Editor {
 
     fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
-        if self.document.edit.save.needs_save() {
-            ctx.request_repaint_after(Duration::from_millis(200));
+        if let Some(due) = self.document.edit.save.due_in() {
+            // Just after it is due, so the frame finds it ready.
+            ctx.request_repaint_after(due + Duration::from_millis(10));
         }
         if ctx.input(|i| i.viewport().close_requested())
             && (self.exporting() || self.activity.is_syncing() || !self.flush())

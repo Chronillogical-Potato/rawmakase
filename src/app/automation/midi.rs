@@ -108,6 +108,18 @@ pub(super) fn locked(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status
     status.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Changes the connection or problem Preferences shows, waking the interface
+/// only when it changed, so Preferences need not poll.
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+fn update(status: &Mutex<Status>, ctx: &egui::Context, change: impl FnOnce(&mut Status)) {
+    let mut status = locked(status);
+    let before = (status.connected.clone(), status.problem.clone());
+    change(&mut status);
+    if (status.connected.clone(), status.problem.clone()) != before {
+        ctx.request_repaint();
+    }
+}
+
 /// The epoch is shared outside the bounded input queue, so disconnects cannot
 /// lose their reset signal and queued input from old connections is discarded.
 #[cfg(any(test, target_os = "macos", target_os = "windows"))]
@@ -164,10 +176,11 @@ pub(super) fn listen(
                                 })
                                 .collect();
                             let selected = select_port(&binding, &available);
-                            locked(&status).problem = selected.as_ref().err().cloned();
+                            let problem = selected.as_ref().err().cloned();
+                            update(&status, &ctx, |s| s.problem = problem);
                             if let Ok(Some(id)) = selected
                                 && let Some(p) = ports.iter().find(|p| p.id() == id)
-                                && let Some(lease) = Lease::claim(id, claims.clone()).or_else(|| { locked(&status).problem=Some("This input is already assigned to another enabled device".into());None })
+                                && let Some(lease) = Lease::claim(id, claims.clone()).or_else(|| { update(&status, &ctx, |s| s.problem = Some("This input is already assigned to another enabled device".into())); None })
                             {
                                 let epoch = reset_connection(&status, &ctx);
                                 let (name, id) = (named(p), p.id());
@@ -205,7 +218,8 @@ pub(super) fn listen(
                         }
                     }
                 }
-                locked(&status).connected = connected.as_ref().map(|(name, ..)| name.clone());
+                let name = connected.as_ref().map(|(name, ..)| name.clone());
+                update(&status, &ctx, |s| s.connected = name);
                 // Looked at again in two seconds; a stop is noticed sooner.
                 for _ in 0..8 {
                     if stop.load(Ordering::Relaxed) {
@@ -214,7 +228,7 @@ pub(super) fn listen(
                     std::thread::sleep(Duration::from_millis(250));
                 }
             }
-            locked(&status).connected = None;
+            update(&status, &ctx, |s| s.connected = None);
         });
     if let Err(e) = spawned {
         eprintln!("MIDI listener: {e}");
