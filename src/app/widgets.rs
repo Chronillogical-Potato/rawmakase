@@ -1,7 +1,7 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::PanelState;
-use crate::develop::params::{self, ParameterId, format_value};
+use crate::develop::params::{self, LocalParameterId, ParameterId, format_value};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -919,14 +919,37 @@ pub(super) fn setting_slider(
     value: &mut f32,
     default: f32,
 ) -> SliderEvent {
-    let d = id.descriptor();
+    let gradient = match id {
+        ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
+        ParameterId::Tint | ParameterId::ShadowTint => Some(TINT_GRADIENT),
+        _ => None,
+    };
+    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+}
+/// The slider for a mask's adjustment, as its descriptor describes it.
+pub(super) fn local_setting_slider(
+    ui: &mut egui::Ui,
+    id: LocalParameterId,
+    value: &mut f32,
+    default: f32,
+) -> SliderEvent {
+    let gradient = match id {
+        LocalParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
+        LocalParameterId::Tint => Some(TINT_GRADIENT),
+        _ => None,
+    };
+    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+}
+fn descriptor_slider<Id>(
+    ui: &mut egui::Ui,
+    d: &params::Descriptor<Id>,
+    value: &mut f32,
+    default: f32,
+    gradient: Option<(Color32, Color32)>,
+) -> SliderEvent {
     let style = SliderStyle {
         display: Some((d.display.scale, d.display.decimals)),
-        gradient: match id {
-            ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
-            ParameterId::Tint | ParameterId::ShadowTint => Some(TINT_GRADIENT),
-            _ => None,
-        },
+        gradient,
         reciprocal: matches!(d.tick, params::Tick::Mireds(_)),
         drag_step: d.drag_step,
         hue_rail: false,
