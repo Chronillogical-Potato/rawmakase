@@ -13,6 +13,7 @@ app -> export_settings
 app -> lens
 app -> lr_develop
 app -> metadata
+app -> optics
 app -> photo
 app -> platform
 app -> presets
@@ -89,12 +90,12 @@ lens -> optics
 lens -> raw
 lens -> storage
 lens -> tiff
-lens -> xml
 lr_develop -> camera_profiles
 lr_develop -> color
 lr_develop -> develop
 lr_develop -> raw
 lr_develop -> xmp
+optics -> xml
 photo -> camera_profiles
 photo -> dng
 photo -> lens
@@ -106,7 +107,6 @@ presets -> storage
 presets -> xml
 presets -> xmp
 raw -> demosaic
-raw -> lens
 raw -> metadata
 raw -> optics
 raw_defaults -> camera_profiles

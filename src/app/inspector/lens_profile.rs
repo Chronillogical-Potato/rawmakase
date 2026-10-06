@@ -91,7 +91,7 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
 fn setup_row(
     ui: &mut egui::Ui,
     r: &mut Recipe,
-    in_use: Option<&crate::lens::lcp::ImportedProfile>,
+    in_use: Option<&crate::optics::lcp::ImportedProfile>,
 ) {
     control_row(ui, "Setup", |ui| {
         let mut setup = r.lens_profile_choice.setup;

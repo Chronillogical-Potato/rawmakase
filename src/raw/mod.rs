@@ -82,7 +82,7 @@ pub struct Metadata {
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
     /// choices; rebuilt on open.
     #[serde(skip)]
-    pub lens_profiles: crate::lens::lcp::PhotoProfiles,
+    pub lens_profiles: crate::optics::lcp::PhotoProfiles,
     /// Lateral chromatic aberration measured from the decoded image, shared by every
     /// image made from it (see `crate::lens::auto_ca::prime`).
     #[serde(skip)]

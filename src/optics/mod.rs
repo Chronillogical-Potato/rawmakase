@@ -2,6 +2,8 @@
 //! radius for vignetting, distortion and lateral chromatic aberration. Readers in
 //! [`lens`](crate::lens) and [`dng`](crate::dng) produce it; it depends on nothing
 //! else in the crate.
+pub mod lcp;
+
 use serde::{Deserialize, Serialize};
 
 /// A radial function sampled at increasing radii. Radius 0 is the image centre and
