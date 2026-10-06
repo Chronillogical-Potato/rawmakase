@@ -14,6 +14,7 @@ use std::{
 /// The queue of export batches and the thread that runs them.
 pub struct Queue {
     shared: Arc<Shared>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 struct Shared {
@@ -58,7 +59,7 @@ impl Queue {
             changed: Box::new(changed),
         });
         let worker = shared.clone();
-        std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             while let Some((ticket, batch, cancel)) = worker.next() {
                 (worker.changed)();
                 // Each photo's panic is caught by the batch, which keeps the others'
@@ -78,7 +79,10 @@ impl Queue {
                 (worker.changed)();
             }
         });
-        Self { shared }
+        Self {
+            shared,
+            thread: Some(thread),
+        }
     }
 
     /// Queues `batch`, returning its ticket.
@@ -163,13 +167,30 @@ impl Shared {
     }
 }
 
-impl Drop for Queue {
-    /// Stops the thread once the running batch is done; waiting ones never start.
-    fn drop(&mut self) {
+impl Queue {
+    /// Stops the queue at exit: the running batch is cancelled after the stage it
+    /// is in, and waiting ones never start. Returns the thread, to wait for.
+    pub fn close(&mut self) -> Option<std::thread::JoinHandle<()>> {
+        if let Ok(state) = self.shared.state.lock()
+            && let Some(running) = &state.running
+        {
+            running.cancel.store(true, Ordering::Relaxed);
+        }
+        self.stop_after_running();
+        self.thread.take()
+    }
+    fn stop_after_running(&self) {
         if let Ok(mut state) = self.shared.state.lock() {
             state.closed = true;
             state.waiting.clear();
         }
         self.shared.wake.notify_all();
+    }
+}
+
+impl Drop for Queue {
+    /// Stops the thread once the running batch is done; waiting ones never start.
+    fn drop(&mut self) {
+        self.stop_after_running();
     }
 }

@@ -16,6 +16,12 @@ pub(super) struct Automation {
     outputs: output::Outputs,
     turn: Option<(std::time::Instant, TurnScope)>,
 }
+impl Automation {
+    /// Cancels the export and preview jobs commands started.
+    pub(super) fn cancel_outputs(&self) {
+        self.outputs.cancel_all();
+    }
+}
 pub(super) use parameter::Param;
 pub(super) use preset::PresetTarget;
 
