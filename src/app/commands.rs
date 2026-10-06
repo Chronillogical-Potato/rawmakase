@@ -4,7 +4,6 @@ mod output;
 mod parameter;
 mod preset;
 mod reply;
-use crate::develop::params::ParameterId;
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
 };
@@ -736,15 +735,9 @@ impl Editor {
             } else {
                 param.turn(recipe, ticks, channel)
             };
-            if param.is_white_balance() && before != *param.value(recipe, channel) {
-                recipe.update_wb(self.document.metadata.as_ref().expect("checked above"));
-                recipe.auto_white_balance = None;
-            }
-            if param == Param::Setting(ParameterId::Clarity) {
-                recipe.adopt_measured_clarity(before);
-            }
-            if param == Param::Setting(ParameterId::Texture) {
-                recipe.adopt_measured_texture(before);
+            if let Param::Setting(id) = param {
+                let photo = self.document.metadata.as_ref();
+                crate::develop::edit::setting_changed(recipe, id, before, photo);
             }
             shown
         };

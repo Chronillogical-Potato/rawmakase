@@ -713,32 +713,30 @@ impl Editor {
                         );
                     });
             });
-            let old = (r.temperature, r.tint);
-            setting_slider(ui, ParameterId::Temperature, &mut r.temperature, 6500.);
-            setting_slider(ui, ParameterId::Tint, &mut r.tint, 0.);
-            if old != (r.temperature, r.tint)
-                && let Some(m) = &metadata
-            {
-                r.update_wb(m);
-                r.auto_white_balance = None;
-            }
+            let photo = metadata.as_ref();
+            setting_control(ui, r, ParameterId::Temperature, 6500., photo);
+            setting_control(ui, r, ParameterId::Tint, 0., photo);
             subheading(ui, "Tone");
-            setting_slider(ui, ParameterId::Exposure, &mut r.exposure, 0.);
-            setting_slider(ui, ParameterId::Contrast, &mut r.contrast, 0.);
-            setting_slider(ui, ParameterId::Highlights, &mut r.highlights, 0.);
-            setting_slider(ui, ParameterId::Shadows, &mut r.shadows, 0.);
-            setting_slider(ui, ParameterId::Whites, &mut r.whites, 0.);
-            setting_slider(ui, ParameterId::Blacks, &mut r.blacks, 0.);
+            for id in [
+                ParameterId::Exposure,
+                ParameterId::Contrast,
+                ParameterId::Highlights,
+                ParameterId::Shadows,
+                ParameterId::Whites,
+                ParameterId::Blacks,
+            ] {
+                setting_control(ui, r, id, 0., photo);
+            }
             subheading(ui, "Presence");
-            let previous_texture = r.effects.texture;
-            setting_slider(ui, ParameterId::Texture, &mut r.effects.texture, 0.);
-            r.adopt_measured_texture(previous_texture);
-            let previous_clarity = r.effects.clarity;
-            setting_slider(ui, ParameterId::Clarity, &mut r.effects.clarity, 0.);
-            r.adopt_measured_clarity(previous_clarity);
-            setting_slider(ui, ParameterId::Dehaze, &mut r.effects.dehaze, 0.);
-            setting_slider(ui, ParameterId::Vibrance, &mut r.vibrance, 0.);
-            setting_slider(ui, ParameterId::Saturation, &mut r.saturation, 0.);
+            for id in [
+                ParameterId::Texture,
+                ParameterId::Clarity,
+                ParameterId::Dehaze,
+                ParameterId::Vibrance,
+                ParameterId::Saturation,
+            ] {
+                setting_control(ui, r, id, 0., photo);
+            }
         }) {
             r.wb = [1.; 3];
             r.tint = 0.;
@@ -1945,4 +1943,18 @@ enum GuidedAction {
     /// Draw: open or close the tool.
     Toggle,
     Clear,
+}
+
+/// The slider for develop setting `id`, and what changing it implies for the rest
+/// of the recipe (`develop::edit`).
+fn setting_control(
+    ui: &mut egui::Ui,
+    r: &mut Recipe,
+    id: ParameterId,
+    default: f32,
+    photo: Option<&crate::raw::Metadata>,
+) {
+    let previous = *id.value_mut(r);
+    setting_slider(ui, id, id.value_mut(r), default);
+    crate::develop::edit::setting_changed(r, id, previous, photo);
 }
