@@ -257,7 +257,7 @@ mod tests {
         });
         assert!(Panel::SpotRemoval.holds_change(&before, &after));
         // Detail's reset on an old recipe also sets the measured sharpening.
-        let mut before = before.clone();
+        let mut before = before;
         before.sharpening = 0.35;
         let mut after = before.clone();
         after.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);

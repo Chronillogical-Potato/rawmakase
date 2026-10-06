@@ -13,7 +13,7 @@ use std::sync::atomic::AtomicBool;
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).context("Supply a RAW path")?;
     let cancel = AtomicBool::new(false);
-    let image = raw::Raw::open(std::path::Path::new(&path))?.develop(true, &cancel)?;
+    let image = raw::Raw::open(std::path::Path::new(&path))?.develop(raw::Decode::Half, &cancel)?;
     let r = Recipe::with_profiles(&image.metadata, &[]);
     let (lum, w, h) = upright::analysis_image(&image, &r);
     let segments = upright::segments(&lum, w, h);

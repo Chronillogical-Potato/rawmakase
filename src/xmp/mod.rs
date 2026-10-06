@@ -12,7 +12,7 @@ use crate::develop::curve::ToneCurve;
 pub use parse::parse;
 use std::{collections::BTreeMap, path::PathBuf};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Preset {
     pub id: String,
     pub name: String,

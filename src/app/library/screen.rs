@@ -283,7 +283,7 @@ fn render(path: &Path, edge: u32, edit: Option<&EditSource>) -> anyhow::Result<i
     let raw = crate::raw::Raw::open(path)?;
     let recipe = EditSource::recipe(edit, &raw)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let image = raw.develop(true, &cancel)?;
+    let image = raw.develop(crate::raw::Decode::Half, &cancel)?;
     let out = crate::develop::render(&image, &recipe, edge)?;
     image::RgbImage::from_raw(out.width, out.height, out.rgb8())
         .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))
@@ -362,7 +362,7 @@ mod tests {
         let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
         screen.pending.insert(key.clone(), 0);
         screen.queue.0.lock().unwrap().jobs.push(Job {
-            key: key.clone(),
+            key,
             ticket: 0,
             edit: None,
         });

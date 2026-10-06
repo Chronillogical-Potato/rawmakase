@@ -750,7 +750,7 @@ mod tests {
         )
         .unwrap();
         let destination = temp.path().join("library");
-        let paths = vec![empty.clone(), good.clone()];
+        let paths = vec![empty.clone(), good];
         // All or nothing, as before.
         assert!(import_into(&paths, &destination).is_err());
         let done = import_each_into(&paths, &destination);

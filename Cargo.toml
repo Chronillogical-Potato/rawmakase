@@ -83,6 +83,15 @@ pkg-config = "0.3"
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
+# Lints beyond the defaults. CI denies warnings, so each one listed here holds
+# at zero. More join as the refactor in issue #216 clears them: unreachable_pub
+# with the narrowing of `pub` (184 today), struct_excessive_bools with the
+# state structs (10).
+[lints.clippy]
+fn_params_excessive_bools = "warn"
+large_enum_variant = "warn"
+redundant_clone = "warn"
+
 [profile.release]
 lto = "thin"
 

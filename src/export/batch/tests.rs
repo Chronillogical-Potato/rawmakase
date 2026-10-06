@@ -159,7 +159,7 @@ fn ask_returns_the_files_that_exist_and_the_answer_applies_to_all() -> Result<()
     let fresh = plan(&photos[2..3], &ask, None).unwrap();
     assert_eq!(fresh.late, Existing::Skip);
     // No folder chosen.
-    let mut none = ask.clone();
+    let mut none = ask;
     none.folder = None;
     assert_eq!(plan(&photos, &none, None).unwrap_err(), Unplanned::NoFolder);
     Ok(())
@@ -586,7 +586,7 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     s.naming = Some(crate::export::Naming::CustomNameSequence);
     s.custom_text = "Concert".into();
     s.start_number = 10;
-    let outcomes = run_all(&f.batch(photos.clone(), s.clone()));
+    let outcomes = run_all(&f.batch(photos.clone(), s));
     assert!(matches!(outcomes[1], Outcome::Failed(_)), "{outcomes:?}");
     assert_eq!(listing(&f.out()), ["Concert-10.tif", "Concert-12.tif"]);
     // A photo left out before the export (offline, not RAW) keeps its number too.

@@ -51,6 +51,7 @@ impl Editor {
             .map(|path| super::worker::Prefetch {
                 path,
                 cancel: self.prefetch_cancel.clone(),
+                demosaic: crate::raw::demosaic(),
             });
         // The photo being left is Paste from Previous's source; opening the same photo
         // again (as a new demosaic setting does) leaves Previous as it was.
@@ -78,6 +79,7 @@ impl Editor {
             cancel,
             prefetch,
             defaults: self.raw_defaults.clone(),
+            demosaic: crate::raw::demosaic(),
         });
         // The photo left may be the reference, or its edit may have changed.
         self.load_reference();
@@ -114,8 +116,8 @@ impl Editor {
         }
         // A snapshot name still being typed, as leaving the photo any way commits it.
         self.commit_snapshot_rename();
-        if let Some(done) = self.autosave.wait() {
-            self.background_saved(done);
+        if let Some(completion) = self.autosave.wait() {
+            self.background_saved(completion);
         }
         // A slider or histogram drag still held when the photo is left (Left or Right
         // with the button down) is saved as a step of its own; History records it
@@ -161,8 +163,8 @@ impl Editor {
     /// Autosave: collects a finished background save and, once the edit
     /// has settled, starts the next.
     pub(super) fn autosave(&mut self, ctx: &egui::Context) {
-        if let Some(done) = self.autosave.poll() {
-            self.background_saved(done);
+        if let Some(completion) = self.autosave.poll() {
+            self.background_saved(completion);
         }
         if !self.document.save.ready() || self.document.history.in_gesture() || self.autosave.busy()
         {
@@ -190,12 +192,13 @@ impl Editor {
             }
         }
     }
-    fn background_saved(&mut self, done: super::autosave::Done) {
-        let result = done.as_ref().map(|_| ()).map_err(Clone::clone);
+    fn background_saved(&mut self, completion: super::autosave::Completion) {
+        let saved = completion.into_result();
+        let result = saved.as_ref().map(|_| ()).map_err(Clone::clone);
         if !self.document.save.finished(result) {
             return;
         }
-        match done {
+        match saved {
             Ok(p) => self.saved_to(&p),
             Err(e) => self.status = format!("Edits not saved: {e}"),
         }

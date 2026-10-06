@@ -793,6 +793,13 @@ impl Preset {
             r.clarity_model = crate::develop::clarity::ClarityModel::Original;
         }
         settings.assign("Texture", &mut r.effects.texture, 0.01, -1., 1.)?;
+        // Lightroom's Texture means the measured operator, also on a recipe saved before.
+        if settings.values.contains_key("Texture") {
+            r.texture_model = crate::develop::texture::TextureModel::Measured;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_TEXTURE) {
+            r.texture_model = crate::develop::texture::TextureModel::Original;
+        }
         settings.assign("Dehaze", &mut r.effects.dehaze, 0.01, -1., 1.)?;
         settings.assign("GrainAmount", &mut r.effects.grain, 0.01, 0., 1.)?;
         settings.assign("GrainSize", &mut r.effects.grain_size, 0.01, 0., 1.)?;
