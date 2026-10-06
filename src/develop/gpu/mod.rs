@@ -19,12 +19,12 @@ use wgpu::util::DeviceExt;
 mod develop;
 mod present;
 mod resident;
+pub(crate) mod sampling;
 mod uniforms;
 mod weights;
 pub(crate) use develop::Input;
 pub(crate) use present::Finish;
 pub use present::{Display, Frame, MonitorLut, Slot};
-pub(crate) use resident::SAMPLE_HEADER;
 
 /// Held by previews while they submit work, and exclusively while the window's
 /// surface is reconfigured for a new size.
