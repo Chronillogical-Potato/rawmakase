@@ -353,6 +353,12 @@ impl ExportSettings {
                 }
             },
         };
+        // Windows' device names can't be file names, extension or not.
+        let name = if reserved(&name) {
+            format!("{name}_")
+        } else {
+            name
+        };
         let extension = self.format.extension();
         let name = if self.uppercase {
             format!("{name}.{}", extension.to_uppercase())
@@ -406,6 +412,16 @@ fn name_part(text: &str) -> String {
         .trim_end_matches(['.', ' '])
         .trim()
         .to_string()
+}
+
+/// Whether `name` is one of Windows' device names (CON, NUL, COM1…), in any case.
+fn reserved(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    matches!(name.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|device| {
+            name.strip_prefix(device)
+                .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+        })
 }
 
 /// "20260504" from a capture time as the catalog keeps it ("2026-05-04
@@ -504,6 +520,9 @@ mod tests {
                 "{name}"
             );
         }
+        // Windows' device names are not left as they are.
+        s.custom_text = "con".into();
+        assert_eq!(s.file_name_for(source, &at).0, "con_.jpg");
         // An empty custom name is the file's own.
         s.custom_text = " ".into();
         s.naming = Some(Naming::CustomName);
