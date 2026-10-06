@@ -783,15 +783,6 @@ fn render_resident(
     if !develop::pipeline::pixel_params::supported(&base) {
         return Ok(None);
     }
-    // The measured Texture's image is made on the CPU, its detail once per image.
-    let texture = develop::texture::measured(&base);
-    let untextured = (texture != 0.).then(|| source.clone());
-    let source = &if texture != 0. {
-        base.effects.texture = 0.;
-        textured(source, texture, scale, cancel, Some(&mut *stages.cache))?
-    } else {
-        source.clone()
-    };
     // Masks whose ranges need developed colours, whose detail changes the samples or
     // whose finish runs on the CPU take the CPU sampling path.
     if base.masks.iter().filter(|m| m.is_active()).any(|m| {
@@ -803,6 +794,15 @@ fn render_resident(
     }) {
         return Ok(None);
     }
+    // The measured Texture's image is made on the CPU, its detail once per image.
+    let texture = develop::texture::measured(&base);
+    let untextured = (texture != 0.).then(|| source.clone());
+    let source = &if texture != 0. {
+        base.effects.texture = 0.;
+        textured(source, texture, scale, cancel, Some(&mut *stages.cache))?
+    } else {
+        source.clone()
+    };
     let mut spatial = base.clone();
     spatial.shadows = 0.;
     spatial.highlights = 0.;
