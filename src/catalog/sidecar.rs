@@ -4,10 +4,8 @@
 //! time; the catalog stays the source of truth.
 use super::Catalog;
 use crate::jpeg::{APP1, Segments};
-use crate::xmp::{
-    descriptive::{self, Read},
-    ns::JPEG_HEADER,
-};
+use crate::xml::ns::JPEG_HEADER;
+use crate::xmp::descriptive::{self, Read};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};

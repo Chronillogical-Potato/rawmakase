@@ -12,7 +12,7 @@
 use super::{LensCorrection, Radial};
 use crate::{
     raw::Metadata,
-    xmp::ns::{RDF, ST_CAMERA},
+    xml::ns::{RDF, ST_CAMERA},
 };
 use anyhow::{Context, Result, ensure};
 use std::{

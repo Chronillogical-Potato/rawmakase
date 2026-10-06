@@ -1,5 +1,7 @@
-//! XML escaping and the packet wrapper of the XMP RAWmakase writes.
-use super::ns::RDF;
+//! XML escaping, the packet wrapper of the XMP RAWmakase writes, and the XMP
+//! namespaces ([`ns`]) that readers and writers across the crate share.
+pub mod ns;
+use ns::RDF;
 
 /// Text or an attribute value as `xmp::write` writes it: markup escaped,
 /// tabs and line breaks kept as they are and other control characters,

@@ -2,8 +2,8 @@
 //! TIFF's embedded XMP, or the XMP a Lightroom catalog keeps per photo.
 //! Namespaces are matched by URI, in attribute and element forms. Lightroom's
 //! and digiKam's properties are read as digiKam documents and writes them.
-use super::ns::{DC, DIGIKAM, EXIF, LR, PHOTOSHOP, RDF, XML, XMP};
 use crate::catalog::{Capture, LangAlt, Location, Value};
+use crate::xml::ns::{DC, DIGIKAM, EXIF, LR, PHOTOSHOP, RDF, XML, XMP};
 use anyhow::{Result, ensure};
 use roxmltree::Node;
 

@@ -23,7 +23,7 @@ camera_profiles -> color_math
 camera_profiles -> develop
 camera_profiles -> raw
 camera_profiles -> storage
-camera_profiles -> xmp
+camera_profiles -> xml
 catalog -> camera_profiles
 catalog -> develop
 catalog -> exif
@@ -32,6 +32,7 @@ catalog -> jpeg
 catalog -> raw
 catalog -> storage
 catalog -> tiff
+catalog -> xml
 catalog -> xmp
 comparison -> camera_profiles
 comparison -> develop
@@ -52,6 +53,7 @@ exif -> catalog
 exif -> jpeg
 exif -> raw
 exif -> tiff
+export -> build_info
 export -> camera_profiles
 export -> catalog
 export -> decode_cache
@@ -63,14 +65,16 @@ export -> storage
 export -> tiff
 export -> time
 export -> watermark
+export -> xml
 export -> xmp
 lens -> raw
 lens -> storage
 lens -> tiff
-lens -> xmp
+lens -> xml
 presets -> develop
 presets -> raw
 presets -> storage
+presets -> xml
 presets -> xmp
 raw -> camera_profiles
 raw -> demosaic
@@ -84,11 +88,12 @@ storage -> export
 storage -> raw
 watermark -> develop
 watermark -> storage
+xmp -> build_info
 xmp -> camera_profiles
 xmp -> catalog
 xmp -> develop
 xmp -> exif
-xmp -> export
 xmp -> lens
 xmp -> presets
 xmp -> raw
+xmp -> xml

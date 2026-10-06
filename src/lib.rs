@@ -13,6 +13,7 @@
 //! and `docs/architecture.md` records ownership rules. This library exists for the
 //! RAWmakase binary, its examples and its tests; it is not a stable public API.
 pub mod app;
+mod build_info;
 pub mod camera_profiles;
 pub mod cameras;
 pub mod catalog;
@@ -36,4 +37,5 @@ mod tiff;
 pub mod time;
 pub mod updates;
 pub mod watermark;
+pub mod xml;
 pub mod xmp;
