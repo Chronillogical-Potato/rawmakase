@@ -8,14 +8,12 @@ use super::{
     worker::Event,
 };
 use crate::{
-    catalog::{
-        Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory,
-        resolve::{self, Origin},
-    },
+    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory},
     develop::{
         Recipe,
         settings_groups::{self, GroupSelection, Source, Target},
     },
+    edits::{self, Origin},
     export_settings::ExportOptions,
     raw_defaults::DevelopDefaults,
 };
@@ -211,7 +209,7 @@ fn prepare(
     let metadata = raw.metadata.clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let record = catalog.edit_record(target.id)?;
-    let resolved = resolve::resolve(&record, &target.path, &metadata, &profiles, defaults)?;
+    let resolved = edits::resolve(&record, &target.path, &metadata, &profiles, defaults)?;
     let mut starting_warnings = Vec::new();
     let before = match resolved.origin {
         Origin::Saved => EditBefore::Saved(Box::new(resolved.recipe)),

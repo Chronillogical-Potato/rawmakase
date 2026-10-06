@@ -1,6 +1,7 @@
 //! A photo's saved edit: its recipe and export options, the spots and masks
 //! kept beside them, and the bitmaps recipes refer to by hash.
-use super::{Catalog, SavedEdit};
+use super::Catalog;
+use crate::edits::{SavedEdit, local_edits};
 use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
@@ -172,13 +173,4 @@ impl Catalog {
         };
         Ok((recipe, lightroom))
     }
-}
-/// Spots and masks from their stored text; none when there is none.
-pub(super) fn local_edits(text: Option<&str>) -> Result<crate::develop::LocalEdits> {
-    let local: crate::develop::LocalEdits = match text {
-        Some(d) => serde_json::from_str(d)?,
-        None => Default::default(),
-    };
-    local.validate()?;
-    Ok(local)
 }
