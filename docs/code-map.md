@@ -260,6 +260,8 @@ above rather than implementing SQL, file formats or pixel processing.
 
 ### Background work
 
+What each long-lived worker blocks on, how it stops and whether exit may wait for it: [the shutdown contract](shutdown.md).
+
 | File | Responsibility |
 | --- | --- |
 | [worker/mod.rs](../src/app/worker/mod.rs) | Named event payloads, load/render jobs, task kinds, render stages and repaint notification. |
