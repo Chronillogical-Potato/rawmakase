@@ -221,6 +221,7 @@ impl Fixture {
             settings,
             defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
             watermark: None,
+            demosaic: Default::default(),
         }
     }
 }

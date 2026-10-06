@@ -4436,6 +4436,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
                 settings,
                 defaults: defaults.clone(),
                 watermark: None,
+                demosaic: Default::default(),
             },
             &Default::default(),
             |_| {},

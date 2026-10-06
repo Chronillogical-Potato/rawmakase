@@ -105,7 +105,10 @@ impl Editor {
     /// Makes catalog photo `id` the reference and shows Reference View, as dropping
     /// it on the Reference side or Set as Reference Photo does.
     pub(super) fn set_reference(&mut self, id: i64) {
-        let source = self.library.as_ref().and_then(|l| l.develop_source(id));
+        let source = self
+            .library
+            .as_ref()
+            .and_then(|l| l.develop_source(id, self.demosaic));
         let Some(source) = source else {
             return;
         };
@@ -138,7 +141,10 @@ impl Editor {
             }
             return;
         }
-        let source = self.library.as_ref().and_then(|l| l.develop_source(id));
+        let source = self
+            .library
+            .as_ref()
+            .and_then(|l| l.develop_source(id, self.demosaic));
         let source = match source {
             // No longer in the catalog, e.g. a virtual copy removed.
             None => return self.clear_reference(),
@@ -167,7 +173,7 @@ impl Editor {
             path: source.path,
             edit: source.edit,
             cancel,
-            demosaic: crate::raw::demosaic(),
+            demosaic: self.demosaic.effective(),
         });
     }
     /// Develops the reference photo again even when its edit and file are as they

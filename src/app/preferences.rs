@@ -513,7 +513,7 @@ impl Editor {
 
     fn performance_page(&mut self, ui: &mut egui::Ui) {
         group(ui, "Demosaic");
-        let current = crate::raw::demosaic();
+        let current = self.demosaic.effective();
         let mut picked = None;
         for (choice, label, note) in [
             (
@@ -543,7 +543,7 @@ impl Editor {
             );
         }
         if let Some(choice) = picked {
-            crate::raw::set_demosaic(choice);
+            self.demosaic = choice;
             let _ = self.save_session();
             // Takes effect on the next full-size decode, so the open photo is
             // reopened.
