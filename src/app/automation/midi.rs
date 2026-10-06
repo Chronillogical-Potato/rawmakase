@@ -131,7 +131,7 @@ pub(super) fn reset_connection(status: &Mutex<Status>, ctx: &egui::Context) -> u
 }
 
 /// Listens for the device on a thread of its own, finding it again when it is
-/// plugged back in, until `stop` is set. Where there is no MIDI backend nothing
+/// plugged back in, until `stop`'s sender is dropped. Where there is no MIDI backend nothing
 /// is ever sent.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) fn listen(
@@ -140,15 +140,16 @@ pub(super) fn listen(
     tx: Sender<Msg>,
     ctx: egui::Context,
     status: Arc<Mutex<Status>>,
-    stop: Arc<AtomicBool>,
+    stop: std::sync::mpsc::Receiver<()>,
 ) {
     use midir::{MidiInput, MidiInputConnection};
+    use std::sync::mpsc::RecvTimeoutError;
     let spawned = std::thread::Builder::new()
         .name("midi".into())
         .spawn(move || {
             let mut connected: Option<(String, String, MidiInputConnection<()>, Lease)> = None;
             let mut last = Instant::now();
-            while !stop.load(Ordering::Relaxed) {
+            loop {
                 // A gap far beyond the poll interval means the Mac slept; the
                 // device comes back as a new endpoint behind the same name.
                 if last.elapsed() > Duration::from_secs(10) {
@@ -220,12 +221,11 @@ pub(super) fn listen(
                 }
                 let name = connected.as_ref().map(|(name, ..)| name.clone());
                 update(&status, &ctx, |s| s.connected = name);
-                // Looked at again in two seconds; a stop is noticed sooner.
-                for _ in 0..8 {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(250));
+                // Looked at again in two seconds, as no portable event announces a
+                // device plugged in; a stop ends the wait at once.
+                match stop.recv_timeout(Duration::from_secs(2)) {
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
                 }
             }
             update(&status, &ctx, |s| s.connected = None);
@@ -241,6 +241,6 @@ pub(super) fn listen(
     _: Sender<Msg>,
     _: egui::Context,
     _: Arc<Mutex<Status>>,
-    _: Arc<AtomicBool>,
+    _: std::sync::mpsc::Receiver<()>,
 ) {
 }
