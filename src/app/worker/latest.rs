@@ -13,6 +13,7 @@ struct Slot<T> {
 }
 pub struct Latest<T> {
     slot: Arc<Slot<T>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 impl<T: Send + 'static> Latest<T> {
     pub fn new(run: impl FnMut(T) + Send + 'static) -> Self {
@@ -25,14 +26,14 @@ impl<T: Send + 'static> Latest<T> {
             wake: Condvar::new(),
             stopped: AtomicBool::new(false),
         });
-        let thread = slot.clone();
-        std::thread::spawn(move || {
+        let worker = slot.clone();
+        let thread = std::thread::spawn(move || {
             loop {
-                let mut lock = thread.jobs.lock().unwrap();
-                while lock.iter().all(Option::is_none) && !thread.stopped.load(Ordering::Relaxed) {
-                    lock = thread.wake.wait(lock).unwrap();
+                let mut lock = worker.jobs.lock().unwrap();
+                while lock.iter().all(Option::is_none) && !worker.stopped.load(Ordering::Relaxed) {
+                    lock = worker.wake.wait(lock).unwrap();
                 }
-                if thread.stopped.load(Ordering::Relaxed) {
+                if worker.stopped.load(Ordering::Relaxed) {
                     break;
                 }
                 let job = lock.iter_mut().find_map(Option::take).unwrap();
@@ -42,8 +43,17 @@ impl<T: Send + 'static> Latest<T> {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(job)));
             }
         });
-        Self { slot }
+        Self {
+            slot,
+            thread: Some(thread),
+        }
     }
+    /// Stops the worker once its current job is done; pending jobs never run.
+    pub(in crate::app) fn stop(&mut self) -> super::super::task::Stopping {
+        self.signal_stop();
+        super::super::task::Stopping::new(self.thread.take())
+    }
+
     pub fn submit(&self, job: T) {
         self.submit_to(0, job);
     }
@@ -64,16 +74,40 @@ pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
         .or_else(|| panic.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".into())
 }
-impl<T> Drop for Latest<T> {
-    fn drop(&mut self) {
+impl<T> Latest<T> {
+    fn signal_stop(&self) {
         let _guard = self.slot.jobs.lock().unwrap();
         self.slot.stopped.store(true, Ordering::Relaxed);
         self.slot.wake.notify_one();
     }
 }
+impl<T> Drop for Latest<T> {
+    fn drop(&mut self) {
+        self.signal_stop();
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_stopped_worker_finishes_its_job_and_runs_no_pending_one() {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let mut worker = Latest::new(move |i: u32| {
+            started_tx.send(i).unwrap();
+            if i == 1 {
+                let _ = release_rx.recv();
+            }
+        });
+        worker.submit(1);
+        assert_eq!(started_rx.recv().unwrap(), 1);
+        worker.submit(2);
+        let stopping = worker.stop();
+        drop(release_tx);
+        let waited = crate::app::task::wait_for(vec![stopping], std::time::Duration::from_secs(10));
+        assert_eq!(waited.detached, 0);
+        assert!(started_rx.try_recv().is_err(), "the pending job never ran");
+    }
     #[test]
     fn pending_jobs_are_coalesced() {
         let (started_tx, started_rx) = std::sync::mpsc::channel();

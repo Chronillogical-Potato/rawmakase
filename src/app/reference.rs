@@ -69,6 +69,10 @@ pub(super) struct ReferenceSide {
 }
 
 impl ReferenceView {
+    /// Stops loading the reference photo.
+    pub(super) fn cancel_load(&mut self) {
+        self.load.invalidate();
+    }
     /// No reference: the side shows how to set one.
     fn clear(&mut self) {
         self.photo = None;

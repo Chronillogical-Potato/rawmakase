@@ -483,6 +483,27 @@ fn the_queue_runs_one_batch_at_a_time_and_a_waiting_one_can_be_removed() -> Resu
 }
 
 #[test]
+fn closing_the_queue_stops_its_thread_and_starts_no_waiting_batch() -> Result<()> {
+    let f = fixture(&["a.dng", "b.dng"])?;
+    let photos = f.batch_photos()?;
+    let mut queue = crate::export::queue::Queue::new(|_, _| {}, || {});
+    let batch = |name: &str| f.batch(photos.clone(), settings(&f.out().join(name)));
+    queue.submit(batch("running"));
+    queue.submit(batch("waiting"));
+    let start = std::time::Instant::now();
+    while queue.status().running.is_none() {
+        assert!(start.elapsed().as_secs() < 60, "the batch did not start");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let thread = queue.close().expect("the queue's thread");
+    // The running batch stops after the stage it is in.
+    thread.join().unwrap();
+    assert!(listing(&f.out().join("waiting")).is_empty());
+    assert!(queue.close().is_none(), "closed once");
+    Ok(())
+}
+
+#[test]
 fn a_preset_watermark_is_read_once_for_the_whole_batch() -> Result<()> {
     let f = fixture(&["a.dng", "b.dng"])?;
     let photos = f.batch_photos()?;

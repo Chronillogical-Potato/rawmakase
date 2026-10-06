@@ -122,6 +122,14 @@ pub(super) struct Exports {
     watermarks: Vec<crate::watermark::Watermark>,
 }
 
+impl Exports {
+    /// Stops the export queue at exit, cancelling the running batch; its thread,
+    /// to wait for.
+    pub(super) fn close(&mut self) -> Option<std::thread::JoinHandle<()>> {
+        self.queue.as_mut().and_then(Queue::close)
+    }
+}
+
 impl Editor {
     /// Export…: the dialog for the photos chosen now, starting from the last
     /// export's choices.

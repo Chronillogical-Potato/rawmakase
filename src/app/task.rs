@@ -36,6 +36,40 @@ enum Phase {
     Running,
 }
 
+/// A worker asked to stop, to wait for at exit (see docs/shutdown.md).
+pub(super) struct Stopping(Option<std::thread::JoinHandle<()>>);
+impl Stopping {
+    pub fn new(thread: Option<std::thread::JoinHandle<()>>) -> Self {
+        Self(thread)
+    }
+    fn finished(&self) -> bool {
+        self.0
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+    }
+}
+/// How waiting for stopping workers ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Waited {
+    pub finished: usize,
+    /// Still running at the deadline, and left to end with the process.
+    pub detached: usize,
+}
+/// Waits until every worker has finished, or `deadline` passes. A worker blocked
+/// on a stalled network share must not hold up quitting, so none is joined
+/// without one.
+pub(super) fn wait_for(workers: Vec<Stopping>, deadline: std::time::Duration) -> Waited {
+    let until = std::time::Instant::now() + deadline;
+    while !workers.iter().all(Stopping::finished) && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let finished = workers.iter().filter(|w| w.finished()).count();
+    Waited {
+        finished,
+        detached: workers.len() - finished,
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Task {
     generation: u64,
@@ -74,6 +108,30 @@ impl Drop for Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn waiting_for_workers_stops_at_the_deadline() {
+        use std::time::Duration;
+        let quick = Stopping::new(Some(std::thread::spawn(|| {})));
+        let (release, stalled) = std::sync::mpsc::channel::<()>();
+        // A read stalled on a network share.
+        let slow = Stopping::new(Some(std::thread::spawn(move || {
+            let _ = stalled.recv();
+        })));
+        let started = std::time::Instant::now();
+        let waited = wait_for(
+            vec![quick, slow, Stopping::new(None)],
+            Duration::from_millis(50),
+        );
+        assert_eq!(
+            waited,
+            Waited {
+                finished: 2,
+                detached: 1
+            }
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(release);
+    }
     use std::time::Duration;
 
     #[test]

@@ -42,12 +42,16 @@ pub(super) struct Outputs {
 }
 impl Drop for Outputs {
     fn drop(&mut self) {
+        self.cancel_all();
+    }
+}
+impl Outputs {
+    /// Cancels every job still running, after the stage it is in.
+    pub fn cancel_all(&self) {
         for job in self.jobs.values() {
             job.cancel.store(true, Ordering::Relaxed);
         }
     }
-}
-impl Outputs {
     pub fn state(&self, id: u64) -> Result<OutputState> {
         self.jobs
             .get(&id)

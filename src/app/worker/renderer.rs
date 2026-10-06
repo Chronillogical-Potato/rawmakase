@@ -132,6 +132,10 @@ impl Textures {
 /// each keeps its latest job and the edit's goes first.
 pub struct Renderer(Latest<RenderJob>);
 impl Renderer {
+    /// Stops rendering once the current job is done.
+    pub(in crate::app) fn stop(&mut self) -> crate::app::task::Stopping {
+        self.0.stop()
+    }
     pub fn submit(&self, job: RenderJob) {
         let lane = match job.pane {
             Pane::After => 0,
