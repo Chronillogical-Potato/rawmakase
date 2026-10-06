@@ -59,6 +59,9 @@ pub struct Library {
     /// Each collection's photos, limited to the ones the Library shows.
     collection_photos: HashMap<i64, HashSet<i64>>,
     roots: Vec<(i64, String, Option<String>)>,
+    /// Whether the folders missing on this computer were reported since the
+    /// catalog opened.
+    missing_noted: bool,
     volumes: volumes::Volumes,
     /// The source and filter bar; `visible` is their result.
     filters: filter::Filters,
@@ -169,6 +172,7 @@ impl Library {
             collections: Vec::new(),
             collection_photos: HashMap::new(),
             roots: Vec::new(),
+            missing_noted: false,
             volumes: Default::default(),
             filters: Default::default(),
             selected_folder: String::new(),

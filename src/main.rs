@@ -184,7 +184,7 @@ fn main() -> Result<()> {
             for (id, source, mapped) in c.roots()? {
                 println!(
                     "Root {id}: {source} → {}",
-                    mapped.unwrap_or_else(|| "not relinked".into())
+                    mapped.unwrap_or_else(|| "where it was added".into())
                 );
             }
         }

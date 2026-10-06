@@ -24,6 +24,8 @@ impl Editor {
                     self.catalog_work = None;
                     self.catalog_ready(result);
                 }
+                // The dialog's own DialogClosed follows.
+                Event::FolderQuestion(question) => self.folder_question = Some(*question),
 
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
@@ -278,6 +280,9 @@ impl Editor {
     }
     fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
+        // Folder locations may have changed with it.
+        self.save_computer_name();
+        self.preferences.locations = None;
         match result {
             Ok(mut l) => {
                 self.load.invalidate();
