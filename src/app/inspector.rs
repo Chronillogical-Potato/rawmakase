@@ -1433,13 +1433,13 @@ impl Editor {
                 let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
                 let mut shown = r.transform.displayed(axes);
                 let t = &mut shown;
-                slider(ui, "Vertical", &mut t.vertical, -1. ..=1., 0.);
-                slider(ui, "Horizontal", &mut t.horizontal, -1. ..=1., 0.);
-                slider_with(ui, "Rotate", &mut t.rotate, -10. ..=10., 0., Some((1., 1)), None);
-                slider(ui, "Aspect", &mut t.aspect, -1. ..=1., 0.);
-                slider_with(ui, "Scale", &mut t.scale, 0.5..=1.5, 1., Some((100., 0)), None);
-                slider(ui, "Offset X", &mut t.offset_x, -1. ..=1., 0.);
-                slider(ui, "Offset Y", &mut t.offset_y, -1. ..=1., 0.);
+                setting_slider(ui, ParameterId::TransformVertical, &mut t.vertical, 0.);
+                setting_slider(ui, ParameterId::TransformHorizontal, &mut t.horizontal, 0.);
+                setting_slider(ui, ParameterId::TransformRotate, &mut t.rotate, 0.);
+                setting_slider(ui, ParameterId::TransformAspect, &mut t.aspect, 0.);
+                setting_slider(ui, ParameterId::TransformScale, &mut t.scale, 1.);
+                setting_slider(ui, ParameterId::TransformOffsetX, &mut t.offset_x, 0.);
+                setting_slider(ui, ParameterId::TransformOffsetY, &mut t.offset_y, 0.);
                 if shown != r.transform.displayed(axes) {
                     r.transform = shown.recorded(axes);
                 }

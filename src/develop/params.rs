@@ -51,6 +51,16 @@ pub enum ParameterId {
     GrainAmount,
     GrainSize,
     GrainRoughness,
+    /// Transform, stored along the photo's own axes; the panel shows them along the
+    /// displayed photo's.
+    TransformVertical,
+    TransformHorizontal,
+    /// In degrees.
+    TransformRotate,
+    TransformAspect,
+    TransformScale,
+    TransformOffsetX,
+    TransformOffsetY,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -133,7 +143,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 30] = [
+const DESCRIPTORS: [Descriptor; 37] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -225,10 +235,41 @@ const DESCRIPTORS: [Descriptor; 30] = [
     amount(ParameterId::GrainAmount, "Amount"),
     amount(ParameterId::GrainSize, "Size"),
     amount(ParameterId::GrainRoughness, "Roughness"),
+    percent(ParameterId::TransformVertical, "Vertical"),
+    percent(ParameterId::TransformHorizontal, "Horizontal"),
+    Descriptor {
+        id: ParameterId::TransformRotate,
+        label: "Rotate",
+        interactive: -10. ..=10.,
+        valid: -10. ..=10.,
+        tick: Tick::Linear(0.1),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 1,
+            signed: true,
+        },
+    },
+    percent(ParameterId::TransformAspect, "Aspect"),
+    Descriptor {
+        id: ParameterId::TransformScale,
+        label: "Scale",
+        interactive: 0.5..=1.5,
+        valid: 0.5..=1.5,
+        tick: Tick::Linear(0.01),
+        drag_step: None,
+        display: Display {
+            scale: 100.,
+            decimals: 0,
+            signed: false,
+        },
+    },
+    percent(ParameterId::TransformOffsetX, "Offset X"),
+    percent(ParameterId::TransformOffsetY, "Offset Y"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 37] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -259,6 +300,13 @@ impl ParameterId {
         Self::GrainAmount,
         Self::GrainSize,
         Self::GrainRoughness,
+        Self::TransformVertical,
+        Self::TransformHorizontal,
+        Self::TransformRotate,
+        Self::TransformAspect,
+        Self::TransformScale,
+        Self::TransformOffsetX,
+        Self::TransformOffsetY,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -296,6 +344,13 @@ impl ParameterId {
             Self::GrainAmount => &mut r.effects.grain,
             Self::GrainSize => &mut r.effects.grain_size,
             Self::GrainRoughness => &mut r.effects.grain_roughness,
+            Self::TransformVertical => &mut r.transform.vertical,
+            Self::TransformHorizontal => &mut r.transform.horizontal,
+            Self::TransformRotate => &mut r.transform.rotate,
+            Self::TransformAspect => &mut r.transform.aspect,
+            Self::TransformScale => &mut r.transform.scale,
+            Self::TransformOffsetX => &mut r.transform.offset_x,
+            Self::TransformOffsetY => &mut r.transform.offset_y,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.
