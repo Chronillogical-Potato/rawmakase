@@ -6,10 +6,10 @@ use super::{
 };
 use crate::export_settings::ExportSettings;
 use crate::{
-    decode_cache::DecodeCache,
+    decode::{DecodePolicy, FullSize},
     develop::Recipe,
     exif,
-    raw::{CameraImage, Decode, Raw},
+    raw::{CameraImage, Demosaic, Raw},
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -31,6 +31,8 @@ pub struct Photo {
     /// The watermark chosen in the Export dialog, a preset or the Simple
     /// Copyright Watermark.
     pub watermark: Option<crate::watermark::Watermark>,
+    /// The demosaic for a full-size decode, if `image` is a draft.
+    pub demosaic: Demosaic,
 }
 
 /// Exports `photo` to `target`, reporting progress from 0 to 1. Stops between
@@ -109,7 +111,7 @@ pub fn prepare(
         Some(w) => Some(w.ready()?),
         None => None,
     };
-    let image = full_size(photo.image.clone(), &photo.source, cancel)?;
+    let image = full_size(photo.image.clone(), &photo.source, photo.demosaic, cancel)?;
     cancelled()?;
     progress(0.4);
     let options = settings.options();
@@ -147,14 +149,16 @@ pub fn prepare(
 
 /// `raw` at full resolution, as Develop decodes the photo it opens: the decode
 /// cache's copy when it has one.
-pub fn decode_full(raw: Raw, source: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
-    let demosaic = crate::raw::demosaic();
-    let cached = DecodeCache::key(source, demosaic)
-        .ok()
-        .and_then(|key| DecodeCache::default().load(&key, &raw.metadata));
-    match cached {
-        Some(full) => Ok(full),
-        None => raw.develop(Decode::Full(demosaic), cancel),
+pub fn decode_full(
+    raw: Raw,
+    source: &Path,
+    demosaic: Demosaic,
+    cancel: &AtomicBool,
+) -> Result<CameraImage> {
+    let full = FullSize::new(source, demosaic);
+    match full.cached(&raw.metadata) {
+        Some(image) => Ok(image),
+        None => full.decode(raw, DecodePolicy::Export, cancel),
     }
 }
 
@@ -162,18 +166,16 @@ pub fn decode_full(raw: Raw, source: &Path, cancel: &AtomicBool) -> Result<Camer
 fn full_size(
     image: Arc<CameraImage>,
     source: &Path,
+    demosaic: Demosaic,
     cancel: &AtomicBool,
 ) -> Result<Arc<CameraImage>> {
     if !image.fast {
         return Ok(image);
     }
-    let demosaic = crate::raw::demosaic();
-    let cached = DecodeCache::key(source, demosaic)
-        .ok()
-        .and_then(|key| DecodeCache::default().load(&key, &image.metadata));
-    Ok(Arc::new(match cached {
-        Some(full) => full,
-        None => crate::photo::open(source)?.develop(Decode::Full(demosaic), cancel)?,
+    let full = FullSize::new(source, demosaic);
+    Ok(Arc::new(match full.cached(&image.metadata) {
+        Some(cached) => cached,
+        None => full.decode(crate::photo::open(source)?, DecodePolicy::Export, cancel)?,
     }))
 }
 

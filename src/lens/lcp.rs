@@ -362,21 +362,35 @@ fn stamp(dirs: &[PathBuf]) -> Stamp {
     out
 }
 
-/// The imported profiles, cached while the profile files are unchanged.
-pub fn library() -> Arc<Library> {
-    static CACHE: Mutex<Option<(Stamp, Arc<Library>)>> = Mutex::new(None);
-    let dirs = library_dirs();
-    let stamp = stamp(&dirs);
-    if let Some((s, library)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-        && *s == stamp
-    {
-        return Arc::clone(library);
+/// The imported profiles, read again only when a profile file changes.
+#[derive(Default)]
+pub struct LibraryCache {
+    cached: Mutex<Option<(Stamp, Arc<Library>)>>,
+}
+impl LibraryCache {
+    pub const fn new() -> Self {
+        Self {
+            cached: Mutex::new(None),
+        }
     }
-    // Read without the lock: a low-priority preview thread reading every profile
-    // must not hold up Develop's open of a photo, which reads them itself instead.
-    let library = Arc::new(Library::load(&dirs));
-    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((stamp, Arc::clone(&library)));
-    library
+    /// The profiles as the files are now.
+    pub fn current(&self) -> Arc<Library> {
+        let dirs = library_dirs();
+        let stamp = stamp(&dirs);
+        if let Some((s, library)) = self.lock().as_ref()
+            && *s == stamp
+        {
+            return Arc::clone(library);
+        }
+        // Read without the lock: a low-priority preview thread reading every profile
+        // must not hold up Develop's open of a photo, which reads them itself instead.
+        let library = Arc::new(Library::load(&dirs));
+        *self.lock() = Some((stamp, Arc::clone(&library)));
+        library
+    }
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<(Stamp, Arc<Library>)>> {
+        self.cached.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 impl Candidate {

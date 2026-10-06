@@ -130,6 +130,7 @@ pub(super) fn synchronize(
     change: &BatchChange,
     targets: &[SyncTarget],
     defaults: &DevelopDefaults,
+    demosaic: crate::raw::Demosaic,
 ) -> SyncResult {
     let mut result = SyncResult {
         change: change.clone(),
@@ -138,7 +139,7 @@ pub(super) fn synchronize(
     };
     let mut prepared = Vec::new();
     for target in targets {
-        match prepare(catalog, source, change, target, defaults) {
+        match prepare(catalog, source, change, target, defaults, demosaic) {
             Ok(p) => {
                 result.notes.extend(p.notes.iter().map(|note| SyncNote {
                     name: target.name.clone(),
@@ -201,6 +202,7 @@ fn prepare(
     change: &BatchChange,
     target: &SyncTarget,
     defaults: &DevelopDefaults,
+    demosaic: crate::raw::Demosaic,
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
@@ -261,7 +263,7 @@ fn prepare(
     // Guided solves this photo's own guides beside that analysis.
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let image = raw.develop(crate::raw::Decode::full(), &cancel)?;
+        let image = raw.develop(crate::raw::Decode::full(demosaic), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
             && after.upright.mode == crate::develop::UprightMode::Guided
         {
@@ -470,6 +472,7 @@ impl Editor {
         let catalog = library.catalog.path.clone();
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
         let defaults = self.raw_defaults.clone();
+        let demosaic = self.demosaic;
         // Moving to another photo or catalog waits, so neither can see an edit change
         // underneath it.
         if !self.activity.begin_sync() {
@@ -484,7 +487,7 @@ impl Editor {
             // A panic (in Upright's analysis, say) still finishes the Sync.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Catalog::open(&catalog)
-                    .map(|c| synchronize(&c, &source, &change, &targets, &defaults))
+                    .map(|c| synchronize(&c, &source, &change, &targets, &defaults, demosaic))
             }))
             .unwrap_or_else(|_| Err(anyhow::anyhow!("the Sync failed unexpectedly")))
             .unwrap_or_else(|e| SyncResult {
@@ -607,6 +610,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         // The file that isn't a photo is reported; the two charts are saved.
         assert_eq!(result.synced.len(), 2);
@@ -672,6 +676,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..1],
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         assert_eq!(again.synced.len(), 1);
         restore(&c, &again.synced, SyncSide::Before, path)?;
@@ -685,6 +690,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..2],
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         assert!(again.synced.is_empty() && again.failed.is_empty());
         // A file changed while it had no edit is not given the old settings again.
@@ -738,6 +744,7 @@ mod tests {
             &BatchChange::MatchTotalExposures,
             &[target(photos[1].0, &photos[1].1)],
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         assert!(result.synced.is_empty());
         assert!(
@@ -788,6 +795,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert_eq!(c.load_edit(id, &path)?.unwrap().recipe.exposure, 0.);
@@ -821,6 +829,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
+            crate::raw::Demosaic::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert!(result.failed[0].reason.contains("Lightroom edit"));
@@ -872,6 +881,7 @@ mod tests {
             &BatchChange::Settings(clarity),
             &targets,
             &defaults,
+            crate::raw::Demosaic::default(),
         );
         assert!(result.failed.is_empty(), "{:?}", result.failed);
         let starting = |id: i64| match &result.synced.iter().find(|s| s.id == id).unwrap().before {
@@ -907,6 +917,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &[target(photos[0].0, &photos[0].1)],
             &missing,
+            crate::raw::Demosaic::default(),
         );
         let notes: Vec<_> = result.notes.iter().map(|n| n.note.as_str()).collect();
         assert!(

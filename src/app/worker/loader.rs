@@ -1,8 +1,8 @@
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
-    decode_cache::DecodeCache,
+    decode::{DecodePolicy, FullSize},
     export_settings::ExportOptions,
-    raw::{Decode, Demosaic, thumbnail},
+    raw::{Decode, thumbnail},
 };
 use eframe::egui;
 use std::{
@@ -16,9 +16,7 @@ struct FullJob {
     path: std::path::PathBuf,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     started: Instant,
-    demosaic: Demosaic,
-    /// Decode cache key of `path`, when its identity could be read.
-    key: Option<String>,
+    full: FullSize,
     prefetch: Option<Prefetch>,
 }
 /// Runs `load`, turning a panic into an error, so the photo does not stay loading.
@@ -39,22 +37,12 @@ fn prefetcher() -> Latest<Prefetch> {
         else {
             return;
         };
-        let cache = DecodeCache::default();
-        let Ok(key) = DecodeCache::key(&job.path, job.demosaic) else {
-            return;
-        };
-        if job.cancel.load(Ordering::Relaxed) || cache.contains(&key) {
+        if job.cancel.load(Ordering::Relaxed) {
             return;
         }
-        let _ = pool.install(|| -> anyhow::Result<()> {
-            let image =
-                crate::photo::open(&job.path)?.develop(Decode::Full(job.demosaic), &job.cancel)?;
-            crate::develop::quality::recovered(&image, &job.cancel)?;
-            if !job.cancel.load(Ordering::Relaxed) {
-                cache.store(&key, &image)?;
-            }
-            Ok(())
-        });
+        let full = FullSize::new(&job.path, job.demosaic);
+        let open = || crate::photo::open(&job.path);
+        let _ = pool.install(|| full.get(open, DecodePolicy::Prefetch, &job.cancel));
     })
 }
 fn full_loader(
@@ -69,10 +57,8 @@ fn full_loader(
                 return Ok(());
             }
             {
-                let decode = Decode::Full(job.demosaic);
-                let image = Arc::new(crate::photo::open(&job.path)?.develop(decode, &job.cancel)?);
-                // Recovered here rather than by the first render, so the cache holds it.
-                crate::develop::quality::recovered(&image, &job.cancel)?;
+                let raw = crate::photo::open(&job.path)?;
+                let image = Arc::new(job.full.decode(raw, DecodePolicy::Show, &job.cancel)?);
                 if job.cancel.load(Ordering::Relaxed) {
                     return Ok(());
                 }
@@ -85,9 +71,7 @@ fn full_loader(
                         status: format!("Developed in {:.2}s", job.started.elapsed().as_secs_f32()),
                     },
                 );
-                if let Some(key) = &job.key {
-                    let _ = DecodeCache::default().store(key, &image);
-                }
+                job.full.store(&image, &job.cancel);
             }
             // Only now, so decoding the neighbour never slows the photo on screen.
             if let Some(prefetch) = prefetch {
@@ -173,11 +157,8 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 return Ok(());
             }
             let t = Instant::now();
-            let key = DecodeCache::key(&path, job.demosaic).ok();
-            let cached = key
-                .as_ref()
-                .and_then(|key| DecodeCache::default().load(key, &raw.metadata));
-            if let Some(image) = cached {
+            let full_size = FullSize::new(&path, job.demosaic);
+            if let Some(image) = full_size.cached(&raw.metadata) {
                 send(
                     &tx,
                     &ctx,
@@ -210,8 +191,7 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                 path,
                 cancel: job.cancel.clone(),
                 started: t,
-                demosaic: job.demosaic,
-                key,
+                full: full_size,
                 prefetch,
             });
             Ok(())

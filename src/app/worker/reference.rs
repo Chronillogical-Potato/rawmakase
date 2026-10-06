@@ -3,7 +3,13 @@
 //! the photo on screen; like opening a photo, a half-size decode comes first for
 //! Fit and the full one follows for 100%.
 use super::{Event, Latest, send};
-use crate::{app::library::EditSource, decode_cache::DecodeCache, develop::Recipe, raw};
+use crate::{
+    app::library::EditSource,
+    decode::{DecodePolicy, FullSize},
+    decode_cache::DecodeCache,
+    develop::Recipe,
+    raw,
+};
 use eframe::egui;
 use std::{
     path::PathBuf,
@@ -75,9 +81,8 @@ fn develop(
 ) -> anyhow::Result<()> {
     let raw = crate::photo::open(&job.path)?;
     let recipe = EditSource::recipe(Some(&job.edit), &raw)?;
-    let key = DecodeCache::key(&job.path, job.demosaic).ok();
-    let cached = key.as_ref().and_then(|key| cache.load(key, &raw.metadata));
-    if let Some(image) = cached {
+    let full_size = FullSize::with_cache(&job.path, job.demosaic, cache.clone());
+    if let Some(image) = full_size.cached(&raw.metadata) {
         ready(ReferenceImage {
             image: Arc::new(image),
             recipe,
@@ -94,15 +99,12 @@ fn develop(
         recipe: recipe.clone(),
         resolution: Resolution::Half,
     });
-    let decode = raw::Decode::Full(job.demosaic);
-    let full = Arc::new(crate::photo::open(&job.path)?.develop(decode, &job.cancel)?);
-    crate::develop::quality::recovered(&full, &job.cancel)?;
+    let opened = crate::photo::open(&job.path)?;
+    let full = Arc::new(full_size.decode(opened, DecodePolicy::Show, &job.cancel)?);
     if job.cancel.load(Ordering::Relaxed) {
         return Ok(());
     }
-    if let Some(key) = &key {
-        let _ = cache.store(key, &full);
-    }
+    full_size.store(&full, &job.cancel);
     ready(ReferenceImage {
         image: full,
         recipe,
@@ -138,7 +140,7 @@ mod tests {
             Ok(stages)
         };
 
-        let preferred = crate::raw::demosaic();
+        let preferred = Demosaic::default().effective();
         let other = match preferred {
             Demosaic::Rawmakase => Demosaic::Libraw,
             Demosaic::Libraw => Demosaic::Rawmakase,

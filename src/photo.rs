@@ -7,6 +7,11 @@ use crate::raw::Raw;
 use anyhow::Result;
 use std::path::Path;
 
+/// The imported lens profiles, shared by everything that opens photos (Develop's
+/// loaders, the Library's previews, exports, Sync Settings) so they are read once
+/// each time the files change, not once per thread.
+static LENS_PROFILES: crate::lens::lcp::LibraryCache = crate::lens::lcp::LibraryCache::new();
+
 /// The photo at `path`, opened for developing.
 pub fn open(path: &Path) -> Result<Raw> {
     let mut raw = Raw::open_file(path)?;
@@ -49,7 +54,7 @@ pub fn open(path: &Path) -> Result<Raw> {
             metadata.apply_default_crop(crop);
         }
     }
-    metadata.lens_profiles = crate::lens::lcp::library().for_photo(metadata);
+    metadata.lens_profiles = LENS_PROFILES.current().for_photo(metadata);
     Ok(raw)
 }
 

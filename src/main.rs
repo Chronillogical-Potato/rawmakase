@@ -282,7 +282,7 @@ fn main() -> Result<()> {
             let decode = if fast {
                 raw::Decode::Half
             } else {
-                raw::Decode::full()
+                raw::Decode::full(Default::default())
             };
             let im = r.develop(decode, &AtomicBool::new(false))?;
             if let Some(path) = xmp {
@@ -364,8 +364,10 @@ fn main() -> Result<()> {
                 "Iterations must be 1–1000"
             );
             let t = Instant::now();
-            let im = rawmakase::photo::open(&input)?
-                .develop(raw::Decode::full(), &AtomicBool::new(false))?;
+            let im = rawmakase::photo::open(&input)?.develop(
+                raw::Decode::full(Default::default()),
+                &AtomicBool::new(false),
+            )?;
             let decode = t.elapsed();
             let small = develop::preview(&im, 1600);
             let mut r = Recipe::for_metadata(&im.metadata);
