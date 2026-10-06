@@ -58,16 +58,15 @@ pub struct Editor {
     exports: export::Exports,
     autosave: autosave::Autosave,
     /// Library/Develop position to restore once the session's catalog opens.
-    restore: Option<(String, Option<i64>, bool)>,
-    /// A photo from outside the Library to open once the catalog is ready,
-    /// and whether its folder has already been added.
-    pending_photo: Option<(PathBuf, bool)>,
+    restore: Option<CatalogPlace>,
+    /// A photo from outside the Library to open once the catalog is ready.
+    pending_photo: Option<PendingPhoto>,
     /// Cancels the prefetch started for the photo on screen.
     prefetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Preferences > Performance's demosaic, for every full-size decode.
     demosaic: crate::raw::Demosaic,
     /// That position as last written to the session.
-    saved_place: (String, Option<i64>, bool),
+    saved_place: CatalogPlace,
     /// How the Library showed its photos, as last written to the session;
     /// returned to whenever the catalog is loaded.
     saved_layout: crate::app::session::LibraryLayout,
@@ -174,6 +173,7 @@ impl Editor {
         });
         // Only a real session (not an isolated test) shows first-run setup.
         let show_onboarding = !session.onboarding_done && session_file.is_some();
+        let place = CatalogPlace::of(&session);
         // Only a real session checks GitHub, not an isolated test.
         let updates = updates::Updates::new(&session, session_file.is_some().then_some(ctx));
         #[cfg(feature = "telemetry")]
@@ -240,16 +240,8 @@ impl Editor {
             ),
             exports: Default::default(),
             autosave: Default::default(),
-            restore: Some((
-                session.library_source.clone(),
-                session.selected_photo,
-                session.develop,
-            )),
-            saved_place: (
-                session.library_source.clone(),
-                session.selected_photo,
-                session.develop,
-            ),
+            restore: Some(place.clone()),
+            saved_place: place,
             saved_layout: session.library_layout.clone(),
             pending_photo: None,
             prefetch_cancel: Default::default(),
@@ -303,9 +295,9 @@ impl Editor {
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
                     onboarding_done: self.onboarding_done,
-                    library_source: self.saved_place.0.clone(),
-                    selected_photo: self.saved_place.1,
-                    develop: self.saved_place.2,
+                    library_source: self.saved_place.source.clone(),
+                    selected_photo: self.saved_place.photo,
+                    develop: self.saved_place.module == library::Module::Develop,
                     demosaic: self.demosaic,
                     no_update_checks: !self.updates.automatic,
                     skipped_version: self.updates.skipped.clone(),
@@ -324,17 +316,24 @@ impl Editor {
         Ok(())
     }
     /// The Library folder, selected photo and module, as saved in the session.
-    fn current_place(&self) -> (String, Option<i64>, bool) {
+    fn current_place(&self) -> CatalogPlace {
         let Some(library) = &self.library else {
-            return Default::default();
+            return CatalogPlace::default();
         };
         let develop = !self.library_mode && self.document.catalog_photo.is_some();
-        let photo = if develop {
-            self.document.catalog_photo
-        } else {
-            library.selected()
-        };
-        (library.source_key(), photo, develop)
+        CatalogPlace {
+            source: library.source_key(),
+            photo: if develop {
+                self.document.catalog_photo
+            } else {
+                library.selected()
+            },
+            module: if develop {
+                library::Module::Develop
+            } else {
+                library::Module::Library
+            },
+        }
     }
     fn session_path(&self) -> Option<PathBuf> {
         self.library
@@ -342,6 +341,43 @@ impl Editor {
             .map(|l| l.catalog.path.clone())
             .or_else(|| self.document.path.clone())
     }
+}
+/// Where the Library was: its folder or collection, the photo selected (or open
+/// in Develop) and the module shown. Saved in the session and restored on launch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CatalogPlace {
+    source: String,
+    photo: Option<i64>,
+    module: library::Module,
+}
+impl Default for CatalogPlace {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            photo: None,
+            module: library::Module::Library,
+        }
+    }
+}
+impl CatalogPlace {
+    fn of(session: &session::Session) -> Self {
+        Self {
+            source: session.library_source.clone(),
+            photo: session.selected_photo,
+            module: if session.develop {
+                library::Module::Develop
+            } else {
+                library::Module::Library
+            },
+        }
+    }
+}
+/// A photo from outside the Library, to open once the catalog is ready.
+struct PendingPhoto {
+    path: PathBuf,
+    /// Its folder has been added to the catalog already; if the photo is still
+    /// not there, it could not be added.
+    folder_added: bool,
 }
 impl eframe::App for Editor {
     /// What shows where no panel paints, e.g. behind the Library grid: the

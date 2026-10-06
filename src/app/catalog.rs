@@ -198,7 +198,10 @@ impl Editor {
         let Some(current) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
             if self.activity.is_dialog() {
                 // The catalog is still opening; add the photo once it is ready.
-                self.pending_photo = Some((path, false));
+                self.pending_photo = Some(super::PendingPhoto {
+                    path,
+                    folder_added: false,
+                });
             } else {
                 self.status = format!("Open or create a catalog to edit {name}");
             }
@@ -210,7 +213,10 @@ impl Editor {
         if !self.ready_for_catalog() || !self.activity.begin_dialog() {
             return;
         }
-        self.pending_photo = Some((path, true));
+        self.pending_photo = Some(super::PendingPhoto {
+            path,
+            folder_added: true,
+        });
         self.status = format!("Adding {name}'s folder to the Library…");
         let tx = self.tx.clone();
         let ctx = self.context.clone();
@@ -263,12 +269,12 @@ impl Editor {
     /// Opens the photo waiting to be added once the catalog is ready, adding
     /// its folder first if that has not happened yet.
     pub(super) fn open_pending_photo(&mut self) {
-        let Some((path, added)) = self.pending_photo.take() else {
+        let Some(super::PendingPhoto { path, folder_added }) = self.pending_photo.take() else {
             return;
         };
         if let Some(id) = self.catalog_photo_at(&path) {
             self.develop_catalog_photo(id);
-        } else if !added {
+        } else if !folder_added {
             self.add_to_library(path);
         } else {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
