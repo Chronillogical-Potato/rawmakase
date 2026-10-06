@@ -1,6 +1,9 @@
 //! Autosave policy. Protected edits can be exported, but never become write jobs.
 use std::time::{Duration, Instant};
 
+/// How long edits must pause before autosave writes them.
+const SETTLE: Duration = Duration::from_millis(600);
+
 #[derive(Default)]
 pub enum SaveState {
     #[default]
@@ -34,9 +37,21 @@ impl SaveState {
             _ => *self = Self::Pending(Instant::now()),
         }
     }
+    /// How long until autosave is due, while it waits for edits to pause or for a
+    /// failed save's retry; the interface wakes then rather than polling. `None`
+    /// once it is due: whatever still holds it back (a drag, a save in flight)
+    /// wakes the interface itself when it ends.
+    pub fn due_in(&self) -> Option<Duration> {
+        let left = match self {
+            Self::Pending(at) => SETTLE.checked_sub(at.elapsed()),
+            Self::Failed { retry_after, .. } => retry_after.checked_duration_since(Instant::now()),
+            _ => None,
+        };
+        left.filter(|left| !left.is_zero())
+    }
     pub fn ready(&self) -> bool {
         match self {
-            Self::Pending(at) => at.elapsed() > Duration::from_millis(600),
+            Self::Pending(at) => at.elapsed() > SETTLE,
             Self::Failed { retry_after, .. } => Instant::now() >= *retry_after,
             _ => false,
         }
@@ -79,6 +94,20 @@ impl SaveState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn autosave_is_due_once_edits_settle_and_never_when_clean() {
+        let mut state = SaveState::default();
+        assert_eq!(state.due_in(), None);
+        state.mark_changed();
+        let due = state.due_in().unwrap();
+        assert!(due <= SETTLE && due > SETTLE / 2, "{due:?}");
+        state.saving();
+        assert_eq!(state.due_in(), None);
+        // Once due, nothing more to wait for, however long a drag holds it back.
+        let settled = SaveState::Pending(Instant::now() - SETTLE * 2);
+        assert!(settled.ready());
+        assert_eq!(settled.due_in(), None);
+    }
     #[test]
     fn protected_edits_never_autosave_and_failures_remain_pending() {
         let mut state = SaveState::default();

@@ -75,7 +75,7 @@ pub struct Editor {
     /// What a running catalog import or open is doing.
     catalog_work: Option<String>,
     /// Progress of a running profile or preset import.
-    importing: Option<std::sync::Arc<std::sync::Mutex<String>>>,
+    importing: Option<std::sync::Arc<bulk_import::ImportProgress>>,
     close_confirm: bool,
     /// The virtual copy waiting for the user to confirm its removal.
     remove_copy: Option<i64>,

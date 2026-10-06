@@ -8,7 +8,7 @@ use eframe::egui;
 
 impl Editor {
     pub(super) fn events(&mut self, ctx: &egui::Context) {
-        self.import_progress(ctx);
+        self.import_progress();
         // A Point Color sample stops as soon as its tab is no longer where the photo is
         // edited (the Library, Before, another tab), whichever way that happened.
         if self.document.point_color_pick.is_running() && !self.point_color_tab_shown() {

@@ -309,7 +309,6 @@ fn mappings(
 impl Editor {
     pub(in crate::app) fn automation_page(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ctx.request_repaint_after(Duration::from_millis(500));
         if let Some(error) = &self.controls.load_error {
             hint(ui, error);
             hint(

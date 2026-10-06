@@ -50,10 +50,13 @@ impl Notice {
     }
 }
 impl WatermarkEditor {
-    pub(super) fn new(watermark: Watermark) -> Self {
-        // Installed fonts are listed off the interface thread.
-        std::thread::spawn(|| {
+    pub(super) fn new(watermark: Watermark, ctx: &egui::Context) -> Self {
+        // Installed fonts are listed off the interface thread, which is woken to
+        // draw them once they are.
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
             let _ = watermark::fonts::families();
+            ctx.request_repaint();
         });
         let original = (!watermark.name.is_empty()).then(|| watermark.name.clone());
         Self {
@@ -315,7 +318,6 @@ fn mark_texture(
             && watermark::fonts::families_if_listed().is_none() =>
         {
             state.notice = Notice::LoadingFonts;
-            ui_repaint(ctx);
             return None;
         }
         _ => {
@@ -516,9 +518,6 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             });
             // Installed fonts are still being listed at first: Inter until then.
             let listed = watermark::fonts::families_if_listed();
-            if listed.is_none() {
-                ui_repaint(ctx);
-            }
             let inter = [watermark::fonts::inter()];
             let families: &[watermark::fonts::Family] = listed.unwrap_or(&inter);
             row(ui, "Font", |ui| {
@@ -635,9 +634,4 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
             w.rotation = (w.rotation + 3) % 4;
         }
     });
-}
-
-/// Asks for another frame soon, while something loads elsewhere.
-fn ui_repaint(ctx: &egui::Context) {
-    ctx.request_repaint_after(std::time::Duration::from_millis(250));
 }

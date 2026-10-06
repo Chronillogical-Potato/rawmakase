@@ -570,8 +570,6 @@ impl Editor {
         {
             queue.cancel(ticket);
         }
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(200));
     }
 
     /// The last export's report line, which opens Problem Exporting Files.
