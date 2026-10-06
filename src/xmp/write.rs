@@ -637,6 +637,11 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             ORIGINAL_SATURATION,
             "ProcessVersion",
         ),
+        (
+            r.vibrance_model.is_original(),
+            ORIGINAL_VIBRANCE,
+            "ProcessVersion",
+        ),
     ]
     .into_iter()
     .filter_map(|(original, name, key)| original.then_some((name, key)))
@@ -650,6 +655,7 @@ pub(super) const ORIGINAL_COLOR_MIXER: &str = "ColorMixer";
 pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 pub(super) const ORIGINAL_COLOR_NOISE: &str = "ColorNoise";
 pub(super) const ORIGINAL_SATURATION: &str = "Saturation";
+pub(super) const ORIGINAL_VIBRANCE: &str = "Vibrance";
 /// Written with every packet and preset whose `RAWmakaseOriginal` names all the
 /// operators below that it keeps. Packets and presets from earlier releases lack it.
 pub(super) const MARKERS: &str = "2";
@@ -657,7 +663,7 @@ pub(super) const MARKERS: &str = "2";
 /// The RAWmakase release each operator's measured version first shipped in. A packet
 /// or preset without `RAWmakaseMarkers` could not name operators measured after the
 /// release that wrote it, so it keeps those.
-pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 8] = [
+pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 9] = [
     (ORIGINAL_SHARPENING, (0, 1, 15)),
     (ORIGINAL_LENS_VIGNETTE, (0, 1, 15)),
     (ORIGINAL_GRAIN, (0, 1, 15)),
@@ -666,6 +672,7 @@ pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32)); 8] = [
     (ORIGINAL_CALIBRATION, (0, 1, 16)),
     (ORIGINAL_COLOR_NOISE, (0, 1, 16)),
     (ORIGINAL_SATURATION, (0, 1, 16)),
+    (ORIGINAL_VIBRANCE, (0, 1, 16)),
 ];
 
 /// A setting key, or the start of one, that belongs to an operator.
@@ -711,6 +718,7 @@ pub(super) fn operator_keys(operator: &str) -> &'static [OperatorKey] {
         ],
         ORIGINAL_COLOR_NOISE => &[Exact("ColorNoiseReduction")],
         ORIGINAL_SATURATION => &[Exact("Saturation")],
+        ORIGINAL_VIBRANCE => &[Exact("Vibrance")],
         _ => &[],
     }
 }

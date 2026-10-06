@@ -146,6 +146,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::SaturationModel::is_original"
     )]
     pub saturation_model: crate::develop::color_mixer::SaturationModel,
+    /// Which tables render Vibrance. Missing means the photo-measured ones, so older
+    /// recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::color_mixer::VibranceModel::is_original"
+    )]
+    pub vibrance_model: crate::develop::color_mixer::VibranceModel,
     /// Which fit renders Camera Calibration's primary sliders. Missing means the
     /// original coefficients, so older recipes look as they did; omitted at that default.
     #[serde(
@@ -304,6 +311,7 @@ impl Default for Recipe {
             grading_model: Default::default(),
             mixer_model: Default::default(),
             saturation_model: Default::default(),
+            vibrance_model: Default::default(),
             calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
@@ -544,6 +552,7 @@ impl Recipe {
         recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
         recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+        recipe.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
         recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
