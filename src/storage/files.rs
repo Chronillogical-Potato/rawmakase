@@ -10,8 +10,8 @@ use tempfile::NamedTempFile;
 /// Per-user data: ~/Library/Application Support/RAWmakase on macOS,
 /// %APPDATA%\RAWmakase on Windows, and $XDG_DATA_HOME/rawmakase (default
 /// ~/.local/share/rawmakase) elsewhere. RAWMAKASE_DATA_DIR overrides all of them.
-pub use super::paths::data_dir;
-use super::paths::{home, xdg_data_home};
+pub use rawmakase_protocol::paths::data_dir;
+use rawmakase_protocol::paths::{home, xdg_data_home};
 
 /// This computer's own data folder, never synced: the platform default even
 /// when RAWMAKASE_DATA_DIR points elsewhere (a shared or synced folder), and

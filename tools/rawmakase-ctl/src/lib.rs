@@ -1,9 +1,12 @@
 //! `rawmakase-ctl`: does from a script what the Loupedeck does by hand.
 //!
-//! RAWmakase listens on a loopback socket and writes where to `control.json`
-//! in its data folder (see src/app/control_surface/socket.rs). Each command
-//! here is one request; the app answers once a frame has handled it.
+//! RAWmakase listens on a loopback socket and announces it in `control.json` in
+//! its data folder (see `rawmakase_protocol::Endpoint`, and
+//! src/app/automation/socket.rs for the app's side). Each command here is one
+//! request; the app answers once a frame has handled it. The app's own
+//! `rawmakase control` and MCP server use this crate too.
 use clap::{Parser, Subcommand};
+use rawmakase_protocol::{Endpoint, PROTOCOL};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -228,12 +231,10 @@ fn dial_values(ticks: i32) -> Vec<u8> {
     values
 }
 
-/// Where RAWmakase keeps its data, as src/storage/files.rs works it out.
+/// Where RAWmakase keeps its data.
 pub fn default_data_dir() -> PathBuf {
-    storage_paths::data_dir()
+    rawmakase_protocol::paths::data_dir()
 }
-#[path = "../../../src/storage/paths.rs"]
-mod storage_paths;
 
 pub struct Connection {
     port: u16,
@@ -241,7 +242,7 @@ pub struct Connection {
 }
 impl Connection {
     pub fn read(dir: &std::path::Path) -> Result<Self, String> {
-        let path = dir.join("control.json");
+        let path = Endpoint::path(dir);
         let text = std::fs::read_to_string(&path).map_err(|e| {
             format!(
                 "cannot read {}: {e}\nIs RAWmakase running, with the control socket on? Its data folder \
@@ -249,23 +250,17 @@ impl Connection {
                 path.display()
             )
         })?;
-        let json: Value =
+        let endpoint: Endpoint =
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self {
-            port: json["port"]
-                .as_u64()
-                .and_then(|p| u16::try_from(p).ok())
-                .ok_or("control.json has no port")?,
-            token: json["token"]
-                .as_str()
-                .ok_or("control.json has no token")?
-                .into(),
+            port: endpoint.port,
+            token: endpoint.token,
         })
     }
     /// Sends a request and returns the app's state after it.
     pub fn request(&self, mut request: Value) -> Result<Value, String> {
         request["token"] = self.token.clone().into();
-        request["protocol"] = 1.into();
+        request["protocol"] = PROTOCOL.into();
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = format!(
             "{}-{}",
@@ -301,7 +296,7 @@ impl Connection {
             );
         }
         let reply: Value = serde_json::from_str(&line).map_err(|e| format!("bad reply: {e}"))?;
-        if reply["protocol"] != 1 || reply["request_id"] != id {
+        if reply["protocol"] != PROTOCOL || reply["request_id"] != id {
             return Err("incompatible or mismatched control reply".into());
         }
         Ok(reply)

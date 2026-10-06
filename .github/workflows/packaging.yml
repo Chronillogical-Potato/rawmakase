@@ -135,7 +135,7 @@ jobs:
           }
           gem install native-packages --version 0.7.0 --no-document
           native-packages doctor --target windows-amd64 --defer-recipes
-          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'rawmakase').version
           "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
           native-packages build --version $version --target windows-amd64 --defer-recipes --output "$env:RUNNER_TEMP\windows-packages"

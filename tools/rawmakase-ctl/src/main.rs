@@ -1,7 +1,6 @@
-mod client;
 use clap::Parser;
 fn main() -> std::process::ExitCode {
-    match client::run(client::Cli::parse()) {
+    match rawmakase_ctl::run(rawmakase_ctl::Cli::parse()) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("rawmakase-ctl: {e}");
