@@ -146,62 +146,81 @@ impl Editor {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.original.clone());
-            ui.add_space(4.);
-            form_row(ui, &name, |ui| {
-                location_line(ui, &root.path, root.location.is_none(), status(&root.path));
-                if ui.button("Change…").clicked() {
-                    click = Some(Click::Change(FolderAction::RelinkRoot(root.root)));
-                }
-                if root.location.is_some() && ui.button("Clear").clicked() {
-                    click = Some(Click::Clear(root.root, String::new()));
-                }
-            });
-            for over in &root.overrides {
-                form_row(ui, "", |ui| {
-                    ui.add_space(14.);
-                    ui.label(
-                        egui::RichText::new(format!("{}  →", over.relative))
-                            .size(12.)
-                            .color(theme::gray(190)),
-                    );
-                    location_line(ui, &over.path, false, status(&over.path));
-                    if let Some(id) = view.folders.get(&(root.root, over.relative.clone()))
-                        && ui.button("Change…").clicked()
-                    {
-                        click = Some(Click::Change(FolderAction::RelinkFolder(*id)));
+            ui.add_space(6.);
+            egui::Frame::new()
+                .fill(theme::gray(36))
+                .corner_radius(6.)
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let note = if root.location.is_some() {
+                        "Located on this computer".to_string()
+                    } else {
+                        "Where it was added; not located on this computer".to_string()
+                    };
+                    match entry(
+                        ui,
+                        &name,
+                        &root.path,
+                        &note,
+                        status(&root.path),
+                        root.location.is_some(),
+                    ) {
+                        Some(Button::Change) => {
+                            click = Some(Click::Change(FolderAction::RelinkRoot(root.root)))
+                        }
+                        Some(Button::Clear) => click = Some(Click::Clear(root.root, String::new())),
+                        None => {}
                     }
-                    if ui.button("Clear").clicked() {
-                        click = Some(Click::Clear(root.root, over.relative.clone()));
+                    for over in &root.overrides {
+                        ui.add_space(6.);
+                        ui.horizontal(|ui| {
+                            ui.add_space(16.);
+                            ui.vertical(|ui| {
+                                let note = format!("Folder of {name}, located separately");
+                                let id = view.folders.get(&(root.root, over.relative.clone()));
+                                match entry(
+                                    ui,
+                                    &over.relative,
+                                    &over.path,
+                                    &note,
+                                    status(&over.path),
+                                    true,
+                                ) {
+                                    Some(Button::Change) => {
+                                        if let Some(id) = id {
+                                            click =
+                                                Some(Click::Change(FolderAction::RelinkFolder(*id)))
+                                        }
+                                    }
+                                    Some(Button::Clear) => {
+                                        click = Some(Click::Clear(root.root, over.relative.clone()))
+                                    }
+                                    None => {}
+                                }
+                            });
+                        });
                     }
-                });
-            }
-            if !root.elsewhere.is_empty() {
-                form_row(ui, "", |ui| {
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new("On other computers")
-                            .size(12.)
-                            .color(theme::gray(135)),
-                    )
-                    .id_salt(("elsewhere", root.root))
-                    .show(ui, |ui| {
-                        for (computer, relative, path) in &root.elsewhere {
-                            let what = if relative.is_empty() {
-                                String::new()
-                            } else {
-                                format!("{relative} → ")
-                            };
-                            ui.label(
+                    for (computer, relative, path) in &root.elsewhere {
+                        let what = if relative.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{relative} at ")
+                        };
+                        ui.add_space(4.);
+                        ui.add(
+                            egui::Label::new(
                                 egui::RichText::new(format!(
-                                    "{computer}: {what}{}",
+                                    "On {computer}: {what}{}",
                                     pretty_path(path)
                                 ))
-                                .size(12.)
-                                .color(theme::gray(150)),
-                            );
-                        }
-                    });
+                                .size(11.)
+                                .color(theme::gray(120)),
+                            )
+                            .truncate(),
+                        );
+                    }
                 });
-            }
         }
         if view.roots.is_empty() {
             form_row(ui, "", |ui| hint(ui, "No folders yet."));
@@ -401,20 +420,61 @@ impl Editor {
         });
     }
 }
-/// A location and whether it is there.
-fn location_line(ui: &mut egui::Ui, path: &Path, as_added: bool, status: (&str, egui::Color32)) {
-    let text = if as_added {
-        format!("as added: {}", pretty_path(path))
-    } else {
-        pretty_path(path)
-    };
+/// A button of a Folder locations entry.
+enum Button {
+    Change,
+    Clear,
+}
+/// One root or folder of Folder locations: its name, whether it is found
+/// and its buttons on the first line, then where it is and why.
+fn entry(
+    ui: &mut egui::Ui,
+    name: &str,
+    path: &Path,
+    note: &str,
+    status: (&str, egui::Color32),
+    clearable: bool,
+) -> Option<Button> {
+    let mut clicked = None;
+    // Buttons and status first, from the right, so a long name can't push
+    // them out of the window; the name takes what is left.
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if clearable
+            && ui
+                .button("Clear")
+                .on_hover_text("Forget this location on this computer")
+                .clicked()
+        {
+            clicked = Some(Button::Clear);
+        }
+        if ui.button("Change…").clicked() {
+            clicked = Some(Button::Change);
+        }
+        ui.add_space(6.);
+        ui.label(egui::RichText::new(status.0).size(11.).color(status.1));
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(name)
+                        .size(13.)
+                        .strong()
+                        .color(theme::gray(230)),
+                )
+                .truncate(),
+            );
+        });
+    });
     ui.add(
-        egui::Label::new(egui::RichText::new(text).color(theme::gray(225)))
-            .truncate()
-            .halign(egui::Align::LEFT),
+        egui::Label::new(
+            egui::RichText::new(pretty_path(path))
+                .size(12.)
+                .color(theme::gray(200)),
+        )
+        .truncate(),
     )
     .on_hover_text(path.display().to_string());
-    ui.label(egui::RichText::new(status.0).size(11.).color(status.1));
+    ui.label(egui::RichText::new(note).size(11.).color(theme::gray(125)));
+    clicked
 }
 /// The catalog at `path` opened again after a folder change, with what the
 /// change found.
