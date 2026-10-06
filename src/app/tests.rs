@@ -4387,3 +4387,37 @@ fn only_size_changes_hold_previews_gpu_work() {
     assert!(!reconfigures_surface(&WindowEvent::RedrawRequested));
     assert!(!reconfigures_surface(&WindowEvent::Focused(true)));
 }
+#[test]
+fn eframes_reason_for_giving_up_is_kept() {
+    use log::Log;
+    let record = |target: &str, level, message: &str| {
+        EframeErrors.log(
+            &log::Record::builder()
+                .target(target)
+                .level(level)
+                .args(format_args!("{message}"))
+                .build(),
+        );
+    };
+    record(
+        "wgpu_core",
+        log::Level::Error,
+        "Exiting because of error: other",
+    );
+    record(
+        "eframe::native::run",
+        log::Level::Warn,
+        "Exiting because of error: warn",
+    );
+    assert_eq!(EframeErrors::take(), None);
+    record(
+        "eframe::native::run",
+        log::Level::Error,
+        "Exiting because of error: No suitable GPU adapter",
+    );
+    assert_eq!(
+        EframeErrors::take().as_deref(),
+        Some("No suitable GPU adapter")
+    );
+    assert_eq!(EframeErrors::take(), None);
+}

@@ -372,6 +372,9 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
     };
     // eframe::run_native, with window events passing through SurfaceGate.
     use winit::platform::run_on_demand::EventLoopExtRunOnDemand as _;
+    if log::set_logger(&EframeErrors).is_ok() {
+        log::set_max_level(log::LevelFilter::Error);
+    }
     let mut event_loop = winit::event_loop::EventLoop::with_user_event().build()?;
     let mut app = SurfaceGate(eframe::create_native(
         "RAWmakase",
@@ -380,7 +383,42 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         &event_loop,
     ));
     event_loop.run_app_on_demand(&mut app)?;
-    Ok(())
+    match EframeErrors::take() {
+        Some(error) => Err(anyhow::anyhow!(error)),
+        None => Ok(()),
+    }
+}
+/// Why eframe gave up, e.g. on a GPU it could not start. `run_native` returned
+/// that error; on our own event loop eframe only logs it.
+struct EframeErrors;
+static EFRAME_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+impl EframeErrors {
+    fn take() -> Option<String> {
+        EFRAME_ERROR
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+impl log::Log for EframeErrors {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Error && metadata.target().starts_with("eframe")
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        if let Some(error) = record
+            .args()
+            .to_string()
+            .strip_prefix("Exiting because of error: ")
+        {
+            *EFRAME_ERROR
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.into());
+        }
+    }
+    fn flush(&self) {}
 }
 /// Whether eframe reconfigures the window's surface for `event`.
 fn reconfigures_surface(event: &winit::event::WindowEvent) -> bool {
