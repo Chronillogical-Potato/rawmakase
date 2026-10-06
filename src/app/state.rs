@@ -9,8 +9,8 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 #[derive(Default)]
 pub(super) struct Document {
-    pub(super) save: super::save_state::SaveState,
-    pub(super) history: super::history::History,
+    /// The settings, their History and whether they still need saving.
+    pub(super) edit: crate::edit_session::EditSession,
     pub(super) path: Option<PathBuf>,
     pub(super) metadata: Option<Metadata>,
     image: Option<Arc<CameraImage>>,
@@ -20,7 +20,6 @@ pub(super) struct Document {
     /// A conversion to black & white waiting for the photo to decode, for its
     /// Auto mix.
     pub(super) pending_treatment: Option<PendingTreatment>,
-    pub(super) recipe: Recipe,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<i64>,
     pub(super) lightroom_notice: String,
@@ -508,7 +507,7 @@ impl Document {
     /// apart so a panel can measure them only when it needs them.
     pub(super) fn recipe_and_colors(&mut self) -> (&mut Recipe, PhotoColorSource<'_>) {
         (
-            &mut self.recipe,
+            &mut self.edit.recipe,
             PhotoColorSource {
                 image: self.image.as_ref(),
                 spread: &self.color_spread,

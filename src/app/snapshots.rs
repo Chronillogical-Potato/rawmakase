@@ -128,7 +128,7 @@ impl Editor {
             return;
         };
         let catalog = &library.catalog;
-        let recipe = &self.document.recipe;
+        let recipe = &self.document.edit.recipe;
         let result = match &action {
             SnapshotAction::New => {
                 let name = format!("Snapshot {}", self.document.snapshots.list.len() + 1);
@@ -196,13 +196,14 @@ impl Editor {
             return;
         };
         // Already the edit: nothing to record, and no label left for the next step.
-        if recipe == self.document.recipe {
+        if recipe == self.document.edit.recipe {
             return;
         }
         self.document
+            .edit
             .history
             .label(Step::new(format!("Snapshot: {name}"), ""));
-        self.document.recipe = recipe;
+        self.document.edit.recipe = recipe;
         self.ensure_upright();
     }
     /// A snapshot's settings for this photo; one from Lightroom is converted, and
@@ -277,7 +278,7 @@ mod tests {
         e.document.catalog_photo = Some(library.photos[0].id);
         e.library = Some(Box::new(library));
         e.document.metadata = Some(Default::default());
-        e.document.recipe.exposure = 0.8;
+        e.document.edit.recipe.exposure = 0.8;
         // + saves the edit as it is and starts naming it.
         e.snapshot_action(SnapshotAction::New);
         let id = e.document.snapshots.list[0].id;
@@ -288,19 +289,19 @@ mod tests {
         e.snapshot_action(SnapshotAction::Rename(id, "  ".into()));
         assert_eq!(e.document.snapshots.list[0].name, "Bright");
         // Applying it is one History step, which Undo takes back.
-        e.document.recipe = Recipe::default();
-        let before = e.document.recipe.clone();
+        e.document.edit.recipe = Recipe::default();
+        let before = e.document.edit.recipe.clone();
         e.snapshot_action(SnapshotAction::Apply(id));
         e.commit_edit(before, None);
-        assert_eq!(e.document.recipe.exposure, 0.8);
-        let (steps, _) = e.document.history.steps();
+        assert_eq!(e.document.edit.recipe.exposure, 0.8);
+        let (steps, _) = e.document.edit.history.steps();
         assert_eq!(steps.last().unwrap().name, "Snapshot: Bright");
         // Update with Current Settings, then Delete.
-        e.document.recipe.exposure = -0.5;
+        e.document.edit.recipe.exposure = -0.5;
         e.snapshot_action(SnapshotAction::Update(id));
-        e.document.recipe = Recipe::default();
+        e.document.edit.recipe = Recipe::default();
         e.snapshot_action(SnapshotAction::Apply(id));
-        assert_eq!(e.document.recipe.exposure, -0.5);
+        assert_eq!(e.document.edit.recipe.exposure, -0.5);
         e.snapshot_action(SnapshotAction::Delete(id));
         assert!(e.document.snapshots.list.is_empty());
         // Typing a name and pressing Return in the panel names the new snapshot.

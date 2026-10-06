@@ -422,7 +422,7 @@ impl Editor {
         if self.document.pending_lightroom.is_some()
             || self.document.metadata.is_none()
             || self.document.auto.is_running()
-            || self.document.save.is_protected()
+            || self.document.edit.save.is_protected()
             || self.importing.is_some()
         {
             return Vec::new();

@@ -228,7 +228,7 @@ impl Editor {
         {
             return Some(ReferenceSide {
                 image: image.clone(),
-                recipe: self.document.recipe.clone(),
+                recipe: self.document.edit.recipe.clone(),
             });
         }
         let loaded = self.reference.loaded.as_ref().filter(|l| l.photo == id)?;
@@ -476,7 +476,7 @@ mod tests {
         let side = editor.reference_side().unwrap();
         assert_eq!(side.recipe.exposure, 1.5);
         // Editing changes the Active photo, never the reference.
-        editor.document.recipe.exposure = -0.5;
+        editor.document.edit.recipe.exposure = -0.5;
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
         // The reference renders in Before's lane, from its own photo.
         editor.schedule_before();
@@ -487,7 +487,7 @@ mod tests {
         editor.document.set_image(image);
         editor.load_reference();
         assert!(!editor.reference.loading());
-        editor.document.recipe.exposure = 0.25;
+        editor.document.edit.recipe.exposure = 0.25;
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 0.25);
         editor.document.reset(Some(open));
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);

@@ -53,18 +53,18 @@ impl Editor {
     /// for it ([`Editor::finish_pending_treatment`]).
     pub(super) fn set_treatment(&mut self, treatment: Treatment) {
         self.document.pending_treatment = None;
-        if self.document.recipe.treatment() == treatment {
+        if self.document.edit.recipe.treatment() == treatment {
             return;
         }
         let needs_auto = treatment == Treatment::BlackWhite
             && self.first_conversion == FirstConversion::AutoMix
-            && self.document.recipe.effects.gray_mix == [0.; 8];
+            && self.document.edit.recipe.effects.gray_mix == [0.; 8];
         // Measured only when the conversion uses it.
         let colors = needs_auto.then(|| self.photo_colors()).flatten();
         if needs_auto && colors.is_none() {
             self.document.pending_treatment = Some(super::state::PendingTreatment {
                 treatment,
-                recipe: self.document.recipe.clone(),
+                recipe: self.document.edit.recipe.clone(),
             });
             self.status = "Converting to Black & White once the photo is decoded".into();
             return;
@@ -74,15 +74,16 @@ impl Editor {
         let document = &mut self.document;
         match &document.metadata {
             Some(m) => document
+                .edit
                 .recipe
                 .choose_treatment(treatment, first, color_profile, m),
-            None => document.recipe.set_treatment(treatment, first),
+            None => document.edit.recipe.set_treatment(treatment, first),
         }
         let name = match treatment {
             Treatment::Color => "Convert to Color",
             Treatment::BlackWhite => "Convert to Black & White",
         };
-        self.document.history.label(Step::new(name, ""));
+        self.document.edit.history.label(Step::new(name, ""));
     }
 
     /// Converts as asked while the photo was decoding, once it is decoded. Called
@@ -90,7 +91,7 @@ impl Editor {
     pub(super) fn finish_pending_treatment(&mut self) {
         if self.document.full().is_some()
             && let Some(pending) = self.document.pending_treatment.take()
-            && pending.recipe == self.document.recipe
+            && pending.recipe == self.document.edit.recipe
         {
             self.set_treatment(pending.treatment);
         }
@@ -103,7 +104,7 @@ impl Editor {
         &mut self,
         old: Option<&crate::camera_profiles::CameraProfile>,
     ) {
-        let r = &self.document.recipe;
+        let r = &self.document.edit.recipe;
         // Measured only for a first conversion by a black & white profile.
         let converts = crate::develop::is_monochrome(r.profile.as_deref())
             && !crate::develop::is_monochrome(old)
@@ -111,7 +112,10 @@ impl Editor {
             && r.effects.gray_mix == [0.; 8];
         let colors = converts.then(|| self.first_conversion_colors()).flatten();
         let first = colors.as_ref().map(PhotoColors::auto_mix);
-        self.document.recipe.follow_profile_treatment(old, first);
+        self.document
+            .edit
+            .recipe
+            .follow_profile_treatment(old, first);
     }
 
     /// V: switches between Color and Black & White.
@@ -121,7 +125,7 @@ impl Editor {
             .document
             .pending_treatment
             .take()
-            .map_or_else(|| self.document.recipe.treatment(), |p| p.treatment);
+            .map_or_else(|| self.document.edit.recipe.treatment(), |p| p.treatment);
         self.set_treatment(match shown {
             Treatment::Color => Treatment::BlackWhite,
             Treatment::BlackWhite => Treatment::Color,
@@ -134,10 +138,11 @@ impl Editor {
         let Some(colors) = self.photo_colors() else {
             return;
         };
-        let mix = colors.auto_mix().for_recipe(&self.document.recipe);
-        if self.document.recipe.effects.gray_mix != mix {
-            self.document.recipe.effects.gray_mix = mix;
+        let mix = colors.auto_mix().for_recipe(&self.document.edit.recipe);
+        if self.document.edit.recipe.effects.gray_mix != mix {
+            self.document.edit.recipe.effects.gray_mix = mix;
             self.document
+                .edit
                 .history
                 .label(Step::new("Black & White Mix", "Auto"));
         }

@@ -1005,7 +1005,7 @@ impl Editor {
                 };
                 status_text(
                     ui,
-                    self.document.save.message().unwrap_or(&self.status),
+                    self.document.edit.save.message().unwrap_or(&self.status),
                     self.message_detail(&self.status),
                     Some(display),
                 );
@@ -1027,7 +1027,7 @@ impl Editor {
                     )
                     .on_hover_text(&self.document.lightroom_notice);
                 }
-                if self.document.save.is_protected() {
+                if self.document.edit.save.is_protected() {
                     ui.separator();
                     ui.colored_label(
                         Color32::YELLOW,
@@ -1119,7 +1119,7 @@ impl Editor {
 
     fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
-        if self.document.save.needs_save() {
+        if self.document.edit.save.needs_save() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
         if ctx.input(|i| i.viewport().close_requested())
@@ -1144,7 +1144,7 @@ impl Editor {
                     && !self.activity.is_syncing()
                     && ui.button("Close without saving").clicked()
                 {
-                    self.document.save.saved();
+                    self.document.edit.save.saved();
                     if let Some(library) = &mut self.library {
                         library.discard_drafts();
                     }

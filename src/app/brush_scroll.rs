@@ -156,7 +156,10 @@ impl Editor {
     pub(super) fn finish_wheel_gesture(&mut self) {
         if self.view.wheel.pending() {
             self.view.wheel = WheelGesture::default();
-            self.document.history.finish_gesture(&self.document.recipe);
+            self.document
+                .edit
+                .history
+                .finish_gesture(&self.document.edit.recipe);
             self.sync_undo();
         }
     }
@@ -177,7 +180,7 @@ impl Editor {
             let tool = &mut self.view.retouch;
             let op = tool
                 .selected
-                .and_then(|i| self.document.recipe.retouch.get_mut(i));
+                .and_then(|i| self.document.edit.recipe.retouch.get_mut(i));
             // Only a selected spot's change is an edit, grouped as one History step;
             // the brush for new spots is a tool setting.
             if op.is_some() {

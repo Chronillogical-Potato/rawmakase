@@ -46,7 +46,8 @@ impl Editor {
     /// Opens the tool for `target`, or puts it away when it is open, and shows the
     /// sliders it moves.
     pub(super) fn toggle_targeted(&mut self, target: Target) {
-        if let Some(steps) = super::point_color_panel::point_color_steps(&self.document.recipe) {
+        if let Some(steps) = super::point_color_panel::point_color_steps(&self.document.edit.recipe)
+        {
             self.status = format!("{steps} in Calibration to use targeted adjustments");
             return;
         }
@@ -74,7 +75,7 @@ impl Editor {
     /// Whether the panel `target` adjusts is the one this photo shows, on the current
     /// process (as Point Color, older processes render the curves elsewhere).
     pub(super) fn targeted_available(&self, target: Target) -> bool {
-        let r = &self.document.recipe;
+        let r = &self.document.edit.recipe;
         if !super::point_color_panel::renders_point_color(r) {
             return false;
         }
@@ -169,8 +170,8 @@ impl Editor {
         self.view.targeted = Some(TargetDrag {
             target,
             at,
-            start: self.document.recipe.clone(),
-            last: self.document.recipe.clone(),
+            start: self.document.edit.recipe.clone(),
+            last: self.document.edit.recipe.clone(),
             travel: 0.,
             weights: None,
             pointer: Pointer::Down,
@@ -181,7 +182,7 @@ impl Editor {
         };
         let (generation, cancel) = self.document.targeted_pick.start();
         let id = self.load.id();
-        let sampled = self.document.recipe.clone();
+        let sampled = self.document.edit.recipe.clone();
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
@@ -207,25 +208,25 @@ impl Editor {
             return;
         };
         // Changed by something else (Auto finishing, say): the sample no longer holds.
-        if self.document.recipe != drag.last {
+        if self.document.edit.recipe != drag.last {
             self.view.targeted = None;
             return;
         }
         drag.travel += up;
         if let Some(weights) = drag.weights.filter(|w| !w.is_empty()) {
-            let before = self.document.recipe.clone();
+            let before = self.document.edit.recipe.clone();
             weights.apply(
                 &drag.start,
                 drag.travel * DRAG_RATE,
-                &mut self.document.recipe,
+                &mut self.document.edit.recipe,
             );
             // Named through the frame, as a slider's drag is; only when it moved, so
             // the name never lands on another edit.
-            if self.document.recipe != before {
-                let (name, value) = weights.step(&self.document.recipe);
+            if self.document.edit.recipe != before {
+                let (name, value) = weights.step(&self.document.edit.recipe);
                 super::widgets::name_frame_step(&self.context, name, value);
             }
-            drag.last = self.document.recipe.clone();
+            drag.last = self.document.edit.recipe.clone();
         }
     }
     /// Ends a drag whose button came up elsewhere (Space or Before took over).
@@ -259,7 +260,7 @@ impl Editor {
         };
         // Taken from the edit the drag started on, and nothing (Auto finishing, say)
         // has changed it since.
-        if *sampled != drag.start || self.document.recipe != drag.start {
+        if *sampled != drag.start || self.document.edit.recipe != drag.start {
             self.view.targeted = None;
             return;
         }
@@ -278,14 +279,14 @@ impl Editor {
         drag.weights = Some(weights);
         if drag.pointer == Pointer::Released {
             let drag = self.view.targeted.take().expect("checked above");
-            if drag.travel != 0. && !weights.is_empty() && self.document.recipe == drag.start {
-                let old = self.document.recipe.clone();
+            if drag.travel != 0. && !weights.is_empty() && self.document.edit.recipe == drag.start {
+                let old = self.document.edit.recipe.clone();
                 weights.apply(
                     &drag.start,
                     drag.travel * DRAG_RATE,
-                    &mut self.document.recipe,
+                    &mut self.document.edit.recipe,
                 );
-                let (name, value) = weights.step(&self.document.recipe);
+                let (name, value) = weights.step(&self.document.edit.recipe);
                 self.commit_edit(old, Some(Step::new(name, value)));
             }
         }
@@ -387,8 +388,8 @@ mod tests {
             scale_clipped: 0,
         });
         editor.document.set_image(image);
-        editor.document.recipe.reference_curves = true;
-        editor.document.recipe.reference_color = true;
+        editor.document.edit.recipe.reference_curves = true;
+        editor.document.edit.recipe.reference_color = true;
         editor.preview.texture = Some(
             ctx.load_texture(
                 "photo",
@@ -442,6 +443,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut e = editor(&ctx);
         e.document
+            .edit
             .recipe
             .panels
             .set(Panel::ColorMixer, PanelState::Off);
@@ -483,7 +485,7 @@ mod tests {
         let end = Pos2::new(50., y);
         frame(&ctx, &mut e, vec![button(end, false)]);
         frame(&ctx, &mut e, vec![]);
-        let r = &e.document.recipe;
+        let r = &e.document.edit.recipe;
         // Dragged up 50 points from the press: orange saturation up by 50/250.
         let travelled = (100. - y) * DRAG_RATE;
         assert!(
@@ -493,7 +495,7 @@ mod tests {
         );
         assert!(r.hsl.iter().all(|b| b[0] == 0. && b[2] == 0.));
         assert_eq!(r.panels.state(Panel::ColorMixer), PanelState::On);
-        let (steps, applied) = e.document.history.steps();
+        let (steps, applied) = e.document.edit.history.steps();
         assert_eq!(applied, 1);
         assert_eq!(steps[0].name, "Orange Saturation");
         assert!(e.view.targeted.is_none());
@@ -509,28 +511,28 @@ mod tests {
         let mut e = editor(&ctx);
         e.toggle_targeted(Target::ToneCurve);
         assert!(e.view.parametric_curve);
-        let before = e.document.recipe.clone();
+        let before = e.document.edit.recipe.clone();
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
         e.drag_targeted(25.);
         e.release_targeted();
-        assert_eq!(e.document.recipe, before);
+        assert_eq!(e.document.edit.recipe, before);
         wait_for_sample(&ctx, &mut e);
-        let r = &e.document.recipe;
+        let r = &e.document.edit.recipe;
         let moved: Vec<usize> = (0..4).filter(|i| r.effects.parametric[*i] != 0.).collect();
         assert_eq!(moved.len(), 1, "{:?}", r.effects.parametric);
         assert!((r.effects.parametric[moved[0]] - 0.1).abs() < 1e-6);
-        let (steps, applied) = e.document.history.steps();
+        let (steps, applied) = e.document.edit.history.steps();
         assert_eq!(applied, 1);
         assert!(steps[0].name.starts_with("Region "), "{}", steps[0].name);
         e.undo();
-        assert_eq!(e.document.recipe, before);
+        assert_eq!(e.document.edit.recipe, before);
     }
 
     #[test]
     fn older_processes_get_no_targeted_tool() {
         let ctx = egui::Context::default();
         let mut e = editor(&ctx);
-        e.document.recipe.reference_curves = false;
+        e.document.edit.recipe.reference_curves = false;
         e.toggle_targeted(Target::ToneCurve);
         assert_eq!(e.view.tool, Tool::None);
         assert_eq!(
@@ -551,7 +553,18 @@ mod tests {
         assert!(e.view.targeted.is_some());
         e.drag_targeted(0.);
         e.release_targeted();
-        assert!((e.document.recipe.effects.parametric.iter().sum::<f32>() - 0.1).abs() < 1e-6);
+        assert!(
+            (e.document
+                .edit
+                .recipe
+                .effects
+                .parametric
+                .iter()
+                .sum::<f32>()
+                - 0.1)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
@@ -560,36 +573,36 @@ mod tests {
         let mut e = editor(&ctx);
         e.toggle_targeted(Target::ToneCurve);
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
-        e.document.recipe.exposure = 0.7;
+        e.document.edit.recipe.exposure = 0.7;
         wait_for_sample(&ctx, &mut e);
         assert!(e.view.targeted.is_none());
         // Or after it arrived, while the drag goes on.
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
         wait_for_sample(&ctx, &mut e);
         e.drag_targeted(10.);
-        e.document.recipe.exposure = 0.2;
-        let changed = e.document.recipe.clone();
+        e.document.edit.recipe.exposure = 0.2;
+        let changed = e.document.edit.recipe.clone();
         e.drag_targeted(10.);
         assert!(e.view.targeted.is_none());
-        assert_eq!(e.document.recipe, changed);
+        assert_eq!(e.document.edit.recipe, changed);
     }
 
     #[test]
     fn neutral_colors_move_nothing_and_the_tool_follows_the_treatment() {
         let ctx = egui::Context::default();
         let mut e = editor(&ctx);
-        let before = e.document.recipe.clone();
+        let before = e.document.edit.recipe.clone();
         e.toggle_targeted(Target::Hsl(HslChannel::Hue));
         e.start_targeted_drag(Target::Hsl(HslChannel::Hue), [0.75, 0.5]);
         wait_for_sample(&ctx, &mut e);
         e.drag_targeted(40.);
-        assert_eq!(e.document.recipe, before);
+        assert_eq!(e.document.edit.recipe, before);
         assert!(e.status.contains("Nothing to adjust"), "{}", e.status);
         // B&W's tool is for black & white photos only; converting puts the Color
         // Mixer's away.
         e.toggle_targeted(Target::BlackWhite);
         assert!(matches!(e.view.tool, Tool::Targeted(Target::Hsl(_))));
-        e.document.recipe.effects.monochrome = true;
+        e.document.edit.recipe.effects.monochrome = true;
         e.keep_targeted_tool();
         assert_eq!(e.view.tool, Tool::None);
         assert!(e.view.targeted.is_none());
@@ -597,7 +610,7 @@ mod tests {
         assert_eq!(e.view.tool, Tool::Targeted(Target::BlackWhite));
         // Hiding the sliders a tool moves puts it away, and another target drops a
         // drag still waiting for its sample.
-        e.document.recipe.effects.monochrome = false;
+        e.document.edit.recipe.effects.monochrome = false;
         e.toggle_targeted(Target::ToneCurve);
         e.view.parametric_curve = false;
         e.keep_targeted_tool();
@@ -647,7 +660,7 @@ mod tests {
         // B&W's is for black & white photos.
         press(&mut e, egui::Key::G, all);
         assert_eq!(e.view.tool, Tool::None);
-        e.document.recipe.effects.monochrome = true;
+        e.document.edit.recipe.effects.monochrome = true;
         press(&mut e, egui::Key::G, all);
         assert_eq!(e.view.tool, Tool::Targeted(Target::BlackWhite));
     }

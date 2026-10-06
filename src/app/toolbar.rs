@@ -299,15 +299,16 @@ impl Editor {
     /// Back to the raw defaults, like Lightroom's Reset.
     pub(super) fn reset_settings(&mut self) {
         self.document
+            .edit
             .history
             .label(super::history::Step::new("Reset Settings", ""));
         let Some(defaults) = self.photo_defaults() else {
-            self.document.recipe = Recipe::default();
+            self.document.edit.recipe = Recipe::default();
             return;
         };
         if let Some(note) = defaults.note {
             self.status = note;
         }
-        self.document.recipe = defaults.recipe;
+        self.document.edit.recipe = defaults.recipe;
     }
 }
