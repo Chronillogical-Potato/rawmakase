@@ -317,8 +317,10 @@ pub(super) fn capture_stops(m: &crate::raw::Metadata) -> Option<f32> {
 /// source: a photo that let in a stop more light gets a stop less Exposure.
 fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
-    let limit = crate::develop::EXPOSURE_LIMIT;
-    Some((source.recipe.exposure + difference).clamp(-limit, limit))
+    let valid = &crate::develop::params::ParameterId::Exposure
+        .descriptor()
+        .valid;
+    Some((source.recipe.exposure + difference).clamp(*valid.start(), *valid.end()))
 }
 
 /// Writes one side of a Sync back, in one transaction, keeping each photo's History,

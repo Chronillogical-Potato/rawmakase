@@ -23,7 +23,7 @@
 use crate::{
     color::curve::ToneCurve,
     develop::{
-        Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, effects::Effects,
+        Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, effects::Effects, params::ParameterId,
         settings_groups::SettingGroup,
     },
     raw::Metadata,
@@ -181,6 +181,11 @@ fn lerp(a: f32, b: f32, t: f32, lo: f32, hi: f32) -> f32 {
     }
     (a + (b - a) * t).clamp(lo.min(a).min(b), hi.max(a).max(b))
 }
+/// A named setting interpolated as [`lerp`] does, within its slider's range.
+fn lerp_setting(id: ParameterId, a: f32, b: f32, t: f32) -> f32 {
+    let range = &id.descriptor().interactive;
+    lerp(a, b, t, *range.start(), *range.end())
+}
 fn lerp_all<const N: usize>(a: [f32; N], b: [f32; N], t: f32, lo: f32, hi: f32) -> [f32; N] {
     std::array::from_fn(|i| lerp(a[i], b[i], t, lo, hi))
 }
@@ -324,9 +329,9 @@ fn effects(a: &Effects, b: &Effects, t: f32) -> Effects {
         balance: lerp(a.balance, *balance, t, -1., 1.),
         blending: lerp(a.blending, *blending, t, 0., 1.),
         global_grade: wheel(a.global_grade, *global_grade, t),
-        clarity: lerp(a.clarity, *clarity, t, -1., 1.),
-        texture: lerp(a.texture, *texture, t, -1., 1.),
-        dehaze: lerp(a.dehaze, *dehaze, t, -1., 1.),
+        clarity: lerp_setting(ParameterId::Clarity, a.clarity, *clarity, t),
+        texture: lerp_setting(ParameterId::Texture, a.texture, *texture, t),
+        dehaze: lerp_setting(ParameterId::Dehaze, a.dehaze, *dehaze, t),
         grain: lerp(a.grain, *grain, t, 0., 1.),
         grain_size: lerp(a.grain_size, *grain_size, t, 0., 1.),
         grain_roughness: lerp(a.grain_roughness, *grain_roughness, t, 0., 1.),
@@ -449,7 +454,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
             mired(TEMPERATURE_MIN),
         ))
     .clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
-    let tint = lerp(a.tint, *tint, t, -TINT_LIMIT, TINT_LIMIT);
+    let tint = lerp_setting(ParameterId::Tint, a.tint, *tint, t);
     let levels = {
         let black = lerp(a.black_point, *black_point, t, 0., 0.99);
         let white = lerp(a.white_point, *white_point, t, 0.01, 1.);
@@ -481,24 +486,24 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         sharpening_detail: lerp(a.sharpening_detail, *sharpening_detail, t, 0., 1.),
         sharpening_masking: lerp(a.sharpening_masking, *sharpening_masking, t, 0., 1.),
         sharpening_model: *sharpening_model,
-        exposure: lerp(a.exposure, *exposure, t, -5., 5.),
+        exposure: lerp_setting(ParameterId::Exposure, a.exposure, *exposure, t),
         camera_exposure: *camera_exposure,
         temperature,
         tint,
         wb: *wb,
         auto_white_balance: None,
-        contrast: lerp(a.contrast, *contrast, t, -1., 1.),
-        highlights: lerp(a.highlights, *highlights, t, -1., 1.),
-        shadows: lerp(a.shadows, *shadows, t, -1., 1.),
-        whites: lerp(a.whites, *whites, t, -1., 1.),
-        blacks: lerp(a.blacks, *blacks, t, -1., 1.),
+        contrast: lerp_setting(ParameterId::Contrast, a.contrast, *contrast, t),
+        highlights: lerp_setting(ParameterId::Highlights, a.highlights, *highlights, t),
+        shadows: lerp_setting(ParameterId::Shadows, a.shadows, *shadows, t),
+        whites: lerp_setting(ParameterId::Whites, a.whites, *whites, t),
+        blacks: lerp_setting(ParameterId::Blacks, a.blacks, *blacks, t),
         black_point: levels.0,
         white_point: levels.1,
         midtone: lerp(a.midtone, *midtone, t, 0.1, 4.),
         curve: curve(&a.curve, b_curve, t),
         curve_saturation: lerp(a.curve_saturation, *curve_saturation, t, 0., 2.),
-        saturation: lerp(a.saturation, *saturation, t, -1., 1.),
-        vibrance: lerp(a.vibrance, *vibrance, t, -1., 1.),
+        saturation: lerp_setting(ParameterId::Saturation, a.saturation, *saturation, t),
+        vibrance: lerp_setting(ParameterId::Vibrance, a.vibrance, *vibrance, t),
         hsl: std::array::from_fn(|i| lerp_all(a.hsl[i], hsl[i], t, -1., 1.)),
         // `same_swatches` holds: only the shifts differ.
         point_colors: a
