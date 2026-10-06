@@ -288,10 +288,15 @@ impl Editor {
                 path,
                 overrides,
             } => {
-                let list: Vec<String> = overrides
+                // A few, so the buttons stay on screen.
+                let mut list: Vec<String> = overrides
                     .iter()
+                    .take(6)
                     .map(|o| format!("{}: {}", o.relative, pretty_path(&o.path)))
                     .collect();
+                if overrides.len() > 6 {
+                    list.push(format!("and {} more", overrides.len() - 6));
+                }
                 let detail = format!(
                     "These folders have their own location on this computer:\n\n{}\n\n\
                      Keep them there, or clear them so they are found in the new location.",

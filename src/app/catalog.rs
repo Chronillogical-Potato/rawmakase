@@ -204,10 +204,19 @@ impl Editor {
         let ctx = self.context.clone();
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<_> {
-                let (_, report) = crate::catalog::Catalog::open(&current)?
-                    .add_folder_with(&folder, &crate::catalog::MetadataDefaults::load())?;
+                let added = crate::catalog::Catalog::open(&current)?.import_folder(
+                    &folder,
+                    &crate::catalog::MetadataDefaults::load(),
+                    &[],
+                )?;
+                anyhow::ensure!(
+                    added.ambiguous.is_empty(),
+                    "{} matches more than one folder of the catalog; add it with Add Folder…",
+                    folder.display()
+                );
                 let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
-                folder_added(&mut library, &report, &[]);
+                // Says why the photo wasn't added when its folder is linked elsewhere.
+                folder_added(&mut library, &added.report, &added.conflicts);
                 Ok(library)
             })()
             .map(Box::new)
@@ -238,10 +247,14 @@ impl Editor {
         } else if !added {
             self.add_to_library(path);
         } else {
-            self.status = format!(
-                "{} could not be added to the Library",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            );
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            // Adding its folder may have said why (linked elsewhere).
+            self.status = match self.library.as_ref().map(|l| l.message.as_str()) {
+                Some(why) if !why.is_empty() => {
+                    format!("{name} could not be added to the Library · {why}")
+                }
+                _ => format!("{name} could not be added to the Library"),
+            };
         }
     }
     pub(super) fn develop_catalog_photo(&mut self, id: i64) {
