@@ -105,6 +105,11 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
     let (steps, applied) = e.document.history.steps();
     assert_eq!(steps[applied - 1].name, "Preset");
     assert_eq!(steps[applied - 1].value, "Bright");
+    // Applied once more, it changes nothing and leaves no name for the next edit.
+    e.execute_command(named("bright"), &ctx).unwrap();
+    set(&mut e, &ctx, 0.25).unwrap();
+    let (steps, applied) = e.document.history.steps();
+    assert_ne!(steps[applied - 1].name, "Preset");
     // An edit no listed preset made names none.
     e.document.recipe.preset_name = "Imported Lightroom edit".into();
     assert_eq!(json(e.command_state())["preset"], Value::Null);
@@ -117,7 +122,7 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
         e.execute_command(named("Brighter"), &ctx).unwrap_err().code,
         "no_document"
     );
-    assert_eq!(e.document.recipe.exposure, 1.);
+    assert_eq!(e.document.recipe.exposure, 0.25);
 }
 #[test]
 fn edits_reject_library_loading_modal_and_stale_targets() {

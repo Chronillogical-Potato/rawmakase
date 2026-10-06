@@ -62,6 +62,10 @@ pub(in crate::app) fn find(presets: &[Preset], target: &PresetTarget) -> Result<
                 .position(|p| p.id == *id)
                 .ok_or_else(|| Error::new("not_found", "No preset has this id; list presets"));
         }
+        // An empty name is part of every name, so it would pick any lone preset.
+        PresetTarget::Name { name, .. } if name.trim().is_empty() => {
+            return Err(Error::new("invalid_request", "The preset name is empty"));
+        }
         PresetTarget::Name { name, group } => (name.to_lowercase(), group.as_deref()),
     };
     let in_group: Vec<usize> = (0..presets.len())
@@ -150,6 +154,11 @@ mod tests {
         assert_eq!(
             find(&presets, &name("Cool", None)).unwrap_err().code,
             "not_found"
+        );
+        let lone = [preset("Warm", "Mine")];
+        assert_eq!(
+            find(&lone, &name(" ", None)).unwrap_err().code,
+            "invalid_request"
         );
         assert_eq!(
             find(&presets, &name("Warm", Some("Other")))

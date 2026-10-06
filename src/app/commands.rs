@@ -586,12 +586,16 @@ impl Editor {
                 self.require_develop()?;
                 self.require_presets()?;
                 let i = preset::find(&self.presets.library.presets, &target)?;
+                let before = self.document.recipe.clone();
                 let applied = self
                     .apply_preset(i)
                     .map_err(|e| Error::new("not_applied", format!("{e:#}")))?;
                 // Named here: applying the preset already applied, after other edits,
-                // changes no preset name for History to recognize it by.
-                super::widgets::name_frame_step(ctx, "Preset".into(), applied.name.clone());
+                // changes no preset name for History to recognize it by. Only a change
+                // is named, or the name would be left for the next edit.
+                if self.document.recipe != before {
+                    super::widgets::name_frame_step(ctx, "Preset".into(), applied.name.clone());
+                }
                 return Ok(Outcome::Preset { applied });
             }
             Operation::Curve(channel, points) => {
