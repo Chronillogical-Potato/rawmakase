@@ -38,7 +38,9 @@ catalog's filenames independently of the Library's current filters. `search`
 changes the Library search itself.
 
 `set` uses displayed units: Exposure in EV, global Temperature in kelvin, global
-Tint in tint units, other basic and mixer parameters in percent. Values are
+Tint in tint units, `straighten` (alias `angle`, the Crop panel's Angle) in
+degrees from −45 to 45, other basic and mixer parameters in percent. `turn`
+moves Straighten 0.1° per tick and has no mask scope. Values are
 clamped to their supported ranges. `capabilities` lists these ranges and whether
 a parameter supports masks. Mixer channels are explicit: `band3.sat`,
 `band3.hue`, `band3.lum`, `band3.gray`. Bare `band3` is a device mapping only.
