@@ -101,8 +101,6 @@ raw -> optics
 stats -> storage
 stats -> time
 stats -> updates
-storage -> develop
-storage -> export_settings
 watermark -> develop
 watermark -> storage
 xmp -> build_info

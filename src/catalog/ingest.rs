@@ -292,7 +292,7 @@ impl Catalog {
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
     fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
-        let Some((sidecar, bitmaps)) = crate::storage::import(file)? else {
+        let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
             return Ok(());
         };
         for bitmap in bitmaps {

@@ -164,7 +164,7 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
 /// The imported edit and its bitmaps come from the same store: the newer one.
 #[test]
 fn import_takes_the_edit_and_its_bitmaps_from_one_store() -> Result<()> {
-    use super::super::bitmaps::{Bitmap, to_base64};
+    use crate::storage::bitmaps::{Bitmap, to_base64};
     let d = tempfile::tempdir()?;
     let raw = d.path().join("photo.ARW");
     fs::write(&raw, b"fixture")?;

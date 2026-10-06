@@ -1,7 +1,10 @@
 //! Public API regressions, with relative-path work isolated in a child process.
 use anyhow::Result;
 use rawmakase::{
-    catalog::Catalog, develop::Recipe, export_settings::ExportOptions, presets, storage,
+    catalog::{Catalog, legacy_sidecar},
+    develop::Recipe,
+    export_settings::ExportOptions,
+    presets, storage,
 };
 use std::{fs, path::Path, process::Command};
 
@@ -35,9 +38,11 @@ fn relative_paths_child() -> Result<()> {
     presets::save_preset(Path::new("preset.json"), &recipe)?;
     assert_eq!(presets::load_preset(Path::new("preset.json"))?, recipe);
     fs::write("photo.ARW", b"identity fixture")?;
-    storage::save(Path::new("photo.ARW"), &recipe, &ExportOptions::default())?;
+    legacy_sidecar::save(Path::new("photo.ARW"), &recipe, &ExportOptions::default())?;
     assert_eq!(
-        storage::load(Path::new("photo.ARW"))?.unwrap().recipe,
+        legacy_sidecar::load(Path::new("photo.ARW"))?
+            .unwrap()
+            .recipe,
         recipe
     );
     assert_eq!(storage::list_raws(Path::new("photo.ARW"))?.len(), 1);
@@ -58,7 +63,7 @@ fn malformed_legacy_recipes_are_errors_and_original_bytes_survive() -> Result<()
     let raw = dir.path().join("photo.ARW");
     fs::write(&raw, b"identity fixture")?;
     let preset = dir.path().join("preset.json");
-    let sidecar = storage::sidecar_path(&raw);
+    let sidecar = legacy_sidecar::sidecar_path(&raw);
     for version in [1, 2, 3, 4, 999] {
         for recipe in [
             serde_json::Value::Null,
@@ -72,8 +77,10 @@ fn malformed_legacy_recipes_are_errors_and_original_bytes_survive() -> Result<()
             fs::write(&preset, &bytes)?;
             fs::write(&sidecar, &bytes)?;
             assert!(presets::load_preset(&preset).is_err());
-            assert!(storage::load(&raw).is_err());
-            assert!(storage::save(&raw, &Recipe::default(), &ExportOptions::default()).is_err());
+            assert!(legacy_sidecar::load(&raw).is_err());
+            assert!(
+                legacy_sidecar::save(&raw, &Recipe::default(), &ExportOptions::default()).is_err()
+            );
             assert_eq!(fs::read(&sidecar)?, bytes);
         }
     }
@@ -86,7 +93,7 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     let raw = dir.path().join("photo.ARW");
     fs::write(&raw, b"identity fixture")?;
     let recipe = Recipe::default();
-    let sidecar = storage::save(&raw, &recipe, &ExportOptions::default())?;
+    let sidecar = legacy_sidecar::save(&raw, &recipe, &ExportOptions::default())?;
     let original = fs::read(&sidecar)?;
     let mut catalog = Catalog::create(&dir.path().join("photos.rawmakase"))?;
     catalog.add_folder(dir.path())?;
@@ -112,7 +119,7 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
             max_edge: 30_001,
         },
     ] {
-        assert!(storage::save(&raw, &recipe, &options).is_err());
+        assert!(legacy_sidecar::save(&raw, &recipe, &options).is_err());
         assert_eq!(fs::read(&sidecar)?, original);
         assert!(
             catalog

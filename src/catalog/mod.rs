@@ -27,10 +27,12 @@ mod develop_history;
 mod edits;
 mod info;
 mod ingest;
+pub mod legacy_sidecar;
 pub mod lightroom;
 pub mod locations;
 mod models;
 pub mod resolve;
+// XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
 pub use crate::xmp::descriptive::Read as FileMetadata;
