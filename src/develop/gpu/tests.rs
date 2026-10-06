@@ -891,7 +891,7 @@ fn shaders_are_valid_wgsl() {
         ),
         (
             "local.wgsl",
-            include_str!("local.wgsl").into(),
+            super::sampling::wgsl_prelude() + include_str!("local.wgsl"),
             &[
                 "running_sum",
                 "window",

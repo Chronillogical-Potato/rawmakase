@@ -5,6 +5,7 @@
 //! the blurs give is computed only for the pixels a region samples (and on the fly
 //! for the Shadows/Highlights map's reduction), so a Clarity edit does not touch the
 //! whole photo unless that map needs it.
+use super::sampling;
 use super::{
     Processor,
     develop::{Developer, DeviceSamples},
@@ -29,8 +30,6 @@ use wgpu::util::DeviceExt;
 
 /// Device samples kept, as the stage cache keeps CPU samples.
 const SAMPLES: usize = 4;
-/// Parameters before the radial tables in the sampling pass (`S_*` in `local.wgsl`).
-pub(crate) const SAMPLE_HEADER: usize = 75;
 
 /// The local-tone stage of the current photo: log luminance and its blurs in one
 /// buffer (`local.wgsl`), and the sliders applied to them.
@@ -137,7 +136,9 @@ impl Resident {
         );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Local stages"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("local.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                (super::sampling::wgsl_prelude() + include_str!("local.wgsl")).into(),
+            ),
         });
         let entries: [(&str, Vec<wgpu::BindGroupLayoutEntry>); 6] = [
             (
@@ -457,13 +458,16 @@ impl Processor {
     }
     /// The first sampling-pass parameters for `image` and its local tones.
     fn header(image: &CameraImage, tones: Option<&LocalTones>) -> Vec<f32> {
-        let mut header = vec![0f32; SAMPLE_HEADER];
-        header[0] = image.width as f32;
-        header[1] = image.height as f32;
+        let mut header = vec![0f32; sampling::HEADER];
+        header[sampling::WIDTH.start] = image.width as f32;
+        header[sampling::HEIGHT.start] = image.height as f32;
         if let Some(t) = tones {
-            header[2] = 1.;
-            header[60..65].copy_from_slice(&t.sliders);
-            header[65] = t.texture as u8 as f32;
+            header[sampling::GAIN.start] = 1.;
+            let [sliders @ .., blur] = &mut header[sampling::SLIDERS] else {
+                unreachable!("six slider slots")
+            };
+            sliders.copy_from_slice(&t.sliders);
+            *blur = t.texture as u8 as f32;
         }
         header
     }
@@ -480,8 +484,7 @@ impl Processor {
         let photo = self.photo(image);
         let device = self.device.clone();
         let mut header = Self::header(image, tones);
-        header[57] = w as f32;
-        header[58] = h as f32;
+        header[sampling::REDUCED].copy_from_slice(&[w as f32, h as f32]);
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Reduce parameters"),
             contents: bytemuck::cast_slice(&header),
@@ -578,16 +581,15 @@ impl Processor {
         }
         let device = self.device.clone();
         let header = Self::header(image, tones);
-        params[..3].copy_from_slice(&header[..3]);
-        params[60..66].copy_from_slice(&header[60..66]);
+        let size_and_gain = sampling::WIDTH.start..sampling::GAIN.end;
+        params[size_and_gain.clone()].copy_from_slice(&header[size_and_gain]);
+        params[sampling::SLIDERS].copy_from_slice(&header[sampling::SLIDERS]);
         let (gx, gy) = groups(&device, n);
-        params[59] = gx as f32;
+        params[sampling::COUNT.start] = gx as f32;
         let box_pixels = bounds[2] as u64 * bounds[3] as u64;
         let (bx, by) = groups(&device, box_pixels);
-        for (i, v) in bounds.iter().enumerate() {
-            params[66 + i] = *v as f32;
-        }
-        params[70] = bx as f32;
+        params[sampling::BOX].copy_from_slice(&bounds.map(|v| v as f32));
+        params[sampling::BOX_COUNT.start] = bx as f32;
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Sampling parameters"),
             contents: bytemuck::cast_slice(&params),

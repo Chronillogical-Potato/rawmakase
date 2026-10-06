@@ -93,6 +93,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [gpu/develop.wgsl](../src/develop/gpu/develop.wgsl) | WGSL port of the engine 4 per-pixel pipeline (profile tables, tone, curves, mixer, grading). |
 | [pipeline/pixel_params.rs](../src/develop/pipeline/pixel_params.rs) | Which recipes the GPU stage covers, and its parameters and tables. |
 | [gpu/resident.rs](../src/develop/gpu/resident.rs), [gpu/logs.wgsl](../src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
+| [gpu/sampling.rs](../src/develop/gpu/sampling.rs) | The sampling pass's parameter header: named slots for the Rust side and the `S_*` offsets generated for `local.wgsl`. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
 | [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |

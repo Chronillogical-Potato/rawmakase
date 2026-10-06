@@ -66,8 +66,8 @@ fn window(@builtin(global_invocation_id) id: vec3<u32>) {
     blur_dst[blur.destination + id.y * w + id.x] = (upper - lower) / f32(b - a);
 }
 
-// Sampling parameters, at the `S_*` offsets below; radial tables follow the header
-// (`resident::SAMPLE_HEADER`).
+// Sampling parameters, at the `S_*` offsets that `sampling::wgsl_prelude` puts
+// before this file; radial tables follow the header (`sampling::HEADER`).
 @group(0) @binding(4) var<storage, read> local_tones: array<f32>;
 @group(0) @binding(8) var<storage, read_write> gains_out: array<f32>;
 @group(0) @binding(10) var<storage, read> photo: array<f32>;
@@ -77,39 +77,6 @@ fn window(@builtin(global_invocation_id) id: vec3<u32>) {
 @group(0) @binding(14) var<storage, read_write> samples: array<f32>;
 @group(0) @binding(15) var<storage, read_write> positions: array<f32>;
 
-const S_WIDTH: u32 = 0u;
-const S_HEIGHT: u32 = 1u;
-const S_GAIN: u32 = 2u;
-const S_OUT: u32 = 3u; // Output width, height.
-const S_REGION: u32 = 5u; // x, y, width, height.
-const S_SPREAD: u32 = 9u;
-const S_CROP: u32 = 10u;
-const S_ORIENTED: u32 = 14u;
-const S_ZOOM: u32 = 16u;
-const S_SIN: u32 = 17u;
-const S_COS: u32 = 18u;
-const S_TURNS: u32 = 19u;
-const S_FLIP: u32 = 20u;
-const S_INSET: u32 = 22u;
-const S_TRANSFORM: u32 = 26u;
-const S_HOMOGRAPHY: u32 = 27u;
-const S_NOISE: u32 = 36u; // luma, chroma, luma detail, chroma detail, luma contrast, chroma smoothness.
-const S_LENS: u32 = 42u;
-const S_CENTER: u32 = 43u;
-const S_HALF: u32 = 45u;
-const S_FILL: u32 = 46u;
-const S_AMOUNT: u32 = 47u;
-const S_DISTORTION: u32 = 48u; // Offset (or -1) and length, for each radial table:
-const S_RED: u32 = 50u;
-const S_BLUE: u32 = 52u;
-const S_VIGNETTING: u32 = 54u;
-const S_VIGNETTING_AMOUNT: u32 = 56u;
-const S_REDUCED: u32 = 57u; // Reduced width, height.
-const S_COUNT: u32 = 59u; // Workgroups per row of the dispatch.
-const S_SLIDERS: u32 = 60u; // Exposure, Shadows, Highlights, Clarity, Texture, texture blur.
-const S_BOX: u32 = 66u; // x, y, width, height of the pixels `gains` holds.
-const S_BOX_COUNT: u32 = 70u; // Workgroups per row of `region_gain`.
-const S_MANUAL: u32 = 72u; // `ManualDistortion`: k (0 when off) and the frame's axes.
 const OUTSIDE: f32 = -3e38;
 
 fn s(i: u32) -> f32 {

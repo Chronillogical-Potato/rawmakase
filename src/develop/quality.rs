@@ -903,24 +903,18 @@ fn render_resident(
         return Ok(None);
     }
     let key = develop::stage_cache::SampleKey::new(&toned, &base, g, region, spread);
-    let mut sampling = vec![0f32; develop::gpu::SAMPLE_HEADER];
+    use develop::gpu::sampling as slot;
+    let mut sampling = vec![0f32; slot::HEADER];
     let [x0, y0, w, h] = region;
-    sampling[..10].copy_from_slice(&[
-        source.width as f32,
-        source.height as f32,
-        0.,
-        g.width as f32,
-        g.height as f32,
-        x0 as f32,
-        y0 as f32,
-        w as f32,
-        h as f32,
-        spread,
-    ]);
-    sampling[10..36].copy_from_slice(&g.gpu_params());
-    sampling[72..75].copy_from_slice(&g.gpu_manual());
+    sampling[slot::WIDTH.start] = source.width as f32;
+    sampling[slot::HEIGHT.start] = source.height as f32;
+    sampling[slot::OUT].copy_from_slice(&[g.width as f32, g.height as f32]);
+    sampling[slot::REGION].copy_from_slice(&[x0 as f32, y0 as f32, w as f32, h as f32]);
+    sampling[slot::SPREAD.start] = spread;
+    sampling[slot::CROP.start..slot::HOMOGRAPHY.end].copy_from_slice(&g.gpu_params());
+    sampling[slot::MANUAL].copy_from_slice(&g.gpu_manual());
     let e = &base.effects;
-    sampling[36..42].copy_from_slice(&[
+    sampling[slot::NOISE].copy_from_slice(&[
         base.noise_luma,
         base.sampled_noise_chroma(),
         e.luma_detail,
@@ -929,9 +923,8 @@ fn render_resident(
         e.chroma_smoothness,
     ]);
     let mut tables = Vec::new();
-    let lens =
-        develop::pipeline::lens_gpu_params(source, &base, develop::gpu::SAMPLE_HEADER, &mut tables);
-    sampling[42..57].copy_from_slice(&lens);
+    let lens = develop::pipeline::lens_gpu_params(source, &base, slot::HEADER, &mut tables);
+    sampling[slot::LENS.start..slot::VIGNETTING_AMOUNT.end].copy_from_slice(&lens);
     sampling.extend(tables);
     let bounds = match tones {
         Some(_) => develop::pipeline::source_bounds(source, &base, g, region, spread),
