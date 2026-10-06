@@ -28,6 +28,7 @@ pub mod export;
 mod jpeg;
 pub mod lens;
 pub mod metadata;
+pub mod optics;
 pub mod platform;
 pub mod presets;
 pub mod raw;

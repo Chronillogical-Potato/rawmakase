@@ -414,7 +414,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     };
     use std::sync::Arc;
     let (w, h) = (157, 103);
-    let radial = |values: Vec<f32>| crate::lens::Radial {
+    let radial = |values: Vec<f32>| crate::optics::Radial {
         knots: (0..values.len())
             .map(|i| i as f32 / (values.len() - 1) as f32)
             .collect(),
@@ -425,7 +425,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         model: "X100F".into(),
         width: w,
         height: h,
-        lens: Some(crate::lens::LensCorrection {
+        lens: Some(crate::optics::LensCorrection {
             vignetting: Some(radial(vec![1., 1.1, 1.3, 1.6])),
             distortion: Some(radial(vec![1., 0.99, 1.02, 1.05])),
             chromatic: Some([
@@ -942,4 +942,14 @@ fn shaders_are_valid_wgsl() {
             );
         }
     }
+}
+#[test]
+fn previews_submit_only_once_the_window_surface_is_reconfigured() {
+    let surface = reconfiguring_surface();
+    let (tx, rx) = mpsc::channel();
+    let preview = std::thread::spawn(move || submitting(|| tx.send(()).unwrap()));
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+    drop(surface);
+    rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    preview.join().unwrap();
 }

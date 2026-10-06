@@ -307,7 +307,7 @@ impl Processor {
         let mut encoder = device.create_command_encoder(&Default::default());
         let output = self.record_develop(Input::Device(&input), params, &mut encoder);
         encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, n * 12);
-        let submission = self.queue.submit([encoder.finish()]);
+        let submission = super::submit(&self.queue, encoder);
         let (tx, rx) = mpsc::sync_channel(1);
         staging
             .slice(..)
@@ -378,7 +378,7 @@ impl Processor {
         let n = samples.pixels.len() as u64;
         let uploaded = &self.developer.as_ref().unwrap().samples[0];
         encoder.copy_buffer_to_buffer(&uploaded.output, 0, &uploaded.staging, 0, n * 12);
-        let submission = self.queue.submit([encoder.finish()]);
+        let submission = super::submit(&self.queue, encoder);
         let (tx, rx) = mpsc::sync_channel(1);
         uploaded
             .staging

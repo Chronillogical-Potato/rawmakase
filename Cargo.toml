@@ -37,6 +37,10 @@ memmap2 = "0.9"
 skrifa = "0.47"
 clap = { version = "4", features = ["derive"] }
 eframe = { version = "=0.36.2", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
+# eframe's windowing, to run its event loop (see app::run).
+winit = { version = "0.30", default-features = false }
+# eframe reports a failure to open the window through log (see app::run).
+log = "0.4"
 rfd = "0.17.2"
 # The HTTP client behind fastframe-update; rustls with bundled roots needs no
 # system TLS library.

@@ -373,12 +373,114 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         wgpu_options: wgpu_options(),
         ..Default::default()
     };
-    eframe::run_native(
+    // eframe::run_native, with window events passing through SurfaceGate.
+    use winit::platform::run_on_demand::EventLoopExtRunOnDemand as _;
+    if log::set_logger(&EframeErrors).is_ok() {
+        log::set_max_level(log::LevelFilter::Error);
+    }
+    let mut event_loop = winit::event_loop::EventLoop::with_user_event().build()?;
+    let mut app = SurfaceGate(eframe::create_native(
         "RAWmakase",
         options,
         Box::new(move |cc| Ok(Box::new(Editor::new(cc, path, launch)))),
+        &event_loop,
+    ));
+    event_loop.run_app_on_demand(&mut app)?;
+    match EframeErrors::take() {
+        Some(error) => Err(anyhow::anyhow!(error)),
+        None => Ok(()),
+    }
+}
+/// Why eframe gave up, e.g. on a GPU it could not start. `run_native` returned
+/// that error; on our own event loop eframe only logs it.
+struct EframeErrors;
+static EFRAME_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+impl EframeErrors {
+    fn take() -> Option<String> {
+        EFRAME_ERROR
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+impl log::Log for EframeErrors {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Error && metadata.target().starts_with("eframe")
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        if let Some(error) = record
+            .args()
+            .to_string()
+            .strip_prefix("Exiting because of error: ")
+        {
+            *EFRAME_ERROR
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.into());
+        }
+    }
+    fn flush(&self) {}
+}
+/// Whether eframe reconfigures the window's surface for `event`.
+fn reconfigures_surface(event: &winit::event::WindowEvent) -> bool {
+    use winit::event::WindowEvent;
+    matches!(
+        event,
+        WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
     )
-    .map_err(|e| anyhow::anyhow!("{e}"))
+}
+/// Holds previews' GPU work while eframe reconfigures the window's surface;
+/// see `develop::gpu::reconfiguring_surface`.
+struct SurfaceGate<'a>(eframe::EframeWinitApplication<'a>);
+impl winit::application::ApplicationHandler<eframe::UserEvent> for SurfaceGate<'_> {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.0.resumed(event_loop);
+    }
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        let _held = reconfigures_surface(&event).then(crate::develop::gpu::reconfiguring_surface);
+        self.0.window_event(event_loop, window_id, event);
+    }
+    fn new_events(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        cause: winit::event::StartCause,
+    ) {
+        self.0.new_events(event_loop, cause);
+    }
+    fn user_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        event: eframe::UserEvent,
+    ) {
+        self.0.user_event(event_loop, event);
+    }
+    fn device_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        self.0.device_event(event_loop, device_id, event);
+    }
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.0.about_to_wait(event_loop);
+    }
+    fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.0.suspended(event_loop);
+    }
+    fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.0.exiting(event_loop);
+    }
+    fn memory_warning(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.0.memory_warning(event_loop);
+    }
 }
 /// The UI's wgpu device also renders previews (see `develop::gpu`): prefer the
 /// discrete GPU and ask for the storage limits full-resolution regions need.

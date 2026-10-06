@@ -12,7 +12,7 @@
 //! where Midpoint mainly raises the power `p`, keeping more of the middle untouched;
 //! `c`, `p` and `k` move linearly with it. The fit's log error is 0.018 RMS over 32
 //! renders (Amount ±25 to ±100, Midpoint 0 to 100, three brightnesses).
-use crate::lens::Radial;
+use crate::optics::Radial;
 use serde::{Deserialize, Serialize};
 
 /// Which operator renders a recipe's manual lens Vignetting.

@@ -447,7 +447,7 @@ impl Processor {
         }
         // Blurs recorded here only exist once the encoder is submitted.
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        self.queue.submit([encoder.finish()]);
+        super::submit(&self.queue, encoder);
         self.resident().blurs = Some((key, tones.clone()));
         Ok(LocalTones {
             buffer: tones,
@@ -525,7 +525,7 @@ impl Processor {
         );
         encoder.copy_buffer_to_buffer(&out, 0, &staging, 0, bytes);
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        let submission = self.queue.submit([encoder.finish()]);
+        let submission = super::submit(&self.queue, encoder);
         let (tx, rx) = mpsc::sync_channel(1);
         staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
@@ -627,7 +627,7 @@ impl Processor {
         );
         dispatch(&mut encoder, pipeline, &[&group], (gx, gy));
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        self.queue.submit([encoder.finish()]);
+        super::submit(&self.queue, encoder);
         let samples = Arc::new(samples);
         let resident = self.resident();
         resident.samples.insert(0, (key, samples.clone()));
