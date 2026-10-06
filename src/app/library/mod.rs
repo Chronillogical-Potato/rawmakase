@@ -118,6 +118,8 @@ pub struct Library {
     loupe_info: photo_info::Overlay,
     /// Photo info was asked for while it was being read.
     info_again: bool,
+    /// Times photo info read from files was saved, so views know to refresh.
+    info_saves: u64,
     /// The hovered grid photo's info, for its tooltip.
     hover_info: Option<(i64, Option<crate::catalog::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
@@ -206,6 +208,7 @@ impl Library {
             info_reader: None,
             info: None,
             info_again: false,
+            info_saves: 0,
             hover_info: None,
             loupe_info: Default::default(),
             capture_tried: HashSet::new(),

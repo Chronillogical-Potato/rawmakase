@@ -105,6 +105,9 @@ impl Editor {
                     self.activity.finish_dialog();
                     self.import(kind, paths, ctx);
                 }
+                Event::OnboardingScanned { generation, found } => {
+                    self.onboarding_scanned(generation, *found)
+                }
                 Event::Imported(summary) => self.imported(summary, ctx),
                 Event::Synced(result) => self.synced(*result),
                 Event::PresetSave(p) => {
