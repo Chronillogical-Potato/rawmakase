@@ -1,8 +1,5 @@
 //! Reproducible, unscaled comparisons against an externally rendered sRGB reference.
-use crate::{
-    develop::{self, Recipe},
-    raw::Raw,
-};
+use crate::develop::{self, Recipe};
 use anyhow::{Result, ensure};
 use std::{path::Path, sync::atomic::AtomicBool};
 pub fn compare(
@@ -16,7 +13,7 @@ pub fn compare(
         !output.exists(),
         "Comparison output directory already exists"
     );
-    let raw = Raw::open(input)?;
+    let raw = crate::photo::open(input)?;
     let edit = if let Some(p) = recipe {
         crate::presets::load_preset(p)?
     } else {

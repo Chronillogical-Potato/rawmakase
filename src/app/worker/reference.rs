@@ -73,7 +73,7 @@ fn develop(
     cache: &DecodeCache,
     mut ready: impl FnMut(ReferenceImage),
 ) -> anyhow::Result<()> {
-    let raw = raw::Raw::open(&job.path)?;
+    let raw = crate::photo::open(&job.path)?;
     let recipe = EditSource::recipe(Some(&job.edit), &raw)?;
     let key = DecodeCache::key(&job.path, job.demosaic).ok();
     let cached = key.as_ref().and_then(|key| cache.load(key, &raw.metadata));
@@ -95,7 +95,7 @@ fn develop(
         resolution: Resolution::Half,
     });
     let decode = raw::Decode::Full(job.demosaic);
-    let full = Arc::new(raw::Raw::open(&job.path)?.develop(decode, &job.cancel)?);
+    let full = Arc::new(crate::photo::open(&job.path)?.develop(decode, &job.cancel)?);
     crate::develop::quality::recovered(&full, &job.cancel)?;
     if job.cancel.load(Ordering::Relaxed) {
         return Ok(());

@@ -69,6 +69,21 @@ pub struct Metadata {
     #[serde(skip)]
     pub embedded_profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
 }
+impl Metadata {
+    /// Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
+    /// 2 px larger per side than LibRaw's), as `[left, top, width, height]`;
+    /// ignored unless it fits the image.
+    pub fn apply_default_crop(&mut self, [left, top, width, height]: [u32; 4]) {
+        if left.checked_add(width).is_some_and(|r| r <= self.width)
+            && top.checked_add(height).is_some_and(|b| b <= self.height)
+        {
+            self.crop_left = left;
+            self.crop_top = top;
+            self.crop_width = width;
+            self.crop_height = height;
+        }
+    }
+}
 /// Canon Highlight Tone Priority: the camera exposes a stop darker to keep
 /// highlights, and Camera Raw brightens the photo by that stop again.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,7 +188,10 @@ pub struct CameraImage {
     pub scale_clipped: u32,
 }
 impl Raw {
-    pub fn open(path: &Path) -> Result<Self> {
+    /// LibRaw's facts about the file at `path`, and the crop a RAF header
+    /// recommends. What the file says beyond them (lens tables, a DNG's profile
+    /// and hints) and the imported lens profiles are `crate::photo::open`'s.
+    pub fn open_file(path: &Path) -> Result<Self> {
         let path_ref = path;
         let (handle, m) = ffi::Handle::open(path)?;
         let text = |bytes: &[std::ffi::c_char]| {
@@ -207,7 +225,7 @@ impl Raw {
             daylight_wb: m.daylight_wb,
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
-            lens: crate::lens::embedded::read(path_ref),
+            lens: None,
             lens_model: text(&m.lens).trim().to_string(),
             baseline_exposure: None,
             lens_profiles: Default::default(),
@@ -215,46 +233,9 @@ impl Raw {
             embedded_profile: None,
         };
         let mut metadata = metadata;
-        let dng = crate::dng::read(path_ref);
-        let mut crop = fuji_crop(path_ref);
-        if let Some(dng) = dng {
-            // 0 is the DNG default; the camera table is for other raw formats.
-            metadata.baseline_exposure = Some(dng.baseline_exposure.unwrap_or(0.));
-            metadata.embedded_profile = dng
-                .profile
-                .filter(|p| p.ensure_camera(&metadata).is_ok())
-                .map(std::sync::Arc::new);
-            // LibRaw has no XYZ-to-camera matrix for a DNG from a camera it does not
-            // know, so one written with colour matrices but no profile would render
-            // without a profile at all. Take the file's D65 matrix then: the same
-            // matrix in the same direction, so nothing downstream has to know where
-            // it came from. A camera LibRaw knows keeps LibRaw's matrix.
-            if metadata.embedded_profile.is_none()
-                && metadata.cam_xyz.iter().flatten().all(|v| *v == 0.)
-                && let Some(matrix) = dng.color_matrix
-                && matrix.iter().flatten().any(|v| *v != 0.)
-            {
-                metadata.cam_xyz = matrix;
-            }
-            if dng.lens.is_some() {
-                metadata.lens = dng.lens;
-            }
-            crop = dng.crop.or(crop);
+        if let Some(crop) = fuji_crop(path_ref) {
+            metadata.apply_default_crop(crop);
         }
-        if let Some([left, top, width, height]) = crop
-            && left.checked_add(width).is_some_and(|r| r <= metadata.width)
-            && top
-                .checked_add(height)
-                .is_some_and(|b| b <= metadata.height)
-        {
-            // Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
-            // 2 px larger per side than LibRaw's).
-            metadata.crop_left = left;
-            metadata.crop_top = top;
-            metadata.crop_width = width;
-            metadata.crop_height = height;
-        }
-        metadata.lens_profiles = crate::lens::lcp::library().for_photo(&metadata);
         Ok(Self { handle, metadata })
     }
     /// The embedded JPEG preview, as stored.
@@ -420,30 +401,10 @@ mod tests {
         assert_eq!(super::fuji_crop(f.path()), None);
     }
     #[test]
-    fn dng_without_baseline_exposure_uses_the_dng_default() {
-        let chart = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/corpus/charts/synthetic-d65.dng"
-        );
-        let mut bytes = std::fs::read(chart).unwrap();
-        // BaselineExposure, SRATIONAL, count 1: give it an invalid type so it is unread.
-        let entry = [0x2a, 0xc6, 10, 0, 1, 0, 0, 0];
-        let at = bytes.windows(8).position(|w| w == entry).unwrap();
-        bytes[at + 2] = 0;
-        // A closed file: Windows' LibRaw cannot open one a NamedTempFile holds open.
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("no-baseline.dng");
-        std::fs::write(&path, bytes).unwrap();
-        let m = super::Raw::open(&path).unwrap().metadata;
-        // A camera without a table row would otherwise take the table's median.
-        assert_eq!(m.baseline_exposure, Some(0.));
-        assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
-    }
-    #[test]
     fn corrupt_raw_is_an_error() {
         let f = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(f.path(), b"not a raw file").unwrap();
-        assert!(super::Raw::open(f.path()).is_err());
+        assert!(super::Raw::open_file(f.path()).is_err());
     }
     #[test]
     fn monitor_srgb_roundtrip() -> anyhow::Result<()> {

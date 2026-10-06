@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn a_saved_edit_comes_first_then_lightroom_then_the_defaults() -> Result<()> {
         let (_d, c, photos) = catalog()?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = crate::raw_defaults::brighter_defaults();
         let resolve_photo = |(id, path): &(i64, std::path::PathBuf)| {
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn an_edit_that_cant_be_used_is_an_error_never_the_defaults() -> Result<()> {
         let (_d, c, photos) = catalog()?;
-        let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = DevelopDefaults::default();
         let resolve_photo = |(id, path): &(i64, std::path::PathBuf)| {
