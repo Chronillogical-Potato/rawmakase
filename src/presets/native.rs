@@ -1,7 +1,8 @@
 //! RAWmakase JSON recipes, including migration of earlier pipeline versions.
 use crate::{
     develop::Recipe,
-    storage::{atomic_json, migrate_recipe, saved_version},
+    develop::saved_format::{migrate_recipe, saved_version},
+    storage::atomic_json,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

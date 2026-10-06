@@ -123,7 +123,7 @@ impl CropGuides {
             GuideShow::Never => false,
         }
     }
-    pub(super) fn from_session(s: &crate::storage::CropGuideLayout) -> Self {
+    pub(super) fn from_session(s: &crate::app::session::CropGuideLayout) -> Self {
         let guide = Guide::ALL
             .into_iter()
             .find(|g| g.key() == s.guide)
@@ -138,8 +138,8 @@ impl CropGuides {
             show,
         }
     }
-    pub(super) fn to_session(self) -> crate::storage::CropGuideLayout {
-        crate::storage::CropGuideLayout {
+    pub(super) fn to_session(self) -> crate::app::session::CropGuideLayout {
+        crate::app::session::CropGuideLayout {
             guide: self.guide.key().into(),
             orientation: self.orientation.into(),
             show: self.show.key().into(),
@@ -663,7 +663,7 @@ mod tests {
         };
         assert_eq!(CropGuides::from_session(&g.to_session()), g);
         // Names it does not know read as the defaults.
-        let unknown = crate::storage::CropGuideLayout {
+        let unknown = crate::app::session::CropGuideLayout {
             guide: "aspect-ratios".into(),
             orientation: 7,
             show: "sometimes".into(),

@@ -1,4 +1,5 @@
-//! Versioning shared by native sidecars and recipe presets.
+//! The version a saved recipe is written with, and the migration of older ones.
+//! Catalog edits, native presets and legacy sidecars all save recipes this way.
 use anyhow::{Context, Result, ensure};
 /// The version written. Spots and masks are saved apart from the recipe (see
 /// `LocalEdits`), so recipes stay readable by releases that predate them.
@@ -13,7 +14,7 @@ const LOOK_AMOUNT: u32 = 8;
 const RGB_TABLE: u32 = 9;
 
 /// The schema and pipeline version to write `r` with.
-pub fn saved_version(r: &crate::develop::Recipe) -> u32 {
+pub fn saved_version(r: &super::Recipe) -> u32 {
     let Some(look) = r.profile.as_ref().and_then(|p| p.enhanced.as_ref()) else {
         return SCHEMA;
     };

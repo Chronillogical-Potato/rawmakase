@@ -609,7 +609,7 @@ mod tests {
 
     fn editor() -> Editor {
         let ctx = egui::Context::default();
-        Editor::with_context(&ctx, None, crate::storage::Session::default(), None)
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None)
     }
     fn photo() -> Arc<CameraImage> {
         let (w, h) = (60, 40);
@@ -793,7 +793,7 @@ mod tests {
     #[test]
     fn y_keys_choose_the_view() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let press = |modifiers: egui::Modifiers, e: &mut Editor| {
             let input = egui::RawInput {
                 events: vec![

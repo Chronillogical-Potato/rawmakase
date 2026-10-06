@@ -31,6 +31,7 @@ mod pipeline;
 pub mod point_color;
 mod preview_renderer;
 mod pyramid;
+pub mod saved_format;
 pub mod settings_groups;
 pub mod sharpening;
 pub mod targeted;

@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn new_develop_preset_writes_the_chosen_settings_to_the_user_library() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let d = tempfile::tempdir().unwrap();
         let user = UserPresets {
             dir: d.path().join("User Presets"),
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn a_preset_s_groups_leave_the_copy_and_sync_choice_alone() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let before = e.copy_groups.clone();
         e.open_copy_dialog(super::super::settings_transfer::Transfer::NewPreset);
         let mut narrow = GroupSelection::none();
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn an_older_preset_scan_never_replaces_a_newer_one() {
         let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let library = |name: &str| {
             let info = PresetInfo::new(name, "Mine");
             let text = crate::xmp::preset_write::preset(

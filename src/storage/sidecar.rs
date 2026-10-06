@@ -1,5 +1,6 @@
 //! Identity-checked edits with read-only-folder fallback and conflict protection.
-use super::{atomic_json, data_dir, migrate_recipe};
+use super::{atomic_json, data_dir};
+use crate::develop::saved_format::{migrate_recipe, saved_version};
 use crate::{
     develop::{LocalEdits, Recipe},
     export::ExportOptions,
@@ -167,7 +168,7 @@ fn save_at(raw: &Path, recipe: &Recipe, export: &ExportOptions, store: &Path) ->
         parse_sidecar(&backup, &source)?;
     }
     let (saved, local) = recipe.split_local();
-    let version = super::format::saved_version(recipe);
+    let version = saved_version(recipe);
     let s = Sidecar {
         schema: version,
         pipeline: version,

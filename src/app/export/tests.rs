@@ -15,7 +15,7 @@ fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>, egui::Contex
     let catalog = dir.path().join("test.rawmakase");
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.raw_defaults = Arc::new(crate::develop::defaults::DevelopDefaults::with_presets(
         Default::default(),
         |_| None,
@@ -184,7 +184,7 @@ fn a_photo_opened_without_a_catalog_is_exported_only_while_its_file_is_there() -
         &path,
     )?;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.path = Some(path.clone());
     e.document.metadata = Some(Default::default());
     e.document.set_image(Arc::new(crate::raw::CameraImage {
