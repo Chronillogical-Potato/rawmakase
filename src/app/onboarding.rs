@@ -572,7 +572,7 @@ impl Editor {
         let models = self
             .library
             .as_ref()
-            .and_then(|l| l.catalog.cameras().ok())
+            .and_then(|l| l.catalog.raw_cameras().ok())
             .unwrap_or_default();
         self.onboarding.info_saves = self.library.as_ref().map_or(0, |l| l.photo_info_saves());
         let (generation, cancel) = self.onboarding.scan.start();
