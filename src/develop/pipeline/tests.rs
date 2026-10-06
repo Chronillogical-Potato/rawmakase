@@ -1290,6 +1290,20 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         .collect();
     let gained = CurveSet::with_photo_measures(Source::new(&im, Some(&gain)), &r, matrix);
     assert_eq!(gained.photo, plain.photo);
+    // Nor the measured Texture, which makes a new image.
+    let textured = crate::develop::texture::TextureDetail::of(
+        &im,
+        1.,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap()
+    .apply(&im, 1.);
+    let source = Source {
+        untextured: Some(&im),
+        ..Source::new(&textured, None)
+    };
+    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    assert_eq!(textured.photo, plain.photo);
 }
 
 /// A look's parametric curve: added to the user's regions by the measured model, a
@@ -1569,4 +1583,34 @@ fn legacy_engines_keep_the_original_colour_noise_filter() {
     r.engine = 4;
     assert!(r.chroma_denoise().is_some());
     assert_eq!(r.sampled_noise_chroma(), 0.);
+}
+/// New edits render Texture with the measured operator; edits saved before keep the
+/// original, until Texture is added to a photo that had none.
+#[test]
+fn texture_operator_is_kept_by_old_edits() {
+    use crate::develop::texture::TextureModel;
+    let im = fixture();
+    assert_eq!(
+        Recipe::with_profiles(&im.metadata, &[]).texture_model,
+        TextureModel::Measured
+    );
+    let mut saved: Recipe = serde_json::from_value(
+        serde_json::to_value(Recipe {
+            effects: crate::develop::effects::Effects {
+                texture: 0.4,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved.texture_model, TextureModel::Original);
+    saved.effects.texture = 0.6;
+    saved.adopt_measured_texture(0.4);
+    assert_eq!(saved.texture_model, TextureModel::Original);
+    let mut none = Recipe::default();
+    none.effects.texture = 0.3;
+    none.adopt_measured_texture(0.);
+    assert_eq!(none.texture_model, TextureModel::Measured);
 }

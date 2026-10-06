@@ -62,6 +62,12 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::clarity::ClarityModel::is_original"
     )]
     pub clarity_model: crate::develop::clarity::ClarityModel,
+    /// Which operator renders Texture, as `grain_model`.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::texture::TextureModel::is_original"
+    )]
+    pub texture_model: crate::develop::texture::TextureModel,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -291,6 +297,7 @@ impl Default for Recipe {
             effects: Default::default(),
             grain_model: Default::default(),
             clarity_model: Default::default(),
+            texture_model: Default::default(),
             preset_name: String::new(),
             preset_settings: Default::default(),
             profile: None,
@@ -546,6 +553,7 @@ impl Recipe {
         recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
         recipe.grain_model = crate::develop::effects::GrainModel::Measured;
         recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        recipe.texture_model = crate::develop::texture::TextureModel::Measured;
         recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
         recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
         recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
@@ -870,6 +878,13 @@ impl Recipe {
     pub fn adopt_measured_clarity(&mut self, previous: f32) {
         if previous == 0. && self.effects.clarity != 0. {
             self.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+        }
+    }
+    /// After an edit of Texture from `previous`: Texture added from none has nothing
+    /// of the original operator's to keep, so it takes the measured one.
+    pub fn adopt_measured_texture(&mut self, previous: f32) {
+        if previous == 0. && self.effects.texture != 0. {
+            self.texture_model = crate::develop::texture::TextureModel::Measured;
         }
     }
     pub(crate) fn lens_correction<'a>(
