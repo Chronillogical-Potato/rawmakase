@@ -352,6 +352,22 @@ impl eframe::App for Editor {
         fastframe_macos::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
         self.draw(ui);
     }
+    // fastframe-macos turns on eframe's glow feature, which adds the context.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.exit();
+    }
+}
+impl Editor {
+    /// What quitting does however it happens (see docs/shutdown.md). Quit on macOS
+    /// closes the window without a close request, so the close guard never sees
+    /// it: the edit and the place in the catalog are saved here too. After a
+    /// window close the guard has already flushed, and this finds nothing to do.
+    fn exit(&mut self) {
+        // Nothing is left to report a failure to: the edit stays as autosave last
+        // saved it.
+        let _ = self.flush();
+        self.remember_place(workspace::LayoutEdit::Settled);
+    }
 }
 pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {

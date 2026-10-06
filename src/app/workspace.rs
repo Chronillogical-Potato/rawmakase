@@ -139,17 +139,26 @@ impl Editor {
             let _ = self.save_session();
         }
         self.sync_undo();
-        let place = self.current_place();
-        let layout = self.library.as_ref().map(|l| l.layout());
-        // Kept once a drag (the thumbnail size) or typing (the search) ends,
-        // or when the window closes.
+        // The layout is kept once a drag (the thumbnail size) or typing (the search)
+        // ends, or when the window closes.
         let closing = ctx.input(|i| i.viewport().close_requested());
         let busy = !closing && (ctx.input(|i| i.pointer.any_down()) || ctx.text_edit_focused());
-        let layout_changed = !busy && layout.as_ref().is_some_and(|l| *l != self.saved_layout);
+        self.remember_place(if busy {
+            LayoutEdit::Changing
+        } else {
+            LayoutEdit::Settled
+        });
+    }
+    /// Saves the session when the place in the catalog, or a settled layout, changed.
+    pub(super) fn remember_place(&mut self, layout: LayoutEdit) {
+        let place = self.current_place();
+        let shown = self.library.as_ref().map(|l| l.layout());
+        let layout_changed = layout == LayoutEdit::Settled
+            && shown.as_ref().is_some_and(|l| *l != self.saved_layout);
         if self.library.is_some() && (place != self.saved_place || layout_changed) {
             self.saved_place = place;
-            if let Some(layout) = layout {
-                self.saved_layout = layout;
+            if let Some(shown) = shown {
+                self.saved_layout = shown;
             }
             let _ = self.save_session();
         }
@@ -1200,4 +1209,12 @@ fn status_text(ui: &mut egui::Ui, text: &str, detail: Option<&str>, hover: Optio
     if let Some(hover) = detail.or(hover) {
         shown.on_hover_text(hover);
     }
+}
+
+/// Whether the Library's layout (thumbnail size, search) may still be changing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LayoutEdit {
+    /// A drag or typing is under way: kept once it ends.
+    Changing,
+    Settled,
 }
