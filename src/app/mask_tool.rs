@@ -6,13 +6,11 @@ use super::icons::{self, Icon};
 use super::overlay;
 use super::retouch_tool::{control_label, hint, indented};
 use super::theme;
-use super::widgets::{
-    SliderStyle, TEMPERATURE_GRADIENT, TINT_GRADIENT, segmented, set_edit_context, slider_styled,
-    slider_with,
-};
+use super::widgets::{local_setting_slider, segmented, set_edit_context, slider_with};
 use crate::develop::{
     ViewMapping,
     masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape, Space},
+    params::LocalParameterId,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -895,85 +893,12 @@ impl Editor {
             None,
         );
         let a = &mut mask.adjust;
-        let unit = |ui: &mut egui::Ui, label: &str, v: &mut f32| {
-            slider_with(ui, label, v, -1. ..=1., 0., None, None)
-        };
-        ui.add_space(4.);
-        let tinted = |gradient| SliderStyle {
-            gradient: Some(gradient),
-            ..SliderStyle::default()
-        };
-        slider_styled(
-            ui,
-            "Temp",
-            &mut a.temperature,
-            -1. ..=1.,
-            0.,
-            tinted(TEMPERATURE_GRADIENT),
-        );
-        slider_styled(
-            ui,
-            "Tint",
-            &mut a.tint,
-            -1. ..=1.,
-            0.,
-            tinted(TINT_GRADIENT),
-        );
-        ui.add_space(4.);
-        slider_styled(
-            ui,
-            "Exposure",
-            &mut a.exposure,
-            -4. ..=4.,
-            0.,
-            SliderStyle {
-                display: Some((1., 2)),
-                drag_step: Some(0.05),
-                ..SliderStyle::default()
-            },
-        );
-        unit(ui, "Contrast", &mut a.contrast);
-        unit(ui, "Highlights", &mut a.highlights);
-        unit(ui, "Shadows", &mut a.shadows);
-        unit(ui, "Whites", &mut a.whites);
-        unit(ui, "Blacks", &mut a.blacks);
-        ui.add_space(4.);
-        unit(ui, "Texture", &mut a.texture);
-        unit(ui, "Clarity", &mut a.clarity);
-        unit(ui, "Dehaze", &mut a.dehaze);
-        ui.add_space(4.);
-        slider_with(
-            ui,
-            "Hue",
-            &mut a.hue,
-            -180. ..=180.,
-            0.,
-            Some((1., 0)),
-            None,
-        );
-        unit(ui, "Saturation", &mut a.saturation);
-        ui.add_space(4.);
-        unit(ui, "Sharpness", &mut a.sharpness);
-        unit(ui, "Noise", &mut a.noise);
-        ui.add_space(4.);
-        slider_with(
-            ui,
-            "Color Hue",
-            &mut a.color[0],
-            0. ..=1.,
-            0.,
-            Some((360., 0)),
-            None,
-        );
-        slider_with(
-            ui,
-            "Color Sat",
-            &mut a.color[1],
-            0. ..=1.,
-            0.,
-            Some((100., 0)),
-            None,
-        );
+        for group in LOCAL_GROUPS {
+            ui.add_space(4.);
+            for &id in group {
+                local_setting_slider(ui, id, id.value_mut(a), 0.);
+            }
+        }
         ui.add_space(4.);
         indented(ui, |ui| {
             if ui
@@ -986,6 +911,18 @@ impl Editor {
         });
     }
 }
+/// A mask's adjustment sliders, in Lightroom's groups.
+const LOCAL_GROUPS: [&[LocalParameterId]; 6] = {
+    use LocalParameterId::*;
+    [
+        &[Temperature, Tint],
+        &[Exposure, Contrast, Highlights, Shadows, Whites, Blacks],
+        &[Texture, Clarity, Dehaze],
+        &[Hue, Saturation],
+        &[Sharpness, Noise],
+        &[ColorHue, ColorSaturation],
+    ]
+};
 /// "Mask 2", or the name the user gave it.
 fn mask_name(m: &MaskGroup, i: usize) -> String {
     if m.name.is_empty() {

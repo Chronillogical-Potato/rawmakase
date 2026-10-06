@@ -6,7 +6,9 @@
 //! A control's interactive range can be narrower than the values a recipe may
 //! hold: the Exposure slider spans ±5 EV, while an imported edit can carry up to
 //! ±8. Relative input must not quietly pull such a value into the narrower range.
-use super::{EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+use super::{
+    EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, masks::LocalAdjust,
+};
 use std::ops::RangeInclusive;
 
 /// The Crop panel's Angle limit either way, in degrees, as `Recipe::validate` allows.
@@ -113,10 +115,11 @@ pub struct Display {
     pub signed: bool,
 }
 
-/// Everything controls need to know about a setting.
+/// Everything controls need to know about a setting: a develop setting
+/// ([`ParameterId`]) or a mask's ([`LocalParameterId`]).
 #[derive(Clone, Debug, PartialEq)]
-pub struct Descriptor {
-    pub id: ParameterId,
+pub struct Descriptor<Id = ParameterId> {
+    pub id: Id,
     /// The slider's label, and the name of its History step.
     pub label: &'static str,
     /// What a slider or dial covers, in the recipe's units.
@@ -142,7 +145,7 @@ const HUNDREDTHS: Display = Display {
 };
 
 /// A 0..100 slider stored as 0..1.
-const fn amount(id: ParameterId, label: &'static str) -> Descriptor {
+const fn amount<Id: Copy>(id: Id, label: &'static str) -> Descriptor<Id> {
     Descriptor {
         id,
         label,
@@ -168,7 +171,7 @@ const fn profile_amount(id: ParameterId, label: &'static str) -> Descriptor {
 }
 
 /// A −100..100 slider stored as −1..1.
-const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
+const fn percent<Id: Copy>(id: Id, label: &'static str) -> Descriptor<Id> {
     Descriptor {
         id,
         label,
@@ -544,6 +547,126 @@ pub fn nudged(value: f32, delta: f32, range: RangeInclusive<f32>) -> f32 {
     }
 }
 
+/// A mask's adjustment slider (see [`LocalAdjust`]). The ranges are a mask's
+/// own: Temp and Tint move relative to the photo's, from −100 to 100.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LocalParameterId {
+    Temperature,
+    Tint,
+    Exposure,
+    Contrast,
+    Highlights,
+    Shadows,
+    Whites,
+    Blacks,
+    Texture,
+    Clarity,
+    Dehaze,
+    /// In degrees.
+    Hue,
+    Saturation,
+    Sharpness,
+    Noise,
+    /// Lightroom's Color swatch: its hue, 0..1 shown as degrees.
+    ColorHue,
+    ColorSaturation,
+}
+
+const LOCAL_DESCRIPTORS: [Descriptor<LocalParameterId>; 17] = [
+    percent(LocalParameterId::Temperature, "Temp"),
+    percent(LocalParameterId::Tint, "Tint"),
+    Descriptor {
+        id: LocalParameterId::Exposure,
+        label: "Exposure",
+        interactive: -4. ..=4.,
+        valid: -4. ..=4.,
+        tick: Tick::Linear(0.02),
+        drag_step: Some(0.05),
+        display: HUNDREDTHS,
+    },
+    percent(LocalParameterId::Contrast, "Contrast"),
+    percent(LocalParameterId::Highlights, "Highlights"),
+    percent(LocalParameterId::Shadows, "Shadows"),
+    percent(LocalParameterId::Whites, "Whites"),
+    percent(LocalParameterId::Blacks, "Blacks"),
+    percent(LocalParameterId::Texture, "Texture"),
+    percent(LocalParameterId::Clarity, "Clarity"),
+    percent(LocalParameterId::Dehaze, "Dehaze"),
+    Descriptor {
+        id: LocalParameterId::Hue,
+        label: "Hue",
+        interactive: -180. ..=180.,
+        valid: -180. ..=180.,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    percent(LocalParameterId::Saturation, "Saturation"),
+    percent(LocalParameterId::Sharpness, "Sharpness"),
+    percent(LocalParameterId::Noise, "Noise"),
+    Descriptor {
+        display: Display {
+            scale: 360.,
+            decimals: 0,
+            signed: false,
+        },
+        ..amount(LocalParameterId::ColorHue, "Color Hue")
+    },
+    amount(LocalParameterId::ColorSaturation, "Color Sat"),
+];
+
+impl LocalParameterId {
+    /// In Lightroom's order.
+    pub const ALL: [Self; 17] = [
+        Self::Temperature,
+        Self::Tint,
+        Self::Exposure,
+        Self::Contrast,
+        Self::Highlights,
+        Self::Shadows,
+        Self::Whites,
+        Self::Blacks,
+        Self::Texture,
+        Self::Clarity,
+        Self::Dehaze,
+        Self::Hue,
+        Self::Saturation,
+        Self::Sharpness,
+        Self::Noise,
+        Self::ColorHue,
+        Self::ColorSaturation,
+    ];
+    pub fn descriptor(self) -> &'static Descriptor<Self> {
+        &LOCAL_DESCRIPTORS[self as usize]
+    }
+    /// The mask adjustment this slider is.
+    pub fn value_mut(self, a: &mut LocalAdjust) -> &mut f32 {
+        match self {
+            Self::Temperature => &mut a.temperature,
+            Self::Tint => &mut a.tint,
+            Self::Exposure => &mut a.exposure,
+            Self::Contrast => &mut a.contrast,
+            Self::Highlights => &mut a.highlights,
+            Self::Shadows => &mut a.shadows,
+            Self::Whites => &mut a.whites,
+            Self::Blacks => &mut a.blacks,
+            Self::Texture => &mut a.texture,
+            Self::Clarity => &mut a.clarity,
+            Self::Dehaze => &mut a.dehaze,
+            Self::Hue => &mut a.hue,
+            Self::Saturation => &mut a.saturation,
+            Self::Sharpness => &mut a.sharpness,
+            Self::Noise => &mut a.noise,
+            Self::ColorHue => &mut a.color[0],
+            Self::ColorSaturation => &mut a.color[1],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,6 +695,25 @@ mod tests {
                 let mut r = Recipe::default();
                 *id.value_mut(&mut r) = value;
                 assert_eq!(r.validate().is_ok(), valid, "{id:?} at {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_mask_adjustment_is_valid_exactly_within_each_valid_range() {
+        for id in LocalParameterId::ALL {
+            let d = id.descriptor();
+            assert_eq!(d.id, id);
+            assert_eq!(d.interactive, d.valid, "{id:?}");
+            for (value, valid) in [
+                (*d.valid.start(), true),
+                (*d.valid.end(), true),
+                (d.valid.start() - 0.01, false),
+                (d.valid.end() + 0.01, false),
+            ] {
+                let mut a = LocalAdjust::default();
+                *id.value_mut(&mut a) = value;
+                assert_eq!(a.validate().is_ok(), valid, "{id:?} at {value}");
             }
         }
     }
