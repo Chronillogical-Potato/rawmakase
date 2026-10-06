@@ -25,11 +25,13 @@ pub fn reveal(path: &Path) -> Result<()> {
     } else {
         let uri = file_uri(path);
         // Waits for the reply, so a session without a file manager on the bus
-        // fails here and falls back.
+        // fails here and falls back; a second at most, as this runs on the UI
+        // thread.
         let selected = Command::new("dbus-send")
             .args([
                 "--session",
                 "--print-reply",
+                "--reply-timeout=1000",
                 "--dest=org.freedesktop.FileManager1",
                 "--type=method_call",
                 "/org/freedesktop/FileManager1",
