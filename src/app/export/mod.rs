@@ -443,10 +443,20 @@ impl Editor {
 
     /// After Export: Show in Finder, for the files a batch wrote.
     fn show_exported(&mut self, exported: &[PathBuf]) {
-        for path in to_show(exported) {
-            if let Err(e) = crate::platform::reveal::reveal(&path) {
-                self.status = format!("Exported files not shown: {e:#}");
+        let shown = to_show(exported);
+        let folders = folders(exported);
+        for path in &shown {
+            if let Err(e) = crate::platform::reveal::reveal(path) {
+                self.status = format!("{} · exported files not shown: {e:#}", self.status);
+                return;
             }
+        }
+        if folders > shown.len() {
+            self.status = format!(
+                "{} · showing {} of the {folders} folders exported to",
+                self.status,
+                shown.len()
+            );
         }
     }
 
@@ -461,13 +471,14 @@ impl Editor {
         let single = (summary.total == 1 && summary.noted == 0)
             .then(|| exported.first().cloned())
             .flatten();
-        if queued.after == crate::export::AfterExport::Show {
-            self.show_exported(&exported);
-        }
         self.status = match single {
             Some(path) => format!("Exported {}", path.display()),
             None => summary.line(),
         };
+        // After the summary, so a file manager that can't be opened is said.
+        if queued.after == crate::export::AfterExport::Show {
+            self.show_exported(&exported);
+        }
         // Unread reports add up until they are dismissed: a later export that went
         // well never hides an earlier one that did not.
         if !summary.problems.is_empty() || !summary.notes.is_empty() {
@@ -668,8 +679,17 @@ fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Vec<PathBuf>) {
     (summary, exported)
 }
 
-/// The first file of each folder exported to, at most a few: one file manager
-/// window for each folder, not one for each photo.
+/// How many folders `exported` went to.
+fn folders(exported: &[PathBuf]) -> usize {
+    let mut folders: Vec<_> = exported.iter().map(|p| p.parent()).collect();
+    folders.sort();
+    folders.dedup();
+    folders.len()
+}
+
+/// The first file of each folder exported to, at most five: one file manager
+/// window for each folder, not one for each photo, and never a screenful. The
+/// status line says when there were more folders.
 fn to_show(exported: &[PathBuf]) -> Vec<PathBuf> {
     let mut shown: Vec<PathBuf> = Vec::new();
     for path in exported {

@@ -220,4 +220,5 @@ fn show_in_finder_opens_one_window_for_each_folder_exported_to() {
         .map(|i| PathBuf::from(format!("/{i}/x.jpg")))
         .collect();
     assert_eq!(to_show(&many).len(), 5);
+    assert_eq!(folders(&many), 20);
 }
