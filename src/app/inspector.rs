@@ -1453,36 +1453,17 @@ impl Editor {
 
         let mut switch = PanelSwitch::new(r, Panel::Effects);
         if switched_section(ui, "Effects", &mut switch.state, |ui| {
+            let photo = metadata.as_ref();
             subheading(ui, "Post-Crop Vignetting");
-            slider(ui, "Amount", &mut r.effects.vignette, -1. ..=1., 0.);
-            slider(
-                ui,
-                "Midpoint",
-                &mut r.effects.vignette_midpoint,
-                0. ..=1.,
-                0.5,
-            );
-            slider(
-                ui,
-                "Feather",
-                &mut r.effects.vignette_feather,
-                0. ..=1.,
-                0.5,
-            );
+            setting_control(ui, r, ParameterId::VignetteAmount, 0., photo);
+            setting_control(ui, r, ParameterId::VignetteMidpoint, 0.5, photo);
+            setting_control(ui, r, ParameterId::VignetteFeather, 0.5, photo);
             subheading(ui, "Grain");
-            let previous_grain = r.effects.grain;
             ui.push_id("grain", |ui| {
-                slider(ui, "Amount", &mut r.effects.grain, 0. ..=1., 0.);
-                slider(ui, "Size", &mut r.effects.grain_size, 0. ..=1., 0.25);
-                slider(
-                    ui,
-                    "Roughness",
-                    &mut r.effects.grain_roughness,
-                    0. ..=1.,
-                    0.5,
-                );
+                setting_control(ui, r, ParameterId::GrainAmount, 0., photo);
+                setting_control(ui, r, ParameterId::GrainSize, 0.25, photo);
+                setting_control(ui, r, ParameterId::GrainRoughness, 0.5, photo);
             });
-            r.adopt_measured_grain(previous_grain);
         }) {
             r.effects.reset_post_crop();
         }
