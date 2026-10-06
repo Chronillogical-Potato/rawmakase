@@ -796,14 +796,10 @@ impl Editor {
                     moving.and_then(|w| (0..4).find(|i| w.shares[*i] > 0.)),
                 );
                 subheading(ui, "Region");
-                for (i, name) in [
-                    (3, "Highlights"),
-                    (2, "Lights"),
-                    (1, "Darks"),
-                    (0, "Shadows"),
-                ] {
+                // Lightroom lists them lightest first.
+                for (i, id) in ParameterId::PARAMETRIC.into_iter().enumerate().rev() {
                     let row = ui.push_id(("parametric", i), |ui| {
-                        slider(ui, name, &mut r.effects.parametric[i], -1. ..=1., 0.)
+                        setting_slider(ui, id, id.value_mut(r), 0.)
                     });
                     highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
                 }
@@ -873,7 +869,7 @@ impl Editor {
                 let mut shown = r.curve_saturation.min(1.);
                 let before = shown;
                 ui.add_enabled_ui(view.selected_curve == 0, |ui| {
-                    slider(ui, "Saturation", &mut shown, 0. ..=1., 1.);
+                    setting_slider(ui, ParameterId::CurveSaturation, &mut shown, 1.);
                 });
                 if shown != before {
                     r.curve_saturation = shown;
@@ -894,7 +890,7 @@ impl Editor {
                 r.black_point + 0.01..=1.,
                 1.,
             );
-            slider(ui, "Midtone", &mut r.midtone, 0.1..=4., 1.);
+            setting_slider(ui, ParameterId::Midtone, &mut r.midtone, 1.);
         }) {
             r.black_point = 0.;
             r.white_point = 1.;
