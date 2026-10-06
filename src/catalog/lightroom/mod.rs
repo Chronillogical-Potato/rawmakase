@@ -1,11 +1,8 @@
-//! Read-only Lightroom catalog import and best-effort Develop conversion.
-mod develop;
+//! Read-only Lightroom catalog import. Its Develop settings are converted by
+//! `lr_develop`.
 pub(super) mod history;
 use super::Catalog;
 use anyhow::{Context, Result, ensure};
-pub use develop::convert_develop;
-#[cfg(test)]
-pub(super) use develop::develop_fields;
 pub use history::HistoryStep;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::path::{Path, PathBuf};

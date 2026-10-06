@@ -1,11 +1,14 @@
+//! Lightroom's Develop settings, as a catalog stores them (a serialized Lua
+//! table), translated into a recipe through the XMP settings they mirror. The
+//! table is parsed as data; no interpreter runs. Used to show and resolve photos
+//! imported from Lightroom; reading the Lightroom catalog itself is
+//! `catalog::lightroom`.
 use crate::develop::Recipe;
 use crate::xmp::look::LookAmount;
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;
 /// Parse Lightroom's serialized Lua table as data only. No interpreter is used.
-pub(in crate::catalog) fn develop_fields(
-    text: &str,
-) -> Result<std::collections::BTreeMap<String, String>> {
+pub(crate) fn develop_fields(text: &str) -> Result<std::collections::BTreeMap<String, String>> {
     ensure!(text.len() < 16_000_000, "Develop settings too large");
     let text = text.trim();
     let text = text
