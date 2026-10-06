@@ -32,6 +32,8 @@ struct Chosen {
     name: String,
     /// The photo open in Develop: exported with its edit as shown.
     open: bool,
+    /// Its capture time, for Date - Filename.
+    captured: Option<String>,
 }
 
 /// The photos an Export acts on, fixed when it is chosen.
@@ -187,6 +189,7 @@ impl Editor {
                             source: photo.path.clone(),
                             name,
                             open,
+                            captured: Some(photo.captured.clone()).filter(|c| !c.is_empty()),
                         }),
                     }
                 }
@@ -200,6 +203,7 @@ impl Editor {
                 }
                 scope.photos.push(Chosen {
                     id: None,
+                    captured: crate::exif::read(&source).and_then(|e| e.captured()),
                     name: source
                         .file_name()
                         .unwrap_or_default()
@@ -360,6 +364,7 @@ impl Editor {
                         name: chosen.name.clone(),
                         edit: Edit::Catalog(Default::default()),
                         values: Values::default(),
+                        captured: chosen.captured.clone(),
                     },
                 };
                 if chosen.open {

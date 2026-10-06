@@ -13,6 +13,7 @@ fn photo(source: &Path) -> BatchPhoto {
         name: source.file_name().unwrap().to_string_lossy().into(),
         edit: Edit::Catalog(Default::default()),
         values: Default::default(),
+        captured: None,
     }
 }
 /// Export settings into `folder`, as small TIFFs.
@@ -572,4 +573,36 @@ fn an_overwrite_takes_the_exact_name_over_one_in_other_case() {
         reserved.existing(&dir.join("A.tif")),
         Some(dir.join("A.TIF"))
     );
+}
+
+#[test]
+fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() -> Result<()> {
+    let f = fixture(&["a.dng", "b.dng", "c.dng"])?;
+    let mut photos = f.batch_photos()?;
+    // b is offline when its turn comes: it keeps 11, and c is still 12.
+    std::fs::remove_file(&f.photos[1].1)?;
+    let mut s = settings(&f.out());
+    s.naming = Some(crate::export::Naming::CustomNameSequence);
+    s.custom_text = "Concert".into();
+    s.start_number = 10;
+    let outcomes = run_all(&f.batch(photos.clone(), s.clone()));
+    assert!(matches!(outcomes[1], Outcome::Failed(_)), "{outcomes:?}");
+    assert_eq!(listing(&f.out()), ["Concert-10.tif", "Concert-12.tif"]);
+    // Date - Filename: the capture date, or "undated" with a note, never the file's
+    // modified date.
+    photos[0].captured = Some("2026-05-04 10:21:33.000".into());
+    photos[2].captured = None;
+    let photos = vec![photos[0].clone(), photos[2].clone()];
+    let mut s = settings(&f.out().join("dated"));
+    s.naming = Some(crate::export::Naming::DateFilename);
+    let outcomes = run_all(&f.batch(photos, s));
+    assert_eq!(
+        listing(&f.out().join("dated")),
+        ["20260504-a.tif", "undated-c.tif"]
+    );
+    match &outcomes[1] {
+        Outcome::Exported { notes, .. } => assert!(notes.iter().any(|n| n.contains("undated"))),
+        other => panic!("{other:?}"),
+    }
+    Ok(())
 }
