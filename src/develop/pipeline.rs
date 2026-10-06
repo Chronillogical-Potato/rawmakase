@@ -357,7 +357,13 @@ fn color_stage(
                 .zip(weights)
                 .map(|(v, w)| v * w)
                 .sum();
-            lab[0] = (lab[0] + gray_mix_shift(shift, chroma)).clamp(0., 1.);
+            lab[0] = match &lut.gray_grid {
+                // The gray's Oklab lightness is the cube root of its luminance.
+                Some(grid) => crate::develop::black_white::gray(grid, lab_to_srgb(lab))
+                    .cbrt()
+                    .clamp(0., 1.),
+                None => (lab[0] + gray_mix_shift(shift, chroma)).clamp(0., 1.),
+            };
             lab[1] = 0.;
             lab[2] = 0.;
         }
@@ -500,6 +506,8 @@ struct CurveSet {
     local: Option<crate::develop::local_tone::LocalToneMap>,
     /// Engine 4 measured color mixer, Saturation and Vibrance.
     mixer: Option<crate::develop::color_mixer::ColorMixer>,
+    /// `BlackWhiteModel::Chart`'s grid for the mix (`black_white::gray_grid`).
+    pub(crate) gray_grid: Option<Vec<[f32; 3]>>,
     /// Engine 4 Point Color swatches.
     point_colors: Option<crate::develop::point_color::PointColors>,
     /// Engine 4 measured color grading, when its settings are covered by the tables.
@@ -596,6 +604,9 @@ impl CurveSet {
             mixer: basic_curves
                 .then(|| crate::develop::color_mixer::ColorMixer::new(r))
                 .flatten(),
+            gray_grid: (r.effects.monochrome
+                && r.black_white_model == crate::develop::black_white::BlackWhiteModel::Chart)
+                .then(|| crate::develop::black_white::gray_grid(r.effects.gray_mix)),
             // Camera Raw leaves Point Color out of black & white renders.
             point_colors: (basic_curves && !r.effects.monochrome)
                 .then(|| crate::develop::point_color::PointColors::new(&r.point_colors))

@@ -643,6 +643,11 @@ pub(super) fn original_operators(r: &Recipe) -> Vec<(&'static str, &'static str)
             ORIGINAL_VIBRANCE,
             "ProcessVersion",
         ),
+        (
+            r.black_white_model.is_original(),
+            ORIGINAL_BLACK_WHITE,
+            "ProcessVersion",
+        ),
     ]
     .into_iter()
     .filter_map(|(original, name, key)| original.then_some((name, key)))
@@ -658,6 +663,7 @@ pub(super) const ORIGINAL_CALIBRATION: &str = "Calibration";
 pub(super) const ORIGINAL_COLOR_NOISE: &str = "ColorNoise";
 pub(super) const ORIGINAL_SATURATION: &str = "Saturation";
 pub(super) const ORIGINAL_VIBRANCE: &str = "Vibrance";
+pub(super) const ORIGINAL_BLACK_WHITE: &str = "BlackWhite";
 /// Written with every packet and preset: the marker format, which says which of the
 /// operators below its `RAWmakaseOriginal` could name (`MEASURED_SINCE`). Packets
 /// and presets from releases before 0.2.0 lack it.
@@ -666,7 +672,7 @@ pub(super) const MARKERS: u32 = 3;
 /// When each operator's measured version first shipped: the RAWmakase release, and
 /// the marker format from which `RAWmakaseOriginal` names it. A packet or preset
 /// that predates either could not name the operator, so it keeps that one.
-pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32), u32); 9] = [
+pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32), u32); 10] = [
     (ORIGINAL_SHARPENING, (0, 1, 15), 2),
     (ORIGINAL_LENS_VIGNETTE, (0, 1, 15), 2),
     (ORIGINAL_GRAIN, (0, 1, 15), 2),
@@ -676,6 +682,7 @@ pub(super) const MEASURED_SINCE: [(&str, (u32, u32, u32), u32); 9] = [
     (ORIGINAL_COLOR_NOISE, (0, 1, 16), 2),
     (ORIGINAL_SATURATION, (0, 1, 16), 2),
     (ORIGINAL_VIBRANCE, (0, 2, 1), 3),
+    (ORIGINAL_BLACK_WHITE, (0, 2, 1), 3),
 ];
 
 /// A setting key, or the start of one, that belongs to an operator.
@@ -722,6 +729,7 @@ pub(super) fn operator_keys(operator: &str) -> &'static [OperatorKey] {
         ORIGINAL_COLOR_NOISE => &[Exact("ColorNoiseReduction")],
         ORIGINAL_SATURATION => &[Exact("Saturation")],
         ORIGINAL_VIBRANCE => &[Exact("Vibrance")],
+        ORIGINAL_BLACK_WHITE => &[Prefix("GrayMixer")],
         _ => &[],
     }
 }

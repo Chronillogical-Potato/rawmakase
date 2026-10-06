@@ -894,8 +894,15 @@ fn adjust(lab_in: vec3<f32>) -> vec3<f32> {
         for (var i = 0u; i < 8u; i++) {
             shift += p(P_GRAY_MIX + i) * weights[i];
         }
-        // `gray_mix_shift` in pipeline.rs.
-        lab.x = clamp(lab.x + shift * chroma * select(4.37, 1.78, shift > 0.0), 0.0, 1.0);
+        if offset(P_GRAY_GRID) >= 0 {
+            // `black_white::gray`: the chart tables scale the color to its gray.
+            let scaled = mixer(max(lab_to_srgb(lab), vec3(0.0)), offset(P_GRAY_GRID));
+            let y = max(dot(scaled, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+            lab.x = clamp(pow(y, 1.0 / 3.0), 0.0, 1.0);
+        } else {
+            // `gray_mix_shift` in pipeline.rs.
+            lab.x = clamp(lab.x + shift * chroma * select(4.37, 1.78, shift > 0.0), 0.0, 1.0);
+        }
         lab.y = 0.0;
         lab.z = 0.0;
     }

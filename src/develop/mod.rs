@@ -2,7 +2,7 @@
 mod auto;
 mod basic_tone;
 mod basic_tone_data;
-mod black_white;
+pub mod black_white;
 pub(crate) mod calibration;
 pub mod clarity;
 pub(crate) mod color;

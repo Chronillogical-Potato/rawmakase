@@ -33,12 +33,16 @@ What the renders show (see docs/color-mixer.md#chart-tables):
 `fit-vibrance` writes src/develop/vibrance_chart.bin from the same renders: the
 photo tables up to ±50 and a grid fitted per position at ±75 and ±100
 (docs/color-mixer.md#vibrance).
+`fit-black-white` writes src/develop/black_white_chart.bin from the renders with
+ConvertToGrayscale: the gray's luminance against the color's at a zero mix, and
+each band's change at ±50 and ±100 (docs/color-mixer.md#chart-gray).
 
 Requires numpy. Run from the repository root:
   python3 scripts/corpus/color-mixer.py chart [--work DIR]
   python3 scripts/corpus/color-mixer.py render [--work DIR] [--refs FILE]
   python3 scripts/corpus/color-mixer.py fit [--work DIR] [--refs FILE]
   python3 scripts/corpus/color-mixer.py fit-vibrance [--work DIR] [--refs FILE]
+  python3 scripts/corpus/color-mixer.py fit-black-white [--work DIR] [--refs FILE]
 """
 import argparse
 import importlib.util
@@ -70,6 +74,13 @@ OUTPUT = ROOT / 'src/develop/color_mixer_chart.bin'
 VIBRANCE_OUTPUT = ROOT / 'src/develop/vibrance_chart.bin'
 # Vibrance's rendered positions, in the order of vibrance_chart.bin's grids.
 VIBRANCE_POSITIONS = [-100, -75, -50, -25, 25, 50, 75, 100]
+BLACK_WHITE_OUTPUT = ROOT / 'src/develop/black_white_chart.bin'
+# The black & white mix's rendered positions, in the order of black_white_chart.bin.
+GRAY_MIX_POSITIONS = [-100, -50, 50, 100]
+GRAY_SCALE = 4000
+# Camera Raw takes some colors to black at −100; the fit stops at 1/64 of their
+# luminance, which keeps the tables within their range.
+GRAY_FLOOR = -6
 # Regularization: smoothness between neighbouring cells, and pull toward the photo
 # tables (which is all that constrains cells without chart colors).
 SMOOTH, PRIOR = 0.03, 0.02
@@ -134,6 +145,11 @@ def cases():
                 out[f'{kind}-{band}{a:+d}'] = {f'{kind}Adjustment{band}': str(a)}
     for a in VIBRANCE_POSITIONS:
         out[f'Vibrance{a:+d}'] = {'Vibrance': str(a)}
+    zero = {f'GrayMixer{band}': '0' for band in BANDS}
+    out['bw-zero'] = {'ConvertToGrayscale': 'True', **zero}
+    for band in BANDS:
+        for a in GRAY_MIX_POSITIONS:
+            out[f'bw-{band}{a:+d}'] = {'ConvertToGrayscale': 'True', **zero, f'GrayMixer{band}': str(a)}
     return out
 
 
@@ -409,10 +425,54 @@ def fit_vibrance(refs):
     VIBRANCE_OUTPUT.write_bytes(values.tobytes())
     print(f'Wrote {VIBRANCE_OUTPUT.relative_to(ROOT)}')
 
+def fit_black_white(refs):
+    """black_white_chart.bin: log2 of the gray's luminance over the color's at a zero
+    mix, then each band's change at GRAY_MIX_POSITIONS, in the color mixer's grid."""
+    data = Data(refs)
+    dtd = smoothness()
+    held_out = data.hue_index % 2 == 1
+    y_in = data.base @ PRO_TO_XYZ[1]
+    usable = (y_in > 0.005) & (data.base.max(1) < 0.995)
+
+    def log_gray(name):
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.log2((data.render(name) @ PRO_TO_XYZ[1]) / y_in)
+
+    def solve(y, use, neutral_fixed=False):
+        keep = use & usable & np.isfinite(y)
+        rows = data.w[keep]
+        normal = rows.T @ rows + SMOOTH * dtd + PRIOR * np.identity(CELLS)
+        table = np.linalg.solve(normal, rows.T @ y[keep])
+        if neutral_fixed:
+            # Camera Raw's band sliders leave grays alone (the ramp moves < 0.001).
+            table.reshape(HUES, SATS, VALS)[:, 0, :] = 0
+        return table
+
+    def lightness(y):
+        f = np.where(y > (6 / 29) ** 3, np.cbrt(np.clip(y, 0, None)), y / (3 * (6 / 29) ** 2) + 4 / 29)
+        return 116 * f
+
+    zero = log_gray('bw-zero')
+    check = solve(zero, ~held_out)
+    tables = [solve(zero, np.ones_like(held_out))]
+    errors = []
+    for band in BANDS:
+        for a in GRAY_MIX_POSITIONS:
+            name = f'bw-{band}{a:+d}'
+            change = np.clip(log_gray(name) - zero, GRAY_FLOOR, None)
+            pred = y_in * 2 ** (data.w @ check + data.w @ solve(change, ~held_out, True))
+            truth = data.render(name) @ PRO_TO_XYZ[1]
+            errors.append(np.abs(lightness(pred) - lightness(truth))[held_out & usable].mean())
+            tables.append(solve(change, np.ones_like(held_out), True))
+    print(f'Black & white mix: mean ΔL* {np.mean(errors):.2f} (worst {max(errors):.2f}) on held-out patches')
+    values = np.clip(np.round(np.array(tables) * GRAY_SCALE), -32768, 32767).astype('<i2')
+    BLACK_WHITE_OUTPUT.write_bytes(values.tobytes())
+    print(f'Wrote {BLACK_WHITE_OUTPUT.relative_to(ROOT)}')
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('command', choices=['chart', 'render', 'fit', 'fit-vibrance'])
+    p.add_argument('command', choices=['chart', 'render', 'fit', 'fit-vibrance', 'fit-black-white'])
     p.add_argument('--work', type=Path, default=Path(tempfile.gettempdir()) / 'rawmakase-color-mixer')
     p.add_argument('--refs', type=Path, help='patch means (default: WORK/refs.json)')
     args = p.parse_args()
@@ -424,8 +484,10 @@ def main():
         render(args.work, refs)
     elif args.command == 'fit':
         fit(refs)
-    else:
+    elif args.command == 'fit-vibrance':
         fit_vibrance(refs)
+    else:
+        fit_black_white(refs)
 
 
 if __name__ == '__main__':

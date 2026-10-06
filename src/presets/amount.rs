@@ -182,6 +182,7 @@ fn process_version(r: &mut Recipe, full: &Recipe) {
     r.mixer_model = full.mixer_model;
     r.saturation_model = full.saturation_model;
     r.vibrance_model = full.vibrance_model;
+    r.black_white_model = full.black_white_model;
     r.calibration_model = full.calibration_model;
     r.whites_model = full.whites_model;
     r.gamut_model = full.gamut_model;
@@ -403,6 +404,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         mixer_model: _,
         saturation_model: _,
         vibrance_model: _,
+        black_white_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,

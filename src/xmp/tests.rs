@@ -1403,15 +1403,38 @@ fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
     let fresh = Recipe::with_profiles(&m, &[]);
     let apply = |markers: &str| {
         let attrs = format!(
-            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.2.0" c:RAWmakaseMarkers="{markers}" c:Vibrance="-80" c:Saturation="-80""#
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.2.0" c:RAWmakaseMarkers="{markers}" c:Vibrance="-80" c:Saturation="-80" c:ConvertToGrayscale="True" c:GrayMixerRed="-40""#
         );
         parse(Path::new("p.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)
     };
     let two = apply("2")?;
     assert_eq!(two.vibrance_model, VibranceModel::Original);
+    assert_eq!(
+        two.black_white_model,
+        crate::develop::black_white::BlackWhiteModel::Original
+    );
     assert_eq!(two.saturation_model, SaturationModel::Gray);
     let three = apply("3")?;
     assert_eq!(three.vibrance_model, VibranceModel::Chart);
+    assert_eq!(
+        three.black_white_model,
+        crate::develop::black_white::BlackWhiteModel::Chart
+    );
+    Ok(())
+}
+#[test]
+fn lightroom_auto_black_white_takes_the_measured_gray() -> Result<()> {
+    use crate::develop::black_white::BlackWhiteModel;
+    // Recipe::default() stands for a recipe saved before the measured gray.
+    let r = parse(
+        Path::new("p.xmp"),
+        &xml(
+            r#"c:ConvertToGrayscale="True" c:AutoGrayscaleMix="True""#,
+            "",
+        ),
+    )?
+    .apply(&Recipe::default(), &Metadata::default(), &[], None)?;
+    assert_eq!(r.black_white_model, BlackWhiteModel::Chart);
     Ok(())
 }
 #[test]

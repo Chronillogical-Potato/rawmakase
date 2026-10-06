@@ -162,6 +162,13 @@ pub struct Recipe {
         skip_serializing_if = "crate::develop::color_mixer::VibranceModel::is_original"
     )]
     pub vibrance_model: crate::develop::color_mixer::VibranceModel,
+    /// Which operator renders the black & white mix. Missing means the Oklab
+    /// lightness shift, so older recipes look as they did; omitted at that default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::develop::black_white::BlackWhiteModel::is_original"
+    )]
+    pub black_white_model: crate::develop::black_white::BlackWhiteModel,
     /// Which fit renders Camera Calibration's primary sliders. Missing means the
     /// original coefficients, so older recipes look as they did; omitted at that default.
     #[serde(
@@ -322,6 +329,7 @@ impl Default for Recipe {
             mixer_model: Default::default(),
             saturation_model: Default::default(),
             vibrance_model: Default::default(),
+            black_white_model: Default::default(),
             calibration_model: Default::default(),
             whites_model: Default::default(),
             gamut_model: Default::default(),
@@ -564,6 +572,7 @@ impl Recipe {
         recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
         recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
         recipe.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
+        recipe.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
         recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
         recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
         recipe.gamut_model = crate::develop::GamutModel::Clip;
