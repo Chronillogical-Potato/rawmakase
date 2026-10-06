@@ -623,6 +623,31 @@ fn stage_means<const N: usize>(
 }
 /// Clarity, Texture and, before engine 4, Shadows and Highlights, as a gain of the
 /// camera image, plus the recipe for the per-pixel stage that follows.
+/// `im` with the measured Texture `amount`: its detail made once per image and kept,
+/// with the result for the amount, in the stage cache when there is one.
+fn textured(
+    im: &Arc<CameraImage>,
+    amount: f32,
+    scale: f32,
+    cancel: &AtomicBool,
+    cache: Option<&mut StageCache>,
+) -> Result<Arc<CameraImage>> {
+    let Some(cache) = cache else {
+        return Ok(Arc::new(
+            develop::texture::TextureDetail::of(im, scale, cancel)?.apply(im, amount),
+        ));
+    };
+    let detail = cache.texture_detail.get_or_try(
+        TextureKey::new(im, scale, 0.),
+        develop::texture::TextureDetail::bytes,
+        || develop::texture::TextureDetail::of(im, scale, cancel),
+    )?;
+    cache.textured.get_or_try(
+        TextureKey::new(im, scale, amount),
+        |im: &CameraImage| im.pixels.len() * 12,
+        || Ok(detail.apply(im, amount)),
+    )
+}
 fn local_stage(
     im: &Arc<CameraImage>,
     r: &Recipe,
@@ -653,15 +678,7 @@ fn local_stage(
     let texture = develop::texture::measured(r);
     let im = &if texture != 0. {
         spatial.effects.texture = 0.;
-        let make = || develop::texture::apply(im, texture, scale, cancel);
-        match cache.as_deref_mut() {
-            Some(cache) => cache.textured.get_or_try(
-                TextureKey::new(im, scale, texture),
-                |im: &CameraImage| im.pixels.len() * 12,
-                make,
-            )?,
-            None => Arc::new(make()?),
-        }
+        textured(im, texture, scale, cancel, cache.as_deref_mut())?
     } else {
         im.clone()
     };
@@ -764,10 +781,14 @@ fn render_resident(
     if !develop::pipeline::pixel_params::supported(&base) {
         return Ok(None);
     }
-    // The measured Texture's image is made on the CPU.
-    if develop::texture::measured(&base) != 0. {
-        return Ok(None);
-    }
+    // The measured Texture's image is made on the CPU, its detail once per image.
+    let texture = develop::texture::measured(&base);
+    let source = &if texture != 0. {
+        base.effects.texture = 0.;
+        textured(source, texture, scale, cancel, Some(&mut *stages.cache))?
+    } else {
+        source.clone()
+    };
     // Masks whose ranges need developed colours, whose detail changes the samples or
     // whose finish runs on the CPU take the CPU sampling path.
     if base.masks.iter().filter(|m| m.is_active()).any(|m| {

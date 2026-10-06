@@ -28,7 +28,8 @@ pub(crate) struct StageCache {
     pub(crate) local: Lru<LocalKey, Vec<f32>>,
     pub(crate) samples: Lru<SampleKey, Samples>,
     pub(crate) reduced: Lru<ReducedKey, CameraImage>,
-    /// The camera image with the measured Texture.
+    /// The measured Texture's detail of a camera image, and the image with an amount.
+    pub(crate) texture_detail: Lru<TextureKey, super::texture::TextureDetail>,
     pub(crate) textured: Lru<TextureKey, CameraImage>,
     /// Mask weights of a region.
     pub(crate) masks: Lru<MaskKey, super::masks::MaskWeights>,
@@ -342,7 +343,8 @@ impl LocalKey {
         }
     }
 }
-/// The measured Texture's image: the source image, its scale and the amount.
+/// The measured Texture's detail and image: the source image, its scale and (for the
+/// image) the amount.
 #[derive(Clone, PartialEq)]
 pub(crate) struct TextureKey {
     image: Same<CameraImage>,

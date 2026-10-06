@@ -64,68 +64,83 @@ fn strength(amount: f32) -> f32 {
     STRENGTH[i - 1] + (STRENGTH[i] - STRENGTH[i - 1]) * t
 }
 
-/// `im`, an image `scale` times the full-resolution photo's size, with the measured
-/// Texture `amount` applied to each channel; stops with an error when `cancel` is set.
-pub(crate) fn apply(
-    im: &CameraImage,
-    amount: f32,
-    scale: f32,
-    cancel: &AtomicBool,
-) -> Result<CameraImage> {
-    // A reduced image's level 0 is a coarser full-resolution level.
-    let offset = (-scale.max(1e-3).log2()).round().max(0.) as usize;
-    let s = strength(amount);
-    let mut out = im.clone();
-    out.recovered = Default::default();
-    for c in 0..3 {
-        let logs = Plane {
-            w: im.width as usize,
-            h: im.height as usize,
-            data: im
-                .pixels
-                .par_iter()
-                .map(|p| p[c].max(1e-6).log2())
-                .collect(),
+/// The measured Texture's detail of each channel of an image, which any amount
+/// scales: made once per image, so moving the slider only applies it.
+pub(crate) struct TextureDetail {
+    channels: [Vec<f32>; 3],
+}
+impl TextureDetail {
+    /// The detail of `im`, an image `scale` times the full-resolution photo's size;
+    /// stops with an error when `cancel` is set.
+    pub(crate) fn of(im: &CameraImage, scale: f32, cancel: &AtomicBool) -> Result<Self> {
+        // The image's size against the full-resolution photo's, also for a half-size
+        // draft decode, which renders at scale 1.
+        let full = im.metadata.width.max(im.metadata.height);
+        let scale = if full > 0 {
+            (im.width.max(im.height) as f32 / full as f32).min(scale.max(1e-3))
+        } else {
+            scale
         };
-        let added = detail(&logs, offset, cancel)?;
-        out.pixels
-            .par_iter_mut()
-            .zip(added.data.par_iter())
-            .for_each(|(p, d)| p[c] *= (s * d).exp2());
+        // A reduced image's level 0 is a coarser full-resolution level.
+        let offset = (-scale.max(1e-3).log2()).round().max(0.) as usize;
+        let mut channels: [Vec<f32>; 3] = Default::default();
+        for (c, out) in channels.iter_mut().enumerate() {
+            let logs = Plane {
+                w: im.width as usize,
+                h: im.height as usize,
+                data: im
+                    .pixels
+                    .par_iter()
+                    .map(|p| p[c].max(1e-6).log2())
+                    .collect(),
+            };
+            *out = detail(&logs, offset, cancel)?.data;
+        }
+        Ok(Self { channels })
     }
-    Ok(out)
+    /// `im`, the image the detail was made from, with Texture `amount`.
+    pub(crate) fn apply(&self, im: &CameraImage, amount: f32) -> CameraImage {
+        let s = strength(amount);
+        let mut out = im.clone();
+        out.recovered = Default::default();
+        out.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
+            for (v, detail) in p.iter_mut().zip(&self.channels) {
+                *v *= (s * detail[i]).exp2();
+            }
+        });
+        out
+    }
+    pub(crate) fn bytes(&self) -> usize {
+        self.channels.iter().map(Vec::len).sum::<usize>() * 4
+    }
 }
 /// The compressed, weighted detail of `plane` as pyramid level `level` and coarser,
-/// expanded to its size.
+/// expanded to its size. Only the level's plane, its blurred copy and the result are
+/// full size at once.
 fn detail(plane: &Plane, level: usize, cancel: &AtomicBool) -> Result<Plane> {
-    let zero = || Plane {
-        w: plane.w,
-        h: plane.h,
-        data: vec![0.; plane.w * plane.h],
-    };
     if level >= LEVELS || plane.w < 4 || plane.h < 4 {
-        return Ok(zero());
+        return Ok(Plane {
+            w: plane.w,
+            h: plane.h,
+            data: vec![0.; plane.w * plane.h],
+        });
     }
     ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
     let coarse = plane.down();
-    let up = coarse.up(plane.w, plane.h);
-    let below = detail(&coarse, level + 1, cancel)?.up(plane.w, plane.h);
+    let mut out = detail(&coarse, level + 1, cancel)?.up(plane.w, plane.h);
+    let blurred = coarse.up(plane.w, plane.h);
+    drop(coarse);
+    ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
     let (w, t) = (WEIGHTS[level], THRESHOLDS[level]);
-    let data = plane
-        .data
-        .par_iter()
-        .zip(up.data.par_iter().zip(below.data.par_iter()))
-        .map(|(v, (u, b))| {
+    out.data
+        .par_iter_mut()
+        .zip(plane.data.par_iter().zip(blurred.data.par_iter()))
+        .for_each(|(o, (v, u))| {
             let band = v - u;
             let x = band / t;
-            b + w * band / (1. + x * x)
-        })
-        .collect();
-    Ok(Plane {
-        w: plane.w,
-        h: plane.h,
-        data,
-    })
+            *o += w * band / (1. + x * x);
+        });
+    Ok(out)
 }
 
 /// One channel at one pyramid level.
@@ -224,7 +239,9 @@ mod tests {
             scale_factor: 1.,
             scale_clipped: 0,
         };
-        let out = apply(&im, amount, 1., &AtomicBool::new(false)).unwrap();
+        let out = TextureDetail::of(&im, 1., &AtomicBool::new(false))
+            .unwrap()
+            .apply(&im, amount);
         let amp = |im: &CameraImage| {
             let (mut s, mut c) = (0., 0.);
             for x in 128..896 {
@@ -257,5 +274,33 @@ mod tests {
         // Negative Texture smooths the same band; none leaves the image alone.
         assert!(gain_at(0.03, 0.5, -1.) < 0.75);
         assert!((gain_at(0.03, 0.5, 0.) - 1.).abs() < 1e-4);
+    }
+    /// A half-size draft decode renders at scale 1, but its pixels are twice the size
+    /// of the photo's: Texture works at the photo's scale, as on a reduced copy.
+    #[test]
+    fn half_size_decodes_texture_at_the_photo_scale() {
+        let (w, h) = (256u32, 128u32);
+        let image = |full: u32| CameraImage {
+            recovered: Default::default(),
+            width: w,
+            height: h,
+            pixels: (0..w * h)
+                .map(|i| [0.1 + 0.1 * ((i % w) as f32 * 0.3).sin().abs(); 3])
+                .collect(),
+            metadata: crate::raw::Metadata {
+                width: full,
+                height: full * h / w,
+                ..Default::default()
+            },
+            fast: true,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        let cancel = AtomicBool::new(false);
+        let draft = TextureDetail::of(&image(2 * w), 1., &cancel).unwrap();
+        let reduced = TextureDetail::of(&image(0), 0.5, &cancel).unwrap();
+        let full = TextureDetail::of(&image(0), 1., &cancel).unwrap();
+        assert_eq!(draft.channels, reduced.channels);
+        assert_ne!(draft.channels, full.channels);
     }
 }
