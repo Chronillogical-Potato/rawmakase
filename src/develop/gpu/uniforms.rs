@@ -3,8 +3,8 @@
 //! checks that its `Params` struct has the same fields at the same offsets, so a
 //! field added, moved or retyped on one side fails CI without a GPU.
 
-/// A `#[repr(C)]` plain-old-data struct whose field names and byte offsets are
-/// listed in `FIELDS`, for comparison with the shader's declaration.
+/// A `#[repr(C)]` plain-old-data struct whose field names, types and byte offsets
+/// are listed in `FIELDS`, for comparison with the shader's declaration.
 macro_rules! uniform {
     ($(#[$meta:meta])* $name:ident { $($(#[$field_meta:meta])* $field:ident: $ty:ty),* $(,)? }) => {
         $(#[$meta])*
@@ -14,10 +14,13 @@ macro_rules! uniform {
             $($(#[$field_meta])* pub(crate) $field: $ty),*
         }
         impl $name {
-            /// Every field's name and byte offset, in declaration order.
+            /// Every field's name, type and byte offset, in declaration order.
             #[cfg(test)]
-            pub(crate) const FIELDS: &[(&str, usize)] =
-                &[$((stringify!($field), std::mem::offset_of!($name, $field))),*];
+            pub(crate) const FIELDS: &[(&str, &str, usize)] = &[$((
+                stringify!($field),
+                stringify!($ty),
+                std::mem::offset_of!($name, $field),
+            )),*];
         }
     };
 }
@@ -62,13 +65,13 @@ uniform! {
         origin_y: u32,
         full_w: u32,
         full_h: u32,
-        /// `effects::GrainField`.
         scale: f32,
+        /// `effects::GrainField`.
         grain: f32,
         grain_cell: f32,
         grain_coarse: f32,
-        /// `effects::PostCropVignette`; a zero amount has no vignette.
         grain_seed: u32,
+        /// `effects::PostCropVignette`; a zero amount has no vignette.
         vignette: f32,
         vignette_style: u32,
         vignette_highlights: f32,
@@ -94,11 +97,11 @@ uniform! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wgpu::naga::{TypeInner, front::wgsl};
+    use wgpu::naga::{Scalar, ScalarKind, TypeInner, front::wgsl};
 
-    /// Each member of the struct `Params` in `source`, by name and byte offset,
-    /// and the struct's size.
-    fn shader_params(source: &str) -> (Vec<(String, usize)>, usize) {
+    /// Each member of the struct `Params` in `source`, by name, Rust type name and
+    /// byte offset, and the struct's size.
+    fn shader_params(source: &str) -> (Vec<(String, String, usize)>, usize) {
         let module = wgsl::parse_str(source).expect("valid WGSL");
         let (_, params) = module
             .types
@@ -108,15 +111,32 @@ mod tests {
         let TypeInner::Struct { members, span } = &params.inner else {
             panic!("Params is a struct");
         };
+        let rust_type = |ty| match module.types[ty].inner {
+            TypeInner::Scalar(Scalar {
+                kind: ScalarKind::Uint,
+                width: 4,
+            }) => "u32",
+            TypeInner::Scalar(Scalar {
+                kind: ScalarKind::Float,
+                width: 4,
+            }) => "f32",
+            ref other => panic!("no Rust type for {other:?}"),
+        };
         let members = members
             .iter()
-            .map(|m| (m.name.clone().unwrap_or_default(), m.offset as usize))
+            .map(|m| {
+                let name = m.name.clone().unwrap_or_default();
+                (name, rust_type(m.ty).to_string(), m.offset as usize)
+            })
             .collect();
         (members, *span as usize)
     }
 
-    fn rust_fields(fields: &[(&str, usize)]) -> Vec<(String, usize)> {
-        fields.iter().map(|(n, o)| ((*n).to_string(), *o)).collect()
+    fn rust_fields(fields: &[(&str, &str, usize)]) -> Vec<(String, String, usize)> {
+        fields
+            .iter()
+            .map(|(name, ty, offset)| ((*name).into(), (*ty).into(), *offset))
+            .collect()
     }
 
     #[test]
