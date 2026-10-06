@@ -12,14 +12,16 @@ pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
     r.engine >= 4 && r.reference_curves
 }
 
-/// Why Point Color is unavailable, naming the control that turns it on. Updating the
-/// process only reaches an older edit; once the process is 4, Reference tone curves is
-/// what the tab also needs, and Calibration's Update button is not shown at all.
-pub(super) fn point_color_hint(r: &crate::develop::Recipe) -> &'static str {
-    if r.reference_curves {
-        "Update the process in Calibration to use Point Color."
-    } else {
-        "Turn on Reference tone curves in Calibration to use Point Color."
+/// What Calibration still needs before Point Color and the targeted tools are on,
+/// worded to finish "… in Calibration to use …", or `None` when the process renders
+/// them. Its Update button is only shown below process 4, so it is named only then,
+/// and Reference tone curves whenever they are off: Update leaves them as they were.
+pub(super) fn point_color_steps(r: &crate::develop::Recipe) -> Option<&'static str> {
+    match (r.engine >= 4, r.reference_curves) {
+        (false, false) => Some("Update the process and turn on Reference tone curves"),
+        (false, true) => Some("Update the process"),
+        (true, false) => Some("Turn on Reference tone curves"),
+        (true, true) => None,
     }
 }
 
@@ -472,38 +474,29 @@ mod tests {
         assert_eq!(nearest(&stacked, 0.7), 2);
     }
 
-    /// The hint has to name a control that exists. Calibration's Update button is only
-    /// drawn while the process is older than 4, so pointing an engine 4 edit at it
-    /// sends the reader looking for a button that is not there.
+    /// The steps name only controls Calibration shows: Update below process 4, and
+    /// Reference tone curves while they are off, which Update does not turn on.
     #[test]
-    fn the_point_color_hint_names_a_control_that_is_there() {
+    fn point_color_steps_name_the_controls_that_are_there() {
         use crate::develop::Recipe;
-        for reference_curves in [false, true] {
-            for engine in [3, 4] {
-                let r = Recipe {
-                    engine,
-                    reference_curves,
-                    ..Default::default()
-                };
-                if renders_point_color(&r) {
-                    continue;
-                }
-                let hint = point_color_hint(&r);
-                if hint.contains("Update the process") {
-                    assert!(
-                        r.engine < 4,
-                        "engine {engine} is told to update the process, but Calibration \
-                         only offers Update below 4"
-                    );
-                } else {
-                    assert!(
-                        !r.reference_curves,
-                        "only Reference tone curves turns Point Color on when the \
-                         process is already 4"
-                    );
-                    assert!(hint.contains("Reference tone curves"), "{hint}");
-                }
-            }
+        let cases = [
+            (
+                3,
+                false,
+                Some("Update the process and turn on Reference tone curves"),
+            ),
+            (3, true, Some("Update the process")),
+            (4, false, Some("Turn on Reference tone curves")),
+            (4, true, None),
+        ];
+        for (engine, reference_curves, steps) in cases {
+            let r = Recipe {
+                engine,
+                reference_curves,
+                ..Default::default()
+            };
+            assert_eq!(point_color_steps(&r), steps, "engine {engine}");
+            assert_eq!(renders_point_color(&r), steps.is_none(), "engine {engine}");
         }
     }
 }
