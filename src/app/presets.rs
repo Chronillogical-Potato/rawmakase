@@ -345,11 +345,12 @@ impl Editor {
                 self.presets.preview = Some(r);
                 self.schedule();
             }
-            // Woken when the hover has lasted long enough to preview.
+            // Woken when the hover has lasted long enough to preview; not after,
+            // when a preset that cannot apply would otherwise keep it awake.
             if self.presets.preview.is_none()
                 && let Some((_, t)) = &self.presets.hover
+                && let Some(left) = HOVER_PREVIEW.checked_sub(t.elapsed())
             {
-                let left = HOVER_PREVIEW.saturating_sub(t.elapsed());
                 ui.ctx()
                     .request_repaint_after(left + Duration::from_millis(10));
             }

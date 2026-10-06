@@ -110,7 +110,7 @@ pub(super) fn locked(status: &Mutex<Status>) -> std::sync::MutexGuard<'_, Status
 
 /// Changes the connection or problem Preferences shows, waking the interface
 /// only when it changed, so Preferences need not poll.
-#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn update(status: &Mutex<Status>, ctx: &egui::Context, change: impl FnOnce(&mut Status)) {
     let mut status = locked(status);
     let before = (status.connected.clone(), status.problem.clone());
