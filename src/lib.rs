@@ -27,6 +27,7 @@ pub mod exif;
 pub mod export;
 mod jpeg;
 pub mod lens;
+pub mod lr_develop;
 pub mod platform;
 pub mod presets;
 pub mod raw;
