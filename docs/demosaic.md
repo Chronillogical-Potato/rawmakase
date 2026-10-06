@@ -9,7 +9,7 @@ The algorithm uses the same two passes for both sensor types:
 
 Borders are mirrored, which keeps the Bayer colour parity. Half-size drafts and files that aren't single-channel Bayer or X-Trans (e.g. Foveon, linear DNG) still use LibRaw.
 
-`rawmakase::raw::set_demosaic(Demosaic::Libraw)` switches to LibRaw's AHD (Bayer) and 1-pass Markesteijn (X-Trans); the environment variable `RAWMAKASE_LIBRAW_DEMOSAIC=1` forces the same.
+Preferences > Performance, or `Decode::full(Demosaic::Libraw)` in code, switches to LibRaw's AHD (Bayer) and 1-pass Markesteijn (X-Trans); the environment variable `RAWMAKASE_LIBRAW_DEMOSAIC=1` forces the same for the whole run.
 
 ## Measurements — 2026-09-26 (M1 Pro, loaded machine)
 
