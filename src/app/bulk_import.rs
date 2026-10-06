@@ -459,11 +459,22 @@ impl Editor {
         let progress = Arc::new(Mutex::new(String::new()));
         self.importing = Some(progress.clone());
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
-        std::thread::spawn(move || {
-            let summary = run(kind, &picks, &progress);
-            let _ = tx.send(Event::Imported(Box::new(summary)));
-            ctx.request_repaint();
-        });
+        let first = picks[0].clone();
+        super::task::spawn(
+            tx,
+            ctx,
+            move |tx| {
+                let summary = run(kind, &picks, &progress);
+                let _ = tx.send(Event::Imported(Box::new(summary)));
+            },
+            move |tx, error| {
+                let summary = Summary {
+                    failed: vec![(first, error)],
+                    ..Summary::new(kind)
+                };
+                let _ = tx.send(Event::Imported(Box::new(summary)));
+            },
+        );
     }
     pub(super) fn import_progress(&mut self, ctx: &egui::Context) {
         if let Some(progress) = &self.importing {

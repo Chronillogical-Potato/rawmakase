@@ -86,6 +86,7 @@ impl Editor {
                     self.auto_straighten_ready(generation, &analysed, result)
                 }
                 Event::XmpLibrary { scan, library } => self.presets_scanned(scan, library),
+                Event::PresetScanFailed { scan, error } => self.preset_scan_failed(scan, error),
                 Event::Profiles {
                     id,
                     profiles,
