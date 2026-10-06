@@ -8,16 +8,9 @@ use super::history::{Recorded, Step};
 use super::library::{CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place};
 use anyhow::Result;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Commands kept, as many as History keeps steps.
 const LIMIT: usize = 100;
-
-/// A number that orders commands made in the same frame.
-pub(super) fn sequence() -> u64 {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    NEXT.fetch_add(1, Ordering::Relaxed)
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Command {

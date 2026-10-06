@@ -48,7 +48,7 @@ impl DescriptiveCommand {
         summary: String,
     ) -> Self {
         Self {
-            sequence: crate::app::undo::sequence(),
+            sequence: crate::edit_session::sequence(),
             before,
             after,
             place_before,

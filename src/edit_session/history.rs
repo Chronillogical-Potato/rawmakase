@@ -8,14 +8,14 @@ const LIMIT: usize = 100;
 
 /// A History panel entry: what changed, and its new value when there is one.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct Step {
-    pub(super) name: String,
-    pub(super) value: String,
+pub struct Step {
+    pub name: String,
+    pub value: String,
     /// Identifies the state this step leaves, set when it is recorded.
     state: u64,
 }
 impl Step {
-    pub(super) fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             value: value.into(),
@@ -29,7 +29,7 @@ impl Step {
 /// state that is, since after undoing and editing the same count can name
 /// another branch.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Mark {
+pub struct Mark {
     applied: usize,
     state: u64,
 }
@@ -37,16 +37,16 @@ pub(super) struct Mark {
 /// A change to the recipe for the shared undo log: a recorded step or a
 /// click in the History panel, with the History positions around it.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Recorded {
+pub struct Recorded {
     /// Orders it among Library commands made in the same frame.
-    pub(super) sequence: u64,
-    pub(super) before: Recipe,
-    pub(super) after: Recipe,
-    pub(super) at_before: Mark,
-    pub(super) at_after: Mark,
+    pub sequence: u64,
+    pub before: Recipe,
+    pub after: Recipe,
+    pub at_before: Mark,
+    pub at_after: Mark,
 }
 
-pub(super) struct History {
+pub struct History {
     /// Tells this photo's History apart from earlier ones, e.g. after the
     /// photo was opened again.
     id: u64,
@@ -193,7 +193,7 @@ impl History {
             return false;
         }
         self.recorded.push(Recorded {
-            sequence: super::undo::sequence(),
+            sequence: super::sequence(),
             before,
             after: current.clone(),
             at_before,
@@ -314,7 +314,7 @@ impl History {
             return false;
         }
         self.recorded.push(Recorded {
-            sequence: super::undo::sequence(),
+            sequence: super::sequence(),
             before: recorded,
             after: after.clone(),
             at_before,

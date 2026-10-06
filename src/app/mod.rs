@@ -568,9 +568,8 @@ mod workflow;
 mod workspace;
 
 mod state;
+use crate::edit_session::{history, save_state};
 use state::{Document, PresetBrowser, PreviewState, ViewState};
-
-mod history;
 
 mod icons;
 
@@ -579,7 +578,6 @@ mod task;
 mod activity;
 
 mod autosave;
-mod save_state;
 pub(crate) mod session;
 
 mod editing;

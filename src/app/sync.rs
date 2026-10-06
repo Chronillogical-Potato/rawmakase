@@ -523,7 +523,7 @@ impl Editor {
         if done > 0 {
             self.undo_log
                 .push(super::undo::Command::Sync(Box::new(SyncCommand {
-                    sequence: super::undo::sequence(),
+                    sequence: crate::edit_session::sequence(),
                     change: result.change.clone(),
                     edits: result.synced,
                 })));
