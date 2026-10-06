@@ -11,7 +11,7 @@
 //!
 //! The Fujifilm vignetting agrees with the FixVignetteRadial opcode Adobe writes into
 //! DNGs of the same file to within 1% (see docs/lens-corrections.md).
-use super::{LensCorrection, Radial};
+use crate::optics::{LensCorrection, Radial};
 use crate::tiff::Tiff;
 use std::{fs::File, io::Read, path::Path};
 

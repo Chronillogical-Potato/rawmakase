@@ -9,7 +9,7 @@
 //! distortion maps ideal to observed radius by 1 + k1 r² + k2 r⁴ + k3 r⁶, vignetting
 //! darkens by 1 + a1 r² + a2 r⁴ + a3 r⁶, and the red/blue chromatic models scale the
 //! radius relative to green the same way, times their ScaleFactor.
-use super::{LensCorrection, Radial};
+use crate::optics::{LensCorrection, Radial};
 use crate::{
     raw::Metadata,
     xml::ns::{RDF, ST_CAMERA},

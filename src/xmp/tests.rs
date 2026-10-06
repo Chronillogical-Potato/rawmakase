@@ -1254,9 +1254,9 @@ fn lens_profile_identity_round_trips() -> Result<()> {
             .contains("Camera Settings")
     );
     let mut with_builtin = m.clone();
-    with_builtin.lens = Some(crate::lens::LensCorrection {
+    with_builtin.lens = Some(crate::optics::LensCorrection {
         source: "Testcam built-in".into(),
-        vignetting: Some(crate::lens::Radial {
+        vignetting: Some(crate::optics::Radial {
             knots: vec![0., 1.],
             values: vec![1., 1.5],
         }),

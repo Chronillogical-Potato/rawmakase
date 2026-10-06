@@ -1113,8 +1113,8 @@ pub(crate) struct VignetteField<'a> {
     amount: f32,
 }
 enum VignetteTable<'a> {
-    Lens(&'a crate::lens::Radial),
-    Combined(crate::lens::Radial),
+    Lens(&'a crate::optics::Radial),
+    Combined(crate::optics::Radial),
 }
 impl<'a> VignetteField<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
@@ -1148,7 +1148,7 @@ impl<'a> VignetteField<'a> {
             amount,
         })
     }
-    fn table(&self) -> &crate::lens::Radial {
+    fn table(&self) -> &crate::optics::Radial {
         match &self.table {
             VignetteTable::Lens(t) => t,
             VignetteTable::Combined(t) => t,
@@ -1247,7 +1247,7 @@ pub(crate) fn lens_gpu_params(
     base: usize,
     tables: &mut Vec<f32>,
 ) -> [f32; 15] {
-    let mut push = |radial: Option<&crate::lens::Radial>| match radial {
+    let mut push = |radial: Option<&crate::optics::Radial>| match radial {
         Some(radial) => {
             let at = base + tables.len();
             tables.extend(&radial.knots);

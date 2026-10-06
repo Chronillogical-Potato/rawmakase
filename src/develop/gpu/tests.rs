@@ -414,7 +414,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     };
     use std::sync::Arc;
     let (w, h) = (157, 103);
-    let radial = |values: Vec<f32>| crate::lens::Radial {
+    let radial = |values: Vec<f32>| crate::optics::Radial {
         knots: (0..values.len())
             .map(|i| i as f32 / (values.len() - 1) as f32)
             .collect(),
@@ -425,7 +425,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         model: "X100F".into(),
         width: w,
         height: h,
-        lens: Some(crate::lens::LensCorrection {
+        lens: Some(crate::optics::LensCorrection {
             vignetting: Some(radial(vec![1., 1.1, 1.3, 1.6])),
             distortion: Some(radial(vec![1., 0.99, 1.02, 1.05])),
             chromatic: Some([

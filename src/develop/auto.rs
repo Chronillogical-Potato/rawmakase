@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn white_balance_samples_through_lens_distortion_correction() {
-        use crate::lens::{LensCorrection, Radial};
+        use crate::optics::{LensCorrection, Radial};
         // A neutral photo with a coloured strip down each side, which the distortion
         // correction pulls out of the frame.
         let mut im = scene([1.; 3], 0.5);

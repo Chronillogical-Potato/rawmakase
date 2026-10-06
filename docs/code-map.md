@@ -117,7 +117,7 @@ remain private to their domain. This is one Rust package, not a multi-crate work
 
 | File | Responsibility |
 | --- | --- |
-| [lens/mod.rs](../src/lens/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. |
+| [optics.rs](../src/optics.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. Shared by the lens readers, DNG and the renderer. |
 | [lens/auto_ca.rs](../src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
 | [lens/embedded.rs](../src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
 | [lens/lcp.rs](../src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles`, cached, listed for the photo's camera and matched to its lens. |

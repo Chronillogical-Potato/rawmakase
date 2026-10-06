@@ -43,11 +43,12 @@ decode_cache -> storage
 develop -> camera_profiles
 develop -> color
 develop -> lens
+develop -> optics
 develop -> presets
 develop -> raw
 develop -> xmp
 dng -> camera_profiles
-dng -> lens
+dng -> optics
 dng -> tiff
 exif -> catalog
 exif -> jpeg
@@ -67,6 +68,7 @@ export -> time
 export -> watermark
 export -> xml
 export -> xmp
+lens -> optics
 lens -> raw
 lens -> storage
 lens -> tiff
@@ -81,6 +83,7 @@ raw -> camera_profiles
 raw -> demosaic
 raw -> dng
 raw -> lens
+raw -> optics
 stats -> storage
 stats -> time
 stats -> updates
