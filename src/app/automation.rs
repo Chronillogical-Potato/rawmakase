@@ -20,7 +20,6 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender as Sender},
     },
     time::{Duration, Instant},
