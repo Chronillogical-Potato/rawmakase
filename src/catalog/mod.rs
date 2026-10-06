@@ -24,6 +24,7 @@ mod copies;
 mod defaults;
 mod descriptive;
 mod develop_history;
+mod edit_records;
 mod edits;
 mod info;
 mod ingest;
@@ -31,7 +32,6 @@ pub mod legacy_sidecar;
 pub mod lightroom;
 pub mod locations;
 mod models;
-pub mod resolve;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
@@ -43,7 +43,7 @@ pub use edits::{EditChange, EditToSave};
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
-pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION, SavedEdit};
+pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
 pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
 impl Catalog {

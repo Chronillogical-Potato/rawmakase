@@ -20,6 +20,7 @@ mod develop;
 mod present;
 mod resident;
 pub(crate) mod sampling;
+mod uniforms;
 mod weights;
 pub(crate) use develop::Input;
 pub(crate) use present::Finish;
@@ -347,25 +348,25 @@ impl Processor {
                 contents: bytemuck::cast_slice(&weights),
                 usage: wgpu::BufferUsages::STORAGE,
             });
-        let params: [u32; 12] = [
-            w,
-            h,
-            ow,
-            oh,
+        let params = uniforms::FinishParams {
+            width: w,
+            height: h,
+            out_width: ow,
+            out_height: oh,
             radius,
             x_stride,
             y_stride,
             y_offset,
-            (recipe.sharpening * sharpener.gain).to_bits(),
-            sharpener.threshold.to_bits(),
-            sharpener.halo.to_bits(),
-            sharpener.dark.to_bits(),
-        ];
+            amount: recipe.sharpening * sharpener.gain,
+            threshold: sharpener.threshold,
+            halo: sharpener.halo,
+            dark: sharpener.dark,
+        };
         let uniform = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Preview parameters"),
-                contents: bytemuck::cast_slice(&params),
+                contents: bytemuck::bytes_of(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
         let entries: Vec<_> = [&b.source, &b.scratch, &b.output, &coefficients, &uniform]

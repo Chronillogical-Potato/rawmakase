@@ -34,6 +34,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
 | [src/lib.rs](../src/lib.rs) | The module list. The library serves the binary, examples and tests; it is not a stable public API. |
 | [src/photo.rs](../src/photo.rs) | Opens a photo for developing: `Raw::open_file`'s facts, then embedded lens tables, a DNG's profile, baseline exposure, colour matrix and crop, and the imported lens profiles that fit. |
+| [src/edits.rs](../src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../src/catalog/edit_records.rs) reads the stored records. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files as RAWmakase sees them: metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
@@ -94,6 +95,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [pipeline/pixel_params.rs](../src/develop/pipeline/pixel_params.rs) | Which recipes the GPU stage covers, and its parameters and tables. |
 | [gpu/resident.rs](../src/develop/gpu/resident.rs), [gpu/logs.wgsl](../src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
 | [gpu/sampling.rs](../src/develop/gpu/sampling.rs) | The sampling pass's parameter header: named slots for the Rust side and the `S_*` offsets generated for `local.wgsl`. |
+| [gpu/uniforms.rs](../src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
 | [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |

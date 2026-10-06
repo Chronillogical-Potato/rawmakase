@@ -321,12 +321,12 @@ impl Editor {
         self.open_raw(p.path, Some(id));
     }
     /// Starts the open photo from its Lightroom settings `text`, converted as every
-    /// photo's Lightroom edit is (`catalog::resolve`).
+    /// photo's Lightroom edit is (`crate::edits`).
     pub(super) fn apply_lightroom_edits(&mut self, text: &str) {
         let Some(m) = &self.document.metadata else {
             return;
         };
-        let result = crate::catalog::resolve::lightroom_edit(text, m, &self.document.profiles);
+        let result = crate::edits::lightroom_edit(text, m, &self.document.profiles);
         match result {
             Ok((r, warnings)) => {
                 self.document.recipe = r;

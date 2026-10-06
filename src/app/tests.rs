@@ -4154,7 +4154,7 @@ fn b_and_w_opens_and_closes_with_the_color_mixer_in_solo_mode() {
 /// screen: a saved edit with its masks, a Lightroom edit, and the raw defaults.
 #[test]
 fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<()> {
-    use crate::catalog::resolve::{self, Origin};
+    use crate::edits::{self, Origin};
     let dir = tempfile::tempdir()?;
     let photos = dir.path().join("photos");
     std::fs::create_dir(&photos)?;
@@ -4227,7 +4227,7 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let record = editor.library.as_ref().unwrap().catalog.edit_record(*id)?;
-        let resolved = resolve::resolve(
+        let resolved = edits::resolve(
             &record,
             path,
             editor.document.metadata.as_ref().unwrap(),

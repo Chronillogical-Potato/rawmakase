@@ -207,6 +207,23 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_for_another_camera_is_a_typed_error_with_the_same_message() {
+        let profile = standard(&camera()).unwrap();
+        let other = Metadata {
+            make: "Canon".into(),
+            model: "EOS R5".into(),
+            ..camera()
+        };
+        let error = profile.ensure_camera(&other).unwrap_err();
+        let mismatch = error.downcast_ref::<super::super::OtherCamera>().unwrap();
+        assert_eq!(mismatch.photo, "Canon EOS R5");
+        assert_eq!(
+            error.to_string(),
+            format!("Profile belongs to {}, not Canon EOS R5", profile.camera)
+        );
+    }
+
+    #[test]
     fn standard_is_the_camera_matrix_default_by_name() {
         let m = camera();
         let profile = standard(&m).unwrap();
