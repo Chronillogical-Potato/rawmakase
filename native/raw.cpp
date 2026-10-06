@@ -3,10 +3,8 @@
 // After LibRaw, which includes winsock2.h ahead of windows.h as Windows requires.
 #include <windows.h>
 #include <string>
-#elif defined(__APPLE__)
-#include <pthread.h>
-#include <pthread/qos.h>
-#else
+#elif defined(__linux__)
+#include <cerrno>
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -115,8 +113,6 @@ struct Handle {
         return rc;
     }
 };
-// Set by ora_background_thread: this thread's decodes use two OpenMP threads.
-static thread_local bool background_thread = false;
 static int progress(void* p, LibRaw_progress, int, int) {
     auto h = static_cast<Handle*>(p);
     return h->cancel && h->cancel(h->context);
@@ -137,22 +133,28 @@ static int open_path(Raw& raw, const char* path) {
 }
 extern "C" {
 const char* ora_version() { return LibRaw::version(); }
-// Lowers the calling thread's scheduling priority, so it takes only cores the
-// foreground leaves idle, and caps its LibRaw decodes at two OpenMP threads.
-// Threads it starts afterwards, such as its OpenMP team, inherit the priority.
+// Caps the calling thread's OpenMP regions, its LibRaw decodes among them, at two
+// threads (one on a single core), and on Linux and Windows lowers its scheduling
+// priority, so it takes only cores the foreground leaves idle.
+//
+// macOS keeps the priority: libomp shares one pool of workers across the process,
+// so a team started by a lower-QoS thread could later run Develop's decodes.
 void ora_background_thread() {
-    background_thread = true;
 #ifdef _OPENMP
-    // For OpenMP regions outside ora_develop too, such as ora_cfa_copy.
-    omp_set_num_threads(2);
+    // The OpenMP setting is the thread's own; other threads keep every core.
+    omp_set_num_threads(std::min(2, std::max(1, omp_get_num_procs())));
 #endif
 #ifdef _WIN32
+    // Below the process's class, whatever it is. MSVC builds have no OpenMP.
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-#elif defined(__APPLE__)
-    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
-#else
-    // Linux applies a nice value to the one thread named by its id.
-    setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 10);
+#elif defined(__linux__)
+    // Ten steps nicer than the thread is now, at most 19: raising a nice value
+    // needs no privilege. Linux applies it to the one thread named by its id, and
+    // libgomp's team for this thread, started from it, inherits it.
+    const auto tid=static_cast<id_t>(syscall(SYS_gettid));
+    errno=0;
+    const int nice=getpriority(PRIO_PROCESS, tid);
+    if(errno==0 && nice<19) setpriority(PRIO_PROCESS, tid, std::min(19, nice+10));
 #endif
 }
 // So the Rust side can check its mirror of Metadata has the same layout.
@@ -205,9 +207,6 @@ int ora_develop(void* ptr, int fast, Cancel cancel, void* context,
         auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
         handle.cancel=cancel; handle.context=context;
         raw.set_progress_handler(progress,&handle);
-#ifdef _OPENMP
-        omp_set_num_threads(background_thread ? 2 : std::max(1, omp_get_num_procs()));
-#endif
         auto& p=raw.imgdata.params;
         p.use_camera_wb=1; p.use_auto_wb=0; p.no_auto_bright=1;
         p.adjust_maximum_thr=0; p.highlight=1; p.output_color=0;

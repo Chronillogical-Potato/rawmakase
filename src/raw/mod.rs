@@ -10,7 +10,29 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod ffi;
-pub use ffi::{background_thread, display_transform, srgb_profile, version};
+pub use ffi::{display_transform, srgb_profile, version};
+/// Runs `work` on a thread of its own at background priority: a lower
+/// scheduling priority, and LibRaw decodes on two OpenMP threads. Every worker
+/// that reads or decodes photos behind the user's back starts here or in
+/// [`background_pool`], so none competes with Develop for the CPU.
+pub fn spawn_background(work: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        ffi::background_thread();
+        work();
+    });
+}
+/// A pool of `threads` named `name-0`, `name-1`… at background priority, as
+/// [`spawn_background`].
+pub fn background_pool(
+    threads: usize,
+    name: &'static str,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(move |i| format!("{name}-{i}"))
+        .start_handler(|_| ffi::background_thread())
+        .build()
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,
@@ -372,6 +394,21 @@ pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn background_threads_are_ten_steps_nicer_than_their_parent() {
+        // Field 19 of /proc/thread-self/stat, after the parenthesised name.
+        fn nice() -> i32 {
+            let stat = std::fs::read_to_string("/proc/thread-self/stat").unwrap();
+            let fields = stat.rsplit(')').next().unwrap();
+            fields.split_whitespace().nth(16).unwrap().parse().unwrap()
+        }
+        let parent = nice();
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::spawn_background(move || tx.send(nice()).unwrap());
+        assert_eq!(rx.recv().unwrap(), (parent + 10).min(19));
+        assert_eq!(nice(), parent);
+    }
     #[test]
     fn reads_highlight_tone_priority_from_libraw() {
         use super::HighlightTonePriority as H;

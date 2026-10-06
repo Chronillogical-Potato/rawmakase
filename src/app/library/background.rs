@@ -29,8 +29,7 @@ impl<T: Send + 'static> Reader<T> {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancelled = cancel.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            crate::raw::background_thread();
+        crate::raw::spawn_background(move || {
             for batch in photos.chunks(BATCH) {
                 if cancelled.load(Ordering::Relaxed) {
                     return;

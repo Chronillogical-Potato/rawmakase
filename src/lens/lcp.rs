@@ -557,14 +557,15 @@ pub fn library() -> Arc<Library> {
     static CACHE: Mutex<Option<(Stamp, Arc<Library>)>> = Mutex::new(None);
     let dirs = library_dirs();
     let stamp = stamp(&dirs);
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((s, library)) = cache.as_ref()
+    if let Some((s, library)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         && *s == stamp
     {
         return Arc::clone(library);
     }
+    // Read without the lock: a low-priority preview thread reading every profile
+    // must not hold up Develop's open of a photo, which reads them itself instead.
     let library = Arc::new(Library::load(&dirs));
-    *cache = Some((stamp, Arc::clone(&library)));
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((stamp, Arc::clone(&library)));
     library
 }
 

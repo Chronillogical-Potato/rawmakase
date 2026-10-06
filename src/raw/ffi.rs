@@ -96,7 +96,7 @@ pub fn version() -> String {
 }
 /// Runs the calling thread at low priority from now on, with LibRaw decodes on
 /// two OpenMP threads; see `ora_background_thread`.
-pub fn background_thread() {
+pub(super) fn background_thread() {
     // SAFETY: takes nothing and changes only the calling thread's own settings.
     unsafe { ora_background_thread() }
 }
