@@ -105,6 +105,7 @@ impl Editor {
         self.remove_copy_window(&ctx);
         self.read_metadata_window(&ctx);
         self.not_editable_window(&ctx);
+        self.folder_question_window(&ctx);
         self.shortcuts_window(&ctx);
         self.copy_dialog_window(&ctx);
         self.preset_rename_window(&ctx);

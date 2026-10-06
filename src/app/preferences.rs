@@ -70,6 +70,8 @@ pub(super) struct Preferences {
     defaults_failed: bool,
     /// Raw Defaults' camera rows.
     pub(super) raw_defaults: super::raw_defaults::Form,
+    /// Folder locations, read when the Catalog page first shows.
+    pub(super) locations: Option<super::folder_locations::LocationsView>,
 }
 
 const WIDTH: f32 = 780.;
@@ -156,6 +158,7 @@ impl Editor {
             folders: catalog.and_then(|c| c.folders().ok().map(|f| f.len())),
         };
         self.preferences.stale = self.activity.is_dialog();
+        self.preferences.locations = None;
     }
     /// ⌘, (Ctrl+, elsewhere) opens Preferences, as in Lightroom.
     pub(super) fn preferences_shortcut(&mut self, ctx: &egui::Context) {
@@ -393,6 +396,7 @@ impl Editor {
             value(ui, &bytes(usage.previews));
         });
         gap(ui);
+        self.folder_locations_block(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
         let mut left = false;

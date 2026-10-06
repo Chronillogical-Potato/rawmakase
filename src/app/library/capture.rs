@@ -11,11 +11,34 @@ impl Library {
     /// capture times still missing, including ones that were offline before.
     pub(super) fn availability_known(&mut self) {
         self.filter();
+        self.note_missing_folders();
         // An original back online renders where it failed before.
         self.screen.retry_failed();
         self.capture_tried.clear();
         self.start_capture_times();
         self.start_photo_info();
+    }
+    /// Says once, after the catalog opens, how many folders with photos have
+    /// none of them on this computer, unless something else is being said.
+    fn note_missing_folders(&mut self) {
+        if std::mem::replace(&mut self.missing_noted, true) || !self.message.is_empty() {
+            return;
+        }
+        let missing = self
+            .folders
+            .iter()
+            .filter(|f| {
+                let mut photos = self.photos.iter().filter(|p| p.folder == f.id).peekable();
+                photos.peek().is_some() && photos.all(|p| !self.is_available(&p.path))
+            })
+            .count();
+        if missing > 0 {
+            self.message = format!(
+                "{} not found on this computer. Locate them in Preferences › Catalog › \
+                 Folder locations, or right-click a folder.",
+                super::super::widgets::plural(missing, "folder isn't", "folders aren't")
+            );
+        }
     }
     pub(super) fn start_capture_times(&mut self) {
         if self.capture.is_some() {
