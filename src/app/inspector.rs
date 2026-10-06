@@ -1194,6 +1194,7 @@ impl Editor {
 
         let mut switch = PanelSwitch::new(r, Panel::LensCorrections);
         if switched_section(ui, "Lens Corrections", &mut switch.state, |ui| {
+            let photo = metadata.as_ref();
             subheading(ui, "Profile");
             ui.add_enabled_ui(r.engine >= 4, |ui| {
                 control_row(ui, "", |ui| {
@@ -1247,24 +1248,8 @@ impl Editor {
             if r.lens_profile {
                 subheading(ui, "Amount");
                 ui.push_id("lens-amount", |ui| {
-                    slider_with(
-                        ui,
-                        "Distortion",
-                        &mut r.lens_distortion,
-                        0. ..=2.,
-                        1.,
-                        Some((100., 0)),
-                        None,
-                    );
-                    slider_with(
-                        ui,
-                        "Vignetting",
-                        &mut r.lens_vignetting,
-                        0. ..=2.,
-                        1.,
-                        Some((100., 0)),
-                        None,
-                    );
+                    setting_control(ui, r, ParameterId::LensDistortion, 1., photo);
+                    setting_control(ui, r, ParameterId::LensVignetting, 1., photo);
                 });
             }
             control_row(ui, "", |ui| {
@@ -1287,7 +1272,7 @@ impl Editor {
             subheading(ui, "Distortion");
             ui.push_id("manual-distortion", |ui| {
                 ui.add_enabled_ui(r.engine >= 4, |ui| {
-                    slider(ui, "Amount", &mut r.lens_manual_distortion, -1. ..=1., 0.);
+                    setting_control(ui, r, ParameterId::ManualDistortion, 0., photo);
                 });
             });
             let row = subheading(ui, "Defringe");
@@ -1311,18 +1296,10 @@ impl Editor {
             }
             defringe_sliders(ui, &mut r.effects);
             subheading(ui, "Vignetting");
-            let previous_vignette = r.effects.lens_vignette;
             ui.push_id("lens-vignette", |ui| {
-                slider(ui, "Amount", &mut r.effects.lens_vignette, -1. ..=1., 0.);
-                slider(
-                    ui,
-                    "Midpoint",
-                    &mut r.effects.lens_vignette_midpoint,
-                    0. ..=1.,
-                    0.5,
-                );
+                setting_control(ui, r, ParameterId::LensVignetteAmount, 0., photo);
+                setting_control(ui, r, ParameterId::LensVignetteMidpoint, 0.5, photo);
             });
-            r.adopt_measured_vignette(previous_vignette);
         }) {
             if let Some(m) = &metadata {
                 r.lens_builtin = m.lens.as_ref().is_none_or(|l| l.default_on);
