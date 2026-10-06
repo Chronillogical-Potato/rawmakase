@@ -6,7 +6,10 @@ use super::icons::{self, Icon};
 use super::overlay;
 use super::retouch_tool::{control_label, hint, indented};
 use super::theme;
-use super::widgets::{segmented, set_edit_context, slider_with};
+use super::widgets::{
+    SliderStyle, TEMPERATURE_GRADIENT, TINT_GRADIENT, segmented, set_edit_context, slider_styled,
+    slider_with,
+};
 use crate::develop::{
     ViewMapping,
     masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape, Space},
@@ -888,17 +891,38 @@ impl Editor {
             slider_with(ui, label, v, -1. ..=1., 0., None, None)
         };
         ui.add_space(4.);
-        unit(ui, "Temp", &mut a.temperature);
-        unit(ui, "Tint", &mut a.tint);
+        let tinted = |gradient| SliderStyle {
+            gradient: Some(gradient),
+            ..SliderStyle::default()
+        };
+        slider_styled(
+            ui,
+            "Temp",
+            &mut a.temperature,
+            -1. ..=1.,
+            0.,
+            tinted(TEMPERATURE_GRADIENT),
+        );
+        slider_styled(
+            ui,
+            "Tint",
+            &mut a.tint,
+            -1. ..=1.,
+            0.,
+            tinted(TINT_GRADIENT),
+        );
         ui.add_space(4.);
-        slider_with(
+        slider_styled(
             ui,
             "Exposure",
             &mut a.exposure,
             -4. ..=4.,
             0.,
-            Some((1., 2)),
-            None,
+            SliderStyle {
+                display: Some((1., 2)),
+                drag_step: Some(0.05),
+                ..SliderStyle::default()
+            },
         );
         unit(ui, "Contrast", &mut a.contrast);
         unit(ui, "Highlights", &mut a.highlights);

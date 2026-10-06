@@ -65,6 +65,9 @@ pub struct Descriptor {
     /// What a recipe may hold, and what a typed value or the `set` command may set.
     pub valid: RangeInclusive<f32>,
     pub tick: Tick,
+    /// What dragging its slider snaps to, as Lightroom's 0.05 EV for Exposure;
+    /// `None` moves freely.
+    pub drag_step: Option<f32>,
     pub display: Display,
 }
 
@@ -87,6 +90,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
         interactive: -1. ..=1.,
         valid: -1. ..=1.,
         tick: Tick::Linear(0.01),
+        drag_step: None,
         display: UNIT,
     }
 }
@@ -98,6 +102,7 @@ const DESCRIPTORS: [Descriptor; 14] = [
         interactive: -5. ..=5.,
         valid: -EXPOSURE_LIMIT..=EXPOSURE_LIMIT,
         tick: Tick::Linear(0.02),
+        drag_step: Some(0.05),
         display: HUNDREDTHS,
     },
     percent(ParameterId::Contrast, "Contrast"),
@@ -116,6 +121,7 @@ const DESCRIPTORS: [Descriptor; 14] = [
         interactive: TEMPERATURE_MIN..=TEMPERATURE_MAX,
         valid: TEMPERATURE_MIN..=TEMPERATURE_MAX,
         tick: Tick::Mireds(4.),
+        drag_step: None,
         display: Display {
             scale: 1.,
             decimals: 0,
@@ -128,6 +134,7 @@ const DESCRIPTORS: [Descriptor; 14] = [
         interactive: -TINT_LIMIT..=TINT_LIMIT,
         valid: -TINT_LIMIT..=TINT_LIMIT,
         tick: Tick::Linear(1.),
+        drag_step: None,
         display: Display {
             scale: 1.,
             decimals: 0,
@@ -141,6 +148,7 @@ const DESCRIPTORS: [Descriptor; 14] = [
         valid: -STRAIGHTEN_LIMIT..=STRAIGHTEN_LIMIT,
         // Fine enough to level a horizon.
         tick: Tick::Linear(0.1),
+        drag_step: None,
         display: HUNDREDTHS,
     },
 ];

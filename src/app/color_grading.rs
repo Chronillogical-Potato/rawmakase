@@ -8,7 +8,9 @@
 //! The wheels edit the values the sliders before them did (hue 0–1, saturation 0–1,
 //! luminance −1 to 1), so a grade renders the same however it was set.
 use super::theme;
-use super::widgets::{name_history_step, set_edit_context, slider, slider_with};
+use super::widgets::{
+    SliderStyle, name_history_step, set_edit_context, slider, slider_styled, slider_with,
+};
 use crate::develop::Recipe;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use std::f32::consts::TAU;
@@ -218,7 +220,11 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
     set_edit_context(ui, region.step());
     ui.push_id(("grade", region), |ui| {
         let mut degrees = grade[0] * 360.;
-        slider(ui, "Hue", &mut degrees, 0. ..=360., 0.);
+        let wheel = SliderStyle {
+            hue_rail: true,
+            ..SliderStyle::default()
+        };
+        slider_styled(ui, "Hue", &mut degrees, 0. ..=360., 0., wheel);
         if degrees != grade[0] * 360. {
             grade[0] = degrees / 360.;
         }
