@@ -96,7 +96,7 @@ impl Editor {
     /// Opens or closes the Guided tool (Shift+T). Opening it chooses Guided Upright,
     /// as in Lightroom.
     pub(super) fn toggle_guided_tool(&mut self) {
-        if !self.view.is(Tool::Guided) && self.document.recipe.engine < 4 {
+        if !self.view.is(Tool::Guided) && self.document.edit.recipe.engine < 4 {
             self.status = "Update the process in Calibration to use Transform".into();
             return;
         }
@@ -108,10 +108,11 @@ impl Editor {
     /// Chooses Guided Upright, analysing the photo first if it hasn't been, so the
     /// guides drawn have their correction at once.
     pub(super) fn choose_guided(&mut self) {
-        let u = &mut self.document.recipe.upright;
+        let u = &mut self.document.edit.recipe.upright;
         if u.mode != UprightMode::Guided {
             u.mode = UprightMode::Guided;
             self.document
+                .edit
                 .history
                 .label(super::history::Step::new("Upright", "Guided"));
         }
@@ -126,7 +127,7 @@ impl Editor {
     /// when they correct less than they might.
     pub(super) fn set_guides(&mut self, guides: Vec<UprightGuide>, step: &str) {
         let im = self.document.full().cloned();
-        let r = &mut self.document.recipe;
+        let r = &mut self.document.edit.recipe;
         r.upright.mode = UprightMode::Guided;
         r.upright.guides = guides;
         let count = r.upright.guides.len();
@@ -151,6 +152,7 @@ impl Editor {
             n => format!("{n} guides"),
         };
         self.document
+            .edit
             .history
             .label(super::history::Step::new(step, value));
     }
@@ -159,7 +161,7 @@ impl Editor {
         let Some(i) = self.view.guided.selected.take() else {
             return;
         };
-        let mut guides = self.document.recipe.upright.guides.clone();
+        let mut guides = self.document.edit.recipe.upright.guides.clone();
         if i < guides.len() {
             guides.remove(i);
             self.set_guides(guides, "Delete Guide");
@@ -196,7 +198,7 @@ impl Editor {
             let q = (p - rect.min) / rect.size();
             g.upright_frame(q.x, q.y)
         };
-        let guides = self.document.recipe.upright.guides.clone();
+        let guides = self.document.edit.recipe.upright.guides.clone();
         let ends: Vec<[Pos2; 2]> = guides
             .iter()
             .map(|g| [to_screen(g.a), to_screen(g.b)])

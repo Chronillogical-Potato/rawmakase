@@ -115,7 +115,7 @@ impl Editor {
             rect,
             &triangles.map(|t| t.hit),
             &mut self.view.tone_drag,
-            &mut self.document.recipe,
+            &mut self.document.edit.recipe,
         );
         if let Some(region) = region {
             let [from, to] = region.span();
@@ -168,7 +168,7 @@ impl Editor {
             format!(
                 "{}   {}",
                 region.label(),
-                region.display(region.value(&self.document.recipe))
+                region.display(region.value(&self.document.edit.recipe))
             )
         });
         // So does the RGB readout while the pointer is over the photo.
@@ -294,7 +294,7 @@ impl Editor {
         let mut action = None;
         let mut guides = self.view.crop_guides;
         let analysing = self.document.straighten.is_running();
-        let r = &mut self.document.recipe;
+        let r = &mut self.document.edit.recipe;
         egui::Frame::new()
             .fill(theme::gray(40))
             .corner_radius(3.)
@@ -486,7 +486,7 @@ impl Editor {
             .pending_treatment
             .as_ref()
             .map(|p| p.treatment);
-        let grading_document = self.document.history.id();
+        let grading_document = self.document.edit.history.id();
         let saved_curves = self.saved_curves();
         let mut curve_choice = None;
         // The Targeted Adjustment Tool: the sliders a drag is moving, and a target

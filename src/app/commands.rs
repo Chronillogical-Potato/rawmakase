@@ -268,19 +268,19 @@ impl Editor {
         let generation = self.load.id();
         if let Some((seen_generation, recipe)) = &self.automation.observed
             && *seen_generation == generation
-            && *recipe == self.document.recipe
+            && *recipe == self.document.edit.recipe
         {
             return;
         }
         if self.automation.observed.is_some() {
             self.automation.revision = self.automation.revision.wrapping_add(1);
         }
-        self.automation.observed = Some((generation, self.document.recipe.clone()));
+        self.automation.observed = Some((generation, self.document.edit.recipe.clone()));
     }
     pub(super) fn command_state(&mut self) -> State {
         self.sync_command_revision();
         let develop = !self.library_mode && self.document.metadata.is_some();
-        let mut recipe = self.document.recipe.clone();
+        let mut recipe = self.document.edit.recipe.clone();
         let mut values = std::collections::BTreeMap::new();
         if develop {
             for (name, param) in Param::all() {
@@ -351,7 +351,7 @@ impl Editor {
             exporting: self.exporting(),
             auto_running: self.document.auto.is_running(),
             treatment_pending: self.document.pending_treatment.is_some(),
-            save_state: match self.document.save {
+            save_state: match self.document.edit.save {
                 super::save_state::SaveState::Clean => "saved",
                 super::save_state::SaveState::Pending(_) => "pending",
                 super::save_state::SaveState::Saving { .. } => "saving",
@@ -565,7 +565,9 @@ impl Editor {
         self.finish_edit_frame(frame, ctx);
         self.sync_undo();
         if save && result.is_ok() {
-            if !self.flush() || self.document.save.needs_save() || self.document.save.is_protected()
+            if !self.flush()
+                || self.document.edit.save.needs_save()
+                || self.document.edit.save.is_protected()
             {
                 return Err(Error::new("save_failed", "The edit could not be saved"));
             }
@@ -587,14 +589,14 @@ impl Editor {
                 self.require_develop()?;
                 self.require_presets()?;
                 let i = preset::find(&self.presets.library.presets, &target)?;
-                let before = self.document.recipe.clone();
+                let before = self.document.edit.recipe.clone();
                 let applied = self
                     .apply_preset(i)
                     .map_err(|e| Error::new("not_applied", format!("{e:#}")))?;
                 // Named here: applying the preset already applied, after other edits,
                 // changes no preset name for History to recognize it by. Only a change
                 // is named, or the name would be left for the next edit.
-                if self.document.recipe != before {
+                if self.document.edit.recipe != before {
                     super::widgets::name_frame_step(ctx, "Preset".into(), applied.name.clone());
                 }
                 return Ok(Outcome::Preset { applied });
@@ -609,10 +611,10 @@ impl Editor {
                     .validate()
                     .map_err(|e| Error::new("invalid_curve", e.to_string()))?;
                 let current = match channel {
-                    CurveChannel::Rgb => &mut self.document.recipe.curve,
-                    CurveChannel::Red => &mut self.document.recipe.effects.channels[0],
-                    CurveChannel::Green => &mut self.document.recipe.effects.channels[1],
-                    CurveChannel::Blue => &mut self.document.recipe.effects.channels[2],
+                    CurveChannel::Rgb => &mut self.document.edit.recipe.curve,
+                    CurveChannel::Red => &mut self.document.edit.recipe.effects.channels[0],
+                    CurveChannel::Green => &mut self.document.edit.recipe.effects.channels[1],
+                    CurveChannel::Blue => &mut self.document.edit.recipe.effects.channels[2],
                 };
                 if *current != curve {
                     *current = curve;
@@ -680,7 +682,7 @@ impl Editor {
             }
             Operation::Save => {
                 self.require_develop()?;
-                if self.document.save.is_protected() {
+                if self.document.edit.save.is_protected() {
                     return Err(Error::new(
                         "protected",
                         "This edit is protected from saving",
@@ -717,18 +719,19 @@ impl Editor {
         if value.is_some_and(|v| !v.is_finite()) {
             return Err(Error::new("invalid_value", "Value must be finite"));
         }
-        let before_recipe = self.document.recipe.clone();
+        let before_recipe = self.document.edit.recipe.clone();
         let channel = self.view.mixer_adjust.min(2);
         let shown = if let Some(index) = target.mask {
             let mask = self
                 .document
+                .edit
                 .recipe
                 .masks
                 .get_mut(index)
                 .ok_or_else(|| Error::new("unknown_mask", "The mask does not exist"))?;
             param.local_set(&mut mask.adjust, value, ticks)?
         } else {
-            let recipe = &mut self.document.recipe;
+            let recipe = &mut self.document.edit.recipe;
             let before = *param.value(recipe, channel);
             let shown = if let Some(value) = value {
                 param.set(recipe, value, channel)
@@ -746,7 +749,7 @@ impl Editor {
         } else {
             param.label(channel)
         };
-        if before_recipe != self.document.recipe {
+        if before_recipe != self.document.edit.recipe {
             ctx.data_mut(|d| d.insert_temp(super::widgets::history_step_id(), (label, shown)));
         }
         Ok(())

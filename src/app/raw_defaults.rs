@@ -46,8 +46,8 @@ impl Editor {
             if let Some(note) = &resolved.note {
                 self.status = note.clone();
             }
-            if self.document.recipe != resolved.recipe {
-                self.document.recipe = resolved.recipe.clone();
+            if self.document.edit.recipe != resolved.recipe {
+                self.document.edit.recipe = resolved.recipe.clone();
                 changed = true;
             }
         }
@@ -69,9 +69,9 @@ impl Editor {
             _ => false,
         };
         self.document.origin == EditOrigin::Defaults
-            && self.document.history.steps().0.is_empty()
-            && !self.document.save.needs_save()
-            && !self.document.save.is_protected()
+            && self.document.edit.history.steps().0.is_empty()
+            && !self.document.edit.save.needs_save()
+            && !self.document.edit.save.is_protected()
             && !saved
     }
     /// Why the open photo shows Adobe Default instead of the raw default chosen
@@ -362,11 +362,11 @@ mod tests {
         editor.document.profiles = profiles(&m);
         editor.document.metadata = Some(m.clone());
         editor.raw_defaults = Arc::new(crate::raw_defaults::brighter_defaults());
-        editor.document.recipe.exposure = -1.;
+        editor.document.edit.recipe.exposure = -1.;
         editor.reset_settings();
-        assert_eq!(editor.document.recipe.exposure, 0.7);
+        assert_eq!(editor.document.edit.recipe.exposure, 0.7);
         assert_eq!(
-            editor.document.recipe,
+            editor.document.edit.recipe,
             editor.raw_defaults.resolve(&m, &profiles(&m)).recipe
         );
     }
@@ -414,28 +414,28 @@ mod tests {
             ctx.clone(),
         )?));
         open(&mut editor);
-        assert_eq!(editor.document.recipe, adobe);
+        assert_eq!(editor.document.edit.recipe, adobe);
         // Changing the defaults changes the photo without an edit, and saves nothing.
         editor.set_raw_defaults(lighten()).unwrap();
         let lightened = editor.raw_defaults.resolve(&m, &profiles(&m)).recipe;
         assert_ne!(lightened, adobe);
-        assert_eq!(editor.document.recipe, lightened);
-        assert!(!editor.document.save.needs_save());
+        assert_eq!(editor.document.edit.recipe, lightened);
+        assert!(!editor.document.edit.save.needs_save());
         // Opened again, it starts from them.
         open(&mut editor);
-        assert_eq!(editor.document.recipe, lightened);
+        assert_eq!(editor.document.edit.recipe, lightened);
         // Once edited and saved, the edit stays as it is.
-        let before = editor.document.recipe.clone();
-        editor.document.recipe.exposure = 0.5;
+        let before = editor.document.edit.recipe.clone();
+        editor.document.edit.recipe.exposure = 0.5;
         editor.commit_edit(before, None);
         assert!(editor.flush());
-        let edited = editor.document.recipe.clone();
+        let edited = editor.document.edit.recipe.clone();
         editor.set_raw_defaults(RawDefaults::default()).unwrap();
-        assert_eq!(editor.document.recipe, edited);
+        assert_eq!(editor.document.edit.recipe, edited);
         open(&mut editor);
-        assert_eq!(editor.document.recipe, edited);
+        assert_eq!(editor.document.edit.recipe, edited);
         editor.set_raw_defaults(lighten()).unwrap();
-        assert_eq!(editor.document.recipe, edited);
+        assert_eq!(editor.document.edit.recipe, edited);
         let library = editor.library.as_ref().unwrap();
         assert_eq!(library.catalog.load_edit(id, &raw)?.unwrap().recipe, edited);
         Ok(())
@@ -475,10 +475,10 @@ mod tests {
             .unwrap();
         editor.events(&ctx);
         editor.document.export.quality = 50;
-        editor.document.save.mark_changed();
+        editor.document.edit.save.mark_changed();
         assert!(editor.flush());
         editor.set_raw_defaults(lighten()).unwrap();
-        assert_eq!(editor.document.recipe, adobe);
+        assert_eq!(editor.document.edit.recipe, adobe);
         Ok(())
     }
 
@@ -528,7 +528,7 @@ mod tests {
         editor.events(&ctx);
         assert!(editor.document.lightroom_notice.contains("not applied"));
         assert_eq!(
-            editor.document.recipe,
+            editor.document.edit.recipe,
             Recipe::with_profiles(&m, &profiles(&m))
         );
         Ok(())

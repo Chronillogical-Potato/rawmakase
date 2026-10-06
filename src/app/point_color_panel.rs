@@ -30,7 +30,7 @@ impl super::Editor {
     /// color photo with the current process, and the Color Mixer on its Point Color
     /// tab.
     pub(super) fn point_color_tab_shown(&self) -> bool {
-        let r = &self.document.recipe;
+        let r = &self.document.edit.recipe;
         !self.library_mode
             && !self.view.compare.before_only()
             && self.view.mixer_tab == super::state::MixerTab::PointColor
@@ -51,7 +51,7 @@ impl super::Editor {
         }
         let (generation, cancel) = self.document.point_color_pick.start();
         let id = self.load.id();
-        let sampled = self.document.recipe.clone();
+        let sampled = self.document.edit.recipe.clone();
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
@@ -83,7 +83,7 @@ impl super::Editor {
         if !self.view.is(Tool::PointColor) || !self.point_color_tab_shown() {
             return;
         }
-        if *sampled != self.document.recipe {
+        if *sampled != self.document.edit.recipe {
             self.status = "The photo changed while sampling; pick the color again".into();
             return;
         }
@@ -95,12 +95,15 @@ impl super::Editor {
             }
         };
         // A drag still under way is recorded first, so undoing it keeps the swatch.
-        if self.document.history.in_gesture() {
-            self.document.history.finish_gesture(&self.document.recipe);
-            self.document.save.mark_changed();
+        if self.document.edit.history.in_gesture() {
+            self.document
+                .edit
+                .history
+                .finish_gesture(&self.document.edit.recipe);
+            self.document.edit.save.mark_changed();
         }
-        let old = self.document.recipe.clone();
-        match add_sample(&mut self.document.recipe.point_colors, source) {
+        let old = self.document.edit.recipe.clone();
+        match add_sample(&mut self.document.edit.recipe.point_colors, source) {
             Ok(i) => {
                 self.view.point_color.selected = Some(i);
                 self.view.tool = Tool::None;

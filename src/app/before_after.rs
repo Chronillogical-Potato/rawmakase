@@ -236,7 +236,7 @@ impl Editor {
             .presets
             .preview
             .as_ref()
-            .unwrap_or(&self.document.recipe);
+            .unwrap_or(&self.document.edit.recipe);
         self.before_framed_by(shown)
     }
     /// Before's settings framed as `edit` is.
@@ -272,8 +272,8 @@ impl Editor {
     /// Copy or swap settings between Before and After.
     pub(super) fn transfer(&mut self, transfer: Transfer) {
         // Framed as the edit itself, never by a preset only hovered.
-        let before = self.before_framed_by(&self.document.recipe);
-        let after = self.document.recipe.clone();
+        let before = self.before_framed_by(&self.document.edit.recipe);
+        let after = self.document.edit.recipe.clone();
         let (step, edit) = match transfer {
             Transfer::AfterToBefore => {
                 self.document.before = Some(after);
@@ -285,16 +285,21 @@ impl Editor {
                 ("Swap Before and After Settings", Some(before))
             }
         };
-        if let Some(edit) = edit.filter(|e| *e != self.document.recipe) {
-            self.document.history.label(Step::new(step, ""));
-            self.document.recipe = edit;
+        if let Some(edit) = edit.filter(|e| *e != self.document.edit.recipe) {
+            self.document.edit.history.label(Step::new(step, ""));
+            self.document.edit.recipe = edit;
             self.ensure_upright();
         }
         self.schedule();
     }
     /// History's Copy History Step Settings to Before: the state with `applied` steps.
     pub(super) fn before_from_history(&mut self, applied: usize) {
-        if let Some(state) = self.document.history.state(applied, &self.document.recipe) {
+        if let Some(state) = self
+            .document
+            .edit
+            .history
+            .state(applied, &self.document.edit.recipe)
+        {
             self.set_before(state);
         }
     }
@@ -635,11 +640,11 @@ mod tests {
     #[test]
     fn copying_before_to_after_and_swapping_are_history_steps() {
         let mut e = editor();
-        let start = e.document.recipe.clone();
-        e.document.recipe.exposure = 1.;
-        e.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
+        let start = e.document.edit.recipe.clone();
+        e.document.edit.recipe.exposure = 1.;
+        e.document.edit.recipe.crop = [0.1, 0.1, 0.9, 0.9];
         e.commit_edit(start, None);
-        let edited = e.document.recipe.clone();
+        let edited = e.document.edit.recipe.clone();
         // After's settings to Before: the edit and its History are left as they are.
         e.document.before = Some(Recipe {
             contrast: 0.3,
@@ -647,34 +652,34 @@ mod tests {
         });
         e.transfer(Transfer::AfterToBefore);
         assert_eq!(e.document.before.as_ref(), Some(&edited));
-        assert_eq!(e.document.recipe, edited);
-        assert_eq!(e.document.history.steps().0.len(), 1);
+        assert_eq!(e.document.edit.recipe, edited);
+        assert_eq!(e.document.edit.history.steps().0.len(), 1);
         // Before's settings to After: one step, keeping the edit's crop, undone by Undo.
         e.document.before = Some(Recipe {
             contrast: 0.3,
             ..Default::default()
         });
-        let before = e.document.recipe.clone();
+        let before = e.document.edit.recipe.clone();
         e.transfer(Transfer::BeforeToAfter);
         e.commit_edit(before, None);
-        assert_eq!(e.document.recipe.contrast, 0.3);
-        assert_eq!(e.document.recipe.exposure, 0.);
-        assert_eq!(e.document.recipe.crop, edited.crop);
-        let (steps, _) = e.document.history.steps();
+        assert_eq!(e.document.edit.recipe.contrast, 0.3);
+        assert_eq!(e.document.edit.recipe.exposure, 0.);
+        assert_eq!(e.document.edit.recipe.crop, edited.crop);
+        let (steps, _) = e.document.edit.history.steps();
         assert_eq!(steps.last().unwrap().name, "Copy Before Settings to After");
         e.undo();
-        assert_eq!(e.document.recipe, edited);
+        assert_eq!(e.document.edit.recipe, edited);
         // Swap: each side takes the other's settings, the edit's change as one step.
-        let before = e.document.recipe.clone();
+        let before = e.document.edit.recipe.clone();
         e.transfer(Transfer::Swap);
         e.commit_edit(before, None);
-        assert_eq!(e.document.recipe.contrast, 0.3);
+        assert_eq!(e.document.edit.recipe.contrast, 0.3);
         assert_eq!(e.document.before.as_ref(), Some(&edited));
-        let (steps, _) = e.document.history.steps();
+        let (steps, _) = e.document.edit.history.steps();
         assert_eq!(steps.last().unwrap().name, "Swap Before and After Settings");
         assert_eq!(e.before_settings().exposure, 1.);
         // Copying settings that are already the edit's records nothing.
-        let before = e.document.recipe.clone();
+        let before = e.document.edit.recipe.clone();
         e.transfer(Transfer::AfterToBefore);
         e.transfer(Transfer::BeforeToAfter);
         e.commit_edit(before, None);
@@ -684,33 +689,33 @@ mod tests {
             ..Default::default()
         });
         e.transfer(Transfer::Swap);
-        assert_eq!(e.document.recipe.crop, edited.crop);
+        assert_eq!(e.document.edit.recipe.crop, edited.crop);
         e.presets.preview = None;
         e.transfer(Transfer::Swap);
         // Exposure and the swap; the undone copy went with the swap.
-        assert_eq!(e.document.history.steps().0.len(), 2);
+        assert_eq!(e.document.edit.history.steps().0.len(), 2);
     }
 
     #[test]
     fn before_starts_as_the_photo_was_and_can_be_set_from_history() {
         let mut e = editor();
         // No settings copied to it: the photo's starting settings, framed as the edit.
-        let start = e.document.recipe.clone();
+        let start = e.document.edit.recipe.clone();
         for value in [0.5, 1.] {
-            let before = e.document.recipe.clone();
-            e.document.recipe.exposure = value;
+            let before = e.document.edit.recipe.clone();
+            e.document.edit.recipe.exposure = value;
             e.commit_edit(before, None);
         }
-        e.document.recipe.straighten = 2.;
+        e.document.edit.recipe.straighten = 2.;
         assert_eq!(e.before_settings().exposure, start.exposure);
         assert_eq!(e.before_settings().straighten, 2.);
         // Copy History Step Settings to Before, from the first step.
-        let edit = e.document.recipe.clone();
+        let edit = e.document.edit.recipe.clone();
         e.before_from_history(1);
         assert_eq!(e.before_settings().exposure, 0.5);
         // The edit and History stay where they were.
-        assert_eq!(e.document.recipe, edit);
-        assert_eq!(e.document.history.steps().1, 2);
+        assert_eq!(e.document.edit.recipe, edit);
+        assert_eq!(e.document.edit.history.steps().1, 2);
         // Before belongs to the open photo.
         e.document.reset(None);
         assert!(e.document.before.is_none());
@@ -727,7 +732,7 @@ mod tests {
         // again behind it.
         assert!(e.preview.before.task.is_running());
         let running = e.preview.before.task.id();
-        e.document.recipe.exposure = 0.5;
+        e.document.edit.recipe.exposure = 0.5;
         e.schedule();
         assert!(e.preview.before.task.id() > running);
         assert!(e.preview.before.submitted.is_some());
@@ -736,8 +741,8 @@ mod tests {
         e.preview.before.task.finish(rendered);
         let shown = e.before_settings();
         // Edits change After alone; Before is neither changed nor rendered again.
-        e.document.recipe.exposure = 1.;
-        e.document.recipe.contrast = 0.4;
+        e.document.edit.recipe.exposure = 1.;
+        e.document.edit.recipe.contrast = 0.4;
         e.schedule();
         assert_eq!(e.before_settings(), shown);
         assert_eq!(e.preview.before.task.id(), rendered);
@@ -749,9 +754,9 @@ mod tests {
         });
         assert_eq!(e.before_settings().crop, [0.1, 0.3, 0.6, 0.9]);
         e.presets.preview = None;
-        e.document.recipe.crop = [0.2, 0.2, 0.8, 0.8];
+        e.document.edit.recipe.crop = [0.2, 0.2, 0.8, 0.8];
         e.schedule();
-        assert_eq!(e.before_settings().crop, e.document.recipe.crop);
+        assert_eq!(e.before_settings().crop, e.document.edit.recipe.crop);
         assert_eq!(e.before_settings().exposure, shown.exposure);
         assert!(e.preview.before.task.id() > rendered);
         // So does zooming in, which renders a 100% region of each.

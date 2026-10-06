@@ -21,7 +21,7 @@ impl Editor {
         };
         let (generation, _) = self.document.upright.start();
         let id = self.load.id();
-        let base = self.document.recipe.clone();
+        let base = self.document.edit.recipe.clone();
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
@@ -45,14 +45,14 @@ impl Editor {
     /// Guided's guides are solved once the other modes' corrections are there to sit
     /// beside its own.
     pub(super) fn ensure_upright(&mut self) {
-        let u = &self.document.recipe.upright;
+        let u = &self.document.edit.recipe.upright;
         if !u.needs_analysis() || self.document.upright.is_running() {
             return;
         }
         if u.mode == UprightMode::Guided && u.corrections.len() == UprightMode::Guided.code() {
             if let Some(im) = self.document.full().cloned()
                 && let Some(issue) =
-                    crate::develop::guided::store(&mut self.document.recipe, &im.metadata)
+                    crate::develop::guided::store(&mut self.document.edit.recipe, &im.metadata)
             {
                 self.status = issue.message().into();
             }
@@ -75,11 +75,11 @@ impl Editor {
         self.document.upright.finish(generation);
         // Settings applied meanwhile (a preset, a History step) may bring their own
         // corrections; those win.
-        if self.document.recipe.upright.corrections != analysed.upright.corrections {
+        if self.document.edit.recipe.upright.corrections != analysed.upright.corrections {
             self.ensure_upright();
             return;
         }
-        if inputs(analysed) != inputs(&self.document.recipe) {
+        if inputs(analysed) != inputs(&self.document.edit.recipe) {
             self.start_upright();
             return;
         }
@@ -99,8 +99,8 @@ impl Editor {
         };
         let metadata = self.document.full().map(|im| im.metadata.clone());
         let mut issue = None;
-        for (i, r) in std::iter::once(&mut self.document.recipe)
-            .chain(self.document.history.states_mut())
+        for (i, r) in std::iter::once(&mut self.document.edit.recipe)
+            .chain(self.document.edit.history.states_mut())
             // A Before copied from the edit before the analysis arrived.
             .chain(self.document.before.as_mut())
             .enumerate()
@@ -116,7 +116,7 @@ impl Editor {
         if let Some(issue) = issue {
             self.status = issue.message().into();
         }
-        self.document.save.mark_changed();
+        self.document.edit.save.mark_changed();
         self.schedule();
     }
 }

@@ -37,8 +37,8 @@ impl Editor {
                     self.activity.finish_dialog();
                     match crate::presets::load_preset(&p) {
                         Ok(r) => {
-                            let r = crate::presets::applied_to(r, &self.document.recipe);
-                            let old = std::mem::replace(&mut self.document.recipe, r);
+                            let r = crate::presets::applied_to(r, &self.document.edit.recipe);
+                            let old = std::mem::replace(&mut self.document.edit.recipe, r);
                             // Before the step is taken, as the Presets panel does.
                             self.ensure_upright();
                             self.commit_edit(old, None);
@@ -99,7 +99,7 @@ impl Editor {
                     if let Some(text) = self.document.pending_lightroom.take() {
                         self.apply_lightroom_edits(&text);
                         // The Lightroom edit is the starting point, not an unsaved change.
-                        self.document.save.saved();
+                        self.document.edit.save.saved();
                     }
                 }
                 Event::Import(kind, paths) => {
@@ -113,7 +113,7 @@ impl Editor {
                 Event::Synced(result) => self.synced(*result),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
-                    match crate::presets::save_preset(&p, &self.document.recipe) {
+                    match crate::presets::save_preset(&p, &self.document.edit.recipe) {
                         Ok(()) => self.status = "Preset saved".into(),
                         Err(e) => self.status = e.to_string(),
                     }
@@ -154,7 +154,7 @@ impl Editor {
                     self.load.finish(id);
                     // An Upright mode chosen before the photo decoded still needs analysing.
                     self.ensure_upright();
-                    if !self.document.save.is_protected() {
+                    if !self.document.edit.save.is_protected() {
                         // A raw default that could not be used stays explained.
                         self.status = match self.defaults_note() {
                             Some(note) => format!("{status} · {note}"),
@@ -360,9 +360,9 @@ impl Editor {
         } = header;
         self.document.file = crate::storage::Identity::read(&p).ok();
         self.document.metadata = Some(m);
-        self.document.recipe = r;
+        self.document.edit.recipe = r;
         self.document.export = ex;
-        self.document.save.saved();
+        self.document.edit.save.saved();
         self.status = status;
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
             self.document.lightroom_history =
@@ -378,19 +378,19 @@ impl Editor {
             match saved {
                 Ok(Some(saved)) => {
                     self.document.origin = super::state::EditOrigin::Saved;
-                    self.document.recipe = saved.recipe;
+                    self.document.edit.recipe = saved.recipe;
                     self.document.export = saved.export;
                     // A History that cannot be read leaves the edit as it is.
                     if let Ok(Some(history)) = l.catalog.load_history(photo) {
-                        self.document.history =
-                            super::history::History::restored(history, &self.document.recipe);
+                        self.document.edit.history =
+                            super::history::History::restored(history, &self.document.edit.recipe);
                     }
-                    self.document.save.saved();
+                    self.document.edit.save.saved();
                     self.document.lightroom_notice.clear();
                 }
                 Ok(None) => {
                     self.document.export = ExportOptions::default();
-                    self.document.save.saved();
+                    self.document.edit.save.saved();
                     self.document.lightroom_notice.clear();
                     // No RAWmakase edit yet: start from the Lightroom edit, as
                     // Lightroom shows it, once camera profiles are known.
@@ -403,7 +403,7 @@ impl Editor {
                 Err(e) => {
                     // Unreadable is not unedited: it must not follow the defaults.
                     self.document.origin = super::state::EditOrigin::Saved;
-                    self.document.save.protect(e.to_string());
+                    self.document.edit.save.protect(e.to_string());
                     self.document.lightroom_notice = e.to_string();
                 }
             }
@@ -429,7 +429,7 @@ impl Editor {
         if self.preview.mode != super::state::TextureMode::Whole || !self.shows_library_edit() {
             return;
         }
-        let Ok(json) = serde_json::to_string(&self.document.recipe) else {
+        let Ok(json) = serde_json::to_string(&self.document.edit.recipe) else {
             return;
         };
         let (Some(library), Some(id)) = (&mut self.library, self.document.catalog_photo) else {
