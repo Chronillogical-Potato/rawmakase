@@ -111,6 +111,8 @@ there is no separate MCP authentication flow. MCP opens no network listener.
 | `open_photo` | Opens a catalog ID and waits up to 30 seconds for decoding |
 | `set_parameter` | Sets exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, texture, clarity, dehaze, vibrance, saturation, straighten or a color-mixer channel |
 | `set_tone_curve` | Sets RGB, red, green or blue point curves; one channel per undo step |
+| `list_presets` | Lists develop presets with ids, groups and how they fit the open photo |
+| `apply_preset` | Applies a develop preset by id or name as one undo step and reports skipped settings |
 | `apply_curve_preset` | Applies linear, medium-contrast or strong-contrast RGB curves, retaining the individual color channels |
 | `auto_tone` | Starts automatic tone adjustment |
 | `auto_white_balance` | Starts automatic white balance |

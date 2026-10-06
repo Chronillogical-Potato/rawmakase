@@ -58,6 +58,73 @@ fn straighten_is_a_global_parameter_in_degrees() {
     assert_eq!(e.document.recipe.straighten, 0.);
 }
 #[test]
+fn presets_are_listed_and_applied_by_name_as_one_history_step() {
+    let (mut e, ctx) = editor();
+    let xmp = |exposure: &str| {
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:PresetType="Normal" crs:HasSettings="True" crs:Exposure2012="{exposure}"/></rdf:RDF></x:xmpmeta>"#
+        )
+    };
+    let preset = |name: &str, exposure: &str| crate::xmp::Preset {
+        name: name.into(),
+        group: "Mine".into(),
+        ..crate::xmp::parse(std::path::Path::new(&format!("{name}.xmp")), &xmp(exposure)).unwrap()
+    };
+    assert_eq!(
+        e.execute_command(Command::new(Operation::Presets { group: None }), &ctx)
+            .unwrap_err()
+            .code,
+        "not_ready"
+    );
+    e.presets.library = Arc::new(crate::presets::Library {
+        presets: vec![preset("Bright", "+1.00"), preset("Brighter", "+2.00")],
+        errors: Vec::new(),
+    });
+    e.presets.scanned = true;
+    let listed = json(
+        e.execute_command(Command::new(Operation::Presets { group: None }), &ctx)
+            .unwrap(),
+    );
+    assert_eq!(listed["presets"][1]["name"], "Brighter");
+    assert_eq!(listed["presets"][1]["group"], "Mine");
+    let named = |name: &str| {
+        Command::new(Operation::Preset(PresetTarget::Name {
+            name: name.into(),
+            group: None,
+        }))
+    };
+    let applied = json(e.execute_command(named("bright"), &ctx).unwrap());
+    assert_eq!(applied["applied"]["name"], "Bright");
+    assert_eq!(e.document.recipe.exposure, 1.);
+    assert_eq!(json(e.command_state())["preset"], "Bright");
+    let (steps, applied) = e.document.history.steps();
+    assert_eq!(steps[applied - 1].name, "Preset");
+    // Applied again after another edit, it is still named for the preset.
+    set(&mut e, &ctx, 0.5).unwrap();
+    e.execute_command(named("bright"), &ctx).unwrap();
+    let (steps, applied) = e.document.history.steps();
+    assert_eq!(steps[applied - 1].name, "Preset");
+    assert_eq!(steps[applied - 1].value, "Bright");
+    // Applied once more, it changes nothing and leaves no name for the next edit.
+    e.execute_command(named("bright"), &ctx).unwrap();
+    set(&mut e, &ctx, 0.25).unwrap();
+    let (steps, applied) = e.document.history.steps();
+    assert_ne!(steps[applied - 1].name, "Preset");
+    // An edit no listed preset made names none.
+    e.document.recipe.preset_name = "Imported Lightroom edit".into();
+    assert_eq!(json(e.command_state())["preset"], Value::Null);
+    assert_eq!(
+        e.execute_command(named("Bri"), &ctx).unwrap_err().code,
+        "ambiguous"
+    );
+    e.library_mode = true;
+    assert_eq!(
+        e.execute_command(named("Brighter"), &ctx).unwrap_err().code,
+        "no_document"
+    );
+    assert_eq!(e.document.recipe.exposure, 0.25);
+}
+#[test]
 fn edits_reject_library_loading_modal_and_stale_targets() {
     let (mut e, ctx) = editor();
     let original = e.document.recipe.clone();

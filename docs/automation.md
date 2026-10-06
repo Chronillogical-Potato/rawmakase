@@ -45,6 +45,21 @@ clamped to their supported ranges. `capabilities` lists these ranges and whether
 a parameter supports masks. Mixer channels are explicit: `band3.sat`,
 `band3.hue`, `band3.lum`, `band3.gray`. Bare `band3` is a device mapping only.
 
+Develop presets, built-in and imported, are listed by `presets` and applied by
+`preset`, as a click in the Presets panel applies them: one History step, the
+settings that don't fit the photo skipped and reported in `applied.skipped`.
+`issue` in the list says in advance why a preset doesn't fully fit the open
+photo. A name matches the panel's in any case, or part of one when only one
+preset has it; an ambiguous name fails and lists the matches, so add a `group`
+or use the `id`. Ids name presets in the loaded list only, and both commands
+return `not_ready` while the list is still loading at startup. `state.preset` is
+the listed preset last applied to the open photo.
+
+```bash
+rawmakase control presets --group "My Presets"
+rawmakase control preset "Ett B&W New"
+```
+
 Point curves are available through the `curve` protocol command and MCP tools.
 `state.tone_curve` includes RGB and individual color-channel points. Inputs and
 outputs range from 0 to 1; inputs must increase by at least 0.00049. Invalid curves
@@ -145,6 +160,8 @@ use target guards for a sequence that must refer to the same edit.
 | `state` | — | State snapshot |
 | `capabilities` | — | Protocol, actions, parameters, ranges and scope support |
 | `photos` | optional `query`, `offset`, `limit` (maximum 500) | Catalog entries and total |
+| `presets` | optional `group` | Develop presets: `id`, `name`, `group`, `builtin`, `issue` |
+| `preset` | `id`, or `name` with optional `group`; optional `target` | `applied` preset and skipped settings |
 | `set` | `param`, finite `value`, optional `target` | Post-edit state |
 | `curve` | `channel`: `rgb`, `red`, `green` or `blue`; `points`: 2–32 normalized input/output pairs; optional `target` | Post-edit state |
 | `turn` | `param`, integer `ticks` (−1000…1000), optional `target` | Post-edit state; grouped gesture |

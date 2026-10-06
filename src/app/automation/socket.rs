@@ -1,7 +1,9 @@
 //! Versioned, bounded local control transport. Every request carries its own
 //! reply channel; a timed-out request still in the queue is cancelled atomically.
 use super::{Action, Msg, Sender, parse_action, shortcut_action};
-use crate::app::commands::{self, Command, Error, Operation, Param, PhotoTarget, Target};
+use crate::app::commands::{
+    self, Command, Error, Operation, Param, PhotoTarget, PresetTarget, Target,
+};
 use eframe::egui;
 use serde_json::{Value, json};
 use std::{
@@ -80,6 +82,17 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
                 .min(usize::MAX as u64) as usize,
             limit: request["limit"].as_u64().unwrap_or(100).clamp(1, 500) as usize,
         },
+        "presets" => Operation::Presets {
+            group: request["group"].as_str().map(Into::into),
+        },
+        "preset" => Operation::Preset(match (request["id"].as_str(), request["name"].as_str()) {
+            (Some(id), _) => PresetTarget::Id(id.into()),
+            (None, Some(name)) => PresetTarget::Name {
+                name: name.into(),
+                group: request["group"].as_str().map(Into::into),
+            },
+            _ => return Err(invalid("preset requires id or name")),
+        }),
         "curve" => {
             let channel = serde_json::from_value(request["channel"].clone())
                 .map_err(|_| invalid("channel must be rgb, red, green or blue"))?;

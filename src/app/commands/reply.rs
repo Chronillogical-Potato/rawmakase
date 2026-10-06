@@ -18,6 +18,8 @@ pub(in crate::app) struct State {
     pub modal: bool,
     pub black_and_white: bool,
     pub mixer_channel: &'static str,
+    /// The develop preset last applied to the open photo, as the Presets panel names it.
+    pub preset: Option<String>,
     pub values: BTreeMap<String, f64>,
     pub masks: Vec<MaskState>,
     pub tone_curve: Curves,
@@ -59,6 +61,12 @@ pub(in crate::app) enum Outcome {
     },
     Search {
         query: String,
+    },
+    Presets {
+        presets: Vec<super::preset::PresetSummary>,
+    },
+    Preset {
+        applied: crate::app::presets::AppliedPreset,
     },
     Opened {
         opened: PhotoIdentity,

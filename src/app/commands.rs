@@ -2,6 +2,7 @@
 //! Adapters translate input; only the Editor executes commands and owns history.
 mod output;
 mod parameter;
+mod preset;
 mod reply;
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
@@ -16,6 +17,7 @@ pub(super) struct Automation {
     turn: Option<(std::time::Instant, TurnScope)>,
 }
 pub(super) use parameter::Param;
+pub(super) use preset::PresetTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Source {
@@ -88,6 +90,11 @@ pub(super) enum Operation {
         offset: usize,
         limit: usize,
     },
+    /// The develop presets, of one group or all.
+    Presets {
+        group: Option<String>,
+    },
+    Preset(PresetTarget),
     Set(Param, f32),
     Curve(CurveChannel, Vec<[f32; 2]>),
     Adjust(Param, i32),
@@ -239,7 +246,7 @@ impl Action {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub(super) struct Error {
     pub code: &'static str,
     pub message: String,
@@ -321,6 +328,17 @@ impl Editor {
             modal: self.command_modal(),
             black_and_white: develop && recipe.effects.monochrome,
             mixer_channel: (["hue", "sat", "lum"][self.view.mixer_adjust.min(2)]),
+            // A photo's imported Lightroom edit names no preset in the list.
+            preset: develop
+                .then(|| {
+                    self.presets
+                        .library
+                        .presets
+                        .iter()
+                        .find(|p| !p.name.is_empty() && p.name == recipe.preset_name)
+                })
+                .flatten()
+                .map(|p| crate::presets::display_name(&p.name)),
             values,
             masks,
             tone_curve: Curves {
@@ -376,6 +394,12 @@ impl Editor {
         }
         Ok(())
     }
+    fn require_presets(&self) -> Result<()> {
+        if !self.presets.scanned {
+            return Err(Error::new("not_ready", "Presets are still loading"));
+        }
+        Ok(())
+    }
     fn require_develop(&self) -> Result<()> {
         if self.library_mode || self.document.metadata.is_none() {
             return Err(Error::new("no_document", "Open a photo in Develop first"));
@@ -415,6 +439,8 @@ impl Editor {
                         "state",
                         "capabilities",
                         "photos",
+                        "presets",
+                        "preset",
                         "curve",
                         "set",
                         "turn",
@@ -466,6 +492,23 @@ impl Editor {
                     total: all.len(),
                     offset,
                     photos,
+                });
+            }
+            Operation::Presets { group } => {
+                self.require_presets()?;
+                // The issues are the open photo's, and the Library has none open.
+                let develop = !self.library_mode && self.document.metadata.is_some();
+                let issues = if develop {
+                    &self.presets.issues[..]
+                } else {
+                    &[]
+                };
+                return Ok(Outcome::Presets {
+                    presets: preset::summaries(
+                        &self.presets.library.presets,
+                        issues,
+                        group.as_deref(),
+                    ),
                 });
             }
             _ => {}
@@ -538,6 +581,22 @@ impl Editor {
         match operation {
             Operation::Set(param, value) => {
                 self.command_parameter(param, Some(value), 0, target, ctx)?
+            }
+            Operation::Preset(target) => {
+                self.require_develop()?;
+                self.require_presets()?;
+                let i = preset::find(&self.presets.library.presets, &target)?;
+                let before = self.document.recipe.clone();
+                let applied = self
+                    .apply_preset(i)
+                    .map_err(|e| Error::new("not_applied", format!("{e:#}")))?;
+                // Named here: applying the preset already applied, after other edits,
+                // changes no preset name for History to recognize it by. Only a change
+                // is named, or the name would be left for the next edit.
+                if self.document.recipe != before {
+                    super::widgets::name_frame_step(ctx, "Preset".into(), applied.name.clone());
+                }
+                return Ok(Outcome::Preset { applied });
             }
             Operation::Curve(channel, points) => {
                 self.require_develop()?;
@@ -640,6 +699,7 @@ impl Editor {
             Operation::State
             | Operation::Capabilities
             | Operation::Photos { .. }
+            | Operation::Presets { .. }
             | Operation::Job(_) => unreachable!(),
         }
         Ok(Outcome::Empty)
