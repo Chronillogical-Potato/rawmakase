@@ -239,6 +239,5 @@ The automation owner manages the bounded queue and local socket independently
 of MIDI. Each MIDI device owns its mapping and connection state, using a shared
 profile registry. Further work can route remaining UI shortcuts through these
 operations and share parameter descriptors with all editing panels.
-The standalone client still includes its shared implementation by path; a
-workspace protocol/client crate would also let MCP schemas reuse those types.
-These follow-ups do not require a new editing engine or MIDI-specific commands.
+The protocol crate can also hold the request types, so MCP schemas reuse
+them instead of declaring their own. These follow-ups do not require a new editing engine or MIDI-specific commands.
