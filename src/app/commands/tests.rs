@@ -70,10 +70,17 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
         group: "Mine".into(),
         ..crate::xmp::parse(std::path::Path::new(&format!("{name}.xmp")), &xmp(exposure)).unwrap()
     };
+    assert_eq!(
+        e.execute_command(Command::new(Operation::Presets { group: None }), &ctx)
+            .unwrap_err()
+            .code,
+        "not_ready"
+    );
     e.presets.library = Arc::new(crate::presets::Library {
         presets: vec![preset("Bright", "+1.00"), preset("Brighter", "+2.00")],
         errors: Vec::new(),
     });
+    e.presets.scanned = true;
     let listed = json(
         e.execute_command(Command::new(Operation::Presets { group: None }), &ctx)
             .unwrap(),
@@ -92,6 +99,15 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
     assert_eq!(json(e.command_state())["preset"], "Bright");
     let (steps, applied) = e.document.history.steps();
     assert_eq!(steps[applied - 1].name, "Preset");
+    // Applied again after another edit, it is still named for the preset.
+    set(&mut e, &ctx, 0.5).unwrap();
+    e.execute_command(named("bright"), &ctx).unwrap();
+    let (steps, applied) = e.document.history.steps();
+    assert_eq!(steps[applied - 1].name, "Preset");
+    assert_eq!(steps[applied - 1].value, "Bright");
+    // An edit no listed preset made names none.
+    e.document.recipe.preset_name = "Imported Lightroom edit".into();
+    assert_eq!(json(e.command_state())["preset"], Value::Null);
     assert_eq!(
         e.execute_command(named("Bri"), &ctx).unwrap_err().code,
         "ambiguous"

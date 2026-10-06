@@ -37,7 +37,7 @@ pub(in crate::app) fn summaries(
     presets
         .iter()
         .enumerate()
-        .filter(|(_, p)| group.is_none_or(|g| p.group.eq_ignore_ascii_case(g)))
+        .filter(|(_, p)| group.is_none_or(|g| same_group(&p.group, g)))
         .map(|(i, p)| PresetSummary {
             id: p.id.clone(),
             name: display_name(&p.name),
@@ -46,6 +46,11 @@ pub(in crate::app) fn summaries(
             issue: issues.get(i).cloned().flatten(),
         })
         .collect()
+}
+
+/// Whether `asked` names `group`, in any case of any script.
+fn same_group(group: &str, asked: &str) -> bool {
+    group.to_lowercase() == asked.to_lowercase()
 }
 
 /// The index in `presets` of the one preset `target` names.
@@ -60,7 +65,7 @@ pub(in crate::app) fn find(presets: &[Preset], target: &PresetTarget) -> Result<
         PresetTarget::Name { name, group } => (name.to_lowercase(), group.as_deref()),
     };
     let in_group: Vec<usize> = (0..presets.len())
-        .filter(|&i| group.is_none_or(|g| presets[i].group.eq_ignore_ascii_case(g)))
+        .filter(|&i| group.is_none_or(|g| same_group(&presets[i].group, g)))
         .collect();
     let names = |i: usize| {
         let p = &presets[i];
@@ -133,6 +138,8 @@ mod tests {
         assert_eq!(find(&presets, &name("warm", None)), Ok(3));
         assert_eq!(find(&presets, &name("ar", None)), Ok(3));
         assert_eq!(find(&presets, &name("Ett B&W New", Some("other"))), Ok(2));
+        let accented = [preset("Lato", "Été")];
+        assert_eq!(find(&accented, &name("lato", Some("été"))), Ok(0));
         let ambiguous = find(&presets, &name("Ett B&W New", None)).unwrap_err();
         assert_eq!(ambiguous.code, "ambiguous");
         assert!(ambiguous.message.contains("Mine / Ett B&W New"));

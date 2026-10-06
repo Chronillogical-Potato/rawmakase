@@ -26,6 +26,7 @@ impl Editor {
     pub(super) fn presets_scanned(&mut self, scan: u64, library: Arc<crate::presets::Library>) {
         if self.presets.is_latest(scan) {
             self.presets.library = library;
+            self.presets.scanned = true;
             // A preset named as a raw default may have been imported or changed.
             if let Err(e) = self.set_raw_defaults(self.raw_defaults.settings().clone()) {
                 self.status = format!("Raw defaults not saved: {e:#}");

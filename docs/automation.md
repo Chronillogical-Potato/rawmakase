@@ -51,8 +51,9 @@ settings that don't fit the photo skipped and reported in `applied.skipped`.
 `issue` in the list says in advance why a preset doesn't fully fit the open
 photo. A name matches the panel's in any case, or part of one when only one
 preset has it; an ambiguous name fails and lists the matches, so add a `group`
-or use the `id`. Ids name presets in the loaded list only. `state.preset` is the
-preset last applied to the open photo.
+or use the `id`. Ids name presets in the loaded list only, and both commands
+return `not_ready` while the list is still loading at startup. `state.preset` is
+the listed preset last applied to the open photo.
 
 ```bash
 rawmakase control presets --group "My Presets"

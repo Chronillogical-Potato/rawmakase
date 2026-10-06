@@ -328,8 +328,17 @@ impl Editor {
             modal: self.command_modal(),
             black_and_white: develop && recipe.effects.monochrome,
             mixer_channel: (["hue", "sat", "lum"][self.view.mixer_adjust.min(2)]),
-            preset: (develop && !recipe.preset_name.is_empty())
-                .then(|| crate::presets::display_name(&recipe.preset_name)),
+            // A photo's imported Lightroom edit names no preset in the list.
+            preset: develop
+                .then(|| {
+                    self.presets
+                        .library
+                        .presets
+                        .iter()
+                        .find(|p| !p.name.is_empty() && p.name == recipe.preset_name)
+                })
+                .flatten()
+                .map(|p| crate::presets::display_name(&p.name)),
             values,
             masks,
             tone_curve: Curves {
@@ -382,6 +391,12 @@ impl Editor {
                 "target_required",
                 "Mask edits require generation and revision from state",
             ));
+        }
+        Ok(())
+    }
+    fn require_presets(&self) -> Result<()> {
+        if !self.presets.scanned {
+            return Err(Error::new("not_ready", "Presets are still loading"));
         }
         Ok(())
     }
@@ -480,10 +495,18 @@ impl Editor {
                 });
             }
             Operation::Presets { group } => {
+                self.require_presets()?;
+                // The issues are the open photo's, and the Library has none open.
+                let develop = !self.library_mode && self.document.metadata.is_some();
+                let issues = if develop {
+                    &self.presets.issues[..]
+                } else {
+                    &[]
+                };
                 return Ok(Outcome::Presets {
                     presets: preset::summaries(
                         &self.presets.library.presets,
-                        &self.presets.issues,
+                        issues,
                         group.as_deref(),
                     ),
                 });
@@ -561,10 +584,14 @@ impl Editor {
             }
             Operation::Preset(target) => {
                 self.require_develop()?;
+                self.require_presets()?;
                 let i = preset::find(&self.presets.library.presets, &target)?;
                 let applied = self
                     .apply_preset(i)
                     .map_err(|e| Error::new("not_applied", format!("{e:#}")))?;
+                // Named here: applying the preset already applied, after other edits,
+                // changes no preset name for History to recognize it by.
+                super::widgets::name_frame_step(ctx, "Preset".into(), applied.name.clone());
                 return Ok(Outcome::Preset { applied });
             }
             Operation::Curve(channel, points) => {
