@@ -438,11 +438,15 @@ def fit_black_white(refs):
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.log2((data.render(name) @ PRO_TO_XYZ[1]) / y_in)
 
-    def solve(y, use):
+    def solve(y, use, neutral_fixed=False):
         keep = use & usable & np.isfinite(y)
         rows = data.w[keep]
         normal = rows.T @ rows + SMOOTH * dtd + PRIOR * np.identity(CELLS)
-        return np.linalg.solve(normal, rows.T @ y[keep])
+        table = np.linalg.solve(normal, rows.T @ y[keep])
+        if neutral_fixed:
+            # Camera Raw's band sliders leave grays alone (the ramp moves < 0.001).
+            table.reshape(HUES, SATS, VALS)[:, 0, :] = 0
+        return table
 
     def lightness(y):
         f = np.where(y > (6 / 29) ** 3, np.cbrt(np.clip(y, 0, None)), y / (3 * (6 / 29) ** 2) + 4 / 29)
@@ -456,10 +460,10 @@ def fit_black_white(refs):
         for a in GRAY_MIX_POSITIONS:
             name = f'bw-{band}{a:+d}'
             change = np.clip(log_gray(name) - zero, GRAY_FLOOR, None)
-            pred = y_in * 2 ** (data.w @ check + data.w @ solve(change, ~held_out))
+            pred = y_in * 2 ** (data.w @ check + data.w @ solve(change, ~held_out, True))
             truth = data.render(name) @ PRO_TO_XYZ[1]
             errors.append(np.abs(lightness(pred) - lightness(truth))[held_out & usable].mean())
-            tables.append(solve(change, np.ones_like(held_out)))
+            tables.append(solve(change, np.ones_like(held_out), True))
     print(f'Black & white mix: mean ΔL* {np.mean(errors):.2f} (worst {max(errors):.2f}) on held-out patches')
     values = np.clip(np.round(np.array(tables) * GRAY_SCALE), -32768, 32767).astype('<i2')
     BLACK_WHITE_OUTPUT.write_bytes(values.tobytes())

@@ -348,6 +348,18 @@ mod tests {
         );
         assert!(band(-0.75) < band(-0.5) && band(-0.5) < base);
         assert!(band(0.25) > base && band(0.25) < band(0.5));
+        // No band moves a gray, as in Camera Raw.
+        for b in 0..8 {
+            for v in [-1., 1.] {
+                let mut mix = [0.; 8];
+                mix[b] = v;
+                let moved = gray(&gray_grid(mix), [0.2; 3]);
+                assert!(
+                    (moved - gray(&zero, [0.2; 3])).abs() < 1e-5,
+                    "{b} {v} {moved}"
+                );
+            }
+        }
     }
     use super::*;
 
