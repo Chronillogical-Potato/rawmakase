@@ -4,6 +4,7 @@ mod output;
 mod parameter;
 mod preset;
 mod reply;
+use crate::develop::params::ParameterId;
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
 };
@@ -739,10 +740,10 @@ impl Editor {
                 recipe.update_wb(self.document.metadata.as_ref().expect("checked above"));
                 recipe.auto_white_balance = None;
             }
-            if param == Param::Clarity {
+            if param == Param::Setting(ParameterId::Clarity) {
                 recipe.adopt_measured_clarity(before);
             }
-            if param == Param::Texture {
+            if param == Param::Setting(ParameterId::Texture) {
                 recipe.adopt_measured_texture(before);
             }
             shown
