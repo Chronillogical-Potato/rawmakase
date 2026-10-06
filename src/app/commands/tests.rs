@@ -47,6 +47,17 @@ fn command_edit_records_history_and_undo_returns_post_action_state() {
     assert_eq!(e.document.recipe.exposure, 1.25);
 }
 #[test]
+fn straighten_is_a_global_parameter_in_degrees() {
+    let (mut e, ctx) = editor();
+    e.execute_command(Command::new(Operation::Set(Param::Straighten, 1.5)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.straighten, 1.5);
+    assert_eq!(json(e.command_state())["values"]["straighten"], 1.5);
+    e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
+        .unwrap();
+    assert_eq!(e.document.recipe.straighten, 0.);
+}
+#[test]
 fn edits_reject_library_loading_modal_and_stale_targets() {
     let (mut e, ctx) = editor();
     let original = e.document.recipe.clone();
@@ -140,6 +151,17 @@ fn named_actions_are_discoverable_and_parameter_values_are_finite() {
             .any(|v| v["name"] == "temperature"
                 && v["unit"] == "kelvin"
                 && v["mask_unit"] == "percent")
+    );
+    assert!(
+        capabilities["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["name"] == "straighten"
+                && v["unit"] == "degrees"
+                && v["min"] == -45.
+                && v["max"] == 45.
+                && v["mask"] == false)
     );
 }
 #[test]

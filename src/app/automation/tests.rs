@@ -88,8 +88,27 @@ mod mapping_tests {
         assert_eq!(Param::Hsl(2, 1).label(0), "Yellow Saturation");
     }
     #[test]
+    fn straighten_is_set_and_turned_in_degrees() {
+        let mut r = Recipe::default();
+        assert_eq!(Param::Straighten.set(&mut r, -2.5, 0), "-2.50");
+        assert_eq!(r.straighten, -2.5);
+        assert_eq!(Param::Straighten.shown(&mut r, 0), -2.5);
+        assert_eq!(Param::Straighten.turn(&mut r, 5, 0), "-2.00");
+        assert_eq!(Param::Straighten.label(0), "Angle");
+        Param::Straighten.set(&mut r, 90., 0);
+        assert_eq!(r.straighten, 45.);
+        Param::Straighten.turn(&mut r, -1000, 0);
+        assert_eq!(r.straighten, -45.);
+        assert!(r.validate().is_ok());
+        assert_eq!(Param::Straighten.range(false), (-45., 45.));
+        let mask = crate::develop::masks::LocalAdjust::default();
+        assert_eq!(Param::Straighten.local_shown(&mask), None);
+    }
+    #[test]
     fn slider_names_parse_with_bands_and_channels() {
         assert_eq!(Param::parse("Temp"), Some(Param::Temperature));
+        assert_eq!(Param::parse("straighten"), Some(Param::Straighten));
+        assert_eq!(Param::parse("Angle"), Some(Param::Straighten));
         assert_eq!(Param::parse("band3.sat"), Some(Param::Hsl(2, 1)));
         assert_eq!(Param::parse("band8.gray"), Some(Param::Gray(7)));
         assert_eq!(Param::parse("band1"), Some(Param::Band(0)));

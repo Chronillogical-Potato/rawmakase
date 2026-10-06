@@ -94,11 +94,12 @@ enum Command {
     /// Print one slider's value
     Get {
         /// exposure, temperature, tint, contrast, highlights, shadows, whites,
-        /// blacks, texture, clarity, dehaze, vibrance, saturation, or
-        /// band1..band8 with .hue .sat .lum .gray
+        /// blacks, texture, clarity, dehaze, vibrance, saturation, straighten,
+        /// or band1..band8 with .hue .sat .lum .gray
         slider: String,
     },
-    /// Set a slider: EV for exposure, kelvin for temperature, else -100..100
+    /// Set a slider: EV for exposure, kelvin for temperature, degrees for
+    /// straighten, else -100..100
     Set { slider: String, value: f64 },
     /// Turn a slider by ticks (clockwise is positive), as a dial would
     Turn { slider: String, ticks: i32 },
@@ -495,10 +496,10 @@ pub fn run(cli: Cli) -> Result<(), String> {
         }
         Command::State => out!("{}", serde_json::to_string_pretty(&state).unwrap()),
         Command::Get { slider } => {
-            let key = if slider.eq_ignore_ascii_case("temp") {
-                "temperature".into()
-            } else {
-                slider.to_ascii_lowercase()
+            let key = match slider.to_ascii_lowercase().as_str() {
+                "temp" => "temperature".into(),
+                "angle" => "straighten".into(),
+                name => name.to_owned(),
             };
             match state["values"].get(&key) {
                 Some(value) => out!("{value}"),
