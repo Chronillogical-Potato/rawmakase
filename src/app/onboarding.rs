@@ -2,11 +2,14 @@
 use super::Editor;
 use super::bulk_import::{ImportKind, Summary, find_files};
 use super::dialogs::{CatalogDialog, FileDialog};
+use super::task::Task;
 use super::widgets::pretty_path;
+use super::worker::Event;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Camera Raw's shared folder, installed with Lightroom for all users. It
 /// holds Adobe's camera profiles and the Adobe looks (Adobe Color…).
@@ -31,12 +34,22 @@ fn user_camera_raw() -> Option<PathBuf> {
     };
     path.is_dir().then_some(path)
 }
-/// What the setup view found on disk, refreshed when it opens or imports.
+/// What the setup view shows and the scan it runs when it opens.
 #[derive(Default)]
 pub(super) struct Onboarding {
     pub(super) visible: bool,
     scanned: bool,
     scanned_for: Option<PathBuf>,
+    /// The scan under way; it opens RAWs and walks Camera Raw's folders, so it
+    /// runs off the UI thread and arrives as [`Event::OnboardingScanned`].
+    scan: Task,
+    found: Found,
+    /// The last profile or preset import, shown under the steps.
+    pub(super) last_import: Option<Box<Summary>>,
+}
+/// What the setup view found on disk, refreshed when it opens.
+#[derive(Default)]
+pub struct Found {
     /// Cameras seen in the catalog ("Sony ILCE-7CR"), from one photo per folder.
     cameras: BTreeSet<String>,
     /// Adobe base and Camera Matching profiles for those cameras, then looks.
@@ -50,8 +63,6 @@ pub(super) struct Onboarding {
     /// Makers of the catalog's cameras, e.g. "Sony".
     makers: BTreeSet<String>,
     user_presets: Vec<PathBuf>,
-    /// The last profile or preset import, shown under the steps.
-    pub(super) last_import: Option<Box<Summary>>,
 }
 impl Onboarding {
     pub(super) fn new(visible: bool) -> Self {
@@ -60,24 +71,42 @@ impl Onboarding {
             ..Default::default()
         }
     }
-    fn scan(&mut self, library: Option<&crate::app::library::Library>) {
-        self.cameras.clear();
-        if let Some(library) = library {
-            let mut folders = BTreeSet::new();
-            for photo in &library.photos {
-                if folders.len() >= 200 {
-                    break;
-                }
-                if crate::storage::is_raw(&photo.path)
-                    && folders.insert(photo.folder)
-                    && let Ok(raw) = crate::raw::Raw::open(&photo.path)
-                {
-                    self.cameras
-                        .insert(format!("{} {}", raw.metadata.make, raw.metadata.model));
-                }
+    fn scanning(&self) -> bool {
+        self.scan.is_running()
+    }
+}
+/// One RAW per folder, up to 200: enough to name the catalog's cameras.
+fn sample_raws(library: Option<&crate::app::library::Library>) -> Vec<PathBuf> {
+    let mut folders = BTreeSet::new();
+    let mut raws = Vec::new();
+    for photo in library.map(|l| &l.photos[..]).unwrap_or_default() {
+        if folders.len() >= 200 {
+            break;
+        }
+        if crate::storage::is_raw(&photo.path) && folders.insert(photo.folder) {
+            raws.push(photo.path.clone());
+        }
+    }
+    raws
+}
+impl Found {
+    fn scan(raws: &[PathBuf], cancel: &AtomicBool) -> Self {
+        let mut found = Self::default();
+        for path in raws {
+            if cancel.load(Ordering::Relaxed) {
+                return found;
+            }
+            if let Ok(raw) = crate::raw::Raw::open(path) {
+                found
+                    .cameras
+                    .insert(format!("{} {}", raw.metadata.make, raw.metadata.model));
             }
         }
-        self.adobe_profiles.clear();
+        found.find_on_disk();
+        found
+    }
+    /// Camera Raw's profiles and presets, narrowed to the cameras found.
+    fn find_on_disk(&mut self) {
         if let Some(shared) = shared_camera_raw() {
             let profiles = shared.join("CameraProfiles");
             for camera in &self.cameras {
@@ -108,7 +137,6 @@ impl Onboarding {
             .filter_map(|c| c.split_whitespace().next())
             .map(str::to_string)
             .collect();
-        self.lens_profiles.clear();
         if let Some(shared) = shared_camera_raw()
             && !self.makers.is_empty()
             && let Ok(entries) = std::fs::read_dir(shared.join("LensProfiles/1.0"))
@@ -163,7 +191,6 @@ impl Onboarding {
             .as_ref()
             .map(|d| find_files(&d.join("Settings"), &["xmp"], &["Defaults", "GPU"]))
             .unwrap_or_default();
-        self.scanned = true;
     }
 }
 
@@ -172,9 +199,7 @@ impl Editor {
         // Rescan when opened and whenever a different catalog is loaded.
         let catalog = self.library.as_ref().map(|l| l.catalog.path.clone());
         if !self.onboarding.scanned || self.onboarding.scanned_for != catalog {
-            let library = self.library.as_deref();
-            self.onboarding.scan(library);
-            self.onboarding.scanned_for = catalog;
+            self.start_onboarding_scan(catalog);
         }
         let ctx = ui.ctx().clone();
         egui::CentralPanel::default()
@@ -260,10 +285,12 @@ impl Editor {
         let importing = self.importing.is_some();
         let enabled = !busy && !importing;
         let mut chosen = None;
-        let adobe = self.onboarding.adobe_profiles.len();
-        let user_profiles = self.onboarding.user_profiles.len();
+        let scanning = self.onboarding.scanning();
+        let adobe = self.onboarding.found.adobe_profiles.len();
+        let user_profiles = self.onboarding.found.user_profiles.len();
         let cameras = self
             .onboarding
+            .found
             .cameras
             .iter()
             .cloned()
@@ -286,26 +313,30 @@ impl Editor {
                 location(ui, "Yours", &pretty_path(&user.join("CameraProfiles")));
             }
             ui.add_space(8.);
-            hint(
-                ui,
-                &if shared.is_none() && user.is_none() {
-                    "Lightroom keeps them in CameraRaw/CameraProfiles, under \
+            if scanning && (shared.is_some() || user.is_some()) {
+                looking(ui, "Looking for profiles for your cameras…");
+            } else {
+                hint(
+                    ui,
+                    &if shared.is_none() && user.is_none() {
+                        "Lightroom keeps them in CameraRaw/CameraProfiles, under \
                      /Library/Application Support/Adobe on a Mac and C:\\ProgramData\\Adobe \
                      on Windows. Copy that folder here, or any folder of profiles."
-                        .to_string()
-                } else if self.onboarding.cameras.is_empty() {
-                    format!(
-                        "Found {user_profiles} of your profiles. Choose a catalog to also \
+                            .to_string()
+                    } else if self.onboarding.found.cameras.is_empty() {
+                        format!(
+                            "Found {user_profiles} of your profiles. Choose a catalog to also \
                          find Adobe's profiles and narrow yours to your cameras."
-                    )
-                } else if adobe + user_profiles == 0 {
-                    format!("No profiles found for {cameras}.")
-                } else {
-                    format!(
-                        "Found {adobe} Adobe and {user_profiles} of your profiles for {cameras}"
-                    )
-                },
-            );
+                        )
+                    } else if adobe + user_profiles == 0 {
+                        format!("No profiles found for {cameras}.")
+                    } else {
+                        format!(
+                            "Found {adobe} Adobe and {user_profiles} of your profiles for {cameras}"
+                        )
+                    },
+                );
+            }
             ui.add_space(10.);
             let found = (adobe + user_profiles > 0)
                 .then(|| format!("Import {} profiles", adobe + user_profiles));
@@ -315,10 +346,11 @@ impl Editor {
         });
 
         let presets = self.presets.library.presets.len();
-        let found = self.onboarding.user_presets.len();
-        let lenses = self.onboarding.lens_profiles.len();
+        let found = self.onboarding.found.user_presets.len();
+        let lenses = self.onboarding.found.lens_profiles.len();
         let makers = self
             .onboarding
+            .found
             .makers
             .iter()
             .cloned()
@@ -341,20 +373,24 @@ impl Editor {
                 location(ui, "Yours", &pretty_path(&user.join("LensProfiles")));
             }
             ui.add_space(8.);
-            hint(
-                ui,
-                &if shared.is_none() && user.is_none() {
-                    "Lightroom keeps them in CameraRaw/LensProfiles. Adobe's cover thousands \
+            if scanning && (shared.is_some() || user.is_some()) {
+                looking(ui, "Looking for lens profiles for your cameras…");
+            } else {
+                hint(
+                    ui,
+                    &if shared.is_none() && user.is_none() {
+                        "Lightroom keeps them in CameraRaw/LensProfiles. Adobe's cover thousands \
                      of lenses; the folders of your camera maker and lens brands are enough."
-                        .to_string()
-                } else if self.onboarding.makers.is_empty() {
-                    "Choose a catalog to find lens profiles for your cameras.".to_string()
-                } else if lenses == 0 {
-                    format!("No lens profiles found for {makers}.")
-                } else {
-                    format!("Found {lenses} lens profiles for {makers} and third-party lenses")
-                },
-            );
+                            .to_string()
+                    } else if self.onboarding.found.makers.is_empty() {
+                        "Choose a catalog to find lens profiles for your cameras.".to_string()
+                    } else if lenses == 0 {
+                        format!("No lens profiles found for {makers}.")
+                    } else {
+                        format!("Found {lenses} lens profiles for {makers} and third-party lenses")
+                    },
+                );
+            }
             ui.add_space(10.);
             let found = (lenses > 0).then(|| format!("Import {lenses} lens profiles"));
             if let Some(choice) = import_buttons(ui, found, enabled) {
@@ -390,11 +426,11 @@ impl Editor {
                 Choice::Found => {
                     let paths = match kind {
                         ImportKind::CameraProfiles => {
-                            let mut paths = self.onboarding.user_profiles.clone();
-                            paths.extend(self.onboarding.adobe_profiles.iter().cloned());
+                            let mut paths = self.onboarding.found.user_profiles.clone();
+                            paths.extend(self.onboarding.found.adobe_profiles.iter().cloned());
                             paths
                         }
-                        ImportKind::LensProfiles => self.onboarding.lens_profiles.clone(),
+                        ImportKind::LensProfiles => self.onboarding.found.lens_profiles.clone(),
                         // The folder rather than its files, to skip Defaults and
                         // keep preset folders.
                         ImportKind::Presets => user_camera_raw()
@@ -473,6 +509,33 @@ impl Editor {
         self.onboarding_done = done;
         self.library_mode = self.library.is_some();
         let _ = self.save_session();
+    }
+    /// Scans in the background; until the result arrives the steps say so.
+    fn start_onboarding_scan(&mut self, catalog: Option<PathBuf>) {
+        let raws = sample_raws(self.library.as_deref());
+        let (generation, cancel) = self.onboarding.scan.start();
+        self.onboarding.scanned = true;
+        self.onboarding.scanned_for = catalog;
+        self.onboarding.found = Found::default();
+        let tx = self.tx.clone();
+        let ctx = self.context.clone();
+        std::thread::spawn(move || {
+            let found = Found::scan(&raws, &cancel);
+            if !cancel.load(Ordering::Relaxed) {
+                let _ = tx.send(Event::OnboardingScanned {
+                    generation,
+                    found: Box::new(found),
+                });
+                ctx.request_repaint();
+            }
+        });
+    }
+    /// Takes a scan's result unless a later scan superseded it.
+    pub(super) fn onboarding_scanned(&mut self, generation: u64, found: Found) {
+        if self.onboarding.scan.is_running() && self.onboarding.scan.id() == generation {
+            self.onboarding.scan.finish(generation);
+            self.onboarding.found = found;
+        }
     }
     pub(super) fn open_onboarding(&mut self) {
         self.onboarding.visible = true;
@@ -557,6 +620,13 @@ fn body(ui: &mut egui::Ui, value: &str) {
 fn hint(ui: &mut egui::Ui, value: &str) {
     text(ui, value, 12., 135);
 }
+/// A hint with a spinner, while the scan runs.
+fn looking(ui: &mut egui::Ui, value: &str) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new().size(12.).color(theme::gray(170)));
+        hint(ui, value);
+    });
+}
 /// A labelled folder path in a quiet monospace chip.
 fn location(ui: &mut egui::Ui, label: &str, path: &str) {
     ui.horizontal(|ui| {
@@ -635,4 +705,57 @@ fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
 }
 fn secondary(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(egui::Button::new(egui::RichText::new(label).size(13.)).min_size(Vec2::new(0., 28.)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_the_assistant_scans_in_the_background() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let photos = dir.path().join("photos");
+        std::fs::create_dir(&photos)?;
+        std::fs::write(photos.join("image.ARW"), b"not a raw")?;
+        let catalog = dir.path().join("test.rawmakase");
+        let mut c = crate::catalog::Catalog::create(&catalog)?;
+        c.add_folder(&photos)?;
+        drop(c);
+        let ctx = egui::Context::default();
+        let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
+        let mut editor = Editor::with_context(&ctx, None, crate::storage::Session::default(), None);
+        editor.library = Some(Box::new(library));
+        editor.open_onboarding();
+        let frame = |editor: &mut Editor| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                editor.events(ui.ctx());
+                editor.onboarding_ui(ui);
+            });
+            output.textures_delta.clear();
+        };
+        // The first frame draws the view and leaves the RAWs to the scan.
+        frame(&mut editor);
+        assert!(editor.onboarding.scanning());
+        let started = std::time::Instant::now();
+        while editor.onboarding.scanning() {
+            assert!(started.elapsed().as_secs() < 30, "the scan never finished");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            frame(&mut editor);
+        }
+        assert_eq!(editor.onboarding.scanned_for.as_deref(), Some(&*catalog));
+        assert!(editor.onboarding.found.cameras.is_empty());
+
+        // A scan superseded by a later one is ignored.
+        editor.start_onboarding_scan(Some(catalog.clone()));
+        let stale = editor.onboarding.scan.id();
+        editor.start_onboarding_scan(Some(catalog));
+        let found = Found {
+            cameras: BTreeSet::from(["Sony ILCE-7M2".to_string()]),
+            ..Default::default()
+        };
+        editor.onboarding_scanned(stale, found);
+        assert!(editor.onboarding.scanning());
+        assert!(editor.onboarding.found.cameras.is_empty());
+        Ok(())
+    }
 }
