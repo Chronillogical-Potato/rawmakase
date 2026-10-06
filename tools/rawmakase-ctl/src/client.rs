@@ -65,6 +65,23 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         limit: usize,
     },
+    /// List develop presets with their ids, groups and fit for the open photo
+    Presets {
+        /// Only the presets in this group (folder)
+        #[arg(long)]
+        group: Option<String>,
+    },
+    /// Apply a develop preset by name, as the Presets panel shows it, or by part
+    /// of the name if only one preset has it
+    Preset {
+        name: String,
+        /// Only look in this group (folder)
+        #[arg(long, conflicts_with = "id")]
+        group: Option<String>,
+        /// `name` is the preset's id, as `presets` lists it
+        #[arg(long)]
+        id: bool,
+    },
     /// Run a named application action (see capabilities)
     Action { name: String },
     /// Save the current edit and report any failure
@@ -315,6 +332,14 @@ fn requests(command: &Command) -> Result<Vec<Value>, String> {
             offset,
             limit,
         } => vec![json!({"cmd":"photos","query":query,"offset":offset,"limit":limit})],
+        Command::Presets { group } => vec![json!({"cmd":"presets","group":group})],
+        Command::Preset { name, group, id } => {
+            if *id {
+                vec![json!({"cmd":"preset","id":name})]
+            } else {
+                vec![json!({"cmd":"preset","name":name,"group":group})]
+            }
+        }
         Command::Action { name } => vec![json!({"cmd":"action","action":name})],
         Command::Save => vec![json!({"cmd":"save"})],
         Command::Export { path, max_edge, .. } => {
@@ -484,6 +509,8 @@ pub fn run(cli: Cli) -> Result<(), String> {
     match &cli.command {
         Command::Capabilities
         | Command::Photos { .. }
+        | Command::Presets { .. }
+        | Command::Preset { .. }
         | Command::Job { .. }
         | Command::Export { .. }
         | Command::Preview { .. }
@@ -550,10 +577,30 @@ mod tests {
             (vec!["rawmakase-ctl", "action", "undo"], "action"),
             (vec!["rawmakase-ctl", "photos", "example"], "photos"),
             (vec!["rawmakase-ctl", "job", "1"], "job"),
+            (vec!["rawmakase-ctl", "presets"], "presets"),
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
             assert_eq!(requests(&cli.command).unwrap()[0]["cmd"], cmd);
         }
+    }
+
+    #[test]
+    fn presets_are_applied_by_name_and_group_or_by_id() {
+        let request = |args: &[&str]| {
+            let cli = Cli::try_parse_from(args).unwrap();
+            requests(&cli.command).unwrap().remove(0)
+        };
+        assert_eq!(
+            request(&["rawmakase-ctl", "preset", "Ett B&W New", "--group", "Mine"]),
+            json!({"cmd":"preset","name":"Ett B&W New","group":"Mine"})
+        );
+        assert_eq!(
+            request(&["rawmakase-ctl", "preset", "--id", "builtin:1234"]),
+            json!({"cmd":"preset","id":"builtin:1234"})
+        );
+        assert!(
+            Cli::try_parse_from(["rawmakase-ctl", "preset", "x", "--id", "--group", "g"]).is_err()
+        );
     }
 
     #[test]

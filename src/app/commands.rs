@@ -2,6 +2,7 @@
 //! Adapters translate input; only the Editor executes commands and owns history.
 mod output;
 mod parameter;
+mod preset;
 mod reply;
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
@@ -16,6 +17,7 @@ pub(super) struct Automation {
     turn: Option<(std::time::Instant, TurnScope)>,
 }
 pub(super) use parameter::Param;
+pub(super) use preset::PresetTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Source {
@@ -88,6 +90,11 @@ pub(super) enum Operation {
         offset: usize,
         limit: usize,
     },
+    /// The develop presets, of one group or all.
+    Presets {
+        group: Option<String>,
+    },
+    Preset(PresetTarget),
     Set(Param, f32),
     Curve(CurveChannel, Vec<[f32; 2]>),
     Adjust(Param, i32),
@@ -239,7 +246,7 @@ impl Action {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub(super) struct Error {
     pub code: &'static str,
     pub message: String,
@@ -321,6 +328,8 @@ impl Editor {
             modal: self.command_modal(),
             black_and_white: develop && recipe.effects.monochrome,
             mixer_channel: (["hue", "sat", "lum"][self.view.mixer_adjust.min(2)]),
+            preset: (develop && !recipe.preset_name.is_empty())
+                .then(|| crate::presets::display_name(&recipe.preset_name)),
             values,
             masks,
             tone_curve: Curves {
@@ -415,6 +424,8 @@ impl Editor {
                         "state",
                         "capabilities",
                         "photos",
+                        "presets",
+                        "preset",
                         "curve",
                         "set",
                         "turn",
@@ -466,6 +477,15 @@ impl Editor {
                     total: all.len(),
                     offset,
                     photos,
+                });
+            }
+            Operation::Presets { group } => {
+                return Ok(Outcome::Presets {
+                    presets: preset::summaries(
+                        &self.presets.library.presets,
+                        &self.presets.issues,
+                        group.as_deref(),
+                    ),
                 });
             }
             _ => {}
@@ -538,6 +558,14 @@ impl Editor {
         match operation {
             Operation::Set(param, value) => {
                 self.command_parameter(param, Some(value), 0, target, ctx)?
+            }
+            Operation::Preset(target) => {
+                self.require_develop()?;
+                let i = preset::find(&self.presets.library.presets, &target)?;
+                let applied = self
+                    .apply_preset(i)
+                    .map_err(|e| Error::new("not_applied", format!("{e:#}")))?;
+                return Ok(Outcome::Preset { applied });
             }
             Operation::Curve(channel, points) => {
                 self.require_develop()?;
@@ -640,6 +668,7 @@ impl Editor {
             Operation::State
             | Operation::Capabilities
             | Operation::Photos { .. }
+            | Operation::Presets { .. }
             | Operation::Job(_) => unreachable!(),
         }
         Ok(Outcome::Empty)
