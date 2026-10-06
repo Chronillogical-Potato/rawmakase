@@ -7,6 +7,15 @@ use crate::develop::Recipe;
 use history::{History, Step};
 use save_state::SaveState;
 
+/// Whether a drag, a wheel scroll or a dial turn is still changing the settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    /// Still under way: its change becomes one step once it ends.
+    Held,
+    /// None, or it ended this frame.
+    Released,
+}
+
 /// The edit of the photo open in Develop: its settings, the History of how they
 /// came to be, and whether they still need saving.
 #[derive(Default)]
@@ -29,12 +38,13 @@ impl EditSession {
         }
         changed
     }
-    /// What a frame of the editor did to the settings, from `before`: an edit is
-    /// recorded once `gesture` (a drag, a dial turned) ends, as one step. Undo and
+    /// What a frame of the editor did to the settings, from `before`: an edit made
+    /// while a `gesture` is held is recorded once it is released, as one step. Undo and
     /// History clicks are not recorded again. Returns whether the settings changed
     /// this frame, to be saved either way.
-    pub fn observe(&mut self, before: Recipe, gesture: bool) -> bool {
-        let changed = self.history.observe(before, &self.recipe, gesture);
+    pub fn observe(&mut self, before: Recipe, gesture: Gesture) -> bool {
+        let held = gesture == Gesture::Held;
+        let changed = self.history.observe(before, &self.recipe, held);
         if changed {
             self.save.mark_changed();
         }
@@ -84,12 +94,12 @@ mod tests {
         let mut session = EditSession::default();
         let start = session.recipe.clone();
         session.recipe.exposure = 0.5;
-        assert!(session.observe(start, true));
+        assert!(session.observe(start, Gesture::Held));
         assert!(session.save.needs_save());
         assert_eq!(session.history.steps().1, 0);
         let mid = session.recipe.clone();
         session.recipe.exposure = 1.;
-        session.observe(mid, false);
+        session.observe(mid, Gesture::Released);
         assert_eq!(session.history.steps().1, 1);
         assert!(session.history.undo(&mut session.recipe));
         assert_eq!(session.recipe.exposure, 0.);

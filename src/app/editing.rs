@@ -120,12 +120,17 @@ impl Editor {
             ctx.request_repaint_after(left);
         }
         // A dial turned on a control surface is one too.
-        let gesture = ctx.input(|i| i.pointer.primary_down())
+        let held = ctx.input(|i| i.pointer.primary_down())
             || self.view.wheel.active()
             || self.automation.turning();
         if !self.document.edit.history.is_replaying() {
             turn_on_edited_panels(&frame.recipe, &mut self.document.edit.recipe);
         }
+        let gesture = if held {
+            crate::edit_session::Gesture::Held
+        } else {
+            crate::edit_session::Gesture::Released
+        };
         let edited = self.document.edit.observe(frame.recipe, gesture);
         // Any change but the Amount's own ends the preset Amount, whether or not the
         // Presets panel is open.
