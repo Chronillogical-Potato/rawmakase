@@ -332,6 +332,7 @@ impl SettingGroup {
                 to.mixer_model = from.mixer_model;
                 to.saturation_model = from.saturation_model;
                 to.vibrance_model = from.vibrance_model;
+                to.black_white_model = from.black_white_model;
                 to.calibration_model = from.calibration_model;
                 to.whites_model = from.whites_model;
                 to.gamut_model = from.gamut_model;
@@ -586,6 +587,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         mixer_model: _,
         saturation_model: _,
         vibrance_model: _,
+        black_white_model: _,
         calibration_model: _,
         whites_model: _,
         gamut_model: _,
@@ -693,6 +695,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("mixer_model", Group(ProcessVersion)),
         ("saturation_model", Group(ProcessVersion)),
         ("vibrance_model", Group(ProcessVersion)),
+        ("black_white_model", Group(ProcessVersion)),
         ("calibration_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
         ("gamut_model", Group(ProcessVersion)),

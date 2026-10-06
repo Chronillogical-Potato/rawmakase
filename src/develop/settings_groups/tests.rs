@@ -67,6 +67,7 @@ fn everything_changed() -> Recipe {
         mixer_model: crate::develop::color_mixer::MixerModel::Chart,
         saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
         vibrance_model: crate::develop::color_mixer::VibranceModel::Chart,
+        black_white_model: crate::develop::black_white::BlackWhiteModel::Chart,
         calibration_model: crate::develop::calibration::CalibrationModel::Measured,
         whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
         gamut_model: crate::develop::GamutModel::Clip,

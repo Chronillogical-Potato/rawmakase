@@ -55,7 +55,7 @@ impl MixerModel {
 const HUES: usize = 36;
 const SATS: usize = 6;
 const VALS: usize = 6;
-const CELLS: usize = HUES * SATS * VALS;
+pub(crate) const CELLS: usize = HUES * SATS * VALS;
 const TABLE: usize = 3 * CELLS;
 /// 8 bands × (hue, saturation, luminance) × (−, +), then Saturation −/+, Vibrance −/+.
 const TABLES: usize = 52;
@@ -244,7 +244,7 @@ impl ColorMixer {
 }
 
 /// `rgb` (linear display RGB) through a grid of changes.
-fn tables(delta: &[[f32; 3]], rgb: [f32; 3]) -> [f32; 3] {
+pub(crate) fn tables(delta: &[[f32; 3]], rgb: [f32; 3]) -> [f32; 3] {
     let p = mul(crate::camera_profiles::RGB_TO_PRO, rgb).map(|v| v.max(0.));
     let Some([h, s, max]) = hsv(p) else {
         return rgb;

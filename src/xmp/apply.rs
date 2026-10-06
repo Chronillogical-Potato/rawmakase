@@ -590,6 +590,17 @@ impl Preset {
         settings.assign("ShadowTint", &mut r.effects.shadow_tint, 0.01, -1., 1.)?;
         // Lightroom's values mean the measured operators, also on a recipe saved
         // before; RAWmakase's own packet names the ones a recipe kept from before.
+        // Lightroom's black & white mix means Camera Raw's measured gray, also on a
+        // recipe saved before; RAWmakase's own packet names it when a recipe kept it.
+        if bands
+            .iter()
+            .any(|band| v.contains_key(&format!("GrayMixer{band}")))
+        {
+            r.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_BLACK_WHITE) {
+            r.black_white_model = crate::develop::black_white::BlackWhiteModel::Original;
+        }
         let mixer_keys = bands.iter().flat_map(|band| {
             ["Hue", "Saturation", "Luminance"].map(|control| format!("{control}Adjustment{band}"))
         });
@@ -698,6 +709,12 @@ impl Preset {
         image: Option<&CameraImage>,
     ) -> Result<()> {
         settings.seen.insert("AutoGrayscaleMix".into());
+        if self.leaves_auto_gray_mix(r)? {
+            // Lightroom's Auto mix means Camera Raw's measured gray, as its values do.
+            if !settings.keeps_original(super::write::ORIGINAL_BLACK_WHITE) {
+                r.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+            }
+        }
         if self.leaves_auto_gray_mix(r)?
             && let Some(im) = image
         {

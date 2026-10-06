@@ -68,6 +68,71 @@ impl ColorSpread {
 /// Camera values above this fraction of the white level count as clipped.
 const CLIPPED: f32 = 0.94;
 
+/// Which operator renders the black & white mix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BlackWhiteModel {
+    /// A change to Oklab lightness by the hue-weighted mix times chroma: what
+    /// recipes saved before the chart tables keep, so they render as they did.
+    #[default]
+    Original,
+    /// Camera Raw 18.7's gray, measured on a dense synthetic chart: a table of the
+    /// gray's luminance against the color's, and one per band at −100, −50, +50 and
+    /// +100 (docs/color-mixer.md#chart-gray).
+    Chart,
+}
+impl BlackWhiteModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+}
+
+/// `BlackWhiteModel::Chart`'s tables, in the color mixer's grid (hue × saturation ×
+/// value of linear ProPhoto RGB): log2 of the gray's luminance over the color's at a
+/// zero mix, then each band's change at `GRAY_MIX_POSITIONS`. 1/4000 per step.
+static GRAY_CHART: &[u8] = include_bytes!("black_white_chart.bin");
+const GRAY_MIX_POSITIONS: [f32; 4] = [-1., -0.5, 0.5, 1.];
+const GRAY_SCALE: f32 = 1. / 4000.;
+
+fn gray_value(table: usize, cell: usize) -> f32 {
+    let i = 2 * (table * super::color_mixer::CELLS + cell);
+    i16::from_le_bytes([GRAY_CHART[i], GRAY_CHART[i + 1]]) as f32 * GRAY_SCALE
+}
+
+/// The mix's grid for the color mixer's lookup: no hue or saturation change, and a
+/// value factor that scales the color to the gray's luminance (`gray`).
+pub(crate) fn gray_grid(mix: [f32; 8]) -> Vec<[f32; 3]> {
+    let mut weights: Vec<(usize, f32)> = vec![(0, 1.)];
+    for (band, &v) in mix.iter().enumerate() {
+        let v = v.clamp(-1., 1.);
+        if v == 0. {
+            continue;
+        }
+        // Linear between the measured positions, and toward no change at 0.
+        let (near, far) = if v < 0. { (1, 0) } else { (2, 3) };
+        let table = |position: usize| 1 + band * 4 + position;
+        let half = GRAY_MIX_POSITIONS[near].abs();
+        if v.abs() <= half {
+            weights.push((table(near), v.abs() / half));
+        } else {
+            let t = (v.abs() - half) / (1. - half);
+            weights.push((table(near), 1. - t));
+            weights.push((table(far), t));
+        }
+    }
+    (0..super::color_mixer::CELLS)
+        .map(|cell| {
+            let dv = weights.iter().map(|(t, w)| w * gray_value(*t, cell)).sum();
+            [0., 0., dv]
+        })
+        .collect()
+}
+
+/// The gray a color (linear display RGB) becomes under `grid`, as linear luminance.
+pub(crate) fn gray(grid: &[[f32; 3]], rgb: [f32; 3]) -> f32 {
+    let scaled = super::color_mixer::tables(grid, rgb.map(|v| v.max(0.)));
+    (0.2126 * scaled[0] + 0.7152 * scaled[1] + 0.0722 * scaled[2]).max(0.)
+}
+
 /// The Basic panel's Treatment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Treatment {
@@ -260,6 +325,30 @@ pub fn is_monochrome(profile: Option<&CameraProfile>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chart_gray_follows_camera_raws_measurements() {
+        use super::{gray, gray_grid};
+        let lum = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+        let zero = gray_grid([0.; 8]);
+        // Neutrals keep their luminance; a zero mix stays near the color's own.
+        assert!((gray(&zero, [0.2; 3]) - 0.2).abs() < 0.01);
+        let orange = [0.6, 0.3, 0.1];
+        assert!((gray(&zero, orange) / lum(orange) - 1.).abs() < 0.25);
+        // Camera Raw's −100 on a band takes its saturated colors to near black, its
+        // +100 brightens them; positions between are between.
+        let band = |v: f32| {
+            let mut mix = [0.; 8];
+            mix[1] = v;
+            gray(&gray_grid(mix), orange)
+        };
+        let (dark, base, light) = (band(-1.), band(0.), band(1.));
+        assert!(
+            dark < base * 0.3 && light > base * 1.5,
+            "{dark} {base} {light}"
+        );
+        assert!(band(-0.75) < band(-0.5) && band(-0.5) < base);
+        assert!(band(0.25) > base && band(0.25) < band(0.5));
+    }
     use super::*;
 
     fn metadata() -> Metadata {

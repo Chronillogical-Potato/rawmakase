@@ -290,6 +290,12 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     measured.vibrance = 0.;
     measured.saturation = -1.;
     recipes.push(measured);
+    // Black & white from the chart tables, with a mix between measured positions.
+    let mut mono = r.clone();
+    mono.effects.monochrome = true;
+    mono.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+    mono.effects.gray_mix = [0.3, -0.7, 0.1, 0., -0.2, 0.9, 0., -1.];
+    recipes.push(mono);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
     let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
     warm.shift = [0.4, -0.5, 0.3];
