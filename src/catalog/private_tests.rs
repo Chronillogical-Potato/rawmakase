@@ -1,5 +1,6 @@
-use super::lightroom::{develop_fields, import_lightroom};
+use super::lightroom::import_lightroom;
 use super::*;
+use crate::lr_develop::{convert_develop, develop_fields};
 use crate::storage::Identity;
 use anyhow::Context;
 #[test]
