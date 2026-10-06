@@ -427,7 +427,7 @@ mod tests {
         // Once edited and saved, the edit stays as it is.
         let before = editor.document.recipe.clone();
         editor.document.recipe.exposure = 0.5;
-        editor.history(before);
+        editor.commit_edit(before, None);
         assert!(editor.flush());
         let edited = editor.document.recipe.clone();
         editor.set_raw_defaults(RawDefaults::default()).unwrap();

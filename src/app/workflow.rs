@@ -209,12 +209,6 @@ impl Editor {
             path.file_name().unwrap_or_default().to_string_lossy()
         );
     }
-    pub(super) fn history(&mut self, old: Recipe) {
-        if self.document.history.record(old, &self.document.recipe) {
-            self.sync_command_revision();
-            self.document.save.mark_changed();
-        }
-    }
     pub(super) fn effective_recipe(&self) -> Recipe {
         let mut r = if self.view.compare.before_only() {
             self.before_settings()

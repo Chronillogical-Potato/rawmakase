@@ -638,7 +638,7 @@ mod tests {
         let start = e.document.recipe.clone();
         e.document.recipe.exposure = 1.;
         e.document.recipe.crop = [0.1, 0.1, 0.9, 0.9];
-        e.history(start);
+        e.commit_edit(start, None);
         let edited = e.document.recipe.clone();
         // After's settings to Before: the edit and its History are left as they are.
         e.document.before = Some(Recipe {
@@ -656,7 +656,7 @@ mod tests {
         });
         let before = e.document.recipe.clone();
         e.transfer(Transfer::BeforeToAfter);
-        e.history(before);
+        e.commit_edit(before, None);
         assert_eq!(e.document.recipe.contrast, 0.3);
         assert_eq!(e.document.recipe.exposure, 0.);
         assert_eq!(e.document.recipe.crop, edited.crop);
@@ -667,7 +667,7 @@ mod tests {
         // Swap: each side takes the other's settings, the edit's change as one step.
         let before = e.document.recipe.clone();
         e.transfer(Transfer::Swap);
-        e.history(before);
+        e.commit_edit(before, None);
         assert_eq!(e.document.recipe.contrast, 0.3);
         assert_eq!(e.document.before.as_ref(), Some(&edited));
         let (steps, _) = e.document.history.steps();
@@ -677,7 +677,7 @@ mod tests {
         let before = e.document.recipe.clone();
         e.transfer(Transfer::AfterToBefore);
         e.transfer(Transfer::BeforeToAfter);
-        e.history(before);
+        e.commit_edit(before, None);
         // A preset only hovered lends Before its framing on screen, not to the edit.
         e.presets.preview = Some(Recipe {
             crop: [0.3, 0.3, 0.7, 0.7],
@@ -699,7 +699,7 @@ mod tests {
         for value in [0.5, 1.] {
             let before = e.document.recipe.clone();
             e.document.recipe.exposure = value;
-            e.history(before);
+            e.commit_edit(before, None);
         }
         e.document.recipe.straighten = 2.;
         assert_eq!(e.before_settings().exposure, start.exposure);
