@@ -4,7 +4,7 @@
 //! through a 1D curve per channel or a 3D grid, and a look applies it at an amount:
 //! `r + amount·(table(r) − r)` in table space, as the DNG SDK blends.
 use super::{Matrix, PRO_TO_RGB, RGB_TO_PRO, matmul};
-use crate::color_math::{mul, srgb_decode, srgb_encode};
+use crate::color::{mul, srgb_decode, srgb_encode};
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

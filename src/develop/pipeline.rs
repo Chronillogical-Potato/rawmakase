@@ -3,7 +3,7 @@ use super::masks::{
     local::{self, slot},
 };
 use super::{Geometry, Recipe, Rendered, mul, srgb_encode};
-use crate::color_math::srgb_decode;
+use crate::color::srgb_decode;
 use crate::{
     develop::curve::{CurveLut, refine_saturation},
     raw::{CameraImage, Metadata},
@@ -885,7 +885,7 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
     let hue_of = |lab: [f32; 3]| {
         lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
     };
-    let lab = srgb_to_lab(rgb.map(crate::color_math::srgb_decode));
+    let lab = srgb_to_lab(rgb.map(crate::color::srgb_decode));
     let (shown, chroma) = (hue_of(lab), lab[1].hypot(lab[2]));
     let effective = r.resolved(m).into_owned();
     let lut = CurveSet::new(&effective);
@@ -904,7 +904,7 @@ pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize>
         };
         let angle = (h + shift / 8.) * std::f32::consts::TAU;
         let out = finish_color([l, angle.cos() * c, angle.sin() * c], &effective, &lut);
-        srgb_to_lab(out.map(crate::color_math::srgb_decode))
+        srgb_to_lab(out.map(crate::color::srgb_decode))
     };
     let miss = |p: [f32; 3]| {
         let q = rendered(p);

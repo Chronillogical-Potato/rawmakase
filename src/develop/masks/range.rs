@@ -1,6 +1,6 @@
 //! Color Range and Luminance Range components: weights from the developed colour of
 //! each pixel, before local adjustments, as Lightroom's range masks select.
-use crate::color_math::srgb_decode;
+use crate::color::srgb_decode;
 use crate::develop::Rendered;
 
 /// Developed display pixels (sRGB-encoded, 0–1) aligned with the region the weights

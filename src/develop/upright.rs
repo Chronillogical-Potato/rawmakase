@@ -770,8 +770,8 @@ impl Displayed {
         Self {
             width,
             height,
-            to_recorded: mat(orient, crate::color_math::inverse(centred)),
-            from_recorded: mat(centred, crate::color_math::inverse(orient)),
+            to_recorded: mat(orient, crate::color::inverse(centred)),
+            from_recorded: mat(centred, crate::color::inverse(orient)),
         }
     }
     /// A recorded position (0–1) in centred long-edge units of the displayed photo.

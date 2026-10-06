@@ -1,7 +1,7 @@
 //! Fallback white balance for cameras without calibrated DCP matrices, and Lightroom's
 //! named white balance presets.
 use crate::{
-    color_math::{inverse, mul},
+    color::{inverse, mul},
     raw::Metadata,
 };
 pub(super) fn illuminant_camera(t: f32, m: &Metadata) -> [f32; 3] {

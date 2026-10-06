@@ -12,7 +12,7 @@
 //! the HSV hue (±35° at ±100), Saturation and Luminance scale HSV saturation and value,
 //! and Variance spreads or gathers hues, saturations and values around the swatch.
 //! Swatches apply in turn, each to the result of the ones before.
-use crate::color_math::{srgb_decode, srgb_encode};
+use crate::color::{srgb_decode, srgb_encode};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::TAU;
 

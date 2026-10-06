@@ -10,7 +10,7 @@
 //! the pointer is over the photo, so dragging sliders costs nothing extra.
 use super::Editor;
 use crate::camera_profiles::RGB_TO_PRO;
-use crate::color_math::{mul, srgb_decode, srgb_encode};
+use crate::color::{mul, srgb_decode, srgb_encode};
 use eframe::egui::{Pos2, Rect};
 
 /// The readout's state: whether the pointer is over the photo, and the values

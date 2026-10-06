@@ -2,7 +2,8 @@
 //! Contrast, and curves saved here. Saved curves are XMP files in the user library's
 //! "Curves" folder, laid out as the ones Lightroom and Camera Raw save in theirs, so
 //! either can read them; each file's name is the curve's.
-use crate::develop::{Recipe, curve::ToneCurve};
+use crate::color::curve::ToneCurve;
+use crate::develop::Recipe;
 use crate::storage::Replace;
 use anyhow::{Context, Result, ensure};
 use std::path::{Path, PathBuf};

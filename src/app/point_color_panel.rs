@@ -287,7 +287,7 @@ fn ranges(ui: &mut egui::Ui, swatch: &mut PointColor) {
         &mut swatch.luminance_range,
         Hold::Value(crate::develop::srgb_encode(v)),
         defaults.luminance_range,
-        &|t| hsv(hue, s, crate::color_math::srgb_decode(t)),
+        &|t| hsv(hue, s, crate::color::srgb_decode(t)),
     );
 }
 
