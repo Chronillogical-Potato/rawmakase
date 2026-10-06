@@ -26,7 +26,8 @@ pub struct Editor {
     context: egui::Context,
     session_file: Option<PathBuf>,
     library: Option<Box<crate::app::library::Library>>,
-    library_mode: bool,
+    /// The module shown: the Library grid, or Develop.
+    module: Module,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     loader: Latest<LoadJob>,
@@ -211,7 +212,7 @@ impl Editor {
             context: ctx.clone(),
             session_file,
             library: None,
-            library_mode: false,
+            module: Module::Develop,
             tx,
             rx,
             loader,
@@ -297,7 +298,7 @@ impl Editor {
                     onboarding_done: self.onboarding_done,
                     library_source: self.saved_place.source.clone(),
                     selected_photo: self.saved_place.photo,
-                    develop: self.saved_place.module == library::Module::Develop,
+                    develop: self.saved_place.module == Module::Develop,
                     demosaic: self.demosaic,
                     no_update_checks: !self.updates.automatic,
                     skipped_version: self.updates.skipped.clone(),
@@ -320,7 +321,7 @@ impl Editor {
         let Some(library) = &self.library else {
             return CatalogPlace::default();
         };
-        let develop = !self.library_mode && self.document.catalog_photo.is_some();
+        let develop = self.module == Module::Develop && self.document.catalog_photo.is_some();
         CatalogPlace {
             source: library.source_key(),
             photo: if develop {
@@ -329,9 +330,9 @@ impl Editor {
                 library.selected()
             },
             module: if develop {
-                library::Module::Develop
+                Module::Develop
             } else {
-                library::Module::Library
+                Module::Library
             },
         }
     }
@@ -348,14 +349,14 @@ impl Editor {
 struct CatalogPlace {
     source: String,
     photo: Option<i64>,
-    module: library::Module,
+    module: Module,
 }
 impl Default for CatalogPlace {
     fn default() -> Self {
         Self {
             source: String::new(),
             photo: None,
-            module: library::Module::Library,
+            module: Module::Library,
         }
     }
 }
@@ -365,9 +366,9 @@ impl CatalogPlace {
             source: session.library_source.clone(),
             photo: session.selected_photo,
             module: if session.develop {
-                library::Module::Develop
+                Module::Develop
             } else {
-                library::Module::Library
+                Module::Library
             },
         }
     }
@@ -611,6 +612,7 @@ mod workspace;
 
 mod state;
 use crate::edit_session::{history, save_state};
+use library::Module;
 use state::{Document, PresetBrowser, PreviewState, ViewState};
 
 mod icons;

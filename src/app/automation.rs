@@ -9,6 +9,7 @@ mod settings;
 mod socket;
 use super::Editor;
 use super::commands::{self, Command, Param};
+use crate::app::Module;
 use config::{Config, DeviceConfig, Encoder, Settings};
 use device::Device;
 use mapping::*;
@@ -190,7 +191,7 @@ impl Editor {
                 None => &mut self.controls.legacy,
             };
             if matches!(msg, Msg::Cc(cc, _) if controller.binding.mapping.photo_dial == Some(cc))
-                && self.library_mode
+                && self.module == Module::Library
                 && !self.library.as_ref().is_some_and(|l| l.loupe_open())
             {
                 continue;

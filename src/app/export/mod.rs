@@ -6,6 +6,8 @@
 mod dialog;
 mod watermark_editor;
 
+use crate::app::Module;
+
 use super::{Editor, worker::Event};
 use crate::app::theme;
 use crate::app::widgets::plural;
@@ -173,7 +175,7 @@ impl Editor {
     fn export_scope(&mut self) -> Option<Scope> {
         let open = self.document.catalog_photo;
         let ids = match &self.library {
-            Some(l) if self.library_mode => l.selected_photos(),
+            Some(l) if self.module == Module::Library => l.selected_photos(),
             Some(l) => match open {
                 Some(open) if l.is_selected(open) => l.selected_photos(),
                 Some(open) => vec![open],

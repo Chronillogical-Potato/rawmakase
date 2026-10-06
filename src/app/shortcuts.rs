@@ -5,6 +5,7 @@ use super::Editor;
 use super::icons::{self, Icon};
 use super::theme;
 use super::widgets::modal_frame;
+use crate::app::Module;
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// A shortcut: its keys and what it does. Keys are written "Cmd+Shift+Z";
@@ -158,7 +159,7 @@ impl Editor {
         ];
         let develop: [Group; 1] = [("Develop", &DEVELOP)];
         // The current module's shortcuts come first, in the left column.
-        let (left, right): (Vec<Group>, Vec<Group>) = if self.library_mode {
+        let (left, right): (Vec<Group>, Vec<Group>) = if self.module == Module::Library {
             (views.to_vec(), [&common[..], &develop].concat())
         } else {
             ([&develop[..], &common].concat(), views.to_vec())

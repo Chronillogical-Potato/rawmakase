@@ -3,6 +3,7 @@ use super::{
     Editor,
     worker::{self, Event, LoadedHeader, Pane, RenderStage, TaskKind},
 };
+use crate::app::Module;
 use crate::export_settings::ExportOptions;
 use eframe::egui;
 
@@ -316,7 +317,7 @@ impl Editor {
                 }
                 l.set_defaults(self.raw_defaults.clone());
                 self.library = Some(l);
-                self.library_mode = true;
+                self.module = Module::Library;
                 // On launch, return to the folder, photo and module of last time.
                 let restore = self.restore.take();
                 if let Some(library) = &mut self.library {

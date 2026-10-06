@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::Module;
 use crate::develop::params::ParameterId;
 use serde_json::Value;
 fn json(value: impl serde::Serialize) -> Value {
@@ -9,7 +10,7 @@ fn editor() -> (Editor, egui::Context) {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.onboarding.visible = false;
-    e.library_mode = false;
+    e.module = Module::Develop;
     let metadata = crate::raw::Metadata {
         width: 12,
         height: 8,
@@ -124,7 +125,7 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
         e.execute_command(named("Bri"), &ctx).unwrap_err().code,
         "ambiguous"
     );
-    e.library_mode = true;
+    e.module = Module::Library;
     assert_eq!(
         e.execute_command(named("Brighter"), &ctx).unwrap_err().code,
         "no_document"
@@ -135,9 +136,9 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
 fn edits_reject_library_loading_modal_and_stale_targets() {
     let (mut e, ctx) = editor();
     let original = e.document.edit.recipe.clone();
-    e.library_mode = true;
+    e.module = Module::Library;
     assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "no_document");
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.preferences.open = true;
     assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "busy");
     e.preferences.open = false;
@@ -262,7 +263,7 @@ fn refused_open_does_not_claim_another_photo_opened() -> anyhow::Result<()> {
         .unwrap_err();
     assert_eq!(error.code, "not_editable");
     assert_eq!(e.document.catalog_photo, Some(999));
-    assert!(!e.library_mode);
+    assert!(e.module == Module::Develop);
     Ok(())
 }
 #[test]
@@ -625,7 +626,7 @@ fn library_metadata_requires_stable_id_despite_selection_changes() -> anyhow::Re
         &db,
         ctx.clone(),
     )?));
-    e.library_mode = true;
+    e.module = Module::Library;
     let library = e.library.as_mut().unwrap();
     let first = library.photos[0].id;
     let second = library.photos[1].id;

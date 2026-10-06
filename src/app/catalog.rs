@@ -3,6 +3,7 @@ use super::dialogs::{CatalogDialog, FolderAction};
 use super::folder_locations::{FolderQuestion, folder_added, reopened};
 use super::widgets::confirm_modal;
 use super::worker::Event;
+use crate::app::Module;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -190,7 +191,7 @@ impl Editor {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        self.library_mode = true;
+        self.module = Module::Library;
         if let Some(id) = self.catalog_photo_at(&path) {
             self.develop_catalog_photo(id);
             return;
@@ -315,7 +316,7 @@ impl Editor {
             if self.view.zoom.on && self.view.is(super::state::Tool::Crop) {
                 self.view.tool = super::state::Tool::None;
             }
-            self.library_mode = false;
+            self.module = Module::Develop;
             return;
         }
         if !self.ready_for_catalog() {
@@ -383,7 +384,7 @@ impl Editor {
             Ok(open) => {
                 self.status = library.message.clone();
                 if let Some(id) = open
-                    && !self.library_mode
+                    && self.module == Module::Develop
                 {
                     self.develop_catalog_photo(id);
                 }
@@ -481,7 +482,7 @@ impl Editor {
                 if self.document.catalog_photo == Some(id) {
                     // Removed from Develop: show its master there instead.
                     if let Some(master) = master
-                        && !self.library_mode
+                        && self.module == Module::Develop
                     {
                         self.develop_catalog_photo(master);
                     }
@@ -489,7 +490,7 @@ impl Editor {
                     if self.document.catalog_photo == Some(id) {
                         self.document.reset(None);
                         self.preview.clear_document();
-                        self.library_mode = true;
+                        self.module = Module::Library;
                     }
                 }
             }

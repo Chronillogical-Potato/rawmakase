@@ -6,6 +6,7 @@
 //! the tool away.
 use super::state::Tool;
 use super::{Editor, history::Step, theme};
+use crate::app::Module;
 use crate::develop::targeted::{DRAG_RATE, HslChannel, Target, TargetSample, TargetWeights};
 use crate::develop::{Recipe, Treatment};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -110,7 +111,7 @@ impl Editor {
             self.document.targeted_pick.invalidate();
         }
         if let Tool::Targeted(target) = self.view.tool
-            && (self.library_mode
+            && (self.module == Module::Library
                 || !self.targeted_available(target)
                 || !self.targeted_shown(target))
         {
@@ -251,7 +252,7 @@ impl Editor {
     ) {
         self.document.targeted_pick.invalidate();
         // Only where the edit is shown and can be adjusted.
-        if self.library_mode || self.view.compare.shows_before() {
+        if self.module == Module::Library || self.view.compare.shows_before() {
             self.view.targeted = None;
             return;
         }
