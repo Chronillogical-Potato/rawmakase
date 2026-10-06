@@ -613,7 +613,7 @@ impl Processor {
             HISTOGRAM_WORDS * 4,
         );
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
-        let submission = self.queue.submit([encoder.finish()]);
+        let submission = super::submit(&self.queue, encoder);
         let (tx, rx) = mpsc::channel();
         let map = |buffer: &wgpu::Buffer| {
             let tx = tx.clone();

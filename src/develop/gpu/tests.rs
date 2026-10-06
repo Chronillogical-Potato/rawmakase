@@ -943,3 +943,13 @@ fn shaders_are_valid_wgsl() {
         }
     }
 }
+#[test]
+fn previews_submit_only_once_the_window_surface_is_reconfigured() {
+    let surface = reconfiguring_surface();
+    let (tx, rx) = mpsc::channel();
+    let preview = std::thread::spawn(move || submitting(|| tx.send(()).unwrap()));
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+    drop(surface);
+    rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    preview.join().unwrap();
+}
