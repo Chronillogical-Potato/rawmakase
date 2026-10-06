@@ -25,7 +25,7 @@ pub fn compare(
             &crate::camera_profiles::installed(&raw.metadata).0,
         )
     };
-    let image = raw.develop(false, &AtomicBool::new(false))?;
+    let image = raw.develop(crate::raw::Decode::full(), &AtomicBool::new(false))?;
     let render = develop::render(&image, &edit, 0)?;
     let reference = image::open(reference)?.to_rgb32f();
     ensure!(

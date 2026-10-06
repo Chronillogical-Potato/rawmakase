@@ -113,6 +113,22 @@ pub fn demosaic() -> Demosaic {
         Demosaic::Rawmakase
     }
 }
+/// What [`Raw::develop`] makes of the sensor data. A job captures it when it is
+/// created and keys its decode-cache entry with the same value, so a preference
+/// changed while the job runs can never file one demosaic under another's key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decode {
+    /// A half-size draft from LibRaw's fast half-size path, whatever the demosaic.
+    Half,
+    /// Every pixel, demosaiced this way.
+    Full(Demosaic),
+}
+impl Decode {
+    /// Full size, with the demosaic preferred now.
+    pub fn full() -> Self {
+        Self::Full(demosaic())
+    }
+}
 pub struct Raw {
     handle: ffi::Handle,
     pub metadata: Metadata,
@@ -217,15 +233,16 @@ impl Raw {
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {
         self.handle.thumbnail()
     }
-    pub fn develop(self, fast: bool, cancel: &AtomicBool) -> Result<CameraImage> {
-        // Half-size drafts always use LibRaw's fast half-size path.
-        if !fast
-            && demosaic() == Demosaic::Rawmakase
-            && let Some(image) = self.develop_cfa(cancel)?
-        {
-            return Ok(image);
+    pub fn develop(self, decode: Decode, cancel: &AtomicBool) -> Result<CameraImage> {
+        match decode {
+            Decode::Half => self.develop_libraw(true, cancel),
+            Decode::Full(Demosaic::Libraw) => self.develop_libraw(false, cancel),
+            // LibRaw's demosaic when the file is not Bayer or X-Trans data.
+            Decode::Full(Demosaic::Rawmakase) => match self.develop_cfa(cancel)? {
+                Some(image) => Ok(image),
+                None => self.develop_libraw(false, cancel),
+            },
         }
-        self.develop_libraw(fast, cancel)
     }
     /// Unpacked CFA data demosaiced by `crate::demosaic`; `None` when the file is not
     /// single-channel Bayer or X-Trans data.

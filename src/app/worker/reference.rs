@@ -21,6 +21,8 @@ pub(in crate::app) struct ReferenceJob {
     pub path: PathBuf,
     pub edit: EditSource,
     pub cancel: Arc<AtomicBool>,
+    /// The demosaic of the full-size decode and of its decode-cache key.
+    pub demosaic: raw::Demosaic,
 }
 /// The reference photo, developed: the half-size decode first, then the full one.
 pub struct ReferenceImage {
@@ -50,7 +52,9 @@ pub(in crate::app) fn reference_loader(
             }
         };
         let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            develop(&job, |image| reply(Ok(Box::new(image))))
+            develop(&job, &DecodeCache::default(), |image| {
+                reply(Ok(Box::new(image)))
+            })
         }));
         match loaded {
             Ok(Ok(())) => {}
@@ -64,13 +68,15 @@ pub(in crate::app) fn reference_loader(
 }
 
 /// Develops the job's photo, handing each stage to `ready`.
-fn develop(job: &ReferenceJob, mut ready: impl FnMut(ReferenceImage)) -> anyhow::Result<()> {
+fn develop(
+    job: &ReferenceJob,
+    cache: &DecodeCache,
+    mut ready: impl FnMut(ReferenceImage),
+) -> anyhow::Result<()> {
     let raw = raw::Raw::open(&job.path)?;
     let recipe = EditSource::recipe(Some(&job.edit), &raw)?;
-    let key = DecodeCache::key(&job.path).ok();
-    let cached = key
-        .as_ref()
-        .and_then(|key| DecodeCache::default().load(key, &raw.metadata));
+    let key = DecodeCache::key(&job.path, job.demosaic).ok();
+    let cached = key.as_ref().and_then(|key| cache.load(key, &raw.metadata));
     if let Some(image) = cached {
         ready(ReferenceImage {
             image: Arc::new(image),
@@ -79,7 +85,7 @@ fn develop(job: &ReferenceJob, mut ready: impl FnMut(ReferenceImage)) -> anyhow:
         });
         return Ok(());
     }
-    let half = raw.develop(true, &job.cancel)?;
+    let half = raw.develop(raw::Decode::Half, &job.cancel)?;
     if job.cancel.load(Ordering::Relaxed) {
         return Ok(());
     }
@@ -88,13 +94,14 @@ fn develop(job: &ReferenceJob, mut ready: impl FnMut(ReferenceImage)) -> anyhow:
         recipe: recipe.clone(),
         resolution: Resolution::Half,
     });
-    let full = Arc::new(raw::Raw::open(&job.path)?.develop(false, &job.cancel)?);
+    let decode = raw::Decode::Full(job.demosaic);
+    let full = Arc::new(raw::Raw::open(&job.path)?.develop(decode, &job.cancel)?);
     crate::develop::quality::recovered(&full, &job.cancel)?;
     if job.cancel.load(Ordering::Relaxed) {
         return Ok(());
     }
     if let Some(key) = &key {
-        let _ = DecodeCache::default().store(key, &full);
+        let _ = cache.store(key, &full);
     }
     ready(ReferenceImage {
         image: full,
@@ -102,4 +109,49 @@ fn develop(job: &ReferenceJob, mut ready: impl FnMut(ReferenceImage)) -> anyhow:
         resolution: Resolution::Full,
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::raw::Demosaic;
+
+    /// The preference is never changed here: the job alone decides which
+    /// demosaic is decoded, and the cache entry is keyed with that one.
+    #[test]
+    fn the_full_decode_is_cached_under_the_jobs_demosaic() -> anyhow::Result<()> {
+        let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/charts/synthetic-d65.dng");
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().to_path_buf(), u64::MAX);
+        let key = |demosaic| DecodeCache::key(&chart, demosaic);
+        let job = |demosaic| ReferenceJob {
+            ticket: 1,
+            path: chart.clone(),
+            edit: EditSource::Defaults(Default::default()),
+            cancel: Default::default(),
+            demosaic,
+        };
+        let develop_stages = |job: &ReferenceJob| -> anyhow::Result<Vec<Resolution>> {
+            let mut stages = Vec::new();
+            develop(job, &cache, |image| stages.push(image.resolution))?;
+            Ok(stages)
+        };
+
+        let preferred = crate::raw::demosaic();
+        let other = match preferred {
+            Demosaic::Rawmakase => Demosaic::Libraw,
+            Demosaic::Libraw => Demosaic::Rawmakase,
+        };
+        assert_eq!(
+            develop_stages(&job(other))?,
+            [Resolution::Half, Resolution::Full]
+        );
+        assert!(cache.contains(&key(other)?));
+        assert!(!cache.contains(&key(preferred)?));
+
+        // The next job with that demosaic opens from the cache.
+        assert_eq!(develop_stages(&job(other))?, [Resolution::Full]);
+        Ok(())
+    }
 }
