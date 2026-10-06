@@ -119,7 +119,7 @@ inject a temporary file, without changing the process-wide environment.
 The library API is internal: the RAWmakase binary, its examples and its tests are
 its only clients, so modules and functions change freely with them and nothing is
 kept for outside callers. The compatibility surface is the saved data: recipe and
-preset envelopes are versioned and migrated by `storage::format`; a catalog must
+preset envelopes are versioned and migrated by `develop::saved_format`; a catalog must
 be exactly version 1 to open (other versions are refused, the file left
 unchanged), and its schema only ever gains tables, applied idempotently on open;
 see [catalogs](catalogs.md#sqlite-format-version-1).

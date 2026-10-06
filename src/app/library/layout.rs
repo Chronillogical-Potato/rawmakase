@@ -1,5 +1,5 @@
 //! The Library's layout kept across launches: its view, filter bar, sort
-//! and grid (see `storage::LibraryLayout`). Each setting is saved under a
+//! and grid (see `app::session::LibraryLayout`). Each setting is saved under a
 //! stable key, so renaming one in the interface keeps what was saved.
 use super::Library;
 use super::cell::Style;
