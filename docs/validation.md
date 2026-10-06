@@ -57,6 +57,35 @@ Catalog validation: source-preserving full import of the supplied Lightroom cata
 
 Preview/tree validation adds persistent SQLite cache hits, offline previews, source-change invalidation, corrupt entry recovery, cache eviction, unrelated-database protection, nested folder scopes/counts, root-button pointer interaction and successful relinking after reopening.
 
+## Architecture refactor baseline — 2026-10-06
+
+The behaviour baseline for the refactor in issue #216 is CI run 37437474805 on
+`9e909ac`: lint and tests green on Linux x86_64, Linux aarch64, Windows and macOS
+with LibRaw 0.22.
+
+Performance baseline, taken on `b820a4d` (after the dependency moves of Phase 2,
+which change no rendering code) with
+`cargo run --release --example preview_benchmark -- DSCF7853.RAF`: Fujifilm X100F,
+6032×4032, Adobe Color, Apple M1 Pro with its GPU, median of the benchmark's runs.
+Later refactor steps that touch decoding, previews or rendering compare against
+these numbers.
+
+| Step | Time |
+| --- | ---: |
+| Decode | 366.6 ms |
+| Highlight recovery | 49.7 ms |
+| Open from decode cache | 38.9 ms |
+| First Fit after opening | 459.1 ms |
+| Fit, GPU / CPU | 17.0 / 151.8 ms |
+| Fit with local adjustments, GPU / CPU | 59.6 / 205.3 ms |
+| 100% region, GPU | 24.2 ms |
+| Clarity region, GPU | 65.4 ms |
+| Export resolution | 2721.9 ms |
+| Export resolution, local adjustments | 2907.9 ms |
+
+Fit differs from the export render resized to the same size by a mean of 0.0013
+per channel (0–1 scale), on both the CPU and the GPU.
+
 ## Structural refactor — 2026-09-28
 
 The domain split (`app.rs`, `core.rs`, `io.rs` and `catalog.rs` into the modules the [architecture guide](architecture.md) describes) kept recipe serialization, schema/pipeline versions, rendering algorithms, asset locations and CLI commands unchanged, and added no runtime dependency or database migration. The suite went from 86 tests to one that also covers bounded history, gesture coalescing, cancellation, stale and cross-task failures, overwrite confirmation, document changes during a frame, loader-resolved recipes, preset hover invalidation, injected session persistence, malformed migration input and invalid export defaults. Relative-path persistence runs in a child process with its own working directory and data directory. The private-fixture tests were not run for the refactor; automated egui interaction tests were.
