@@ -87,6 +87,10 @@ impl Library {
             self.info_reader = Some(super::background::Reader::start(todo, &self.ctx, read));
         }
     }
+    /// Whether photo info is still being read from files.
+    pub(in crate::app) fn reading_photo_info(&self) -> bool {
+        self.info_reader.is_some()
+    }
     /// Saves the info read so far.
     pub(super) fn poll_photo_info(&mut self) {
         let Some(reader) = &self.info_reader else {

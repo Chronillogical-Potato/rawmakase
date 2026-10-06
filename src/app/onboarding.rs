@@ -40,6 +40,9 @@ pub(super) struct Onboarding {
     pub(super) visible: bool,
     scanned: bool,
     scanned_for: Option<PathBuf>,
+    /// The catalog was still reading photo info from files when it last
+    /// scanned, so the cameras may be incomplete.
+    info_pending: bool,
     /// The scan under way; it walks Camera Raw's folders, thousands of files,
     /// so it runs off the UI thread and arrives as [`Event::OnboardingScanned`].
     scan: Task,
@@ -60,7 +63,8 @@ pub struct Found {
     /// Adobe lens profiles for the catalog's camera makers and common
     /// third-party lens brands, plus your own lens profiles.
     lens_profiles: Vec<PathBuf>,
-    /// The camera models the catalog records, e.g. "ILCE-7M2".
+    /// Models the catalog records that Adobe has no profiles for, to match
+    /// your own profiles by.
     models: Vec<String>,
     /// Makers of the catalog's cameras, e.g. "Sony".
     makers: BTreeSet<String>,
@@ -92,6 +96,11 @@ fn full_name<'a>(model: &str, names: &'a [String]) -> Option<&'a String> {
         .filter(|name| name.to_lowercase().ends_with(&suffix));
     let name = makers.next()?;
     makers.all(|other| other == name).then_some(name)
+}
+/// Whether any of `names` ends in `model`, as "Canon EOS M10" ends in "M10".
+fn shares_model(model: &str, names: &[String]) -> bool {
+    let suffix = format!(" {}", model.to_lowercase());
+    names.iter().any(|n| n.to_lowercase().ends_with(&suffix))
 }
 /// The cameras Adobe has profiles for, as its folders and files name them.
 fn adobe_cameras(profiles: &std::path::Path) -> Vec<String> {
@@ -126,22 +135,23 @@ impl Found {
                     found.cameras.insert(name.clone());
                 }
                 // Without Adobe's profiles to name the maker, the model is all
-                // there is; with them, a camera Adobe lacks has nothing to find.
+                // there is.
                 None if shared.is_none() => {
                     found.cameras.insert(model.clone());
                 }
+                // A camera Adobe lacks may still have profiles of yours; one
+                // several makers share ("M10") is left out rather than guessed.
+                None if !shares_model(model, &known) => found.models.push(model.clone()),
                 None => {}
             }
         }
-        found.models = models.to_vec();
-        if cancel.load(Ordering::Relaxed) {
-            return found;
-        }
-        found.find_on_disk();
+        found.find_on_disk(cancel);
         found
     }
     /// Camera Raw's profiles and presets, narrowed to the cameras found.
-    fn find_on_disk(&mut self) {
+    /// Stops early once `cancel` is set, as the result is then dropped.
+    fn find_on_disk(&mut self, cancel: &AtomicBool) {
+        let cancelled = || cancel.load(Ordering::Relaxed);
         if let Some(shared) = shared_camera_raw() {
             let profiles = shared.join("CameraProfiles");
             for camera in &self.cameras {
@@ -165,6 +175,9 @@ impl Found {
                     &[],
                 ));
             }
+        }
+        if cancelled() {
+            return;
         }
         self.makers = self
             .cameras
@@ -203,6 +216,9 @@ impl Found {
                 }
             }
         }
+        if cancelled() {
+            return;
+        }
         let user = user_camera_raw();
         if let Some(user) = &user {
             self.lens_profiles
@@ -233,7 +249,13 @@ impl Editor {
     pub(super) fn onboarding_ui(&mut self, ui: &mut egui::Ui) {
         // Rescan when opened and whenever a different catalog is loaded.
         let catalog = self.library.as_ref().map(|l| l.catalog.path.clone());
-        if !self.onboarding.scanned || self.onboarding.scanned_for != catalog {
+        // And once the catalog finishes reading cameras from new photos' files.
+        let reading = self
+            .library
+            .as_ref()
+            .is_some_and(|l| l.reading_photo_info());
+        let read = self.onboarding.info_pending && !reading && !self.onboarding.scanning();
+        if !self.onboarding.scanned || self.onboarding.scanned_for != catalog || read {
             self.start_onboarding_scan(catalog);
         }
         let ctx = ui.ctx().clone();
@@ -553,6 +575,10 @@ impl Editor {
             .as_ref()
             .and_then(|l| l.catalog.cameras().ok())
             .unwrap_or_default();
+        self.onboarding.info_pending = self
+            .library
+            .as_ref()
+            .is_some_and(|l| l.reading_photo_info());
         let (generation, cancel) = self.onboarding.scan.start();
         self.onboarding.scanned = true;
         self.onboarding.scanned_for = catalog;
@@ -820,6 +846,9 @@ mod tests {
         assert_eq!(name("M10"), None);
         assert_eq!(name("7M2"), None);
         assert_eq!(name("iPhone 8"), None);
+        // "M10" is a Leica and a Canon, so it matches none of your profiles either.
+        assert!(shares_model("M10", &adobe));
+        assert!(!shares_model("iPhone 8", &adobe));
         assert!(names_camera(
             "Sony ILCE-7M2 Portra 400 SO.dcp",
             "Sony ILCE-7M2"
