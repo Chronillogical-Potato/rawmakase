@@ -19,15 +19,25 @@ changes what one waits on, updates its row here.
    made in one exit hook, in the order above.
 4. **Never hold a bounded receiver while joining its sender.** A worker blocked in
    `send` on a full channel never sees its stop signal.
-5. **The exit hook runs on every exit path.** On macOS, Quit (Cmd-Q) closes the
-   window without a close request, so eframe calls `App::on_exit` but not the
-   close guard. Anything the close guard does to keep work from being lost
-   (flushing the edit, waiting for the autosave in flight) must also run in
-   `on_exit`.
+5. **The exit hook runs on every exit path, but cannot refuse one.** On macOS,
+   Quit (Cmd-Q, the Dock, logging out) closes the window without a close request,
+   so eframe calls `App::on_exit` but never the close guard, and the process ends
+   right after it. `on_exit` therefore saves what it can synchronously: the edit
+   and the autosave in flight. It cannot keep an export or Sync Settings running,
+   or ask what to do about an edit that fails to save; see Quit on macOS below.
+6. **One deadline bounds every join.** The loaders, previews, exports and output
+   jobs read photo files, often on a network share, so a stalled read can outlast
+   their current job. They are joinable only under the shared deadline: a worker
+   still running when it passes is left detached and ends with the process. No
+   worker is joined without a deadline.
 
 ## Workers
 
 "Stop" is the signal the worker checks; "Join" is what the exit hook may do.
+
+Joining needs each worker's `JoinHandle`. Today none is kept: `Latest`, the
+autosave and the export queue discard theirs, so the code that joins starts by
+keeping them.
 
 | Worker | Where | Blocks on | Stop | Join |
 | --- | --- | --- | --- | --- |
@@ -50,10 +60,12 @@ changes what one waits on, updates its row here.
 | Usage stats | `stats.rs` | A 30 s sleep, then a report of up to 20 s | `enabled`, after the sleep | No |
 | GVFS bridge reaper (Linux) | `platform/network.rs` | The bridge process, which outlives the app | None | Never |
 
-One-shot jobs (Auto, Upright, Auto straighten, the Point Color and Targeted
-Adjustment samples, the onboarding scan, catalog open and import, file dialogs,
-bulk import, the preset scan, Sync Settings, folder relink and move, watermark
-fonts) stay detached. They report through the event channel or a generation check,
+One-shot jobs stay detached: Auto, Upright, Auto straighten, the Point Color and
+Targeted Adjustment samples, the onboarding scan, catalog open and import, file
+dialogs, bulk import, the preset scan, Sync Settings, folder relink and move, the
+folder availability probe (which can hang on a stalled mount like the volume
+probe), the update receipt acknowledgement, usage stats collection (which can run
+the package manager) and the watermark fonts. They report through the event channel or a generation check,
 so a result that arrives after its document is gone is dropped. File dialogs on
 macOS run their panel on the main thread, so they are never joined from it.
 
@@ -69,10 +81,27 @@ macOS run their panel on the main thread, so they are never joined from it.
       request receiver and the library's result receivers.
    4. Stop: the `Latest` workers, the export queue, the screen previews, MIDI and
       the control socket.
-   5. Join the joinable workers above, with one deadline for all of them; the
-      renderer is among them, so it is done before eframe drops the device.
+   5. Join the joinable workers above, with one deadline for all of them. The
+      renderer is among them, so it is done before eframe drops the device; any
+      worker still running at the deadline is left detached.
 3. eframe drops the editor, then the painter. The detached workers end with the
    process.
+
+## Quit on macOS
+
+The close guard refuses to close while an export or Sync Settings runs, and asks
+before closing when the edit cannot be saved. Quit bypasses it, and `on_exit`
+cannot refuse, so until Quit is routed through the guard:
+
+- the edit and the autosave in flight are saved synchronously;
+- a running export is cancelled: its finished photos stay, and the photo being
+  written is not published, as exports write a temporary file and rename it;
+- Sync Settings stops partway, leaving some of its photos synced and some not;
+- an edit that fails to save is lost without a word.
+
+The fix is for Quit to send the window a close request, so the guard runs as it
+does for a window close. winit's default menu binds Quit to `terminate:`, which
+does not, so this needs a Quit item of our own.
 
 ## Where the code stands
 
@@ -81,8 +110,9 @@ These gaps remain:
 
 - **No exit hook exists.** `Editor` implements no `on_exit`, nothing is joined, and
   every stop signal is sent by a `Drop` as the editor is dropped.
-- **Quit on macOS skips the close guard** (inferred from winit's and eframe's code,
-  not yet seen on a real build), so an unsaved edit or library draft can be lost.
+- **Quit on macOS skips the close guard** (confirmed in the pinned winit and eframe
+  sources; not yet seen on a real build), so an edit autosave has not written yet,
+  or a library draft, is lost.
 - **The close guard misses folder jobs and command output jobs.**
 - **Stop signals that exist but are not sent at exit:** dropping the export queue
   does not cancel its running batch, and nothing sets `prefetch_cancel`.
