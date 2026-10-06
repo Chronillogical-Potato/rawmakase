@@ -47,7 +47,7 @@ keeping them.
 | Autosave | `app/autosave.rs` | The job channel; one SQLite commit | Its job sender dropped | Yes, after dropping the job sender, which also lets the last save finish |
 | Export queue | `export/queue.rs` | A batch: decodes, renders and file writes | `closed`, between batches; the running batch's cancel, between photos and stages | Yes, after cancelling the running batch |
 | Command output jobs | `app/commands/output.rs` | One export or preview job | Each job's cancel, between stages | Yes, after cancelling |
-| MIDI listener | `app/automation/midi.rs` | A 250 ms sleep between port scans | The device's stop flag | Yes; it stops within about 250 ms |
+| MIDI listener | `app/automation/midi.rs` | A 2 s wait on its stop channel between port scans | The device dropped, which closes the channel | Yes; it stops at once |
 | Control socket listener | `app/automation/socket.rs` | A blocking `accept` | The stop flag, seen after a wake-up connection | Bounded only: if the wake-up connection fails, `accept` never returns |
 | Control socket connections | `app/automation/socket.rs` | A 5 s read; **a 3 s wait for the UI thread's reply**; a 5 s write | The stop flag; the request queue's receiver dropped | Bounded, and only after the request queue's receiver is dropped |
 | Library thumbnails | `app/library/previews.rs` | The request channel; preview cache and file reads; **a send on a result channel bounded at 24** | Its channels dropped | Yes, after dropping the result receiver |
