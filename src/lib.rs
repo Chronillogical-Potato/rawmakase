@@ -17,7 +17,7 @@ mod build_info;
 pub mod camera_profiles;
 pub mod cameras;
 pub mod catalog;
-mod color_math;
+pub mod color;
 pub mod comparison;
 pub mod decode_cache;
 pub mod demosaic;

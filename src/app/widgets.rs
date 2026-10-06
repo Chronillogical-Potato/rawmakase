@@ -651,7 +651,7 @@ pub(super) fn parametric_curve_ui(
 }
 pub(super) fn tone_curve_ui(
     ui: &mut egui::Ui,
-    curve: &mut crate::develop::curve::ToneCurve,
+    curve: &mut crate::color::curve::ToneCurve,
     histogram: &[[u32; 256]; 3],
     channel: usize,
 ) {
@@ -732,7 +732,7 @@ pub(super) fn tone_curve_ui(
         state.selected = None;
     }
     curve_backdrop(ui, rect, histogram, channel);
-    let plot = crate::develop::curve::CurveLut::new(curve);
+    let plot = crate::color::curve::CurveLut::new(curve);
     let pts = (0..=256)
         .map(|i| {
             let x = i as f32 / 256.;

@@ -31,8 +31,9 @@ files should preserve.
 | `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 
-`color_math` is a private collection of shared numeric primitives. Camera profiles
-use it directly, without depending on recipe or render orchestration. Presets and
+`color` holds shared numeric primitives (matrices, sRGB transfer) and the tone-curve
+model (`color::curve`). It depends on nothing else, so camera profiles, XMP and the
+interface use it without depending on recipe or render orchestration. Presets and
 camera profiles independently use storage's asset-directory policy; neither
 library discovers its folders through the other.
 

@@ -9,7 +9,7 @@ use super::{
     quality::recovered,
 };
 use crate::{
-    color_math::srgb_decode,
+    color::srgb_decode,
     raw::{CameraImage, Metadata},
 };
 use anyhow::{Result, bail, ensure};

@@ -1,5 +1,5 @@
 use super::Preset;
-use crate::develop::curve::ToneCurve;
+use crate::color::curve::ToneCurve;
 use crate::xml::ns::{CRS, PHOTOSHOP, RDF, XML};
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};

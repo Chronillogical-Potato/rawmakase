@@ -5,7 +5,7 @@ use super::basic_tone_data::{
     BLACKS, CONTRAST, CONTRAST_CHART, CONTRAST_PIVOT, DEHAZE, DEHAZE_VALUES, SLIDER_VALUES, WHITES,
     WHITES_ADAPTIVE, WHITES_EXPOSURES, WHITES_HIGHLIGHTS,
 };
-use crate::color_math::{srgb_decode, srgb_encode};
+use crate::color::{srgb_decode, srgb_encode};
 use serde::{Deserialize, Serialize};
 
 /// How a recipe's Contrast renders.

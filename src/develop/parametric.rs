@@ -253,7 +253,7 @@ impl Shape {
     /// The curve at `x` (encoded with the sRGB transfer function, as the pipeline's
     /// curves are): taken to gamma 2.2, through the regions and back.
     fn eval(&self, x: f32) -> f32 {
-        use crate::color_math::{srgb_decode, srgb_encode};
+        use crate::color::{srgb_decode, srgb_encode};
         let w = srgb_decode(x.clamp(0., 1.)).powf(1. / GAMMA);
         let m = self.midtone;
         let mut y = match (&self.shadows, &self.highlights) {
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn regions_change_only_their_side_of_the_midtone_split() {
-        let midtone = crate::color_math::srgb_encode(0.5f32.powf(GAMMA));
+        let midtone = crate::color::srgb_encode(0.5f32.powf(GAMMA));
         let highlights = ParametricCurve::new([0., 0., 0., 0.8], [0.25, 0.5, 0.75]).unwrap();
         let shadows = ParametricCurve::new([-0.8, 0., 0., 0.], [0.25, 0.5, 0.75]).unwrap();
         for i in 0..=20 {
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn regions_join_the_identity_at_the_midtone_split() {
-        let midtone = crate::color_math::srgb_encode(0.5f32.powf(GAMMA));
+        let midtone = crate::color::srgb_encode(0.5f32.powf(GAMMA));
         for regions in [
             [1., 0., 0., 0.],
             [-1., 0., 0., 0.],
