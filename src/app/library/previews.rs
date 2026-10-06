@@ -168,12 +168,8 @@ fn spawn_edited_with(
 ) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
     let (tx, rx) = mpsc::channel::<EditJob>();
     let (result_tx, result_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(2)
-            .thread_name(|i| format!("edited-preview-{i}"))
-            .build()
-            .ok();
+    crate::raw::spawn_background(move || {
+        let pool = crate::raw::background_pool(2, "edited-preview").ok();
         let mut cache = PreviewCache::open(&cache_path).ok();
         let mut queue = Vec::new();
         loop {

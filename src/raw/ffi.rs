@@ -58,6 +58,7 @@ const ERR: usize = 512;
 
 unsafe extern "C" {
     fn ora_version() -> *const c_char;
+    fn ora_background_thread();
     fn ora_metadata_size() -> u32;
     fn ora_open(path: *const c_char, m: *mut NativeMetadata, err: *mut c_char) -> *mut c_void;
     fn ora_close(h: *mut c_void);
@@ -92,6 +93,12 @@ unsafe extern "C" {
 pub fn version() -> String {
     // SAFETY: `ora_version` returns LibRaw's static, NUL-terminated version string.
     unsafe { CStr::from_ptr(ora_version()).to_string_lossy().into_owned() }
+}
+/// Runs the calling thread at low priority from now on, with LibRaw decodes on
+/// two OpenMP threads; see `ora_background_thread`.
+pub(super) fn background_thread() {
+    // SAFETY: takes nothing and changes only the calling thread's own settings.
+    unsafe { ora_background_thread() }
 }
 
 /// `sizeof(Metadata)` on the native side.

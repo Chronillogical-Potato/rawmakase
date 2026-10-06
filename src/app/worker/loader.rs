@@ -35,13 +35,8 @@ fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
 fn prefetcher() -> Latest<Prefetch> {
     Latest::new(|job: Prefetch| {
         static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
-        let Some(pool) = POOL.get_or_init(|| {
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(2)
-                .thread_name(|i| format!("prefetch-{i}"))
-                .build()
-                .ok()
-        }) else {
+        let Some(pool) = POOL.get_or_init(|| crate::raw::background_pool(2, "prefetch").ok())
+        else {
             return;
         };
         let cache = DecodeCache::default();
