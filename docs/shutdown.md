@@ -94,7 +94,7 @@ before closing when the edit cannot be saved. Quit bypasses it, and `on_exit`
 cannot refuse, so until Quit is routed through the guard:
 
 - the edit and the autosave in flight are saved synchronously;
-- a running export is cancelled: its finished photos stay, and the photo being
+- a running export is cut off: its finished photos stay, and the photo being
   written is not published, as exports write a temporary file and rename it;
 - Sync Settings stops partway, leaving some of its photos synced and some not;
 - an edit that fails to save is lost without a word.
