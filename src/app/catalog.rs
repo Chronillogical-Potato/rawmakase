@@ -9,7 +9,7 @@ use std::path::PathBuf;
 impl Editor {
     /// Whether no work in progress stops a catalog change and the open edit
     /// is saved; it is saved only when nothing is in progress.
-    fn ready_for_catalog(&mut self) -> bool {
+    pub(super) fn ready_for_catalog(&mut self) -> bool {
         !self.activity.is_busy() && self.flush()
     }
     pub(super) fn load_catalog(&mut self, path: PathBuf, ctx: &egui::Context) {

@@ -48,9 +48,11 @@ fn path_of(catalog: &Path, who: &Computer, name: &str) -> Result<PathBuf> {
 fn legacy(catalog: &Path) -> Result<rusqlite::Connection> {
     Ok(rusqlite::Connection::open(catalog)?)
 }
+/// A folder by logical path; one an older release just added, by its own.
 fn folder_id(catalog: &Path, relative: &str) -> Result<i64> {
     Ok(legacy(catalog)?.query_row(
-        "SELECT id FROM folders WHERE relative_path=?",
+        "SELECT f.id FROM folders f LEFT JOIN folder_paths p ON p.folder=f.id
+         WHERE COALESCE(p.path, f.relative_path)=?",
         [relative],
         |r| r.get(0),
     )?)

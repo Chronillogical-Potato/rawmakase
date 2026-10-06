@@ -44,6 +44,10 @@ enum FolderJob {
         folder: PathBuf,
         choices: Vec<FolderLocation>,
     },
+    Clear {
+        root: i64,
+        relative: String,
+    },
 }
 
 /// The Folder locations list, read when the Catalog page shows.
@@ -240,22 +244,24 @@ impl Editor {
             None => {}
         }
     }
+    /// Clears a location, then opens the catalog again as relinking does,
+    /// so a photo open in Develop follows its new path.
     fn clear_folder_location(&mut self, root: i64, relative: &str) {
-        if self.activity.is_busy() || !self.flush() {
+        if !self.ready_for_catalog() {
             return;
         }
-        let Some(library) = &mut self.library else {
+        let Some(catalog) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
             return;
         };
-        let result = library
-            .catalog
-            .clear_folder_location(root, relative)
-            .and_then(|()| library.refresh());
-        self.status = match result {
-            Ok(()) => "Folder location cleared on this computer".into(),
-            Err(e) => format!("Folder location not cleared: {e:#}"),
-        };
-        self.preferences.locations = None;
+        let ctx = self.context.clone();
+        self.folder_job(
+            catalog,
+            FolderJob::Clear {
+                root,
+                relative: relative.into(),
+            },
+            &ctx,
+        );
     }
     /// Asks the pending folder question, then carries out the change.
     pub(super) fn folder_question_window(&mut self, ctx: &egui::Context) {
@@ -395,6 +401,10 @@ impl Editor {
                         cat.relink_root_with(root, &path, overrides)?;
                         (true, Default::default(), Vec::new())
                     }
+                    FolderJob::Clear { root, relative } => {
+                        cat.clear_folder_location(root, &relative)?;
+                        (true, Default::default(), Vec::new())
+                    }
                     FolderJob::Import { folder, choices } => {
                         let added = cat.import_folder(
                             &folder,
@@ -492,7 +502,7 @@ pub(super) fn reopened(
                     l.wait_for_availability();
                     let available = l.available_count();
                     l.message = format!(
-                        "Folder relinked. {available} of {} photos are available.",
+                        "Folder location changed. {available} of {} photos are available.",
                         l.photos.len()
                     );
                     if available == 0 {
