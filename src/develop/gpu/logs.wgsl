@@ -10,7 +10,7 @@ struct LogParams {
 @group(1) @binding(2) var<storage, read> radial: array<f32>;
 @group(1) @binding(3) var<uniform> lp: LogParams;
 
-// `lens::Radial::eval` over `len` knots at `radial[at..]`, then `len` values.
+// `optics::Radial::eval` over `len` knots at `radial[at..]`, then `len` values.
 fn radial_eval(at: u32, len: u32, r: f32) -> f32 {
     var i = 0u;
     while i < len && radial[at + i] <= r {

@@ -3,7 +3,7 @@
 //! FixVignetteRadial (OpcodeList2) and WarpRectilinear (OpcodeList3) lens corrections.
 use crate::{
     camera_profiles::CameraProfile,
-    lens::{LensCorrection, Radial},
+    optics::{LensCorrection, Radial},
     tiff::{Entry, Tiff},
 };
 use std::{collections::BTreeMap, fs::File, path::Path};

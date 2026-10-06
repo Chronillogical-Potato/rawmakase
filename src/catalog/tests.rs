@@ -1187,7 +1187,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
 -> Result<()> {
     let m = crate::raw::Metadata {
         lens_model: "FE 55mm F1.8 ZA".into(),
-        lens: Some(crate::lens::LensCorrection {
+        lens: Some(crate::optics::LensCorrection {
             source: "Sony built-in".into(),
             default_on: false,
             vignetting: None,
