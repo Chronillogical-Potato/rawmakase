@@ -95,7 +95,9 @@ impl SettingGroup {
     ];
     /// Whether this group's settings scale with a preset's Amount, so a preset
     /// holding it may offer one. Adobe's own presets with lens or chromatic
-    /// aberration corrections don't.
+    /// aberration corrections don't. Applying an Amount also refuses some changes
+    /// within groups that do scale, such as adding Point Color swatches: see
+    /// `presets::amount`.
     pub fn scales_with_amount(self) -> bool {
         use SettingGroup::*;
         !matches!(
