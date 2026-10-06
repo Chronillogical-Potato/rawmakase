@@ -68,6 +68,14 @@ pub enum ParameterId {
     ManualDistortion,
     LensVignetteAmount,
     LensVignetteMidpoint,
+    /// Calibration.
+    ShadowTint,
+    RedPrimaryHue,
+    RedPrimarySaturation,
+    GreenPrimaryHue,
+    GreenPrimarySaturation,
+    BluePrimaryHue,
+    BluePrimarySaturation,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -159,7 +167,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 42] = [
+const DESCRIPTORS: [Descriptor; 49] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -287,10 +295,23 @@ const DESCRIPTORS: [Descriptor; 42] = [
     percent(ParameterId::ManualDistortion, "Amount"),
     percent(ParameterId::LensVignetteAmount, "Amount"),
     amount(ParameterId::LensVignetteMidpoint, "Midpoint"),
+    percent(ParameterId::ShadowTint, "Tint"),
+    percent(ParameterId::RedPrimaryHue, "Hue"),
+    percent(ParameterId::RedPrimarySaturation, "Saturation"),
+    percent(ParameterId::GreenPrimaryHue, "Hue"),
+    percent(ParameterId::GreenPrimarySaturation, "Saturation"),
+    percent(ParameterId::BluePrimaryHue, "Hue"),
+    percent(ParameterId::BluePrimarySaturation, "Saturation"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 42] = [
+    /// Calibration's Hue and Saturation of each primary, red to blue.
+    pub const PRIMARIES: [[Self; 2]; 3] = [
+        [Self::RedPrimaryHue, Self::RedPrimarySaturation],
+        [Self::GreenPrimaryHue, Self::GreenPrimarySaturation],
+        [Self::BluePrimaryHue, Self::BluePrimarySaturation],
+    ];
+    pub const ALL: [Self; 49] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -333,6 +354,13 @@ impl ParameterId {
         Self::ManualDistortion,
         Self::LensVignetteAmount,
         Self::LensVignetteMidpoint,
+        Self::ShadowTint,
+        Self::RedPrimaryHue,
+        Self::RedPrimarySaturation,
+        Self::GreenPrimaryHue,
+        Self::GreenPrimarySaturation,
+        Self::BluePrimaryHue,
+        Self::BluePrimarySaturation,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -382,6 +410,13 @@ impl ParameterId {
             Self::ManualDistortion => &mut r.lens_manual_distortion,
             Self::LensVignetteAmount => &mut r.effects.lens_vignette,
             Self::LensVignetteMidpoint => &mut r.effects.lens_vignette_midpoint,
+            Self::ShadowTint => &mut r.effects.shadow_tint,
+            Self::RedPrimaryHue => &mut r.effects.calibration[0][0],
+            Self::RedPrimarySaturation => &mut r.effects.calibration[0][1],
+            Self::GreenPrimaryHue => &mut r.effects.calibration[1][0],
+            Self::GreenPrimarySaturation => &mut r.effects.calibration[1][1],
+            Self::BluePrimaryHue => &mut r.effects.calibration[2][0],
+            Self::BluePrimarySaturation => &mut r.effects.calibration[2][1],
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.

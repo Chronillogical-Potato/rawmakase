@@ -7,9 +7,8 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, TINT_GRADIENT, adjustment_section, name_history_step, parametric_curve_ui,
-    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented,
+    setting_slider, slider, slider_with, switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
@@ -1500,15 +1499,7 @@ impl Editor {
                 .on_hover_text("Neutral-preserving primary adjustments and corrected shadow tint. Older edits keep their saved behavior until enabled.");
             subheading(ui, "Shadows");
             ui.push_id("calibration-shadows", |ui| {
-                slider_with(
-                    ui,
-                    "Tint",
-                    &mut r.effects.shadow_tint,
-                    -1. ..=1.,
-                    0.,
-                    None,
-                    Some(TINT_GRADIENT),
-                );
+                setting_slider(ui, ParameterId::ShadowTint, &mut r.effects.shadow_tint, 0.);
             });
             for (i, name) in ["Red Primary", "Green Primary", "Blue Primary"]
                 .iter()
@@ -1516,14 +1507,10 @@ impl Editor {
             {
                 subheading(ui, name);
                 ui.push_id(("calibration", i), |ui| {
-                    slider(ui, "Hue", &mut r.effects.calibration[i][0], -1. ..=1., 0.);
-                    slider(
-                        ui,
-                        "Saturation",
-                        &mut r.effects.calibration[i][1],
-                        -1. ..=1.,
-                        0.,
-                    );
+                    let primary = ParameterId::PRIMARIES[i];
+                    for id in primary {
+                        setting_slider(ui, id, id.value_mut(r), 0.);
+                    }
                 });
             }
         }) {
