@@ -61,6 +61,13 @@ pub enum ParameterId {
     TransformScale,
     TransformOffsetX,
     TransformOffsetY,
+    /// Lens Corrections: how much of the lens profile's correction applies, 0..2.
+    LensDistortion,
+    LensVignetting,
+    /// Lens Corrections: Manual.
+    ManualDistortion,
+    LensVignetteAmount,
+    LensVignetteMidpoint,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -130,6 +137,15 @@ const fn amount(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
+/// A 0..200 slider stored as 0..2, where 100 applies a profile's correction as it is.
+const fn profile_amount(id: ParameterId, label: &'static str) -> Descriptor {
+    Descriptor {
+        interactive: 0. ..=2.,
+        valid: 0. ..=2.,
+        ..amount(id, label)
+    }
+}
+
 /// A −100..100 slider stored as −1..1.
 const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     Descriptor {
@@ -143,7 +159,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 37] = [
+const DESCRIPTORS: [Descriptor; 42] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -266,10 +282,15 @@ const DESCRIPTORS: [Descriptor; 37] = [
     },
     percent(ParameterId::TransformOffsetX, "Offset X"),
     percent(ParameterId::TransformOffsetY, "Offset Y"),
+    profile_amount(ParameterId::LensDistortion, "Distortion"),
+    profile_amount(ParameterId::LensVignetting, "Vignetting"),
+    percent(ParameterId::ManualDistortion, "Amount"),
+    percent(ParameterId::LensVignetteAmount, "Amount"),
+    amount(ParameterId::LensVignetteMidpoint, "Midpoint"),
 ];
 
 impl ParameterId {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 42] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -307,6 +328,11 @@ impl ParameterId {
         Self::TransformScale,
         Self::TransformOffsetX,
         Self::TransformOffsetY,
+        Self::LensDistortion,
+        Self::LensVignetting,
+        Self::ManualDistortion,
+        Self::LensVignetteAmount,
+        Self::LensVignetteMidpoint,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -351,6 +377,11 @@ impl ParameterId {
             Self::TransformScale => &mut r.transform.scale,
             Self::TransformOffsetX => &mut r.transform.offset_x,
             Self::TransformOffsetY => &mut r.transform.offset_y,
+            Self::LensDistortion => &mut r.lens_distortion,
+            Self::LensVignetting => &mut r.lens_vignetting,
+            Self::ManualDistortion => &mut r.lens_manual_distortion,
+            Self::LensVignetteAmount => &mut r.effects.lens_vignette,
+            Self::LensVignetteMidpoint => &mut r.effects.lens_vignette_midpoint,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.
