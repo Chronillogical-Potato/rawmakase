@@ -420,8 +420,14 @@ fn reserved(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     matches!(name.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ["COM", "LPT"].iter().any(|device| {
-            name.strip_prefix(device)
-                .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+            // A digit, or the superscript ¹ ² ³ Windows reserves too.
+            name.strip_prefix(device).is_some_and(|n| {
+                let mut chars = n.chars();
+                matches!(
+                    (chars.next(), chars.next()),
+                    (Some('0'..='9' | '¹' | '²' | '³'), None)
+                )
+            })
         })
 }
 
@@ -526,6 +532,8 @@ mod tests {
         assert_eq!(s.file_name_for(source, &at).0, "con_.jpg");
         s.custom_text = "CON.txt".into();
         assert_eq!(s.file_name_for(source, &at).0, "CON_.txt.jpg");
+        s.custom_text = "lpt².txt".into();
+        assert_eq!(s.file_name_for(source, &at).0, "lpt²_.txt.jpg");
         // An empty custom name is the file's own.
         s.custom_text = " ".into();
         s.naming = Some(Naming::CustomName);
