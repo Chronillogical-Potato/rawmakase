@@ -314,6 +314,14 @@ impl Library {
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
     }
+    /// Why photo `id` can't be exported, if it can't: what keeps Develop from
+    /// opening it.
+    /// The file is looked at directly: the availability scan counts every photo
+    /// as there until it has checked.
+    pub(in crate::app) fn export_refusal(&self, id: i64) -> Option<Refusal> {
+        let photo = self.photo(id)?;
+        develop_refusal(photo, photo.path.is_file())
+    }
     pub fn available_count(&self) -> usize {
         self.availability.count(&self.photos)
     }

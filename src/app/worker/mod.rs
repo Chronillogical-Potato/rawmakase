@@ -154,7 +154,11 @@ pub enum Event {
     /// The renderer recovered from a failure and no longer uses the textures its
     /// previews were presented into: stop drawing them, then drop this to free them.
     RendererReset(RetiredTextures),
-    Exported(String),
+    /// A batch of the export queue finished: each photo's outcome, in order.
+    BatchExported {
+        ticket: u64,
+        outcomes: Vec<crate::export::batch::Outcome>,
+    },
     /// Develop's Reference View photo, developed (half-size, then full), or why not.
     Reference {
         ticket: u64,

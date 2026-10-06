@@ -4349,6 +4349,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
             photo.edit = Edit::Shown {
                 recipe: Box::new(editor.document.recipe.clone()),
                 unsaved: true,
+                file: Some(crate::storage::Identity::read(path)?),
             };
         }
         let settings = settings(&format!("batch/{i}"));

@@ -39,8 +39,14 @@ pub enum Edit {
     /// As the catalog stores it, worked out when the photo's turn comes, as
     /// Develop would open it (`catalog::resolve`).
     Catalog(EditRecord),
-    /// The open photo's edit as shown; `unsaved` when saving it failed.
-    Shown { recipe: Box<Recipe>, unsaved: bool },
+    /// The open photo's edit as shown; `unsaved` when saving it failed. `file` is
+    /// the photo's file when Export was pressed: a file replaced since is not
+    /// exported with an edit made for another.
+    Shown {
+        recipe: Box<Recipe>,
+        unsaved: bool,
+        file: Option<crate::storage::Identity>,
+    },
 }
 
 impl BatchPhoto {
@@ -120,8 +126,8 @@ impl std::fmt::Display for Unplanned {
 #[derive(Clone, Debug, Default)]
 struct Reservations {
     /// Names already in each folder when the batch was planned, folded, with the
-    /// file's own name.
-    on_disk: HashMap<PathBuf, HashMap<String, OsString>>,
+    /// files' own names: more than one on a case-sensitive volume.
+    on_disk: HashMap<PathBuf, HashMap<String, Vec<OsString>>>,
     /// Names given to the batch's own files.
     batch: HashMap<PathBuf, HashSet<String>>,
 }
@@ -129,25 +135,26 @@ fn fold(name: &std::ffi::OsStr) -> String {
     name.to_string_lossy().to_lowercase()
 }
 impl Reservations {
-    fn folder(&mut self, dir: &Path) -> &HashMap<String, OsString> {
+    fn folder(&mut self, dir: &Path) -> &HashMap<String, Vec<OsString>> {
         self.on_disk.entry(dir.to_path_buf()).or_insert_with(|| {
-            std::fs::read_dir(dir)
-                .map(|entries| {
-                    entries
-                        .flatten()
-                        .map(|e| (fold(&e.file_name()), e.file_name()))
-                        .collect()
-                })
-                .unwrap_or_default()
+            let mut names: HashMap<String, Vec<OsString>> = HashMap::new();
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                names
+                    .entry(fold(&entry.file_name()))
+                    .or_default()
+                    .push(entry.file_name());
+            }
+            names
         })
     }
-    /// The file already in `path`'s folder under its name in any case, as it is
-    /// spelled there.
+    /// The file already in `path`'s folder under its name, as it is spelled there:
+    /// the exact name when there is one, else the name in other case.
     fn existing(&mut self, path: &Path) -> Option<PathBuf> {
-        let name = fold(path.file_name().unwrap_or_default());
+        let name = path.file_name().unwrap_or_default();
         let dir = crate::storage::parent_dir(path);
-        let found = self.folder(dir).get(&name)?.clone();
-        Some(dir.join(found))
+        let found = self.folder(dir).get(&fold(name))?;
+        let spelled = found.iter().find(|n| *n == name).or(found.first())?;
+        Some(dir.join(spelled))
     }
     fn on_disk(&mut self, path: &Path) -> bool {
         self.existing(path).is_some()
@@ -173,7 +180,9 @@ impl Reservations {
         self.on_disk
             .entry(dir)
             .or_default()
-            .insert(fold(name), name.to_os_string());
+            .entry(fold(name))
+            .or_default()
+            .push(name.to_os_string());
     }
     /// The first of `path`, "name-2", "name-3"… that is neither in the folder nor
     /// the batch's, reserved for the batch.
@@ -452,13 +461,25 @@ fn render(
             };
             (resolved.recipe, notes)
         }
-        Edit::Shown { recipe, unsaved } => (
-            (**recipe).clone(),
-            unsaved
-                .then(|| "exported using unsaved adjustments".to_string())
-                .into_iter()
-                .collect(),
-        ),
+        Edit::Shown {
+            recipe,
+            unsaved,
+            file,
+        } => {
+            if let Some(file) = file {
+                ensure!(
+                    crate::storage::Identity::read(&photo.source)? == *file,
+                    "the photo's file changed since it was shown; open it again to export it"
+                );
+            }
+            (
+                (**recipe).clone(),
+                unsaved
+                    .then(|| "exported using unsaved adjustments".to_string())
+                    .into_iter()
+                    .collect(),
+            )
+        }
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     let image = Arc::new(job::decode_full(raw, &photo.source, cancel)?);
@@ -505,15 +526,26 @@ fn commit(
     }
     let mut target = planned.target.clone();
     if planned.write == Write::Overwrite {
-        // The file as it is spelled now, should it have been renamed meanwhile.
-        let target = spelled_otherwise(&target).unwrap_or(target);
+        // The file as it is spelled now, should it have been renamed meanwhile; the
+        // exact name first.
+        let target = if exactly(&target) {
+            target
+        } else {
+            spelled_otherwise(&target).unwrap_or(target)
+        };
         overwrite(staged, &target, &photo.source)?;
         return Ok((target, None));
     }
     loop {
         // A file under the name in other case is the same name here; an exact-name
         // check alone misses it on a case-sensitive volume.
-        let appeared = match spelled_otherwise(&target) {
+        // The exact name first, then the name in other case.
+        let found = if exactly(&target) {
+            Some(target.clone())
+        } else {
+            spelled_otherwise(&target)
+        };
+        let appeared = match found {
             Some(existing) => existing,
             None => match staged.persist_noclobber(&target) {
                 Ok(_) => {
@@ -544,6 +576,18 @@ fn commit(
             }
         }
     }
+}
+
+/// Whether `path`'s folder has a file named exactly as `path` is, case included.
+fn exactly(path: &Path) -> bool {
+    let (Some(name), dir) = (path.file_name(), crate::storage::parent_dir(path)) else {
+        return false;
+    };
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| e.file_name() == name)
 }
 
 /// The file in `path`'s folder whose name is `path`'s in other case, if any.

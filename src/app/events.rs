@@ -271,9 +271,7 @@ impl Editor {
                 Event::DialogClosed => {
                     self.activity.finish_dialog();
                 }
-                Event::Exported(s) => {
-                    self.status = s;
-                }
+                Event::BatchExported { ticket, outcomes } => self.batch_exported(ticket, outcomes),
                 _ => {}
             }
         }
@@ -351,6 +349,7 @@ impl Editor {
             status,
             ..
         } = header;
+        self.document.file = crate::storage::Identity::read(&p).ok();
         self.document.metadata = Some(m);
         self.document.recipe = r;
         self.document.export = ex;
