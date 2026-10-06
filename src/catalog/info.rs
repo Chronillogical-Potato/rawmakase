@@ -60,6 +60,23 @@ impl Catalog {
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?)
     }
+    /// The cameras the catalog's RAW photos were taken with, leaving out
+    /// cameras seen only in JPEGs, TIFFs and videos.
+    pub fn raw_cameras(&self) -> Result<Vec<String>> {
+        let mut query = self.db.prepare(
+            "SELECT i.camera, p.filename FROM photo_info i
+             JOIN photos p ON p.id = i.photo
+             WHERE i.camera IS NOT NULL AND i.camera != ''",
+        )?;
+        let mut cameras = std::collections::BTreeSet::new();
+        for row in query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (camera, filename) = row?;
+            if crate::storage::is_raw(std::path::Path::new(&filename)) {
+                cameras.insert(camera);
+            }
+        }
+        Ok(cameras.into_iter().collect())
+    }
     /// Masters with no info yet, whose files may have it.
     pub fn photos_without_info(&self) -> Result<Vec<i64>> {
         Ok(self

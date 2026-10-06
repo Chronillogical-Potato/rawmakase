@@ -422,6 +422,12 @@ impl Preset {
         if settings.keeps_original(super::write::ORIGINAL_SATURATION) {
             r.saturation_model = crate::develop::color_mixer::SaturationModel::Original;
         }
+        if settings.values.contains_key("Vibrance") {
+            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
+        }
+        if settings.keeps_original(super::write::ORIGINAL_VIBRANCE) {
+            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Original;
+        }
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
         settings.assign("SharpenDetail", &mut r.sharpening_detail, 0.01, 0., 1.)?;

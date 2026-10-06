@@ -1344,3 +1344,33 @@ fn lightroom_15_controls_at_rest_are_not_reported() -> Result<()> {
     }
     Ok(())
 }
+#[test]
+fn raw_cameras_leave_out_cameras_seen_only_in_jpegs() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in ["a.ARW", "b.JPG", "c.jpg"] {
+        std::fs::write(folder.join(name), name)?;
+    }
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    cat.add_folder(&folder)?;
+    let info = |camera: &str| {
+        Some(PhotoInfo {
+            camera: Some(camera.into()),
+            ..Default::default()
+        })
+    };
+    let infos: Vec<_> = cat
+        .photos()?
+        .iter()
+        .map(|p| match p.filename.as_str() {
+            "a.ARW" => (p.id, info("ILCE-7M2")),
+            "b.JPG" => (p.id, info("ILCE-7M2")),
+            _ => (p.id, info("iPhone 8")),
+        })
+        .collect();
+    cat.fill_photo_info(&infos)?;
+    assert_eq!(cat.cameras()?, ["ILCE-7M2", "iPhone 8"]);
+    assert_eq!(cat.raw_cameras()?, ["ILCE-7M2"]);
+    Ok(())
+}

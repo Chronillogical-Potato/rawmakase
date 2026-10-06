@@ -116,6 +116,11 @@ pub enum Event {
         analysed: Box<crate::develop::Recipe>,
         result: Result<Option<f32>, String>,
     },
+    /// The setup assistant's scan for cameras, profiles and presets.
+    OnboardingScanned {
+        generation: u64,
+        found: Box<crate::app::onboarding::Found>,
+    },
     XmpLibrary {
         scan: u64,
         library: Arc<crate::presets::Library>,

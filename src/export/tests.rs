@@ -719,7 +719,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         Recipe,
         calibration::CalibrationModel,
         clarity::ClarityModel,
-        color_mixer::{MixerModel, SaturationModel},
+        color_mixer::{MixerModel, SaturationModel, VibranceModel},
         color_noise::NoiseModel,
         effects::{GrainModel, LensVignetteModel},
         sharpening::SharpeningModel,
@@ -756,6 +756,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     old.effects.calibration[0][0] = 0.3;
     old.noise_chroma = 0.3;
     old.saturation = -0.3;
+    old.vibrance = 0.4;
     let back = read(&old)?;
     assert_eq!(back.noise_model, NoiseModel::Original);
     assert_eq!(back.grain_model, GrainModel::Original);
@@ -765,6 +766,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.mixer_model, MixerModel::Original);
     assert_eq!(back.calibration_model, CalibrationModel::Original);
     assert_eq!(back.saturation_model, SaturationModel::Original);
+    assert_eq!(back.vibrance_model, VibranceModel::Original);
     // Also onto a new photo's settings, which start on the measured operators.
     let packet = crate::xmp::write::packet(&old, &m, &photo);
     let fresh = Recipe::with_profiles(&m, &[]);
@@ -786,11 +788,12 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         calibration_model: CalibrationModel::Measured,
         noise_model: NoiseModel::Measured,
         saturation_model: SaturationModel::Gray,
+        vibrance_model: VibranceModel::Chart,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
     assert!(!packet.contains("RAWmakaseOriginal"));
-    assert!(packet.contains(r#"crs:RAWmakaseMarkers="2""#), "{packet}");
+    assert!(packet.contains(r#"crs:RAWmakaseMarkers="3""#), "{packet}");
     let back = read(&measured)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
@@ -799,5 +802,6 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.calibration_model, CalibrationModel::Measured);
     assert_eq!(back.noise_model, NoiseModel::Measured);
     assert_eq!(back.saturation_model, SaturationModel::Gray);
+    assert_eq!(back.vibrance_model, VibranceModel::Chart);
     Ok(())
 }

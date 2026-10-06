@@ -77,6 +77,74 @@ impl SaturationModel {
     }
 }
 
+/// Which tables render the Vibrance slider.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VibranceModel {
+    /// Tables measured on photos at ±50 and extrapolated: what recipes saved before
+    /// the chart tables keep, so they render as they did.
+    #[default]
+    Original,
+    /// The photo tables up to ±50, then Camera Raw 18.7's change at ±75 and ±100
+    /// measured on the dense synthetic chart, interpolated between
+    /// (docs/color-mixer.md#vibrance).
+    Chart,
+}
+impl VibranceModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
+    }
+}
+
+/// `VibranceModel::Chart`'s slider positions, each with a grid in
+/// `vibrance_chart.bin`: hue shift, log2 saturation and log2 value factors. The
+/// ±25 and ±50 grids are the photo tables there; the ±75 and ±100 ones the chart's.
+const VIBRANCE_KNOTS: [f32; 8] = [-1., -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.];
+static VIBRANCE_CHART: &[u8] = include_bytes!("vibrance_chart.bin");
+
+fn vibrance_value(knot: usize, channel: usize, cell: usize) -> f32 {
+    let i = 2 * (knot * TABLE + channel * CELLS + cell);
+    i16::from_le_bytes([VIBRANCE_CHART[i], VIBRANCE_CHART[i + 1]]) as f32 * SCALE
+}
+
+/// The chart grids around Vibrance `v` and their weights: linear between the
+/// measured positions, and toward no change at 0.
+fn vibrance_knots(v: f32) -> Vec<(usize, f32)> {
+    let v = v.clamp(-1., 1.);
+    let i = VIBRANCE_KNOTS.partition_point(|k| *k < v);
+    let below = i.checked_sub(1).map(|k| (k, VIBRANCE_KNOTS[k]));
+    let above = (i < VIBRANCE_KNOTS.len()).then(|| (i, VIBRANCE_KNOTS[i]));
+    // Between −25 and +25 the other end is no change at all.
+    let (lo, hi) = match (below, above) {
+        (Some(b), Some(a)) if b.1 < 0. && a.1 > 0. => {
+            return if v < 0. {
+                vec![(b.0, v / b.1)]
+            } else {
+                vec![(a.0, v / a.1)]
+            };
+        }
+        (Some(b), Some(a)) => (b, a),
+        (Some(b), None) => return vec![(b.0, 1.)],
+        (None, Some(a)) => return vec![(a.0, 1.)],
+        (None, None) => return Vec::new(),
+    };
+    let t = (v - lo.1) / (hi.1 - lo.1);
+    [(lo.0, 1. - t), (hi.0, t)]
+        .into_iter()
+        .filter(|(_, w)| *w != 0.)
+        .collect()
+}
+
+/// Adds Vibrance `v`'s chart grid to `grid`.
+fn add_vibrance(grid: &mut [[f32; 3]], v: f32) {
+    for (knot, w) in vibrance_knots(v) {
+        for (cell, d) in grid.iter_mut().enumerate() {
+            for (c, d) in d.iter_mut().enumerate() {
+                *d += w * vibrance_value(knot, c, cell);
+            }
+        }
+    }
+}
+
 /// Where `SaturationModel::Gray` stops scaling the measured −50 table and starts
 /// fading to gray.
 const GRAY_FROM: f32 = -0.5;
@@ -124,8 +192,11 @@ impl ColorMixer {
         } else {
             r.saturation
         };
+        // Up to ±50 the chart model is the photo tables, scaled as before.
+        let chart_vibrance = r.vibrance_model == VibranceModel::Chart && r.vibrance.abs() > 0.5;
+        let vibrance = if chart_vibrance { 0. } else { r.vibrance };
         // Measured at ±50: positions beyond extrapolate linearly.
-        for (i, s) in [saturation, r.vibrance].into_iter().enumerate() {
+        for (i, s) in [saturation, vibrance].into_iter().enumerate() {
             if s != 0. {
                 active.push((48 + i * 2 + usize::from(s > 0.), (s.abs() * 2.).min(2.)));
             }
@@ -135,7 +206,7 @@ impl ColorMixer {
         } else {
             0.
         };
-        if active.is_empty() {
+        if active.is_empty() && !chart_vibrance {
             return None;
         }
         // While colors fade to gray, the other sliders still set its brightness.
@@ -144,10 +215,16 @@ impl ColorMixer {
             .copied()
             .filter(|(t, _)| *t != 48 && *t != 49)
             .collect();
-        let gray_source =
-            (saturation_gray > 0. && !others.is_empty()).then(|| grid(model, &others));
+        let with_vibrance = |mut g: Vec<[f32; 3]>| {
+            if chart_vibrance {
+                add_vibrance(&mut g, r.vibrance);
+            }
+            g
+        };
+        let gray_source = (saturation_gray > 0. && (!others.is_empty() || chart_vibrance))
+            .then(|| with_vibrance(grid(model, &others)));
         Some(Self {
-            delta: grid(model, &active),
+            delta: with_vibrance(grid(model, &active)),
             saturation_gray,
             gray_source,
         })
@@ -383,6 +460,47 @@ mod tests {
         // The photo tables' extrapolated −100 leaves some color.
         let old = at(SaturationModel::Original, -1.);
         assert!(old[0] - old[2] > 0.02, "{old:?}");
+    }
+    #[test]
+    fn chart_vibrance_interpolates_its_measured_positions() {
+        assert!(vibrance_knots(0.).iter().all(|(_, w)| *w == 0.));
+        assert_eq!(vibrance_knots(-1.), vec![(0, 1.)]);
+        assert_eq!(vibrance_knots(0.5), vec![(5, 1.)]);
+        let between = vibrance_knots(0.6);
+        assert_eq!(between.len(), 2);
+        assert!((between[0].1 - 0.6).abs() < 1e-6 && (between[1].1 - 0.4).abs() < 1e-6);
+        assert_eq!(vibrance_knots(-0.1), vec![(3, 0.4)]);
+        let at = |vibrance_model, vibrance| {
+            ColorMixer::new(&Recipe {
+                vibrance_model,
+                vibrance,
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let skin = [0.6, 0.35, 0.25];
+        let sat = |p: [f32; 3]| {
+            let max = p.iter().fold(0f32, |a, b| a.max(*b));
+            (max - p.iter().fold(1f32, |a, b| a.min(*b))) / max
+        };
+        // Vibrance −100 removes most of a color's saturation, as Camera Raw does;
+        // the photo tables, extrapolated from −50, leave far more.
+        let chart = sat(at(VibranceModel::Chart, -1.).apply(skin));
+        let photo = sat(at(VibranceModel::Original, -1.).apply(skin));
+        assert!(chart < sat(skin) * 0.4, "{chart} {photo}");
+        assert!(
+            at(VibranceModel::Chart, 0.7)
+                .apply([0.2; 3])
+                .iter()
+                .all(|v| (v - 0.2).abs() < 2e-3)
+        );
+        // Up to ±50 it is the photo tables exactly, between their measured positions too.
+        for v in [-0.5, -0.4, -0.1, 0.3, 0.5] {
+            assert_eq!(
+                at(VibranceModel::Chart, v).delta,
+                at(VibranceModel::Original, v).delta
+            );
+        }
     }
     #[test]
     fn chart_luminance_follows_camera_raws_slider_curve() {
