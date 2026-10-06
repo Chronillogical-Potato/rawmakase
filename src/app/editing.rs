@@ -133,11 +133,7 @@ impl Editor {
         // Presets panel is open.
         self.end_stale_preset_amount();
         if edited {
-            self.sync_command_revision();
-            self.document.save.mark_changed();
-            // A conversion waiting for the photo lapses with any other edit, Undo
-            // included.
-            self.document.pending_treatment = None;
+            self.edited();
         }
         if edited || frame.modes != self.render_modes() || frame.overlay != self.overlay() {
             self.schedule();
@@ -145,6 +141,30 @@ impl Editor {
         if frame.export != (self.document.export.quality, self.document.export.max_edge) {
             self.document.save.mark_changed();
         }
+    }
+}
+
+impl Editor {
+    /// Records an edit made outside an edit frame (a preset loaded from a file, a
+    /// result computed off the UI thread) as one History step, `step` or one named
+    /// for what changed, with what an edit frame does after a slider moves.
+    pub(super) fn commit_edit(&mut self, before: Recipe, step: Option<super::history::Step>) {
+        turn_on_edited_panels(&before, &mut self.document.recipe);
+        if let Some(step) = step {
+            self.document.history.label(step);
+        }
+        if self.document.history.record(before, &self.document.recipe) {
+            self.edited();
+        }
+        self.end_stale_preset_amount();
+        self.schedule();
+    }
+    /// What any change to the photo's settings marks, Undo included.
+    fn edited(&mut self) {
+        self.sync_command_revision();
+        self.document.save.mark_changed();
+        // A conversion waiting for the photo lapses with any other edit.
+        self.document.pending_treatment = None;
     }
 }
 

@@ -426,7 +426,7 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     set(&mut e, &ctx, exposure).unwrap();
     let old = e.document.recipe.clone();
     e.document.recipe.preset_name = "Example".into();
-    e.history(old);
+    e.commit_edit(old, None);
     assert_eq!(e.document.history.steps().0.last().unwrap().name, "Preset");
     set(&mut e, &ctx, 100.).unwrap();
     e.execute_command(
@@ -438,7 +438,7 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     e.finish_gesture();
     let old = e.document.recipe.clone();
     e.document.recipe.preset_name = "Another".into();
-    e.history(old);
+    e.commit_edit(old, None);
     assert_eq!(e.document.history.steps().0.last().unwrap().name, "Preset");
 }
 

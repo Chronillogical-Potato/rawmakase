@@ -286,9 +286,7 @@ impl Editor {
                     &mut self.document.recipe,
                 );
                 let (name, value) = weights.step(&self.document.recipe);
-                self.document.history.label(Step::new(name, value));
-                self.history(old);
-                self.schedule();
+                self.commit_edit(old, Some(Step::new(name, value)));
             }
         }
     }

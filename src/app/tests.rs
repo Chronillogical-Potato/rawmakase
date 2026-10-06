@@ -389,7 +389,7 @@ fn history_snapshot_undo_and_redo() {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.exposure = 2.;
-    e.history(original.clone());
+    e.commit_edit(original.clone(), None);
     assert!(e.document.history.can_undo());
     e.undo();
     assert_eq!(e.document.recipe, original);
@@ -404,7 +404,7 @@ fn undo_and_redo_keys_work_while_a_button_has_focus() {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.exposure = 2.;
-    e.history(original.clone());
+    e.commit_edit(original.clone(), None);
     // A clicked button or the tone curve keeps focus; that must not block shortcuts.
     let frame = |input, e: &mut Editor| {
         let mut output = ctx.run_ui(input, |ui| {
@@ -734,7 +734,7 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     for exposure in [0.5, 1.] {
         let before = editor.document.recipe.clone();
         editor.document.recipe.exposure = exposure;
-        editor.history(before);
+        editor.commit_edit(before, None);
     }
     assert!(editor.flush());
     // Another photo, or a restart, starts a new document.
@@ -1791,7 +1791,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.recipe.clone();
     e.document.recipe.upright.mode = UprightMode::Vertical;
-    e.history(original);
+    e.commit_edit(original, None);
     // The analysis arrives after the click that chose the mode.
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.recipe.clone();
@@ -2080,7 +2080,7 @@ fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()>
     e.document.path = Some(d.path().join("photos/a.RAF"));
     let original = e.document.recipe.clone();
     e.document.recipe.exposure = 1.;
-    e.history(original.clone());
+    e.commit_edit(original.clone(), None);
     e.library
         .as_mut()
         .unwrap()
@@ -2104,7 +2104,7 @@ fn undoing_a_history_click_returns_to_the_exact_step() {
     for exposure in [0.25, 0.5, 1.] {
         let before = e.document.recipe.clone();
         e.document.recipe.exposure = exposure;
-        e.history(before);
+        e.commit_edit(before, None);
     }
     // A click on the first state jumps three steps back as one command.
     assert!(e.document.history.jump(0, &mut e.document.recipe));
@@ -2143,12 +2143,12 @@ fn undoing_a_history_click_after_a_new_branch_restores_its_own_state() {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let before = e.document.recipe.clone();
     e.document.recipe.exposure = 0.5;
-    e.history(before);
+    e.commit_edit(before, None);
     // Click the opened state, then edit: History branches.
     assert!(e.document.history.jump(0, &mut e.document.recipe));
     let before = e.document.recipe.clone();
     e.document.recipe.exposure = 1.;
-    e.history(before);
+    e.commit_edit(before, None);
     e.undo();
     assert_eq!(e.document.recipe.exposure, 0.);
     // The same step count now leads to the other branch; the click's own
@@ -4508,4 +4508,52 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
     assert_eq!(value, 6.);
     draw(&mut value, vec![over, key(egui::Key::ArrowDown)], 3.);
     assert!(5. < value && value < 6., "{value}");
+}
+#[test]
+fn a_swatch_added_while_color_mixer_is_off_turns_it_on() {
+    use crate::develop::panels::{Panel, PanelState};
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    editor.document.recipe.reference_curves = true;
+    editor.document.recipe.reference_color = true;
+    editor
+        .document
+        .recipe
+        .panels
+        .set(Panel::ColorMixer, PanelState::Off);
+    editor.view.mixer_tab = state::MixerTab::PointColor;
+    editor.view.toggle(state::Tool::PointColor);
+    editor.start_point_color_sample(0.7, 0.5);
+    let start = std::time::Instant::now();
+    while editor.document.point_color_pick.is_running() {
+        assert!(start.elapsed().as_secs() < 60, "sampling did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        editor.events(&ctx);
+    }
+    assert_eq!(editor.document.recipe.point_colors.len(), 1);
+    // As a slider moved in a switched-off panel does, so the swatch shows.
+    assert_eq!(
+        editor.document.recipe.panels.state(Panel::ColorMixer),
+        PanelState::On
+    );
+    editor.undo();
+    assert_eq!(
+        editor.document.recipe.panels.state(Panel::ColorMixer),
+        PanelState::Off
+    );
+}
+#[test]
+fn auto_ends_a_conversion_waiting_for_the_photo() {
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), false);
+    in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
+    assert!(editor.document.pending_treatment.is_some());
+    let mut auto = editor.document.recipe.clone();
+    auto.exposure = 1.;
+    editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
+    // Any other edit drops the waiting conversion, as an edit made with a slider does.
+    assert_eq!(editor.document.recipe.exposure, 1.);
+    assert!(editor.document.pending_treatment.is_none());
 }

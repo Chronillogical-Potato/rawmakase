@@ -468,11 +468,7 @@ impl super::Editor {
         }
         let old = self.document.recipe.clone();
         self.document.recipe.straighten = angle;
-        self.document
-            .history
-            .label(super::history::Step::new("Straighten", "Auto"));
-        self.history(old);
-        self.schedule();
+        self.commit_edit(old, Some(super::history::Step::new("Straighten", "Auto")));
     }
 }
 

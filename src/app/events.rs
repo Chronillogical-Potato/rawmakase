@@ -39,9 +39,9 @@ impl Editor {
                         Ok(r) => {
                             let r = crate::presets::applied_to(r, &self.document.recipe);
                             let old = std::mem::replace(&mut self.document.recipe, r);
-                            self.history(old);
+                            // Before the step is taken, as the Presets panel does.
                             self.ensure_upright();
-                            self.schedule();
+                            self.commit_edit(old, None);
                         }
                         Err(e) => self.status = e.to_string(),
                     }

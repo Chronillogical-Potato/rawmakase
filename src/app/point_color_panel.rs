@@ -104,11 +104,10 @@ impl super::Editor {
             Ok(i) => {
                 self.view.point_color.selected = Some(i);
                 self.view.tool = Tool::None;
-                self.document
-                    .history
-                    .label(super::history::Step::new("Point Color", "Add Swatch"));
-                self.history(old);
-                self.schedule();
+                self.commit_edit(
+                    old,
+                    Some(super::history::Step::new("Point Color", "Add Swatch")),
+                );
             }
             Err(refusal) => self.status = refusal.message().into(),
         }

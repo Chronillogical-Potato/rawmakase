@@ -117,8 +117,6 @@ impl Editor {
                 Step::new("White Balance", "Auto")
             }
         };
-        self.document.history.label(step);
-        self.history(old);
-        self.schedule();
+        self.commit_edit(old, Some(step));
     }
 }

@@ -291,7 +291,7 @@ mod tests {
         e.document.recipe = Recipe::default();
         let before = e.document.recipe.clone();
         e.snapshot_action(SnapshotAction::Apply(id));
-        e.history(before);
+        e.commit_edit(before, None);
         assert_eq!(e.document.recipe.exposure, 0.8);
         let (steps, _) = e.document.history.steps();
         assert_eq!(steps.last().unwrap().name, "Snapshot: Bright");
