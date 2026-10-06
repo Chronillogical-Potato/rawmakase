@@ -71,16 +71,28 @@ impl Computer {
 }
 /// The name of the file holding the computer id. On Linux the data folder
 /// can be in a home directory several computers share (over NFS, or a synced
-/// XDG_DATA_HOME), so each machine, as /etc/machine-id tells them apart,
-/// keeps its own.
+/// XDG_DATA_HOME), so each machine, as /etc/machine-id (else its host
+/// name) tells them apart, keeps its own.
 fn id_file() -> String {
     let machine = cfg!(target_os = "linux")
         .then(|| std::fs::read_to_string("/etc/machine-id").ok())
         .flatten()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()));
+    // Without one, the host name still tells machines sharing a home apart.
+    let host = || {
+        let name: String = host_name()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        (!name.is_empty()).then_some(name)
+    };
     match machine {
         Some(machine) => format!("computer-id-{machine}"),
+        None if cfg!(target_os = "linux") => match host() {
+            Some(host) => format!("computer-id-host-{host}"),
+            None => "computer-id".into(),
+        },
         None => "computer-id".into(),
     }
 }
