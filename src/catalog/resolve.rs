@@ -8,8 +8,8 @@
 //! a step of its own: [`crate::develop::upright::complete`].
 use super::{Catalog, SavedEdit, edits::local_edits};
 use crate::{
-    camera_profiles::CameraProfile, develop::Recipe, develop::defaults::DevelopDefaults,
-    export::ExportOptions, raw::Metadata, storage::Identity,
+    camera_profiles::CameraProfile, develop::Recipe, export::ExportOptions, raw::Metadata,
+    raw_defaults::DevelopDefaults, storage::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};
@@ -218,7 +218,7 @@ mod tests {
         let (_d, c, photos) = catalog()?;
         let metadata = crate::raw::Raw::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
-        let defaults = crate::develop::defaults::brighter_defaults();
+        let defaults = crate::raw_defaults::brighter_defaults();
         let resolve_photo = |(id, path): &(i64, std::path::PathBuf)| {
             resolve(&c.edit_record(*id)?, path, &metadata, &profiles, &defaults)
         };

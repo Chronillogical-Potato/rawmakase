@@ -21,6 +21,7 @@ files should preserve.
 | `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement, plus profile selection | `embedded.rs`, `lcp.rs`, `auto_ca.rs`, `choice.rs` |
 | `develop` | Validated recipes, geometry, color processing, curves, effects, local adjustments, detail rendering, the GPU port and output pixel buffers | `recipe.rs`, `pipeline.rs`, `quality.rs`, `geometry.rs`, `gpu/` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
+| `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
 | `storage` | RAW identity checks, application paths and atomic JSON writes. Saved-recipe versions are `develop::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |

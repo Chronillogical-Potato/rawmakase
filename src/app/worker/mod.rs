@@ -213,7 +213,7 @@ pub struct LoadJob {
     /// The photo to decode ahead of time once this one is fully developed.
     pub prefetch: Option<Prefetch>,
     /// What the photo starts from when it has no edit.
-    pub defaults: Arc<crate::develop::defaults::DevelopDefaults>,
+    pub defaults: Arc<crate::raw_defaults::DevelopDefaults>,
     /// The demosaic of the full-size decode and of its decode-cache key.
     pub demosaic: crate::raw::Demosaic,
 }

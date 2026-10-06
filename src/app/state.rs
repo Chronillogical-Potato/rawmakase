@@ -41,7 +41,7 @@ pub(super) struct Document {
     pub(super) origin: EditOrigin,
     /// The raw defaults for this photo, once its profiles are known: what Reset
     /// returns to and Before shows.
-    pub(super) defaults: Option<crate::develop::defaults::Resolved>,
+    pub(super) defaults: Option<crate::raw_defaults::Resolved>,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
     /// The Auto estimate for this photo; dropping it with the document cancels it.

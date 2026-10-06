@@ -58,11 +58,8 @@ pub struct Session {
     #[serde(default)]
     pub crop_guides: CropGuideLayout,
     /// Preferences > Raw Defaults: what photos without an edit start from.
-    #[serde(
-        default,
-        deserialize_with = "crate::develop::defaults::lenient_settings"
-    )]
-    pub raw_defaults: crate::develop::defaults::RawDefaults,
+    #[serde(default, deserialize_with = "crate::raw_defaults::lenient_settings")]
+    pub raw_defaults: crate::raw_defaults::RawDefaults,
 }
 
 /// The Crop tool's guide overlay, which way round it is and when it shows, by stable
@@ -106,7 +103,7 @@ pub fn load_session() -> Session {
 #[cfg(test)]
 mod raw_defaults_tests {
     use super::Session;
-    use crate::develop::defaults::{DefaultChoice, RawDefaults};
+    use crate::raw_defaults::{DefaultChoice, RawDefaults};
 
     #[test]
     fn raw_defaults_survive_the_session_and_unreadable_ones_reset() {
