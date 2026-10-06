@@ -76,6 +76,16 @@ pub enum ParameterId {
     GreenPrimarySaturation,
     BluePrimaryHue,
     BluePrimarySaturation,
+    /// Tone Curve: the parametric curve's regions, darkest first.
+    ParametricShadows,
+    ParametricDarks,
+    ParametricLights,
+    ParametricHighlights,
+    /// Tone Curve: Refine Saturation. Camera Raw stores up to 2 and renders above
+    /// 1 as 1; the slider covers 0..1.
+    CurveSaturation,
+    /// Tone Curve: Levels' Midtone, a gamma.
+    Midtone,
 }
 
 /// How one dial tick or `turn` step moves a setting.
@@ -167,7 +177,7 @@ const fn percent(id: ParameterId, label: &'static str) -> Descriptor {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 49] = [
+const DESCRIPTORS: [Descriptor; 55] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -302,16 +312,44 @@ const DESCRIPTORS: [Descriptor; 49] = [
     percent(ParameterId::GreenPrimarySaturation, "Saturation"),
     percent(ParameterId::BluePrimaryHue, "Hue"),
     percent(ParameterId::BluePrimarySaturation, "Saturation"),
+    percent(ParameterId::ParametricShadows, "Shadows"),
+    percent(ParameterId::ParametricDarks, "Darks"),
+    percent(ParameterId::ParametricLights, "Lights"),
+    percent(ParameterId::ParametricHighlights, "Highlights"),
+    Descriptor {
+        valid: 0. ..=2.,
+        ..amount(ParameterId::CurveSaturation, "Saturation")
+    },
+    Descriptor {
+        id: ParameterId::Midtone,
+        label: "Midtone",
+        interactive: 0.1..=4.,
+        valid: 0.1..=4.,
+        tick: Tick::Linear(0.01),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 2,
+            signed: false,
+        },
+    },
 ];
 
 impl ParameterId {
+    /// The parametric curve's regions, in the order of `Effects::parametric`.
+    pub const PARAMETRIC: [Self; 4] = [
+        Self::ParametricShadows,
+        Self::ParametricDarks,
+        Self::ParametricLights,
+        Self::ParametricHighlights,
+    ];
     /// Calibration's Hue and Saturation of each primary, red to blue.
     pub const PRIMARIES: [[Self; 2]; 3] = [
         [Self::RedPrimaryHue, Self::RedPrimarySaturation],
         [Self::GreenPrimaryHue, Self::GreenPrimarySaturation],
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 55] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -361,6 +399,12 @@ impl ParameterId {
         Self::GreenPrimarySaturation,
         Self::BluePrimaryHue,
         Self::BluePrimarySaturation,
+        Self::ParametricShadows,
+        Self::ParametricDarks,
+        Self::ParametricLights,
+        Self::ParametricHighlights,
+        Self::CurveSaturation,
+        Self::Midtone,
     ];
     pub fn descriptor(self) -> &'static Descriptor {
         &DESCRIPTORS[self as usize]
@@ -417,6 +461,12 @@ impl ParameterId {
             Self::GreenPrimarySaturation => &mut r.effects.calibration[1][1],
             Self::BluePrimaryHue => &mut r.effects.calibration[2][0],
             Self::BluePrimarySaturation => &mut r.effects.calibration[2][1],
+            Self::ParametricShadows => &mut r.effects.parametric[0],
+            Self::ParametricDarks => &mut r.effects.parametric[1],
+            Self::ParametricLights => &mut r.effects.parametric[2],
+            Self::ParametricHighlights => &mut r.effects.parametric[3],
+            Self::CurveSaturation => &mut r.curve_saturation,
+            Self::Midtone => &mut r.midtone,
         }
     }
     /// `value` in the units the slider shows, rounded to thousandths.
