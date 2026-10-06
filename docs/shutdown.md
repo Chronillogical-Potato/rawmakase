@@ -105,15 +105,21 @@ does not, so this needs a Quit item of our own.
 
 ## Where the code stands
 
-This contract was written from an audit of the code before any of it was built.
-These gaps remain:
+The exit hook (`app/exit.rs`) runs the sequence above. It saves the edit and the
+place in the catalog (#269), cancels the jobs in progress, and stops and waits for
+the develop loader, the preview renderer, the Reference View loader and the export
+queue under a 3 s deadline (#270). Still to do:
 
-- **No exit hook exists.** `Editor` implements no `on_exit`, nothing is joined, and
-  every stop signal is sent by a `Drop` as the editor is dropped.
-- **Quit on macOS skips the close guard** (confirmed in the pinned winit and eframe
-  sources; not yet seen on a real build), so an edit autosave has not written yet,
-  or a library draft, is lost.
+- **Quit on macOS still cannot be refused** (see above): it cuts off a running
+  export or Sync Settings.
+- **The edit is saved without a deadline**, so a catalog on a stalled network share
+  would hold up quitting.
 - **The close guard misses folder jobs and command output jobs.**
-- **Stop signals that exist but are not sent at exit:** dropping the export queue
-  does not cancel its running batch, and nothing sets `prefetch_cancel`.
+- **Step 2.3 is not done yet:** the exit hook closes no channels itself; they
+  close as the editor is dropped.
+- **Not yet waited for:** the develop loader's nested full-size loader and
+  prefetcher, the command output jobs (cancelled at quit), the library's preview
+  workers, MIDI and the control socket. Each still stops through its own signal.
 - **Renders that cannot be cancelled:** the library's edited and screen previews.
+- **A worker cut off at the deadline** can leave its temporary file beside an
+  export.
