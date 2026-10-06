@@ -34,12 +34,16 @@ struct Chosen {
     open: bool,
     /// Its capture time, for Date - Filename.
     captured: Option<String>,
+    /// Its place among the photos chosen, those left out counted.
+    place: usize,
 }
 
 /// The photos an Export acts on, fixed when it is chosen.
 #[derive(Clone, Debug, Default)]
 struct Scope {
     photos: Vec<Chosen>,
+    /// How many photos were chosen, those left out counted.
+    chosen: usize,
     /// Photos chosen that can't be exported: their names and why.
     left_out: Vec<(String, String)>,
 }
@@ -175,6 +179,8 @@ impl Editor {
                     let Some(photo) = l.photo(id) else {
                         continue;
                     };
+                    let place = scope.chosen;
+                    scope.chosen += 1;
                     let name = format!(
                         "{}{}",
                         photo.filename,
@@ -190,6 +196,7 @@ impl Editor {
                             name,
                             open,
                             captured: Some(photo.captured.clone()).filter(|c| !c.is_empty()),
+                            place,
                         }),
                     }
                 }
@@ -201,9 +208,11 @@ impl Editor {
                     self.status = format!("{} can't be exported: Offline", source.display());
                     return None;
                 }
+                scope.chosen = 1;
                 scope.photos.push(Chosen {
                     id: None,
-                    captured: crate::exif::read(&source).and_then(|e| e.captured()),
+                    captured: crate::exif::capture_time(&source),
+                    place: 0,
                     name: source
                         .file_name()
                         .unwrap_or_default()
@@ -365,8 +374,10 @@ impl Editor {
                         edit: Edit::Catalog(Default::default()),
                         values: Values::default(),
                         captured: chosen.captured.clone(),
+                        place: None,
                     },
                 };
+                photo.place = Some((chosen.place, scope.chosen));
                 if chosen.open {
                     photo.edit = Edit::Shown {
                         recipe: Box::new(self.document.recipe.clone()),

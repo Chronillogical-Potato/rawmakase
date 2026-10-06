@@ -44,14 +44,21 @@ impl Editor {
             self.exports.draft.destination = Destination::Folder;
         }
         // Names and folders are shown for the first photo.
-        let (source, captured) = self
+        let (source, captured, place) = self
             .exports
             .scope
             .photos
             .first()
-            .map(|p| (p.source.clone(), p.captured.clone()))
+            .map(|p| (p.source.clone(), p.captured.clone(), p.place))
             .unwrap_or_default();
         let count = self.exports.scope.photos.len();
+        let chosen = self.exports.scope.chosen.max(count);
+        // As the export names it.
+        let at = NameContext {
+            index: place,
+            total: chosen,
+            captured: captured.as_deref(),
+        };
         let left_out = self.exports.scope.left_out.clone();
         let mut confirmed = None;
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
@@ -119,7 +126,7 @@ impl Editor {
                     .show(&mut content, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
                         ui.spacing_mut().interact_size.y = 26.;
-                        self.export_sections(ui, &source, count, captured.as_deref());
+                        self.export_sections(ui, &source, &at);
                     });
                 ui.painter().hline(
                     rect.x_range(),
@@ -145,7 +152,7 @@ impl Editor {
                 {
                     confirmed = Some(false);
                 }
-                if let Some(target) = self.exports.draft.target(&source) {
+                if let Some((target, _)) = self.exports.draft.target_for(&source, &at) {
                     bar.add_space(12.);
                     bar.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.add(
@@ -173,13 +180,7 @@ impl Editor {
         }
     }
 
-    fn export_sections(
-        &mut self,
-        ui: &mut egui::Ui,
-        source: &Path,
-        count: usize,
-        captured: Option<&str>,
-    ) {
+    fn export_sections(&mut self, ui: &mut egui::Ui, source: &Path, example: &NameContext) {
         let picking = self.exports.picking.load(Ordering::Relaxed);
         let s = &mut self.exports.draft;
         let mut choose = false;
@@ -250,14 +251,9 @@ impl Editor {
                 egui::DragValue::new(&mut s.start_number).range(0..=999_999),
             );
         });
-        let example = NameContext {
-            index: 0,
-            total: count,
-            captured,
-        };
         form_row(ui, "Example", |ui| {
             ui.label(
-                egui::RichText::new(s.file_name_for(source, &example).0).color(theme::gray(225)),
+                egui::RichText::new(s.file_name_for(source, example).0).color(theme::gray(225)),
             );
         });
         form_row(ui, "Extensions", |ui| {

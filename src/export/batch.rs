@@ -33,6 +33,10 @@ pub struct BatchPhoto {
     pub values: Values,
     /// Its capture time, for Date - Filename.
     pub captured: Option<String>,
+    /// Its place among the photos chosen, and how many were chosen, for the
+    /// sequence numbers: a photo left out keeps its number. `None` numbers it by
+    /// its place in the batch.
+    pub place: Option<(usize, usize)>,
 }
 
 /// The edit a photo is exported with.
@@ -59,6 +63,7 @@ impl BatchPhoto {
             source,
             name,
             captured: Some(record.captured).filter(|c| !c.is_empty()),
+            place: None,
             edit: Edit::Catalog(record.edit),
             values: Values {
                 descriptive: record.descriptive,
@@ -230,6 +235,7 @@ pub fn plan(
         .iter()
         .enumerate()
         .map(|(index, p)| {
+            let (index, total) = p.place.unwrap_or((index, total));
             settings.target_for(
                 &p.source,
                 &super::NameContext {

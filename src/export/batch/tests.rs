@@ -14,6 +14,7 @@ fn photo(source: &Path) -> BatchPhoto {
         edit: Edit::Catalog(Default::default()),
         values: Default::default(),
         captured: None,
+        place: None,
     }
 }
 /// Export settings into `folder`, as small TIFFs.
@@ -588,6 +589,18 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     let outcomes = run_all(&f.batch(photos.clone(), s.clone()));
     assert!(matches!(outcomes[1], Outcome::Failed(_)), "{outcomes:?}");
     assert_eq!(listing(&f.out()), ["Concert-10.tif", "Concert-12.tif"]);
+    // A photo left out before the export (offline, not RAW) keeps its number too.
+    let mut placed = vec![photos[0].clone(), photos[2].clone()];
+    placed[0].place = Some((0, 3));
+    placed[1].place = Some((2, 3));
+    let mut s = settings(&f.out().join("placed"));
+    s.naming = Some(crate::export::Naming::CustomNameOf);
+    s.custom_text = "Show".into();
+    run_all(&f.batch(placed, s));
+    assert_eq!(
+        listing(&f.out().join("placed")),
+        ["Show (1 of 3).tif", "Show (3 of 3).tif"]
+    );
     // Date - Filename: the capture date, or "undated" with a note, never the file's
     // modified date.
     photos[0].captured = Some("2026-05-04 10:21:33.000".into());

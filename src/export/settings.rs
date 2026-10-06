@@ -329,7 +329,8 @@ impl ExportSettings {
     /// export, and a note when it lacks what the template needs (a capture date).
     pub fn file_name_for(&self, source: &Path, at: &NameContext) -> (String, Option<String>) {
         let stem = source.file_stem().unwrap_or_default().to_string_lossy();
-        let text = self.custom_text.trim();
+        let text = name_part(&self.custom_text);
+        let text = text.as_str();
         // A custom name left empty is the file's own.
         let custom = if text.is_empty() { &*stem } else { text };
         let sequence = self.start_number as usize + at.index;
@@ -385,6 +386,26 @@ impl ExportSettings {
     pub fn mime_type(&self) -> &'static str {
         self.format.mime_type()
     }
+}
+
+/// `text` as part of one file name, on any system: no folder separators or
+/// characters Windows refuses, and no leading dots, so it can't name another
+/// folder or a hidden file.
+fn name_part(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            c if c.is_control() => '-',
+            c => c,
+        })
+        .collect();
+    cleaned
+        .trim()
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' '])
+        .trim()
+        .to_string()
 }
 
 /// "20260504" from a capture time as the catalog keeps it ("2026-05-04
@@ -473,6 +494,16 @@ mod tests {
         let (name, note) = s.file_name_for(source, &NameContext::ONE);
         assert_eq!(name, "undated-DSC0001.jpg");
         assert!(note.is_some());
+        // Custom text names one file, never another folder.
+        s.naming = Some(Naming::CustomName);
+        for text in ["/tmp/final", "../final", "a\\b:c"] {
+            s.custom_text = text.into();
+            let name = s.file_name_for(source, &at).0;
+            assert!(
+                !name.contains(['/', '\\', ':']) && !name.starts_with('.'),
+                "{name}"
+            );
+        }
         // An empty custom name is the file's own.
         s.custom_text = " ".into();
         s.naming = Some(Naming::CustomName);
