@@ -62,6 +62,8 @@ pub enum Event {
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
+    /// A folder change waiting for the user's answer.
+    FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     Monitor(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),

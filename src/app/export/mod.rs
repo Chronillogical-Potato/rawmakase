@@ -61,6 +61,8 @@ struct Pending {
 struct Queued {
     names: Vec<String>,
     left_out: Vec<(String, String)>,
+    /// What happens once it is written.
+    after: crate::export::AfterExport,
 }
 
 /// What finished exports could not do, kept until it is dismissed.
@@ -397,6 +399,7 @@ impl Editor {
             Ok(plan) => {
                 let names = pending.batch.iter().map(|p| p.name.clone()).collect();
                 let total = pending.batch.len();
+                let after = pending.settings.after_export;
                 let batch = batch::Batch {
                     photos: pending.batch,
                     plan,
@@ -410,6 +413,7 @@ impl Editor {
                     Queued {
                         names,
                         left_out: pending.left_out,
+                        after,
                     },
                 );
                 self.status = format!("Exporting {}…", plural(total, "photo", "photos"));
@@ -437,17 +441,44 @@ impl Editor {
         })
     }
 
+    /// After Export: Show in Finder, for the files a batch wrote.
+    fn show_exported(&mut self, exported: &[PathBuf]) {
+        let shown = to_show(exported);
+        let folders = folders(exported);
+        for path in &shown {
+            if let Err(e) = crate::platform::reveal::reveal(path) {
+                self.status = format!("{} · exported files not shown: {e:#}", self.status);
+                return;
+            }
+        }
+        if folders > shown.len() {
+            self.status = format!(
+                "{} · showing {} of the {folders} folders exported to",
+                self.status,
+                shown.len()
+            );
+        }
+    }
+
     /// A finished batch: the status line says how it went, and what could not be
     /// exported stays in the top bar until it is read.
     pub(super) fn batch_exported(&mut self, ticket: u64, outcomes: Vec<Outcome>) {
         let Some(queued) = self.exports.queued.remove(&ticket) else {
             return;
         };
-        let (summary, single) = summarize(&queued, &outcomes);
+        let (summary, exported) = summarize(&queued, &outcomes);
+        // One photo exported with nothing to say is named in the status line.
+        let single = (summary.total == 1 && summary.noted == 0)
+            .then(|| exported.first().cloned())
+            .flatten();
         self.status = match single {
             Some(path) => format!("Exported {}", path.display()),
             None => summary.line(),
         };
+        // After the summary, so a file manager that can't be opened is said.
+        if queued.after == crate::export::AfterExport::Show {
+            self.show_exported(&exported);
+        }
         // Unread reports add up until they are dismissed: a later export that went
         // well never hides an earlier one that did not.
         if !summary.problems.is_empty() || !summary.notes.is_empty() {
@@ -618,7 +649,7 @@ impl Editor {
 
 /// How a batch went: the report, and the file when it was one photo exported
 /// with nothing to say.
-fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Option<PathBuf>) {
+fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Vec<PathBuf>) {
     let mut summary = Summary::default();
     let mut exported = Vec::new();
     for (name, outcome) in queued.names.iter().zip(outcomes) {
@@ -645,9 +676,31 @@ fn summarize(queued: &Queued, outcomes: &[Outcome]) -> (Summary, Option<PathBuf>
     }
     summary.exported = exported.len();
     summary.total = queued.names.len() + queued.left_out.len();
-    let single = (summary.total == 1 && summary.exported == 1 && summary.noted == 0)
-        .then(|| exported.remove(0));
-    (summary, single)
+    (summary, exported)
+}
+
+/// How many folders `exported` went to.
+fn folders(exported: &[PathBuf]) -> usize {
+    let mut folders: Vec<_> = exported.iter().map(|p| p.parent()).collect();
+    folders.sort();
+    folders.dedup();
+    folders.len()
+}
+
+/// The first file of each folder exported to, at most five: one file manager
+/// window for each folder, not one for each photo, and never a screenful. The
+/// status line says when there were more folders.
+fn to_show(exported: &[PathBuf]) -> Vec<PathBuf> {
+    let mut shown: Vec<PathBuf> = Vec::new();
+    for path in exported {
+        if shown.len() == 5 {
+            break;
+        }
+        if !shown.iter().any(|s| s.parent() == path.parent()) {
+            shown.push(path.clone());
+        }
+    }
+    shown
 }
 
 /// The watermark named in the Export dialog: a saved preset, or the Simple

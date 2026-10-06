@@ -207,3 +207,34 @@ CREATE TABLE IF NOT EXISTS keyword_export (
     include INTEGER NOT NULL,
     parents INTEGER NOT NULL
 );
+
+-- Where each computer finds the catalog's folders (see `locations`). The
+-- legacy `roots.mapped_path` and `folder_mappings` stay as releases before
+-- these tables read them, and are still written.
+
+-- A computer that opened the catalog: a random id made once per install,
+-- and a name to show. `adopted_at` records when it copied the legacy
+-- mappings into its own rows; from then on they no longer apply to it.
+CREATE TABLE IF NOT EXISTS computers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    adopted_at TEXT
+);
+
+-- A folder's logical path in its root: names joined by '/'. No system allows
+-- '/' in a name, so a '\' here is always part of one.
+CREATE TABLE IF NOT EXISTS folder_paths (
+    folder INTEGER PRIMARY KEY REFERENCES folders(id) ON DELETE CASCADE,
+    path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS folder_paths_path ON folder_paths(path);
+
+-- Where a root ('') or a folder and its subfolders (a logical path) are on
+-- one computer.
+CREATE TABLE IF NOT EXISTS folder_locations (
+    root INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+    relative_path TEXT NOT NULL,
+    computer TEXT NOT NULL REFERENCES computers(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    PRIMARY KEY(root, relative_path, computer)
+);

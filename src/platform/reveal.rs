@@ -23,10 +23,15 @@ pub fn reveal(path: &Path) -> Result<()> {
         select.push(path);
         Command::new("explorer").arg(select).spawn()?;
     } else {
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(path);
+        // Waits for the reply, so a session without a file manager on the bus
+        // fails here and falls back; a second at most, as this runs on the UI
+        // thread.
         let selected = Command::new("dbus-send")
             .args([
                 "--session",
+                "--print-reply",
+                "--reply-timeout=1000",
                 "--dest=org.freedesktop.FileManager1",
                 "--type=method_call",
                 "/org/freedesktop/FileManager1",
@@ -34,6 +39,8 @@ pub fn reveal(path: &Path) -> Result<()> {
             ])
             .arg(format!("array:string:{uri}"))
             .arg("string:")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .is_ok_and(|s| s.success());
         if !selected {
@@ -42,4 +49,31 @@ pub fn reveal(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `path` as a file URI with every byte but unreserved ones and `/`
+/// percent-encoded, so a comma (dbus-send's array separator) or a space can't
+/// split or end it.
+fn file_uri(path: &Path) -> String {
+    use std::fmt::Write;
+    let mut uri = String::from("file://");
+    for &b in path.as_os_str().as_encoded_bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
+            uri.push(b as char);
+        } else {
+            let _ = write!(uri, "%{b:02X}");
+        }
+    }
+    uri
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn file_uris_escape_what_dbus_send_would_split() {
+        assert_eq!(
+            super::file_uri(std::path::Path::new("/photos/a,b c.jpg")),
+            "file:///photos/a%2Cb%20c.jpg"
+        );
+    }
 }
