@@ -7,18 +7,18 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented, slider,
-    slider_with, switched_section, tone_curve_ui, toolbar_action,
+    SliderEvent, TINT_GRADIENT, adjustment_section, name_history_step, parametric_curve_ui,
+    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
+    toolbar_action,
 };
 use super::worker::AutoKind;
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::{Panel, PanelState};
+use crate::develop::params::ParameterId;
 use crate::develop::sharpening::{SharpeningModel, SharpeningSliders};
 use crate::develop::targeted::Target;
-use crate::develop::{
-    NamedWhiteBalance, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, Treatment,
-};
+use crate::develop::{NamedWhiteBalance, Recipe, Treatment};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
@@ -324,7 +324,7 @@ impl Editor {
                         action = Some(CropAction::Swap);
                     }
                 });
-                slider(ui, "Angle", &mut r.straighten, -45. ..=45., 0.);
+                setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.);
                 control_row(ui, "Straighten", |ui| {
                     let w = (ui.available_width() - 4.) / 2.;
                     let armed = self.view.ruler == Ruler::Armed;
@@ -714,14 +714,8 @@ impl Editor {
                     });
             });
             let old = (r.temperature, r.tint);
-            slider(
-                ui,
-                "Temp",
-                &mut r.temperature,
-                TEMPERATURE_MIN..=TEMPERATURE_MAX,
-                6500.,
-            );
-            slider(ui, "Tint", &mut r.tint, -TINT_LIMIT..=TINT_LIMIT, 0.);
+            setting_slider(ui, ParameterId::Temperature, &mut r.temperature, 6500.);
+            setting_slider(ui, ParameterId::Tint, &mut r.tint, 0.);
             if old != (r.temperature, r.tint)
                 && let Some(m) = &metadata
             {
@@ -729,30 +723,22 @@ impl Editor {
                 r.auto_white_balance = None;
             }
             subheading(ui, "Tone");
-            slider_with(
-                ui,
-                "Exposure",
-                &mut r.exposure,
-                -5. ..=5.,
-                0.,
-                Some((1., 2)),
-                None,
-            );
-            slider(ui, "Contrast", &mut r.contrast, -1. ..=1., 0.);
-            slider(ui, "Highlights", &mut r.highlights, -1. ..=1., 0.);
-            slider(ui, "Shadows", &mut r.shadows, -1. ..=1., 0.);
-            slider(ui, "Whites", &mut r.whites, -1. ..=1., 0.);
-            slider(ui, "Blacks", &mut r.blacks, -1. ..=1., 0.);
+            setting_slider(ui, ParameterId::Exposure, &mut r.exposure, 0.);
+            setting_slider(ui, ParameterId::Contrast, &mut r.contrast, 0.);
+            setting_slider(ui, ParameterId::Highlights, &mut r.highlights, 0.);
+            setting_slider(ui, ParameterId::Shadows, &mut r.shadows, 0.);
+            setting_slider(ui, ParameterId::Whites, &mut r.whites, 0.);
+            setting_slider(ui, ParameterId::Blacks, &mut r.blacks, 0.);
             subheading(ui, "Presence");
             let previous_texture = r.effects.texture;
-            slider(ui, "Texture", &mut r.effects.texture, -1. ..=1., 0.);
+            setting_slider(ui, ParameterId::Texture, &mut r.effects.texture, 0.);
             r.adopt_measured_texture(previous_texture);
             let previous_clarity = r.effects.clarity;
-            slider(ui, "Clarity", &mut r.effects.clarity, -1. ..=1., 0.);
+            setting_slider(ui, ParameterId::Clarity, &mut r.effects.clarity, 0.);
             r.adopt_measured_clarity(previous_clarity);
-            slider(ui, "Dehaze", &mut r.effects.dehaze, -1. ..=1., 0.);
-            slider(ui, "Vibrance", &mut r.vibrance, -1. ..=1., 0.);
-            slider(ui, "Saturation", &mut r.saturation, -1. ..=1., 0.);
+            setting_slider(ui, ParameterId::Dehaze, &mut r.effects.dehaze, 0.);
+            setting_slider(ui, ParameterId::Vibrance, &mut r.vibrance, 0.);
+            setting_slider(ui, ParameterId::Saturation, &mut r.saturation, 0.);
         }) {
             r.wb = [1.; 3];
             r.tint = 0.;
@@ -1595,10 +1581,7 @@ impl Editor {
                     -1. ..=1.,
                     0.,
                     None,
-                    Some((
-                        Color32::from_rgb(91, 156, 112),
-                        Color32::from_rgb(165, 105, 158),
-                    )),
+                    Some(TINT_GRADIENT),
                 );
             });
             for (i, name) in ["Red Primary", "Green Primary", "Blue Primary"]

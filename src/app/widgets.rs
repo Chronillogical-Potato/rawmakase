@@ -1,7 +1,7 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::PanelState;
-use crate::develop::params::format_value;
+use crate::develop::params::{self, ParameterId, format_value};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -880,6 +880,74 @@ pub(super) fn slider_with(
     display: Option<(f32, usize)>,
     gradient: Option<(Color32, Color32)>,
 ) -> SliderEvent {
+    let style = SliderStyle {
+        display,
+        gradient,
+        ..SliderStyle::default()
+    };
+    slider_styled(ui, label, value, range, default, style)
+}
+/// How a slider looks and moves beyond its label, range and default.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct SliderStyle {
+    /// Shown scale and decimals, e.g. Sharpening's 0–150; picked from the range
+    /// when `None`.
+    pub display: Option<(f32, usize)>,
+    /// A coloured rail, from its left end to its right.
+    pub gradient: Option<(Color32, Color32)>,
+    /// The rail is even in the value's reciprocal, as Temp moves in mireds.
+    pub reciprocal: bool,
+    /// What dragging snaps to, as Exposure's 0.05 EV; typed values stay exact.
+    pub drag_step: Option<f32>,
+    /// A hue wheel of 0–360° as the rail.
+    pub hue_rail: bool,
+}
+/// The Temp slider's rail, blue to yellow.
+pub(super) const TEMPERATURE_GRADIENT: (Color32, Color32) = (
+    Color32::from_rgb(74, 123, 182),
+    Color32::from_rgb(194, 169, 93),
+);
+/// The Tint slider's rail, green to magenta.
+pub(super) const TINT_GRADIENT: (Color32, Color32) = (
+    Color32::from_rgb(91, 156, 112),
+    Color32::from_rgb(165, 105, 158),
+);
+/// The slider for a develop setting, as its descriptor describes it.
+pub(super) fn setting_slider(
+    ui: &mut egui::Ui,
+    id: ParameterId,
+    value: &mut f32,
+    default: f32,
+) -> SliderEvent {
+    let d = id.descriptor();
+    let style = SliderStyle {
+        display: Some((d.display.scale, d.display.decimals)),
+        gradient: match id {
+            ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
+            ParameterId::Tint => Some(TINT_GRADIENT),
+            _ => None,
+        },
+        reciprocal: matches!(d.tick, params::Tick::Mireds(_)),
+        drag_step: d.drag_step,
+        hue_rail: false,
+    };
+    slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
+}
+pub(super) fn slider_styled(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    default: f32,
+    style: SliderStyle,
+) -> SliderEvent {
+    let SliderStyle {
+        display,
+        gradient,
+        reciprocal,
+        drag_step: step,
+        hue_rail,
+    } = style;
     let mut event = SliderEvent::None;
     let start = *range.start();
     let end = *range.end();
@@ -892,15 +960,7 @@ pub(super) fn slider_with(
         (1., 2)
     });
     let signed = start < 0. && default == 0.;
-    let origin = fill_origin(
-        start,
-        default,
-        gradient.is_some() || label == "Temp" || label == "Tint",
-    );
-    // Like Lightroom, Temp moves evenly in mireds rather than kelvin.
-    let reciprocal = label == "Temp" && start > 0.;
-    // Dragging Exposure moves in Lightroom's 0.05 EV steps; typed values stay exact.
-    let step = (label == "Exposure").then_some(0.05);
+    let origin = fill_origin(start, default, gradient.is_some());
     let to_rail = move |v: f32, rail: Rect| {
         let t = if reciprocal {
             egui::remap_clamp(1. / v, 1. / start..=1. / end, 0. ..=1.)
@@ -971,18 +1031,7 @@ pub(super) fn slider_with(
             Pos2::new(area.left() + 5., area.center().y - 1.),
             Pos2::new(area.right() - 5., area.center().y + 1.),
         );
-        let gradient = gradient.or(match label {
-            "Temp" => Some((
-                Color32::from_rgb(74, 123, 182),
-                Color32::from_rgb(194, 169, 93),
-            )),
-            "Tint" => Some((
-                Color32::from_rgb(91, 156, 112),
-                Color32::from_rgb(165, 105, 158),
-            )),
-            _ => None,
-        });
-        if label == "Hue" && start == 0. && end == 360. {
+        if hue_rail {
             let mut mesh = egui::Mesh::default();
             for sector in 0..6 {
                 let left = egui::lerp(rail.left()..=rail.right(), sector as f32 / 6.);

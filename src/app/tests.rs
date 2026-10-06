@@ -4476,7 +4476,12 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
     let draw = |value: &mut f32, events: Vec<egui::Event>, time| {
         widget_frame(&ctx, time, events, |ui| {
             let top = ui.cursor().min;
-            super::widgets::slider(ui, "Exposure", value, -5. ..=5., 0.);
+            super::widgets::setting_slider(
+                ui,
+                crate::develop::params::ParameterId::Exposure,
+                value,
+                0.,
+            );
             row.set(Rect::from_min_max(
                 top,
                 Pos2::new(ui.max_rect().right(), ui.cursor().top()),
