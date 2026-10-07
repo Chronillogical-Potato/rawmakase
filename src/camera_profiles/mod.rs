@@ -469,7 +469,7 @@ pub(crate) struct GpuTables<'a> {
     pub hue: Option<(&'a Table, Option<&'a Table>, f32)>,
     pub look: Option<&'a Table>,
     pub enhanced: Option<&'a Table>,
-    pub enhanced_curve: Option<&'a [f32]>,
+    pub enhanced_curve: Option<&'a crate::color::curve::CurveLut>,
     pub tone: &'a [[f32; 2]],
     pub exposure_scale: f32,
 }
@@ -496,7 +496,7 @@ impl CameraProfile {
                 .map(|t| (t, self.hue2.as_ref(), self.weight(temperature))),
             look: self.look.as_ref(),
             enhanced: self.enhanced.as_ref().and_then(|e| e.table.as_ref()),
-            enhanced_curve: self.enhanced.as_ref().map(|e| e.curve.as_slice()),
+            enhanced_curve: self.enhanced.as_ref().map(|e| e.curve.as_ref()),
             tone: &self.tone,
             exposure_scale: 2f32.powf(self.exposure),
         }
