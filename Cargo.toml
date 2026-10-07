@@ -10,9 +10,10 @@ repository = "https://github.com/pch/rawmakase"
 # The control protocol and its command-line client build on their own, without
 # the app's GUI, GPU or native libraries.
 [workspace]
-members = ["crates/rawmakase-model", "crates/rawmakase-protocol", "tools/rawmakase-ctl"]
+members = ["crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-protocol", "tools/rawmakase-ctl"]
 
 [dependencies]
+rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["sql"] }
 rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
 rawmakase-ctl = { path = "tools/rawmakase-ctl", version = "0.1.0" }
@@ -87,6 +88,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 # The model's fixtures, for the app's tests.
 [dev-dependencies]
+rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0", features = ["test-support"] }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["sql", "test-support"] }
 
 [build-dependencies]

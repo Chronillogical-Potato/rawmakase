@@ -915,4 +915,104 @@ mod tests {
         im.pixels.iter_mut().for_each(|p| *p = [0.; 3]);
         assert!(auto_white_balance(&im, &Recipe::default()).is_err());
     }
+
+    /// An XMP packet with `attrs` on its settings.
+    fn packet(attrs: &str) -> String {
+        use crate::xml::ns::{CRS, RDF};
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="{RDF}"><r:Description xmlns:c="{CRS}" {attrs}></r:Description></r:RDF></x:xmpmeta>"#
+        )
+    }
+
+    #[test]
+    fn xmp_auto_white_balance_is_the_wb_menus_auto_on_the_presets_crop() -> Result<()> {
+        let (width, height) = (32u32, 24u32);
+        let m = Metadata {
+            width,
+            height,
+            wb: [2., 1., 1.8],
+            daylight_wb: [2., 1., 1.8],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        let im = CameraImage {
+            recovered: Default::default(),
+            width,
+            height,
+            // A warm left half and a cool right half.
+            pixels: (0..width * height)
+                .map(|i| {
+                    let x = i % width;
+                    let v = 0.05 + 0.4 * x as f32 / width as f32;
+                    if x < width / 2 {
+                        [v * 1.3, v, v * 0.7]
+                    } else {
+                        [v * 0.7, v, v * 1.3]
+                    }
+                })
+                .collect(),
+            metadata: m.clone(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        // Measured on the preset's crop: the warm half.
+        let attrs = r#"c:WhiteBalance="Auto" c:CropLeft="0" c:CropTop="0" c:CropRight="0.45" c:CropBottom="1""#;
+        let preset = crate::xmp::parse(std::path::Path::new("preset.xmp"), &packet(attrs))?;
+        let result = preset.apply(&Recipe::default(), &m, &[], Some(&Measures(&im)))?;
+        let cropped = Recipe {
+            crop: result.crop,
+            ..Default::default()
+        };
+        let auto = auto_white_balance(&im, &cropped)?;
+        let whole = auto_white_balance(&im, &Recipe::default())?;
+        assert_ne!(auto.wb, whole.wb);
+        assert_eq!(
+            (result.wb, result.temperature, result.tint),
+            (auto.wb, auto.temperature, auto.tint)
+        );
+        assert_eq!(result.auto_white_balance, auto.auto_white_balance);
+        Ok(())
+    }
+
+    #[test]
+    fn xmp_auto_black_and_white_mix_is_measured_on_the_photo() -> Result<()> {
+        let (width, height) = (16u32, 8u32);
+        let m = Metadata {
+            width,
+            height,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        let im = CameraImage {
+            recovered: Default::default(),
+            width,
+            height,
+            pixels: (0..width * height)
+                .map(|i| {
+                    let v = 0.05 + 0.3 * (i % width) as f32 / width as f32;
+                    [v, v, 2. * v]
+                })
+                .collect(),
+            metadata: m.clone(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        let attrs = r#"c:ConvertToGrayscale="True" c:AutoGrayscaleMix="True""#;
+        let preset = crate::xmp::parse(std::path::Path::new("auto.xmp"), &packet(attrs))?;
+        let base = Recipe::default();
+        let r = preset.apply(&base, &m, &[], Some(&Measures(&im)))?;
+        let spread = super::super::ColorSpread::measure(&im);
+        let expected = super::super::AutoMix {
+            spread: &spread,
+            metadata: &m,
+        }
+        .for_recipe(&r);
+        assert_ne!(expected, base.effects.gray_mix);
+        assert_eq!(r.effects.gray_mix, expected);
+        Ok(())
+    }
 }

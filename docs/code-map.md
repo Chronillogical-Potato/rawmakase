@@ -17,12 +17,12 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | --- | --- | --- |
 | Add a develop adjustment | [Recipe](../crates/rawmakase-model/src/model/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
 | Change preview quality or detail | [Quality rendering](../src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
-| Support another XMP setting | [Parser](../src/xmp/parse.rs), [application stages](../src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
-| Change preset discovery/import | [Preset library](../src/presets/library.rs) | Preset browser UI and shared asset paths |
+| Support another XMP setting | [Parser](../crates/rawmakase-interop/src/xmp/parse.rs), [application stages](../crates/rawmakase-interop/src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
+| Change preset discovery/import | [Preset library](../crates/rawmakase-interop/src/presets/library.rs) | Preset browser UI and shared asset paths |
 | Add DCP support | [DCP reader](../crates/rawmakase-model/src/camera_profiles/dcp.rs), [profile model](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
-| Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
+| Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../crates/rawmakase-interop/src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
 | Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
@@ -59,8 +59,8 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [crates/rawmakase-model/src/cameras.rs](../crates/rawmakase-model/src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
 | [crates/rawmakase-model/src/tiff.rs](../crates/rawmakase-model/src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
-| [src/jpeg.rs](../src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
-| [src/exif.rs](../src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
+| [crates/rawmakase-interop/src/jpeg.rs](../crates/rawmakase-interop/src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
+| [crates/rawmakase-interop/src/exif.rs](../crates/rawmakase-interop/src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
 | [src/time.rs](../src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
@@ -72,7 +72,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | --- | --- |
 | [develop/mod.rs](../src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
 | [recipe.rs](../src/develop/recipe.rs) | What rendering makes of a recipe: the measured manual Vignetting and Color noise reduction run on the camera image. |
-| [raw_defaults.rs](../src/raw_defaults.rs) | Raw defaults: the master and per-camera choices (Adobe Default, Camera Settings, RAWmakase Default or a preset), and resolving a photo's starting settings with a fallback note. See [raw defaults](xmp-presets.md#raw-defaults). |
+| [raw_defaults.rs](../crates/rawmakase-interop/src/raw_defaults.rs) | Raw defaults: the master and per-camera choices (Adobe Default, Camera Settings, RAWmakase Default or a preset), and resolving a photo's starting settings with a fallback note. See [raw defaults](xmp-presets.md#raw-defaults). |
 | [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
 | [orientation.rs](../src/develop/orientation.rs) | Rotate and Flip on the photo as shown, keeping the crop and straightening on the same part of the photo. |
 | [image_space.rs](../src/develop/image_space.rs) | Image space's mapping to and from the view, including the lens distortion inverse. The frame itself is `model/image_frame.rs`. |
@@ -153,18 +153,18 @@ recipes and the installed preset collection; they do not own the renderer.
 
 | File | Responsibility |
 | --- | --- |
-| [xmp/mod.rs](../src/xmp/mod.rs) | Parsed preset/settings model and XMP API. |
-| [parse.rs](../src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
-| [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
-| [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
+| [xmp/mod.rs](../crates/rawmakase-interop/src/xmp/mod.rs) | Parsed preset/settings model and XMP API. |
+| [parse.rs](../crates/rawmakase-interop/src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
+| [apply.rs](../crates/rawmakase-interop/src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
+| [write.rs](../crates/rawmakase-interop/src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
 | [xml/ns.rs](../crates/rawmakase-model/src/xml/ns.rs), [xml/mod.rs](../crates/rawmakase-model/src/xml/mod.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
-| [local.rs](../src/xmp/local.rs) | Lightroom's spot removal, red eye and masks (`RetouchAreas`, legacy `RetouchInfo`, `RedEyeInfo`, mask correction lists) from XMP or a catalog, as retouch operations, red eye corrections and masks; import only. |
-| [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
-| [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
-| [amount.rs](../src/presets/amount.rs) | Lightroom's preset Amount: which presets offer one, and the settings at an Amount from those before the preset and the preset's result. |
-| [curves.rs](../src/presets/curves.rs) | The Point Curve menu's curves: Lightroom's built-in point curves, the curves saved in the data directory's `curves/` folder, and the name the menu shows. |
-| [builtin.rs](../src/presets/builtin.rs) | Built-in presets embedded from `assets/presets`, their group order and ids. |
-| [library.rs](../src/presets/library.rs) | XMP collection discovery, import without overwriting existing files, display names and favorites. |
+| [local.rs](../crates/rawmakase-interop/src/xmp/local.rs) | Lightroom's spot removal, red eye and masks (`RetouchAreas`, legacy `RetouchInfo`, `RedEyeInfo`, mask correction lists) from XMP or a catalog, as retouch operations, red eye corrections and masks; import only. |
+| [presets/mod.rs](../crates/rawmakase-interop/src/presets/mod.rs) | Public preset API. |
+| [native.rs](../crates/rawmakase-interop/src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
+| [amount.rs](../crates/rawmakase-interop/src/presets/amount.rs) | Lightroom's preset Amount: which presets offer one, and the settings at an Amount from those before the preset and the preset's result. |
+| [curves.rs](../crates/rawmakase-interop/src/presets/curves.rs) | The Point Curve menu's curves: Lightroom's built-in point curves, the curves saved in the data directory's `curves/` folder, and the name the menu shows. |
+| [builtin.rs](../crates/rawmakase-interop/src/presets/builtin.rs) | Built-in presets embedded from `assets/presets`, their group order and ids. |
+| [library.rs](../crates/rawmakase-interop/src/presets/library.rs) | XMP collection discovery, import without overwriting existing files, display names and favorites. |
 
 ## Persistence, catalog and export
 
@@ -187,13 +187,13 @@ recipes and the installed preset collection; they do not own the renderer.
 | [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
-| [lr_develop.rs](../src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
+| [lr_develop.rs](../crates/rawmakase-interop/src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
 | [lightroom/history.rs](../src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
 | [export/mod.rs](../src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
 | [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
 | [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
 | [export/job.rs](../src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
-| [export_settings.rs](../src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
+| [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
 
 ## Desktop application
 
@@ -347,7 +347,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [app/tests.rs](../src/app/tests.rs), [library/tests.rs](../src/app/library/tests.rs) | Editor interactions, state transitions, worker results, navigation, library trees and metadata. Small state owners also contain inline tests. |
 | [develop/pipeline/tests.rs](../src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
 | [camera_profiles/tests.rs](../crates/rawmakase-model/src/camera_profiles/tests.rs) | Profile parsing and validation. |
-| [xmp/tests.rs](../src/xmp/tests.rs), [presets/tests.rs](../src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
+| [xmp/tests.rs](../crates/rawmakase-interop/src/xmp/tests.rs), [presets/tests.rs](../crates/rawmakase-interop/src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
 | [catalog/legacy_sidecar/tests.rs](../src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [catalog/locations_tests.rs](../src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |

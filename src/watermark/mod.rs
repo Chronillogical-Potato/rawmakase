@@ -10,9 +10,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// The Export dialog's choice that takes its text from the photo's
-/// copyright, as Lightroom's Simple Copyright Watermark does.
-pub const SIMPLE_COPYRIGHT: &str = "<simple-copyright>";
+pub use crate::export_settings::SIMPLE_COPYRIGHT;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Style {

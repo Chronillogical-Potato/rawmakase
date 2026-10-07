@@ -16,7 +16,7 @@ pub struct KeywordPath {
 }
 impl KeywordPath {
     /// A path whose names all export.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn all(path: Vec<String>) -> Self {
         Self {
             exported: vec![true; path.len()],
@@ -28,6 +28,9 @@ impl KeywordPath {
 /// Facts about the photo that go in the packet beside its settings.
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
+    /// The software writing the packet (xmp:CreatorTool), e.g. "RAWmakase 0.2.0";
+    /// left out when empty.
+    pub creator_tool: String,
     /// The RAW's file name, e.g. "DSC07924.ARW".
     pub raw_name: String,
     /// Capture time as EXIF writes it, "2018:08:26 10:39:33".
@@ -773,11 +776,12 @@ pub(super) fn unnamed_by_markers(markers: u32) -> Vec<&'static str> {
 
 /// The XMP packet for an exported photo.
 pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
-    let mut attributes: Vec<(String, String)> = vec![
-        ("xmp:CreatorTool".into(), crate::build_info::SOFTWARE.into()),
-        ("xmp:ModifyDate".into(), photo.now.clone()),
-        ("xmp:MetadataDate".into(), photo.now.clone()),
-    ];
+    let mut attributes: Vec<(String, String)> = Vec::new();
+    if !photo.creator_tool.is_empty() {
+        attributes.push(("xmp:CreatorTool".into(), photo.creator_tool.clone()));
+    }
+    attributes.push(("xmp:ModifyDate".into(), photo.now.clone()));
+    attributes.push(("xmp:MetadataDate".into(), photo.now.clone()));
     let created = photo
         .created
         .clone()

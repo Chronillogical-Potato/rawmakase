@@ -2,21 +2,21 @@
 //! the rest of the file.
 use std::io::{self, Read, Seek, SeekFrom};
 
-pub(crate) const APP1: u8 = 0xe1;
+pub const APP1: u8 = 0xe1;
 const SOS: u8 = 0xda;
 const EOI: u8 = 0xd9;
 
 /// A marker segment: its code and where its data (after the length) starts
 /// and how long it is, from the start of the JPEG.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Segment {
+pub struct Segment {
     pub marker: u8,
     pub offset: u64,
     pub length: usize,
 }
 
 /// The segments of a JPEG, read from `reader` where it starts.
-pub(crate) struct Segments<R> {
+pub struct Segments<R> {
     reader: R,
     start: u64,
     /// Where the next marker starts.
@@ -24,7 +24,7 @@ pub(crate) struct Segments<R> {
 }
 impl<R: Read + Seek> Segments<R> {
     /// `None` when `reader` is not at a JPEG's start of image.
-    pub(crate) fn new(mut reader: R) -> io::Result<Option<Self>> {
+    pub fn new(mut reader: R) -> io::Result<Option<Self>> {
         let start = reader.stream_position()?;
         let mut soi = [0u8; 2];
         reader.read_exact(&mut soi)?;
@@ -38,7 +38,7 @@ impl<R: Read + Seek> Segments<R> {
     /// scan or end of image, or where the file ends or stops being a JPEG.
     /// Fill bytes (0xff) are skipped, as are the markers without a length:
     /// TEM and the restarts.
-    pub(crate) fn next(&mut self) -> io::Result<Option<Segment>> {
+    pub fn next_segment(&mut self) -> io::Result<Option<Segment>> {
         self.reader.seek(SeekFrom::Start(self.next))?;
         let mut byte = [0u8; 1];
         loop {
@@ -72,7 +72,7 @@ impl<R: Read + Seek> Segments<R> {
         }))
     }
     /// The reader, at the data of the segment `next` returned last.
-    pub(crate) fn reader(&mut self) -> &mut R {
+    pub fn reader(&mut self) -> &mut R {
         &mut self.reader
     }
 }
@@ -92,7 +92,7 @@ mod tests {
         ];
         let mut s = Segments::new(io::Cursor::new(&jpeg[..])).unwrap().unwrap();
         let mut found = Vec::new();
-        while let Some(segment) = s.next().unwrap() {
+        while let Some(segment) = s.next_segment().unwrap() {
             found.push((segment.marker, segment.offset, segment.length));
         }
         assert_eq!(found, [(0xe0, 6, 2), (0xe1, 15, 1)]);

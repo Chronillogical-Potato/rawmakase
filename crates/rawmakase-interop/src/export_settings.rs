@@ -5,6 +5,10 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// The Export dialog's choice that takes its text from the photo's
+/// copyright, as Lightroom's Simple Copyright Watermark does.
+pub const SIMPLE_COPYRIGHT: &str = "<simple-copyright>";
+
 /// A photo's own export choices, saved with its edit.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -293,7 +297,7 @@ impl Default for ExportSettings {
             include: Include::Custom,
             remove_location: false,
             watermark: false,
-            watermark_name: crate::watermark::SIMPLE_COPYRIGHT.into(),
+            watermark_name: SIMPLE_COPYRIGHT.into(),
             after_export: AfterExport::Nothing,
         }
     }

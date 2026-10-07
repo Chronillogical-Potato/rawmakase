@@ -190,6 +190,7 @@ fn xmp(
         &photo.recipe,
         &image.metadata,
         &crate::xmp::write::Photo {
+            creator_tool: crate::build_info::SOFTWARE.into(),
             raw_name: photo
                 .source
                 .file_name()
