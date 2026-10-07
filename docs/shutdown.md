@@ -124,5 +124,5 @@ quitting: the edit is saved before them. Still to do, tracked in #330:
 - **A worker cut off at the deadline** can leave its temporary file beside an
   export.
 
-Each is stopped and awaited explicitly by the exit hook, never by blocking joins
-in `Drop`.
+When each is done, the exit hook is to stop and await it explicitly, never a
+blocking join in `Drop`.
