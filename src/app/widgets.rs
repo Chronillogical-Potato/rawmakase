@@ -968,6 +968,29 @@ fn descriptor_slider<Id>(
     };
     slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
 }
+/// How a slider's number field was changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NumberInput {
+    /// Typed and entered: any value the setting may hold.
+    Typed,
+    /// Dragged, or stepped with the arrow keys: relative to the value before.
+    Relative,
+}
+/// The value a number field entry gives, from `before`: a typed value within
+/// `typed`; a relative one as dials and arrow keys move it, within `rail` and never
+/// further out than it was.
+fn number_input(
+    input: NumberInput,
+    before: f32,
+    entered: f32,
+    rail: std::ops::RangeInclusive<f32>,
+    (typed_low, typed_high): (f32, f32),
+) -> f32 {
+    match input {
+        NumberInput::Typed => entered.clamp(typed_low, typed_high),
+        NumberInput::Relative => params::nudged(before, entered - before, rail),
+    }
+}
 pub(super) fn slider_styled(
     ui: &mut egui::Ui,
     label: &str,
@@ -1060,14 +1083,31 @@ pub(super) fn slider_styled(
             })
             .inner;
         if value_response.changed() {
-            let entered = displayed / scale;
-            *value = if value_response.dragged() {
-                // Relative input: never further out than the rail, never snapping
-                // a value already beyond it.
-                params::nudged(before, entered - before, start..=end)
+            // Dragging the number, or the arrow keys stepping it while it has focus,
+            // move it relative to where it was; anything else was typed.
+            let stepped = value_response.has_focus()
+                && ui.input(|i| {
+                    [
+                        egui::Key::ArrowUp,
+                        egui::Key::ArrowDown,
+                        egui::Key::ArrowLeft,
+                        egui::Key::ArrowRight,
+                    ]
+                    .into_iter()
+                    .any(|key| i.key_pressed(key))
+                });
+            let input = if value_response.dragged() || stepped {
+                NumberInput::Relative
             } else {
-                entered.clamp(typed_low, typed_high)
+                NumberInput::Typed
             };
+            *value = number_input(
+                input,
+                before,
+                displayed / scale,
+                start..=end,
+                (typed_low, typed_high),
+            );
         }
         let area = Rect::from_min_max(
             Pos2::new(label_rect.right(), row.top()),
@@ -1884,5 +1924,23 @@ mod slider_tests {
         assert_eq!(drag_exposure(6.5, 300.), 6.5);
         let back = drag_exposure(6.5, -30.);
         assert!(back < 6.5 && back > 5., "{back}");
+    }
+
+    #[test]
+    fn stepping_the_number_is_relative_input_typing_is_not() {
+        let (rail, typed) = (-5. ..=5., (-8., 8.));
+        let relative = |before, entered| {
+            number_input(NumberInput::Relative, before, entered, rail.clone(), typed)
+        };
+        // An arrow key at the rail's end, or on an imported value beyond it, never
+        // pushes further out; stepping back in moves it.
+        assert_eq!(relative(5., 5.1), 5.);
+        assert_eq!(relative(6.5, 6.6), 6.5);
+        assert_eq!(relative(6.5, 6.4), 6.4);
+        assert_eq!(
+            number_input(NumberInput::Typed, 0., 6., rail.clone(), typed),
+            6.
+        );
+        assert_eq!(number_input(NumberInput::Typed, 0., 9., rail, typed), 8.);
     }
 }
