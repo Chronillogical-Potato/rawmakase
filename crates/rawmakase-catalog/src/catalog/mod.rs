@@ -99,7 +99,7 @@ impl Catalog {
         let paths: std::collections::HashMap<_, _> =
             mappings.into_iter().map(|f| (f.id, f.path)).collect();
         let mut q = self.db.prepare(
-            "SELECT p.id,p.folder,p.filename,p.captured,p.rating,p.flag,p.label,p.format,p.copy_name,p.master_id, COALESCE((SELECT group_concat(k.name, ', ')
+            "SELECT p.id,p.folder,p.filename,p.captured,p.rating,p.flag,p.label,p.format,p.copy_name,p.master_id, COALESCE((SELECT string_agg(k.name, ', ')
              FROM photo_keywords pk JOIN keywords k ON k.id=pk.keyword WHERE pk.photo=p.id),''),length(COALESCE(p.lightroom_develop,''))>0
              FROM photos p
              ORDER BY p.captured,p.filename,p.id",

@@ -3,7 +3,7 @@
 use super::{Catalog, PhotoId};
 use crate::edits::{SavedEdit, local_edits};
 use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;
 
@@ -142,16 +142,28 @@ impl Catalog {
     /// from 2001.
     pub fn edit_times(&self) -> Result<std::collections::HashMap<PhotoId, String>> {
         let mut query = self.db.prepare(
-            "SELECT p.id, COALESCE(p.edited_at,
-                 (SELECT datetime(MAX(h.created) + 978307200, 'unixepoch')
-                  FROM lightroom_history h WHERE h.photo = p.id))
+            "SELECT p.id, p.edited_at,
+                 (SELECT MAX(h.created) FROM lightroom_history h WHERE h.photo = p.id)
              FROM photos p
              WHERE p.edited_at IS NOT NULL
                 OR EXISTS (SELECT 1 FROM lightroom_history h
                            WHERE h.photo = p.id AND h.created IS NOT NULL)",
         )?;
-        let rows = query.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let rows = query.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<f64>>(2)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, edited, created) = row?;
+            let time = edited
+                .or_else(|| created.and_then(lightroom_time))
+                .context("Lightroom edit time out of range")?;
+            Ok((id, time))
+        })
+        .collect()
     }
     /// Changes whenever the photo's edit does: a hash of its recipe, its
     /// spots and masks, and its Lightroom settings. Cheaper than reading
@@ -187,4 +199,23 @@ impl Catalog {
         };
         Ok((recipe, lightroom))
     }
+}
+
+/// A Lightroom history time, seconds since 2001 (fractions allowed), as
+/// catalogs store times. Rounds and limits as SQLite's
+/// `datetime(created + 978307200, 'unixepoch')` did: to the millisecond,
+/// then down to the second, and `None` before 4714 BC or after 9999.
+pub(super) fn lightroom_time(created: f64) -> Option<String> {
+    /// Unix time of 2001-01-01, Lightroom's epoch.
+    const EPOCH: f64 = 978_307_200.;
+    /// Milliseconds from the Julian day epoch (4714 BC) to 1970, and to the
+    /// end of 9999.
+    const UNIX_JD_MS: f64 = 210_866_760_000_000.;
+    const MAX_JD_MS: f64 = 464_269_060_800_000.;
+    let julian_ms = (created + EPOCH) * 1000. + UNIX_JD_MS;
+    if !(0. ..MAX_JD_MS).contains(&julian_ms) {
+        return None;
+    }
+    let unix_ms = (julian_ms + 0.5) as i64 - UNIX_JD_MS as i64;
+    Some(rawmakase_model::time::utc_text(unix_ms.div_euclid(1000)))
 }

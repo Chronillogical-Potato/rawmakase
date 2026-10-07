@@ -241,7 +241,9 @@ pub(super) fn keyword_at(db: &Connection, path: &[String]) -> Result<i64> {
         ensure!(!name.is_empty(), "A keyword needs a name");
         // Not unique: the first of any duplicates Lightroom left.
         let candidates: Vec<(i64, String)> = db
-            .prepare_cached("SELECT id, name FROM keywords WHERE parent IS ? ORDER BY id")?
+            .prepare_cached(
+                "SELECT id, name FROM keywords WHERE parent IS NOT DISTINCT FROM ? ORDER BY id",
+            )?
             .query_map([parent], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
         let found = candidates
@@ -331,7 +333,7 @@ pub(super) fn read(db: &Connection, id: PhotoId) -> Result<Descriptive> {
         None => None,
     };
     d.capture = db
-        .prepare_cached("SELECT captured, subsec, offset FROM photo_capture WHERE photo=?")?
+        .prepare_cached(r#"SELECT captured, subsec, "offset" FROM photo_capture WHERE photo=?"#)?
         .query_row([id], |r| {
             Ok(Capture {
                 captured: r.get(0)?,
@@ -400,7 +402,7 @@ pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()>
     }
     if let Some(c) = &d.capture {
         db.execute(
-            "INSERT INTO photo_capture(photo, captured, subsec, offset) VALUES (?, ?, ?, ?)",
+            r#"INSERT INTO photo_capture(photo, captured, subsec, "offset") VALUES (?, ?, ?, ?)"#,
             params![id, c.captured, c.subsec, c.offset],
         )?;
         let sort = crate::exif::lightroom_time(&c.captured, c.subsec.as_deref())
@@ -431,7 +433,7 @@ pub(super) fn copy_rows(db: &Connection, photo: PhotoId, copy: PhotoId) -> Resul
         ("photo_fields", "field, state"),
         ("photo_text", "field, lang, position, value"),
         ("photo_creators", "position, name"),
-        ("photo_capture", "captured, subsec, offset"),
+        ("photo_capture", r#"captured, subsec, "offset""#),
         ("photo_location", "lat, lon, alt, cleared"),
     ] {
         db.execute(

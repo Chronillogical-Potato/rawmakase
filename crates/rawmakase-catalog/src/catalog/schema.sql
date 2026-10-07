@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS photo_capture (
     photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
     captured TEXT NOT NULL,
     subsec TEXT,
-    offset TEXT
+    "offset" TEXT
 );
 
 -- A location from elsewhere than the file, or the file's cleared.
