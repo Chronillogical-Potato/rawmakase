@@ -301,15 +301,15 @@ impl Editor {
     pub(super) fn reset_settings(&mut self) {
         self.document
             .edit
-            .history
+            .history_mut()
             .label(super::history::Step::new("Reset Settings", ""));
         let Some(defaults) = self.photo_defaults() else {
-            self.document.edit.recipe = Recipe::default();
+            self.document.edit.replace(Recipe::default());
             return;
         };
         if let Some(note) = defaults.note {
             self.status = note;
         }
-        self.document.edit.recipe = defaults.recipe;
+        self.document.edit.replace(defaults.recipe);
     }
 }

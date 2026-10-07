@@ -348,7 +348,7 @@ impl Editor {
         let result = crate::edits::lightroom_edit(text, m, &self.document.profiles);
         match result {
             Ok((r, warnings)) => {
-                self.document.edit.recipe = r;
+                self.document.edit.replace(r);
                 // Short for the status bar; the full list shows on hover.
                 self.document.lightroom_notice = if warnings.is_empty() {
                     "Lightroom edit applied".into()
@@ -362,8 +362,12 @@ impl Editor {
             }
             Err(e) => {
                 // Lightroom's edit starts from Adobe Default, not the raw defaults.
-                self.document.edit.recipe =
-                    crate::model::recipe::Recipe::with_profiles(m, &self.document.profiles);
+                self.document
+                    .edit
+                    .replace(crate::model::recipe::Recipe::with_profiles(
+                        m,
+                        &self.document.profiles,
+                    ));
                 self.document.lightroom_notice = format!("Lightroom settings not applied: {e:#}")
             }
         }

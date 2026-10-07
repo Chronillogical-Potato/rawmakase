@@ -514,7 +514,7 @@ impl Document {
     /// apart so a panel can measure them only when it needs them.
     pub(super) fn recipe_and_colors(&mut self) -> (&mut Recipe, PhotoColorSource<'_>) {
         (
-            &mut self.edit.recipe,
+            self.edit.recipe_mut(),
             PhotoColorSource {
                 image: self.image.as_ref(),
                 spread: &self.color_spread,

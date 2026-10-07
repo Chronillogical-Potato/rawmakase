@@ -349,7 +349,7 @@ impl super::Editor {
         let r = Recipe {
             crop: [0., 0., 1., 1.],
             constrain_crop: false,
-            ..self.document.edit.recipe.clone()
+            ..self.document.edit.recipe().clone()
         };
         let g = crate::develop::Geometry::new(im, &r, 0);
         Some(Vec2::new(g.oriented_width, g.oriented_height))
@@ -359,7 +359,7 @@ impl super::Editor {
         let Some(photo) = self.crop_frame() else {
             return;
         };
-        let r = &mut self.document.edit.recipe;
+        let r = self.document.edit.recipe_mut();
         r.crop = swap_orientation(r.crop, photo);
         self.view.aspect = swapped_aspect(self.view.aspect, photo);
     }
@@ -416,7 +416,7 @@ impl super::Editor {
         };
         let (generation, _) = self.document.straighten.start();
         let id = self.load.id();
-        let base = self.document.edit.recipe.clone();
+        let base = self.document.edit.recipe().clone();
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         std::thread::spawn(move || {
@@ -447,7 +447,7 @@ impl super::Editor {
             return;
         }
         self.document.straighten.finish(generation);
-        if super::upright::inputs(analysed) != super::upright::inputs(&self.document.edit.recipe) {
+        if super::upright::inputs(analysed) != super::upright::inputs(self.document.edit.recipe()) {
             self.start_auto_straighten();
             return;
         }
@@ -463,16 +463,13 @@ impl super::Editor {
             }
         };
         // A drag still under way is recorded first, so undoing it keeps the angle.
-        if self.document.edit.history.in_gesture() {
-            self.document
-                .edit
-                .history
-                .finish_gesture(&self.document.edit.recipe);
-            self.document.edit.save.mark_changed();
+        if self.document.edit.history().in_gesture() {
+            self.document.edit.finish_gesture();
+            self.document.edit.save_state_mut().mark_changed();
         }
-        let old = self.document.edit.recipe.clone();
-        self.document.edit.recipe.straighten = angle;
-        self.commit_edit(old, Some(super::history::Step::new("Straighten", "Auto")));
+        self.change_edit(Some(super::history::Step::new("Straighten", "Auto")), |r| {
+            r.straighten = angle;
+        });
     }
 }
 

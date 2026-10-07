@@ -45,7 +45,7 @@ impl Editor {
             return;
         }
         let info = PresetInfo::new(&form.name, &form.group);
-        match user.create(&self.document.edit.recipe, &info, groups) {
+        match user.create(self.document.edit.recipe(), &info, groups) {
             Ok(_) => {
                 self.status = format!("Preset {} created in {}", info.name, info.group);
                 self.reload_presets(&self.context.clone());
@@ -63,7 +63,7 @@ impl Editor {
                 return;
             }
             PresetAction::Update(i) => library.presets.get(i).map(|p| {
-                user.update(p, &self.document.edit.recipe)
+                user.update(p, self.document.edit.recipe())
                     .map(|()| format!("Preset {} updated", p.name))
             }),
             PresetAction::Delete(i) => library.presets.get(i).map(|p| {
@@ -203,7 +203,7 @@ mod tests {
                 scale_factor: 1.,
                 scale_clipped: 0,
             }));
-        e.document.edit.recipe.exposure = 0.7;
+        e.document.edit.recipe_mut().exposure = 0.7;
         let mut groups = GroupSelection::none();
         groups.set(SettingGroup::Exposure, GroupInclusion::Included);
         e.create_preset_in(&user, &form, &groups);
