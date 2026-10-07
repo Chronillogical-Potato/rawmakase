@@ -7,6 +7,7 @@ use super::grid::filter_caption;
 use super::stage::MARGIN;
 use super::{Action, Library};
 use crate::app::theme;
+use crate::catalog::PhotoId;
 use eframe::egui::{self, Rect, Vec2};
 
 /// One of the two photos.
@@ -28,9 +29,9 @@ impl Side {
 #[derive(Debug, Default)]
 pub(super) struct Compare {
     pub open: bool,
-    pub select: Option<i64>,
+    pub select: Option<PhotoId>,
     /// None when no other photo is shown.
-    pub candidate: Option<i64>,
+    pub candidate: Option<PhotoId>,
     pub active: Side,
     /// The selection as Compare last set it; one changed since, by undo or
     /// a new virtual copy, is followed.
@@ -39,7 +40,7 @@ pub(super) struct Compare {
     pub restored: bool,
 }
 impl Compare {
-    fn id(&self, side: Side) -> Option<i64> {
+    fn id(&self, side: Side) -> Option<PhotoId> {
         match side {
             Side::Select => self.select,
             Side::Candidate => self.candidate,
@@ -71,8 +72,8 @@ impl Library {
     }
     /// `select` as the select, beside the next photo selected with it, or
     /// else the next one shown; the select is active.
-    fn seed_compare(&mut self, select: i64) {
-        let others: Vec<i64> = self
+    fn seed_compare(&mut self, select: PhotoId) {
+        let others: Vec<PhotoId> = self
             .selected_ids()
             .into_iter()
             .filter(|id| *id != select)
@@ -81,7 +82,7 @@ impl Library {
             .visible
             .iter()
             .position(|i| self.photos[*i].id == select);
-        let after = |id: &i64| {
+        let after = |id: &PhotoId| {
             let position = self.visible.iter().position(|i| self.photos[*i].id == *id);
             position > at
         };
@@ -106,8 +107,8 @@ impl Library {
     }
     /// The photo `by` steps from `from` (or from the select) among those
     /// shown, passing over the select; None at either end.
-    fn next_candidate(&self, select: i64, from: Option<i64>, by: isize) -> Option<i64> {
-        let ids: Vec<i64> = self.visible.iter().map(|i| self.photos[*i].id).collect();
+    fn next_candidate(&self, select: PhotoId, from: Option<PhotoId>, by: isize) -> Option<PhotoId> {
+        let ids: Vec<PhotoId> = self.visible.iter().map(|i| self.photos[*i].id).collect();
         let from = from.filter(|id| ids.contains(id)).unwrap_or(select);
         let mut at = ids.iter().position(|id| *id == from)? as isize;
         loop {
@@ -156,7 +157,7 @@ impl Library {
     }
     /// A filmstrip click: the select activates its side; any other photo
     /// becomes the candidate, as in Lightroom.
-    pub(super) fn compare_pick(&mut self, id: i64) {
+    pub(super) fn compare_pick(&mut self, id: PhotoId) {
         if Some(id) == self.compare.select {
             self.activate(Side::Select);
         } else {
@@ -213,7 +214,7 @@ impl Library {
         }
         Ok(())
     }
-    fn is_shown(&self, id: i64) -> bool {
+    fn is_shown(&self, id: PhotoId) -> bool {
         self.visible.iter().any(|i| self.photos[*i].id == id)
     }
     /// Keeps Compare to the selection and the photos shown. A selection
@@ -223,7 +224,7 @@ impl Library {
     /// next photo shown, the select to the candidate, both to the photos
     /// shown. The active photo stays active wherever it is. Returns the
     /// select; None when nothing is shown.
-    pub(super) fn keep_compared_shown(&mut self) -> Option<i64> {
+    pub(super) fn keep_compared_shown(&mut self) -> Option<PhotoId> {
         let active = self.compare.id(self.compare.active);
         // A filter or source that hid the active photo pruned the selection
         // and moved it off that photo; that is reconciled below, keeping its

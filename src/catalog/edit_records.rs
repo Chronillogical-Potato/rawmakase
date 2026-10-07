@@ -1,12 +1,12 @@
 //! Reading the edits that `crate::edits` resolves: one photo's, or many photos'
 //! in one transaction.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::edits::{EditRecord, PhotoRecord};
 use anyhow::Result;
 
 impl Catalog {
     /// Photo `id`'s edit as stored.
-    pub fn edit_record(&self, id: i64) -> Result<EditRecord> {
+    pub fn edit_record(&self, id: PhotoId) -> Result<EditRecord> {
         let (recipe, export, identity, lightroom) = self.db.query_row(
             "SELECT recipe,export_options,identity,lightroom_develop FROM photos WHERE id=?",
             [id],
@@ -25,7 +25,7 @@ impl Catalog {
 impl Catalog {
     /// The records of `ids`, in order, read in one transaction: one consistent
     /// state of the catalog however many photos there are.
-    pub fn photo_records(&self, ids: &[i64]) -> Result<Vec<PhotoRecord>> {
+    pub fn photo_records(&self, ids: &[PhotoId]) -> Result<Vec<PhotoRecord>> {
         let tx = self.db.unchecked_transaction()?;
         let records = ids
             .iter()
@@ -36,7 +36,6 @@ impl Catalog {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )?;
                 Ok(PhotoRecord {
-                    id,
                     edit: self.edit_record(id)?,
                     descriptive: self.descriptive(id)?,
                     keywords: self.keywords(id)?,
@@ -60,7 +59,7 @@ mod tests {
     use std::path::Path;
 
     /// Each photo's catalog id and file.
-    type Photos = Vec<(i64, std::path::PathBuf)>;
+    type Photos = Vec<(PhotoId, std::path::PathBuf)>;
     /// A catalog of three copies of the synthetic chart DNG.
     fn catalog() -> Result<(tempfile::TempDir, Catalog, Photos)> {
         let d = tempfile::tempdir()?;
@@ -76,7 +75,7 @@ mod tests {
         let photos = c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
         Ok((d, c, photos))
     }
-    fn set_lightroom(c: &Catalog, id: i64, text: &str) -> Result<()> {
+    fn set_lightroom(c: &Catalog, id: PhotoId, text: &str) -> Result<()> {
         c.db.execute(
             "UPDATE photos SET lightroom_develop=? WHERE id=?",
             rusqlite::params![text, id],
@@ -90,7 +89,7 @@ mod tests {
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = crate::raw_defaults::brighter_defaults();
-        let resolve_photo = |(id, path): &(i64, std::path::PathBuf)| {
+        let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {
             resolve(&c.edit_record(*id)?, path, &metadata, &profiles, &defaults)
         };
         // Saved, masks included: they are stored apart from the recipe.
@@ -159,7 +158,7 @@ mod tests {
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = DevelopDefaults::default();
-        let resolve_photo = |(id, path): &(i64, std::path::PathBuf)| {
+        let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {
             c.edit_record(*id)
                 .and_then(|record| resolve(&record, path, &metadata, &profiles, &defaults))
                 .map(|r| r.origin)

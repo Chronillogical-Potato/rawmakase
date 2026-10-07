@@ -1,9 +1,10 @@
 use super::*;
 use crate::app::Module;
+use crate::catalog::PhotoId;
 use crate::export_settings::{Destination, Format};
 
 /// An editor on a catalog of two copies of the synthetic chart DNG and a JPEG.
-fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>, egui::Context)> {
+fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>, egui::Context)> {
     let dir = tempfile::tempdir()?;
     let photos = dir.path().join("photos");
     std::fs::create_dir(&photos)?;

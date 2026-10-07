@@ -3,7 +3,7 @@
 //! so photos alike in it stay in capture order. Edit time and aspect ratio
 //! are not on `Photo` and are read from the catalog as they are needed.
 use crate::app::photo_metadata::LABELS;
-use crate::catalog::{Catalog, Photo};
+use crate::catalog::{Catalog, Photo, PhotoId};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -116,8 +116,8 @@ impl Sort {
 pub(super) enum Keys {
     #[default]
     None,
-    EditTimes(HashMap<i64, String>),
-    Aspects(HashMap<i64, f32>),
+    EditTimes(HashMap<PhotoId, String>),
+    Aspects(HashMap<PhotoId, f32>),
 }
 
 /// Lightroom's label colour order: red, yellow, green, blue, purple, then

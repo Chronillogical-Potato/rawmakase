@@ -60,7 +60,7 @@ fn lightroom_metadata_preserves_all_labels_flags_and_unrated_photos() -> Result<
     import_lightroom(&source, &destination)?;
     let mut cat = Catalog::open(&destination)?;
     let photos = cat.photos()?;
-    let unrated = photos.iter().find(|p| p.id == 40).unwrap();
+    let unrated = photos.iter().find(|p| p.id == PhotoId(40)).unwrap();
     assert_eq!(
         (unrated.rating, unrated.flag, unrated.label.as_str()),
         (0, 0, "")
@@ -77,26 +77,35 @@ fn lightroom_metadata_preserves_all_labels_flags_and_unrated_photos() -> Result<
     .iter()
     .enumerate()
     {
-        let photo = photos.iter().find(|p| p.id == 100 + i as i64).unwrap();
+        let photo = photos
+            .iter()
+            .find(|p| p.id == PhotoId(100 + i as i64))
+            .unwrap();
         assert_eq!(
             (photo.rating, photo.flag, photo.label.as_str()),
             ((i % 6) as i32, i as i32 % 3 - 1, *label)
         );
     }
-    cat.set_metadata(100, 5, 1, "Purple")?;
-    assert!(cat.set_metadata(100, 6, 1, "Red").is_err());
-    assert!(cat.set_metadata(100, 0, 2, "Red").is_err());
-    assert!(cat.set_metadata(9999, 0, 0, "").is_err());
+    cat.set_metadata(PhotoId(100), 5, 1, "Purple")?;
+    assert!(cat.set_metadata(PhotoId(100), 6, 1, "Red").is_err());
+    assert!(cat.set_metadata(PhotoId(100), 0, 2, "Red").is_err());
+    assert!(cat.set_metadata(PhotoId(9999), 0, 0, "").is_err());
     drop(cat);
     let reopened = Catalog::open(&destination)?;
     let photos = reopened.photos()?;
-    let edited = photos.iter().find(|p| p.id == 100).unwrap();
+    let edited = photos.iter().find(|p| p.id == PhotoId(100)).unwrap();
     assert_eq!(
         (edited.rating, edited.flag, edited.label.as_str()),
         (5, 1, "Purple")
     );
-    assert_eq!(photos.iter().find(|p| p.id == 40).unwrap().rating, 0);
-    assert_eq!(photos.iter().find(|p| p.id == 101).unwrap().label, "Yellow");
+    assert_eq!(
+        photos.iter().find(|p| p.id == PhotoId(40)).unwrap().rating,
+        0
+    );
+    assert_eq!(
+        photos.iter().find(|p| p.id == PhotoId(101)).unwrap().label,
+        "Yellow"
+    );
     assert_eq!(std::fs::read(&source)?, original);
     Ok(())
 }
@@ -121,7 +130,7 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     assert_eq!(photos[0].rating, 4);
     assert_eq!(photos[0].keywords, "City");
     assert_eq!(photos[1].copy_name, "B&W");
-    assert_eq!(cat.collection_members(50)?.len(), 2);
+    assert_eq!(cat.collection_members(CollectionId(50))?.len(), 2);
     let local = dir.path().join("local");
     std::fs::create_dir(&local)?;
     std::fs::write(local.join("image.ARW"), b"synthetic raw identity")?;
@@ -140,23 +149,23 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
         ..Default::default()
     };
     cat.save_edit(
-        40,
+        PhotoId(40),
         &p,
         &edit,
         &ExportOptions::default(),
         crate::catalog::HistoryUpdate::Keep,
     )?;
-    assert_eq!(cat.load_edit(40, &p)?.unwrap().recipe, edit);
-    assert!(cat.load_edit(41, &p)?.is_none());
+    assert_eq!(cat.load_edit(PhotoId(40), &p)?.unwrap().recipe, edit);
+    assert!(cat.load_edit(PhotoId(41), &p)?.is_none());
     assert!(!super::legacy_sidecar::sidecar_path(&p).exists());
-    cat.set_metadata(41, 5, 1, "Purple")?;
+    cat.set_metadata(PhotoId(41), 5, 1, "Purple")?;
     assert_eq!(cat.photos()?[0].rating, 4);
     assert_eq!(cat.photos()?[1].rating, 5);
     std::fs::write(&p, b"changed raw")?;
-    assert!(cat.load_edit(40, &p).is_err());
+    assert!(cat.load_edit(PhotoId(40), &p).is_err());
     assert!(
         cat.save_edit(
-            40,
+            PhotoId(40),
             &p,
             &edit,
             &ExportOptions::default(),
@@ -794,7 +803,7 @@ fn lightroom_import_copies_photo_info_from_apex_values() -> Result<()> {
     let output = d.path().join("info.rawmakase");
     import_lightroom(&source, &output)?;
     let cat = Catalog::open(&output)?;
-    let info = cat.photo_info(40)?.unwrap();
+    let info = cat.photo_info(PhotoId(40))?.unwrap();
     assert_eq!(info.camera.as_deref(), Some("ILCE-7M2"));
     assert_eq!(info.lens.as_deref(), Some("FE 55mm F1.8 ZA"));
     assert_eq!(info.aperture_text().as_deref(), Some("f/2"));
@@ -805,7 +814,7 @@ fn lightroom_import_copies_photo_info_from_apex_values() -> Result<()> {
     // A quarter-turned photo shows taller than it is stored.
     assert_eq!(info.dimensions_text().as_deref(), Some("4000 × 6000"));
     // A virtual copy has its master's info.
-    assert_eq!(cat.photo_info(41)?, Some(info));
+    assert_eq!(cat.photo_info(PhotoId(41))?, Some(info));
     Ok(())
 }
 #[test]
@@ -842,15 +851,15 @@ fn edit_times_come_from_rawmakase_or_else_lightroom_history() -> Result<()> {
     )?;
     let times = c.edit_times()?;
     assert_eq!(
-        times.get(&1).map(String::as_str),
+        times.get(&PhotoId(1)).map(String::as_str),
         Some("2024-05-01 12:00:00")
     );
     // Lightroom's latest step, counted from 2001.
     assert_eq!(
-        times.get(&2).map(String::as_str),
+        times.get(&PhotoId(2)).map(String::as_str),
         Some("2001-01-02 00:00:00")
     );
-    assert!(!times.contains_key(&3));
+    assert!(!times.contains_key(&PhotoId(3)));
     Ok(())
 }
 
@@ -906,7 +915,7 @@ fn imported_develop_history_is_copied_in_date_order_and_decoded() -> Result<()> 
     let dest = d.path().join("history.rawmakase");
     import_lightroom(&source, &dest)?;
     let cat = Catalog::open(&dest)?;
-    let steps = cat.lightroom_history(40)?;
+    let steps = cat.lightroom_history(PhotoId(40))?;
     // Ordered by dateCreated, the step with no text dropped, the zlib snapshot
     // decoded to the develop settings it holds.
     assert_eq!(
@@ -915,7 +924,7 @@ fn imported_develop_history_is_copied_in_date_order_and_decoded() -> Result<()> 
     );
     assert_eq!(steps[1].text, "s = { Exposure2012 = 0.5 }");
     assert_eq!(
-        cat.lightroom_history(41)?[0].text,
+        cat.lightroom_history(PhotoId(41))?[0].text,
         "s = { Highlights = 10 }"
     );
     Ok(())
@@ -1006,14 +1015,20 @@ fn lightroom_import_reads_each_photos_descriptive_metadata() -> Result<()> {
     import_lightroom(&source, &destination)?;
     let cat = Catalog::open(&destination)?;
     let title = |id| -> Result<_> { Ok(cat.descriptive(id)?.title) };
-    assert_eq!(title(40)?, Some(Value::Set(LangAlt::new("Master"))));
-    assert_eq!(title(41)?, Some(Value::Set(LangAlt::new("Copy"))));
-    let master = cat.descriptive(40)?;
+    assert_eq!(
+        title(PhotoId(40))?,
+        Some(Value::Set(LangAlt::new("Master")))
+    );
+    assert_eq!(title(PhotoId(41))?, Some(Value::Set(LangAlt::new("Copy"))));
+    let master = cat.descriptive(PhotoId(40))?;
     assert_eq!(master.creator, Some(Value::Set(vec!["Example".into()])));
     assert_eq!(master.capture.unwrap().offset.as_deref(), Some("+01:00"));
     // Rating stays Lightroom's own column's.
     let photos = cat.photos()?;
-    assert_eq!(photos.iter().find(|p| p.id == 40).unwrap().rating, 4);
+    assert_eq!(
+        photos.iter().find(|p| p.id == PhotoId(40)).unwrap().rating,
+        4
+    );
     Ok(())
 }
 #[test]
@@ -1036,7 +1051,7 @@ fn lightroom_keyword_export_options_are_imported_and_backfilled() -> Result<()> 
     let mut cat = Catalog::open(&destination)?;
     let exported = |cat: &Catalog| -> Result<Vec<(Vec<String>, Vec<bool>)>> {
         Ok(cat
-            .keywords(40)?
+            .keywords(PhotoId(40))?
             .into_iter()
             .map(|k| (k.path, k.exported))
             .collect())
@@ -1309,7 +1324,7 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
     let mut cat = Catalog::open(&destination)?;
     // Imported here, so opening the catalog has nothing to recover.
     assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
-    let snapshots = cat.snapshots(40)?;
+    let snapshots = cat.snapshots(PhotoId(40))?;
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].name, "Before crop");
     assert_eq!(
@@ -1323,7 +1338,7 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
         [],
     )?;
     assert_eq!(cat.backfill_lightroom_snapshots()?, 1);
-    assert_eq!(cat.snapshots(40)?.len(), 1);
+    assert_eq!(cat.snapshots(PhotoId(40))?.len(), 1);
     assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
     // A copy cut short before its marker was written copies nothing twice.
     cat.db.execute(
@@ -1331,7 +1346,7 @@ fn lightroom_snapshots_import_with_their_photo() -> Result<()> {
         [],
     )?;
     assert_eq!(cat.backfill_lightroom_snapshots()?, 0);
-    assert_eq!(cat.snapshots(40)?.len(), 1);
+    assert_eq!(cat.snapshots(PhotoId(40))?.len(), 1);
     Ok(())
 }
 #[test]

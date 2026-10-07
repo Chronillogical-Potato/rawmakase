@@ -36,6 +36,7 @@ catalog -> develop
 catalog -> edits
 catalog -> exif
 catalog -> export_settings
+catalog -> ids
 catalog -> jpeg
 catalog -> metadata
 catalog -> storage

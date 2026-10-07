@@ -516,7 +516,7 @@ mod integration_tests {
         e.control_commands(&ctx);
         assert_eq!(answer.try_recv().unwrap().unwrap().status, "applied");
         // No photo is opened: the wait stays until its time is up.
-        let (pending, answer) = wait(commands::Until::Loaded(1), 30);
+        let (pending, answer) = wait(commands::Until::Loaded(crate::catalog::PhotoId(1)), 30);
         tx.send(Msg::Request(pending)).unwrap();
         e.control_commands(&ctx);
         assert!(answer.try_recv().is_err(), "answered before it held");

@@ -3,6 +3,7 @@
 //! photos added from folders it is read from the files in the background and
 //! kept in the catalog, a row of nothing for a file without any.
 use super::Library;
+use crate::catalog::PhotoId;
 use crate::metadata::PhotoInfo;
 use eframe::egui;
 use std::path::Path;
@@ -76,7 +77,7 @@ impl Library {
         let Ok(missing) = self.catalog.photos_without_info() else {
             return;
         };
-        let missing: std::collections::HashSet<i64> = missing.into_iter().collect();
+        let missing: std::collections::HashSet<PhotoId> = missing.into_iter().collect();
         let todo: Vec<_> = self
             .photos
             .iter()

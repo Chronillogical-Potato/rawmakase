@@ -1,6 +1,7 @@
 //! Reading something from many photos' files in the background, a batch at a
 //! time, for the catalog: capture times, camera settings. Dropping the
 //! reader stops it.
+use crate::catalog::PhotoId;
 use eframe::egui;
 use std::{
     path::{Path, PathBuf},
@@ -15,13 +16,13 @@ use std::{
 const BATCH: usize = 32;
 
 pub(super) struct Reader<T> {
-    rx: Receiver<Vec<(i64, T)>>,
+    rx: Receiver<Vec<(PhotoId, T)>>,
     cancel: Arc<AtomicBool>,
 }
 impl<T: Send + 'static> Reader<T> {
     /// Reads `photos` with `read` on a thread of its own.
     pub(super) fn start(
-        photos: Vec<(i64, PathBuf)>,
+        photos: Vec<(PhotoId, PathBuf)>,
         ctx: &egui::Context,
         read: fn(&Path) -> T,
     ) -> Self {
@@ -44,7 +45,7 @@ impl<T: Send + 'static> Reader<T> {
         Self { rx, cancel }
     }
     /// The batches read since the last call, and whether reading is done.
-    pub(super) fn poll(&self) -> (Vec<(i64, T)>, bool) {
+    pub(super) fn poll(&self) -> (Vec<(PhotoId, T)>, bool) {
         let mut out = Vec::new();
         loop {
             match self.rx.try_recv() {

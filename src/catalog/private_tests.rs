@@ -20,7 +20,10 @@ fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {
         c.db.query_row("SELECT original_catalog FROM sources", [], |r| r.get(0))?;
     assert_eq!(archive, std::fs::read(&source)?);
     assert_eq!(before, Identity::read(&source)?);
-    for (id, make, model) in [(350644, "Sony", "ILCE-7M2"), (1062257, "Fujifilm", "X100F")] {
+    for (id, make, model) in [
+        (PhotoId(350644), "Sony", "ILCE-7M2"),
+        (PhotoId(1062257), "Fujifilm", "X100F"),
+    ] {
         let m = crate::raw::Metadata {
             make: make.into(),
             model: model.into(),

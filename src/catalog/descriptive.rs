@@ -3,7 +3,7 @@
 //! photo, a virtual copy's apart from its master's. A field with no row is the
 //! file's own (its EXIF, at export); a cleared one is empty whatever the file
 //! says.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::metadata::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, TextField, Value, keyword_name,
 };
@@ -25,7 +25,7 @@ const CREATOR: &str = "creator";
 /// included, to put back on undo.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetadataSnapshot {
-    pub photo: i64,
+    pub photo: PhotoId,
     pub descriptive: Descriptive,
     pub keywords: Vec<i64>,
     /// The capture time it sorts by (`photos.captured`), which a capture
@@ -35,11 +35,11 @@ pub struct MetadataSnapshot {
 
 impl Catalog {
     /// A photo's descriptive overrides.
-    pub fn descriptive(&self, id: i64) -> Result<Descriptive> {
+    pub fn descriptive(&self, id: PhotoId) -> Result<Descriptive> {
         read(&self.db, id)
     }
     /// The overrides of several photos, by photo.
-    pub fn descriptive_of(&self, ids: &[i64]) -> Result<HashMap<i64, Descriptive>> {
+    pub fn descriptive_of(&self, ids: &[PhotoId]) -> Result<HashMap<PhotoId, Descriptive>> {
         ids.iter()
             .map(|id| Ok((*id, read(&self.db, *id)?)))
             .collect()
@@ -47,7 +47,7 @@ impl Catalog {
     /// Replaces the default language of a field on every photo given, keeping
     /// its other languages; empty text clears the field, every language.
     /// One transaction.
-    pub fn set_text(&mut self, ids: &[i64], field: TextField, text: &str) -> Result<()> {
+    pub fn set_text(&mut self, ids: &[PhotoId], field: TextField, text: &str) -> Result<()> {
         self.update_descriptive(ids, |d| {
             let slot = d.text_mut(field);
             *slot = Some(if text.is_empty() {
@@ -64,7 +64,7 @@ impl Catalog {
         })
     }
     /// Sets the creators of every photo given, in order; none clears the field.
-    pub fn set_creators(&mut self, ids: &[i64], names: &[String]) -> Result<()> {
+    pub fn set_creators(&mut self, ids: &[PhotoId], names: &[String]) -> Result<()> {
         let names: Vec<String> = names
             .iter()
             .map(|n| n.trim().to_string())
@@ -79,20 +79,20 @@ impl Catalog {
         })
     }
     /// Leaves the location of every photo given out, its file's included.
-    pub fn clear_location(&mut self, ids: &[i64]) -> Result<()> {
+    pub fn clear_location(&mut self, ids: &[PhotoId]) -> Result<()> {
         self.update_descriptive(ids, |d| d.location = Some(Location::Cleared))
     }
     /// Records a capture time from elsewhere than the file, and sorts the
     /// photo by it.
     #[cfg(test)]
-    pub fn set_capture(&mut self, id: i64, capture: &Capture) -> Result<()> {
+    pub fn set_capture(&mut self, id: PhotoId, capture: &Capture) -> Result<()> {
         self.update_descriptive(&[id], |d| d.capture = Some(capture.clone()))
     }
     /// Reads, changes and writes back the overrides of every photo given, in
     /// one transaction.
     fn update_descriptive(
         &mut self,
-        ids: &[i64],
+        ids: &[PhotoId],
         mut f: impl FnMut(&mut Descriptive),
     ) -> Result<()> {
         self.update_descriptive_where(ids, |_, d| {
@@ -104,8 +104,8 @@ impl Catalog {
     /// photos `f` returns true for.
     pub(super) fn update_descriptive_where(
         &mut self,
-        ids: &[i64],
-        mut f: impl FnMut(i64, &mut Descriptive) -> bool,
+        ids: &[PhotoId],
+        mut f: impl FnMut(PhotoId, &mut Descriptive) -> bool,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
         for &id in ids {
@@ -118,7 +118,7 @@ impl Catalog {
         Ok(())
     }
     /// What `restore_metadata` needs to put these photos back as they are.
-    pub fn metadata_snapshot(&self, ids: &[i64]) -> Result<Vec<MetadataSnapshot>> {
+    pub fn metadata_snapshot(&self, ids: &[PhotoId]) -> Result<Vec<MetadataSnapshot>> {
         ids.iter()
             .map(|id| {
                 Ok(MetadataSnapshot {
@@ -163,7 +163,7 @@ impl Catalog {
         Ok(())
     }
     /// A photo's keywords, each with its path from the top, by path.
-    pub fn keywords(&self, id: i64) -> Result<Vec<Keyword>> {
+    pub fn keywords(&self, id: PhotoId) -> Result<Vec<Keyword>> {
         let ids: Vec<i64> = self
             .db
             .prepare_cached("SELECT keyword FROM photo_keywords WHERE photo=?")?
@@ -188,7 +188,7 @@ impl Catalog {
     }
     /// Adds keywords, by path (top first), to every photo given, making
     /// them where missing; one transaction.
-    pub fn add_keywords(&mut self, ids: &[i64], paths: &[Vec<String>]) -> Result<()> {
+    pub fn add_keywords(&mut self, ids: &[PhotoId], paths: &[Vec<String>]) -> Result<()> {
         let tx = self.db.transaction()?;
         for path in paths {
             ensure!(!path.is_empty(), "A keyword needs a name");
@@ -202,7 +202,7 @@ impl Catalog {
     }
     /// Adds a keyword to every photo given.
     #[cfg(test)]
-    pub fn add_keyword(&mut self, ids: &[i64], keyword: i64) -> Result<()> {
+    pub fn add_keyword(&mut self, ids: &[PhotoId], keyword: i64) -> Result<()> {
         let tx = self.db.transaction()?;
         for id in ids {
             tag_photo(&tx, *id, keyword)?;
@@ -211,12 +211,12 @@ impl Catalog {
         Ok(())
     }
     /// Removes a keyword from every photo given that has it.
-    pub fn remove_keyword(&mut self, ids: &[i64], keyword: i64) -> Result<()> {
+    pub fn remove_keyword(&mut self, ids: &[PhotoId], keyword: i64) -> Result<()> {
         let tx = self.db.transaction()?;
         for id in ids {
             tx.execute(
                 "DELETE FROM photo_keywords WHERE photo=? AND keyword=?",
-                [*id, keyword],
+                params![id, keyword],
             )?;
         }
         tx.commit()?;
@@ -225,10 +225,10 @@ impl Catalog {
 }
 
 /// Gives `photo` `keyword`, unless it has it already.
-pub(super) fn tag_photo(db: &Connection, photo: i64, keyword: i64) -> Result<()> {
+pub(super) fn tag_photo(db: &Connection, photo: PhotoId, keyword: i64) -> Result<()> {
     db.execute(
         "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
-        [photo, keyword],
+        params![photo, keyword],
     )?;
     Ok(())
 }
@@ -302,7 +302,7 @@ fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
     })
 }
 
-pub(super) fn read(db: &Connection, id: i64) -> Result<Descriptive> {
+pub(super) fn read(db: &Connection, id: PhotoId) -> Result<Descriptive> {
     let states: HashMap<String, String> = db
         .prepare_cached("SELECT field, state FROM photo_fields WHERE photo=?")?
         .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -358,7 +358,7 @@ pub(super) fn read(db: &Connection, id: i64) -> Result<Descriptive> {
 }
 
 /// Replaces every descriptive row of a photo with `d`.
-pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
+pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()> {
     for table in TABLES {
         db.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
     }
@@ -426,7 +426,7 @@ pub(super) fn write(db: &Connection, id: i64, d: &Descriptive) -> Result<()> {
 }
 
 /// Gives `copy` its own copies of `photo`'s descriptive rows.
-pub(super) fn copy_rows(db: &Connection, photo: i64, copy: i64) -> Result<()> {
+pub(super) fn copy_rows(db: &Connection, photo: PhotoId, copy: PhotoId) -> Result<()> {
     for (table, columns) in [
         ("photo_fields", "field, state"),
         ("photo_text", "field, lang, position, value"),

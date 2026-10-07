@@ -26,7 +26,6 @@ mod descriptive;
 mod develop_history;
 mod edit_records;
 mod edits;
-mod ids;
 mod info;
 mod ingest;
 pub mod legacy_sidecar;
@@ -36,12 +35,12 @@ mod models;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
+pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
-pub use ids::{CollectionId, FolderId, RootId};
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
@@ -225,8 +224,8 @@ impl Catalog {
     pub fn change_collection(
         &mut self,
         collection: CollectionId,
-        add: &[i64],
-        remove: &[i64],
+        add: &[PhotoId],
+        remove: &[PhotoId],
     ) -> Result<()> {
         let tx = self.db.transaction()?;
         for photo in add {
@@ -247,7 +246,7 @@ impl Catalog {
     /// Every collection's photos, by collection.
     pub fn collection_photos(
         &self,
-    ) -> Result<std::collections::HashMap<CollectionId, std::collections::HashSet<i64>>> {
+    ) -> Result<std::collections::HashMap<CollectionId, std::collections::HashSet<PhotoId>>> {
         let mut members: std::collections::HashMap<_, std::collections::HashSet<_>> =
             Default::default();
         let mut query = self
@@ -269,7 +268,10 @@ impl Catalog {
         Ok(())
     }
     #[cfg(test)]
-    pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<i64>> {
+    pub(crate) fn collection_members(
+        &self,
+        id: CollectionId,
+    ) -> Result<std::collections::HashSet<PhotoId>> {
         Ok(self
             .db
             .prepare("SELECT photo FROM collection_photos WHERE collection=?")?
@@ -301,12 +303,12 @@ impl Catalog {
         set_meta(&self.db, key, value)
     }
     #[cfg(test)]
-    pub fn set_metadata(&mut self, id: i64, rating: i32, flag: i32, label: &str) -> Result<()> {
+    pub fn set_metadata(&mut self, id: PhotoId, rating: i32, flag: i32, label: &str) -> Result<()> {
         self.set_metadata_of(&[(id, rating, flag, label.into())])
     }
     /// Sets rating, flag and label of several photos in one transaction:
     /// all of them are saved, or none.
-    pub fn set_metadata_of(&mut self, changes: &[(i64, i32, i32, String)]) -> Result<()> {
+    pub fn set_metadata_of(&mut self, changes: &[(PhotoId, i32, i32, String)]) -> Result<()> {
         let tx = self.db.transaction()?;
         for (id, rating, flag, label) in changes {
             ensure!((0..=5).contains(rating), "Rating must be between 0 and 5");

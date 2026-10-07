@@ -1,5 +1,6 @@
 //! The desktop session: the last photo and catalog place, the panels and
 //! layouts as the user left them, and the preferences kept between launches.
+use crate::catalog::PhotoId;
 use crate::storage::{data_dir, read_json_or_default};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ pub struct Session {
     #[serde(default)]
     pub library_source: String,
     #[serde(default)]
-    pub selected_photo: Option<i64>,
+    pub selected_photo: Option<PhotoId>,
     #[serde(default)]
     pub develop: bool,
     /// Which demosaic full-size decodes use.

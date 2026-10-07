@@ -3,7 +3,7 @@
 //! enough to stall the interface mid-edit. Saves before navigation stay
 //! synchronous, after waiting for the one in flight.
 use crate::{
-    catalog::{Catalog, SavedHistory},
+    catalog::{Catalog, PhotoId, SavedHistory},
     develop::Recipe,
     export_settings::ExportOptions,
 };
@@ -18,7 +18,7 @@ use std::{
 pub(super) struct Job {
     /// The catalog the edit goes to, and the photo in it.
     pub catalog: PathBuf,
-    pub photo: i64,
+    pub photo: PhotoId,
     pub raw: PathBuf,
     pub recipe: Recipe,
     pub export: ExportOptions,
@@ -172,7 +172,7 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    fn job(photo: i64) -> Job {
+    fn job(photo: PhotoId) -> Job {
         Job {
             catalog: PathBuf::from("test.rawmakase"),
             photo,
@@ -189,7 +189,7 @@ mod tests {
 
     /// Panics on photo 1 and saves every other photo.
     fn panics_on_photo_one(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
-        assert_ne!(job.photo, 1, "save panicked");
+        assert_ne!(job.photo, PhotoId(1), "save panicked");
         Ok(job.catalog.clone())
     }
 
@@ -211,7 +211,7 @@ mod tests {
             saver: panics_on_photo_one,
             ..Autosave::default()
         };
-        assert!(autosave.submit(job(1), &ctx).is_ok());
+        assert!(autosave.submit(job(PhotoId(1)), &ctx).is_ok());
         let completion = finish(&mut autosave);
         assert!(
             matches!(completion, Completion::Failed(_)),
@@ -219,7 +219,7 @@ mod tests {
         );
         assert!(!autosave.busy());
 
-        assert!(autosave.submit(job(2), &ctx).is_ok());
+        assert!(autosave.submit(job(PhotoId(2)), &ctx).is_ok());
         let completion = finish(&mut autosave);
         assert!(matches!(completion, Completion::Saved(_)), "{completion:?}");
     }
@@ -238,7 +238,7 @@ mod tests {
         assert!(autosave.worker.is_none());
 
         let ctx = egui::Context::default();
-        assert!(autosave.submit(job(2), &ctx).is_ok());
+        assert!(autosave.submit(job(PhotoId(2)), &ctx).is_ok());
         assert!(matches!(finish(&mut autosave), Completion::Saved(_)));
     }
 

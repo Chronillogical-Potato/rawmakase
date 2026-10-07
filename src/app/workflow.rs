@@ -2,6 +2,7 @@ use super::Editor;
 use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
 use crate::app::Module;
+use crate::catalog::PhotoId;
 use crate::develop::{Geometry, Recipe};
 use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ impl Editor {
             self.module = Module::Library;
         }
     }
-    pub(super) fn open_raw(&mut self, path: PathBuf, photo: Option<i64>) {
+    pub(super) fn open_raw(&mut self, path: PathBuf, photo: Option<PhotoId>) {
         if self.load_raw(path, photo) {
             self.module = Module::Develop;
         }
@@ -36,7 +37,7 @@ impl Editor {
     /// Starts loading a RAW as the document, staying in the module shown:
     /// the Library's Loupe shows it through the same pipeline as Develop.
     /// False when work in progress or an unsaved edit prevents it.
-    pub(super) fn load_raw(&mut self, path: PathBuf, photo: Option<i64>) -> bool {
+    pub(super) fn load_raw(&mut self, path: PathBuf, photo: Option<PhotoId>) -> bool {
         if self.activity.is_busy() {
             return false;
         }
@@ -88,7 +89,7 @@ impl Editor {
     }
     /// The photo to decode ahead of time while `id` is shown: the next one in
     /// the filmstrip, or the previous one after stepping back.
-    pub(super) fn prefetch_neighbour(&self, id: i64) -> Option<PathBuf> {
+    pub(super) fn prefetch_neighbour(&self, id: PhotoId) -> Option<PathBuf> {
         let library = self.library.as_ref()?;
         let step = match self.document.catalog_photo {
             Some(previous) if previous != id && library.navigate(previous, -1) == Some(id) => -1,

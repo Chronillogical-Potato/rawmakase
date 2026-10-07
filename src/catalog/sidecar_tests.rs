@@ -1,4 +1,5 @@
 use super::*;
+use crate::catalog::PhotoId;
 use crate::metadata::{LangAlt, TextField, Value};
 
 fn xmp(description: &str, body: &str) -> String {
@@ -26,13 +27,13 @@ fn jpeg_with(packet: &str) -> Result<Vec<u8>> {
     out.extend_from_slice(&jpeg[2..]);
     Ok(out)
 }
-fn title(cat: &Catalog, id: i64) -> Result<Option<Value<LangAlt>>> {
+fn title(cat: &Catalog, id: PhotoId) -> Result<Option<Value<LangAlt>>> {
     Ok(cat.descriptive(id)?.title)
 }
 fn set(text: &str) -> Option<Value<LangAlt>> {
     Some(Value::Set(LangAlt::new(text)))
 }
-fn id_of(cat: &Catalog, name: &str) -> Result<i64> {
+fn id_of(cat: &Catalog, name: &str) -> Result<PhotoId> {
     Ok(cat
         .photos()?
         .into_iter()

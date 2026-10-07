@@ -3,11 +3,11 @@
 //! transaction and is handed to the shared undo log once saved.
 use super::{Library, Place};
 use crate::app::photo_metadata::Edit;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use anyhow::Result;
 
 /// Rating, flag and label of a photo.
-pub type Metadata = (i64, i32, i32, String);
+pub type Metadata = (PhotoId, i32, i32, String);
 /// A metadata change made through the Library, for the shared undo log.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetadataCommand {
@@ -24,12 +24,17 @@ pub struct MetadataCommand {
 impl Library {
     /// Sets the rating, flag or label of one photo, as Develop and the
     /// filmstrip do; see `edit_photos`.
-    pub fn edit_metadata(&mut self, id: i64, edit: Edit, advance: bool) -> Result<Option<i64>> {
+    pub fn edit_metadata(
+        &mut self,
+        id: PhotoId,
+        edit: Edit,
+        advance: bool,
+    ) -> Result<Option<PhotoId>> {
         self.edit_photos(&[id], edit, advance)
     }
     /// A metadata key in the Grid: Lightroom applies it to every selected
     /// photo.
-    pub fn edit_selection(&mut self, edit: Edit, advance: bool) -> Result<Option<i64>> {
+    pub fn edit_selection(&mut self, edit: Edit, advance: bool) -> Result<Option<PhotoId>> {
         self.edit_photos(&self.selected_ids(), edit, advance)
     }
     /// Sets the rating, flag or label of `ids` in one transaction. A toggle
@@ -39,10 +44,10 @@ impl Library {
     /// selection; when the active one goes, the next one shown is selected.
     pub(super) fn edit_photos(
         &mut self,
-        ids: &[i64],
+        ids: &[PhotoId],
         edit: Edit,
         advance: bool,
-    ) -> Result<Option<i64>> {
+    ) -> Result<Option<PhotoId>> {
         let Some(&first) = ids.first() else {
             return Ok(None);
         };

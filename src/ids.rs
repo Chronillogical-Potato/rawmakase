@@ -1,5 +1,7 @@
-//! Typed row ids, so a collection's id can never be passed where a photo's is
-//! meant. Each is the table's integer key, stored and serialized as that integer.
+//! Typed catalog row ids, so a collection's id can never be passed where a photo's
+//! is meant. Each is the table's integer key, stored and serialized as that
+//! integer. A leaf module: edit resolution and export, which sit below the
+//! catalog, name photos with them too; `catalog` re-exports them.
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +32,10 @@ macro_rules! row_id {
 row_id!(
     /// A collection or collection set (`collections.id`).
     CollectionId
+);
+row_id!(
+    /// A photo or one of its virtual copies (`photos.id`).
+    PhotoId
 );
 row_id!(
     /// A folder of photos (`folders.id`).

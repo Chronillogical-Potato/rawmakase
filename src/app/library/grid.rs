@@ -2,7 +2,7 @@
 use super::cell::{self, photo_cell};
 use super::{Action, Library};
 use crate::app::theme;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Vec2};
 
 impl Library {
@@ -192,7 +192,7 @@ impl Library {
         photo: &Photo,
         action: cell::PhotoAction,
         whole_selection: bool,
-    ) -> Option<i64> {
+    ) -> Option<PhotoId> {
         use cell::PhotoAction;
         match action {
             PhotoAction::Develop => return Some(photo.id),

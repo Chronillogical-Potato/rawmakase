@@ -4,6 +4,7 @@ use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
 use crate::app::Module;
 use crate::app::theme;
+use crate::catalog::PhotoId;
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
 
@@ -439,7 +440,7 @@ impl Editor {
     /// A RAW in the Library's Loupe: loaded as the document, as Develop
     /// does, and drawn by Develop's viewport without its tools, so it zooms
     /// the same way and D shows it in Develop at once.
-    fn loupe_viewport(&mut self, ui: &mut egui::Ui, id: i64) {
+    fn loupe_viewport(&mut self, ui: &mut egui::Ui, id: PhotoId) {
         // Loaded once each time the Loupe shows the photo: one that failed to
         // open, or whose predecessor failed to save, is tried again the next
         // time, not every frame.

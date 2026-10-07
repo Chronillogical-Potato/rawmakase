@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    catalog::{Catalog, HistoryUpdate},
+    catalog::{Catalog, HistoryUpdate, PhotoId},
     export_settings::{Destination, Format},
 };
 use std::sync::Mutex;
@@ -8,7 +8,6 @@ use std::sync::Mutex;
 /// A photo of a batch at `source`, without an edit.
 fn photo(source: &Path) -> BatchPhoto {
     BatchPhoto {
-        id: 0,
         source: source.to_path_buf(),
         name: source.file_name().unwrap().to_string_lossy().into(),
         edit: Edit::Catalog(Default::default()),
@@ -169,7 +168,7 @@ fn ask_returns_the_files_that_exist_and_the_answer_applies_to_all() -> Result<()
 struct Fixture {
     dir: tempfile::TempDir,
     catalog: Catalog,
-    photos: Vec<(i64, PathBuf)>,
+    photos: Vec<(PhotoId, PathBuf)>,
 }
 fn fixture(names: &[&str]) -> Result<Fixture> {
     let dir = tempfile::tempdir()?;
@@ -202,7 +201,7 @@ impl Fixture {
     }
     /// The batch photos of every photo, as Export reads them.
     fn batch_photos(&self) -> Result<Vec<BatchPhoto>> {
-        let ids: Vec<i64> = self.photos.iter().map(|(id, _)| *id).collect();
+        let ids: Vec<PhotoId> = self.photos.iter().map(|(id, _)| *id).collect();
         Ok(self
             .catalog
             .photo_records(&ids)?
@@ -261,7 +260,7 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
     let (profiles, _) = crate::camera_profiles::installed(&m);
     let mut brighter = Recipe::with_profiles(&m, &profiles);
     brighter.exposure = 1.;
-    let save = |id: i64, path: &Path| {
+    let save = |id: PhotoId, path: &Path| {
         f.catalog.save_edit(
             id,
             path,
