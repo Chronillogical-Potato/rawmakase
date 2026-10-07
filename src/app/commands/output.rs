@@ -56,6 +56,20 @@ impl Outputs {
                 != Status::Running
         })
     }
+    /// The jobs still running.
+    fn running(&self) -> impl Iterator<Item = &Job> {
+        self.jobs.values().filter(|j| {
+            j.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .status
+                == Status::Running
+        })
+    }
+    /// Whether any job is still running.
+    pub(crate) fn any_running(&self) -> bool {
+        self.running().next().is_some()
+    }
     /// Cancels every job still running, after the stage it is in.
     pub(crate) fn cancel_all(&self) {
         for job in self.jobs.values() {
@@ -87,18 +101,7 @@ impl Outputs {
         revision: u64,
         ctx: eframe::egui::Context,
     ) -> Result<OutputState> {
-        let active = self
-            .jobs
-            .values()
-            .filter(|j| {
-                j.state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .status
-                    == Status::Running
-            })
-            .count();
-        if active >= 2 {
+        if self.running().count() >= 2 {
             return Err(Error::new("busy", "Two output jobs are already running"));
         }
         let format = Format::from_path(&path).ok_or_else(|| {

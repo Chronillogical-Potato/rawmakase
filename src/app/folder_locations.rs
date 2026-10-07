@@ -409,7 +409,7 @@ impl Editor {
     }
     /// Carries out a settled folder change and opens the catalog again.
     fn folder_job(&mut self, catalog: PathBuf, job: FolderJob, ctx: &egui::Context) {
-        if !self.activity.begin_dialog() {
+        if !self.activity.begin_folder_change() {
             return;
         }
         let tx = self.tx.clone();

@@ -22,6 +22,10 @@ impl Automation {
     pub(super) fn job_finished(&self, id: u64) -> bool {
         self.outputs.finished(id)
     }
+    /// Whether an export or preview job a command started is still running.
+    pub(super) fn outputs_running(&self) -> bool {
+        self.outputs.any_running()
+    }
     /// Cancels the export and preview jobs commands started.
     pub(super) fn cancel_outputs(&self) {
         self.outputs.cancel_all();

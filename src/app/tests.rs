@@ -4735,6 +4735,21 @@ fn closing_while_the_catalog_does_not_answer_keeps_the_window_open() -> anyhow::
     assert!(e.document.edit.save_state().needs_save());
     Ok(())
 }
+#[test]
+fn closing_during_a_folder_change_keeps_the_window_open() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    assert!(e.activity.begin_folder_change());
+    assert!(e.quitting_would_cut_off_work());
+    let mut output = ctx.run_ui(close_request(), |ui| e.pending_work(ui.ctx()));
+    output.textures_delta.clear();
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose)
+    );
+    assert!(e.close_confirm);
+}
 /// The input of a frame in which the window is asked to close.
 fn close_request() -> egui::RawInput {
     let mut input = egui::RawInput::default();

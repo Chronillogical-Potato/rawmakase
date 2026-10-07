@@ -1142,16 +1142,31 @@ impl Editor {
         egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
     }
 
-    /// Whether quitting now would cut off work or could lose an edit: an export or
-    /// Sync Settings running, or an edit, Copy Name or metadata field not saved
-    /// yet, pending, being saved or failed. A quit the close guard doesn't see (the
-    /// Dock, logging out) then closes the window instead, so the guard saves first
-    /// and asks if that fails: an earlier save succeeding says nothing of the next.
+    /// Whether quitting now would cut off work or could lose an edit: an export, Sync
+    /// Settings, a folder change or a control output running, or an edit, Copy Name
+    /// or metadata field not saved yet, pending, being saved or failed. A quit the
+    /// close guard doesn't see (the Dock, logging out) then closes the window
+    /// instead, so the guard saves first and asks if that fails: an earlier save
+    /// succeeding says nothing of the next.
     pub(super) fn quitting_would_cut_off_work(&self) -> bool {
-        self.exporting()
-            || self.activity.is_syncing()
+        self.closing_waits_for().is_some()
             || self.document.edit.save_state().needs_save()
             || self.library.as_ref().is_some_and(|l| l.has_drafts())
+    }
+    /// The work closing waits for, as the close guard names it: closing would cut
+    /// it off, and nothing can be saved in its place.
+    fn closing_waits_for(&self) -> Option<&'static str> {
+        if self.exporting() {
+            Some("the export")
+        } else if self.activity.is_syncing() {
+            Some("Sync Settings")
+        } else if self.activity.is_changing_folder() {
+            Some("the folder change")
+        } else if self.automation.outputs_running() {
+            Some("the output the control socket asked for")
+        } else {
+            None
+        }
     }
     pub(super) fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
@@ -1162,32 +1177,28 @@ impl Editor {
             ctx.request_repaint_after(due + Duration::from_millis(10));
         }
         if ctx.input(|i| i.viewport().close_requested())
-            && (self.exporting()
-                || self.activity.is_syncing()
+            && (self.closing_waits_for().is_some()
                 || self.flush_by(Instant::now() + super::exit::DEADLINE) != Flushed::Saved)
         {
             refuse_close(ctx);
             self.close_confirm = true;
         }
         if self.close_confirm {
+            let waits_for = self.closing_waits_for();
             egui::Window::new("Work still pending").show(ctx, |ui| {
-                ui.label(if self.exporting() {
-                    "Wait for the export to finish before closing."
-                } else if self.activity.is_syncing() {
-                    "Wait for Sync Settings to finish before closing."
+                ui.label(if let Some(work) = waits_for {
+                    format!("Wait for {work} to finish before closing.")
                 } else if self.autosave.busy() {
                     "Edits are still being saved: the catalog is not answering. Wait, or \
                      close without saving."
+                        .into()
                 } else {
-                    "Edits could not be saved. Retry or save a preset before closing."
+                    "Edits could not be saved. Retry or save a preset before closing.".into()
                 });
                 if ui.button("Keep editing").clicked() {
                     self.close_confirm = false;
                 }
-                if !self.exporting()
-                    && !self.activity.is_syncing()
-                    && ui.button("Close without saving").clicked()
-                {
+                if waits_for.is_none() && ui.button("Close without saving").clicked() {
                     self.document.edit.save_state_mut().saved();
                     if let Some(library) = &mut self.library {
                         library.discard_drafts();
