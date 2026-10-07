@@ -1061,6 +1061,18 @@ pub(super) fn slider_styled(
             row.max,
         );
         let mut displayed = *value * scale;
+        // The arrow keys step a focused number; egui's DragValue consumes them while
+        // it draws, so they are read before.
+        let arrows = ui.input(|i| {
+            [
+                egui::Key::ArrowUp,
+                egui::Key::ArrowDown,
+                egui::Key::ArrowLeft,
+                egui::Key::ArrowRight,
+            ]
+            .into_iter()
+            .any(|key| i.key_pressed(key))
+        });
         // A fixed field that fits the widest value ("50000", "+5.00"): typing or
         // dragging never widens it over the rail.
         let value_response = ui
@@ -1085,17 +1097,7 @@ pub(super) fn slider_styled(
         if value_response.changed() {
             // Dragging the number, or the arrow keys stepping it while it has focus,
             // move it relative to where it was; anything else was typed.
-            let stepped = value_response.has_focus()
-                && ui.input(|i| {
-                    [
-                        egui::Key::ArrowUp,
-                        egui::Key::ArrowDown,
-                        egui::Key::ArrowLeft,
-                        egui::Key::ArrowRight,
-                    ]
-                    .into_iter()
-                    .any(|key| i.key_pressed(key))
-                });
+            let stepped = value_response.has_focus() && arrows;
             let input = if value_response.dragged() || stepped {
                 NumberInput::Relative
             } else {
@@ -1942,5 +1944,51 @@ mod slider_tests {
             6.
         );
         assert_eq!(number_input(NumberInput::Typed, 0., 9., rail, typed), 8.);
+    }
+
+    /// Exposure's slider from `start`, with `tabs` Tab presses to move the focus,
+    /// then Up pressed `ups` times.
+    fn step_exposure(start: f32, tabs: usize, ups: usize) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let mut frames = vec![vec![]];
+        frames.extend((0..tabs).map(|_| vec![key(egui::Key::Tab)]));
+        frames.extend((0..ups).map(|_| vec![key(egui::Key::ArrowUp)]));
+        frames.push(vec![]);
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    #[test]
+    fn arrow_keys_on_the_focused_number_step_it_within_the_rail() {
+        // Find the Tab press that focuses the number: Up then moves 0 up.
+        let tabs = (1..6)
+            .find(|&tabs| step_exposure(0., tabs, 1) > 0.)
+            .expect("Tab reaches the number field");
+        assert_eq!(step_exposure(5., tabs, 3), 5.);
+        assert_eq!(step_exposure(6.5, tabs, 3), 6.5);
     }
 }
