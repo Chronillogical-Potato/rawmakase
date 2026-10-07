@@ -92,11 +92,11 @@ impl Catalog {
     /// Saves `recipe` as a new snapshot of the photo named `name`; returns its id.
     pub fn add_snapshot(&self, photo: PhotoId, name: &str, recipe: &Recipe) -> Result<i64> {
         recipe.validate()?;
-        self.db.execute(
-            "INSERT INTO develop_snapshots(photo, name, recipe) VALUES (?, ?, ?)",
+        Ok(self.db.query_row(
+            "INSERT INTO develop_snapshots(photo, name, recipe) VALUES (?, ?, ?) RETURNING id",
             params![photo, snapshot_name(name)?, serde_json::to_string(recipe)?],
-        )?;
-        Ok(self.db.last_insert_rowid())
+            |r| r.get(0),
+        )?)
     }
     /// Lightroom's Update with Current Settings: the snapshot now holds `recipe`.
     pub fn update_snapshot(&self, id: i64, recipe: &Recipe) -> Result<()> {

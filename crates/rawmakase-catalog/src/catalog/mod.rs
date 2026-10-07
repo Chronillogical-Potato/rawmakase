@@ -203,11 +203,11 @@ impl Catalog {
         if let Some(id) = found {
             return Ok(id);
         }
-        self.db.execute(
-            "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?)",
+        Ok(self.db.query_row(
+            "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?) RETURNING id",
             params![models::QUICK_COLLECTION, KIND],
-        )?;
-        Ok(CollectionId(self.db.last_insert_rowid()))
+            |r| r.get(0),
+        )?)
     }
     /// Adds `add` to and removes `remove` from a collection, in one transaction.
     pub fn change_collection(

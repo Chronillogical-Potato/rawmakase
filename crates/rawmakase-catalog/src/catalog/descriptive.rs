@@ -250,13 +250,11 @@ pub(super) fn keyword_at(db: &Connection, path: &[String]) -> Result<i64> {
             .map(|(id, _)| id);
         parent = Some(match found {
             Some(id) => id,
-            None => {
-                db.execute(
-                    "INSERT INTO keywords(name, parent) VALUES (?, ?)",
-                    params![name, parent],
-                )?;
-                db.last_insert_rowid()
-            }
+            None => db.query_row(
+                "INSERT INTO keywords(name, parent) VALUES (?, ?) RETURNING id",
+                params![name, parent],
+                |r| r.get(0),
+            )?,
         });
     }
     Ok(parent.unwrap())
