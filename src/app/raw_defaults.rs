@@ -395,7 +395,6 @@ mod tests {
                     metadata: m.clone(),
                     recipe: adobe.clone(),
                     export: Default::default(),
-                    protected: false,
                     status: "Original".into(),
                 })),
                 Event::Profiles {
@@ -469,7 +468,6 @@ mod tests {
                 metadata: m,
                 recipe: adobe.clone(),
                 export: Default::default(),
-                protected: false,
                 status: "Original".into(),
             })))
             .unwrap();
@@ -514,7 +512,6 @@ mod tests {
                 // As the loader resolves it.
                 recipe: editor.raw_defaults.resolve(&m, &profiles(&m)).recipe,
                 export: Default::default(),
-                protected: false,
                 status: "Original".into(),
             })),
             Event::Profiles {

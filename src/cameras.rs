@@ -85,10 +85,6 @@ pub fn all() -> &'static [Camera] {
 }
 
 /// The row for a camera, matching make and model (or an alias) without case.
-pub fn find(make: &str, model: &str) -> Option<&'static Camera> {
-    find_in(all(), make, model)
-}
-
 fn find_in<'a>(rows: &'a [Camera], make: &str, model: &str) -> Option<&'a Camera> {
     rows.iter()
         .find(|c| c.make.eq_ignore_ascii_case(make) && c.is(model))

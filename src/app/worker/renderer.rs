@@ -14,6 +14,8 @@ use std::{
 };
 #[derive(Clone)]
 pub(in crate::app) enum RenderBackend {
+    /// The CPU, for headless tests.
+    #[cfg(test)]
     Cpu,
     /// The GPU; with the UI's render state, previews are presented into textures
     /// the viewport draws, and otherwise read back from a device of their own.
@@ -145,7 +147,8 @@ impl Renderer {
     }
 }
 
-/// CPU-only compatibility entry point, also suitable for headless UI tests.
+/// A CPU-only renderer, for headless tests.
+#[cfg(test)]
 pub fn renderer(tx: Sender<Event>, ctx: egui::Context) -> Renderer {
     renderer_with_backend(tx, ctx, RenderBackend::Cpu)
 }
@@ -247,6 +250,7 @@ fn render(
     };
     {
         let processor = processor.get_or_insert_with(|| match backend {
+            #[cfg(test)]
             RenderBackend::Cpu => develop::PreviewRenderer::default(),
             RenderBackend::Gpu(None) => develop::PreviewRenderer::with_gpu(),
             RenderBackend::Gpu(Some(state)) => {

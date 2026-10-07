@@ -91,6 +91,7 @@ impl Catalog {
             .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
         Ok(have > 0)
     }
+    #[cfg(test)]
     pub fn lightroom_develop(&self, id: PhotoId) -> Result<Option<String>> {
         Ok(self.db.query_row(
             "SELECT lightroom_develop FROM photos WHERE id=?",

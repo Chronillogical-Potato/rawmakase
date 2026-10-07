@@ -54,7 +54,6 @@ pub use auto::{
     AutoTone, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,
 };
-pub use basic_tone::{ContrastModel, WhitesModel};
 pub use black_white::{AutoMix, ColorSpread, Treatment, is_monochrome};
 pub use geometry::{Geometry, Transform, Upright, UprightGuide, UprightMode, display_axes};
 pub use image_space::{ImageFrame, ViewMapping};
@@ -68,5 +67,5 @@ pub use recipe::{
     TEMPERATURE_MIN, TINT_LIMIT, camera_matching_names, camera_matching_profile,
 };
 pub(crate) use rendered::unit_to_u8;
-pub use rendered::{ClipOverlay, Clipped, HIGHLIGHT_CLIP, Histogram, Rendered, SHADOW_CLIP};
-pub use white_balance::{NamedWhiteBalance, TemperatureTint};
+pub use rendered::{ClipOverlay, Histogram, Rendered};
+pub use white_balance::NamedWhiteBalance;

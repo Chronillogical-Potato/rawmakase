@@ -16,6 +16,7 @@ pub struct KeywordPath {
 }
 impl KeywordPath {
     /// A path whose names all export.
+    #[cfg(test)]
     pub fn all(path: Vec<String>) -> Self {
         Self {
             exported: vec![true; path.len()],

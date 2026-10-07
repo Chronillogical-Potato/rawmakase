@@ -694,7 +694,6 @@ fn catalog_header_keeps_the_recipe_resolved_by_the_loader() -> anyhow::Result<()
             metadata: Metadata::default(),
             recipe: recipe.clone(),
             export: Default::default(),
-            protected: false,
             status: "Original".into(),
         })))
         .unwrap();
@@ -726,7 +725,6 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
                 metadata: Metadata::default(),
                 recipe: Recipe::default(),
                 export: Default::default(),
-                protected: false,
                 status: "Original".into(),
             })))
             .unwrap();

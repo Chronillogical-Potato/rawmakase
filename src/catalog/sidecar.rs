@@ -242,6 +242,7 @@ impl Catalog {
     /// field a photo's sidecar or embedded XMP has replaces the catalog's,
     /// edits included; fields the files lack are left alone. One
     /// transaction. Virtual copies are never read.
+    #[cfg(test)]
     pub fn read_metadata_from_files(&mut self, ids: &[PhotoId]) -> Result<SidecarReport> {
         let photos: Vec<(PhotoId, PathBuf)> = self
             .photos()?

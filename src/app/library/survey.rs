@@ -21,6 +21,7 @@ pub(super) struct Survey {
 }
 
 impl Library {
+    #[cfg(test)]
     pub fn survey_open(&self) -> bool {
         self.survey.open
     }

@@ -58,7 +58,9 @@ pub struct Display {
 }
 /// A presented preview.
 pub struct Frame {
+    #[cfg(test)]
     pub width: u32,
+    #[cfg(test)]
     pub height: u32,
     /// Rgba8Unorm, holding the 8-bit display values.
     pub texture: wgpu::Texture,
@@ -672,7 +674,9 @@ impl Processor {
         let (small, shown) = (small?, shown?);
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         Ok(Frame {
+            #[cfg(test)]
             width: cw,
+            #[cfg(test)]
             height: ch,
             texture,
             generation,
