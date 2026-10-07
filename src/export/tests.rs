@@ -715,15 +715,10 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
 /// Lightroom's packets, and RAWmakase's for measured recipes, set the measured ones.
 #[test]
 fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
-    use crate::develop::{
-        Recipe,
-        calibration::CalibrationModel,
-        clarity::ClarityModel,
-        color_mixer::{MixerModel, SaturationModel, VibranceModel},
-        color_noise::NoiseModel,
-        effects::{GrainModel, LensVignetteModel},
-        sharpening::SharpeningModel,
-        texture::TextureModel,
+    use crate::develop::Recipe;
+    use crate::model::operators::{
+        CalibrationModel, ClarityModel, GrainModel, LensVignetteModel, MixerModel, NoiseModel,
+        SaturationModel, SharpeningModel, TextureModel, VibranceModel,
     };
     let m = Metadata {
         wb: [2., 1., 1.5],
@@ -775,7 +770,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.vibrance_model, VibranceModel::Original);
     assert_eq!(
         back.black_white_model,
-        crate::develop::black_white::BlackWhiteModel::Original
+        crate::model::operators::BlackWhiteModel::Original
     );
     // Also onto a new photo's settings, which start on the measured operators.
     let packet = crate::xmp::write::packet(&old, &m, &photo);
@@ -801,7 +796,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         noise_model: NoiseModel::Measured,
         saturation_model: SaturationModel::Gray,
         vibrance_model: VibranceModel::Chart,
-        black_white_model: crate::develop::black_white::BlackWhiteModel::Chart,
+        black_white_model: crate::model::operators::BlackWhiteModel::Chart,
         ..old
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
@@ -817,7 +812,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.noise_model, NoiseModel::Measured);
     assert_eq!(
         back.black_white_model,
-        crate::develop::black_white::BlackWhiteModel::Chart
+        crate::model::operators::BlackWhiteModel::Chart
     );
     assert_eq!(back.saturation_model, SaturationModel::Gray);
     assert_eq!(back.vibrance_model, VibranceModel::Chart);

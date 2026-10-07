@@ -9,10 +9,8 @@ use super::Editor;
 use super::overlay;
 use super::theme;
 use super::widgets::{segmented, slider_with};
-use crate::develop::{
-    ViewMapping,
-    retouch::{self, RetouchMode, RetouchOp, RetouchShape},
-};
+use crate::develop::{ViewMapping, retouch};
+use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 
 pub(super) struct RetouchTool {
@@ -181,7 +179,7 @@ impl Editor {
                     } else {
                         ((at[0] - last[0]) * aspect, at[1] - last[1])
                     };
-                    if dx.hypot(dy) >= spacing && points.len() < retouch::MAX_POINTS {
+                    if dx.hypot(dy) >= spacing && points.len() < crate::model::retouch::MAX_POINTS {
                         points.push(at);
                     }
                     None
@@ -288,7 +286,7 @@ impl Editor {
         self.push_op(op);
     }
     fn push_op(&mut self, mut op: RetouchOp) {
-        if self.document.edit.recipe.retouch.len() >= retouch::MAX_OPS {
+        if self.document.edit.recipe.retouch.len() >= crate::model::retouch::MAX_OPS {
             self.status = "Too many spots on this photo".into();
             return;
         }

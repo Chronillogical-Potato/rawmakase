@@ -385,7 +385,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("DEFRINGE_RANGES", e.defringe_ranges.as_flattened());
     p.set(
         "GAMUT_CLIP",
-        &[(r.gamut_model == crate::develop::GamutModel::Clip) as u8 as f32],
+        &[(r.gamut_model == crate::model::operators::GamutModel::Clip) as u8 as f32],
     );
     p.set("MONO", &[e.monochrome as u8 as f32]);
     p.set("GRAY_MIX", &e.gray_mix);

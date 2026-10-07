@@ -71,10 +71,8 @@ pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::{
-        panels::{Panel, PanelState},
-        red_eye::RedEyeOp,
-    };
+    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::red_eye::RedEyeOp;
     #[test]
     fn a_preset_leaves_the_photos_red_eye_and_its_switch() {
         let mut photo = Recipe::default();
@@ -89,7 +87,7 @@ mod tests {
         // The photo's spots keep the feather they were made with.
         let mut preset = Recipe {
             exposure: 0.5,
-            retouch_model: crate::develop::retouch::RetouchModel::Measured,
+            retouch_model: crate::model::operators::RetouchModel::Measured,
             ..Default::default()
         };
         preset.panels.set(Panel::RedEye, PanelState::Off);

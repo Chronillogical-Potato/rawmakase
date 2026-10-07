@@ -1,8 +1,7 @@
 use super::widgets::tone_curve_ui;
 use super::*;
 use crate::camera_data::{CameraImage, Metadata};
-use crate::catalog::PhotoId;
-use crate::develop;
+use crate::{catalog::PhotoId, develop};
 use eframe::egui::{Pos2, Rect};
 use std::sync::Arc;
 #[test]
@@ -832,7 +831,7 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
 }
 #[test]
 fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
-    use crate::develop::retouch::RetouchShape;
+    use crate::model::retouch::RetouchShape;
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -937,7 +936,7 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
     frame(vec![egui::Event::PointerMoved(p), button(p, true, none)]);
     frame(vec![egui::Event::PointerMoved(q)]);
     let (ops, ..) = frame(vec![button(q, false, none)]);
-    let source = |op: &crate::develop::retouch::RetouchOp| {
+    let source = |op: &crate::model::retouch::RetouchOp| {
         [op.pin()[0] + op.offset[0], op.pin()[1] + op.offset[1]]
     };
     assert!((ops[0].pin()[0] - before.pin()[0] - 0.1).abs() < 0.01);
@@ -1113,7 +1112,7 @@ fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
 }
 #[test]
 fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
-    use crate::develop::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
+    use crate::model::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -2407,14 +2406,14 @@ fn the_preset_list_is_kept_until_what_it_shows_changes() {
 #[test]
 fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
     let ctx = egui::Context::default();
-    let mut effects = crate::develop::effects::Effects {
+    let mut effects = crate::model::effects::Effects {
         // Green below its default, as the fringe selector can leave it.
         defringe_ranges: [[0.1, 0.95], [0.0, 0.2]],
         ..Default::default()
     };
     let mut time = 0.;
     let mut frame =
-        |effects: &mut crate::develop::effects::Effects, events: Vec<egui::Event>, wait: f64| {
+        |effects: &mut crate::model::effects::Effects, events: Vec<egui::Event>, wait: f64| {
             time += wait;
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -3511,9 +3510,9 @@ fn a_wheel_scroll_resizing_a_spot_is_one_history_step() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3602,9 +3601,9 @@ fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3646,9 +3645,9 @@ fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3700,9 +3699,9 @@ fn a_wheel_scroll_closes_once_paused_even_while_a_button_goes_down() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3749,9 +3748,9 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -4352,9 +4351,9 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
         },
         ..Default::default()
     });
-    local.retouch = vec![develop::retouch::RetouchOp {
-        mode: develop::retouch::RetouchMode::Heal,
-        shape: develop::retouch::RetouchShape::Spot {
+    local.retouch = vec![crate::model::retouch::RetouchOp {
+        mode: crate::model::retouch::RetouchMode::Heal,
+        shape: crate::model::retouch::RetouchShape::Spot {
             center: [0.3, 0.3],
             radius: 0.03,
         },

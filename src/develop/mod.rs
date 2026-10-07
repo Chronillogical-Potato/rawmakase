@@ -37,7 +37,6 @@ pub mod sharpening;
 pub mod targeted;
 pub mod texture;
 pub mod upright;
-pub use pipeline::GamutModel;
 pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;

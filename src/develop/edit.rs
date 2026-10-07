@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn grain_added_from_none_takes_the_measured_operator() {
-        use crate::develop::effects::GrainModel;
+        use crate::model::operators::GrainModel;
         let mut r = Recipe::default();
         assert_eq!(r.grain_model, GrainModel::Original);
         // Size alone is not grain added.
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn lens_vignetting_added_from_none_takes_the_measured_operator() {
-        use crate::develop::effects::LensVignetteModel;
+        use crate::model::operators::LensVignetteModel;
         let mut r = Recipe::default();
         assert_eq!(r.lens_vignette_model, LensVignetteModel::Original);
         r.effects.lens_vignette = 0.3;
@@ -93,13 +93,13 @@ mod tests {
         let mut r = Recipe::default();
         assert_eq!(
             r.clarity_model,
-            crate::develop::clarity::ClarityModel::Original
+            crate::model::operators::ClarityModel::Original
         );
         r.effects.clarity = 0.2;
         setting_changed(&mut r, ParameterId::Clarity, 0., None);
         assert_eq!(
             r.clarity_model,
-            crate::develop::clarity::ClarityModel::Measured
+            crate::model::operators::ClarityModel::Measured
         );
     }
 

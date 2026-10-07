@@ -1,10 +1,12 @@
 use super::*;
-use crate::develop::{
-    UprightMode,
-    effects::VignetteStyle,
-    masks::{MaskComponent, MaskGroup, MaskShape},
-    panels::PanelState,
-    retouch::{RetouchMode, RetouchOp, RetouchShape},
+use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
+use crate::{
+    develop::{
+        UprightMode,
+        masks::{MaskComponent, MaskGroup, MaskShape},
+        panels::PanelState,
+    },
+    model::effects::VignetteStyle,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -54,23 +56,23 @@ fn everything_changed() -> Recipe {
         reference_curves: true,
         reference_calibration: true,
         reference_color: true,
-        parametric_model: crate::develop::parametric::ParametricModel::Layered,
-        sharpening_model: crate::develop::sharpening::SharpeningModel::Measured,
-        grain_model: crate::develop::effects::GrainModel::Measured,
-        clarity_model: crate::develop::clarity::ClarityModel::Measured,
-        texture_model: crate::develop::texture::TextureModel::Measured,
-        contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
-        lens_vignette_model: crate::develop::effects::LensVignetteModel::Measured,
-        retouch_model: crate::develop::retouch::RetouchModel::Measured,
-        noise_model: crate::develop::color_noise::NoiseModel::Measured,
-        grading_model: crate::develop::color_grade::GradingModel::Measured,
-        mixer_model: crate::develop::color_mixer::MixerModel::Chart,
-        saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
-        vibrance_model: crate::develop::color_mixer::VibranceModel::Chart,
-        black_white_model: crate::develop::black_white::BlackWhiteModel::Chart,
-        calibration_model: crate::develop::calibration::CalibrationModel::Measured,
-        whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
-        gamut_model: crate::develop::GamutModel::Clip,
+        parametric_model: crate::model::operators::ParametricModel::Layered,
+        sharpening_model: crate::model::operators::SharpeningModel::Measured,
+        grain_model: crate::model::operators::GrainModel::Measured,
+        clarity_model: crate::model::operators::ClarityModel::Measured,
+        texture_model: crate::model::operators::TextureModel::Measured,
+        contrast_model: crate::model::operators::ContrastModel::Adaptive,
+        lens_vignette_model: crate::model::operators::LensVignetteModel::Measured,
+        retouch_model: crate::model::operators::RetouchModel::Measured,
+        noise_model: crate::model::operators::NoiseModel::Measured,
+        grading_model: crate::model::operators::GradingModel::Measured,
+        mixer_model: crate::model::operators::MixerModel::Chart,
+        saturation_model: crate::model::operators::SaturationModel::Gray,
+        vibrance_model: crate::model::operators::VibranceModel::Chart,
+        black_white_model: crate::model::operators::BlackWhiteModel::Chart,
+        calibration_model: crate::model::operators::CalibrationModel::Measured,
+        whites_model: crate::model::operators::WhitesModel::Adaptive,
+        gamut_model: crate::model::operators::GamutModel::Clip,
         temperature: 4000.,
         tint: 12.,
         wb: [1.5, 1., 0.8],
@@ -116,7 +118,7 @@ fn everything_changed() -> Recipe {
         opacity: 1.,
         offset: [0.02, 0.],
     });
-    r.red_eye.push(crate::develop::red_eye::RedEyeOp {
+    r.red_eye.push(crate::model::red_eye::RedEyeOp {
         kind: Default::default(),
         center: [0.4, 0.4],
         radius: [0.01; 2],

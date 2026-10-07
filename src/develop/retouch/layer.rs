@@ -3,16 +3,14 @@
 //! between renders and, when operations change, recompute only the 256-pixel tiles
 //! those changes reach; exports build it at once.
 use super::{
-    RetouchModel, RetouchOp,
+    RetouchOp,
     heal::{self, PixelRect},
 };
+use crate::model::red_eye::RedEyeOp;
 use crate::{
     camera_data::CameraImage,
-    develop::{
-        ImageFrame,
-        color_noise::ChromaDenoise,
-        red_eye::{self, RedEyeOp},
-    },
+    develop::{ImageFrame, color_noise::ChromaDenoise, red_eye},
+    model::operators::RetouchModel,
 };
 use anyhow::{Result, ensure};
 use std::{

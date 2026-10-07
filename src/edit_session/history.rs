@@ -499,7 +499,7 @@ fn red_eye_step(before: &Recipe, after: &Recipe) -> String {
     let (b, a) = (&before.red_eye, &after.red_eye);
     // The first correction that differs, from the list that has it.
     let changed = (0..a.len().max(b.len())).find(|i| a.get(*i) != b.get(*i));
-    let kind = |list: &[crate::develop::red_eye::RedEyeOp]| {
+    let kind = |list: &[crate::model::red_eye::RedEyeOp]| {
         changed.and_then(|i| list.get(i)).map(|op| op.kind)
     };
     let (verb, kind) = match a.len().cmp(&b.len()) {
@@ -512,7 +512,7 @@ fn red_eye_step(before: &Recipe, after: &Recipe) -> String {
 }
 /// Lightroom names spot edits by mode: "Spot Removal", "Clone", "Delete Spot".
 fn retouch_step(before: &Recipe, after: &Recipe) -> &'static str {
-    use crate::develop::retouch::RetouchMode;
+    use crate::model::retouch::RetouchMode;
     if after.retouch.len() < before.retouch.len() {
         return "Delete Spot";
     }
@@ -671,7 +671,7 @@ mod tests {
     }
     #[test]
     fn red_and_pet_eye_edits_have_lightroom_names() {
-        use crate::develop::red_eye::{EyeKind, RedEyeOp};
+        use crate::model::red_eye::{EyeKind, RedEyeOp};
         let eye = |kind| RedEyeOp {
             kind,
             center: [0.5, 0.5],
@@ -696,12 +696,12 @@ mod tests {
     }
     #[test]
     fn retouch_and_mask_edits_have_lightroom_names() {
-        use crate::develop::{masks, retouch};
+        use crate::develop::masks;
         let before = Recipe::default();
         let mut after = before.clone();
-        after.retouch.push(retouch::RetouchOp {
-            mode: retouch::RetouchMode::Heal,
-            shape: retouch::RetouchShape::Spot {
+        after.retouch.push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.01,
             },

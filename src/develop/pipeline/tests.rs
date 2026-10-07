@@ -65,54 +65,57 @@ fn old_recipes_keep_original_profile_tones() {
     assert!(!old.reference_calibration);
     assert_eq!(
         old.parametric_model,
-        crate::develop::parametric::ParametricModel::Original
+        crate::model::operators::ParametricModel::Original
     );
     assert_eq!(
         old.contrast_model,
-        crate::develop::basic_tone::ContrastModel::Original
+        crate::model::operators::ContrastModel::Original
     );
     assert_eq!(
         old.whites_model,
-        crate::develop::basic_tone::WhitesModel::Original
+        crate::model::operators::WhitesModel::Original
     );
     assert!(Recipe::default().profile_tone);
-    assert_eq!(old.gamut_model, crate::develop::GamutModel::Compress);
+    assert_eq!(
+        old.gamut_model,
+        crate::model::operators::GamutModel::Compress
+    );
     assert_eq!(
         old.grading_model,
-        crate::develop::color_grade::GradingModel::Original
+        crate::model::operators::GradingModel::Original
     );
     assert_eq!(
         old.mixer_model,
-        crate::develop::color_mixer::MixerModel::Original
+        crate::model::operators::MixerModel::Original
     );
     assert_eq!(
         old.saturation_model,
-        crate::develop::color_mixer::SaturationModel::Original
+        crate::model::operators::SaturationModel::Original
     );
     assert_eq!(
         old.vibrance_model,
-        crate::develop::color_mixer::VibranceModel::Original
+        crate::model::operators::VibranceModel::Original
     );
     assert_eq!(
         old.black_white_model,
-        crate::develop::black_white::BlackWhiteModel::Original
+        crate::model::operators::BlackWhiteModel::Original
     );
     assert_eq!(
         old.calibration_model,
-        crate::develop::calibration::CalibrationModel::Original
+        crate::model::operators::CalibrationModel::Original
     );
     // The measured parametric curve and grading are saved, and read back.
     let measured = Recipe {
-        parametric_model: crate::develop::parametric::ParametricModel::Layered,
-        contrast_model: crate::develop::basic_tone::ContrastModel::Adaptive,
-        grading_model: crate::develop::color_grade::GradingModel::Measured,
-        whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
-        gamut_model: crate::develop::GamutModel::Clip,
-        mixer_model: crate::develop::color_mixer::MixerModel::Chart,
-        saturation_model: crate::develop::color_mixer::SaturationModel::Gray,
-        vibrance_model: crate::develop::color_mixer::VibranceModel::Chart,
-        black_white_model: crate::develop::black_white::BlackWhiteModel::Chart,
-        calibration_model: crate::develop::calibration::CalibrationModel::Measured,
+        parametric_model: crate::model::operators::ParametricModel::Layered,
+        contrast_model: crate::model::operators::ContrastModel::Adaptive,
+        grading_model: crate::model::operators::GradingModel::Measured,
+        whites_model: crate::model::operators::WhitesModel::Adaptive,
+        gamut_model: crate::model::operators::GamutModel::Clip,
+        mixer_model: crate::model::operators::MixerModel::Chart,
+        saturation_model: crate::model::operators::SaturationModel::Gray,
+        vibrance_model: crate::model::operators::VibranceModel::Chart,
+        black_white_model: crate::model::operators::BlackWhiteModel::Chart,
+        calibration_model: crate::model::operators::CalibrationModel::Measured,
         ..Recipe::default()
     };
     let back: Recipe = serde_json::from_value(serde_json::to_value(&measured).unwrap()).unwrap();
@@ -1247,7 +1250,8 @@ fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
 /// moved by Clarity's or Texture's gain.
 #[test]
 fn contrast_and_whites_are_measured_on_the_photo_alone() {
-    use crate::develop::basic_tone::{ContrastCurve, ContrastModel, TYPICAL_PIVOT};
+    use crate::develop::basic_tone::{ContrastCurve, TYPICAL_PIVOT};
+    use crate::model::operators::ContrastModel;
     let mut im = fixture();
     im.metadata.cam_xyz = [
         [1.1434, -0.4948, -0.121],
@@ -1271,7 +1275,7 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
         reference_calibration: true,
         contrast_model: ContrastModel::Adaptive,
         contrast: 0.6,
-        whites_model: crate::develop::basic_tone::WhitesModel::Adaptive,
+        whites_model: crate::model::operators::WhitesModel::Adaptive,
         whites: 0.5,
         shadows: 0.3,
         ..Default::default()
@@ -1319,7 +1323,8 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
 /// second curve after the user's by the layered one, as Camera Raw 18.7 renders it.
 #[test]
 fn a_looks_parametric_curve_follows_the_users() {
-    use crate::develop::parametric::{ParametricCurve, ParametricModel};
+    use crate::develop::parametric::ParametricCurve;
+    use crate::model::operators::ParametricModel;
     let mut m = fixture().metadata;
     m.cam_xyz = [
         [1.1434, -0.4948, -0.121],
@@ -1361,7 +1366,7 @@ fn a_looks_parametric_curve_follows_the_users() {
 
 #[test]
 fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
-    use crate::develop::effects::LensVignetteModel;
+    use crate::model::operators::LensVignetteModel;
     let mut im = fixture();
     im.pixels = vec![[0.1; 3]; 96];
     let mut r = Recipe::for_metadata(&im.metadata);
@@ -1374,7 +1379,7 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
     assert!(corner < centre * 0.9, "{corner} {centre}");
     // Lightroom's positive amounts lighten the corners.
     let lighter = Recipe {
-        effects: crate::develop::effects::Effects {
+        effects: crate::model::effects::Effects {
             lens_vignette: 0.5,
             ..r.effects.clone()
         },
@@ -1421,7 +1426,7 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
 
 #[test]
 fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
-    use crate::develop::GamutModel;
+    use crate::model::operators::GamutModel;
     let im = fixture();
     let r = Recipe::with_profiles(&im.metadata, &[]);
     assert_eq!(r.gamut_model, GamutModel::Clip);
@@ -1436,7 +1441,8 @@ fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
 /// original's on an old edit, Lightroom's after Detail's reset chose the measured one.
 #[test]
 fn process_update_sharpens_with_the_recipe_operator_default() {
-    use crate::develop::sharpening::{SharpeningModel, SharpeningSliders};
+    use crate::develop::sharpening::SharpeningSliders;
+    use crate::model::operators::SharpeningModel;
     let mut old = Recipe {
         engine: 1,
         ..Default::default()
@@ -1511,7 +1517,7 @@ fn new_edits_render_grain_at_camera_raw_strength() -> anyhow::Result<()> {
 /// original operator.
 #[test]
 fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
-    use crate::develop::color_noise::NoiseModel;
+    use crate::model::operators::NoiseModel;
     let (width, height) = (160, 120);
     let m = Metadata {
         width,
@@ -1586,7 +1592,7 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
 /// there keeps applying its Color amount with the original filter.
 #[test]
 fn legacy_engines_keep_the_original_colour_noise_filter() {
-    use crate::develop::color_noise::NoiseModel;
+    use crate::model::operators::NoiseModel;
     let mut r = Recipe {
         engine: 2,
         noise_chroma: 0.25,
@@ -1603,7 +1609,7 @@ fn legacy_engines_keep_the_original_colour_noise_filter() {
 /// original, until Texture is added to a photo that had none.
 #[test]
 fn texture_operator_is_kept_by_old_edits() {
-    use crate::develop::texture::TextureModel;
+    use crate::model::operators::TextureModel;
     let im = fixture();
     assert_eq!(
         Recipe::with_profiles(&im.metadata, &[]).texture_model,
@@ -1611,7 +1617,7 @@ fn texture_operator_is_kept_by_old_edits() {
     );
     let mut saved: Recipe = serde_json::from_value(
         serde_json::to_value(Recipe {
-            effects: crate::develop::effects::Effects {
+            effects: crate::model::effects::Effects {
                 texture: 0.4,
                 ..Default::default()
             },

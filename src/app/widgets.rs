@@ -553,8 +553,8 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
 /// moving, which shows as a hovered one does.
 pub(super) fn parametric_curve_ui(
     ui: &mut egui::Ui,
-    effects: &mut crate::develop::effects::Effects,
-    model: crate::develop::parametric::ParametricModel,
+    effects: &mut crate::model::effects::Effects,
+    model: crate::model::operators::ParametricModel,
     histogram: &[[u32; 256]; 3],
     targeted: Option<usize>,
 ) {

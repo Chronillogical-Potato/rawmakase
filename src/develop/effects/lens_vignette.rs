@@ -13,23 +13,6 @@
 //! `c`, `p` and `k` move linearly with it. The fit's log error is 0.018 RMS over 32
 //! renders (Amount ±25 to ±100, Midpoint 0 to 100, three brightnesses).
 use crate::optics::Radial;
-use serde::{Deserialize, Serialize};
-
-/// Which operator renders a recipe's manual lens Vignetting.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LensVignetteModel {
-    /// RAWmakase's first version, applied to the finished pixels after the crop: what
-    /// recipes saved before the measured model keep, so they render as they did.
-    #[default]
-    Original,
-    /// The gain measured in Camera Raw, applied to the camera image.
-    Measured,
-}
-impl LensVignetteModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// The measured gain for one Amount and Midpoint.
 #[derive(Clone, Copy, Debug, PartialEq)]

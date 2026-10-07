@@ -245,9 +245,9 @@ mod tests {
         assert!(Panel::Effects.holds_change(&before, &after));
         // A first spot also sets the measured feather.
         let mut after = before.clone();
-        after.add_retouch(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Clone,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        after.add_retouch(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Clone,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.3, 0.3],
                 radius: 0.05,
             },
@@ -260,7 +260,7 @@ mod tests {
         let mut before = before;
         before.sharpening = 0.35;
         let mut after = before.clone();
-        after.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        after.set_sharpening_defaults(crate::model::operators::SharpeningModel::Measured);
         assert!(Panel::Detail.holds_change(&before, &after));
     }
 }

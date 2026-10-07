@@ -83,10 +83,10 @@ impl CurveSet {
         let basic_curves = r.engine >= 4 && r.reference_curves;
         let photo = crate::develop::basic_tone::PhotoTone {
             contrast: match r.contrast_model {
-                crate::develop::basic_tone::ContrastModel::Original => {
+                crate::model::operators::ContrastModel::Original => {
                     crate::develop::basic_tone::ContrastCurve::Original
                 }
-                crate::develop::basic_tone::ContrastModel::Adaptive => {
+                crate::model::operators::ContrastModel::Adaptive => {
                     crate::develop::basic_tone::ContrastCurve::Pivot(
                         crate::develop::basic_tone::TYPICAL_PIVOT,
                     )
@@ -116,7 +116,7 @@ impl CurveSet {
                 .then(|| crate::develop::color_mixer::ColorMixer::new(r))
                 .flatten(),
             gray_grid: (r.effects.monochrome
-                && r.black_white_model == crate::develop::black_white::BlackWhiteModel::Chart)
+                && r.black_white_model == crate::model::operators::BlackWhiteModel::Chart)
                 .then(|| crate::develop::black_white::gray_grid(r.effects.gray_mix)),
             // Camera Raw leaves Point Color out of black & white renders.
             point_colors: (basic_curves && !r.effects.monochrome)
@@ -154,7 +154,8 @@ impl CurveSet {
 /// The measured parametric curve: the user's regions, then (layered) a look's own
 /// curve at its Profile Amount, as Camera Raw applies it.
 fn parametric_curve(r: &Recipe) -> Option<crate::develop::parametric::ParametricCurve> {
-    use crate::develop::parametric::{ParametricCurve, ParametricModel};
+    use crate::develop::parametric::ParametricCurve;
+    use crate::model::operators::ParametricModel;
     let user = ParametricCurve::new(r.effects.parametric, r.effects.splits);
     let look = r
         .profile
@@ -168,7 +169,7 @@ fn parametric_curve(r: &Recipe) -> Option<crate::develop::parametric::Parametric
 pub(crate) fn measures_contrast_pivot(r: &Recipe) -> bool {
     r.engine >= 4
         && r.reference_curves
-        && r.contrast_model == crate::develop::basic_tone::ContrastModel::Adaptive
+        && r.contrast_model == crate::model::operators::ContrastModel::Adaptive
         && (r.contrast != 0.
             || r.masks
                 .iter()
@@ -178,7 +179,7 @@ pub(crate) fn measures_contrast_pivot(r: &Recipe) -> bool {
 pub(crate) fn measures_whites(r: &Recipe) -> bool {
     r.engine >= 4
         && r.reference_curves
-        && r.whites_model == crate::develop::basic_tone::WhitesModel::Adaptive
+        && r.whites_model == crate::model::operators::WhitesModel::Adaptive
         && (r.whites > 0.
             || r.masks
                 .iter()

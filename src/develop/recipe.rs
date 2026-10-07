@@ -50,27 +50,27 @@ pub struct Recipe {
     /// Use the DCP tone curve without a second generic scene shoulder.
     #[serde(default)]
     pub profile_tone: bool,
-    pub effects: crate::develop::effects::Effects,
+    pub effects: crate::model::effects::Effects,
     /// Which operator renders Grain. Missing means the original grain, so recipes
     /// saved before the measured one look as they did; omitted at that default, and
     /// kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::effects::GrainModel::is_original"
+        skip_serializing_if = "crate::model::operators::GrainModel::is_original"
     )]
-    pub grain_model: crate::develop::effects::GrainModel,
+    pub grain_model: crate::model::operators::GrainModel,
     /// Which operator renders positive Clarity, as `grain_model`.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::clarity::ClarityModel::is_original"
+        skip_serializing_if = "crate::model::operators::ClarityModel::is_original"
     )]
-    pub clarity_model: crate::develop::clarity::ClarityModel,
+    pub clarity_model: crate::model::operators::ClarityModel,
     /// Which operator renders Texture, as `grain_model`.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::texture::TextureModel::is_original"
+        skip_serializing_if = "crate::model::operators::TextureModel::is_original"
     )]
-    pub texture_model: crate::develop::texture::TextureModel,
+    pub texture_model: crate::model::operators::TextureModel,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
@@ -84,9 +84,9 @@ pub struct Recipe {
     /// default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::sharpening::SharpeningModel::is_original"
+        skip_serializing_if = "crate::model::operators::SharpeningModel::is_original"
     )]
-    pub sharpening_model: crate::develop::sharpening::SharpeningModel,
+    pub sharpening_model: crate::model::operators::SharpeningModel,
     pub sharpening_radius: f32,
     pub sharpening_detail: f32,
     pub sharpening_masking: f32,
@@ -107,98 +107,98 @@ pub struct Recipe {
     /// omitted at that default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::parametric::ParametricModel::is_original"
+        skip_serializing_if = "crate::model::operators::ParametricModel::is_original"
     )]
-    pub parametric_model: crate::develop::parametric::ParametricModel,
+    pub parametric_model: crate::model::operators::ParametricModel,
     /// Whether Contrast pivots where the photo puts it, after Whites and Blacks.
     /// Missing means the original averaged curve before them, so older recipes look as
     /// they did; omitted at that default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::basic_tone::ContrastModel::is_original"
+        skip_serializing_if = "crate::model::operators::ContrastModel::is_original"
     )]
-    pub contrast_model: crate::develop::basic_tone::ContrastModel,
+    pub contrast_model: crate::model::operators::ContrastModel,
     /// How manual lens Vignetting renders. Missing means the original operator, so
     /// recipes saved before the measured one look as they did; omitted at that
     /// default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::effects::LensVignetteModel::is_original"
+        skip_serializing_if = "crate::model::operators::LensVignetteModel::is_original"
     )]
-    pub lens_vignette_model: crate::develop::effects::LensVignetteModel,
+    pub lens_vignette_model: crate::model::operators::LensVignetteModel,
     /// The soft edge Heal and Clone render with. Missing means the original one, so
     /// recipes saved before the measured feather look as they did; omitted at that
     /// default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::retouch::RetouchModel::is_original"
+        skip_serializing_if = "crate::model::operators::RetouchModel::is_original"
     )]
-    pub retouch_model: crate::develop::retouch::RetouchModel,
+    pub retouch_model: crate::model::operators::RetouchModel,
     /// How color grading renders. Missing means the original operator, so recipes
     /// saved before the measured curves look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::color_grade::GradingModel::is_original"
+        skip_serializing_if = "crate::model::operators::GradingModel::is_original"
     )]
-    pub grading_model: crate::develop::color_grade::GradingModel,
+    pub grading_model: crate::model::operators::GradingModel,
     /// Which measured tables render the color mixer. Missing means the tables
     /// measured on photos, so older recipes look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::color_mixer::MixerModel::is_original"
+        skip_serializing_if = "crate::model::operators::MixerModel::is_original"
     )]
-    pub mixer_model: crate::develop::color_mixer::MixerModel,
+    pub mixer_model: crate::model::operators::MixerModel,
     /// Which operator renders the global Saturation slider. Missing means the
     /// photo-measured tables, so older recipes look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::color_mixer::SaturationModel::is_original"
+        skip_serializing_if = "crate::model::operators::SaturationModel::is_original"
     )]
-    pub saturation_model: crate::develop::color_mixer::SaturationModel,
+    pub saturation_model: crate::model::operators::SaturationModel,
     /// Which tables render Vibrance. Missing means the photo-measured ones, so older
     /// recipes look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::color_mixer::VibranceModel::is_original"
+        skip_serializing_if = "crate::model::operators::VibranceModel::is_original"
     )]
-    pub vibrance_model: crate::develop::color_mixer::VibranceModel,
+    pub vibrance_model: crate::model::operators::VibranceModel,
     /// Which operator renders the black & white mix. Missing means the Oklab
     /// lightness shift, so older recipes look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::black_white::BlackWhiteModel::is_original"
+        skip_serializing_if = "crate::model::operators::BlackWhiteModel::is_original"
     )]
-    pub black_white_model: crate::develop::black_white::BlackWhiteModel,
+    pub black_white_model: crate::model::operators::BlackWhiteModel,
     /// Which fit renders Camera Calibration's primary sliders. Missing means the
     /// original coefficients, so older recipes look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::calibration::CalibrationModel::is_original"
+        skip_serializing_if = "crate::model::operators::CalibrationModel::is_original"
     )]
-    pub calibration_model: crate::develop::calibration::CalibrationModel,
+    pub calibration_model: crate::model::operators::CalibrationModel,
     /// Whether positive Whites follows the photo's highlights. Missing means the
     /// original median curve, so older recipes look as they did; omitted at that
     /// default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::basic_tone::WhitesModel::is_original"
+        skip_serializing_if = "crate::model::operators::WhitesModel::is_original"
     )]
-    pub whites_model: crate::develop::basic_tone::WhitesModel,
+    pub whites_model: crate::model::operators::WhitesModel,
     /// How out-of-gamut colors reach sRGB. Missing means compressed, so recipes saved
     /// before the clipped model look as they did; omitted at that default.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::GamutModel::is_compress"
+        skip_serializing_if = "crate::model::operators::GamutModel::is_compress"
     )]
-    pub gamut_model: crate::develop::GamutModel,
+    pub gamut_model: crate::model::operators::GamutModel,
     /// How Color noise reduction renders. Missing means the original operator, so
     /// recipes saved before the measured one look as they did; omitted at that
     /// default, and kept by releases that predate it.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::color_noise::NoiseModel::is_original"
+        skip_serializing_if = "crate::model::operators::NoiseModel::is_original"
     )]
-    pub noise_model: crate::develop::color_noise::NoiseModel,
+    pub noise_model: crate::model::operators::NoiseModel,
     pub temperature: f32,
     pub tint: f32,
     pub wb: [f32; 3],
@@ -253,13 +253,13 @@ pub struct Recipe {
     /// Heal and Clone operations, in order. Saved apart from the recipe (see
     /// [`LocalEdits`]); omitted from recipe JSON when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    pub retouch: Vec<crate::model::retouch::RetouchOp>,
     /// Red eye corrections, in order; saved apart, as `retouch`.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank"
+        skip_serializing_if = "crate::model::red_eye::RedEyeList::is_blank"
     )]
-    pub red_eye: crate::develop::red_eye::RedEyeList,
+    pub red_eye: crate::model::red_eye::RedEyeList,
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
@@ -276,9 +276,9 @@ pub struct Recipe {
 #[serde(default)]
 pub struct LocalEdits {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
-    #[serde(skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank")]
-    pub red_eye: crate::develop::red_eye::RedEyeList,
+    pub retouch: Vec<crate::model::retouch::RetouchOp>,
+    #[serde(skip_serializing_if = "crate::model::red_eye::RedEyeList::is_blank")]
+    pub red_eye: crate::model::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
 }
@@ -287,8 +287,8 @@ impl LocalEdits {
         self.retouch.is_empty() && self.red_eye.is_blank() && self.masks.is_empty()
     }
     pub fn validate(&self) -> Result<()> {
-        crate::develop::retouch::validate(&self.retouch)?;
-        crate::develop::red_eye::validate(&self.red_eye)?;
+        crate::model::retouch::validate(&self.retouch)?;
+        crate::model::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)
     }
 }
@@ -470,20 +470,19 @@ impl Recipe {
         // The layered curve renders a look's parametric curve as a curve of its own,
         // on the measured path only; elsewhere the look's regions join the user's.
         let merge_parametric = !(self.parametric_model
-            == crate::develop::parametric::ParametricModel::Layered
+            == crate::model::operators::ParametricModel::Layered
             && self.engine >= 4
             && self.reference_curves);
         if s.parametric != [0.; 4] && merge_parametric {
             for (v, l) in e.parametric.iter_mut().zip(s.parametric) {
                 *v = add(*v, l);
             }
-            if e.splits == crate::develop::effects::Effects::default().splits {
+            if e.splits == crate::model::effects::Effects::default().splits {
                 e.splits = s.splits;
             }
         }
         // The measured grading renders a look's split toning as a pass of its own.
-        let merge_toning =
-            self.grading_model == crate::develop::color_grade::GradingModel::Original;
+        let merge_toning = self.grading_model == crate::model::operators::GradingModel::Original;
         if let Some(t) = s.toning.filter(|_| merge_toning) {
             // Split toning, as Lightroom's looks store it, overlaps all tones; the
             // user's own toning of shadows or highlights wins over the look's.
@@ -560,23 +559,23 @@ impl Recipe {
         recipe.reference_color = true;
         recipe.reference_curves = true;
         recipe.reference_calibration = true;
-        recipe.parametric_model = crate::develop::parametric::ParametricModel::Layered;
-        recipe.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
-        recipe.grain_model = crate::develop::effects::GrainModel::Measured;
-        recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
-        recipe.texture_model = crate::develop::texture::TextureModel::Measured;
-        recipe.contrast_model = crate::develop::basic_tone::ContrastModel::Adaptive;
-        recipe.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
-        recipe.retouch_model = crate::develop::retouch::RetouchModel::Measured;
-        recipe.grading_model = crate::develop::color_grade::GradingModel::Measured;
-        recipe.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
-        recipe.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
-        recipe.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
-        recipe.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
-        recipe.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
-        recipe.whites_model = crate::develop::basic_tone::WhitesModel::Adaptive;
-        recipe.gamut_model = crate::develop::GamutModel::Clip;
-        recipe.set_color_noise_defaults(crate::develop::color_noise::NoiseModel::Measured);
+        recipe.parametric_model = crate::model::operators::ParametricModel::Layered;
+        recipe.set_sharpening_defaults(crate::model::operators::SharpeningModel::Measured);
+        recipe.grain_model = crate::model::operators::GrainModel::Measured;
+        recipe.clarity_model = crate::model::operators::ClarityModel::Measured;
+        recipe.texture_model = crate::model::operators::TextureModel::Measured;
+        recipe.contrast_model = crate::model::operators::ContrastModel::Adaptive;
+        recipe.lens_vignette_model = crate::model::operators::LensVignetteModel::Measured;
+        recipe.retouch_model = crate::model::operators::RetouchModel::Measured;
+        recipe.grading_model = crate::model::operators::GradingModel::Measured;
+        recipe.mixer_model = crate::model::operators::MixerModel::Chart;
+        recipe.saturation_model = crate::model::operators::SaturationModel::Gray;
+        recipe.vibrance_model = crate::model::operators::VibranceModel::Chart;
+        recipe.black_white_model = crate::model::operators::BlackWhiteModel::Chart;
+        recipe.calibration_model = crate::model::operators::CalibrationModel::Measured;
+        recipe.whites_model = crate::model::operators::WhitesModel::Adaptive;
+        recipe.gamut_model = crate::model::operators::GamutModel::Clip;
+        recipe.set_color_noise_defaults(crate::model::operators::NoiseModel::Measured);
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe
@@ -673,8 +672,8 @@ impl Recipe {
             "Invalid Profile Amount"
         );
         // Every other number is range-checked above, which also rejects NaN.
-        crate::develop::retouch::validate(&self.retouch)?;
-        crate::develop::red_eye::validate(&self.red_eye)?;
+        crate::model::retouch::validate(&self.retouch)?;
+        crate::model::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)?;
         Ok(())
     }
@@ -793,9 +792,9 @@ impl Recipe {
     }
     /// Adds a Heal or Clone operation. The first on a recipe has no spots of the
     /// original feather to keep, so it takes the measured one.
-    pub fn add_retouch(&mut self, op: crate::develop::retouch::RetouchOp) {
+    pub fn add_retouch(&mut self, op: crate::model::retouch::RetouchOp) {
         if self.retouch.is_empty() {
-            self.retouch_model = crate::develop::retouch::RetouchModel::Measured;
+            self.retouch_model = crate::model::operators::RetouchModel::Measured;
         }
         self.retouch.push(op);
     }
@@ -803,7 +802,7 @@ impl Recipe {
     /// has nothing of the original operator's to keep, so it takes the measured one.
     pub fn adopt_measured_vignette(&mut self, previous: f32) {
         if previous == 0. && self.effects.lens_vignette != 0. {
-            self.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+            self.lens_vignette_model = crate::model::operators::LensVignetteModel::Measured;
         }
     }
     /// The manual lens Vignetting Amount the finishing stage applies: only the
@@ -831,12 +830,12 @@ impl Recipe {
     /// Color noise reduction at its defaults for `model`, which the recipe then uses:
     /// Lightroom's Amount 25 for raw files with the measured operator (Detail and
     /// Smoothness 50), off with the original.
-    pub fn set_color_noise_defaults(&mut self, model: crate::develop::color_noise::NoiseModel) {
-        let d = crate::develop::effects::Effects::default();
+    pub fn set_color_noise_defaults(&mut self, model: crate::model::operators::NoiseModel) {
+        let d = crate::model::effects::Effects::default();
         self.noise_model = model;
         self.noise_chroma = match model {
-            crate::develop::color_noise::NoiseModel::Original => 0.,
-            crate::develop::color_noise::NoiseModel::Measured => 0.25,
+            crate::model::operators::NoiseModel::Original => 0.,
+            crate::model::operators::NoiseModel::Measured => 0.25,
         };
         self.effects.chroma_detail = d.chroma_detail;
         self.effects.chroma_smoothness = d.chroma_smoothness;
@@ -870,7 +869,7 @@ impl Recipe {
     /// The Sharpening sliders at their defaults for `model`, which the recipe then
     /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)
     /// with the measured operator, RAWmakase's earlier ones with the original.
-    pub fn set_sharpening_defaults(&mut self, model: crate::develop::sharpening::SharpeningModel) {
+    pub fn set_sharpening_defaults(&mut self, model: crate::model::operators::SharpeningModel) {
         let d = crate::develop::sharpening::SharpeningSliders::defaults(model);
         self.sharpening_model = model;
         self.sharpening = if self.engine >= 3 { d.amount } else { 0. };
@@ -882,21 +881,21 @@ impl Recipe {
     /// of the original operator's to keep, so it takes the measured one.
     pub fn adopt_measured_grain(&mut self, previous: f32) {
         if previous == 0. && self.effects.grain != 0. {
-            self.grain_model = crate::develop::effects::GrainModel::Measured;
+            self.grain_model = crate::model::operators::GrainModel::Measured;
         }
     }
     /// After an edit of Clarity from `previous`: Clarity added from none has nothing
     /// of the original operator's to keep, so it takes the measured one.
     pub fn adopt_measured_clarity(&mut self, previous: f32) {
         if previous == 0. && self.effects.clarity != 0. {
-            self.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+            self.clarity_model = crate::model::operators::ClarityModel::Measured;
         }
     }
     /// After an edit of Texture from `previous`: Texture added from none has nothing
     /// of the original operator's to keep, so it takes the measured one.
     pub fn adopt_measured_texture(&mut self, previous: f32) {
         if previous == 0. && self.effects.texture != 0. {
-            self.texture_model = crate::develop::texture::TextureModel::Measured;
+            self.texture_model = crate::model::operators::TextureModel::Measured;
         }
     }
     pub(crate) fn lens_correction<'a>(

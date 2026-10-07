@@ -224,7 +224,7 @@ impl<'a> ViewMapping<'a> {
     /// View-space length of an image-space long-edge fraction `r` near `p`, as
     /// fractions of the view width and height.
     pub fn view_radius(&self, p: [f32; 2], r: f32) -> [f32; 2] {
-        let (rx, ry) = super::retouch::radii(r, self.frame.aspect());
+        let (rx, ry) = crate::model::retouch::radii(r, self.frame.aspect());
         let c = self.to_view(p);
         let a = self.to_view([p[0] + rx, p[1]]);
         let b = self.to_view([p[0], p[1] + ry]);

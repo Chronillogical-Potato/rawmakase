@@ -17,6 +17,7 @@ app -> export_settings
 app -> lens
 app -> lr_develop
 app -> metadata
+app -> model
 app -> optics
 app -> photo
 app -> platform
@@ -65,11 +66,13 @@ develop -> camera_data
 develop -> camera_profiles
 develop -> color
 develop -> lens
+develop -> model
 develop -> optics
 dng -> optics
 dng -> tiff
 edit_session -> catalog
 edit_session -> develop
+edit_session -> model
 edit_session -> presets
 edits -> camera_data
 edits -> camera_profiles
@@ -113,6 +116,7 @@ lr_develop -> camera_profiles
 lr_develop -> color
 lr_develop -> develop
 lr_develop -> xmp
+model -> color
 optics -> xml
 photo -> camera_profiles
 photo -> dng
@@ -121,6 +125,7 @@ photo -> raw
 presets -> camera_data
 presets -> color
 presets -> develop
+presets -> model
 presets -> storage
 presets -> xml
 presets -> xmp
@@ -144,4 +149,5 @@ xmp -> develop
 xmp -> exif
 xmp -> lens
 xmp -> metadata
+xmp -> model
 xmp -> xml

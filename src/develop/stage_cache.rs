@@ -8,11 +8,10 @@
 //! is added to the stages that read it, or to those that only later stages read.
 use super::{
     Geometry, Recipe,
-    effects::Effects,
     pipeline::{Samples, Toned},
     quality::LocalBlurs,
 };
-use crate::camera_data::CameraImage;
+use crate::{camera_data::CameraImage, model::effects::Effects};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -470,7 +469,7 @@ mod tests {
             (
                 "manual vignetting",
                 edit(&|r| {
-                    r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+                    r.lens_vignette_model = crate::model::operators::LensVignetteModel::Measured;
                     r.effects.lens_vignette = -0.5;
                 }),
                 true,

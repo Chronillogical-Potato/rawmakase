@@ -722,7 +722,7 @@ fn absolute_controls_preserve_endpoints_neutral_and_monotonicity() {
 }
 #[test]
 fn clarity_added_by_command_takes_the_measured_operator() {
-    use crate::develop::clarity::ClarityModel;
+    use crate::model::operators::ClarityModel;
     let (mut e, ctx) = editor();
     e.document.edit.recipe.clarity_model = ClarityModel::Original;
     e.execute_command(

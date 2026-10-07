@@ -6,41 +6,6 @@ use super::basic_tone_data::{
     WHITES_ADAPTIVE, WHITES_EXPOSURES, WHITES_HIGHLIGHTS,
 };
 use crate::color::{srgb_decode, srgb_encode};
-use serde::{Deserialize, Serialize};
-
-/// How a recipe's Contrast renders.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ContrastModel {
-    /// The curve averaged over five photos, before Whites and Blacks: what recipes
-    /// saved before the adaptive one keep, so they render as they did.
-    #[default]
-    Original,
-    /// Camera Raw's curve, measured on the synthetic chart and moved to the photo's own
-    /// pivot, after Whites and Blacks (docs/tone-controls.md#contrast).
-    Adaptive,
-}
-impl ContrastModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
-
-/// How a recipe's positive Whites renders.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WhitesModel {
-    /// The median of five photos' curves: what recipes saved before the adaptive one
-    /// keep, so they render as they did.
-    #[default]
-    Original,
-    /// Camera Raw's curve for a photo whose highlights are as bright as this one's
-    /// (docs/tone-controls.md#whites).
-    Adaptive,
-}
-impl WhitesModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// The Whites tables one render uses: per slider position (as `SLIDER_VALUES`), the
 /// curve at 64 bin centres.
