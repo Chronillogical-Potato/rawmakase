@@ -19,14 +19,22 @@ impl Editor {
     /// guard never sees it: the edit and the place in the catalog are saved here
     /// too. After a window close the guard has already flushed, and this finds
     /// nothing to do. Then the workers that write or hold the GPU are stopped and
-    /// waited for, before eframe drops the device.
+    /// waited for, before eframe drops the device. A close the guard let through
+    /// keeps the deadline it started with its save.
     pub(super) fn exit(&mut self) -> task::Waited {
-        self.exit_within(DEADLINE)
+        let until = self
+            .quit_by
+            .take()
+            .unwrap_or_else(|| Instant::now() + DEADLINE);
+        self.exit_by(until)
     }
-    /// The exit sequence, with `deadline` for all of it. The workers wind down while
-    /// the edit saves.
+    /// The exit sequence, with `deadline` for all of it.
+    #[cfg(test)]
     pub(super) fn exit_within(&mut self, deadline: Duration) -> task::Waited {
-        let until = Instant::now() + deadline;
+        self.exit_by(Instant::now() + deadline)
+    }
+    /// The exit sequence, done by `until`. The workers wind down while the edit saves.
+    fn exit_by(&mut self, until: Instant) -> task::Waited {
         self.cancel_jobs();
         self.close_channels();
         let mut stopping = self.stop_workers();
@@ -35,10 +43,7 @@ impl Editor {
         match self.flush_by(until) {
             Flushed::Saved => {}
             Flushed::Failed => eprintln!("{}", self.status),
-            Flushed::Late => eprintln!(
-                "Edits not saved: the catalog did not answer within {} s",
-                deadline.as_secs_f32()
-            ),
+            Flushed::Late => eprintln!("Edits not saved: the catalog did not answer in time"),
         }
         self.remember_place(super::workspace::LayoutEdit::Settled);
         // Only now: the save went through it.

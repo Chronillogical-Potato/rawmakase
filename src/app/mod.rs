@@ -78,6 +78,9 @@ pub(crate) struct Editor {
     /// The close was refused only to let work finish (an export, Sync Settings, a
     /// folder change, a command output): it is asked for again once that is done.
     close_after_work: bool,
+    /// When quitting must be done by, set as the close guard lets a close through,
+    /// so the save it made and the exit hook share one deadline.
+    quit_by: Option<std::time::Instant>,
     /// The dialog blocking the editor, if one is open.
     modal: Option<Modal>,
     /// A photo Develop could not open and why, until the user dismisses it.
@@ -249,6 +252,7 @@ impl Editor {
             importing: None,
             close_confirm: false,
             close_after_work: false,
+            quit_by: None,
             modal: None,
             not_editable: None,
             undo_log: Default::default(),
