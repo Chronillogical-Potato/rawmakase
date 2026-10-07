@@ -105,15 +105,15 @@ impl Editor {
     }
     /// Opens Copy Settings, or Synchronize Settings, with the groups chosen last time.
     pub(super) fn open_copy_dialog(&mut self, purpose: Transfer) {
-        self.copy_dialog = Some(CopyDialog {
+        self.modal = Some(super::Modal::CopySettings(CopyDialog {
             purpose,
             groups: self.copy_groups.clone(),
             preset: PresetForm::default(),
-        });
+        }));
     }
     /// Lightroom's Copy Settings: a checkbox per group, under its section.
     pub(super) fn copy_dialog_window(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = &mut self.copy_dialog else {
+        let Some(super::Modal::CopySettings(dialog)) = &mut self.modal else {
             return;
         };
         let mut choice = None;
@@ -189,7 +189,10 @@ impl Editor {
     /// other selected photos; both start the next dialog from that choice. A new
     /// preset's groups are its own and leave that choice as it was.
     pub(super) fn close_copy_dialog(&mut self, choice: CopyChoice) {
-        let Some(dialog) = self.copy_dialog.take() else {
+        let Some(super::Modal::CopySettings(dialog)) = self
+            .modal
+            .take_if(|m| matches!(m, super::Modal::CopySettings(_)))
+        else {
             return;
         };
         if choice == CopyChoice::Cancel {

@@ -389,13 +389,9 @@ impl Editor {
     pub(super) fn command_modal(&self) -> bool {
         self.preferences.open
             || self.export_modal()
-            || self.remove_copy.is_some()
-            || self.read_metadata.is_some()
+            || self.modal.is_some()
             || self.not_editable.is_some()
-            || self.folder_question.is_some()
             || self.view.shortcuts
-            || self.copy_dialog.is_some()
-            || self.preset_rename.is_some()
             || self.onboarding.visible
             || self.curve_save_open()
     }

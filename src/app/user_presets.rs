@@ -78,10 +78,10 @@ impl Editor {
             }),
             PresetAction::StartRename(i) => {
                 if let Some(p) = library.presets.get(i) {
-                    self.preset_rename = Some(PresetRename {
+                    self.modal = Some(super::Modal::RenamePreset(PresetRename {
                         path: p.path.clone(),
                         name: p.name.clone(),
-                    });
+                    }));
                 }
                 return;
             }
@@ -97,7 +97,7 @@ impl Editor {
     }
     /// The Rename Preset window, while one is being renamed.
     pub(super) fn preset_rename_window(&mut self, ctx: &egui::Context) {
-        let Some(rename) = &mut self.preset_rename else {
+        let Some(super::Modal::RenamePreset(rename)) = &mut self.modal else {
             return;
         };
         let mut choice = None;
@@ -136,7 +136,9 @@ impl Editor {
         let Some(choice) = choice else {
             return;
         };
-        let rename = self.preset_rename.take().expect("open above");
+        let Some(super::Modal::RenamePreset(rename)) = self.modal.take() else {
+            unreachable!("open above");
+        };
         if choice == RenameChoice::Cancel {
             return;
         }
@@ -221,7 +223,10 @@ mod tests {
         e.open_copy_dialog(super::super::settings_transfer::Transfer::NewPreset);
         let mut narrow = GroupSelection::none();
         narrow.set(SettingGroup::Exposure, GroupInclusion::Included);
-        e.copy_dialog.as_mut().unwrap().groups = narrow;
+        let Some(super::super::Modal::CopySettings(dialog)) = &mut e.modal else {
+            panic!("Copy Settings is open");
+        };
+        dialog.groups = narrow;
         e.close_copy_dialog(super::super::settings_transfer::CopyChoice::Confirm);
         assert_eq!(e.copy_groups, before);
     }
