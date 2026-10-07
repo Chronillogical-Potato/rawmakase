@@ -39,11 +39,8 @@ pub struct Editor {
     clipboard: Option<settings_transfer::Clipboard>,
     /// The settings of the photo open before this one, for Paste from Previous.
     previous_settings: Option<settings_transfer::Settings>,
-    /// Copy Settings while open, and the groups it last copied.
-    copy_dialog: Option<settings_transfer::CopyDialog>,
+    /// The groups Copy Settings last copied.
     copy_groups: crate::develop::settings_groups::GroupSelection,
-    /// A preset made here being renamed.
-    preset_rename: Option<user_presets::PresetRename>,
     /// The Point Curve menu's saved curves and its Save window.
     curves: curve_menu::CurveMenu,
     /// Collapsed panel sections as last saved to the session.
@@ -78,14 +75,12 @@ pub struct Editor {
     /// Progress of a running profile or preset import.
     importing: Option<std::sync::Arc<bulk_import::ImportProgress>>,
     close_confirm: bool,
-    /// The virtual copy waiting for the user to confirm its removal.
-    remove_copy: Option<PhotoId>,
-    /// Photos waiting for the user to confirm Read Metadata from Files.
-    read_metadata: Option<Vec<PhotoId>>,
+    /// The dialog blocking the editor, if one is open.
+    modal: Option<Modal>,
     /// A photo Develop could not open and why, until the user dismisses it.
+    /// Its own field: a photo dropped on the window can be refused while
+    /// a `modal` is open.
     not_editable: Option<(String, String)>,
-    /// A folder change waiting for the user's answer.
-    folder_question: Option<folder_locations::FolderQuestion>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
     /// Photo > Auto Advance, saved in the session.
@@ -222,8 +217,6 @@ impl Editor {
             reference_loader,
             clipboard: None,
             previous_settings: None,
-            copy_dialog: None,
-            preset_rename: None,
             curves: Default::default(),
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
@@ -252,10 +245,8 @@ impl Editor {
             catalog_work: None,
             importing: None,
             close_confirm: false,
-            remove_copy: None,
-            read_metadata: None,
+            modal: None,
             not_editable: None,
-            folder_question: None,
             undo_log: Default::default(),
             auto_advance: session.auto_advance,
             first_conversion: if session.no_auto_black_white_mix {
@@ -380,6 +371,21 @@ struct PendingPhoto {
     /// Its folder has been added to the catalog already; if the photo is still
     /// not there, it could not be added.
     folder_added: bool,
+}
+/// The dialog that blocks the editor, one at a time, kept in `Editor::modal`.
+/// Dialogs owned by a subsystem (Preferences, Export, Shortcuts, onboarding,
+/// Save Curve) keep their state there instead.
+enum Modal {
+    /// Copy, Synchronize or New Preset settings, and the groups being chosen.
+    CopySettings(settings_transfer::CopyDialog),
+    /// A preset made here being renamed.
+    RenamePreset(user_presets::PresetRename),
+    /// The virtual copy waiting for the user to confirm its removal.
+    RemoveCopy(PhotoId),
+    /// Photos waiting for the user to confirm Read Metadata from Files.
+    ReadMetadata(Vec<PhotoId>),
+    /// A folder change waiting for the user's answer.
+    FolderQuestion(folder_locations::FolderQuestion),
 }
 impl eframe::App for Editor {
     /// What shows where no panel paints, e.g. behind the Library grid: the

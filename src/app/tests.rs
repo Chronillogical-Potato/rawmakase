@@ -1971,7 +1971,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     // The copy was last open in Develop; the user is back in the Library.
     editor.document.catalog_photo = Some(copy);
     editor.module = Module::Library;
-    editor.remove_copy = Some(copy);
+    editor.modal = Some(Modal::RemoveCopy(copy));
     // Return alone never confirms the dialog.
     let input = egui::RawInput {
         events: vec![egui::Event::Key {
@@ -1985,9 +1985,9 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     };
     let mut output = ctx.run_ui(input, |ui| editor.remove_copy_window(ui.ctx()));
     output.textures_delta.clear();
-    assert_eq!(editor.remove_copy, Some(copy));
+    assert!(matches!(editor.modal, Some(Modal::RemoveCopy(id)) if id == copy));
     assert!(editor.library.as_ref().unwrap().photo(copy).is_some());
-    editor.remove_copy = None;
+    editor.modal = None;
     editor.remove_virtual_copy(copy);
     assert!(editor.module == Module::Library);
     assert_eq!(editor.document.catalog_photo, None);
@@ -2517,35 +2517,26 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     }
     let copy = ctx.memory(|m| m.area_rect(egui::Id::new("copy-settings")));
     assert!(copy.is_some_and(|r| r.bottom() <= 650.), "{copy:?}");
-    let dialog = editor.copy_dialog.as_mut().unwrap();
+    let Some(Modal::CopySettings(dialog)) = &mut editor.modal else {
+        panic!("Copy Settings is open");
+    };
     dialog.groups = GroupSelection::none();
     dialog
         .groups
         .set(SettingGroup::Exposure, GroupInclusion::Included);
     editor.close_copy_dialog(settings_transfer::CopyChoice::Confirm);
-    assert!(editor.copy_dialog.is_none());
+    assert!(editor.modal.is_none());
     editor.document.edit.recipe = Recipe::default();
     editor.paste_settings();
     assert_eq!(editor.document.edit.recipe.exposure, 0.6);
     assert_eq!(editor.document.edit.recipe.contrast, 0.);
     // The next Copy Settings starts from that choice; Cancel copies nothing.
     editor.open_copy_dialog(settings_transfer::Transfer::Copy);
-    assert!(
-        editor
-            .copy_dialog
-            .as_ref()
-            .unwrap()
-            .groups
-            .contains(SettingGroup::Exposure)
-    );
-    assert!(
-        !editor
-            .copy_dialog
-            .as_ref()
-            .unwrap()
-            .groups
-            .contains(SettingGroup::Contrast)
-    );
+    let Some(Modal::CopySettings(dialog)) = &editor.modal else {
+        panic!("Copy Settings is open");
+    };
+    assert!(dialog.groups.contains(SettingGroup::Exposure));
+    assert!(!dialog.groups.contains(SettingGroup::Contrast));
     editor.document.edit.recipe.exposure = -1.;
     editor.close_copy_dialog(settings_transfer::CopyChoice::Cancel);
     editor.document.edit.recipe = Recipe::default();

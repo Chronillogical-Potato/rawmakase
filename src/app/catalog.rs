@@ -365,7 +365,7 @@ impl Editor {
         use crate::app::library::CopyAction;
         let result = match action {
             CopyAction::Remove(id) => {
-                self.remove_copy = Some(id);
+                self.modal = Some(super::Modal::RemoveCopy(id));
                 return;
             }
             _ if !self.ready_for_catalog() => return,
@@ -396,11 +396,11 @@ impl Editor {
     /// Asks before removing a virtual copy, as Lightroom does; a copy shown
     /// in Develop gives way to its master.
     pub(super) fn remove_copy_window(&mut self, ctx: &egui::Context) {
-        let Some(id) = self.remove_copy else {
+        let Some(super::Modal::RemoveCopy(id)) = self.modal else {
             return;
         };
         let Some(photo) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
-            self.remove_copy = None;
+            self.modal = None;
             return;
         };
         // Only a click or the focused button confirms: a stray Return must
@@ -417,7 +417,7 @@ impl Editor {
         ) else {
             return;
         };
-        self.remove_copy = None;
+        self.modal = None;
         if remove {
             self.remove_virtual_copy(id);
         }
@@ -434,9 +434,10 @@ impl Editor {
     /// Asks before Read Metadata from Files, as Lightroom does: it replaces
     /// the catalog's values, edits included.
     pub(super) fn read_metadata_window(&mut self, ctx: &egui::Context) {
-        let Some(ids) = self.read_metadata.clone() else {
+        let Some(super::Modal::ReadMetadata(ids)) = &self.modal else {
             return;
         };
+        let ids = ids.clone();
         let n = ids.len();
         let title = if n == 1 {
             "Read metadata from the file?".to_string()
@@ -456,7 +457,7 @@ impl Editor {
         ) else {
             return;
         };
-        self.read_metadata = None;
+        self.modal = None;
         if !read || !self.ready_for_catalog() {
             return;
         }
