@@ -157,7 +157,7 @@ impl PostCropVignette {
             (style, false) => {
                 let shape = 1.7625 + 0.6875 * x * x;
                 let gain = 1. - 0.97 * darkening(x) * (1. - (1. - mask).powf(shape));
-                let y = 0.2126 * b[0] + 0.7152 * b[1] + 0.0722 * b[2];
+                let y = crate::color::luminance(b);
                 let protect = if self.highlights > 0. {
                     (1. - smoothstep(0.198, 1.108, y)).powf(self.highlights.powf(1.43))
                 } else {

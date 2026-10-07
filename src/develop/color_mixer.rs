@@ -238,7 +238,7 @@ impl ColorMixer {
         }
         // Camera Raw's −100 keeps the luminance the color has without Saturation.
         let source = self.gray_source.as_ref().map_or(rgb, |g| tables(g, rgb));
-        let y = 0.2126 * source[0] + 0.7152 * source[1] + 0.0722 * source[2];
+        let y = crate::color::luminance(source);
         mixed.map(|v| v + self.saturation_gray * (y - v))
     }
 }
@@ -402,7 +402,7 @@ mod tests {
     fn orange_luminance_darkens_skin_tones() {
         let mut r = Recipe::default();
         let skin = [0.5, 0.3, 0.2];
-        let lum = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+        let lum = |p: [f32; 3]| crate::color::luminance(p);
         r.hsl[1][2] = -1.;
         let darker = ColorMixer::new(&r).unwrap().apply(skin);
         r.hsl[1][2] = 1.;
@@ -427,7 +427,7 @@ mod tests {
             ..Default::default()
         };
         let orange = [0.6, 0.3, 0.1];
-        let y = 0.2126 * orange[0] + 0.7152 * orange[1] + 0.0722 * orange[2];
+        let y = crate::color::luminance(orange);
         let at = |model, s| ColorMixer::new(&recipe(model, s)).unwrap().apply(orange);
         // −100 is exactly gray of the color's luminance, as in Camera Raw.
         let gray = at(SaturationModel::Gray, -1.);
@@ -451,7 +451,7 @@ mod tests {
         let mut no_saturation = darker;
         no_saturation.saturation = 0.;
         let alone = ColorMixer::new(&no_saturation).unwrap().apply(orange);
-        let y_alone = 0.2126 * alone[0] + 0.7152 * alone[1] + 0.0722 * alone[2];
+        let y_alone = crate::color::luminance(alone);
         assert!(
             toned.iter().all(|v| (v - y_alone).abs() < 1e-5),
             "{toned:?}"

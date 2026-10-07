@@ -254,7 +254,7 @@ impl Measure {
         for p in &out.pixels {
             let p = p.map(|v| if v.is_finite() { v.clamp(0., 1.) } else { 0. });
             let (max, min) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
-            luma.push(0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]);
+            luma.push(crate::color::luminance(p));
             peak.push(max);
             chroma.push(if max > CHROMA_FLOOR {
                 (max - min) / max
