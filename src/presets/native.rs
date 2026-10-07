@@ -16,7 +16,7 @@ struct Preset {
     /// Masks, kept outside the recipe so releases before them read the rest (the
     /// envelope accepts unknown keys in every release).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    masks: Vec<crate::develop::masks::MaskGroup>,
+    masks: Vec<crate::model::masks::MaskGroup>,
 }
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;

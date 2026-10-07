@@ -9,8 +9,12 @@ use super::theme;
 use super::widgets::{local_setting_slider, segmented, set_edit_context, slider_with};
 use crate::develop::{
     ViewMapping,
-    masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape, Space},
+    masks::{self, Space},
     params::LocalParameterId,
+};
+use crate::model::masks::{
+    BrushStroke, LocalAdjust, MAX_COMPONENTS, MAX_GROUPS, MAX_POINTS, MAX_STROKES, MaskComponent,
+    MaskGroup, MaskOp, MaskShape,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -180,13 +184,13 @@ impl Editor {
     fn add_component(&mut self, mut component: MaskComponent, op: Option<MaskOp>) {
         let masks = &mut self.document.edit.recipe.masks;
         match (op, self.view.masking.selected.filter(|i| *i < masks.len())) {
-            (Some(op), Some(m)) if masks[m].components.len() < masks::MAX_COMPONENTS => {
+            (Some(op), Some(m)) if masks[m].components.len() < MAX_COMPONENTS => {
                 component.op = op;
                 masks[m].components.push(component);
                 let c = masks[m].components.len() - 1;
                 self.view.masking.select(Some(m), Some(c));
             }
-            _ if masks.len() < masks::MAX_GROUPS => {
+            _ if masks.len() < MAX_GROUPS => {
                 masks.push(MaskGroup {
                     components: vec![component],
                     ..Default::default()
@@ -194,7 +198,7 @@ impl Editor {
                 let m = masks.len() - 1;
                 self.view.masking.select(Some(m), Some(0));
             }
-            _ => self.status = format!("A photo holds up to {} masks", masks::MAX_GROUPS),
+            _ => self.status = format!("A photo holds up to {} masks", MAX_GROUPS),
         }
     }
     /// The Masking tool's keys: `[` `]` brush size (Shift: feather), O overlay, Delete
@@ -325,7 +329,7 @@ impl Editor {
                     let last = space.to(points[points.len() - 1]);
                     let q = space.to(at);
                     if (q[0] - last[0]).hypot(q[1] - last[1]) >= size * 0.2
-                        && points.len() < masks::MAX_POINTS
+                        && points.len() < MAX_POINTS
                     {
                         points.push(at);
                     }
@@ -479,7 +483,7 @@ impl Editor {
         let b = t.brushes[if erase { 2 } else { t.brush }];
         if let MaskShape::Brush { strokes } =
             &mut self.document.edit.recipe.masks[m].components[c].shape
-            && strokes.len() < masks::MAX_STROKES
+            && strokes.len() < MAX_STROKES
         {
             strokes.push(BrushStroke {
                 points: points.into(),
@@ -748,7 +752,7 @@ impl Editor {
             ui.add_space(14.);
             ui.checkbox(&mut self.document.edit.recipe.masks[i].invert, "Invert")
                 .on_hover_text("Apply the adjustment outside the mask");
-            let full = self.document.edit.recipe.masks.len() >= masks::MAX_GROUPS;
+            let full = self.document.edit.recipe.masks.len() >= MAX_GROUPS;
             if ui
                 .add_enabled(!full, egui::Button::new("Duplicate"))
                 .clicked()

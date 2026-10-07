@@ -834,9 +834,8 @@ fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
 }
 #[test]
 fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
-    use crate::develop::point_color::add_sample;
-    use crate::model::point_color::PointColor;
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::{develop::point_color::add_sample, model::point_color::PointColor};
     let im = fixture();
     let plain = Recipe {
         reference_curves: true,
@@ -897,8 +896,8 @@ fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow
 }
 #[test]
 fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     use crate::develop::point_color::visualize;
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     use crate::model::point_color::{PointColor, visualize_range};
     let im = fixture();
     let mut r = Recipe {
@@ -937,8 +936,8 @@ fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Res
 }
 #[test]
 fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     use crate::develop::targeted::{HslChannel, Target, TargetWeights};
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     // Four patches: a dark gray, an orange, a light gray and a blue.
     let patches = [
         [0.03, 0.03, 0.03],

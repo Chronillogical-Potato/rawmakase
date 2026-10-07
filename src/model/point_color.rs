@@ -254,6 +254,8 @@ mod tests {
             assert!((r.source[0] - 4.25).abs() < 1e-6 && (r.variance + 0.3).abs() < 1e-6);
         }
         assert!(parse_list("1, 2", None).is_err());
+        // Camera Raw keeps eight swatches.
+        assert_eq!(MAX_SWATCHES, 8);
         assert!(parse_list(&["-1"; 19].join(", "), None).unwrap().is_empty());
     }
 }

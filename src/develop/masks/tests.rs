@@ -2,6 +2,7 @@ use super::local::slot;
 use super::*;
 use crate::camera_data::CameraImage;
 use crate::develop::{Geometry, Recipe};
+use crate::model::masks::{BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape};
 use std::sync::Arc;
 
 fn image(width: u32, height: u32) -> CameraImage {

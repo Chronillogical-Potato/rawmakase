@@ -744,11 +744,14 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
+    use crate::model::masks::LocalAdjust;
     use crate::{
         camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
-        develop::masks::{LocalAdjust, MaskWeights},
-        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        develop::{
+            masks::MaskWeights,
+            pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        },
     };
     use std::sync::Arc;
     let metadata = Metadata {

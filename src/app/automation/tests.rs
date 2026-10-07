@@ -160,7 +160,7 @@ mod mapping_tests {
             Param::Setting(ParameterId::Straighten).range(false),
             (-45., 45.)
         );
-        let mask = crate::develop::masks::LocalAdjust::default();
+        let mask = crate::model::masks::LocalAdjust::default();
         assert_eq!(
             Param::Setting(ParameterId::Straighten).local_shown(&mask),
             None

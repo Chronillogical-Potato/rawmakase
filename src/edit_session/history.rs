@@ -696,7 +696,6 @@ mod tests {
     }
     #[test]
     fn retouch_and_mask_edits_have_lightroom_names() {
-        use crate::develop::masks;
         let before = Recipe::default();
         let mut after = before.clone();
         after.retouch.push(crate::model::retouch::RetouchOp {
@@ -712,10 +711,12 @@ mod tests {
         assert_eq!(describe(&before, &after).name, "Spot Removal");
         assert_eq!(describe(&after, &before).name, "Delete Spot");
         let mut masked = before.clone();
-        masked.masks.push(masks::MaskGroup {
-            components: vec![masks::MaskComponent::new(masks::MaskShape::Brush {
-                strokes: Vec::new(),
-            })],
+        masked.masks.push(crate::model::masks::MaskGroup {
+            components: vec![crate::model::masks::MaskComponent::new(
+                crate::model::masks::MaskShape::Brush {
+                    strokes: Vec::new(),
+                },
+            )],
             ..Default::default()
         });
         masked.masks.push(masked.masks[0].clone());

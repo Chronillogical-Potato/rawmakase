@@ -1250,7 +1250,7 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
 }
 #[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
-    use crate::develop::masks::MaskShape;
+    use crate::model::masks::MaskShape;
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -1379,7 +1379,7 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     // Add a subtracted brush to the brush mask, then delete the mask with Delete.
     editor.create_mask(
         mask_tool::Kind::Brush,
-        Some(crate::develop::masks::MaskOp::Subtract),
+        Some(crate::model::masks::MaskOp::Subtract),
     );
     assert_eq!(editor.document.edit.recipe.masks[2].components.len(), 2);
     frame(
@@ -3396,7 +3396,7 @@ fn red_eye_brackets_resize_the_circle_a_click_uses() {
 #[test]
 fn scrolling_over_the_photo_resizes_the_brush_spot_and_red_eye_circle() {
     use super::brush_scroll::{Adjust, MaskBrush, Scroll};
-    use crate::develop::masks::{MaskComponent, MaskGroup, MaskShape};
+    use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -4219,16 +4219,16 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let mut saved = Recipe::with_profiles(&metadata, &profiles);
     saved.exposure = 0.4;
-    saved.masks.push(develop::masks::MaskGroup {
-        components: vec![develop::masks::MaskComponent::new(
-            develop::masks::MaskShape::Radial {
+    saved.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
                 center: [0.5, 0.5],
                 radii: [0.2, 0.1],
                 angle: 0.,
                 feather: 0.5,
             },
         )],
-        adjust: develop::masks::LocalAdjust {
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },
@@ -4336,16 +4336,16 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     // a: a mask and a spot.
     let mut local = base.clone();
     local.exposure = 0.3;
-    local.masks.push(develop::masks::MaskGroup {
-        components: vec![develop::masks::MaskComponent::new(
-            develop::masks::MaskShape::Radial {
+    local.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
                 center: [0.5, 0.5],
                 radii: [0.2, 0.1],
                 angle: 0.,
                 feather: 0.5,
             },
         )],
-        adjust: develop::masks::LocalAdjust {
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },

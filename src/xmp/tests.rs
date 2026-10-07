@@ -488,7 +488,7 @@ fn empty_flags_are_unset_and_curves_still_apply() -> Result<()> {
 /// dab); AI masks are reported, not imported.
 #[test]
 fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
-    use crate::develop::masks::{MaskOp, MaskShape};
+    use crate::model::masks::{MaskOp, MaskShape};
     use crate::model::retouch::{RetouchMode, RetouchShape};
     let dabs =
         "<r:li>d 0.200000 0.700000</r:li><r:li>r 0.030000</r:li><r:li>d 0.300000 0.700000</r:li>";

@@ -557,7 +557,6 @@ fn bitmaps_are_stored_once_by_hash() -> Result<()> {
 }
 #[test]
 fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
-    use crate::develop::masks;
     let d = tempfile::tempdir()?;
     let photos = d.path().join("photos");
     std::fs::create_dir(&photos)?;
@@ -567,14 +566,16 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
     c.add_folder(&photos)?;
     let id = c.photos()?[0].id;
     let mut r = Recipe::default();
-    r.masks.push(masks::MaskGroup {
-        components: vec![masks::MaskComponent::new(masks::MaskShape::Radial {
-            center: [0.5, 0.5],
-            radii: [0.2, 0.1],
-            angle: 0.,
-            feather: 0.5,
-        })],
-        adjust: masks::LocalAdjust {
+    r.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
+                center: [0.5, 0.5],
+                radii: [0.2, 0.1],
+                angle: 0.,
+                feather: 0.5,
+            },
+        )],
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },

@@ -8,9 +8,9 @@
 //! source is the absolute position of its centre (`SourceX`, `OffsetY`), and a brushed
 //! spot's source is where its first dab copies from. Gradient, radial and brush masks
 //! are assumed to use the same frame and units; their shape details are not verified.
-use crate::develop::{
-    ImageFrame,
-    masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape},
+use crate::develop::ImageFrame;
+use crate::model::masks::{
+    BrushStroke, LocalAdjust, MAX_GROUPS, MaskComponent, MaskGroup, MaskOp, MaskShape,
 };
 use crate::model::red_eye::{EyeKind, RedEyeOp};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
@@ -296,12 +296,10 @@ pub fn convert(local: &BTreeMap<String, Node>, image: ImageFrame) -> ConvertedLo
             any = true;
             for c in list.items() {
                 match correction(c, &frame) {
-                    Ok(Some(g)) if groups.len() < masks::MAX_GROUPS => groups.push(g),
-                    Ok(Some(g)) => edits.skipped.push(format!(
-                        "{}: more than {} masks",
-                        g.name,
-                        masks::MAX_GROUPS
-                    )),
+                    Ok(Some(g)) if groups.len() < MAX_GROUPS => groups.push(g),
+                    Ok(Some(g)) => edits
+                        .skipped
+                        .push(format!("{}: more than {} masks", g.name, MAX_GROUPS)),
                     Ok(None) => {}
                     Err(e) => {
                         let name = c.text("CorrectionName").unwrap_or("A mask");

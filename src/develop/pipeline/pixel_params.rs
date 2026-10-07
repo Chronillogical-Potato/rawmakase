@@ -409,7 +409,7 @@ impl PixelParams {
         if n == 0 {
             return true;
         }
-        if n > crate::develop::masks::MAX_GROUPS {
+        if n > crate::model::masks::MAX_GROUPS {
             return false;
         }
         let words = n.div_ceil(4);
