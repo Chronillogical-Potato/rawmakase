@@ -109,10 +109,11 @@ macOS says the app interrupted it.
 The exit hook (`app/exit.rs`) runs the sequence above. It saves the edit and the
 place in the catalog (#269), cancels the jobs in progress, and stops and waits for
 the develop loader, the preview renderer, the Reference View loader and the export
-queue under a 3 s deadline (#270). Still to do:
+queue under a 3 s deadline (#270). That deadline bounds the joins only, not
+quitting: the edit is saved before them. Still to do, tracked in #330:
 
 - **The edit is saved without a deadline**, so a catalog on a stalled network share
-  would hold up quitting.
+  would hold up quitting however long it stalls.
 - **The close guard misses folder jobs and command output jobs.**
 - **Step 2.3 is not done yet:** the exit hook closes no channels itself; they
   close as the editor is dropped.
@@ -122,3 +123,6 @@ queue under a 3 s deadline (#270). Still to do:
 - **Renders that cannot be cancelled:** the library's edited and screen previews.
 - **A worker cut off at the deadline** can leave its temporary file beside an
   export.
+
+Each is stopped and awaited explicitly by the exit hook, never by blocking joins
+in `Drop`.
