@@ -105,22 +105,20 @@ impl Editor {
             AutoKind::Settings => Step::new("Auto Settings", ""),
             AutoKind::WhiteBalance => Step::new("White Balance", "Auto"),
         };
-        let applied = self.change_edit(Some(step), |r| match kind {
+        let mut applied = self.document.edit.recipe().clone();
+        match kind {
             AutoKind::Settings => {
-                AutoTone::of(&auto).apply(r);
-                Some(r.clone())
+                AutoTone::of(&auto).apply(&mut applied);
+                self.document.auto_applied = Some(applied.clone());
+                self.document.auto_effect.take();
             }
             AutoKind::WhiteBalance => {
-                r.wb = auto.wb;
-                r.temperature = auto.temperature;
-                r.tint = auto.tint;
-                r.auto_white_balance = auto.auto_white_balance;
-                None
+                applied.wb = auto.wb;
+                applied.temperature = auto.temperature;
+                applied.tint = auto.tint;
+                applied.auto_white_balance = auto.auto_white_balance;
             }
-        });
-        if let Some(applied) = applied {
-            self.document.auto_applied = Some(applied);
-            self.document.auto_effect.take();
         }
+        self.change_edit(Some(step), |r| *r = applied);
     }
 }

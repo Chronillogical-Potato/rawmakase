@@ -3797,6 +3797,26 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     assert_eq!(editor.document.edit.history().steps().1, 1);
 }
 #[test]
+fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    editor.document.edit.recipe_mut().reference_curves = true;
+    editor.document.edit.recipe_mut().reference_color = true;
+    editor.view.mixer_tab = state::MixerTab::PointColor;
+    editor.view.point_color.visualize = true;
+    editor.view.toggle(state::Tool::PointColor);
+    let sampled = editor.document.edit.recipe().clone();
+    editor.point_color_sample_ready(&sampled, Ok([2., 0.6, 0.3]));
+    assert_eq!(editor.view.point_color.selected, Some(0));
+    // The render scheduled with the swatch shows its range, with no other change.
+    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    assert_eq!(
+        pending.point_colors[0].view,
+        crate::model::point_color::SwatchView::VisualizeRange
+    );
+}
+#[test]
 fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     use crate::develop::point_color::SampleRefusal;
     let ctx = egui::Context::default();

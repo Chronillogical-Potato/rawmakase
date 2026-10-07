@@ -104,11 +104,15 @@ impl super::Editor {
             self.document.edit.finish_gesture();
             self.document.edit.save_state_mut().mark_changed();
         }
-        let step = super::history::Step::new("Point Color", "Add Swatch");
-        match self.change_edit(Some(step), |r| add_sample(&mut r.point_colors, source)) {
+        let mut swatches = self.document.edit.recipe().point_colors.clone();
+        match add_sample(&mut swatches, source) {
             Ok(i) => {
+                // Selected, with the dropper put away, before the render is
+                // scheduled: Visualize Range shows the new swatch.
                 self.view.point_color.selected = Some(i);
                 self.view.tool = Tool::None;
+                let step = super::history::Step::new("Point Color", "Add Swatch");
+                self.change_edit(Some(step), |r| r.point_colors = swatches);
             }
             Err(refusal) => self.status = refusal.message().into(),
         }
