@@ -11,7 +11,8 @@ use eframe::egui;
 use std::{
     panic::{self, AssertUnwindSafe},
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
+    time::Instant,
 };
 
 /// An edit to write, as it was when the save started.
@@ -109,6 +110,17 @@ impl Autosave {
     pub(crate) fn wait(&mut self) -> Option<Completion> {
         self.receive(|completions| Some(completions.recv().unwrap_or(Completion::WorkerLost)))
     }
+    /// The save in flight, if it finishes before `until`; still [`busy`](Self::busy)
+    /// if it does not.
+    pub(crate) fn wait_until(&mut self, until: Instant) -> Option<Completion> {
+        self.receive(|completions| {
+            match completions.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Ok(completion) => Some(completion),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => Some(Completion::WorkerLost),
+            }
+        })
+    }
     fn receive(
         &mut self,
         get: impl FnOnce(&Receiver<Completion>) -> Option<Completion>,
@@ -168,9 +180,24 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
 }
 
 #[cfg(test)]
+impl Autosave {
+    /// An autosave whose saves take a minute, as on a stalled network share.
+    pub(super) fn stalled() -> Self {
+        fn stall(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            Ok(job.catalog.clone())
+        }
+        Self {
+            saver: stall,
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn job(photo: PhotoId) -> Job {
         Job {
@@ -253,5 +280,18 @@ mod tests {
         };
         assert!(matches!(autosave.wait(), Some(Completion::WorkerLost)));
         assert!(!autosave.busy());
+    }
+
+    #[test]
+    fn waiting_for_a_stalled_save_gives_up_at_the_deadline() {
+        let ctx = egui::Context::default();
+        let mut autosave = Autosave::stalled();
+        assert!(autosave.submit(job(PhotoId(1)), &ctx).is_ok());
+        let started = Instant::now();
+        let until = started + Duration::from_millis(50);
+        assert!(autosave.wait_until(until).is_none());
+        assert!(Instant::now() >= until);
+        assert!(started.elapsed() < Duration::from_secs(30));
+        assert!(autosave.busy(), "the save is still in flight");
     }
 }

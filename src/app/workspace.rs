@@ -2,11 +2,12 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
+use super::workflow::Flushed;
 use crate::app::Module;
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use eframe::egui::{self, Color32, Vec2};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 impl Editor {
     pub(super) fn metadata_shortcuts(&mut self, ctx: &egui::Context) {
@@ -1161,7 +1162,9 @@ impl Editor {
             ctx.request_repaint_after(due + Duration::from_millis(10));
         }
         if ctx.input(|i| i.viewport().close_requested())
-            && (self.exporting() || self.activity.is_syncing() || !self.flush())
+            && (self.exporting()
+                || self.activity.is_syncing()
+                || self.flush_by(Instant::now() + super::exit::DEADLINE) != Flushed::Saved)
         {
             refuse_close(ctx);
             self.close_confirm = true;
@@ -1172,6 +1175,9 @@ impl Editor {
                     "Wait for the export to finish before closing."
                 } else if self.activity.is_syncing() {
                     "Wait for Sync Settings to finish before closing."
+                } else if self.autosave.busy() {
+                    "Edits are still being saved: the catalog is not answering. Wait, or \
+                     close without saving."
                 } else {
                     "Edits could not be saved. Retry or save a preset before closing."
                 });

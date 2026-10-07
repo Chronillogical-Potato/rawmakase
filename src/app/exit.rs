@@ -1,11 +1,15 @@
 //! Quitting, however it happens: the steps of docs/shutdown.md's exit sequence.
-use super::{Editor, task};
-use std::{sync::atomic::Ordering, time::Duration};
+use super::{Editor, task, workflow::Flushed};
+use std::{
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
+};
 
-/// How long quitting waits for the stopped workers. The preview renderer can wait
-/// up to 10 s for one GPU submission, but a quit that hangs is worse than a
-/// render cut off; the loaders and exports write through temporary files.
-const DEADLINE: Duration = Duration::from_secs(3);
+/// How long quitting waits for the edit to save and the stopped workers to end. The
+/// preview renderer can wait up to 10 s for one GPU submission, but a quit that
+/// hangs is worse than a render cut off; the loaders and exports write through
+/// temporary files.
+pub(super) const DEADLINE: Duration = Duration::from_secs(3);
 
 impl Editor {
     /// Quit on macOS closes the window without a close request, so the close
@@ -14,12 +18,26 @@ impl Editor {
     /// nothing to do. Then the workers that write or hold the GPU are stopped and
     /// waited for, before eframe drops the device.
     pub(super) fn exit(&mut self) -> task::Waited {
-        // Nothing is left to report a failure to: the edit stays as autosave last
-        // saved it.
-        let _ = self.flush();
-        self.remember_place(super::workspace::LayoutEdit::Settled);
+        self.exit_within(DEADLINE)
+    }
+    /// The exit sequence, with `deadline` for all of it. The workers wind down while
+    /// the edit saves.
+    pub(super) fn exit_within(&mut self, deadline: Duration) -> task::Waited {
+        let until = Instant::now() + deadline;
         self.cancel_jobs();
-        task::wait_for(self.stop_workers(), DEADLINE)
+        let stopping = self.stop_workers();
+        // Nothing but the terminal is left to say so in: the edit stays as autosave
+        // last saved it.
+        match self.flush_by(until) {
+            Flushed::Saved => {}
+            Flushed::Failed => eprintln!("{}", self.status),
+            Flushed::Late => eprintln!(
+                "Edits not saved: the catalog did not answer within {} s",
+                deadline.as_secs_f32()
+            ),
+        }
+        self.remember_place(super::workspace::LayoutEdit::Settled);
+        task::wait_for(stopping, until.saturating_duration_since(Instant::now()))
     }
     /// Every job in progress stops at its next check.
     fn cancel_jobs(&mut self) {
