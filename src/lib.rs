@@ -18,6 +18,7 @@ pub mod camera_data;
 pub mod camera_profiles;
 pub mod cameras;
 pub mod catalog;
+pub mod catalog_session;
 pub mod color;
 pub mod comparison;
 pub mod decode;
