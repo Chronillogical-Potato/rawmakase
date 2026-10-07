@@ -45,6 +45,11 @@ fn literals(source: &str) -> Vec<(usize, usize, String)> {
                 continue;
             }
         }
+        // A character literal can be a quote: '"'.
+        if bytes[i] == b'\'' && bytes.get(i + 2) == Some(&b'\'') {
+            i += 3;
+            continue;
+        }
         if bytes[i] == b'"' {
             let start = i + 1;
             let mut end = start;
@@ -124,6 +129,8 @@ fn only_edit_rows_writes_a_photos_edit() {
                 .find("#[cfg(test)]\nmod ")
                 .map_or(&source[..], |at| &source[..at]);
             for statement in statements(production) {
+                // A statement read as empty means the scan lost its place.
+                assert!(!statement.is_empty(), "{name}: a statement read as empty");
                 if writes_an_edit(&statement) {
                     offenders.push(format!("{name}: {}", statement.trim()));
                 }
