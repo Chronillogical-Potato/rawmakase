@@ -36,8 +36,7 @@ impl Catalog {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )?;
                 Ok(PhotoRecord {
-                    // `edits` is below the catalog and keeps the bare integer.
-                    id: id.0,
+                    id,
                     edit: self.edit_record(id)?,
                     descriptive: self.descriptive(id)?,
                     keywords: self.keywords(id)?,

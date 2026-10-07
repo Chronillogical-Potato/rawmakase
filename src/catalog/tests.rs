@@ -130,7 +130,7 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     assert_eq!(photos[0].rating, 4);
     assert_eq!(photos[0].keywords, "City");
     assert_eq!(photos[1].copy_name, "B&W");
-    assert_eq!(cat.collection_members(50)?.len(), 2);
+    assert_eq!(cat.collection_members(CollectionId(50))?.len(), 2);
     let local = dir.path().join("local");
     std::fs::create_dir(&local)?;
     std::fs::write(local.join("image.ARW"), b"synthetic raw identity")?;

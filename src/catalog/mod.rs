@@ -26,7 +26,6 @@ mod descriptive;
 mod develop_history;
 mod edit_records;
 mod edits;
-mod ids;
 mod info;
 mod ingest;
 pub mod legacy_sidecar;
@@ -36,12 +35,12 @@ mod models;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
+pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
-pub use ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
@@ -269,7 +268,10 @@ impl Catalog {
         Ok(())
     }
     #[cfg(test)]
-    pub(crate) fn collection_members(&self, id: i64) -> Result<std::collections::HashSet<PhotoId>> {
+    pub(crate) fn collection_members(
+        &self,
+        id: CollectionId,
+    ) -> Result<std::collections::HashSet<PhotoId>> {
         Ok(self
             .db
             .prepare("SELECT photo FROM collection_photos WHERE collection=?")?

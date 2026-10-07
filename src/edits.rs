@@ -57,7 +57,7 @@ pub struct Resolved {
 /// file carries.
 #[derive(Clone, Debug)]
 pub struct PhotoRecord {
-    pub id: i64,
+    pub id: crate::ids::PhotoId,
     pub edit: EditRecord,
     pub descriptive: crate::metadata::Descriptive,
     pub keywords: Vec<crate::metadata::Keyword>,
