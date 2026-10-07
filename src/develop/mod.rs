@@ -49,8 +49,8 @@ pub use auto::{
     auto_white_balance_cancellable,
 };
 pub use black_white::{AutoMix, ColorSpread, Treatment, is_monochrome};
-pub use geometry::{Geometry, display_axes};
-pub use image_space::{ImageFrame, ViewMapping};
+pub use geometry::Geometry;
+pub use image_space::ViewMapping;
 pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{
     neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,

@@ -1404,9 +1404,9 @@ impl Editor {
                 // Stored as Camera Raw applies them, before the photo is turned for
                 // display; shown, as in Lightroom, along the displayed photo's axes.
                 let turns = metadata.as_ref().map_or(0, |m| {
-                    crate::develop::ImageFrame::for_metadata(m).turns
+                    crate::model::image_frame::ImageFrame::for_metadata(m).turns
                 });
-                let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
+                let axes = crate::model::transform::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
                 let mut shown = r.transform.displayed(axes);
                 let t = &mut shown;
                 setting_slider(ui, ParameterId::TransformVertical, &mut t.vertical, 0.);

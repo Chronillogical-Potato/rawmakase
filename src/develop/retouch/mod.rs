@@ -4,7 +4,7 @@
 //! later edit and export at full quality. The operations themselves are
 //! [`crate::model::retouch`]'s.
 //!
-//! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
+//! Positions are in image space (see [`crate::model::image_frame::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening. Sizes are
 //! fractions of the photo's long edge.
 mod heal;

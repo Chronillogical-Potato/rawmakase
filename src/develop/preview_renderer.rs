@@ -616,7 +616,7 @@ mod tests {
                 [0.5, 0.33, 0.25]
             };
         }
-        let frame = crate::develop::ImageFrame::new(&im);
+        let frame = crate::model::image_frame::ImageFrame::new(&im);
         let op = RedEyeOp {
             kind: Default::default(),
             center: frame.to_image(eye[0], eye[1]),

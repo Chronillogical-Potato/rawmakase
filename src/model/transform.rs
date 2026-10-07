@@ -85,6 +85,57 @@ impl Transform {
 /// Lightroom's limit on guides.
 pub const MAX_GUIDES: usize = 4;
 
+/// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
+/// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
+pub fn display_axes(turns: u8, flip_x: bool, flip_y: bool) -> [[f32; 2]; 2] {
+    let recorded = |x: f32, y: f32| {
+        let x = if flip_x { 1. - x } else { x };
+        let y = if flip_y { 1. - y } else { y };
+        super::image_frame::turn(turns, x, y)
+    };
+    let [ox, oy] = recorded(0., 0.);
+    let [xx, xy] = recorded(1., 0.);
+    let [yx, yy] = recorded(0., 1.);
+    [[xx - ox, yx - ox], [xy - oy, yy - oy]]
+}
+/// The lens settings an analysis is made through, as they render: when any of them
+/// changes, the corrections analysed before no longer fit the photo. A setting a
+/// switched-off panel or an older process version leaves unrendered changes nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LensInputs {
+    builtin: bool,
+    profile: bool,
+    profile_choice: crate::lens::choice::LensProfileChoice,
+    distortion: f32,
+    manual_distortion: f32,
+}
+impl LensInputs {
+    pub fn of(r: &super::recipe::Recipe) -> Self {
+        // Lens corrections render from process version 4.
+        if r.engine < 4 {
+            return Self {
+                builtin: false,
+                profile: false,
+                profile_choice: Default::default(),
+                distortion: 1.,
+                manual_distortion: 0.,
+            };
+        }
+        let shown = r.as_rendered();
+        Self {
+            builtin: shown.lens_builtin,
+            profile: shown.lens_profile,
+            profile_choice: if shown.lens_profile {
+                shown.lens_profile_choice.rendering()
+            } else {
+                Default::default()
+            },
+            distortion: shown.lens_distortion,
+            manual_distortion: shown.lens_manual_distortion,
+        }
+    }
+}
+
 /// Lightroom's Upright modes, in Adobe's `crs:PerspectiveUpright` order.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

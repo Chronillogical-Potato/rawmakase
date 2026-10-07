@@ -378,10 +378,9 @@ impl Editor {
     /// The Remove panel's drawer below the tool strip.
     pub(super) fn retouch_panel(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
-        let long = self
-            .document
-            .full()
-            .map_or(1000., |im| crate::develop::ImageFrame::new(im).long_edge());
+        let long = self.document.full().map_or(1000., |im| {
+            crate::model::image_frame::ImageFrame::new(im).long_edge()
+        });
         let selected = self
             .view
             .retouch

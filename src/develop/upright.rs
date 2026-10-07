@@ -5,44 +5,6 @@ use super::{Geometry, image_space::LensMap};
 use crate::camera_data::CameraImage;
 use crate::model::recipe::Recipe;
 
-/// The lens settings an analysis is made through, as they render: when any of them
-/// changes, the corrections analysed before no longer fit the photo. A setting a
-/// switched-off panel or an older process version leaves unrendered changes nothing.
-#[derive(Clone, Debug, PartialEq)]
-pub struct LensInputs {
-    builtin: bool,
-    profile: bool,
-    profile_choice: crate::lens::choice::LensProfileChoice,
-    distortion: f32,
-    manual_distortion: f32,
-}
-impl LensInputs {
-    pub fn of(r: &Recipe) -> Self {
-        // Lens corrections render from process version 4.
-        if r.engine < 4 {
-            return Self {
-                builtin: false,
-                profile: false,
-                profile_choice: Default::default(),
-                distortion: 1.,
-                manual_distortion: 0.,
-            };
-        }
-        let shown = r.as_rendered();
-        Self {
-            builtin: shown.lens_builtin,
-            profile: shown.lens_profile,
-            profile_choice: if shown.lens_profile {
-                shown.lens_profile_choice.rendering()
-            } else {
-                Default::default()
-            },
-            distortion: shown.lens_distortion,
-            manual_distortion: shown.lens_manual_distortion,
-        }
-    }
-}
-
 /// Long edge of the image the lines are found in.
 const ANALYSIS_EDGE: u32 = 1024;
 
@@ -675,7 +637,7 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     let (image, w, h) = analysis_image(im, r);
     let f = focal(&im.metadata);
     let found = vanishing_points(&segments(&image, w, h), f);
-    let turns = (super::ImageFrame::new(im).turns + r.rotation) % 4;
+    let turns = (crate::model::image_frame::ImageFrame::new(im).turns + r.rotation) % 4;
     let shown = Displayed::new(w as f32, h as f32, turns, r.flip_x, r.flip_y);
     let rotations = rotations(&found);
     let mut out = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
@@ -762,7 +724,7 @@ impl Displayed {
         let recorded = |x: f32, y: f32| {
             let x = if flip_x { 1. - x } else { x };
             let y = if flip_y { 1. - y } else { y };
-            super::image_space::turn(turns, x, y)
+            crate::model::image_frame::turn(turns, x, y)
         };
         let [ox, oy] = recorded(0., 0.);
         let [xx, xy] = recorded(1., 0.);

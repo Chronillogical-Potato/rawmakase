@@ -1,7 +1,7 @@
 //! Lightroom's Masking panel: masks built from brush, gradient and range components,
 //! each with its own local adjustment.
 //!
-//! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
+//! Positions are in image space (see [`crate::model::image_frame::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening, so masks
 //! stay on the photo when those change. Sizes are fractions of the long edge. The masks
 //! themselves are [`crate::model::masks`]'s; this module renders their weights.

@@ -1,19 +1,6 @@
 use crate::model::recipe::Recipe;
 use crate::{camera_data::CameraImage, model::transform::Transform};
 
-/// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
-/// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
-pub fn display_axes(turns: u8, flip_x: bool, flip_y: bool) -> [[f32; 2]; 2] {
-    let recorded = |x: f32, y: f32| {
-        let x = if flip_x { 1. - x } else { x };
-        let y = if flip_y { 1. - y } else { y };
-        super::image_space::turn(turns, x, y)
-    };
-    let [ox, oy] = recorded(0., 0.);
-    let [xx, xy] = recorded(1., 0.);
-    let [yx, yy] = recorded(0., 1.);
-    [[xx - ox, yx - ox], [xy - oy, yy - oy]]
-}
 impl Transform {
     /// Homography from output to source coordinates, both centred, y down, in units
     /// of the long edge. The forward (source-to-output) matrix was fitted to Camera Raw
@@ -162,7 +149,7 @@ pub struct Geometry {
 impl Geometry {
     pub fn new(im: &CameraImage, r: &Recipe, max_edge: u32) -> Self {
         Self::with_frame(
-            super::ImageFrame::new(im),
+            crate::model::image_frame::ImageFrame::new(im),
             [im.width, im.height],
             r,
             max_edge,
@@ -172,14 +159,19 @@ impl Geometry {
     /// the photo is decoded.
     pub fn for_metadata(m: &crate::camera_data::Metadata, r: &Recipe) -> Self {
         Self::with_frame(
-            super::ImageFrame::for_metadata(m),
+            crate::model::image_frame::ImageFrame::for_metadata(m),
             [m.width.max(1), m.height.max(1)],
             r,
             0,
         )
     }
     /// For a photo decoded at `size` pixels with `frame`.
-    fn with_frame(frame: super::ImageFrame, size: [u32; 2], r: &Recipe, max_edge: u32) -> Self {
+    fn with_frame(
+        frame: crate::model::image_frame::ImageFrame,
+        size: [u32; 2],
+        r: &Recipe,
+        max_edge: u32,
+    ) -> Self {
         let turns = (frame.turns + r.rotation) % 4;
         let [w, h] = frame.size();
         let (ow, oh) = if r.rotation % 2 == 1 { (h, w) } else { (w, h) };
@@ -400,7 +392,7 @@ impl Geometry {
             }
             None => (x, y),
         };
-        let [mut x, mut y] = super::image_space::turn((4 - self.turns) % 4, x, y);
+        let [mut x, mut y] = crate::model::image_frame::turn((4 - self.turns) % 4, x, y);
         if self.flip_x {
             x = 1. - x;
         }
@@ -441,6 +433,7 @@ impl super::crop_constraint::Covers for Geometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::transform::display_axes;
 
     #[test]
     fn sliders_show_along_the_displayed_axes_as_in_lightroom() {

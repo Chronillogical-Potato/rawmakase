@@ -4,7 +4,7 @@
 //! parameters beside the recipe, like spot removal, and render on the linear camera
 //! image before Heal and Clone, so every later edit and export sees them.
 //!
-//! Positions are in image space (see [`crate::develop::ImageFrame`]); sizes are
+//! Positions are in image space (see [`crate::model::image_frame::ImageFrame`]); sizes are
 //! fractions of the photo's long edge. The ellipse is Lightroom's: semi-axes along the
 //! image's x and y and their correlation (`crs:RedEyeInfo`'s `width`, `height` and
 //! `alpha`), not a rotation angle. The corrections themselves are

@@ -457,10 +457,10 @@ pub struct Source<'a> {
     pub metadata: &'a Metadata,
 }
 
-/// How a photo is turned and flipped for display (see [`super::display_axes`]).
+/// How a photo is turned and flipped for display (see [`crate::model::transform::display_axes`]).
 fn display_axes(r: &Recipe, m: &Metadata) -> [[f32; 2]; 2] {
-    let turns = super::ImageFrame::for_metadata(m).turns;
-    super::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y)
+    let turns = crate::model::image_frame::ImageFrame::for_metadata(m).turns;
+    crate::model::transform::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y)
 }
 
 /// The source's settings in `selection` applied over `to`, with everything that depends
@@ -539,7 +539,10 @@ pub fn transfer(
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
     let exact = selection.contains(SettingGroup::UprightTransforms);
-    if !exact && super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
+    if !exact
+        && crate::model::transform::LensInputs::of(&recipe)
+            != crate::model::transform::LensInputs::of(to)
+    {
         // Guided solves again from this photo's guides.
         let guided = recipe.upright.mode == crate::model::transform::UprightMode::Guided;
         recipe.upright.analyse_again();

@@ -1,8 +1,8 @@
 //! Lightroom's Guided Upright: two to four guides drawn along edges that should be
 //! vertical or horizontal solve to a turn of the camera, framed as Upright frames its
 //! other modes (docs/transform.md#guided-upright).
-use super::ImageFrame;
 use super::upright::{self, Displayed, IDENTITY, Mat, Segment, apply, cross, dot, unit};
+use crate::model::image_frame::ImageFrame;
 use crate::model::recipe::Recipe;
 use crate::model::transform::{UprightGuide, UprightMode};
 use crate::{camera_data::Metadata, model::transform::MAX_GUIDES};

@@ -79,7 +79,7 @@ fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
         height: 4000,
         ..Default::default()
     };
-    let frame = crate::develop::ImageFrame::for_metadata(&m);
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&m);
     let (mut photos, mut spots, mut masks) = (0, 0, 0);
     let mut skipped = std::collections::BTreeMap::<String, usize>::new();
     for text in &texts {

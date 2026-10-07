@@ -81,7 +81,7 @@ pub(crate) fn key(strokes: &[BrushStroke]) -> u64 {
 /// Camera colours along the strokes for Auto Mask, sampled from the photo.
 pub(crate) struct Guide<'a> {
     pub(crate) image: &'a CameraImage,
-    pub(crate) frame: crate::develop::ImageFrame,
+    pub(crate) frame: crate::model::image_frame::ImageFrame,
 }
 impl Guide<'_> {
     /// Log camera RGB at image-space position `p`.

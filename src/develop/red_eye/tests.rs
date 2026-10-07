@@ -3,7 +3,7 @@ use super::*;
 use crate::model::red_eye::{
     DEFAULT_CATCHLIGHT, DEFAULT_DARKEN, DEFAULT_PUPIL_SIZE, RedEyeList, RedEyeOp,
 };
-use crate::{camera_data::CameraImage, develop::ImageFrame};
+use crate::{camera_data::CameraImage, model::image_frame::ImageFrame};
 
 const SKIN: [f32; 3] = [0.55, 0.35, 0.25];
 const RED_PUPIL: [f32; 3] = [0.6, 0.03, 0.03];

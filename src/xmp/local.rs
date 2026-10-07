@@ -8,7 +8,7 @@
 //! source is the absolute position of its centre (`SourceX`, `OffsetY`), and a brushed
 //! spot's source is where its first dab copies from. Gradient, radial and brush masks
 //! are assumed to use the same frame and units; their shape details are not verified.
-use crate::develop::ImageFrame;
+use crate::model::image_frame::ImageFrame;
 use crate::model::masks::{
     BrushStroke, LocalAdjust, MAX_GROUPS, MaskComponent, MaskGroup, MaskOp, MaskShape,
 };

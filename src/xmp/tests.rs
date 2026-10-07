@@ -607,7 +607,7 @@ fn lightroom_catalog_tables_parse_as_data() -> Result<()> {
     let node = Node::from_lua(text)?;
     let mut local = std::collections::BTreeMap::new();
     local.insert("RetouchAreas".to_string(), node);
-    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&Metadata {
         width: 300,
         height: 200,
         ..Default::default()
@@ -1110,7 +1110,7 @@ fn red_eye_catalog_tables_parse_as_data() -> Result<()> {
         pupilDarkenAmount = 0.5, pupilSize = 0.5, showPetEyeHighlight = 1 } }"#;
     let mut local = std::collections::BTreeMap::new();
     local.insert("RedEyeInfo".to_string(), Node::from_lua(text)?);
-    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&Metadata {
         width: 6000,
         height: 4000,
         ..Default::default()

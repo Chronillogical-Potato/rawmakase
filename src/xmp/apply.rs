@@ -224,7 +224,7 @@ impl Preset {
     /// longer fit the photo: they are dropped for a new analysis, unless these settings
     /// bring Lightroom's own corrections, made with them.
     fn keep_upright_fitting(&self, base: &Recipe, r: &mut Recipe) {
-        use crate::develop::upright::LensInputs;
+        use crate::model::transform::LensInputs;
         // Whether the Upright stage installs corrections of its own: tried on a copy,
         // since a lenient apply rolls back a stage that fails.
         let mut trial = r.clone();
@@ -1214,7 +1214,10 @@ impl Preset {
         if self.local.is_empty() {
             return Vec::new();
         }
-        let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
+        let edits = super::local::convert(
+            &self.local,
+            crate::model::image_frame::ImageFrame::for_metadata(m),
+        );
         if let Some(retouch) = edits.retouch {
             // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
             r.retouch_model = crate::model::operators::RetouchModel::Measured;

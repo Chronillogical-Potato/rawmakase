@@ -1,5 +1,6 @@
 //! What an edit is, as values the renderer, the catalog and file formats share.
 pub mod effects;
+pub mod image_frame;
 pub mod masks;
 pub mod operators;
 pub mod panels;

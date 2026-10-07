@@ -397,8 +397,8 @@ fn transform_keeps_what_it_shows_on_photos_turned_differently() {
         ..Default::default()
     };
     let turned = |r: &Recipe| {
-        crate::develop::display_axes(
-            (crate::develop::ImageFrame::for_metadata(&m).turns + r.rotation) % 4,
+        crate::model::transform::display_axes(
+            (crate::model::image_frame::ImageFrame::for_metadata(&m).turns + r.rotation) % 4,
             r.flip_x,
             r.flip_y,
         )

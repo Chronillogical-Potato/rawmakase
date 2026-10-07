@@ -897,7 +897,7 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
             r.upright.mode = current.upright.mode;
         }
     }
-    use crate::develop::upright::LensInputs;
+    use crate::model::transform::LensInputs;
     if LensInputs::of(r) != LensInputs::of(current) {
         r.upright.analyse_again();
     }
