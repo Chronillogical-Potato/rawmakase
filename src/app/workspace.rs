@@ -88,11 +88,13 @@ impl Editor {
             // the photo and the adjustments only. Each part may open another
             // photo; what follows edits that one.
             self.follow_edit_frame(&mut frame);
+            self.bottom_edge(ui);
             if self.panel_shown(WorkspacePanel::Filmstrip) {
                 self.status_bar(ui);
                 self.filmstrip(ui);
                 self.follow_edit_frame(&mut frame);
             }
+            self.side_edges(ui);
             if self.panel_shown(WorkspacePanel::Left) {
                 self.develop_left_panel(ui);
                 self.follow_edit_frame(&mut frame);
@@ -549,6 +551,7 @@ impl Editor {
                 None => {}
             }
         }
+        self.bottom_edge(ui);
         let filmstrip = self.panel_shown(WorkspacePanel::Filmstrip);
         if filmstrip {
             self.library_status_bar(ui);
@@ -568,6 +571,7 @@ impl Editor {
         if develops != self.loupe_tried {
             self.loupe_tried = None;
         }
+        self.side_edges(ui);
         if self.panel_shown(WorkspacePanel::Left) {
             action = action.then(self.library_left_panel(ui, develops));
         }
