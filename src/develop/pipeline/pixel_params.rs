@@ -290,7 +290,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.table("LOOK", t.look);
     p.table("ENH", t.enhanced);
     let curve = match t.enhanced_curve {
-        Some(curve) => p.push(curve.iter().copied()),
+        Some(curve) => p.push(curve.values().iter().copied()),
         None => -1.,
     };
     p.set("ENH_CURVE", &[curve]);

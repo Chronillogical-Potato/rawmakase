@@ -224,8 +224,16 @@ impl NaturalSpline {
     }
 }
 
+/// A curve sampled at 4097 points over 0..=1, read with linear interpolation: how
+/// the pipeline, the GPU port, the curve editor and camera profile looks all
+/// evaluate a tone curve. It serializes as its 4097 samples.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CurveLut([f32; 4097]);
 impl CurveLut {
+    /// The table whose sample `i` is `f(i)`.
+    pub fn from_fn(f: impl FnMut(usize) -> f32) -> Self {
+        Self(std::array::from_fn(f))
+    }
     pub fn new(curve: &ToneCurve) -> Self {
         if curve.natural && curve.smooth {
             let spline = NaturalSpline::new(&curve.points);
@@ -234,7 +242,7 @@ impl CurveLut {
             Self(std::array::from_fn(|i| curve.evaluate(i as f32 / 4096.)))
         }
     }
-    pub(crate) fn values(&self) -> &[f32; 4097] {
+    pub fn values(&self) -> &[f32; 4097] {
         &self.0
     }
     pub fn evaluate(&self, x: f32) -> f32 {
@@ -242,6 +250,20 @@ impl CurveLut {
         let i = (p as usize).min(4095);
         let t = p - i as f32;
         self.0[i] * (1. - t) + self.0[i + 1] * t
+    }
+}
+
+impl Serialize for CurveLut {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.as_slice().serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for CurveLut {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let samples = Vec::<f32>::deserialize(deserializer)?;
+        <[f32; 4097]>::try_from(samples.as_slice())
+            .map(Self)
+            .map_err(|_| serde::de::Error::invalid_length(samples.len(), &"4097 curve samples"))
     }
 }
 
@@ -281,6 +303,15 @@ pub(crate) fn refine_saturation(input: [f32; 3], curved: [f32; 3], amount: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_table_serializes_as_its_samples_and_reads_back_only_whole() {
+        let lut = CurveLut::from_fn(|i| i as f32 / 4096.);
+        let json = serde_json::to_string(&lut).unwrap();
+        let samples: Vec<f32> = serde_json::from_str(&json).unwrap();
+        assert_eq!(samples.as_slice(), lut.values().as_slice());
+        assert_eq!(serde_json::from_str::<CurveLut>(&json).unwrap(), lut);
+        assert!(serde_json::from_str::<CurveLut>("[0.0, 1.0]").is_err());
+    }
     #[test]
     fn natural_curve_matches_independent_cubic_reference() {
         let curve = ToneCurve {
