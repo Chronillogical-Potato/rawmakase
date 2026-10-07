@@ -6,6 +6,7 @@ use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
 use crate::camera_data::Demosaic;
+use crate::catalog::CatalogLocation;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 
@@ -154,7 +155,10 @@ impl Editor {
             decode_cache: files(&decode_cache_dir(), &["decoded"]),
             previews: std::fs::metadata(crate::catalog::preview_cache::PreviewCache::path())
                 .map_or(0, |m| m.len()),
-            catalog: catalog.and_then(|c| std::fs::metadata(&c.path).ok().map(|m| m.len())),
+            catalog: catalog.and_then(|c| {
+                let CatalogLocation::File(path) = c.location();
+                std::fs::metadata(path).ok().map(|m| m.len())
+            }),
             folders: catalog.and_then(|c| c.folders().ok().map(|f| f.len())),
         };
         self.preferences.stale = self.activity.is_dialog();
@@ -374,11 +378,10 @@ impl Editor {
         let ctx = ui.ctx().clone();
         let usage = &self.preferences.usage;
         if let Some(library) = &self.library {
-            let path = library.session.catalog.path.clone();
+            let location = library.session.catalog.location().clone();
             group(ui, "Current catalog");
-            form_row(ui, "Name", |ui| {
-                value(ui, &path.file_stem().unwrap_or_default().to_string_lossy());
-            });
+            form_row(ui, "Name", |ui| value(ui, &location.name()));
+            let CatalogLocation::File(path) = location;
             form_row(ui, "Location", |ui| path_value(ui, &path));
             form_row(ui, "", |ui| reveal_button(ui, &path));
             form_row(ui, "Photos", |ui| {

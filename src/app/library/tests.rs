@@ -820,7 +820,7 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
 #[test]
 fn collections_panel_shows_imported_collections_and_filters_through_them() -> Result<()> {
     let (directory, library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
-    let path = library.session.catalog.path.clone();
+    let crate::catalog::CatalogLocation::File(path) = library.session.catalog.location().clone();
     let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     drop(library);
     {

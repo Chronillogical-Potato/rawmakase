@@ -8,7 +8,7 @@
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
 use crate::app::worker::{Event, Latest};
-use crate::catalog::PhotoId;
+use crate::catalog::{CatalogLocation, PhotoId};
 #[cfg(test)]
 use crate::model::recipe::Recipe;
 use eframe::egui::{self, Vec2};
@@ -344,7 +344,11 @@ impl Editor {
     fn session_path(&self) -> Option<PathBuf> {
         self.library
             .as_ref()
-            .map(|l| l.session.catalog.path.clone())
+            .map(|l| {
+                // session.json names a file catalog by its path, as before.
+                let CatalogLocation::File(path) = l.session.catalog.location();
+                path.clone()
+            })
             .or_else(|| self.document.path.clone())
     }
 }

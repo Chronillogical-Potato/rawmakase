@@ -1,7 +1,11 @@
 use super::worker::{LoadJob, RenderJob};
 use super::{Editor, state::Picture};
 use crate::model::recipe::Recipe;
-use crate::{app::Module, catalog::PhotoId, develop::Geometry};
+use crate::{
+    app::Module,
+    catalog::{CatalogLocation, PhotoId},
+    develop::Geometry,
+};
 use eframe::egui::{self, Vec2};
 use std::{path::PathBuf, time::Instant};
 
@@ -159,7 +163,7 @@ impl Editor {
                     &self.document.export,
                     crate::catalog::HistoryUpdate::of(&history),
                 )
-                .map(|()| l.session.catalog.path.clone());
+                .map(|()| l.session.catalog.location().clone());
             match saved {
                 Ok(p) => {
                     self.saved_to(&p);
@@ -206,7 +210,7 @@ impl Editor {
             return None;
         };
         Some(super::autosave::Job {
-            catalog: l.session.catalog.path.clone(),
+            catalog: l.session.catalog.location().clone(),
             photo,
             raw,
             recipe: self.document.edit.recipe().clone(),
@@ -279,7 +283,8 @@ impl Editor {
             Err(e) => self.status = format!("Edits not saved: {e}"),
         }
     }
-    fn saved_to(&mut self, path: &std::path::Path) {
+    fn saved_to(&mut self, location: &CatalogLocation) {
+        let CatalogLocation::File(path) = location;
         self.status = format!(
             "Saved {}",
             path.file_name().unwrap_or_default().to_string_lossy()

@@ -4,7 +4,7 @@ use super::folder_locations::{FolderQuestion, folder_added, reopened};
 use super::widgets::confirm_modal;
 use super::worker::Event;
 use crate::app::Module;
-use crate::catalog::PhotoId;
+use crate::catalog::{CatalogLocation, PhotoId};
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -28,9 +28,12 @@ impl Editor {
             tx,
             ctx.clone(),
             move |tx| {
-                let result = crate::catalog_session::CatalogSession::open(&path)
-                    .map(|opened| Box::new(crate::app::library::Library::new(opened, ctx.clone())))
-                    .map_err(|e| format!("{e:#}"));
+                let result =
+                    crate::catalog_session::CatalogSession::open(&CatalogLocation::File(path))
+                        .map(|opened| {
+                            Box::new(crate::app::library::Library::new(opened, ctx.clone()))
+                        })
+                        .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(Event::CatalogReady(result));
             },
             |tx, error| {
@@ -50,7 +53,7 @@ impl Editor {
         let current = self
             .library
             .as_ref()
-            .map(|l| l.session.catalog.path.clone());
+            .map(|l| l.session.catalog.location().clone());
         super::task::spawn(
             tx,
             ctx.clone(),
@@ -59,7 +62,7 @@ impl Editor {
                 // folders it skipped.
                 let mut report = crate::catalog::SidecarReport::default();
                 let mut conflicts = Vec::new();
-                let result = (|| -> anyhow::Result<Option<PathBuf>> {
+                let result = (|| -> anyhow::Result<Option<CatalogLocation>> {
                     Ok(match kind {
                         CatalogDialog::Create => {
                             let Some(path) = catalog_file_dialog()
@@ -69,9 +72,11 @@ impl Editor {
                                 return Ok(None);
                             };
                             crate::catalog::Catalog::create(&path)?;
-                            Some(path)
+                            Some(CatalogLocation::File(path))
                         }
-                        CatalogDialog::Open => catalog_file_dialog().pick_file(),
+                        CatalogDialog::Open => {
+                            catalog_file_dialog().pick_file().map(CatalogLocation::File)
+                        }
                         CatalogDialog::ImportLightroom => {
                             let Some(source) = rfd::FileDialog::new()
                                 .add_filter("Lightroom catalog", &["lrcat"])
@@ -93,10 +98,9 @@ impl Editor {
                                 source.file_name().unwrap_or_default().to_string_lossy()
                             )));
                             ctx.request_repaint();
-                            Some(crate::catalog::lightroom::import_lightroom(
-                                &source,
-                                &destination,
-                            )?)
+                            Some(CatalogLocation::File(
+                                crate::catalog::lightroom::import_lightroom(&source, &destination)?,
+                            ))
                         }
                         CatalogDialog::Folder(action) => {
                             crate::platform::network::prepare_filesystem_bridge();
@@ -155,16 +159,16 @@ impl Editor {
                         }
                     })
                 })();
-                if let Ok(Some(path)) = &result {
+                if let Ok(Some(location)) = &result {
                     let _ = tx.send(Event::CatalogWorking(format!(
                         "Opening {}…",
-                        path.file_stem().unwrap_or_default().to_string_lossy()
+                        location.name()
                     )));
                     ctx.request_repaint();
                 }
                 let event = match result {
-                    Ok(Some(path)) => reopened(
-                        &path,
+                    Ok(Some(location)) => reopened(
+                        &location,
                         matches!(
                             kind,
                             CatalogDialog::Folder(
@@ -203,7 +207,7 @@ impl Editor {
         let Some(current) = self
             .library
             .as_ref()
-            .map(|l| l.session.catalog.path.clone())
+            .map(|l| l.session.catalog.location().clone())
         else {
             if self.activity.is_dialog() {
                 // The catalog is still opening; add the photo once it is ready.

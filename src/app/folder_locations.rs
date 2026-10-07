@@ -8,7 +8,8 @@ use super::theme;
 use super::widgets::{confirm_modal, form_row, pretty_path};
 use super::worker::Event;
 use crate::catalog::{
-    Ambiguity, Catalog, Choice, Conflict, FolderId, Override, Overrides, RootId, RootLocations,
+    Ambiguity, Catalog, CatalogLocation, Choice, Conflict, FolderId, Override, Overrides, RootId,
+    RootLocations,
 };
 use eframe::egui;
 use std::collections::HashMap;
@@ -19,7 +20,7 @@ use std::sync::{Arc, Mutex};
 pub(crate) enum FolderQuestion {
     /// A root moves while folders below it have their own locations here.
     Overrides {
-        catalog: PathBuf,
+        catalog: CatalogLocation,
         root: RootId,
         path: PathBuf,
         overrides: Vec<Override>,
@@ -27,7 +28,7 @@ pub(crate) enum FolderQuestion {
     /// Folders found on disk that equally close locations claim; asked one
     /// at a time, then added with every choice.
     Ambiguous {
-        catalog: PathBuf,
+        catalog: CatalogLocation,
         folder: PathBuf,
         open: Vec<Ambiguity>,
         chosen: Vec<Choice>,
@@ -267,7 +268,7 @@ impl Editor {
         let Some(catalog) = self
             .library
             .as_ref()
-            .map(|l| l.session.catalog.path.clone())
+            .map(|l| l.session.catalog.location().clone())
         else {
             return;
         };
@@ -408,7 +409,7 @@ impl Editor {
         }
     }
     /// Carries out a settled folder change and opens the catalog again.
-    fn folder_job(&mut self, catalog: PathBuf, job: FolderJob, ctx: &egui::Context) {
+    fn folder_job(&mut self, catalog: CatalogLocation, job: FolderJob, ctx: &egui::Context) {
         if !self.activity.begin_folder_change() {
             return;
         }
@@ -436,7 +437,7 @@ impl Editor {
 /// Makes a settled folder change in the catalog at `catalog`: whether it relinked a
 /// root, and what adding a folder found.
 fn change_folders(
-    catalog: &Path,
+    catalog: &CatalogLocation,
     job: FolderJob,
 ) -> anyhow::Result<(bool, crate::catalog::SidecarReport, Vec<Conflict>)> {
     let mut cat = Catalog::open(catalog)?;
@@ -521,17 +522,17 @@ fn entry(
     ui.label(egui::RichText::new(note).size(11.).color(palette.gray(125)));
     clicked
 }
-/// The catalog at `path` opened again after a folder change, with what the
-/// change found.
+/// The catalog at `location` opened again after a folder change, with what
+/// the change found.
 pub(super) fn reopened(
-    path: &Path,
+    location: &CatalogLocation,
     relinked: bool,
     report: &crate::catalog::SidecarReport,
     conflicts: &[Conflict],
     ctx: &egui::Context,
 ) -> Event {
     Event::CatalogReady(
-        crate::catalog_session::CatalogSession::open(path)
+        crate::catalog_session::CatalogSession::open(location)
             .map(|opened| crate::app::library::Library::new(opened, ctx.clone()))
             .map(|mut l| {
                 if relinked {

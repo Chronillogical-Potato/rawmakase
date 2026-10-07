@@ -279,16 +279,7 @@ impl Editor {
                     let catalog = self
                         .library
                         .as_ref()
-                        .map(|library| {
-                            library
-                                .session
-                                .catalog
-                                .path
-                                .file_stem()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string()
-                        })
+                        .map(|library| library.session.catalog.location().name())
                         .unwrap_or_else(|| "No catalog".into());
                     // Every element is painted in a 28 px slot so all centers line up.
                     let name = ui.painter().layout_no_wrap(

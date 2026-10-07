@@ -2341,7 +2341,7 @@ fn quick_collection_toggles_shows_clears_and_undoes() -> anyhow::Result<()> {
     assert_eq!(e.library.as_ref().unwrap().shown(), ids[..2]);
     // Kept in the catalog.
     let reopened =
-        crate::catalog::Catalog::open(&e.library.as_ref().unwrap().session.catalog.path)?;
+        crate::catalog::Catalog::open(e.library.as_ref().unwrap().session.catalog.location())?;
     let quick = reopened
         .collections()?
         .into_iter()
