@@ -1,6 +1,6 @@
 //! Stateful desktop preview backend. Export remains on the reference CPU path.
 use super::{
-    Geometry, Recipe, Rendered, gpu, pyramid::Pyramid, quality, quality::Output,
+    Geometry, Recipe, Rendered, ValidRecipe, gpu, pyramid::Pyramid, quality, quality::Output,
     stage_cache::StageCache,
 };
 use crate::raw::CameraImage;
@@ -103,16 +103,17 @@ impl PreviewRenderer {
             !cancel.load(std::sync::atomic::Ordering::Relaxed),
             "Render superseded"
         );
+        let recipe = &recipe.checked()?;
         if recipe.engine < 3 {
             return match region {
-                Some(region) => super::render_region_legacy(image, &recipe.checked()?, region),
+                Some(region) => super::render_region_legacy(image, recipe, region),
                 // Older engines develop without highlight recovery, so their Fit
                 // uses a reduced copy of the camera image instead of the pyramid.
                 None if max_edge > 0 && image.width.max(image.height) > max_edge * 5 / 2 => {
                     let shown = super::preview(image, max_edge * 2);
-                    super::render_legacy(&shown, &recipe.checked()?, max_edge)
+                    super::render_legacy(&shown, recipe, max_edge)
                 }
-                None => super::render_legacy(image, &recipe.checked()?, max_edge),
+                None => super::render_legacy(image, recipe, max_edge),
             }
             .map(Output::Pixels);
         }
@@ -124,7 +125,7 @@ impl PreviewRenderer {
         }
         quality::render_preview(
             image,
-            &recipe.checked()?,
+            recipe,
             max_edge,
             region,
             cancel,
@@ -144,7 +145,7 @@ impl PreviewRenderer {
     fn render_fit(
         &mut self,
         image: &CameraImage,
-        recipe: &Recipe,
+        recipe: &ValidRecipe,
         max_edge: u32,
         cancel: &AtomicBool,
         display: Option<&gpu::Display>,
@@ -190,6 +191,7 @@ impl PreviewRenderer {
         if recipe.engine < 3 {
             return Ok(None);
         }
+        let recipe = &recipe.checked()?;
         let full = Geometry::new(image, recipe, 0);
         let [x, y, w, h] = region;
         anyhow::ensure!(
