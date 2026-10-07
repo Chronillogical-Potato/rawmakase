@@ -17,7 +17,7 @@ impl Editor {
             return;
         }
         if let Some(im) = self.document.full().cloned() {
-            let mut r = self.document.edit.recipe.clone();
+            let mut r = self.document.edit.recipe().clone();
             r.crop = [0., 0., 1., 1.];
             let g = Geometry::new(&im, &r, 0);
             let portrait = g.oriented_height > g.oriented_width;
@@ -29,7 +29,7 @@ impl Editor {
                 self.view.aspect
             };
             let ratio = aspect * g.oriented_height / g.oriented_width;
-            let c = &mut self.document.edit.recipe.crop;
+            let c = &mut self.document.edit.recipe_mut().crop;
             let cx = (c[0] + c[2]) / 2.;
             let cy = (c[1] + c[3]) / 2.;
             let mut w = c[2] - c[0];
@@ -55,12 +55,12 @@ impl Editor {
             return;
         };
         self.view.aspect_read = true;
-        let c = self.document.edit.recipe.crop;
+        let c = self.document.edit.recipe().crop;
         if c == [0., 0., 1., 1.] {
             self.view.aspect = -1.;
             return;
         }
-        let mut r = self.document.edit.recipe.clone();
+        let mut r = self.document.edit.recipe().clone();
         r.crop = [0., 0., 1., 1.];
         let g = Geometry::new(&im, &r, 0);
         let photo = g.oriented_width / g.oriented_height;
@@ -481,12 +481,12 @@ impl Editor {
         {
             let u = (pos.x - rect.left()) / rect.width();
             let v = (pos.y - rect.top()) / rect.height();
-            self.document.edit.recipe.wb =
-                develop::neutral_pick(&im, &self.document.edit.recipe, u, v);
-            self.document.edit.recipe.auto_white_balance = None;
+            self.document.edit.recipe_mut().wb =
+                develop::neutral_pick(&im, self.document.edit.recipe(), u, v);
+            self.document.edit.recipe_mut().auto_white_balance = None;
             self.document
                 .edit
-                .recipe
+                .recipe_mut()
                 .sync_white_balance_controls(&im.metadata);
             self.view.tool = Tool::None;
         }
@@ -526,7 +526,7 @@ impl Editor {
                 .zip(metadata)
             {
                 Some((rgb, m)) => {
-                    match develop::pick_fringe(&mut self.document.edit.recipe, &m, rgb) {
+                    match develop::pick_fringe(self.document.edit.recipe_mut(), &m, rgb) {
                         Some(_) => self.view.tool = Tool::None,
                         None => {
                             self.status =
@@ -539,7 +539,7 @@ impl Editor {
             }
         }
         if self.view.is(Tool::Crop) && !self.view.zoom.on && self.document.full().is_some() {
-            let c = self.document.edit.recipe.crop;
+            let c = self.document.edit.recipe().crop;
             let cr = Rect::from_min_max(
                 Pos2::new(
                     rect.left() + c[0] * rect.width(),
@@ -647,7 +647,7 @@ impl Editor {
                 c[1] = c[1].clamp(0., start[3] - 0.01);
                 c[2] = c[2].clamp(c[0] + 0.01, 1.);
                 c[3] = c[3].clamp(c[1] + 0.01, 1.);
-                self.document.edit.recipe.crop = c;
+                self.document.edit.recipe_mut().crop = c;
                 self.fit_aspect();
             }
             if response.drag_stopped() {
@@ -729,15 +729,18 @@ impl Editor {
         }
         if response.drag_stopped() || !response.dragged() {
             self.view.ruler = Ruler::Off;
-            let current = self.document.edit.recipe.straighten;
+            let current = self.document.edit.recipe().straighten;
             if let Some(angle) = super::crop_tool::ruler_angle(from, to, current)
                 && angle != current
             {
-                self.document.edit.recipe.straighten = angle;
-                self.document.edit.history.label(super::history::Step::new(
-                    "Straighten",
-                    format!("{angle:+.2}"),
-                ));
+                self.document.edit.recipe_mut().straighten = angle;
+                self.document
+                    .edit
+                    .history_mut()
+                    .label(super::history::Step::new(
+                        "Straighten",
+                        format!("{angle:+.2}"),
+                    ));
             }
         }
         true

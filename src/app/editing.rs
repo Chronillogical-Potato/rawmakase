@@ -65,7 +65,7 @@ impl Editor {
                 .iter()
                 .any(|e| matches!(e, egui::Event::PointerButton { .. }))
         });
-        let edit = if self.document.edit.recipe == *frame.edit.before() && !clicked {
+        let edit = if *self.document.edit.recipe() == *frame.edit.before() && !clicked {
             super::brush_scroll::Edit::Unchanged
         } else {
             super::brush_scroll::Edit::Changed
@@ -73,23 +73,23 @@ impl Editor {
         if self.view.wheel.ends_before(edit) {
             self.document
                 .edit
-                .history
+                .history_mut()
                 .finish_gesture(frame.edit.before());
         }
         if self.automation.has_turn()
             && !frame.command_adjust
-            && (self.document.edit.recipe != *frame.edit.before() || clicked)
+            && (*self.document.edit.recipe() != *frame.edit.before() || clicked)
         {
             self.automation.end_turn();
             self.document
                 .edit
-                .history
+                .history_mut()
                 .finish_gesture(frame.edit.before());
         }
         if let Some((name, value)) = step {
             self.document
                 .edit
-                .history
+                .history_mut()
                 .label(super::history::Step::new(name, value));
         }
         self.leave_compare_for_tools();
@@ -99,7 +99,7 @@ impl Editor {
         // The Guided tool goes with the mode, however it was left: a reset, an undo, a
         // preset, with the Transform panel open or not.
         if self.view.is(super::state::Tool::Guided)
-            && self.document.edit.recipe.upright.mode
+            && self.document.edit.recipe().upright.mode
                 != crate::model::transform::UprightMode::Guided
         {
             self.view.tool = super::state::Tool::None;
@@ -119,7 +119,7 @@ impl Editor {
         }
         // A conversion waiting for the photo, once it is decoded and nothing else
         // changed this frame (any edit drops it below).
-        if self.document.edit.recipe == *frame.edit.before() {
+        if *self.document.edit.recipe() == *frame.edit.before() {
             self.finish_pending_treatment();
         }
         // A wheel scroll sizing a spot is a gesture like a drag: one step once it pauses.
@@ -146,7 +146,7 @@ impl Editor {
             self.schedule();
         }
         if frame.export != (self.document.export.quality, self.document.export.max_edge) {
-            self.document.edit.save.mark_changed();
+            self.document.edit.save_state_mut().mark_changed();
         }
     }
 }
@@ -161,6 +161,23 @@ impl Editor {
         }
         self.end_stale_preset_amount();
         self.schedule();
+    }
+    /// Changes the settings outside an edit frame (a result computed off the UI
+    /// thread, say) as one History step, `step` or one named for what changed, with
+    /// what an edit frame does after a slider moves. A change of nothing is no step.
+    pub(super) fn change_edit<T>(
+        &mut self,
+        step: Option<super::history::Step>,
+        edit: impl FnOnce(&mut Recipe) -> T,
+    ) -> T {
+        let before = self.document.edit.recipe().clone();
+        let out = self.document.edit.change(step, edit);
+        if *self.document.edit.recipe() != before {
+            self.edited();
+        }
+        self.end_stale_preset_amount();
+        self.schedule();
+        out
     }
     /// What any change to the photo's settings ends or advances, Undo included;
     /// the edit session has marked it for saving.

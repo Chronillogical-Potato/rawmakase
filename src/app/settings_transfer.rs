@@ -83,7 +83,7 @@ impl Editor {
     /// The open photo's settings, once its camera is known.
     pub(super) fn current_settings(&self) -> Option<Settings> {
         Some(Settings {
-            recipe: self.document.edit.recipe.clone(),
+            recipe: self.document.edit.recipe().clone(),
             metadata: self.document_metadata()?,
         })
     }
@@ -232,7 +232,7 @@ impl Editor {
                 recipe: &from.recipe,
                 metadata: &from.metadata,
             },
-            &self.document.edit.recipe,
+            self.document.edit.recipe(),
             groups,
             Target {
                 metadata: &metadata,
@@ -241,9 +241,9 @@ impl Editor {
         );
         self.document
             .edit
-            .history
+            .history_mut()
             .label(super::history::Step::new(step, ""));
-        self.document.edit.recipe = out.recipe;
+        self.document.edit.replace(out.recipe);
         self.ensure_upright();
         self.status = if out.notes.is_empty() {
             "Settings pasted".into()

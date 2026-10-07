@@ -264,11 +264,11 @@ impl Editor {
             Some("its Lightroom edit is still being applied")
         } else if d.auto.is_running() {
             Some("Auto is still working on it")
-        } else if d.edit.save.is_protected() {
+        } else if d.edit.save_state().is_protected() {
             Some("its edit is protected, as the file changed since it was saved")
         } else if self.importing.is_some() {
             Some("camera profiles are still being imported")
-        } else if d.upright.is_running() || d.edit.recipe.upright.needs_analysis() {
+        } else if d.upright.is_running() || d.edit.recipe().upright.needs_analysis() {
             Some("Upright is still analysing it")
         } else {
             None
@@ -316,7 +316,7 @@ impl Editor {
         Some(Photo {
             image: self.document.full()?.clone(),
             source: self.document.path.clone()?,
-            recipe: self.document.edit.recipe.clone(),
+            recipe: self.document.edit.recipe().clone(),
             values,
             watermark: None,
             demosaic: self.demosaic,
@@ -397,7 +397,7 @@ impl Editor {
                 photo.place = Some((chosen.place, scope.chosen));
                 if chosen.open {
                     photo.edit = Edit::Shown {
-                        recipe: Box::new(self.document.edit.recipe.clone()),
+                        recipe: Box::new(self.document.edit.recipe().clone()),
                         unsaved,
                         file: self.document.file.clone(),
                     };

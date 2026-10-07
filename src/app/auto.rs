@@ -28,7 +28,7 @@ impl Editor {
     /// nothing Auto measures has changed since, so running it again would change nothing. Adjustments Auto does not
     /// measure (curves, presence, color and the like) leave it in effect.
     pub(super) fn auto_in_effect(&self) -> bool {
-        let r = &self.document.edit.recipe;
+        let r = self.document.edit.recipe();
         if let Some((seen, in_effect)) = &*self.document.auto_effect.borrow()
             && seen == r
         {
@@ -53,7 +53,7 @@ impl Editor {
         }
         let (_, cancel) = self.document.auto.start();
         let id = self.load.id();
-        let base = self.document.edit.recipe.clone();
+        let base = self.document.edit.recipe().clone();
         self.document.auto_input = Some(inputs(kind, &base));
         let tx = self.tx.clone();
         let ctx = self.context.clone();
@@ -85,7 +85,7 @@ impl Editor {
             .auto_input
             .take()
             .or_else(|| result.as_deref().ok().map(|r| inputs(kind, r)));
-        if fitted.is_some_and(|f| f != inputs(kind, &self.document.edit.recipe)) {
+        if fitted.is_some_and(|f| f != inputs(kind, self.document.edit.recipe())) {
             self.start_auto(kind);
             return;
         }
@@ -97,30 +97,28 @@ impl Editor {
             }
         };
         // A drag still under way is recorded first, so undoing it keeps Auto.
-        if self.document.edit.history.in_gesture() {
-            self.document
-                .edit
-                .history
-                .finish_gesture(&self.document.edit.recipe);
-            self.document.edit.save.mark_changed();
+        if self.document.edit.history().in_gesture() {
+            self.document.edit.finish_gesture();
+            self.document.edit.save_state_mut().mark_changed();
         }
-        let old = self.document.edit.recipe.clone();
-        let r = &mut self.document.edit.recipe;
         let step = match kind {
+            AutoKind::Settings => Step::new("Auto Settings", ""),
+            AutoKind::WhiteBalance => Step::new("White Balance", "Auto"),
+        };
+        let mut applied = self.document.edit.recipe().clone();
+        match kind {
             AutoKind::Settings => {
-                AutoTone::of(&auto).apply(r);
-                self.document.auto_applied = Some(r.clone());
+                AutoTone::of(&auto).apply(&mut applied);
+                self.document.auto_applied = Some(applied.clone());
                 self.document.auto_effect.take();
-                Step::new("Auto Settings", "")
             }
             AutoKind::WhiteBalance => {
-                r.wb = auto.wb;
-                r.temperature = auto.temperature;
-                r.tint = auto.tint;
-                r.auto_white_balance = auto.auto_white_balance;
-                Step::new("White Balance", "Auto")
+                applied.wb = auto.wb;
+                applied.temperature = auto.temperature;
+                applied.tint = auto.tint;
+                applied.auto_white_balance = auto.auto_white_balance;
             }
-        };
-        self.commit_edit(old, Some(step));
+        }
+        self.change_edit(Some(step), |r| *r = applied);
     }
 }
