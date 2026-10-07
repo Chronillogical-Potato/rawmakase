@@ -368,6 +368,8 @@ mod locations_tests;
 #[cfg(test)]
 mod open_tests;
 #[cfg(test)]
+mod portability_tests;
+#[cfg(test)]
 mod portable_sql_tests;
 pub mod preview_cache;
 #[cfg(test)]
