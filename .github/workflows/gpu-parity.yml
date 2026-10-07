@@ -2,11 +2,11 @@ name: GPU parity
 
 # The GPU port must keep matching the CPU renderer. Its tests need a hardware
 # compute adapter, so CI's test jobs skip them (#[ignore]); this lane runs them
-# on a schedule, and on demand, against main. It never gates a pull request: a
+# weekly, and on demand, against main. It never gates a pull request: a
 # failure here is a parity regression to look at, not a merge blocker.
 on:
   schedule:
-    - cron: '17 4 * * *'
+    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -41,9 +41,8 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build native dependencies
         run: bash packaging/native-deps.sh "$RUNNER_TEMP/native"
+      # Its own cache, kept between weekly runs so each builds only what changed.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          save-if: false
       - name: Show the GPU
         run: system_profiler SPDisplaysDataType
       # Only the GPU tests: the other ignored tests need private RAW files,
