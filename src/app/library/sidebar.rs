@@ -195,7 +195,7 @@ impl Library {
         action
     }
     /// Shows collection `id`'s photos; the filter bar still applies.
-    pub(super) fn select_collection(&mut self, id: i64) {
+    pub(super) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
         self.filters.collection = Some(id);
         self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
         self.filters.folder_scope = None;
@@ -237,6 +237,7 @@ impl Library {
         if let Some(id) = key
             .strip_prefix("collection:")
             .and_then(|id| id.parse::<i64>().ok())
+            .map(crate::catalog::CollectionId)
             && self.collections.iter().any(|c| {
                 c.id == id && (c.kind == CollectionKind::Collection || self.quick() == Some(id))
             })

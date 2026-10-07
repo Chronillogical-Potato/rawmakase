@@ -57,7 +57,7 @@ pub struct Library {
     folders: Vec<Folder>,
     collections: Vec<Collection>,
     /// Each collection's photos, limited to the ones the Library shows.
-    collection_photos: HashMap<i64, HashSet<i64>>,
+    collection_photos: HashMap<crate::catalog::CollectionId, HashSet<i64>>,
     roots: Vec<(i64, String, Option<String>)>,
     /// Whether the folders missing on this computer were reported since the
     /// catalog opened.
