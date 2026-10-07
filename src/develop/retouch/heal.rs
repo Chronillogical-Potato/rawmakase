@@ -6,7 +6,7 @@
 //! extended inward as a membrane (the solution of Laplace's equation). A constant or
 //! linear difference is therefore reproduced exactly, and the source's texture is kept.
 use super::{RetouchMode, RetouchOp, RetouchShape};
-use crate::{develop::ImageFrame, raw::CameraImage};
+use crate::{camera_data::CameraImage, develop::ImageFrame};
 use rayon::prelude::*;
 
 /// A rectangle of decoded pixels, `[x0, y0, x1, y1)`.

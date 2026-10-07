@@ -67,8 +67,8 @@ fn gpu_matches_cpu_finishing_and_reuses_buffers() -> Result<()> {
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> {
     use crate::{
+        camera_data::{CameraImage, Metadata},
         develop::PreviewRenderer,
-        raw::{CameraImage, Metadata},
     };
     let image = CameraImage {
         width: 137,
@@ -169,9 +169,9 @@ fn gpu_preview_preserves_regions_spatial_effects_and_falls_back() -> Result<()> 
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     use crate::{
+        camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
         develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
-        raw::{CameraImage, Metadata},
     };
     use std::sync::Arc;
     let metadata = Metadata {
@@ -413,9 +413,9 @@ fn read_texture(gpu: &Processor, texture: &wgpu::Texture) -> Result<Vec<u8>> {
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn presented_previews_match_the_cpu_render() -> Result<()> {
     use crate::{
+        camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
         develop::{PreviewRenderer, quality::Output},
-        raw::{CameraImage, Metadata},
     };
     use std::sync::Arc;
     let (w, h) = (157, 103);
@@ -670,8 +670,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn panning_never_writes_the_drawn_region() -> Result<()> {
     use crate::{
+        camera_data::{CameraImage, Metadata},
         develop::{PreviewRenderer, quality::Output},
-        raw::{CameraImage, Metadata},
     };
     let (w, h) = (120, 80);
     let image = CameraImage {
@@ -745,10 +745,10 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     use crate::{
+        camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
         develop::masks::{LocalAdjust, MaskWeights},
         develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
-        raw::{CameraImage, Metadata},
     };
     use std::sync::Arc;
     let metadata = Metadata {

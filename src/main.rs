@@ -4,6 +4,7 @@ use anyhow::Result;
 mod mcp;
 use clap::{Parser, Subcommand};
 use rawmakase::{
+    camera_data,
     develop::{self, Recipe},
     export_settings::ExportOptions,
     raw,
@@ -281,9 +282,9 @@ fn main() -> Result<()> {
             }
             edit.validate()?;
             let decode = if fast {
-                raw::Decode::Half
+                camera_data::Decode::Half
             } else {
-                raw::Decode::full(Default::default())
+                camera_data::Decode::full(Default::default())
             };
             let im = r.develop(decode, &AtomicBool::new(false))?;
             if let Some(path) = xmp {
@@ -366,7 +367,7 @@ fn main() -> Result<()> {
             );
             let t = Instant::now();
             let im = rawmakase::photo::open(&input)?.develop(
-                raw::Decode::full(Default::default()),
+                camera_data::Decode::full(Default::default()),
                 &AtomicBool::new(false),
             )?;
             let decode = t.elapsed();

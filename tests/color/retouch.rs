@@ -2,11 +2,11 @@
 //! healed with automatically chosen sources, scored against the clean render.
 use crate::{chart_path, develop, embedded_profiles, measure};
 use rawmakase::{
+    camera_data::CameraImage,
     develop::{
         ImageFrame, Recipe, ViewMapping, render,
         retouch::{RetouchMode, RetouchOp, RetouchShape, find_source},
     },
-    raw::CameraImage,
 };
 
 /// The chart's camera and metadata with a gradient above a lit texture, so results

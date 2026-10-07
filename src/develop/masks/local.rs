@@ -11,8 +11,8 @@
 //! - Hue and Saturation rotate and scale Oklab chroma after the colour mixer.
 //! - Sharpness and Noise change the finishing sharpening and noise reduction.
 use super::LocalAdjust;
+use crate::camera_data::Metadata;
 use crate::develop::Recipe;
-use crate::raw::Metadata;
 
 /// Slots of a [`LocalDelta`].
 pub(crate) mod slot {

@@ -29,7 +29,7 @@ const QUICK_REGION: std::time::Duration = std::time::Duration::from_millis(40);
 
 /// A finished render and the view it shows.
 struct Shown {
-    image: Arc<crate::raw::CameraImage>,
+    image: Arc<crate::camera_data::CameraImage>,
     recipe: develop::Recipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
@@ -217,7 +217,11 @@ struct PaneState {
     quick_region: bool,
     /// The whole photo's histogram for the last edit shown at 100%, so panning
     /// there does not render the whole photo again.
-    whole_shown: Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)>,
+    whole_shown: Option<(
+        Arc<crate::camera_data::CameraImage>,
+        develop::Recipe,
+        Histogram,
+    )>,
 }
 
 fn render(
@@ -563,11 +567,15 @@ fn whole_histogram(
     job: &RenderJob,
     processor: &mut develop::PreviewRenderer,
     fit: &Option<Shown>,
-    whole: &mut Option<(Arc<crate::raw::CameraImage>, develop::Recipe, Histogram)>,
+    whole: &mut Option<(
+        Arc<crate::camera_data::CameraImage>,
+        develop::Recipe,
+        Histogram,
+    )>,
     tx: &Sender<Event>,
     ctx: &egui::Context,
 ) -> anyhow::Result<()> {
-    let same = |image: &Arc<crate::raw::CameraImage>, recipe: &develop::Recipe| {
+    let same = |image: &Arc<crate::camera_data::CameraImage>, recipe: &develop::Recipe| {
         Arc::ptr_eq(image, &job.image) && *recipe == job.recipe
     };
     let histogram = if let Some((.., histogram)) = whole.as_ref().filter(|(i, r, _)| same(i, r)) {
@@ -605,7 +613,7 @@ fn whole_histogram(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raw::{CameraImage, Metadata};
+    use crate::camera_data::{CameraImage, Metadata};
     use std::sync::{Arc, atomic::AtomicBool};
     fn image() -> Arc<CameraImage> {
         let (w, h) = (240, 160);

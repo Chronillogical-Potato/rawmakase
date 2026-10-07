@@ -3,6 +3,7 @@
 use super::{Embed, exif::tiff_block};
 use crate::build_info::SOFTWARE;
 use crate::{
+    camera_data::Metadata,
     exif::{
         CameraExif, Field,
         tag::{
@@ -10,7 +11,6 @@ use crate::{
             RESOLUTION_UNIT, X_RESOLUTION, Y_RESOLUTION, YCBCR_POSITIONING,
         },
     },
-    raw::Metadata,
 };
 
 pub(super) fn directories(m: &Metadata, embed: &Embed, width: u32, height: u32) -> CameraExif {

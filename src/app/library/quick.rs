@@ -24,7 +24,8 @@ pub struct CollectionCommand {
 impl Library {
     /// The Quick Collection, once there is one.
     pub(super) fn quick(&self) -> Option<crate::catalog::CollectionId> {
-        self.collections
+        self.session
+            .collections
             .iter()
             .find(|c| {
                 c.kind == CollectionKind::System && c.name == QUICK_COLLECTION && c.parent.is_none()
@@ -36,20 +37,20 @@ impl Library {
         if let Some(id) = self.quick() {
             return Ok(id);
         }
-        let id = self.catalog.quick_collection()?;
-        self.collections = self.catalog.collections()?;
-        self.collection_photos.entry(id).or_default();
+        let id = self.session.catalog.quick_collection()?;
+        self.session.collections = self.session.catalog.collections()?;
+        self.session.collection_photos.entry(id).or_default();
         Ok(id)
     }
     pub(super) fn in_quick(&self, id: PhotoId) -> bool {
         self.quick()
-            .and_then(|q| self.collection_photos.get(&q))
+            .and_then(|q| self.session.collection_photos.get(&q))
             .is_some_and(|members| members.contains(&id))
     }
     /// The Quick Collection's photo count, for the Catalog panel.
     pub(super) fn quick_count(&self) -> usize {
         self.quick()
-            .and_then(|q| self.collection_photos.get(&q))
+            .and_then(|q| self.session.collection_photos.get(&q))
             .map_or(0, |members| members.len())
     }
     pub(super) fn showing_quick(&self) -> bool {
@@ -86,6 +87,7 @@ impl Library {
             return Ok(());
         };
         let removed: Vec<PhotoId> = self
+            .session
             .collection_photos
             .get(&quick)
             .map(|m| m.iter().copied().collect())
@@ -159,8 +161,14 @@ impl Library {
             .filter(|id| self.photo(*id).is_some())
             .collect();
         let add = add.as_slice();
-        self.catalog.change_collection(collection, add, remove)?;
-        let members = self.collection_photos.entry(collection).or_default();
+        self.session
+            .catalog
+            .change_collection(collection, add, remove)?;
+        let members = self
+            .session
+            .collection_photos
+            .entry(collection)
+            .or_default();
         members.extend(add);
         for id in remove {
             members.remove(id);

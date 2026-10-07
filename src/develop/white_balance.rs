@@ -1,8 +1,8 @@
 //! Fallback white balance for cameras without calibrated DCP matrices, and Lightroom's
 //! named white balance presets.
 use crate::{
+    camera_data::Metadata,
     color::{inverse, mul},
-    raw::Metadata,
 };
 pub(super) fn illuminant_camera(t: f32, m: &Metadata) -> [f32; 3] {
     // Planckian locus approximation in CIE xy; extrapolation avoided by UI range.

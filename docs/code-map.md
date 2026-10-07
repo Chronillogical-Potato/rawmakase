@@ -38,7 +38,8 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/edits.rs](../src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../src/catalog/edit_records.rs) reads the stored records. |
 | [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
-| [src/raw/mod.rs](../src/raw/mod.rs) | RAW files as RAWmakase sees them: metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
+| [src/camera_data.rs](../src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
+| [src/raw/mod.rs](../src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
 | [src/color/mod.rs](../src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |

@@ -10,8 +10,8 @@
 //!   table.
 use super::{CameraProfile, Table, enhanced::Enhanced};
 use crate::{
+    camera_data::Metadata,
     color::curve::{CurveLut, ToneCurve},
-    raw::Metadata,
 };
 
 pub const STANDARD: &str = "RAWmakase Standard";

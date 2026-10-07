@@ -12,7 +12,7 @@ use super::{
     pipeline::{Samples, Toned},
     quality::LocalBlurs,
 };
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -527,7 +527,7 @@ mod tests {
     /// which `Recipe::resolved` puts into the profile, reuses them.
     #[test]
     fn profile_amount_reuses_the_blurs() {
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             make: "Test".into(),
             model: "Camera".into(),
             cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],

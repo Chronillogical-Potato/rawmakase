@@ -63,7 +63,7 @@ pub struct Editor {
     /// Cancels the prefetch started for the photo on screen.
     prefetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Preferences > Performance's demosaic, for every full-size decode.
-    demosaic: crate::raw::Demosaic,
+    demosaic: crate::camera_data::Demosaic,
     /// That position as last written to the session.
     saved_place: CatalogPlace,
     /// How the Library showed its photos, as last written to the session;
@@ -331,7 +331,7 @@ impl Editor {
     fn session_path(&self) -> Option<PathBuf> {
         self.library
             .as_ref()
-            .map(|l| l.catalog.path.clone())
+            .map(|l| l.session.catalog.path.clone())
             .or_else(|| self.document.path.clone())
     }
 }

@@ -63,6 +63,7 @@ impl Editor {
     fn follows_defaults(&self) -> bool {
         let saved = match (&self.library, self.document.catalog_photo) {
             (Some(l), Some(id)) => l
+                .session
                 .catalog
                 .edit_texts(id)
                 .map_or(true, |(recipe, _)| recipe.is_some()),
@@ -108,7 +109,7 @@ impl Editor {
         let mut cameras = self
             .library
             .as_ref()
-            .and_then(|l| l.catalog.cameras().ok())
+            .and_then(|l| l.session.catalog.cameras().ok())
             .unwrap_or_default();
         if let Some(m) = &self.document.metadata
             && !m.model.trim().is_empty()
@@ -319,9 +320,9 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
 mod tests {
     use super::*;
     use crate::app::worker::{Event, LoadedHeader};
+    use crate::camera_data::Metadata;
     use crate::camera_profiles::{CameraProfile, open};
     use crate::develop::Recipe;
-    use crate::raw::Metadata;
 
     #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
     fn x100f() -> Metadata {
@@ -439,7 +440,10 @@ mod tests {
         editor.set_raw_defaults(lighten()).unwrap();
         assert_eq!(editor.document.edit.recipe, edited);
         let library = editor.library.as_ref().unwrap();
-        assert_eq!(library.catalog.load_edit(id, &raw)?.unwrap().recipe, edited);
+        assert_eq!(
+            library.session.catalog.load_edit(id, &raw)?.unwrap().recipe,
+            edited
+        );
         Ok(())
     }
 
@@ -589,7 +593,7 @@ mod tests {
             .tx
             .send(Event::Ready {
                 id: generation,
-                full: Arc::new(crate::raw::CameraImage {
+                full: Arc::new(crate::camera_data::CameraImage {
                     recovered: Default::default(),
                     width: 12,
                     height: 8,
@@ -628,7 +632,7 @@ mod tests {
             cancel: Default::default(),
             prefetch: None,
             defaults: defaults.clone(),
-            demosaic: crate::raw::Demosaic::default(),
+            demosaic: crate::camera_data::Demosaic::default(),
         });
         let header = loop {
             match rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap() {

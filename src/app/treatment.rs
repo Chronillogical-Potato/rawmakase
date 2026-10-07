@@ -1,8 +1,8 @@
 //! The Basic panel's Treatment and the B&W panel's Auto. Each runs during an edit
 //! frame, which records it as one History step under the name it gives.
 use super::{Editor, history::Step};
+use crate::camera_data::Metadata;
 use crate::develop::{AutoMix, ColorSpread, Treatment};
-use crate::raw::Metadata;
 
 /// What converting to black & white does to a mix that was never set: Lightroom's
 /// "Apply auto mix when first converting to black and white" preference, on by

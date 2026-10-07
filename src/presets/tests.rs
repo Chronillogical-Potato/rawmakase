@@ -7,7 +7,7 @@ use std::fs::{self, File};
 fn embedded_profile_roundtrip_and_old_engine_pixels() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("profile.json");
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         cam_xyz: [
@@ -55,8 +55,8 @@ fn embedded_profile_roundtrip_and_old_engine_pixels() -> Result<()> {
 }
 
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
-fn x100f() -> crate::raw::Metadata {
-    crate::raw::Metadata {
+fn x100f() -> crate::camera_data::Metadata {
+    crate::camera_data::Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
@@ -70,7 +70,7 @@ fn x100f() -> crate::raw::Metadata {
 }
 /// What `camera_profiles::installed` gives with nothing imported.
 fn open_profiles(
-    m: &crate::raw::Metadata,
+    m: &crate::camera_data::Metadata,
 ) -> Vec<std::sync::Arc<crate::camera_profiles::CameraProfile>> {
     use crate::camera_profiles::open;
     [open::standard(m), open::color(m)]
@@ -182,7 +182,7 @@ fn builtin_presets_prefer_imported_adobe_profiles() {
     // The DNG's own profile comes before RAWmakase Standard.
     let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/corpus/charts/fujifilm-x100f-d65.dng");
-    let dng = crate::raw::Metadata {
+    let dng = crate::camera_data::Metadata {
         embedded_dcp: crate::dng::read(&chart)
             .and_then(|d| d.profile)
             .map(Into::into),

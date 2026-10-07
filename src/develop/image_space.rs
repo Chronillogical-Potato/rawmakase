@@ -6,7 +6,7 @@
 //! straightening and the user's rotation and flips. A spot stays on the dust particle
 //! whatever those settings do.
 use super::{Geometry, Recipe};
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 
 /// Image space of one decoded image (or pyramid level) of a photo.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,10 +25,10 @@ impl ImageFrame {
     }
     /// The frame from metadata alone, as when a Lightroom edit is converted before the
     /// photo is decoded.
-    pub fn for_metadata(m: &crate::raw::Metadata) -> Self {
+    pub fn for_metadata(m: &crate::camera_data::Metadata) -> Self {
         Self::with_size(m, m.width.max(1), m.height.max(1))
     }
-    fn with_size(m: &crate::raw::Metadata, width: u32, height: u32) -> Self {
+    fn with_size(m: &crate::camera_data::Metadata, width: u32, height: u32) -> Self {
         let cw = if m.crop_width > 0 && m.crop_width <= m.width {
             m.crop_width as f32 / m.width as f32
         } else {
@@ -243,7 +243,7 @@ mod tests {
             width: 300,
             height: 200,
             pixels: vec![[0.2; 3]; 300 * 200],
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 300,
                 height: 200,
                 crop_left: 10,

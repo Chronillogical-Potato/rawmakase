@@ -12,7 +12,8 @@ files should preserve.
 
 | Module | Owns | Main extension points |
 | --- | --- | --- |
-| `raw` | LibRaw/Little CMS boundary, camera metadata, decoded images, oriented embedded thumbnails | RAW decoding and native color management |
+| `camera_data` | A RAW's metadata, the demosaic and decode choices and the decoded camera-space image, as values with no native code | `camera_data.rs` |
+| `raw` | LibRaw/Little CMS boundary: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails | RAW decoding and native color management |
 | `photo` | Opening a photo: LibRaw's facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
 | `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
 | `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |

@@ -3,7 +3,7 @@ use super::{
     Geometry, Recipe, Rendered, ValidRecipe, gpu, pyramid::Pyramid, quality, quality::Output,
     stage_cache::StageCache,
 };
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use anyhow::Result;
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -349,7 +349,7 @@ mod tests {
             pixels: (0..width * height)
                 .map(|i| [value + (i % 7) as f32 * 0.01, value, value * 0.5])
                 .collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width,
                 height,
                 wb: [1.; 3],

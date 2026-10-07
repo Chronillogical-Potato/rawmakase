@@ -1,6 +1,6 @@
 use super::panels::PanelSwitches;
 use super::white_balance::{estimate_temperature, illuminant_camera};
-use crate::{develop::curve::ToneCurve, raw::Metadata};
+use crate::{camera_data::Metadata, develop::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 /// Lightroom's white balance slider ranges for RAW files.

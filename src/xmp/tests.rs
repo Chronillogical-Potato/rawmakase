@@ -1,6 +1,6 @@
 use super::*;
 use crate::xml::ns::{CRS, RDF};
-use crate::{develop::Recipe, raw::Metadata};
+use crate::{camera_data::Metadata, develop::Recipe};
 use anyhow::Result;
 use std::path::Path;
 fn xml(attrs: &str, body: &str) -> String {
@@ -188,7 +188,7 @@ fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
-    let im = crate::raw::CameraImage {
+    let im = crate::camera_data::CameraImage {
         recovered: Default::default(),
         width,
         height,
@@ -821,7 +821,7 @@ fn auto_grayscale_mix_uses_stored_mixer_or_estimates_it() -> Result<()> {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
-    let im = crate::raw::CameraImage {
+    let im = crate::camera_data::CameraImage {
         recovered: Default::default(),
         width,
         height,

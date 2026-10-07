@@ -245,7 +245,7 @@ impl Editor {
                 };
                 // Each photo where it is now, after any relink since the Sync.
                 let path = |id: PhotoId| library.photo(id).map(|p| p.path.clone());
-                match super::sync::restore(&library.catalog, &sync.edits, side, path) {
+                match super::sync::restore(&library.session.catalog, &sync.edits, side, path) {
                     Ok(()) => {}
                     // Nothing to return to: the command is used up, not retried.
                     Err(e @ super::sync::SyncRestoreError::PhotoRemoved) => {
@@ -325,16 +325,20 @@ impl Editor {
                     self.status = format!("{verb}: that photo is no longer in the catalog");
                     return true;
                 };
-                let saved = library.catalog.load_edit(id, &path).and_then(|edit| {
-                    let export = edit.map(|e| e.export).unwrap_or_default();
-                    library.catalog.save_edit(
-                        id,
-                        &path,
-                        target,
-                        &export,
-                        crate::catalog::HistoryUpdate::Keep,
-                    )
-                });
+                let saved = library
+                    .session
+                    .catalog
+                    .load_edit(id, &path)
+                    .and_then(|edit| {
+                        let export = edit.map(|e| e.export).unwrap_or_default();
+                        library.session.catalog.save_edit(
+                            id,
+                            &path,
+                            target,
+                            &export,
+                            crate::catalog::HistoryUpdate::Keep,
+                        )
+                    });
                 if let Err(e) = saved {
                     self.status = format!("{verb} failed: {e}");
                     return false;

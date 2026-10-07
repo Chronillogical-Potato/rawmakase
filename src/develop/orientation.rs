@@ -55,15 +55,15 @@ pub fn mirror(r: &mut Recipe, mirror: Mirror) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera_data::CameraImage;
     use crate::develop::Geometry;
-    use crate::raw::CameraImage;
 
     fn photo() -> CameraImage {
         CameraImage {
             width: 300,
             height: 200,
             pixels: vec![[0.2; 3]; 300 * 200],
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 300,
                 height: 200,
                 wb: [1.; 3],

@@ -1,7 +1,7 @@
 use super::heal::{self, Placed};
 use super::*;
+use crate::camera_data::CameraImage;
 use crate::develop::red_eye::RedEyeOp;
-use crate::raw::CameraImage;
 use std::sync::atomic::AtomicBool;
 
 fn image(width: u32, height: u32, f: impl Fn(f32, f32) -> [f32; 3]) -> CameraImage {
@@ -11,7 +11,7 @@ fn image(width: u32, height: u32, f: impl Fn(f32, f32) -> [f32; 3]) -> CameraIma
         pixels: (0..width * height)
             .map(|i| f((i % width) as f32, (i / width) as f32))
             .collect(),
-        metadata: crate::raw::Metadata {
+        metadata: crate::camera_data::Metadata {
             width,
             height,
             wb: [1.; 3],
