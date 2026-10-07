@@ -32,6 +32,10 @@ row_id!(
     CollectionId
 );
 row_id!(
+    /// A photo or one of its virtual copies (`photos.id`).
+    PhotoId
+);
+row_id!(
     /// A folder of photos (`folders.id`).
     FolderId
 );

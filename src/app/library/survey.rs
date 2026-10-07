@@ -6,6 +6,7 @@ use super::grid::filter_caption;
 use super::stage::MARGIN;
 use super::{Action, Library};
 use crate::app::theme;
+use crate::catalog::PhotoId;
 use eframe::egui::{self, Rect, Vec2};
 
 /// Photos shown at most, keeping previews and memory bounded however many
@@ -44,13 +45,13 @@ impl Library {
         }
     }
     /// The photos surveyed, in display order.
-    pub(super) fn surveyed(&self) -> Vec<i64> {
+    pub(super) fn surveyed(&self) -> Vec<PhotoId> {
         self.selected_ids()
     }
     /// Left/Up and Right/Down: the photo before or after becomes active.
     /// The photos surveyed that are shown: all of them, or the `MOST` up to
     /// and including the active photo.
-    pub(super) fn shown_surveyed(&self) -> Vec<i64> {
+    pub(super) fn shown_surveyed(&self) -> Vec<PhotoId> {
         let ids = self.surveyed();
         let at = self
             .selection
@@ -73,7 +74,7 @@ impl Library {
         self.make_active(ids[to]);
     }
     /// × or Cmd+click: takes a photo out of the survey.
-    pub(super) fn drop_surveyed(&mut self, id: i64) {
+    pub(super) fn drop_surveyed(&mut self, id: PhotoId) {
         if self.selection.selected.len() > 1 {
             self.click(id, egui::Modifiers::COMMAND);
         }
@@ -92,8 +93,9 @@ impl Library {
         let surveyed = self.surveyed();
         let recorded = self.done.len();
         self.edit_metadata(id, edit, false)?;
-        let shown =
-            |library: &Self, id: &i64| library.visible.iter().any(|i| library.photos[*i].id == *id);
+        let shown = |library: &Self, id: &PhotoId| {
+            library.visible.iter().any(|i| library.photos[*i].id == *id)
+        };
         let at = surveyed.iter().position(|i| *i == id).unwrap_or(0);
         let active = surveyed[at..]
             .iter()
@@ -168,7 +170,7 @@ impl Library {
     }
     /// The photos' usual shape, width over height, from their previews; 3:2
     /// until those are in.
-    fn aspect(&self, ids: &[i64]) -> f32 {
+    fn aspect(&self, ids: &[PhotoId]) -> f32 {
         let shapes: Vec<f32> = ids
             .iter()
             .filter_map(|id| self.texture(self.photo(*id)?))
@@ -207,7 +209,7 @@ impl Library {
     }
     /// One surveyed photo in `rect`: a click makes it active, a double-click
     /// opens it in the Loupe, Cmd+click or its × takes it out.
-    fn survey_tile(&mut self, ui: &mut egui::Ui, id: i64, rect: Rect) {
+    fn survey_tile(&mut self, ui: &mut egui::Ui, id: PhotoId, rect: Rect) {
         let Some(photo) = self.photo(id).cloned() else {
             return;
         };

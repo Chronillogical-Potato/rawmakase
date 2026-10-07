@@ -4,7 +4,7 @@
 //! with ≥, ≤ or =, any set of color labels, and masters or virtual copies.
 //! Cmd+L turns the bar off and on without losing what is set in it.
 use crate::app::photo_metadata::LABELS;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use std::{
     collections::{BTreeSet, HashSet},
     path::Path,
@@ -76,7 +76,7 @@ pub(super) struct Filters {
     pub folder_scope: Option<HashSet<crate::catalog::FolderId>>,
     pub collection: Option<crate::catalog::CollectionId>,
     /// The chosen collection's photos.
-    pub members: HashSet<i64>,
+    pub members: HashSet<PhotoId>,
     pub query: String,
     /// The flags shown (1 picked, 0 unflagged, -1 rejected); none is every flag.
     pub flags: BTreeSet<i32>,

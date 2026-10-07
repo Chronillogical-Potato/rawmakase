@@ -1,5 +1,6 @@
 use super::widgets::tone_curve_ui;
 use super::*;
+use crate::catalog::PhotoId;
 use crate::develop;
 use crate::raw::{CameraImage, Metadata};
 use eframe::egui::{Pos2, Rect};
@@ -2042,7 +2043,9 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     Ok(())
 }
 /// An editor with a catalog of `names`, its Library open.
-fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>)> {
+fn editor_with_catalog(
+    names: &[&str],
+) -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>)> {
     let d = tempfile::tempdir()?;
     let photos = d.path().join("photos");
     std::fs::create_dir(&photos)?;
@@ -2082,7 +2085,11 @@ fn undo_brings_back_a_range_rejected_under_the_unflagged_filter() -> anyhow::Res
     assert_eq!(library.photos.iter().filter(|p| p.flag == -1).count(), 3);
     // A write that fails is never logged.
     let library = e.library.as_mut().unwrap();
-    assert!(library.edit_metadata(9999, Edit::Rating(5), false).is_err());
+    assert!(
+        library
+            .edit_metadata(PhotoId(9999), Edit::Rating(5), false)
+            .is_err()
+    );
     e.sync_undo();
     assert_eq!(e.undo_log.len(), (1, 0));
     Ok(())
@@ -2877,7 +2884,7 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     // Undo on the next photo reaches it.
     assert_eq!(editor.undo_log.len(), (1, 0));
     // A save that fails keeps the drag going, as one step.
-    editor.document.catalog_photo = Some(id + 1000);
+    editor.document.catalog_photo = Some(PhotoId(id.0 + 1000));
     let before = editor.document.edit.recipe.clone();
     editor.document.edit.recipe.exposure = 0.9;
     editor
@@ -4197,7 +4204,7 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     let catalog = dir.path().join("test.rawmakase");
     let mut c = crate::catalog::Catalog::create(&catalog)?;
     c.add_folder(&photos)?;
-    let ids: Vec<(i64, std::path::PathBuf)> =
+    let ids: Vec<(PhotoId, std::path::PathBuf)> =
         c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
     let metadata = crate::photo::open(&ids[0].1)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
@@ -4296,20 +4303,21 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     let catalog = dir.path().join("test.rawmakase");
     let mut c = crate::catalog::Catalog::create(&catalog)?;
     c.add_folder(&photos)?;
-    let mut ids: Vec<(i64, std::path::PathBuf)> =
+    let mut ids: Vec<(PhotoId, std::path::PathBuf)> =
         c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
     let metadata = crate::photo::open(&ids[0].1)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let base = Recipe::with_profiles(&metadata, &profiles);
-    let save = |c: &crate::catalog::Catalog, (id, path): &(i64, std::path::PathBuf), r: &Recipe| {
-        c.save_edit(
-            *id,
-            path,
-            r,
-            &Default::default(),
-            crate::catalog::HistoryUpdate::Keep,
-        )
-    };
+    let save =
+        |c: &crate::catalog::Catalog, (id, path): &(PhotoId, std::path::PathBuf), r: &Recipe| {
+            c.save_edit(
+                *id,
+                path,
+                r,
+                &Default::default(),
+                crate::catalog::HistoryUpdate::Keep,
+            )
+        };
     // a: a mask and a spot.
     let mut local = base.clone();
     local.exposure = 0.3;

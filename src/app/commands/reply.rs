@@ -1,5 +1,6 @@
 //! Typed application results. Transports choose how to encode these snapshots.
 use super::output::OutputState;
+use crate::catalog::PhotoId;
 use crate::color::curve::ToneCurve;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -10,7 +11,7 @@ pub(in crate::app) struct State {
     pub message: String,
     pub mode: &'static str,
     pub photo: Option<String>,
-    pub photo_id: Option<i64>,
+    pub photo_id: Option<PhotoId>,
     pub generation: u64,
     pub revision: u64,
     pub loaded: bool,
@@ -78,7 +79,7 @@ pub(in crate::app) enum Outcome {
 }
 #[derive(Debug, Serialize)]
 pub(in crate::app) struct PhotoIdentity {
-    pub id: i64,
+    pub id: PhotoId,
     pub filename: String,
     pub path: std::path::PathBuf,
 }

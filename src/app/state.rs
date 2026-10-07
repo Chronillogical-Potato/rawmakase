@@ -1,4 +1,5 @@
 //! State owned by the document, preview, viewport and preset browser.
+use crate::catalog::PhotoId;
 use crate::{
     develop::Recipe,
     export_settings::ExportOptions,
@@ -21,7 +22,7 @@ pub(super) struct Document {
     /// Auto mix.
     pub(super) pending_treatment: Option<PendingTreatment>,
     pub(super) export: ExportOptions,
-    pub(super) catalog_photo: Option<i64>,
+    pub(super) catalog_photo: Option<PhotoId>,
     pub(super) lightroom_notice: String,
     /// Lightroom's history for the open catalog photo, oldest first.
     pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
@@ -367,7 +368,7 @@ impl PresetBrowser {
 }
 
 impl Document {
-    pub fn reset(&mut self, catalog_photo: Option<i64>) {
+    pub fn reset(&mut self, catalog_photo: Option<PhotoId>) {
         *self = Self {
             catalog_photo,
             ..Default::default()

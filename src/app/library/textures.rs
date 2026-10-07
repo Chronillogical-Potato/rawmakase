@@ -3,7 +3,7 @@
 //! bounded; requests go to the workers in `previews`, and results are
 //! matched to the latest request so a late or stale render never shows.
 use super::previews::{self, EditJob, EditResult, EditSource, PreviewResult, Progress, Wanted};
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -27,17 +27,17 @@ pub(super) struct PreviewTextures {
     pub(super) edit_rx: Receiver<EditResult>,
     /// Photos with an edited preview requested, by the ticket of the latest
     /// request; results of earlier requests are dropped.
-    pub(super) edited_requested: HashMap<i64, u64>,
+    pub(super) edited_requested: HashMap<PhotoId, u64>,
     next_ticket: u64,
     /// Photos asking for an edited preview this frame, and last frame's
     /// as the worker sees them.
-    pub(super) edit_seen: HashSet<i64>,
+    pub(super) edit_seen: HashSet<PhotoId>,
     edit_wanted: Wanted,
     /// Edited previews queued and not yet back.
     pub(super) edits_pending: usize,
     /// Previews showing each photo's edit, by photo.
-    pub(super) edited: HashMap<i64, egui::TextureHandle>,
-    pub(super) edited_order: VecDeque<i64>,
+    pub(super) edited: HashMap<PhotoId, egui::TextureHandle>,
+    pub(super) edited_order: VecDeque<PhotoId>,
     pub(super) progress: Progress,
     /// Photos one view shows at once, e.g. a large survey; never fewer
     /// textures are kept, so none is dropped while it is shown.
@@ -130,7 +130,7 @@ impl PreviewTextures {
         self.thumbs
             .insert(path.clone(), texture(ctx, path.display().to_string(), im));
     }
-    pub(super) fn insert_edited(&mut self, ctx: &egui::Context, id: i64, im: &image::RgbImage) {
+    pub(super) fn insert_edited(&mut self, ctx: &egui::Context, id: PhotoId, im: &image::RgbImage) {
         if !self.edited.contains_key(&id) {
             while self.edited.len() >= KEPT.max(self.shown_at_once) {
                 let Some(old) = self.edited_order.pop_front() else {
@@ -150,7 +150,7 @@ impl PreviewTextures {
     }
     /// Forgets a removed photo's previews, so a later photo given its id
     /// starts afresh.
-    pub(super) fn forget(&mut self, id: i64) {
+    pub(super) fn forget(&mut self, id: PhotoId) {
         self.edited.remove(&id);
         self.edited_order.retain(|other| *other != id);
         self.edited_requested.remove(&id);
@@ -163,11 +163,11 @@ impl PreviewTextures {
             .or_else(|| self.thumbs.get(&photo.path))
     }
     /// Photos whose thumbnail shows an edit.
-    pub(super) fn edited_ids(&self) -> impl Iterator<Item = i64> + '_ {
+    pub(super) fn edited_ids(&self) -> impl Iterator<Item = PhotoId> + '_ {
         self.edited.keys().copied()
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
-    pub(super) fn has_edited(&self, id: i64) -> bool {
+    pub(super) fn has_edited(&self, id: PhotoId) -> bool {
         self.edited.contains_key(&id)
     }
     /// Queues the previews a shown photo needs: the embedded one until its
@@ -227,7 +227,7 @@ impl PreviewTextures {
     pub(super) fn store_edited(
         &mut self,
         ctx: &egui::Context,
-        id: i64,
+        id: PhotoId,
         path: PathBuf,
         image: image::RgbImage,
         recipe_json: String,

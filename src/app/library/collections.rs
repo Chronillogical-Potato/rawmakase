@@ -3,7 +3,7 @@
 //! and Lightroom's own (the Quick Collection, unsaved creations) never show.
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::catalog::{Collection, CollectionId, CollectionKind};
+use crate::catalog::{Collection, CollectionId, CollectionKind, PhotoId};
 use eframe::egui::{self, Vec2};
 use std::collections::{HashMap, HashSet};
 
@@ -20,7 +20,7 @@ pub(super) struct CollectionNode {
 /// hidden, such as Lightroom's default "Smart Collections" set.
 pub(super) fn tree(
     collections: &[Collection],
-    counts: &HashMap<CollectionId, HashSet<i64>>,
+    counts: &HashMap<CollectionId, HashSet<PhotoId>>,
 ) -> Vec<CollectionNode> {
     let mut children: HashMap<Option<CollectionId>, Vec<&Collection>> = HashMap::new();
     let ids: HashSet<CollectionId> = collections.iter().map(|c| c.id).collect();
@@ -36,7 +36,7 @@ pub(super) fn tree(
 fn nodes(
     parent: Option<CollectionId>,
     children: &HashMap<Option<CollectionId>, Vec<&Collection>>,
-    counts: &HashMap<CollectionId, HashSet<i64>>,
+    counts: &HashMap<CollectionId, HashSet<PhotoId>>,
     seen: &mut HashSet<CollectionId>,
 ) -> Vec<CollectionNode> {
     let mut out = Vec::new();

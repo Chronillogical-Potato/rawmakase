@@ -5,7 +5,7 @@
 //! were, absent ones included.
 use super::{Library, Place};
 use crate::app::widgets::plural;
-use crate::catalog::MetadataSnapshot;
+use crate::catalog::{MetadataSnapshot, PhotoId};
 use crate::metadata::TextField;
 use anyhow::{Result, ensure};
 
@@ -15,8 +15,8 @@ pub(super) struct Reread {
         Option<crate::catalog::FileMetadata>,
         crate::catalog::SidecarReport,
     )>,
-    paths: std::collections::HashMap<i64, std::path::PathBuf>,
-    read: Vec<(i64, std::path::PathBuf, crate::catalog::FileMetadata)>,
+    paths: std::collections::HashMap<PhotoId, std::path::PathBuf>,
+    read: Vec<(PhotoId, std::path::PathBuf, crate::catalog::FileMetadata)>,
     report: crate::catalog::SidecarReport,
     place: Place,
 }
@@ -111,7 +111,7 @@ impl Library {
     /// Makes `edit` to the photos given and hands it to the undo log.
     pub(in crate::app) fn edit_descriptive(
         &mut self,
-        ids: &[i64],
+        ids: &[PhotoId],
         edit: DescriptiveEdit,
     ) -> Result<()> {
         self.edit_descriptive_at(ids, edit, None)
@@ -120,11 +120,11 @@ impl Library {
     /// typed, rather than where the Library is now; undo returns there.
     pub(super) fn edit_descriptive_at(
         &mut self,
-        ids: &[i64],
+        ids: &[PhotoId],
         edit: DescriptiveEdit,
         place: Option<Place>,
     ) -> Result<()> {
-        let ids: Vec<i64> = ids
+        let ids: Vec<PhotoId> = ids
             .iter()
             .copied()
             .filter(|id| self.photo(*id).is_some())
@@ -190,7 +190,7 @@ impl Library {
         if !ratings.is_empty() {
             self.set_metadata(ratings)?;
         }
-        let ids: Vec<i64> = values.iter().map(|s| s.photo).collect();
+        let ids: Vec<PhotoId> = values.iter().map(|s| s.photo).collect();
         self.refresh_photos(&ids)?;
         self.fields.reload();
         Ok(())
@@ -198,9 +198,9 @@ impl Library {
     /// Lightroom's Read Metadata from Files, for the masters among `ids`:
     /// the files are read in the background, then what they have replaces
     /// the catalog's values, edits included, as one command.
-    pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[i64]) -> Result<()> {
-        let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
-        let photos: Vec<(i64, std::path::PathBuf)> = self
+    pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[PhotoId]) -> Result<()> {
+        let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
+        let photos: Vec<(PhotoId, std::path::PathBuf)> = self
             .photos
             .iter()
             .filter(|p| wanted.contains(&p.id) && p.master.is_none())
@@ -262,13 +262,13 @@ impl Library {
             .into_iter()
             .filter(|(id, ..)| self.photo(*id).is_some_and(|p| p.master.is_none()))
             .collect();
-        let ids: Vec<i64> = reread
+        let ids: Vec<PhotoId> = reread
             .paths
             .keys()
             .copied()
             .filter(|id| self.photo(*id).is_some())
             .collect();
-        let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
+        let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
         let before = self.catalog.metadata_snapshot(&ids)?;
         let ratings_before = self.ratings_by_id(&wanted);
         let mut report = reread.report;
@@ -296,7 +296,7 @@ impl Library {
         Ok(())
     }
     /// Rating, flag and label of the photos in `wanted`, by id.
-    fn ratings_by_id(&self, wanted: &std::collections::HashSet<i64>) -> Vec<super::Metadata> {
+    fn ratings_by_id(&self, wanted: &std::collections::HashSet<PhotoId>) -> Vec<super::Metadata> {
         let mut found =
             super::metadata::ratings_of(self.photos.iter().filter(|p| wanted.contains(&p.id)));
         found.sort_by_key(|m| m.0);
@@ -304,9 +304,9 @@ impl Library {
     }
     /// Rating, flag, label, capture time and keywords of `ids`, read again
     /// from the catalog, and the photos shown.
-    fn refresh_photos(&mut self, ids: &[i64]) -> Result<()> {
-        let wanted: std::collections::HashSet<i64> = ids.iter().copied().collect();
-        let fresh: std::collections::HashMap<i64, crate::catalog::Photo> = self
+    fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
+        let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
+        let fresh: std::collections::HashMap<PhotoId, crate::catalog::Photo> = self
             .catalog
             .photos()?
             .into_iter()
@@ -336,7 +336,7 @@ impl Library {
     }
     /// The keywords shown for `ids`, read again from the catalog, and the
     /// photos shown, which a text filter may pick by them.
-    fn refresh_keywords(&mut self, ids: &[i64]) -> Result<()> {
+    fn refresh_keywords(&mut self, ids: &[PhotoId]) -> Result<()> {
         let mut names = std::collections::HashMap::new();
         for id in ids {
             let keywords: Vec<String> = self

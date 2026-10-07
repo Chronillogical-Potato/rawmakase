@@ -1,5 +1,6 @@
 //! Bounded, asynchronous disk-cache work and its UI progress.
 use crate::app::widgets::plural;
+use crate::catalog::PhotoId;
 use crate::catalog::preview_cache::{PreviewCache, Stamp};
 use eframe::egui;
 use std::{
@@ -124,7 +125,7 @@ pub(super) enum EditJob {
     /// Render (or load from cache) catalog photo `id` with its edit. Virtual
     /// copies share a file but not an edit, so results go by photo.
     Render {
-        id: i64,
+        id: PhotoId,
         /// Matches the result to this request, not to a later photo that
         /// reused a removed copy's id.
         ticket: u64,
@@ -140,12 +141,12 @@ pub(super) enum EditJob {
 }
 /// Photos shown in the grid or filmstrip in the last frame. Edited previews
 /// are rendered only for these, so scrolling past photos leaves no backlog.
-pub(super) type Wanted = Arc<Mutex<HashSet<i64>>>;
+pub(super) type Wanted = Arc<Mutex<HashSet<PhotoId>>>;
 /// What an edited preview job came to.
 pub(super) enum EditResult {
-    Ready(i64, u64, image::RgbImage),
+    Ready(PhotoId, u64, image::RgbImage),
     /// The photo scrolled out of view first; request it again when shown.
-    Skipped(i64, u64),
+    Skipped(PhotoId, u64),
     Failed,
     /// A preview could not be kept in the cache; it comes besides any result.
     CacheError(String),
@@ -398,7 +399,7 @@ mod tests {
             Ok(image::open(path)?.to_rgb8())
         }
         let wanted = Wanted::default();
-        wanted.lock().unwrap().extend([1, 2]);
+        wanted.lock().unwrap().extend([PhotoId(1), PhotoId(2)]);
         let (tx, rx) = spawn_edited_with(
             directory.path().join("previews.sqlite3"),
             wanted,
@@ -412,15 +413,15 @@ mod tests {
             path: path.clone(),
             source: source.clone(),
         };
-        tx.send(job(1, &panics))?;
+        tx.send(job(PhotoId(1), &panics))?;
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
             EditResult::Failed
         ));
-        tx.send(job(2, &works))?;
+        tx.send(job(PhotoId(2), &works))?;
         assert!(matches!(
             rx.recv_timeout(Duration::from_secs(10))?,
-            EditResult::Ready(2, 0, _)
+            EditResult::Ready(PhotoId(2), 0, _)
         ));
         Ok(())
     }

@@ -1,6 +1,6 @@
 //! A photo's saved edit: its recipe and export options, the spots and masks
 //! kept beside them, and the bitmaps recipes refer to by hash.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::edits::{SavedEdit, local_edits};
 use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
 use anyhow::{Result, ensure};
@@ -10,12 +10,12 @@ use std::path::Path;
 /// One photo's change for [`Catalog::change_edits`].
 pub enum EditChange<'a, 'b> {
     Save(&'b EditToSave<'a>),
-    Clear { id: i64 },
+    Clear { id: PhotoId },
 }
 
 /// One photo's edit for [`Catalog::save_edits`].
 pub struct EditToSave<'a> {
-    pub id: i64,
+    pub id: PhotoId,
     pub path: &'a Path,
     pub recipe: &'a Recipe,
     pub export: &'a ExportOptions,
@@ -45,7 +45,7 @@ impl Catalog {
     }
     pub fn save_edit(
         &self,
-        id: i64,
+        id: PhotoId,
         path: &Path,
         recipe: &Recipe,
         export: &ExportOptions,
@@ -106,11 +106,11 @@ impl Catalog {
         Ok(())
     }
     /// The photo's spots and masks, saved apart from its recipe.
-    fn local_edits(&self, id: i64) -> Result<crate::develop::LocalEdits> {
+    fn local_edits(&self, id: PhotoId) -> Result<crate::develop::LocalEdits> {
         local_edits(self.local_text(id)?.as_deref())
     }
     /// The photo's spots and masks as stored, unread.
-    pub(super) fn local_text(&self, id: i64) -> Result<Option<String>> {
+    pub(super) fn local_text(&self, id: PhotoId) -> Result<Option<String>> {
         Ok(self
             .db
             .query_row("SELECT data FROM local_edits WHERE photo=?", [id], |r| {
@@ -120,13 +120,13 @@ impl Catalog {
     }
     /// The photo's saved RAWmakase edit, if it has one; an error when it can't be
     /// read or its file changed since it was saved.
-    pub fn load_edit(&self, id: i64, path: &Path) -> Result<Option<SavedEdit>> {
+    pub fn load_edit(&self, id: PhotoId, path: &Path) -> Result<Option<SavedEdit>> {
         self.edit_record(id)?.saved(path)
     }
     /// When each edited photo was last edited, as "YYYY-MM-DD HH:MM:SS"
     /// UTC: in RAWmakase, or else in Lightroom, whose history counts seconds
     /// from 2001.
-    pub fn edit_times(&self) -> Result<std::collections::HashMap<i64, String>> {
+    pub fn edit_times(&self) -> Result<std::collections::HashMap<PhotoId, String>> {
         let mut query = self.db.prepare(
             "SELECT p.id, COALESCE(p.edited_at,
                  (SELECT datetime(MAX(h.created) + 978307200, 'unixepoch')
@@ -142,7 +142,7 @@ impl Catalog {
     /// Changes whenever the photo's edit does: a hash of its recipe, its
     /// spots and masks, and its Lightroom settings. Cheaper than reading
     /// the edit itself, for previews to notice an edit saved elsewhere.
-    pub fn edit_stamp(&self, id: i64) -> Result<u64> {
+    pub fn edit_stamp(&self, id: PhotoId) -> Result<u64> {
         use std::hash::{Hash, Hasher};
         let texts: [Option<String>; 3] = self
             .db
@@ -157,7 +157,7 @@ impl Catalog {
     }
     /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
     /// develop text, if any.
-    pub fn edit_texts(&self, id: i64) -> Result<(Option<String>, Option<String>)> {
+    pub fn edit_texts(&self, id: PhotoId) -> Result<(Option<String>, Option<String>)> {
         let (recipe, lightroom): (Option<String>, Option<String>) = self.db.query_row(
             "SELECT recipe, lightroom_develop FROM photos WHERE id=?",
             [id],

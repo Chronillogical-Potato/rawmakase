@@ -7,7 +7,7 @@
 //! results are kept as textures, a few at a time, oldest dropped first.
 use super::previews::EditSource;
 use super::thumbnails;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -27,7 +27,7 @@ const THREADS: usize = 2;
 
 /// A preview as asked for: photo, file (photo ids can be reused), edge and
 /// the edit's stamp, so an edit saved anywhere renders it again.
-type Key = (i64, PathBuf, u32, u64);
+type Key = (PhotoId, PathBuf, u32, u64);
 type Render = fn(&Path, u32, Option<&EditSource>) -> anyhow::Result<image::RgbImage>;
 
 struct Job {
@@ -205,7 +205,7 @@ impl ScreenPreviews {
         self.pending.clear();
     }
     /// Forgets `id`'s previews, as it was removed.
-    pub(super) fn forget(&mut self, id: i64) {
+    pub(super) fn forget(&mut self, id: PhotoId) {
         self.textures.retain(|key, _| key.0 != id);
         self.order.retain(|key| key.0 != id);
         self.failed.retain(|key, _| key.0 != id);
@@ -293,7 +293,7 @@ fn render(path: &Path, edge: u32, edit: Option<&EditSource>) -> anyhow::Result<i
 mod tests {
     use super::*;
 
-    fn photo(id: i64, path: &Path) -> Photo {
+    fn photo(id: PhotoId, path: &Path) -> Photo {
         Photo {
             id,
             path: path.into(),
@@ -308,7 +308,7 @@ mod tests {
         image::RgbImage::new(3000, 2000).save(&path)?;
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::new(&ctx);
-        let a = photo(1, &path);
+        let a = photo(PhotoId(1), &path);
         assert!(matches!(screen.get(&a, 900, 0, || None), Shown::Loading));
         screen.wait(&ctx);
         // Rendered at the next step up from the size asked for.
@@ -317,7 +317,7 @@ mod tests {
             _ => panic!("not rendered"),
         }
         // Forgetting the photo renders it again.
-        screen.forget(1);
+        screen.forget(PhotoId(1));
         assert!(matches!(screen.get(&a, 900, 0, || None), Shown::Loading));
         Ok(())
     }
@@ -333,8 +333,12 @@ mod tests {
         }
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, render);
-        let photos = [(1, "panics"), (2, "fails"), (3, "works")]
-            .map(|(id, path)| photo(id, Path::new(path)));
+        let photos = [
+            (PhotoId(1), "panics"),
+            (PhotoId(2), "fails"),
+            (PhotoId(3), "works"),
+        ]
+        .map(|(id, path)| photo(id, Path::new(path)));
         for p in &photos {
             let _ = screen.get(p, 100, 0, || None);
         }
@@ -357,9 +361,9 @@ mod tests {
     fn a_preview_no_longer_shown_is_skipped_and_asked_for_again() {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
-        let a = photo(1, Path::new("a"));
+        let a = photo(PhotoId(1), Path::new("a"));
         // Queued, then not shown for a frame before a worker takes it.
-        let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
+        let key = (PhotoId(1), PathBuf::from("a"), EDGE_STEP, 0);
         screen.pending.insert(key.clone(), 0);
         screen.queue.0.lock().unwrap().jobs.push(Job {
             key,
@@ -378,7 +382,7 @@ mod tests {
     fn a_render_asked_for_before_an_edit_changed_is_dropped() {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
-        let key = (1, PathBuf::from("a"), EDGE_STEP, 0);
+        let key = (PhotoId(1), PathBuf::from("a"), EDGE_STEP, 0);
         // The photo was asked for again (ticket 2) after the edit changed,
         // and the render asked for before it (ticket 1) comes in first.
         screen.pending.insert(key.clone(), 2);
@@ -402,7 +406,7 @@ mod tests {
     fn a_failed_preview_is_asked_for_again_once_retried() {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| anyhow::bail!("offline"));
-        let a = photo(1, Path::new("a"));
+        let a = photo(PhotoId(1), Path::new("a"));
         let _ = screen.get(&a, 100, 0, || None);
         screen.wait(&ctx);
         assert!(matches!(screen.get(&a, 100, 0, || None), Shown::Failed(_)));
@@ -415,7 +419,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut screen = ScreenPreviews::with(&ctx, |_, _, _| Ok(image::RgbImage::new(4, 4)));
         let photos: Vec<Photo> = (1..=KEPT as i64 + 3)
-            .map(|id| photo(id, Path::new("a")))
+            .map(|id| photo(PhotoId(id), Path::new("a")))
             .collect();
         // One frame shows them all, as a survey of seven does.
         for p in &photos {

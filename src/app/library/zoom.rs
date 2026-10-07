@@ -8,6 +8,7 @@
 //! Loupe goes back to Fit. In flight: one region at a time, the latest asked
 //! for. Retained: one region texture, no larger than the view.
 use crate::app::worker::Latest;
+use crate::catalog::PhotoId;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{
@@ -49,7 +50,7 @@ struct Held {
 /// The image pixels in view, read from the full decode in the background.
 pub(super) struct Regions {
     /// The photo the region and size below belong to.
-    pub photo: Option<i64>,
+    pub photo: Option<PhotoId>,
     pub full: Option<[u32; 2]>,
     pub region: Option<(egui::TextureHandle, [f32; 4])>,
     /// Asked for and not in yet.
@@ -57,7 +58,7 @@ pub(super) struct Regions {
     worker: Latest<Option<RegionJob>>,
     results: Receiver<Done>,
     ticket: u64,
-    requested: Option<(i64, [i32; 2], [u32; 2], u32)>,
+    requested: Option<(PhotoId, [i32; 2], [u32; 2], u32)>,
     cancel: Arc<AtomicBool>,
     pub error: Option<String>,
 }
@@ -114,7 +115,7 @@ impl Regions {
     /// of the photo), unless they are already on their way.
     pub(super) fn request(
         &mut self,
-        photo: i64,
+        photo: PhotoId,
         path: &std::path::Path,
         center: [f32; 2],
         size: [u32; 2],

@@ -8,6 +8,7 @@
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
 use crate::app::worker::{Event, Latest, LoadJob};
+use crate::catalog::PhotoId;
 #[cfg(test)]
 use crate::develop::Recipe;
 use eframe::egui::{self, Vec2};
@@ -78,9 +79,9 @@ pub struct Editor {
     importing: Option<std::sync::Arc<bulk_import::ImportProgress>>,
     close_confirm: bool,
     /// The virtual copy waiting for the user to confirm its removal.
-    remove_copy: Option<i64>,
+    remove_copy: Option<PhotoId>,
     /// Photos waiting for the user to confirm Read Metadata from Files.
-    read_metadata: Option<Vec<i64>>,
+    read_metadata: Option<Vec<PhotoId>>,
     /// A photo Develop could not open and why, until the user dismisses it.
     not_editable: Option<(String, String)>,
     /// A folder change waiting for the user's answer.
@@ -94,7 +95,7 @@ pub struct Editor {
     first_conversion: treatment::FirstConversion,
     /// The RAW the Loupe last started loading, so one that fails is not
     /// loaded again every frame.
-    loupe_tried: Option<i64>,
+    loupe_tried: Option<PhotoId>,
     /// Preferences > Raw Defaults, ready to apply; shared with the loader and the
     /// Library's previews.
     raw_defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
@@ -348,7 +349,7 @@ impl Editor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CatalogPlace {
     source: String,
-    photo: Option<i64>,
+    photo: Option<PhotoId>,
     module: Module,
 }
 impl Default for CatalogPlace {

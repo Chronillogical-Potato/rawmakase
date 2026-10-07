@@ -257,12 +257,12 @@ fn refused_open_does_not_claim_another_photo_opened() -> anyhow::Result<()> {
     )?));
     let id = e.library.as_ref().unwrap().photos[0].id;
     std::fs::remove_file(missing)?;
-    e.document.catalog_photo = Some(999);
+    e.document.catalog_photo = Some(PhotoId(999));
     let error = e
         .execute_command(Command::new(Operation::Open(PhotoTarget::Id(id))), &ctx)
         .unwrap_err();
     assert_eq!(error.code, "not_editable");
-    assert_eq!(e.document.catalog_photo, Some(999));
+    assert_eq!(e.document.catalog_photo, Some(PhotoId(999)));
     assert!(e.module == Module::Develop);
     Ok(())
 }

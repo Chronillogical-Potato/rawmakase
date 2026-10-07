@@ -4,6 +4,7 @@ use super::{Action, Msg, Sender, parse_action, shortcut_action};
 use crate::app::commands::{
     self, Command, Error, Operation, Param, PhotoTarget, PresetTarget, Target, Until,
 };
+use crate::catalog::PhotoId;
 use eframe::egui;
 use serde_json::{Value, json};
 use std::{
@@ -134,7 +135,7 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
             Operation::Action(action)
         }
         "open" => Operation::Open(match (request["id"].as_i64(), request["name"].as_str()) {
-            (Some(id), _) => PhotoTarget::Id(id),
+            (Some(id), _) => PhotoTarget::Id(PhotoId(id)),
             (None, Some(name)) => PhotoTarget::Name(name.into()),
             _ => return Err(invalid("open requires id or name")),
         }),
@@ -174,7 +175,7 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
         // timeout_ms (1 s by default, at most 5 s, within clients' read timeout).
         "wait" => {
             let until = match text("until")? {
-                "loaded" => Until::Loaded(integer("photo_id", 1, i64::MAX)?),
+                "loaded" => Until::Loaded(PhotoId(integer("photo_id", 1, i64::MAX)?)),
                 "job" => Until::Job(integer("job_id", 1, i64::MAX)? as u64),
                 _ => return Err(invalid("until must be loaded or job")),
             };

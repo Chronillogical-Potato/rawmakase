@@ -52,7 +52,7 @@ impl Automation {
 }
 
 use super::{Editor, state::Tool};
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +61,7 @@ pub(super) use rawmakase_protocol::PROTOCOL;
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Target {
-    pub photo_id: Option<i64>,
+    pub photo_id: Option<PhotoId>,
     pub generation: Option<u64>,
     pub revision: Option<u64>,
     /// A mask index from state. Requires generation and revision guards, since
@@ -135,7 +135,7 @@ pub(super) enum Operation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Until {
     /// The photo is loaded, or no longer the one opened (another replaced it).
-    Loaded(i64),
+    Loaded(PhotoId),
     /// The output job has finished, or does not exist.
     Job(u64),
 }
@@ -143,7 +143,7 @@ pub(super) enum Until {
 #[derive(Clone, Debug)]
 pub(super) enum PhotoTarget {
     Name(String),
-    Id(i64),
+    Id(PhotoId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -782,7 +782,11 @@ impl Editor {
         }
         Ok(())
     }
-    pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Outcome> {
+    pub(super) fn execute_action(
+        &mut self,
+        action: Action,
+        photo: Option<PhotoId>,
+    ) -> Result<Outcome> {
         use Action::*;
         if let Some(edit) = action.metadata() {
             if self.module == Module::Library && photo.is_none() {
@@ -901,7 +905,7 @@ impl Editor {
     pub(super) fn command_metadata(
         &mut self,
         edit: super::photo_metadata::Edit,
-        photo: Option<i64>,
+        photo: Option<PhotoId>,
         advance: bool,
     ) -> Result<()> {
         let library = self

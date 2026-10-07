@@ -1,5 +1,5 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
-use crate::catalog::{Catalog, Collection, Folder, FolderId, Photo, RootId};
+use crate::catalog::{Catalog, Collection, Folder, FolderId, Photo, PhotoId, RootId};
 use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     None,
-    Develop(i64),
+    Develop(PhotoId),
     RelinkRoot(RootId),
     RelinkFolder(FolderId),
     AddFolder,
@@ -40,10 +40,10 @@ pub use quick::CollectionCommand;
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CopyAction {
-    Create(i64),
-    SetMaster(i64),
+    Create(PhotoId),
+    SetMaster(PhotoId),
     /// Asks first, as Lightroom does.
-    Remove(i64),
+    Remove(PhotoId),
 }
 pub struct Library {
     pub catalog: Catalog,
@@ -57,7 +57,7 @@ pub struct Library {
     folders: Vec<Folder>,
     collections: Vec<Collection>,
     /// Each collection's photos, limited to the ones the Library shows.
-    collection_photos: HashMap<crate::catalog::CollectionId, HashSet<i64>>,
+    collection_photos: HashMap<crate::catalog::CollectionId, HashSet<PhotoId>>,
     roots: Vec<(RootId, String, Option<String>)>,
     /// Whether the folders missing on this computer were reported since the
     /// catalog opened.
@@ -81,7 +81,7 @@ pub struct Library {
     drawn_style: cell::Style,
     /// Grid cells' photo info, read once per photo while expanded cells
     /// show it.
-    cell_info: HashMap<i64, Option<crate::metadata::PhotoInfo>>,
+    cell_info: HashMap<PhotoId, Option<crate::metadata::PhotoInfo>>,
     strip: filmstrip::State,
     /// Counts changes to the photos shown, their order or their metadata,
     /// so the filmstrip notices a change made after it was drawn.
@@ -121,14 +121,14 @@ pub struct Library {
     /// Times photo info read from files was saved, so views know to refresh.
     info_saves: u64,
     /// The hovered grid photo's info, for its tooltip.
-    hover_info: Option<(i64, Option<crate::metadata::PhotoInfo>)>,
+    hover_info: Option<(PhotoId, Option<crate::metadata::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
-    info: Option<(i64, Option<crate::metadata::PhotoInfo>)>,
+    info: Option<(PhotoId, Option<crate::metadata::PhotoInfo>)>,
     /// Photos the capture-time backfill tried since the last online check.
-    capture_tried: HashSet<i64>,
+    capture_tried: HashSet<PhotoId>,
     /// A photo to keep in place in the grid after a re-sort, with its
     /// position before it.
-    keep_in_place: Option<(i64, usize)>,
+    keep_in_place: Option<(PhotoId, usize)>,
     /// The grid's scroll offset last frame.
     grid_offset: f32,
     /// Positions in `visible` the grid drew last frame; all until it is drawn.
@@ -141,7 +141,7 @@ pub struct Library {
     /// message is: (message, detail).
     message_detail: (String, String),
     /// Photos to Read Metadata from Files for, once confirmed.
-    read_request: Option<Vec<i64>>,
+    read_request: Option<Vec<PhotoId>>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -256,7 +256,7 @@ impl Library {
             folder.count = self.photos.iter().filter(|p| p.folder == folder.id).count();
         }
         self.collections = self.catalog.collections()?;
-        let ids: HashSet<i64> = self.photos.iter().map(|p| p.id).collect();
+        let ids: HashSet<PhotoId> = self.photos.iter().map(|p| p.id).collect();
         self.collection_photos = self.catalog.collection_photos()?;
         for members in self.collection_photos.values_mut() {
             members.retain(|id| ids.contains(id));
@@ -325,7 +325,7 @@ impl Library {
     /// opening it.
     /// The file is looked at directly: the availability scan counts every photo
     /// as there until it has checked.
-    pub(in crate::app) fn export_refusal(&self, id: i64) -> Option<Refusal> {
+    pub(in crate::app) fn export_refusal(&self, id: PhotoId) -> Option<Refusal> {
         let photo = self.photo(id)?;
         develop_refusal(photo, photo.path.is_file())
     }
@@ -366,7 +366,7 @@ impl Library {
             self.keep_in_place = anchor;
         }
     }
-    pub fn photo(&self, id: i64) -> Option<&Photo> {
+    pub fn photo(&self, id: PhotoId) -> Option<&Photo> {
         self.photos.iter().find(|p| p.id == id)
     }
     /// What photo `id` is developed from, as Develop would open it: its saved edit
@@ -375,7 +375,7 @@ impl Library {
     /// for a photo no longer in the catalog.
     pub(in crate::app) fn develop_source(
         &self,
-        id: i64,
+        id: PhotoId,
         demosaic: crate::raw::Demosaic,
     ) -> Option<Result<DevelopSource, Refusal>> {
         let photo = self.photo(id)?;
@@ -406,7 +406,7 @@ impl Library {
             edit,
         }))
     }
-    pub fn navigate(&self, id: i64, delta: i32) -> Option<i64> {
+    pub fn navigate(&self, id: PhotoId, delta: i32) -> Option<PhotoId> {
         let at = self.visible.iter().position(|i| self.photos[*i].id == id)?;
         let n = (at as i32 + delta).clamp(0, self.visible.len().saturating_sub(1) as i32) as usize;
         self.visible.get(n).map(|i| self.photos[*i].id)
@@ -434,15 +434,15 @@ impl Library {
         self.filter();
     }
     #[cfg(test)]
-    pub(in crate::app) fn select_range_to(&mut self, id: i64) {
+    pub(in crate::app) fn select_range_to(&mut self, id: PhotoId) {
         self.click(id, egui::Modifiers::SHIFT);
     }
     #[cfg(test)]
-    pub(in crate::app) fn shown(&self) -> Vec<i64> {
+    pub(in crate::app) fn shown(&self) -> Vec<PhotoId> {
         self.visible.iter().map(|i| self.photos[*i].id).collect()
     }
     /// Edits written elsewhere (Sync, its Undo): their previews render again.
-    pub(in crate::app) fn edits_changed(&mut self, ids: impl IntoIterator<Item = i64>) {
+    pub(in crate::app) fn edits_changed(&mut self, ids: impl IntoIterator<Item = PhotoId>) {
         for id in ids {
             self.cache.forget(id);
         }
@@ -450,11 +450,11 @@ impl Library {
         self.resort_in_place(|l| l.sort_keys = None);
     }
     /// Whether `id` is selected, shown or hidden by the filters.
-    pub(in crate::app) fn is_selected(&self, id: i64) -> bool {
+    pub(in crate::app) fn is_selected(&self, id: PhotoId) -> bool {
         self.selection.selected.contains(&id)
     }
     /// The selected photos in display order.
-    pub(in crate::app) fn selected_photos(&self) -> Vec<i64> {
+    pub(in crate::app) fn selected_photos(&self) -> Vec<PhotoId> {
         self.selected_ids()
     }
     pub(in crate::app) fn place(&self) -> Place {
@@ -493,7 +493,7 @@ impl Library {
     }
     /// Photos Read Metadata from Files was chosen for, for the editor to
     /// confirm.
-    pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<i64>> {
+    pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<PhotoId>> {
         self.read_request.take()
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
@@ -501,7 +501,7 @@ impl Library {
         self.copy_request.take()
     }
     /// Creates a virtual copy of `id` and selects it.
-    pub(super) fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
+    pub(super) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
         let copy = self.catalog.create_virtual_copy(id)?;
         self.reload()?;
         self.show(copy);
@@ -510,7 +510,7 @@ impl Library {
         }
         Ok(copy)
     }
-    pub(super) fn set_copy_as_master(&mut self, id: i64) -> Result<()> {
+    pub(super) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
         self.catalog.set_copy_as_master(id)?;
         self.reload()?;
         self.show(id);
@@ -520,7 +520,7 @@ impl Library {
         Ok(())
     }
     /// Removes virtual copy `id`; returns its master, which is selected.
-    pub(super) fn remove_virtual_copy(&mut self, id: i64) -> Result<Option<i64>> {
+    pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<Option<PhotoId>> {
         let photo = self.photo(id).cloned();
         self.catalog.remove_virtual_copy(id)?;
         self.cache.forget(id);
@@ -536,7 +536,7 @@ impl Library {
         Ok(master)
     }
     /// Selects `id`, leaving filters that would hide it so it stays in view.
-    fn show(&mut self, id: i64) {
+    fn show(&mut self, id: PhotoId) {
         if !self.visible.iter().any(|i| self.photos[*i].id == id) {
             if !self.filters.members.contains(&id) {
                 self.filters.collection = None;
@@ -588,7 +588,7 @@ impl Library {
     pub(super) fn update_edited(
         &mut self,
         ctx: &egui::Context,
-        id: i64,
+        id: PhotoId,
         image: image::RgbImage,
         recipe_json: String,
     ) {
@@ -600,7 +600,7 @@ impl Library {
     /// The selected photo, or else the first one shown in the current
     /// folder or filter (which then becomes selected), as Lightroom does
     /// when switching to Develop.
-    pub(super) fn selected_or_first(&mut self) -> Option<i64> {
+    pub(super) fn selected_or_first(&mut self) -> Option<PhotoId> {
         if self.selection.active.is_none() {
             self.select(self.visible.first().map(|i| self.photos[*i].id));
         }
@@ -616,7 +616,7 @@ impl Library {
         self.screen.clear();
         // Develop's renders of photos without an edit: back to the embedded
         // preview until Develop shows one with the new defaults.
-        let unedited: Vec<i64> = self
+        let unedited: Vec<PhotoId> = self
             .cache
             .edited_ids()
             .filter(|id| edit_source(&self.catalog, *id).is_none())
@@ -626,11 +626,11 @@ impl Library {
         }
     }
     /// Whether the photo's thumbnail already shows its edit (crop included).
-    pub(super) fn has_edited_thumbnail(&self, id: i64) -> bool {
+    pub(super) fn has_edited_thumbnail(&self, id: PhotoId) -> bool {
         self.cache.has_edited(id)
     }
     /// The Library's cached preview for a photo, if one is loaded.
-    pub(super) fn thumbnail(&self, id: i64) -> Option<&egui::TextureHandle> {
+    pub(super) fn thumbnail(&self, id: PhotoId) -> Option<&egui::TextureHandle> {
         self.texture(self.photo(id)?)
     }
     pub(super) fn preview_progress_active(&self) -> bool {
@@ -651,7 +651,7 @@ impl Library {
         self.commit_fields()
     }
     #[cfg(test)]
-    pub(super) fn set_copy_name_draft(&mut self, id: i64, name: &str) {
+    pub(super) fn set_copy_name_draft(&mut self, id: PhotoId, name: &str) {
         self.copy_names.draft = Some((id, name.into()));
     }
     /// Drops a Copy Name or metadata field that could not be saved, e.g.
@@ -712,7 +712,7 @@ pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
 /// else its Lightroom settings.
-fn edit_source(catalog: &Catalog, id: i64) -> Option<previews::EditSource> {
+fn edit_source(catalog: &Catalog, id: PhotoId) -> Option<previews::EditSource> {
     let (recipe, lightroom) = catalog.edit_texts(id).ok()?;
     recipe
         .map(previews::EditSource::Recipe)

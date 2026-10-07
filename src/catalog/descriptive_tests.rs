@@ -1,11 +1,12 @@
 use super::*;
+use crate::catalog::PhotoId;
 use crate::metadata::{
     Capture, DEFAULT_LANG, Descriptive, LangAlt, Location, PhotoInfo, TextField, Value,
 };
 use rusqlite::Connection;
 
 /// A catalog with `n` photos added from a folder, and their ids.
-fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<i64>)> {
+fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<PhotoId>)> {
     let dir = tempfile::tempdir()?;
     let folder = dir.path().join("photos");
     std::fs::create_dir(&folder)?;
@@ -22,7 +23,7 @@ fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<i64>)> {
 }
 
 /// Sets a photo's descriptive overrides as a whole.
-fn put(cat: &mut Catalog, id: i64, descriptive: Descriptive) -> Result<()> {
+fn put(cat: &mut Catalog, id: PhotoId, descriptive: Descriptive) -> Result<()> {
     let mut snapshot = cat.metadata_snapshot(&[id])?.remove(0);
     snapshot.descriptive = descriptive;
     cat.restore_metadata(&[snapshot])

@@ -2,7 +2,7 @@
 //! and TIFF files: when a folder is added, for its new photos, and on Read
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::jpeg::{APP1, Segments};
 use crate::xml::ns::JPEG_HEADER;
 use crate::xmp::descriptive::{self, Read};
@@ -201,7 +201,7 @@ pub enum Merge {
 
 /// Writes what was read into photo `id`'s rows, in `db`'s transaction, as
 /// `merge` says. Rating, label and flag are set where the file has them.
-pub(super) fn apply(db: &Connection, id: i64, read: &Read, merge: Merge) -> Result<()> {
+pub(super) fn apply(db: &Connection, id: PhotoId, read: &Read, merge: Merge) -> Result<()> {
     let overwrite = merge == Merge::Overwrite;
     let mut d = super::descriptive::read(db, id)?;
     fn put<T: Clone>(slot: &mut Option<T>, value: &Option<T>, overwrite: bool) {
@@ -242,8 +242,8 @@ impl Catalog {
     /// field a photo's sidecar or embedded XMP has replaces the catalog's,
     /// edits included; fields the files lack are left alone. One
     /// transaction. Virtual copies are never read.
-    pub fn read_metadata_from_files(&mut self, ids: &[i64]) -> Result<SidecarReport> {
-        let photos: Vec<(i64, PathBuf)> = self
+    pub fn read_metadata_from_files(&mut self, ids: &[PhotoId]) -> Result<SidecarReport> {
+        let photos: Vec<(PhotoId, PathBuf)> = self
             .photos()?
             .into_iter()
             .filter(|p| ids.contains(&p.id) && p.master.is_none())
@@ -256,7 +256,7 @@ impl Catalog {
     /// left as it was and reported with its file.
     pub fn apply_file_metadata(
         &mut self,
-        reads: &[(i64, PathBuf, Read)],
+        reads: &[(PhotoId, PathBuf, Read)],
         merge: Merge,
     ) -> Result<SidecarReport> {
         let mut report = SidecarReport::default();
@@ -274,14 +274,18 @@ impl Catalog {
     /// Reads the metadata of photos just added from a folder.
     pub(super) fn import_file_metadata(
         &mut self,
-        added: &[(i64, PathBuf)],
+        added: &[(PhotoId, PathBuf)],
     ) -> Result<SidecarReport> {
         self.read_and_apply(added, Merge::FillEmpty)
     }
     /// Reads each photo's files and writes what they have.
-    fn read_and_apply(&mut self, files: &[(i64, PathBuf)], merge: Merge) -> Result<SidecarReport> {
+    fn read_and_apply(
+        &mut self,
+        files: &[(PhotoId, PathBuf)],
+        merge: Merge,
+    ) -> Result<SidecarReport> {
         let mut report = SidecarReport::default();
-        let reads: Vec<(i64, PathBuf, Read)> = files
+        let reads: Vec<(PhotoId, PathBuf, Read)> = files
             .iter()
             .filter_map(|(id, path)| {
                 let (read, found) = read_file(path);
@@ -302,7 +306,7 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
     if !super::lightroom::has_table(db, "lr", "Adobe_AdditionalMetadata")? {
         return Ok(0);
     }
-    let rows: Vec<(i64, String)> = db
+    let rows: Vec<(PhotoId, String)> = db
         .prepare(&format!(
             // Only photos that are still that Lightroom image: a photo
             // added since may have taken a removed copy's id.

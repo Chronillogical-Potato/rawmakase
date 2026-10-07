@@ -7,6 +7,7 @@ use super::descriptive::{DescriptiveEdit, parse_keywords};
 use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, paint_truncated, panel_edit, value_at};
 use super::{Library, Place};
 use crate::app::theme;
+use crate::catalog::PhotoId;
 use crate::metadata::{Descriptive, Keyword, Location, TextField, Value};
 use eframe::egui::{self, Vec2};
 
@@ -39,7 +40,7 @@ impl<T: PartialEq + Clone> Shared<T> {
 #[derive(Default)]
 pub(super) struct Fields {
     /// The photos shown; edits go to all of them.
-    pub(super) targets: Vec<i64>,
+    pub(super) targets: Vec<PhotoId>,
     /// Read again before the next frame draws.
     stale: bool,
     title: Shared<String>,
@@ -131,8 +132,8 @@ fn text_of(d: &Descriptive, field: TextField) -> String {
 impl Library {
     /// The photos the Metadata panel edits: every one selected in the Grid,
     /// else the active one.
-    fn field_targets(&self) -> Vec<i64> {
-        let mut ids: Vec<i64> = if self.edits_active_only() {
+    fn field_targets(&self) -> Vec<PhotoId> {
+        let mut ids: Vec<PhotoId> = if self.edits_active_only() {
             self.selection.active.into_iter().collect()
         } else {
             self.selected_ids()

@@ -1,7 +1,7 @@
 //! Default Creator and Copyright from Preferences, written for photos added
 //! from folders where neither the file nor its sidecar has one: below an
 //! edit or an imported value, above the file's EXIF, and never at export.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::metadata::{LangAlt, Value};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ impl Catalog {
     /// its own and its file's EXIF none either. One transaction.
     pub(super) fn apply_defaults(
         &mut self,
-        added: &[(i64, PathBuf)],
+        added: &[(PhotoId, PathBuf)],
         defaults: &MetadataDefaults,
     ) -> Result<()> {
         if defaults.is_empty() {
@@ -46,8 +46,9 @@ impl Catalog {
                 .is_some_and(|t| !t.is_empty())
         };
         let (creator, copyright) = (defaults.creator.trim(), defaults.copyright.trim());
-        let ids: Vec<i64> = added.iter().map(|(id, _)| *id).collect();
-        let paths: HashMap<i64, &PathBuf> = added.iter().map(|(id, path)| (*id, path)).collect();
+        let ids: Vec<PhotoId> = added.iter().map(|(id, _)| *id).collect();
+        let paths: HashMap<PhotoId, &PathBuf> =
+            added.iter().map(|(id, path)| (*id, path)).collect();
         self.update_descriptive_where(&ids, |id, d| {
             if (creator.is_empty() || d.creator.is_some())
                 && (copyright.is_empty() || d.copyright.is_some())
