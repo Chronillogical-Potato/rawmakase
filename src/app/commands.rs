@@ -22,9 +22,18 @@ impl Automation {
     pub(super) fn job_finished(&self, id: u64) -> bool {
         self.outputs.finished(id)
     }
+    /// Whether an export or preview job a command started is still running, and
+    /// not cancelled.
+    pub(super) fn outputs_running(&self) -> bool {
+        self.outputs.any_running()
+    }
     /// Cancels the export and preview jobs commands started.
     pub(super) fn cancel_outputs(&self) {
         self.outputs.cancel_all();
+    }
+    /// The export and preview jobs commands started, cancelled, to wait for at exit.
+    pub(super) fn stop_outputs(&mut self) -> Vec<super::task::Stopping> {
+        self.outputs.stop()
     }
 }
 pub(super) use parameter::Param;

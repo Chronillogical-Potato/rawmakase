@@ -144,6 +144,13 @@ pub(crate) struct Library {
     defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
 }
 impl Library {
+    /// Ends the preview workers at exit: the renders under way are cancelled and the
+    /// results dropped, so none waits for the grid. They are then waited for.
+    pub(in crate::app) fn close_previews(&mut self) -> Vec<crate::app::task::Stopping> {
+        let mut stopping = Vec::from(self.cache.close());
+        stopping.extend(self.screen.close());
+        stopping
+    }
     /// The Library over a catalog read with [`CatalogSession::open`].
     pub(crate) fn new(opened: Opened, ctx: egui::Context) -> Self {
         let Opened {

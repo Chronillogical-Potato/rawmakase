@@ -3,7 +3,17 @@ use super::{Editor, state::Picture};
 use crate::model::recipe::Recipe;
 use crate::{app::Module, catalog::PhotoId, develop::Geometry};
 use eframe::egui::{self, Vec2};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
+
+/// How saving the edit before closing ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Flushed {
+    Saved,
+    /// Not saved: the error is on the status line.
+    Failed,
+    /// Still being saved when time ran out.
+    Late,
+}
 
 impl Editor {
     pub(super) fn open(&mut self, path: PathBuf) {
@@ -178,13 +188,24 @@ impl Editor {
         {
             return;
         }
-        let Some(raw) = self.document.path.clone() else {
+        let Some(job) = self.save_job() else {
             return;
         };
+        match self.autosave.submit(job, ctx) {
+            Ok(()) => self.document.edit.save_state_mut().saving(),
+            // No saver thread: save here, as before.
+            Err(_) => {
+                self.flush();
+            }
+        }
+    }
+    /// The edit as it stands, to save to the catalog photo it belongs to.
+    fn save_job(&self) -> Option<super::autosave::Job> {
+        let raw = self.document.path.clone()?;
         let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) else {
-            return;
+            return None;
         };
-        let job = super::autosave::Job {
+        Some(super::autosave::Job {
             catalog: l.session.catalog.path.clone(),
             photo,
             raw,
@@ -195,14 +216,57 @@ impl Editor {
                 .edit
                 .history()
                 .saved(self.document.edit.recipe()),
-        };
-        match self.autosave.submit(job, ctx) {
-            Ok(()) => self.document.edit.save_state_mut().saving(),
-            // No saver thread: save here, as before.
-            Err(_) => {
-                self.flush();
+        })
+    }
+    /// Saves the edit as [`flush`](Self::flush) does, but on the autosave thread,
+    /// giving up at `until`: a catalog on a stalled network share must not hold up
+    /// closing. A save still running then goes on, and the edit stays unsaved.
+    pub(super) fn flush_by(&mut self, until: Instant) -> Flushed {
+        if !self.commit_library_drafts() {
+            return Flushed::Failed;
+        }
+        self.commit_snapshot_rename();
+        if self.document.edit.history().in_gesture() {
+            self.document.edit.save_state_mut().mark_changed();
+        }
+        // An edit closed without saving leaves the save in flight to finish alone.
+        if self.document.edit.save_state().needs_save() {
+            if let Some(completion) = self.autosave.wait_until(until) {
+                self.background_saved(completion);
+            }
+            if self.autosave.busy() {
+                return Flushed::Late;
             }
         }
+        if self.document.edit.save_state().needs_save()
+            && let Some(job) = self.save_job()
+        {
+            // A saver lost since the last save is started again by a second
+            // submit; saving here instead could stall as long as the catalog does.
+            let submitted = self
+                .autosave
+                .submit(job, &self.context)
+                .or_else(|job| self.autosave.submit(*job, &self.context));
+            if submitted.is_err() {
+                let error = "the autosave thread could not start".to_string();
+                self.document.edit.save_state_mut().failed(error.clone());
+                self.status = format!("Edits not saved: {error}");
+                return Flushed::Failed;
+            }
+            self.document.edit.save_state_mut().saving();
+            if let Some(completion) = self.autosave.wait_until(until) {
+                self.background_saved(completion);
+            }
+            if self.autosave.busy() {
+                return Flushed::Late;
+            }
+            if self.document.edit.save_state().needs_save() {
+                return Flushed::Failed;
+            }
+        }
+        // Its state was just saved with History: nothing new to save.
+        self.finish_saved_gesture();
+        Flushed::Saved
     }
     fn background_saved(&mut self, completion: super::autosave::Completion) {
         let saved = completion.into_result();

@@ -7,7 +7,7 @@
 //!
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
-use crate::app::worker::{Event, Latest, LoadJob};
+use crate::app::worker::{Event, Latest};
 use crate::catalog::PhotoId;
 #[cfg(test)]
 use crate::model::recipe::Recipe;
@@ -31,7 +31,7 @@ pub(crate) struct Editor {
     module: Module,
     tx: Sender<Event>,
     rx: Receiver<Event>,
-    loader: Latest<LoadJob>,
+    loader: worker::Loader,
     renderer: worker::Renderer,
     /// Develop's Reference View, and the worker developing its photo.
     reference: reference::ReferenceView,
@@ -75,6 +75,16 @@ pub(crate) struct Editor {
     /// Progress of a running profile or preset import.
     importing: Option<std::sync::Arc<bulk_import::ImportProgress>>,
     close_confirm: bool,
+    /// The close was refused only to let work finish (an export, Sync Settings, a
+    /// folder change, a command output): it is asked for again once that is done.
+    close_after_work: bool,
+    /// When quitting must be done by, set as the close guard lets a close through,
+    /// so the save it made and the exit hook share one deadline.
+    quit_by: Option<std::time::Instant>,
+    /// The next close goes ahead without waiting for a folder change or a command
+    /// output, as the user chose; the exit hook still waits for them, under its
+    /// deadline.
+    close_anyway: bool,
     /// The dialog blocking the editor, if one is open.
     modal: Option<Modal>,
     /// A photo Develop could not open and why, until the user dismisses it.
@@ -188,7 +198,7 @@ impl Editor {
         );
         let last = session.last_path.clone().filter(|p| p.exists());
         let (tx, rx) = mpsc::channel();
-        let loader = worker::loader(tx.clone(), ctx.clone());
+        let loader = worker::Loader::new(tx.clone(), ctx.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
         let mut app = Self {
@@ -245,6 +255,9 @@ impl Editor {
             catalog_work: None,
             importing: None,
             close_confirm: false,
+            close_after_work: false,
+            quit_by: None,
+            close_anyway: false,
             modal: None,
             not_editable: None,
             undo_log: Default::default(),

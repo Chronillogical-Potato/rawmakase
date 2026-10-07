@@ -132,7 +132,7 @@ pub(super) fn reset_connection(status: &Mutex<Status>, ctx: &egui::Context) -> u
 
 /// Listens for the device on a thread of its own, finding it again when it is
 /// plugged back in, until `stop`'s sender is dropped. Where there is no MIDI backend nothing
-/// is ever sent.
+/// is ever sent, and no thread starts.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) fn listen(
     binding: DeviceConfig,
@@ -141,7 +141,7 @@ pub(super) fn listen(
     ctx: egui::Context,
     status: Arc<Mutex<Status>>,
     stop: std::sync::mpsc::Receiver<()>,
-) {
+) -> Option<std::thread::JoinHandle<()>> {
     use midir::{MidiInput, MidiInputConnection};
     use std::sync::mpsc::RecvTimeoutError;
     let spawned = std::thread::Builder::new()
@@ -230,9 +230,7 @@ pub(super) fn listen(
             }
             update(&status, &ctx, |s| s.connected = None);
         });
-    if let Err(e) = spawned {
-        eprintln!("MIDI listener: {e}");
-    }
+    spawned.map_err(|e| eprintln!("MIDI listener: {e}")).ok()
 }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(super) fn listen(
@@ -242,5 +240,6 @@ pub(super) fn listen(
     _: egui::Context,
     _: Arc<Mutex<Status>>,
     _: std::sync::mpsc::Receiver<()>,
-) {
+) -> Option<std::thread::JoinHandle<()>> {
+    None
 }

@@ -4697,6 +4697,103 @@ fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
     assert_eq!(saved.recipe.exposure, 0.7);
     Ok(())
 }
+/// An editor showing a catalog photo with an edit not saved yet, on a catalog whose
+/// saves stall, as on a network share that stopped answering.
+fn editor_with_a_stalled_catalog() -> anyhow::Result<(tempfile::TempDir, Editor)> {
+    let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.path = Some(d.path().join("photos/a.RAF"));
+    e.autosave = autosave::Autosave::stalled();
+    let before = e.document.edit.recipe().clone();
+    e.document.edit.setup_mut().exposure = 0.7;
+    e.commit_edit(before, None);
+    Ok((d, e))
+}
+#[test]
+fn quitting_gives_up_on_a_save_the_catalog_does_not_answer() -> anyhow::Result<()> {
+    let (_d, mut e) = editor_with_a_stalled_catalog()?;
+    let started = std::time::Instant::now();
+    e.exit_within(std::time::Duration::from_millis(100));
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    assert!(e.document.edit.save_state().needs_save());
+    Ok(())
+}
+#[test]
+fn closing_while_the_catalog_does_not_answer_keeps_the_window_open() -> anyhow::Result<()> {
+    let (_d, mut e) = editor_with_a_stalled_catalog()?;
+    let ctx = e.context.clone();
+    let mut output = ctx.run_ui(close_request(), |ui| e.pending_work(ui.ctx()));
+    output.textures_delta.clear();
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose)
+    );
+    assert!(e.close_confirm);
+    assert!(e.autosave.busy(), "the save goes on");
+    // Closes once the save is done, without asking again.
+    assert!(e.close_after_work);
+    assert!(e.quit_by.is_none());
+    assert!(e.document.edit.save_state().needs_save());
+    Ok(())
+}
+#[test]
+fn closing_during_a_folder_change_waits_for_it_then_closes() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    assert!(e.activity.begin_folder_change());
+    assert!(e.quitting_would_cut_off_work());
+    let commands = |e: &mut Editor, input| {
+        let mut output = ctx.run_ui(input, |ui| e.pending_work(ui.ctx()));
+        output.textures_delta.clear();
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .clone()
+    };
+    assert!(commands(&mut e, close_request()).contains(&egui::ViewportCommand::CancelClose));
+    assert!(e.close_confirm);
+    // Still running: the window stays open and asks nothing more.
+    assert!(!commands(&mut e, Default::default()).contains(&egui::ViewportCommand::Close));
+    // Once the catalog opens again, the close goes ahead.
+    e.activity.finish_dialog();
+    assert!(commands(&mut e, Default::default()).contains(&egui::ViewportCommand::Close));
+    assert!(!e.close_confirm);
+}
+#[test]
+fn closing_anyway_does_not_wait_for_a_folder_change() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    assert!(e.activity.begin_folder_change());
+    // Close anyway, as the question offers: the next close goes ahead.
+    e.close_anyway = true;
+    let mut output = ctx.run_ui(close_request(), |ui| e.pending_work(ui.ctx()));
+    output.textures_delta.clear();
+    let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+    assert!(!commands.contains(&egui::ViewportCommand::CancelClose));
+    assert!(e.quit_by.is_some());
+    assert!(!e.close_anyway, "for that close only");
+}
+/// The input of a frame in which the window is asked to close.
+fn close_request() -> egui::RawInput {
+    let mut input = egui::RawInput::default();
+    input.viewports.insert(
+        egui::ViewportId::ROOT,
+        egui::ViewportInfo {
+            events: vec![egui::ViewportEvent::Close],
+            ..Default::default()
+        },
+    );
+    input
+}
+#[test]
+fn quitting_waits_for_every_worker_it_stops() -> anyhow::Result<()> {
+    let (_d, mut e, _) = editor_with_catalog(&["a.RAF"])?;
+    let waited = e.exit_within(std::time::Duration::from_secs(20));
+    assert_eq!(waited.detached, 0);
+    assert!(waited.finished > 0);
+    Ok(())
+}
 /// A catalog of two photos, A and B, the latter rated 2, in an editor.
 fn two_photo_editor() -> anyhow::Result<(tempfile::TempDir, egui::Context, Editor, [PhotoId; 2])> {
     let dir = tempfile::tempdir()?;
@@ -4927,15 +5024,7 @@ fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::
     editor.document.edit.change(None, |r| r.exposure = 1.);
     assert!(editor.quitting_would_cut_off_work());
     // The close the Dock's quit turns into: the guard tries to save, fails, and asks.
-    let mut input = egui::RawInput::default();
-    input.viewports.insert(
-        egui::ViewportId::ROOT,
-        egui::ViewportInfo {
-            events: vec![egui::ViewportEvent::Close],
-            ..Default::default()
-        },
-    );
-    let mut output = ctx.run_ui(input, |ui| editor.pending_work(ui.ctx()));
+    let mut output = ctx.run_ui(close_request(), |ui| editor.pending_work(ui.ctx()));
     output.textures_delta.clear();
     assert!(
         output.viewport_output[&egui::ViewportId::ROOT]

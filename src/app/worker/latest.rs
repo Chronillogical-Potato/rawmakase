@@ -59,11 +59,28 @@ impl<T: Send + 'static> Latest<T> {
     }
     /// Replaces the pending job of `lane`, leaving the other lanes' work queued.
     pub(crate) fn submit_to(&self, lane: usize, job: T) {
-        let mut jobs = self.slot.jobs.lock().unwrap();
+        self.slot.submit_to(lane, job);
+    }
+    /// Where another worker submits jobs to this one, which stays owned here.
+    pub(crate) fn mailbox(&self) -> Mailbox<T> {
+        Mailbox(self.slot.clone())
+    }
+}
+/// Submits jobs to a [`Latest`] worker without owning it: stopping and waiting
+/// for the worker stay with its owner. Jobs submitted once it has stopped never run.
+pub(crate) struct Mailbox<T>(Arc<Slot<T>>);
+impl<T> Mailbox<T> {
+    pub(crate) fn submit(&self, job: T) {
+        self.0.submit_to(0, job);
+    }
+}
+impl<T> Slot<T> {
+    fn submit_to(&self, lane: usize, job: T) {
+        let mut jobs = self.jobs.lock().unwrap();
         let last = jobs.len() - 1;
         jobs[lane.min(last)] = Some(job);
         drop(jobs);
-        self.slot.wake.notify_one();
+        self.wake.notify_one();
     }
 }
 /// The message a caught panic carries.

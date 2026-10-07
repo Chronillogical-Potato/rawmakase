@@ -451,7 +451,14 @@ fn export(
             &prepared.embed,
         )?;
         progress(0.95);
-        let (path, note) = commit(staged, photo, planned, batch.plan.late, reserved, cancel)?;
+        let (path, note) = commit(
+            staged.file,
+            photo,
+            planned,
+            batch.plan.late,
+            reserved,
+            cancel,
+        )?;
         notes.extend(note);
         progress(1.);
         Ok((path, notes))

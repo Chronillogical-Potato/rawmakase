@@ -100,6 +100,20 @@ impl Hub {
         hub.set_socket(hub.settings.socket);
         hub
     }
+    /// Drops the control request queue at exit: requests in it, or waiting for a
+    /// photo or an output, and any sent later are answered at once, so no connection
+    /// waits for the interface.
+    pub(super) fn close_requests(&mut self) {
+        self.rx = mpsc::sync_channel(0).1;
+        self.waits.clear();
+        self.link = None;
+    }
+    /// Stops the MIDI listeners and the control socket, to wait for at exit.
+    pub(super) fn stop(&mut self) -> Vec<super::task::Stopping> {
+        let mut stopping: Vec<_> = self.devices.iter_mut().map(Device::stop).collect();
+        stopping.extend(self.socket.as_mut().map(socket::Handle::stop));
+        stopping
+    }
     fn set_socket(&mut self, on: bool) {
         self.socket = None;
         if on && let Some((tx, ctx)) = &self.link {

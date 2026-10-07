@@ -272,7 +272,7 @@ mod reference;
 mod renderer;
 pub(crate) use latest::Latest;
 pub(crate) use latest::panic_message;
-pub(crate) use loader::loader;
+pub(crate) use loader::Loader;
 pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
 pub(crate) use renderer::Renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

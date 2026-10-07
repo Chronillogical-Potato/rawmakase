@@ -34,6 +34,7 @@ pub(in crate::app) struct OutputState {
 struct Job {
     state: Arc<Mutex<OutputState>>,
     cancel: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 #[derive(Default)]
 pub(super) struct Outputs {
@@ -56,11 +57,34 @@ impl Outputs {
                 != Status::Running
         })
     }
+    /// The jobs still running, cancelled or not.
+    fn running(&self) -> impl Iterator<Item = &Job> {
+        self.jobs.values().filter(|j| {
+            j.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .status
+                == Status::Running
+        })
+    }
+    /// Whether any job not cancelled is still running.
+    pub(crate) fn any_running(&self) -> bool {
+        self.running()
+            .any(|job| !job.cancel.load(Ordering::Relaxed))
+    }
     /// Cancels every job still running, after the stage it is in.
     pub(crate) fn cancel_all(&self) {
         for job in self.jobs.values() {
             job.cancel.store(true, Ordering::Relaxed);
         }
+    }
+    /// Cancels every job still running, to wait for at exit.
+    pub(in crate::app) fn stop(&mut self) -> Vec<crate::app::task::Stopping> {
+        self.cancel_all();
+        self.jobs
+            .values_mut()
+            .map(|job| crate::app::task::Stopping::new(job.thread.take()))
+            .collect()
     }
     pub(crate) fn state(&self, id: u64) -> Result<OutputState> {
         self.jobs
@@ -87,18 +111,7 @@ impl Outputs {
         revision: u64,
         ctx: eframe::egui::Context,
     ) -> Result<OutputState> {
-        let active = self
-            .jobs
-            .values()
-            .filter(|j| {
-                j.state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .status
-                    == Status::Running
-            })
-            .count();
-        if active >= 2 {
+        if self.running().count() >= 2 {
             return Err(Error::new("busy", "Two output jobs are already running"));
         }
         let format = Format::from_path(&path).ok_or_else(|| {
@@ -155,7 +168,7 @@ impl Outputs {
         let state = Arc::new(Mutex::new(initial.clone()));
         let cancel = Arc::new(AtomicBool::new(false));
         let (report, stop) = (state.clone(), cancel.clone());
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("control-output".into())
             .spawn(move || {
                 let settings = ExportSettings {
@@ -190,7 +203,14 @@ impl Outputs {
                 ctx.request_repaint();
             })
             .map_err(|e| Error::new("start_failed", e.to_string()))?;
-        self.jobs.insert(id, Job { state, cancel });
+        self.jobs.insert(
+            id,
+            Job {
+                state,
+                cancel,
+                thread: Some(thread),
+            },
+        );
         Ok(initial)
     }
 }

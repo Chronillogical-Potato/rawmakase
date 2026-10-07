@@ -16,11 +16,11 @@ pub use ffi::{display_transform, srgb_profile, version};
 /// scheduling priority, and LibRaw decodes on two OpenMP threads. Every worker
 /// that reads or decodes photos behind the user's back starts here or in
 /// [`background_pool`], so none competes with Develop for the CPU.
-pub fn spawn_background(work: impl FnOnce() + Send + 'static) {
+pub fn spawn_background(work: impl FnOnce() + Send + 'static) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         ffi::background_thread();
         work();
-    });
+    })
 }
 /// A pool of `threads` named `name-0`, `name-1`… at background priority, as
 /// [`spawn_background`].

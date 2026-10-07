@@ -13,6 +13,7 @@ pub(super) struct Device {
     /// The listener's stop: dropping it (with the device, or by starting again)
     /// ends the listener at once.
     stop: Option<std::sync::mpsc::Sender<()>>,
+    listener: Option<std::thread::JoinHandle<()>>,
 }
 impl Device {
     pub(crate) fn new(binding: DeviceConfig) -> Self {
@@ -29,6 +30,7 @@ impl Device {
             midi_epoch: 0,
             status: Arc::default(),
             stop: None,
+            listener: None,
         }
     }
     pub(crate) fn start(
@@ -40,7 +42,7 @@ impl Device {
         if self.binding.enabled {
             let (stop, stopped) = std::sync::mpsc::channel();
             self.stop = Some(stop);
-            midi::listen(
+            self.listener = midi::listen(
                 self.binding.clone(),
                 claims,
                 tx,
@@ -49,6 +51,11 @@ impl Device {
                 stopped,
             );
         }
+    }
+    /// Ends the listener at once, to wait for at exit.
+    pub(in crate::app) fn stop(&mut self) -> crate::app::task::Stopping {
+        self.stop = None;
+        crate::app::task::Stopping::new(self.listener.take())
     }
     pub(crate) fn sync_midi_epoch(&mut self) {
         let epoch = locked(&self.status).epoch;

@@ -1,3 +1,4 @@
+use super::latest::Mailbox;
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
     camera_data::Decode,
@@ -49,7 +50,7 @@ fn prefetcher() -> Latest<Prefetch> {
 fn full_loader(
     tx: Sender<Event>,
     ctx: egui::Context,
-    prefetcher: Arc<Latest<Prefetch>>,
+    prefetcher: Mailbox<Prefetch>,
 ) -> Latest<FullJob> {
     Latest::new(move |mut job: FullJob| {
         let prefetch = job.prefetch.take();
@@ -95,9 +96,38 @@ fn full_loader(
         }
     })
 }
-pub(crate) fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
-    let prefetcher = Arc::new(prefetcher());
-    let full = full_loader(tx.clone(), ctx.clone(), prefetcher.clone());
+/// Opens photos for Develop: the quick first stage, then the full-size decode and a
+/// neighbour's prefetch, each on a worker of its own.
+pub(crate) struct Loader {
+    open: Latest<LoadJob>,
+    full: Latest<FullJob>,
+    prefetch: Latest<Prefetch>,
+}
+impl Loader {
+    pub(crate) fn new(tx: Sender<Event>, ctx: egui::Context) -> Self {
+        let prefetch = prefetcher();
+        let full = full_loader(tx.clone(), ctx.clone(), prefetch.mailbox());
+        let open = opener(tx, ctx, full.mailbox(), prefetch.mailbox());
+        Self {
+            open,
+            full,
+            prefetch,
+        }
+    }
+    pub(crate) fn submit(&self, job: LoadJob) {
+        self.open.submit(job);
+    }
+    /// Stops all three workers once their current jobs are done.
+    pub(in crate::app) fn stop(&mut self) -> [crate::app::task::Stopping; 3] {
+        [self.open.stop(), self.full.stop(), self.prefetch.stop()]
+    }
+}
+fn opener(
+    tx: Sender<Event>,
+    ctx: egui::Context,
+    full: Mailbox<FullJob>,
+    prefetcher: Mailbox<Prefetch>,
+) -> Latest<LoadJob> {
     Latest::new(move |mut job: LoadJob| {
         let prefetch = job.prefetch.take();
         let result = caught(|| -> anyhow::Result<()> {

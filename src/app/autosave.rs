@@ -11,7 +11,8 @@ use eframe::egui;
 use std::{
     panic::{self, AssertUnwindSafe},
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
+    time::Instant,
 };
 
 /// An edit to write, as it was when the save started.
@@ -53,6 +54,8 @@ type Saver = fn(&mut Option<Catalog>, &Job) -> anyhow::Result<PathBuf>;
 struct Worker {
     jobs: Sender<Job>,
     completions: Receiver<Completion>,
+    /// None in tests that stand in for a worker.
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 pub(super) struct Autosave {
@@ -81,10 +84,14 @@ impl Autosave {
             let spawned = std::thread::Builder::new()
                 .name("autosave".into())
                 .spawn(move || run(rx, tx, ctx, saver));
-            if spawned.is_err() {
+            let Ok(thread) = spawned else {
                 return Err(Box::new(job));
-            }
-            self.worker = Some(Worker { jobs, completions });
+            };
+            self.worker = Some(Worker {
+                jobs,
+                completions,
+                thread: Some(thread),
+            });
         }
         let worker = self.worker.as_ref().expect("started above");
         if let Err(mpsc::SendError(job)) = worker.jobs.send(job) {
@@ -97,6 +104,13 @@ impl Autosave {
     pub(crate) fn busy(&self) -> bool {
         self.in_flight
     }
+    /// Drops the saver's channels at exit: it ends once the save in flight, if any,
+    /// is written, and is then waited for.
+    pub(super) fn close(&mut self) -> super::task::Stopping {
+        self.in_flight = false;
+        let thread = self.worker.take().and_then(|worker| worker.thread);
+        super::task::Stopping::new(thread)
+    }
     /// The finished save, if one finished.
     pub(crate) fn poll(&mut self) -> Option<Completion> {
         self.receive(|completions| match completions.try_recv() {
@@ -108,6 +122,17 @@ impl Autosave {
     /// The save in flight, once it finishes.
     pub(crate) fn wait(&mut self) -> Option<Completion> {
         self.receive(|completions| Some(completions.recv().unwrap_or(Completion::WorkerLost)))
+    }
+    /// The save in flight, if it finishes before `until`; still [`busy`](Self::busy)
+    /// if it does not.
+    pub(crate) fn wait_until(&mut self, until: Instant) -> Option<Completion> {
+        self.receive(|completions| {
+            match completions.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Ok(completion) => Some(completion),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => Some(Completion::WorkerLost),
+            }
+        })
     }
     fn receive(
         &mut self,
@@ -168,9 +193,24 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
 }
 
 #[cfg(test)]
+impl Autosave {
+    /// An autosave whose saves take a minute, as on a stalled network share.
+    pub(super) fn stalled() -> Self {
+        fn stall(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            Ok(job.catalog.clone())
+        }
+        Self {
+            saver: stall,
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn job(photo: PhotoId) -> Job {
         Job {
@@ -229,7 +269,11 @@ mod tests {
         let (jobs, _) = mpsc::channel();
         let (_, completions) = mpsc::channel();
         let mut autosave = Autosave {
-            worker: Some(Worker { jobs, completions }),
+            worker: Some(Worker {
+                jobs,
+                completions,
+                thread: None,
+            }),
             in_flight: true,
             saver: panics_on_photo_one,
         };
@@ -247,11 +291,28 @@ mod tests {
         let (jobs, _) = mpsc::channel();
         let (_, completions) = mpsc::channel();
         let mut autosave = Autosave {
-            worker: Some(Worker { jobs, completions }),
+            worker: Some(Worker {
+                jobs,
+                completions,
+                thread: None,
+            }),
             in_flight: true,
             saver: save,
         };
         assert!(matches!(autosave.wait(), Some(Completion::WorkerLost)));
         assert!(!autosave.busy());
+    }
+
+    #[test]
+    fn waiting_for_a_stalled_save_gives_up_at_the_deadline() {
+        let ctx = egui::Context::default();
+        let mut autosave = Autosave::stalled();
+        assert!(autosave.submit(job(PhotoId(1)), &ctx).is_ok());
+        let started = Instant::now();
+        let until = started + Duration::from_millis(50);
+        assert!(autosave.wait_until(until).is_none());
+        assert!(Instant::now() >= until);
+        assert!(started.elapsed() < Duration::from_secs(30));
+        assert!(autosave.busy(), "the save is still in flight");
     }
 }
