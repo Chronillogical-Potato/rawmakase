@@ -1130,4 +1130,64 @@ mod tests {
         assert_eq!(saved["from_a_later_release"], serde_json::json!([1, 2]));
         assert!(r.validate().is_ok());
     }
+
+    /// Settings saved only when they differ from their defaults keep their names
+    /// too: a renamed one would be read as unknown and lost from saved edits.
+    #[test]
+    fn settings_saved_only_when_set_keep_their_stored_names() {
+        let stored = serde_json::json!({
+            "lens_profile_choice": {"setup": "Custom"},
+            "lens_vignetting": 0.5,
+            "lens_manual_distortion": 0.25,
+            "grain_model": "Measured",
+            "clarity_model": "Measured",
+            "texture_model": "Measured",
+            "profile_amount": 0.5,
+            "sharpening_model": "Measured",
+            "parametric_model": "Layered",
+            "contrast_model": "Adaptive",
+            "lens_vignette_model": "Measured",
+            "retouch_model": "Measured",
+            "grading_model": "Measured",
+            "mixer_model": "Chart",
+            "saturation_model": "Gray",
+            "vibrance_model": "Chart",
+            "black_white_model": "Chart",
+            "calibration_model": "Measured",
+            "whites_model": "Adaptive",
+            "gamut_model": "Clip",
+            "noise_model": "Measured",
+            "auto_white_balance": [5000.0, 10.0],
+            "curve_saturation": 0.5,
+            "point_colors": [{
+                "source": [1.0, 0.5, 0.5], "shift": [0.0, 0.0, 0.0], "range": 0.5,
+                "hue_range": [0.0, 0.25, 0.75, 1.0], "saturation_range": [0.0, 0.25, 0.75, 1.0],
+                "luminance_range": [0.0, 0.25, 0.75, 1.0], "variance": 0.0,
+            }],
+            "constrain_crop": true,
+            "upright": {"mode": "auto"},
+            "panels": {"off": ["detail"]},
+        });
+        let r: Recipe = serde_json::from_value(stored.clone()).unwrap();
+        assert!(
+            r.unknown.is_empty(),
+            "read as unknown: {:?}",
+            r.unknown.keys()
+        );
+        let saved = serde_json::to_value(&r).unwrap();
+        for (key, value) in stored.as_object().unwrap() {
+            assert_eq!(&saved[key], value, "{key}");
+        }
+        let local: LocalEdits = serde_json::from_value(serde_json::json!({
+            "retouch": [{"mode": "Heal", "shape": {"Spot": {"center": [0.5, 0.5], "radius": 0.01}},
+                "feather": 0.5, "opacity": 1.0, "offset": [0.1, 0.0]}],
+            "red_eye": [{"center": [0.5, 0.5], "radius": [0.01, 0.01], "pupil_size": 0.5, "darken": 0.5}],
+            "masks": [{"name": "Sky"}],
+        }))
+        .unwrap();
+        assert_eq!(
+            (local.retouch.len(), local.red_eye.len(), local.masks.len()),
+            (1, 1, 1)
+        );
+    }
 }
