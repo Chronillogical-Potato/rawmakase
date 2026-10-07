@@ -412,48 +412,57 @@ impl Editor {
         if !self.activity.begin_folder_change() {
             return;
         }
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let result = (|| -> anyhow::Result<_> {
-                let mut cat = Catalog::open(&catalog)?;
-                Ok(match job {
-                    FolderJob::Relink {
-                        root,
-                        path,
-                        overrides,
-                    } => {
-                        cat.relink_root_with(root, &path, overrides)?;
-                        (true, Default::default(), Vec::new())
+        // A panic ends the folder change as a failure does, so closing never waits
+        // for it.
+        let opened = ctx.clone();
+        super::task::spawn(
+            self.tx.clone(),
+            ctx.clone(),
+            move |tx| {
+                let event = match change_folders(&catalog, job) {
+                    Ok((relinked, report, conflicts)) => {
+                        reopened(&catalog, relinked, &report, &conflicts, &opened)
                     }
-                    FolderJob::Clear { root, relative } => {
-                        cat.clear_folder_location(root, &relative)?;
-                        (true, Default::default(), Vec::new())
-                    }
-                    FolderJob::Import { folder, choices } => {
-                        let added = cat.import_folder(
-                            &folder,
-                            &crate::catalog::MetadataDefaults::load(),
-                            &choices,
-                        )?;
-                        anyhow::ensure!(
-                            added.ambiguous.is_empty(),
-                            "The folders changed meanwhile; add the folder again"
-                        );
-                        (false, added.report, added.conflicts)
-                    }
-                })
-            })();
-            let event = match result {
-                Ok((relinked, report, conflicts)) => {
-                    reopened(&catalog, relinked, &report, &conflicts, &ctx)
-                }
-                Err(e) => Event::CatalogReady(Err(format!("{e:#}"))),
-            };
-            let _ = tx.send(event);
-            ctx.request_repaint();
-        });
+                    Err(e) => Event::CatalogReady(Err(format!("{e:#}"))),
+                };
+                let _ = tx.send(event);
+            },
+            |tx, message| {
+                let _ = tx.send(Event::CatalogReady(Err(message)));
+            },
+        );
     }
+}
+/// Makes a settled folder change in the catalog at `catalog`: whether it relinked a
+/// root, and what adding a folder found.
+fn change_folders(
+    catalog: &Path,
+    job: FolderJob,
+) -> anyhow::Result<(bool, crate::catalog::SidecarReport, Vec<Conflict>)> {
+    let mut cat = Catalog::open(catalog)?;
+    Ok(match job {
+        FolderJob::Relink {
+            root,
+            path,
+            overrides,
+        } => {
+            cat.relink_root_with(root, &path, overrides)?;
+            (true, Default::default(), Vec::new())
+        }
+        FolderJob::Clear { root, relative } => {
+            cat.clear_folder_location(root, &relative)?;
+            (true, Default::default(), Vec::new())
+        }
+        FolderJob::Import { folder, choices } => {
+            let added =
+                cat.import_folder(&folder, &crate::catalog::MetadataDefaults::load(), &choices)?;
+            anyhow::ensure!(
+                added.ambiguous.is_empty(),
+                "The folders changed meanwhile; add the folder again"
+            );
+            (false, added.report, added.conflicts)
+        }
+    })
 }
 /// A button of a Folder locations entry.
 enum Button {
