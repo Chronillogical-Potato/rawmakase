@@ -352,8 +352,10 @@ mod stored_tests {
             a: [0.1, 0.2],
             b: [0.1, 0.9],
         };
+        let tilt = [1., 0.1, 0., 0., 1., 0., 0., 0.05, 1.];
         let guided = Upright {
             mode: UprightMode::Guided,
+            corrections: vec![tilt],
             guides: vec![guide],
             ..Default::default()
         };
@@ -361,6 +363,7 @@ mod stored_tests {
             serde_json::to_value(&guided).unwrap(),
             serde_json::json!({
                 "mode": "guided",
+                "corrections": [[1.0, 0.1_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.05_f32, 1.0]],
                 "guides": [{"a": [0.1_f32, 0.2_f32], "b": [0.1_f32, 0.9_f32]}],
             })
         );
