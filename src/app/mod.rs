@@ -391,7 +391,8 @@ impl eframe::App for Editor {
     /// What shows where no panel paints, e.g. behind the Library grid: the
     /// theme's darkest grey rather than eframe's near-black.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        theme::gray(12).to_normalized_gamma_f32()
+        // eframe gives no context here; the palette last applied to it.
+        self.themes.applied().gray(12).to_normalized_gamma_f32()
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // AppKit moves the traffic lights back during layout passes.

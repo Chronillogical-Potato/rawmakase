@@ -379,6 +379,7 @@ impl Editor {
     }
     /// The Remove panel's drawer below the tool strip.
     pub(super) fn retouch_panel(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let long = self
             .document
             .full()
@@ -495,8 +496,8 @@ impl Editor {
             if ui
                 .add_sized(
                     [w, 22.],
-                    egui::Button::new(egui::RichText::new("Close").color(theme::on_accent()))
-                        .fill(theme::accent()),
+                    egui::Button::new(egui::RichText::new("Close").color(palette.on_accent()))
+                        .fill(palette.accent()),
                 )
                 .on_hover_text("Close the tool · Q")
                 .clicked()
@@ -557,7 +558,7 @@ pub(super) fn control_label(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mu
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            theme::gray(190),
+            theme::palette(ui.ctx()).gray(190),
         );
         add(ui);
     });
@@ -572,7 +573,12 @@ pub(super) fn indented(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     indented(ui, |ui| {
         ui.add(
-            egui::Label::new(egui::RichText::new(text).size(10.).color(theme::gray(125))).wrap(),
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .size(10.)
+                    .color(theme::palette(ui.ctx()).gray(125)),
+            )
+            .wrap(),
         );
     });
 }

@@ -52,6 +52,7 @@ impl CopyNames {
         catalog: &Catalog,
         photos: &mut [Photo],
     ) -> Result<bool> {
+        let palette = theme::palette(ui.ctx());
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), egui::Sense::hover());
         caption_at(ui, rect, "Copy Name");
@@ -74,13 +75,14 @@ impl CopyNames {
                 egui::Align2::LEFT_CENTER,
                 &photo.copy_name,
                 font(),
-                theme::gray(VALUE_GRAY),
+                palette.gray(VALUE_GRAY),
             );
             return outcome;
         };
         let response = ui.put(
             field,
-            panel_edit(egui::TextEdit::singleline(text)).vertical_align(egui::Align::Center),
+            panel_edit(&palette, egui::TextEdit::singleline(text))
+                .vertical_align(egui::Align::Center),
         );
         if response.lost_focus() {
             return Ok(self.commit(catalog, photos)? || outcome?);

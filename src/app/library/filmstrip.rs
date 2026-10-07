@@ -101,7 +101,7 @@ impl Library {
     ) -> Outcome {
         egui::Panel::bottom(ID)
             .exact_size(HEIGHT)
-            .frame(egui::Frame::new().fill(theme::gray(26)))
+            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).gray(26)))
             .show(ui, |ui| self.filmstrip(ui, current, module))
             .inner
     }
@@ -167,6 +167,7 @@ impl Library {
         current: Option<PhotoId>,
         module: Module,
     ) -> Outcome {
+        let palette = theme::palette(ui.ctx());
         let mut target = None;
         let mut changed = false;
         let library = module == Module::Library;
@@ -189,22 +190,24 @@ impl Library {
                     ui.label(
                         egui::RichText::new(self.source_name())
                             .size(11.)
-                            .color(theme::gray(200)),
+                            .color(palette.gray(200)),
                     );
                     let selected = self.selection.selected.len();
-                    ui.label(filter_caption(&match position {
-                        Some(_) if selected > 1 => {
-                            format!("{} of {} photos selected", selected, self.visible.len())
-                        }
-                        Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
-                        None => format!("{} photos", self.visible.len()),
-                    }));
+                    ui.label(filter_caption(
+                        &palette,
+                        &match position {
+                            Some(_) if selected > 1 => {
+                                format!("{} of {} photos selected", selected, self.visible.len())
+                            }
+                            Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
+                            None => format!("{} photos", self.visible.len()),
+                        },
+                    ));
                     if let Some(p) = &photo {
-                        ui.label(filter_caption(&format!(
-                            "{}{}",
-                            p.filename,
-                            cell::copy_suffix(p)
-                        )));
+                        ui.label(filter_caption(
+                            &palette,
+                            &format!("{}{}", p.filename, cell::copy_suffix(p)),
+                        ));
                         // Right-aligned by the width the controls took last frame, so
                         // the row never runs past the window and widens the strip.
                         let width_id = ui.id().with("controls-width");
@@ -301,8 +304,10 @@ impl Library {
         };
         let response = ui.interact(rect, ui.id().with(photo.id), sense);
         self.request_previews(photo, ui.ctx());
+        // One palette read per cell, shared by everything the cell paints.
         paint_cell(
             ui.painter(),
+            &theme::palette(ui.ctx()),
             rect,
             photo,
             self.texture(photo),
@@ -356,6 +361,7 @@ impl Library {
 /// its label, with the same cues as the grid.
 fn paint_cell(
     painter: &egui::Painter,
+    palette: &theme::Palette,
     rect: egui::Rect,
     photo: &Photo,
     texture: Option<&egui::TextureHandle>,
@@ -364,15 +370,16 @@ fn paint_cell(
 ) {
     let active = mark == Mark::Active;
     let cell = rect.shrink(2.);
-    let base = theme::gray(match mark {
+    let base = palette.gray(match mark {
         Mark::Active => 120,
         Mark::Selected => 78,
         Mark::None if hovered => 58,
         Mark::None => 40,
     });
-    let fill = crate::app::photo_metadata::label_color(&photo.label).map_or(base, |label| {
-        base.lerp_to_gamma(label, if mark == Mark::None { 0.25 } else { 0.35 })
-    });
+    let fill = crate::app::photo_metadata::label_color(palette, &photo.label)
+        .map_or(base, |label| {
+            base.lerp_to_gamma(label, if mark == Mark::None { 0.25 } else { 0.35 })
+        });
     painter.rect_filled(cell, 2., fill);
     let strip = 14.;
     if let Some(texture) = texture {
@@ -390,13 +397,19 @@ fn paint_cell(
             Color32::WHITE,
         );
         if photo.master.is_some() {
-            cell::copy_badge(painter, image, fill);
+            cell::copy_badge(painter, palette, image, fill);
         }
     }
     let y = cell.bottom() - strip / 2. - 2.;
     let mut x = cell.left() + 6.;
     if photo.flag != 0 {
-        crate::app::photo_metadata::flag_icon(painter, egui::pos2(x + 4., y), photo.flag, active);
+        crate::app::photo_metadata::flag_icon(
+            painter,
+            palette,
+            egui::pos2(x + 4., y),
+            photo.flag,
+            active,
+        );
         x += 13.;
     }
     if photo.rating > 0 {
@@ -405,7 +418,7 @@ fn paint_cell(
             egui::Align2::LEFT_CENTER,
             "★".repeat(photo.rating as usize),
             egui::FontId::proportional(9.),
-            theme::gray(if active { 30 } else { 200 }),
+            palette.gray(if active { 30 } else { 200 }),
         );
     }
 }

@@ -86,6 +86,7 @@ impl Library {
     }
     /// The view buttons, the current one lit.
     pub(super) fn view_buttons(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let current = self.view();
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.x = 2.;
@@ -94,10 +95,10 @@ impl Library {
                     ui.allocate_exact_size(Vec2::new(30., 22.), egui::Sense::click());
                 let on = view == current;
                 if on || response.hovered() {
-                    let fill = theme::gray(if on { 78 } else { 55 });
+                    let fill = palette.gray(if on { 78 } else { 55 });
                     ui.painter().rect_filled(rect, 3., fill);
                 }
-                let tint = theme::gray(if on { 240 } else { 165 });
+                let tint = palette.gray(if on { 240 } else { 165 });
                 icons::paint_at(ui.painter(), view.icon(), rect.center(), 15., tint);
                 if response.on_hover_text(view.hover()).clicked() && !on {
                     self.set_view(view);

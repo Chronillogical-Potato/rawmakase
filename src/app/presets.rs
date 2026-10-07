@@ -84,6 +84,7 @@ impl Editor {
             .collect();
     }
     pub(super) fn presets_ui(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let library = self.presets.library.clone();
         let mut clicked = None;
         let mut hovered = None;
@@ -106,9 +107,9 @@ impl Editor {
                         );
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::splat(22.), Sense::click());
-                        let color = theme::gray(if response.hovered() { 235 } else { 160 });
+                        let color = palette.gray(if response.hovered() { 235 } else { 160 });
                         if response.hovered() {
-                            ui.painter().rect_filled(rect, 3., theme::gray(50));
+                            ui.painter().rect_filled(rect, 3., palette.gray(50));
                         }
                         crate::app::icons::paint_at(
                             ui.painter(),
@@ -169,7 +170,7 @@ impl Editor {
                                 format!("{} presets", library.presets.len())
                             })
                             .size(10.)
-                            .color(theme::gray(125)),
+                            .color(palette.gray(125)),
                         )
                         .truncate(),
                     );
@@ -248,7 +249,7 @@ impl Editor {
                                     egui::Align2::CENTER_CENTER,
                                     "★",
                                     egui::FontId::proportional(12.),
-                                    theme::gray(if star_response.hovered() {
+                                    palette.gray(if star_response.hovered() {
                                         240
                                     } else if favorite {
                                         200
@@ -526,7 +527,7 @@ impl Editor {
             egui::Label::new(
                 egui::RichText::new(&session.name)
                     .size(11.)
-                    .color(theme::gray(170)),
+                    .color(theme::palette(ui.ctx()).gray(170)),
             )
             .truncate(),
         );
@@ -673,6 +674,7 @@ fn list_row(
     selected: bool,
     enabled: bool,
 ) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
@@ -685,9 +687,9 @@ fn list_row(
             rect,
             2.,
             if selected {
-                theme::selected_row()
+                palette.selected_row()
             } else {
-                theme::gray(43)
+                palette.gray(43)
             },
         );
     }
@@ -710,7 +712,7 @@ fn list_row(
         };
         ui.painter().add(egui::Shape::convex_polygon(
             triangle,
-            theme::gray(140),
+            palette.gray(140),
             Stroke::NONE,
         ));
     }
@@ -725,7 +727,7 @@ fn list_row(
     ui.painter().galley(
         Pos2::new(text_left, y - galley.size().y / 2.),
         galley,
-        theme::gray(if !enabled {
+        palette.gray(if !enabled {
             95
         } else if selected {
             240
@@ -739,7 +741,7 @@ fn list_row(
             Align2::RIGHT_CENTER,
             count.to_string(),
             FontId::proportional(10.),
-            theme::gray(120),
+            palette.gray(120),
         );
     }
     response
@@ -795,7 +797,7 @@ impl Editor {
             ui.label(
                 egui::RichText::new("From Lightroom")
                     .size(11.)
-                    .color(theme::gray(125)),
+                    .color(theme::palette(ui.ctx()).gray(125)),
             );
             ui.add_space(4.);
             for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
@@ -908,17 +910,18 @@ fn history_row(
     current: bool,
     undone: bool,
 ) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     if current {
-        ui.painter().rect_filled(rect, 3., theme::accent());
+        ui.painter().rect_filled(rect, 3., palette.accent());
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 3., theme::gray(43));
+        ui.painter().rect_filled(rect, 3., palette.gray(43));
     }
     let color = if current {
-        theme::on_accent_text(250)
+        palette.on_accent_text(250)
     } else {
-        theme::gray(if undone { 120 } else { 205 })
+        palette.gray(if undone { 120 } else { 205 })
     };
     let value_width = if value.is_empty() {
         0.

@@ -68,7 +68,7 @@ impl Editor {
                     ui.label(
                         egui::RichText::new("+ saves the photo as it is now")
                             .size(11.)
-                            .color(theme::gray(125)),
+                            .color(theme::palette(ui.ctx()).gray(125)),
                     );
                 }
                 for snapshot in &panel.list {
@@ -240,10 +240,11 @@ impl Editor {
 
 /// A snapshot in the list, as History's rows look.
 fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 3., theme::gray(43));
+        ui.painter().rect_filled(rect, 3., palette.gray(43));
     }
     ui.painter()
         .with_clip_rect(rect.shrink2(Vec2::new(8., 0.)))
@@ -252,7 +253,7 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
             egui::Align2::LEFT_CENTER,
             name,
             egui::FontId::proportional(12.),
-            theme::gray(205),
+            palette.gray(205),
         );
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)

@@ -101,7 +101,7 @@ pub fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {
     })
 }
 
-pub fn label_color(label: &str) -> Option<Color32> {
+pub(super) fn label_color(palette: &theme::Palette, label: &str) -> Option<Color32> {
     Some(match label {
         "" => return None,
         "Red" => Color32::from_rgb(206, 86, 83),
@@ -110,13 +110,14 @@ pub fn label_color(label: &str) -> Option<Color32> {
         "Blue" => Color32::from_rgb(87, 143, 207),
         "Purple" => Color32::from_rgb(164, 111, 194),
         // Lightroom stores label text; custom label-set colors cannot be inferred.
-        _ => theme::gray(220),
+        _ => palette.gray(220),
     })
 }
 
 /// Rating, flag and label as fixed-size painted controls, so hovering never
 /// changes the layout.
 pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<Edit> {
+    let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Rect, Sense, Stroke, StrokeKind, Vec2};
     let mut edit = None;
     ui.push_id(("photo-metadata", photo.id), |ui| {
@@ -143,7 +144,7 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                     Align2::CENTER_CENTER,
                     "★",
                     FontId::proportional(14.),
-                    theme::gray(match (lit, hovered.is_some()) {
+                    palette.gray(match (lit, hovered.is_some()) {
                         (true, false) => 230,
                         (true, true) => 175,
                         _ => 72,
@@ -158,10 +159,10 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                     ui.painter().rect_filled(
                         rect.shrink2(Vec2::new(2., 2.)),
                         3.,
-                        theme::gray(if active { 70 } else { 50 }),
+                        palette.gray(if active { 70 } else { 50 }),
                     );
                 }
-                flag_icon(ui.painter(), rect.center(), flag, active);
+                flag_icon(ui.painter(), &palette, rect.center(), flag, active);
                 if response.on_hover_text(tip).clicked() {
                     edit = Some(Edit::Flag(if active { 0 } else { flag }));
                 }
@@ -171,13 +172,16 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
                 let (rect, response) = ui.allocate_exact_size(Vec2::new(18., 22.), Sense::click());
                 let active = photo.label == label;
                 let chip = Rect::from_center_size(rect.center(), Vec2::splat(11.));
-                ui.painter()
-                    .rect_filled(chip, 2., label_color(label).unwrap_or_default());
+                ui.painter().rect_filled(
+                    chip,
+                    2.,
+                    label_color(&palette, label).unwrap_or_default(),
+                );
                 if active || response.hovered() {
                     ui.painter().rect_stroke(
                         chip.expand(2.),
                         3.,
-                        Stroke::new(1.2, theme::gray(if active { 235 } else { 140 })),
+                        Stroke::new(1.2, palette.gray(if active { 235 } else { 140 })),
                         StrokeKind::Outside,
                     );
                 }
@@ -196,7 +200,7 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
             // Always shown, so a photo's label never changes the row's width.
             ui.add_space(4.);
             ui.menu_image_button(
-                crate::app::icons::Icon::More.image(theme::gray(200), 14.),
+                crate::app::icons::Icon::More.image(palette.gray(200), 14.),
                 |ui| {
                     for label in custom {
                         if ui.selectable_label(photo.label == *label, label).clicked() {
@@ -221,14 +225,20 @@ pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<E
     edit
 }
 /// Lightroom's pick and reject flags: a bright flag, or a struck-out one in red.
-pub fn flag_icon(painter: &egui::Painter, at: egui::Pos2, flag: i32, strong: bool) {
+pub(super) fn flag_icon(
+    painter: &egui::Painter,
+    palette: &theme::Palette,
+    at: egui::Pos2,
+    flag: i32,
+    strong: bool,
+) {
     use crate::app::icons::{self, Icon};
     let (icon, color) = if flag < 0 {
         (Icon::Rejected, Color32::from_rgb(214, 78, 66))
     } else if flag > 0 {
-        (Icon::Flag, theme::gray(if strong { 245 } else { 200 }))
+        (Icon::Flag, palette.gray(if strong { 245 } else { 200 }))
     } else {
-        (Icon::Flag, theme::gray(if strong { 150 } else { 110 }))
+        (Icon::Flag, palette.gray(if strong { 150 } else { 110 }))
     };
     icons::paint_at(painter, icon, at, 13., color);
 }
@@ -312,8 +322,12 @@ mod tests {
     }
     #[test]
     fn unknown_label_is_visible_without_guessing_a_color() {
-        assert_eq!(label_color("Client approved"), Some(theme::gray(220)));
-        assert_eq!(label_color(""), None);
-        assert_ne!(label_color("Red"), label_color("Green"));
+        let palette = theme::Palette::DEFAULT;
+        assert_eq!(
+            label_color(&palette, "Client approved"),
+            Some(palette.gray(220))
+        );
+        assert_eq!(label_color(&palette, ""), None);
+        assert_ne!(label_color(&palette, "Red"), label_color(&palette, "Green"));
     }
 }

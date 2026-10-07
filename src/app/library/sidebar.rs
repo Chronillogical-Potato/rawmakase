@@ -12,6 +12,7 @@ impl Library {
     /// The left panel; without `navigator` when the editor shows its own,
     /// as for a RAW in the Loupe.
     pub fn sidebar(&mut self, ui: &mut egui::Ui, navigator: bool) -> Action {
+        let palette = theme::palette(ui.ctx());
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
@@ -153,7 +154,7 @@ impl Library {
                         ui.label(
                             egui::RichText::new("No folders yet")
                                 .size(11.)
-                                .color(theme::gray(120)),
+                                .color(palette.gray(120)),
                         );
                     }
                     ui.add_space(12.);
@@ -184,7 +185,7 @@ impl Library {
                         ui.label(
                             egui::RichText::new("No collections")
                                 .size(11.)
-                                .color(theme::gray(120)),
+                                .color(palette.gray(120)),
                         );
                     }
                 });
@@ -299,13 +300,14 @@ impl Library {
 }
 /// A quiet full-width "+ label" row, Lightroom's add action in a panel.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
     let hovered = response.hovered();
     if hovered {
-        ui.painter().rect_filled(rect, 3., theme::gray(43));
+        ui.painter().rect_filled(rect, 3., palette.gray(43));
     }
-    let color = theme::gray(if hovered { 235 } else { 165 });
+    let color = palette.gray(if hovered { 235 } else { 165 });
     // Same columns as folder rows: icon at 10 px, text at 29 px.
     let c = egui::pos2(rect.left() + 16., rect.center().y);
     crate::app::icons::paint_at(ui.painter(), crate::app::icons::Icon::Add, c, 13., color);
@@ -320,6 +322,7 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
 }
 /// A Catalog panel row: name on the left, photo count right-aligned.
 fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), egui::Sense::click());
     if active || response.hovered() {
@@ -327,9 +330,9 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
             rect,
             2.,
             if active {
-                theme::selected_row()
+                palette.selected_row()
             } else {
-                theme::gray(43)
+                palette.gray(43)
             },
         );
     }
@@ -339,14 +342,14 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(12.),
-        theme::gray(if active { 235 } else { 190 }),
+        palette.gray(if active { 235 } else { 190 }),
     );
     ui.painter().text(
         egui::pos2(rect.right() - 10., y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         egui::FontId::proportional(11.),
-        theme::gray(125),
+        palette.gray(125),
     );
     response
 }

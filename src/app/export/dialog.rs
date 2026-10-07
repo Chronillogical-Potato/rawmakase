@@ -41,6 +41,7 @@ impl Editor {
     }
 
     fn export_dialog(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         if let Some(folder) = self.exports.picked.lock().ok().and_then(|mut p| p.take()) {
             self.exports.draft.folder = Some(folder);
             self.exports.draft.destination = Destination::Folder;
@@ -65,7 +66,7 @@ impl Editor {
         let mut confirmed = None;
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame())
+            .frame(modal_frame(&palette))
             .show(ctx, |ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::hover());
                 ui.painter().text(
@@ -77,7 +78,7 @@ impl Editor {
                         format!("Export {count} Files")
                     },
                     egui::FontId::proportional(16.),
-                    theme::gray(236),
+                    palette.gray(236),
                 );
                 // Said before the export starts: what will not be exported, and why.
                 if !left_out.is_empty() {
@@ -133,7 +134,7 @@ impl Editor {
                 ui.painter().hline(
                     rect.x_range(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., theme::gray(45)),
+                    Stroke::new(1., palette.gray(45)),
                 );
                 let footer = egui::Rect::from_min_max(
                     egui::pos2(rect.left() + 24., rect.bottom() - 56.),
@@ -161,7 +162,7 @@ impl Editor {
                             egui::Label::new(
                                 egui::RichText::new(format!("Saves to {}", pretty_path(&target)))
                                     .size(12.)
-                                    .color(theme::gray(140)),
+                                    .color(palette.gray(140)),
                             )
                             .truncate(),
                         )
@@ -183,6 +184,7 @@ impl Editor {
     }
 
     fn export_sections(&mut self, ui: &mut egui::Ui, source: &Path, example: &NameContext) {
+        let palette = theme::palette(ui.ctx());
         let picking = self.exports.picking.load(Ordering::Relaxed);
         let s = &mut self.exports.draft;
         let mut choose = false;
@@ -205,7 +207,7 @@ impl Editor {
             let text = folder
                 .as_deref()
                 .map_or("No folder chosen".into(), pretty_path);
-            ui.add(egui::Label::new(egui::RichText::new(text).color(theme::gray(150))).truncate());
+            ui.add(egui::Label::new(egui::RichText::new(text).color(palette.gray(150))).truncate());
         });
         form_row(ui, "", |ui| {
             ui.checkbox(&mut s.subfolder, "Put in Subfolder:");
@@ -255,7 +257,7 @@ impl Editor {
         });
         form_row(ui, "Example", |ui| {
             ui.label(
-                egui::RichText::new(s.file_name_for(source, example).0).color(theme::gray(225)),
+                egui::RichText::new(s.file_name_for(source, example).0).color(palette.gray(225)),
             );
         });
         form_row(ui, "Extensions", |ui| {
@@ -293,12 +295,12 @@ impl Editor {
             }),
             Format::Tiff => form_row(ui, "Bit Depth", |ui| {
                 ui.label(
-                    egui::RichText::new("16 bits/component, uncompressed").color(theme::gray(225)),
+                    egui::RichText::new("16 bits/component, uncompressed").color(palette.gray(225)),
                 );
             }),
         }
         form_row(ui, "Color Space", |ui| {
-            ui.label(egui::RichText::new("sRGB").color(theme::gray(225)));
+            ui.label(egui::RichText::new("sRGB").color(palette.gray(225)));
         });
 
         section(ui, "Image Sizing");
@@ -510,14 +512,15 @@ impl Editor {
 
 /// A Lightroom section band.
 fn section(ui: &mut egui::Ui, title: &str) {
+    let palette = theme::palette(ui.ctx());
     ui.add_space(6.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    ui.painter().rect_filled(rect, 3., theme::gray(44));
+    ui.painter().rect_filled(rect, 3., palette.gray(44));
     ui.painter().text(
         rect.left_center() + Vec2::new(12., 0.),
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(13.),
-        theme::gray(235),
+        palette.gray(235),
     );
 }

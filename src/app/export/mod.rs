@@ -506,6 +506,7 @@ impl Editor {
     /// waiting; after one that could not export everything, what it could not do,
     /// until it is read.
     pub(super) fn export_progress(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let status = self.exports.queue.as_ref().map(Queue::status);
         let Some((ticket, progress)) = status.as_ref().and_then(|s| s.running) else {
             self.export_summary(ui);
@@ -524,14 +525,14 @@ impl Editor {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            theme::gray(190),
+            palette.gray(190),
         );
         let fraction = (progress.done as f32 + progress.fraction) / progress.total.max(1) as f32;
         let bar = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.top() + 17.),
             Vec2::new(rect.width() - 26., 4.),
         );
-        painter.rect_filled(bar, 2., theme::gray(50));
+        painter.rect_filled(bar, 2., palette.gray(50));
         painter.rect_filled(
             egui::Rect::from_min_size(bar.min, Vec2::new(bar.width() * fraction.min(1.), 4.)),
             2.,
@@ -559,7 +560,7 @@ impl Editor {
         let cancel = ui
             .interact(close, ui.id().with("cancel-export"), Sense::click())
             .on_hover_text("Cancel export");
-        let color = theme::gray(if cancel.hovered() { 235 } else { 150 });
+        let color = palette.gray(if cancel.hovered() { 235 } else { 150 });
         crate::app::icons::paint_at(
             ui.painter(),
             crate::app::icons::Icon::Close,
@@ -594,6 +595,7 @@ impl Editor {
     /// Lightroom's Problem Exporting Files: the photos not exported, by reason, and
     /// the notes on those that were.
     pub(super) fn export_report(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         if !self.exports.report {
             return;
         }
@@ -604,20 +606,20 @@ impl Editor {
         let mut close = false;
         let mut dismiss = false;
         let response = egui::Modal::new(egui::Id::new("export-report"))
-            .frame(super::widgets::modal_frame().inner_margin(24))
+            .frame(super::widgets::modal_frame(&palette).inner_margin(24))
             .show(ctx, |ui| {
                 ui.set_width(520.);
                 ui.label(
                     egui::RichText::new("Problem Exporting Files")
                         .size(15.)
-                        .color(theme::gray(236)),
+                        .color(palette.gray(236)),
                 );
                 ui.add_space(6.);
                 if !summary.problems.is_empty() {
                     ui.label(
                         egui::RichText::new("Some export operations were not performed.")
                             .size(12.)
-                            .color(theme::gray(170)),
+                            .color(palette.gray(170)),
                     );
                 }
                 ui.add_space(8.);
@@ -631,12 +633,16 @@ impl Editor {
                             if rows.is_empty() {
                                 continue;
                             }
-                            ui.label(egui::RichText::new(title).size(12.).color(theme::gray(220)));
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .size(12.)
+                                    .color(palette.gray(220)),
+                            );
                             for (name, reason) in rows {
                                 ui.label(
                                     egui::RichText::new(format!("{name}: {reason}"))
                                         .size(12.)
-                                        .color(theme::gray(160)),
+                                        .color(palette.gray(160)),
                                 );
                             }
                             ui.add_space(8.);

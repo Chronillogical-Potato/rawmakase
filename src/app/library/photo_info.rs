@@ -3,6 +3,7 @@
 //! photos added from folders it is read from the files in the background and
 //! kept in the catalog, a row of nothing for a file without any.
 use super::Library;
+use crate::app::theme;
 use crate::catalog::PhotoId;
 use crate::metadata::PhotoInfo;
 use eframe::egui;
@@ -201,6 +202,7 @@ impl Library {
         .into_iter()
         .flatten()
         .collect();
+        let text = theme::palette(painter.ctx()).gray(235);
         let mut y = rect.top() + 12.;
         for (i, line) in lines.iter().enumerate() {
             let size = if i == 0 { 15. } else { 12. };
@@ -214,13 +216,7 @@ impl Library {
                 font.clone(),
                 egui::Color32::from_black_alpha(200),
             );
-            painter.text(
-                at,
-                egui::Align2::LEFT_TOP,
-                line,
-                font,
-                crate::app::theme::gray(235),
-            );
+            painter.text(at, egui::Align2::LEFT_TOP, line, font, text);
             y += size + 5.;
         }
     }

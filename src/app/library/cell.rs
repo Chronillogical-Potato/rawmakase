@@ -60,6 +60,7 @@ pub(super) fn photo_cell(
     shown: Shown,
     width: f32,
 ) -> (egui::Response, Option<PhotoAction>) {
+    let palette = theme::palette(ui.ctx());
     let Shown {
         mark,
         number,
@@ -86,15 +87,15 @@ pub(super) fn photo_cell(
     let active = mark == super::selection::Mark::Active;
     // The active photo is lighter than the rest of the selection.
     let base = if active {
-        theme::gray(150)
+        palette.gray(150)
     } else if selected {
-        theme::gray(112)
+        palette.gray(112)
     } else if response.hovered() {
-        theme::gray(66)
+        palette.gray(66)
     } else {
-        theme::gray(56)
+        palette.gray(56)
     };
-    let fill = label_color(&photo.label).map_or(base, |label| {
+    let fill = label_color(&palette, &photo.label).map_or(base, |label| {
         base.lerp_to_gamma(label, if selected { 0.35 } else { 0.22 })
     });
     let painter = ui.painter();
@@ -104,7 +105,7 @@ pub(super) fn photo_cell(
         1.,
         Stroke::new(
             1.,
-            theme::gray(match mark {
+            palette.gray(match mark {
                 super::selection::Mark::Active => 205,
                 super::selection::Mark::Selected => 150,
                 super::selection::Mark::None => 40,
@@ -112,7 +113,7 @@ pub(super) fn photo_cell(
         ),
         StrokeKind::Inside,
     );
-    let ink = theme::gray(if selected { 60 } else { 125 });
+    let ink = palette.gray(if selected { 60 } else { 125 });
     let header = if extras {
         (width * 0.13).clamp(16., 26.)
     } else {
@@ -124,7 +125,7 @@ pub(super) fn photo_cell(
             Align2::LEFT_TOP,
             number.to_string(),
             FontId::proportional(header * 0.95),
-            theme::gray(if selected { 120 } else { 78 }),
+            palette.gray(if selected { 120 } else { 78 }),
         );
     }
     // An expanded cell's details, under its number and name.
@@ -188,7 +189,7 @@ pub(super) fn photo_cell(
             StrokeKind::Outside,
         );
         if photo.master.is_some() {
-            copy_badge(painter, image, fill);
+            copy_badge(painter, &palette, image, fill);
         }
     } else {
         painter.text(
@@ -206,7 +207,7 @@ pub(super) fn photo_cell(
             available,
             ink,
         };
-        footer_badges(painter, cell, footer, photo, badges);
+        footer_badges(painter, &palette, cell, footer, photo, badges);
     }
     let action = photo_menu(&response, photo, available, super::Module::Library);
     (response, action)
@@ -223,6 +224,7 @@ struct Badges {
 /// Collection marker and the offline mark.
 fn footer_badges(
     painter: &egui::Painter,
+    palette: &theme::Palette,
     cell: egui::Rect,
     footer: f32,
     photo: &Photo,
@@ -242,13 +244,13 @@ fn footer_badges(
         painter.circle_filled(
             Pos2::new(cell.right() - 10., cell.bottom() - footer / 2. - 1.),
             3.5,
-            theme::gray(if selected { 40 } else { 225 }),
+            palette.gray(if selected { 40 } else { 225 }),
         );
     }
     let y = cell.bottom() - footer / 2. - 1.;
     let mut x = cell.left() + 7.;
     if photo.flag != 0 {
-        flag_icon(painter, Pos2::new(x + 4., y), photo.flag, selected);
+        flag_icon(painter, palette, Pos2::new(x + 4., y), photo.flag, selected);
         x += 14.;
     }
     if photo.rating > 0 {
@@ -257,7 +259,7 @@ fn footer_badges(
             Align2::LEFT_CENTER,
             "★".repeat(photo.rating as usize),
             FontId::proportional(10.),
-            theme::gray(if selected { 35 } else { 185 }),
+            palette.gray(if selected { 35 } else { 185 }),
         );
     }
     if photo.master.is_some() {
@@ -288,7 +290,12 @@ fn footer_badges(
 }
 /// Lightroom's virtual copy badge: the image's lower left corner folded
 /// over. `background` is what shows behind the fold.
-pub(in crate::app) fn copy_badge(painter: &egui::Painter, image: egui::Rect, background: Color32) {
+pub(in crate::app) fn copy_badge(
+    painter: &egui::Painter,
+    palette: &theme::Palette,
+    image: egui::Rect,
+    background: Color32,
+) {
     let size = (image.width().min(image.height()) * 0.12).clamp(8., 16.);
     let corner = image.left_bottom();
     let up = corner - Vec2::new(0., size);
@@ -300,7 +307,7 @@ pub(in crate::app) fn copy_badge(painter: &egui::Painter, image: egui::Rect, bac
     ));
     painter.add(egui::Shape::convex_polygon(
         vec![up, right, corner + Vec2::new(size, -size)],
-        theme::gray(225),
+        palette.gray(225),
         egui::Stroke::new(1., Color32::from_black_alpha(160)),
     ));
 }
@@ -440,6 +447,7 @@ pub(in crate::app) fn photo_menu(
             }
         });
         ui.menu_button("Set Color Label", |ui| {
+            let palette = theme::palette(ui.ctx());
             ui.set_width(170.);
             ui.spacing_mut().item_spacing.y = 0.;
             for (label, key) in LABELS
@@ -453,7 +461,7 @@ pub(in crate::app) fn photo_menu(
                     action = Some(PhotoAction::Edit(Edit::Label(label.into())));
                     ui.close();
                 }
-                if let Some(color) = crate::app::photo_metadata::label_color(label) {
+                if let Some(color) = crate::app::photo_metadata::label_color(&palette, label) {
                     let chip = egui::Rect::from_center_size(
                         before + Vec2::new(ui.available_width() - 60., 12.),
                         Vec2::splat(9.),

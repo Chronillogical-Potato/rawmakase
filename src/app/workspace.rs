@@ -256,12 +256,13 @@ impl Editor {
     /// Lightroom's top panel: catalog menu on the left, module picker on the
     /// right. On macOS it is also the title bar, beside the traffic lights.
     fn workspace_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let ctx = ui.ctx().clone();
         egui::Panel::top("workspace-modes")
             .exact_size(BAR_HEIGHT)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::gray(26))
+                    .fill(palette.gray(26))
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
@@ -286,7 +287,7 @@ impl Editor {
                     let name = ui.painter().layout_no_wrap(
                         catalog,
                         egui::FontId::proportional(13.),
-                        theme::gray(255),
+                        palette.gray(255),
                     );
                     let busy = self.activity.is_busy();
                     let (rect, response) = ui.allocate_exact_size(
@@ -300,9 +301,9 @@ impl Editor {
                     let open =
                         egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response));
                     if response.hovered() || open {
-                        ui.painter().rect_filled(rect, 4., theme::gray(38));
+                        ui.painter().rect_filled(rect, 4., palette.gray(38));
                     }
-                    let color = theme::gray(if response.hovered() || open { 235 } else { 175 });
+                    let color = palette.gray(if response.hovered() || open { 235 } else { 175 });
                     ui.painter()
                         .with_clip_rect(rect.shrink2(Vec2::new(10., 0.)))
                         .galley(
@@ -429,7 +430,7 @@ impl Editor {
             });
         egui::Panel::top("workspace-modes-rule")
             .exact_size(1.)
-            .frame(egui::Frame::new().fill(theme::gray(16)))
+            .frame(egui::Frame::new().fill(palette.gray(16)))
             .show(ui, |_| {});
     }
 
@@ -464,7 +465,9 @@ impl Editor {
         // under this one's name.
         if self.document.catalog_photo != Some(id) {
             ui.centered_and_justified(|ui| {
-                ui.label(egui::RichText::new(&self.status).color(theme::gray(150)));
+                ui.label(
+                    egui::RichText::new(&self.status).color(theme::palette(ui.ctx()).gray(150)),
+                );
             });
             return;
         }

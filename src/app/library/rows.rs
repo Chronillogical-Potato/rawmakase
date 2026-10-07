@@ -31,7 +31,7 @@ pub(super) fn caption_at(ui: &egui::Ui, rect: egui::Rect, key: &str) {
         egui::Align2::RIGHT_CENTER,
         key,
         font(),
-        theme::gray(CAPTION_GRAY),
+        theme::palette(ui.ctx()).gray(CAPTION_GRAY),
     );
 }
 /// A row's value, truncated to fit; dimmed when it is not `set`.
@@ -42,7 +42,7 @@ pub(super) fn value_at(ui: &egui::Ui, rect: egui::Rect, text: &str, set: bool) {
         egui::pos2(left, rect.center().y),
         rect.right() - left,
         text,
-        theme::gray(if set { VALUE_GRAY } else { UNSET_GRAY }),
+        theme::palette(ui.ctx()).gray(if set { VALUE_GRAY } else { UNSET_GRAY }),
     );
 }
 /// The text field area of a row, right of its caption.
@@ -53,9 +53,12 @@ pub(super) fn field_rect(rect: egui::Rect) -> egui::Rect {
     )
 }
 /// A text field styled as the panel's values.
-pub(super) fn panel_edit(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
+pub(super) fn panel_edit<'t>(
+    palette: &theme::Palette,
+    edit: egui::TextEdit<'t>,
+) -> egui::TextEdit<'t> {
     edit.font(font())
-        .text_color(theme::gray(VALUE_GRAY))
+        .text_color(palette.gray(VALUE_GRAY))
         .margin(egui::Margin::symmetric(4, 1))
 }
 /// One line of `text` from `left_center`, cut short to `width`.

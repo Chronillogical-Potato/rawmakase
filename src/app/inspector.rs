@@ -49,15 +49,16 @@ impl Editor {
     /// cyan, magenta, yellow and gray, with clipping indicators in the corners.
     /// Dragging in it moves Blacks, Shadows, Exposure, Highlights or Whites.
     pub(super) fn histogram_ui(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 96.), Sense::hover());
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, 2., theme::gray(20));
+        painter.rect_filled(rect, 2., palette.gray(20));
         for i in 1..5 {
             let x = rect.left() + i as f32 / 5. * rect.width();
             painter.line_segment(
                 [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1., theme::gray(32)),
+                Stroke::new(1., palette.gray(32)),
             );
         }
         let histogram = self.preview.histogram;
@@ -102,7 +103,7 @@ impl Editor {
                     );
                 }
             };
-            segment(0., v[0].0, theme::gray(150));
+            segment(0., v[0].0, palette.gray(150));
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
@@ -147,7 +148,7 @@ impl Editor {
             }
             let on = self.view.clipping.is_on(side);
             let color = clipping::indicator_color(clipping::clipped_channels(&histogram, side))
-                .unwrap_or_else(|| theme::gray(if on || response.hovered() { 150 } else { 80 }));
+                .unwrap_or_else(|| palette.gray(if on || response.hovered() { 150 } else { 80 }));
             painter.add(egui::Shape::convex_polygon(
                 vec![
                     corner,
@@ -192,13 +193,14 @@ impl Editor {
                     })
             });
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(exif).size(11.).color(theme::gray(170)))
+            ui.label(egui::RichText::new(exif).size(11.).color(palette.gray(170)))
                 .on_hover_text("Output histogram of the whole photo");
         });
     }
     /// Lightroom's tool strip: Crop, Remove, Red Eye and Masking, with the open tool's
     /// drawer below it.
     pub(super) fn tool_strip(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         ui.add_space(6.);
         // Red Eye has no shortcut, as in Lightroom.
         const TOOLS: [(Tool, &str, &str); 4] = [
@@ -222,7 +224,7 @@ impl Editor {
             ui.painter().rect_filled(
                 rect,
                 3.,
-                theme::gray(if active {
+                palette.gray(if active {
                     72
                 } else if response.hovered() {
                     50
@@ -242,7 +244,7 @@ impl Editor {
                 egui::Align2::LEFT_CENTER,
                 label,
                 egui::FontId::proportional(12.),
-                theme::gray(if active { 245 } else { 200 }),
+                palette.gray(if active { 245 } else { 200 }),
             );
             if response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -254,7 +256,7 @@ impl Editor {
         let drawer = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.add_space(4.);
             egui::Frame::new()
-                .fill(theme::gray(40))
+                .fill(palette.gray(40))
                 .corner_radius(3.)
                 .inner_margin(egui::Margin {
                     left: 0,
@@ -295,7 +297,7 @@ impl Editor {
         let analysing = self.document.straighten.is_running();
         let r = &mut self.document.edit.recipe;
         egui::Frame::new()
-            .fill(theme::gray(40))
+            .fill(palette.gray(40))
             .corner_radius(3.)
             .inner_margin(egui::Margin {
                 left: 0,
@@ -401,7 +403,7 @@ impl Editor {
                     ui.label(
                         egui::RichText::new("Drag the frame on the photo; changes apply live.")
                             .size(10.)
-                            .color(theme::gray(125)),
+                            .color(palette.gray(125)),
                     );
                 });
                 ui.horizontal(|ui| {
@@ -422,9 +424,9 @@ impl Editor {
                         .add_sized(
                             [w, 22.],
                             egui::Button::new(
-                                egui::RichText::new("Done").color(theme::on_accent_text(245)),
+                                egui::RichText::new("Done").color(palette.on_accent_text(245)),
                             )
-                            .fill(theme::accent()),
+                            .fill(palette.accent()),
                         )
                         .on_hover_text("Finish cropping · Enter or R")
                         .clicked()
@@ -441,6 +443,7 @@ impl Editor {
         }
     }
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
         ui.spacing_mut().button_padding = Vec2::new(6., 2.);
         ui.spacing_mut().interact_size.y = 20.;
@@ -662,7 +665,7 @@ impl Editor {
                 let picking = view.is(Tool::WhiteBalance);
                 if picking || response.hovered() {
                     ui.painter()
-                        .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
+                        .rect_filled(rect, 3., palette.gray(if picking { 72 } else { 50 }));
                 }
                 eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
                 if response
@@ -968,7 +971,7 @@ impl Editor {
                             -1. ..=1.,
                             0.,
                             None,
-                            Some((theme::gray(40), band_color(i))),
+                            Some((palette.gray(40), band_color(i))),
                         )
                     });
                     highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
@@ -1018,7 +1021,7 @@ impl Editor {
                             ui.painter().circle_stroke(
                                 rect.center(),
                                 10.,
-                                Stroke::new(1.5, theme::gray(215)),
+                                Stroke::new(1.5, palette.gray(215)),
                             );
                         }
                         if response.on_hover_text(*band).clicked() {
@@ -1036,7 +1039,7 @@ impl Editor {
                             -1. ..=1.,
                             0.,
                             None,
-                            Some(hsl_gradient(i, c)),
+                            Some(hsl_gradient(&palette, i, c)),
                         );
                     }
                 });
@@ -1106,7 +1109,7 @@ impl Editor {
                                 -1. ..=1.,
                                 0.,
                                 None,
-                                Some(hsl_gradient(i, c)),
+                                Some(hsl_gradient(&palette, i, c)),
                             );
                         });
                         highlight_targeted(
@@ -1223,7 +1226,7 @@ impl Editor {
                 ui.label(
                     egui::RichText::new(lens.as_deref().unwrap_or("Unknown"))
                         .size(11.)
-                        .color(theme::gray(200)),
+                        .color(palette.gray(200)),
                 );
             });
             lens_profile::profile_menus(ui, r, metadata.as_ref());
@@ -1234,7 +1237,7 @@ impl Editor {
                         egui::Label::new(
                             egui::RichText::new(missing)
                                 .size(11.)
-                                .color(theme::gray(150)),
+                                .color(palette.gray(150)),
                         )
                         .wrap(),
                     );
@@ -1280,7 +1283,7 @@ impl Editor {
             let picking = view.is(Tool::Defringe);
             if picking || response.hovered() {
                 ui.painter()
-                    .rect_filled(rect, 3., theme::gray(if picking { 72 } else { 50 }));
+                    .rect_filled(rect, 3., palette.gray(if picking { 72 } else { 50 }));
             }
             eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
             if response
@@ -1370,7 +1373,7 @@ impl Editor {
                         }
                         ui.label(
                             egui::RichText::new(format!("{count} of {}", crate::develop::guided::MAX_GUIDES))
-                                .color(theme::gray(170)),
+                                .color(palette.gray(170)),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
@@ -1636,12 +1639,12 @@ fn band_color(i: usize) -> Color32 {
 }
 /// Rail colors for a mixer slider: neighbouring hues for Hue, gray to color
 /// for Saturation and dark to light for Luminance.
-fn hsl_gradient(band: usize, channel: usize) -> (Color32, Color32) {
+fn hsl_gradient(palette: &theme::Palette, band: usize, channel: usize) -> (Color32, Color32) {
     let color = band_color(band);
     match channel {
         0 => (band_color((band + 7) % 8), band_color((band + 1) % 8)),
-        1 => (theme::gray(110), color),
-        _ => (theme::gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
+        1 => (palette.gray(110), color),
+        _ => (palette.gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
     }
 }
 /// A panel's switch while its section is drawn; a click on it is stored after.
@@ -1671,7 +1674,9 @@ fn highlight_targeted(ui: &egui::Ui, row: Rect, share: f32) {
     painter.rect_filled(
         Rect::from_min_size(row.left_top(), Vec2::new(3., row.height())),
         1.5,
-        theme::gray(235).gamma_multiply(0.4 + 0.6 * share),
+        theme::palette(ui.ctx())
+            .gray(235)
+            .gamma_multiply(0.4 + 0.6 * share),
     );
 }
 /// The Targeted Adjustment Tool's shortcut ending in `key`, as the tooltips show it.
@@ -1692,7 +1697,7 @@ fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(11.),
-        theme::gray(165),
+        theme::palette(ui.ctx()).gray(165),
     );
     rect
 }
@@ -1706,7 +1711,7 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
         egui::Align2::RIGHT_CENTER,
         label,
         egui::FontId::proportional(11.),
-        theme::gray(190),
+        theme::palette(ui.ctx()).gray(190),
     );
     let rect = Rect::from_min_max(Pos2::new(row.left() + 88., row.top()), row.max);
     ui.scope_builder(
@@ -1777,7 +1782,7 @@ pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effect
     }
 }
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::gray(if strong { 235 } else { 170 });
+    let color = theme::palette(painter.ctx()).gray(if strong { 235 } else { 170 });
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
 }
 /// The line that opens the Remove and Masking drawers: both tools are new.
@@ -1792,14 +1797,17 @@ fn experimental(ui: &mut egui::Ui, note: &str) {
         ui.label(
             egui::RichText::new("Experimental · early version")
                 .size(10.)
-                .color(theme::warning()),
+                .color(theme::palette(ui.ctx()).warning()),
         )
         .on_hover_text(note);
     });
 }
 /// A circle with an arrow leaving it: the Remove tool.
 fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(1.4, theme::gray(if strong { 240 } else { 170 }));
+    let stroke = Stroke::new(
+        1.4,
+        theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 }),
+    );
     painter.circle_stroke(c + Vec2::new(-2., 2.), 4.5, stroke);
     painter.line_segment([c + Vec2::new(1.5, -1.5), c + Vec2::new(6., -6.)], stroke);
     painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(2.5, -6.)], stroke);
@@ -1807,7 +1815,7 @@ fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
 }
 /// An eye: the Red Eye tool.
 fn eye_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::gray(if strong { 240 } else { 170 });
+    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
     let stroke = Stroke::new(1.4, color);
     let lid = |sign: f32| -> Vec<Pos2> {
         (0..=12)
@@ -1823,7 +1831,7 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
 }
 /// A dashed circle over a square: the Masking tool.
 fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::gray(if strong { 240 } else { 170 });
+    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
     let stroke = Stroke::new(1.4, color);
     painter.rect_stroke(
         Rect::from_center_size(c, Vec2::splat(12.)),
@@ -1834,7 +1842,7 @@ fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
     painter.circle_filled(c + Vec2::new(1., 1.), 3.5, color);
 }
 fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::gray(if strong { 240 } else { 170 });
+    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
     icons::paint_at(painter, Icon::Crop, c, 15., color);
 }
 
@@ -1842,7 +1850,11 @@ fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
 fn hint_row(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
         ui.add_space(88.);
-        ui.label(egui::RichText::new(text).size(11.).color(theme::gray(140)));
+        ui.label(
+            egui::RichText::new(text)
+                .size(11.)
+                .color(theme::palette(ui.ctx()).gray(140)),
+        );
     });
 }
 

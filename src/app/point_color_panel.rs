@@ -174,6 +174,7 @@ fn swatch_row(
     pc: &mut PointColorView,
     picking: bool,
 ) -> bool {
+    let palette = theme::palette(ui.ctx());
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.), Sense::hover());
     let dropper = Rect::from_center_size(
         Pos2::new(row.left() + 70., row.center().y),
@@ -182,7 +183,7 @@ fn swatch_row(
     let response = ui.interact(dropper, ui.id().with("point-color-dropper"), Sense::click());
     if picking || response.hovered() {
         ui.painter()
-            .rect_filled(dropper, 3., theme::gray(if picking { 72 } else { 50 }));
+            .rect_filled(dropper, 3., palette.gray(if picking { 72 } else { 50 }));
     }
     let strong = picking || response.hovered();
     super::icons::paint_at(
@@ -190,7 +191,7 @@ fn swatch_row(
         super::icons::Icon::Eyedropper,
         dropper.center(),
         14.,
-        theme::gray(if strong { 235 } else { 170 }),
+        palette.gray(if strong { 235 } else { 170 }),
     );
     let toggle = response
         .on_hover_text("Point Color dropper: click a color in the photo to add a swatch")
@@ -204,7 +205,7 @@ fn swatch_row(
         );
         let Some(swatch) = list.get(slot) else {
             ui.painter()
-                .circle_stroke(center, 7., Stroke::new(1., theme::gray(60)));
+                .circle_stroke(center, 7., Stroke::new(1., palette.gray(60)));
             continue;
         };
         let rect = Rect::from_center_size(center, Vec2::splat(step));
@@ -213,7 +214,7 @@ fn swatch_row(
             .circle_filled(center, 8., display(swatch.source_prophoto()));
         if pc.selected == Some(slot) {
             ui.painter()
-                .circle_stroke(center, 10.5, Stroke::new(1.5, theme::gray(215)));
+                .circle_stroke(center, 10.5, Stroke::new(1.5, palette.gray(215)));
         }
         if response.clicked() {
             pc.selected = Some(slot);
@@ -313,6 +314,7 @@ fn range_points(
     default: [f32; 4],
     color: &dyn Fn(f32) -> Color32,
 ) {
+    let palette = theme::palette(ui.ctx());
     let before = *points;
     ui.push_id(label, |ui| {
         let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::hover());
@@ -321,7 +323,7 @@ fn range_points(
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            theme::gray(190),
+            palette.gray(190),
         );
         let area = Rect::from_min_max(Pos2::new(row.left() + 88., row.top()), row.max);
         let rail = Rect::from_min_max(
@@ -365,7 +367,7 @@ fn range_points(
             Pos2::new(x(points[3]), rail.bottom() + 5.),
         ];
         ui.painter()
-            .line(shape.to_vec(), Stroke::new(1., theme::gray(215)));
+            .line(shape.to_vec(), Stroke::new(1., palette.gray(215)));
         for (k, t) in points.iter().enumerate() {
             let c = Pos2::new(x(*t), rail.bottom() + 6.);
             let triangle = vec![c, c + Vec2::new(-4., 6.), c + Vec2::new(4., 6.)];
@@ -373,11 +375,11 @@ fn range_points(
             ui.painter().add(egui::Shape::convex_polygon(
                 triangle,
                 if inner {
-                    theme::gray(215)
+                    palette.gray(215)
                 } else {
-                    theme::gray(40)
+                    palette.gray(40)
                 },
-                Stroke::new(1., theme::gray(215)),
+                Stroke::new(1., palette.gray(215)),
             ));
         }
         response.on_hover_text("Drag the outer or inner points · double-click to reset");
@@ -424,8 +426,12 @@ fn disclosure(ui: &mut egui::Ui, open: &mut bool) {
         let text = if *open { "▾ Ranges" } else { "▸ Ranges" };
         if ui
             .add(
-                egui::Label::new(egui::RichText::new(text).size(11.).color(theme::gray(190)))
-                    .sense(Sense::click()),
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(11.)
+                        .color(theme::palette(ui.ctx()).gray(190)),
+                )
+                .sense(Sense::click()),
             )
             .on_hover_text("Hue, Sat and Lum Range")
             .clicked()
@@ -438,7 +444,11 @@ fn disclosure(ui: &mut egui::Ui, open: &mut bool) {
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
         ui.add_space(88.);
-        ui.label(egui::RichText::new(text).size(11.).color(theme::gray(150)));
+        ui.label(
+            egui::RichText::new(text)
+                .size(11.)
+                .color(theme::palette(ui.ctx()).gray(150)),
+        );
     });
 }
 

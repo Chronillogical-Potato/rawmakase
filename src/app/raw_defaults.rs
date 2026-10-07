@@ -201,6 +201,7 @@ impl Editor {
             settings.set_camera(&form.camera, form.choice.clone());
         }
         let mut remove = None;
+        let palette = theme::palette(ui.ctx());
         for c in &settings.cameras {
             form_row(ui, "", |ui| {
                 if remove_button(ui, on).clicked() {
@@ -213,7 +214,7 @@ impl Editor {
                             c.camera,
                             choice_text(&c.choice, presets)
                         ))
-                        .color(theme::gray(if on { 215 } else { 140 })),
+                        .color(palette.gray(if on { 215 } else { 140 })),
                     )
                     .truncate(),
                 );
@@ -254,6 +255,7 @@ fn choice_text(choice: &DefaultChoice, presets: &[Preset]) -> String {
 }
 /// A small ✕ that removes a camera's row.
 fn remove_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let sense = if enabled {
         egui::Sense::click()
     } else {
@@ -262,9 +264,9 @@ fn remove_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(22.), sense);
     let hovered = enabled && response.hovered();
     if hovered {
-        ui.painter().rect_filled(rect, 3., theme::gray(50));
+        ui.painter().rect_filled(rect, 3., palette.gray(50));
     }
-    let tint = theme::gray(match (enabled, hovered) {
+    let tint = palette.gray(match (enabled, hovered) {
         (false, _) => 90,
         (true, false) => 160,
         (true, true) => 235,
@@ -293,6 +295,7 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
                 let label = fixed.label();
                 ui.selectable_value(choice, fixed, label);
             }
+            let caption = theme::palette(ui.ctx()).gray(130);
             let mut last_group = None;
             for p in presets {
                 if last_group != Some(&p.group) {
@@ -302,7 +305,7 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
                     } else {
                         &p.group
                     };
-                    ui.label(egui::RichText::new(title).size(11.).color(theme::gray(130)));
+                    ui.label(egui::RichText::new(title).size(11.).color(caption));
                     last_group = Some(&p.group);
                 }
                 let value = DefaultChoice::preset(p);

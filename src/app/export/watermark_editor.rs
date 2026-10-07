@@ -73,6 +73,7 @@ impl WatermarkEditor {
 
 impl Editor {
     pub(super) fn watermark_editor(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         let Some(mut state) = self.exports.watermark_editor.take() else {
             return;
         };
@@ -90,7 +91,7 @@ impl Editor {
         let mut delete = false;
         let response = egui::Modal::new(egui::Id::new("watermark-editor"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame())
+            .frame(modal_frame(&palette))
             .show(ctx, |ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::hover());
                 ui.painter().text(
@@ -98,7 +99,7 @@ impl Editor {
                     egui::Align2::LEFT_CENTER,
                     "Watermark Editor",
                     egui::FontId::proportional(16.),
-                    theme::gray(236),
+                    palette.gray(236),
                 );
                 let preview = egui::Rect::from_min_max(
                     rect.left_top() + Vec2::new(24., 52.),
@@ -146,7 +147,7 @@ impl Editor {
                         close = Some(false);
                         delete = true;
                     }
-                    ui.label(egui::RichText::new("Name").color(theme::gray(150)));
+                    ui.label(egui::RichText::new("Name").color(palette.gray(150)));
                     ui.add(
                         egui::TextEdit::singleline(&mut state.watermark.name)
                             .desired_width(200.)
@@ -253,14 +254,15 @@ fn draw_preview(
     area: egui::Rect,
     photo: Option<(egui::TextureId, Vec2)>,
 ) {
-    ui.painter().rect_filled(area, 2., theme::gray(24));
+    let palette = theme::palette(ui.ctx());
+    ui.painter().rect_filled(area, 2., palette.gray(24));
     let Some((texture, size)) = photo.filter(|(_, s)| s.x > 0. && s.y > 0.) else {
         ui.painter().text(
             area.center(),
             egui::Align2::CENTER_CENTER,
             "Open a photo to preview the watermark",
             egui::FontId::proportional(12.),
-            theme::gray(130),
+            palette.gray(130),
         );
         return;
     };
@@ -386,7 +388,7 @@ fn heading(ui: &mut egui::Ui, title: &str) {
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(12.),
-        theme::gray(215),
+        theme::palette(ui.ctx()).gray(215),
     );
     ui.add_space(2.);
 }
@@ -407,7 +409,7 @@ fn row_of<R>(
         egui::Align2::RIGHT_CENTER,
         label,
         egui::FontId::proportional(12.),
-        theme::gray(150),
+        theme::palette(ui.ctx()).gray(150),
     );
     let controls = egui::Rect::from_min_max(
         egui::pos2(rect.left() + LABEL + GAP, rect.top()),
@@ -501,7 +503,9 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     }
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(name).size(12.).color(theme::gray(180)),
+                            egui::RichText::new(name)
+                                .size(12.)
+                                .color(theme::palette(ui.ctx()).gray(180)),
                         )
                         .truncate(),
                     );

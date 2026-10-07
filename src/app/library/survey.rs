@@ -143,6 +143,7 @@ impl Library {
     }
     /// Survey in place of the grid: the photos tiled, with a toolbar.
     pub(super) fn survey(&mut self, ui: &mut egui::Ui) -> Action {
+        let palette = theme::palette(ui.ctx());
         if self.selection.active.is_none() {
             self.close_survey();
             return Action::None;
@@ -150,14 +151,14 @@ impl Library {
         egui::Panel::bottom("library-survey-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::gray(38))
+                    .fill(palette.gray(38))
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
             .show(ui, |ui| self.survey_toolbar(ui));
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
-        ui.painter().rect_filled(area, 0., theme::gray(36));
+        ui.painter().rect_filled(area, 0., palette.gray(36));
         let ids = self.shown_surveyed();
         // The previews of every photo shown stay while they are shown.
         self.cache.shown_at_once = ids.len();
@@ -186,15 +187,19 @@ impl Library {
         }
     }
     fn survey_toolbar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         ui.horizontal(|ui| {
             self.view_buttons(ui);
             ui.add_space(12.);
             let count = self.surveyed().len();
-            ui.label(filter_caption(&match count {
-                1 => "1 photo".to_string(),
-                n if n > MOST => format!("{MOST} of {n} photos selected, up to the active one"),
-                n => format!("{n} photos"),
-            }));
+            ui.label(filter_caption(
+                &palette,
+                &match count {
+                    1 => "1 photo".to_string(),
+                    n if n > MOST => format!("{MOST} of {n} photos selected, up to the active one"),
+                    n => format!("{n} photos"),
+                },
+            ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let done = ui
                     .add(egui::Button::new(egui::RichText::new("Done").size(11.)).small())
@@ -203,6 +208,7 @@ impl Library {
                     self.close_survey();
                 }
                 ui.label(filter_caption(
+                    &palette,
                     "Click to make active · × or Cmd+click to take out",
                 ));
             });
@@ -211,6 +217,7 @@ impl Library {
     /// One surveyed photo in `rect`: a click makes it active, a double-click
     /// opens it in the Loupe, Cmd+click or its × takes it out.
     fn survey_tile(&mut self, ui: &mut egui::Ui, id: PhotoId, rect: Rect) {
+        let palette = theme::palette(ui.ctx());
         let Some(photo) = self.photo(id).cloned() else {
             return;
         };
@@ -237,14 +244,14 @@ impl Library {
             ui.painter().circle_filled(
                 close.center(),
                 10.,
-                theme::gray(if button.hovered() { 70 } else { 30 }),
+                palette.gray(if button.hovered() { 70 } else { 30 }),
             );
             crate::app::icons::paint_at(
                 ui.painter(),
                 crate::app::icons::Icon::Close,
                 close.center(),
                 12.,
-                theme::gray(230),
+                palette.gray(230),
             );
             if button.on_hover_text("Take out of the survey").clicked() {
                 self.drop_surveyed(id);

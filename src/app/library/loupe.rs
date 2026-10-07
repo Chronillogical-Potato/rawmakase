@@ -360,6 +360,7 @@ impl Library {
     }
     /// The Loupe in place of the grid, with its toolbar below.
     pub(super) fn loupe(&mut self, ui: &mut egui::Ui, zoom: &mut Zoom) -> Action {
+        let palette = theme::palette(ui.ctx());
         self.loupe.poll(ui.ctx());
         let Some(id) = self.selection.active else {
             self.close_loupe();
@@ -368,7 +369,7 @@ impl Library {
         egui::Panel::bottom("library-loupe-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::gray(38))
+                    .fill(palette.gray(38))
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
@@ -383,7 +384,7 @@ impl Library {
         }
         let (rect, response) =
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
-        ui.painter().rect_filled(rect, 0., theme::gray(36));
+        ui.painter().rect_filled(rect, 0., palette.gray(36));
         let ppp = ui.ctx().pixels_per_point();
         // The photo fits within the margin, as drawn below.
         self.loupe.view = rect.shrink(16.).size() * ppp;
@@ -531,7 +532,7 @@ impl Library {
                 egui::Align2::LEFT_BOTTOM,
                 note,
                 egui::FontId::proportional(11.),
-                theme::gray(170),
+                palette.gray(170),
             );
         }
         self.loupe_overlay(ui.painter(), rect);

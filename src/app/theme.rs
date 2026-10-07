@@ -3,13 +3,12 @@
 //! Omarchy desktop's theme, followed live.
 //!
 //! The interface was drawn in greys, so a palette is applied through them:
-//! [`gray`] maps a level of the default palette onto the current one,
-//! between the palette's own colours. The photo's backdrop is a neutral
-//! grey in every theme, as light as the palette, so colours are judged
-//! against grey.
+//! [`Palette::gray`] maps a level of the default palette onto the one
+//! applied to the egui context ([`palette`]), between the palette's own
+//! colours. The photo's backdrop is a neutral grey in every theme, as light
+//! as the palette, so colours are judged against grey.
 use eframe::egui::{self, Color32, Stroke};
 use std::collections::BTreeSet;
-use std::sync::RwLock;
 
 /// fastframe-theme's sixteen interface colours.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -134,21 +133,79 @@ impl fastframe_theme::Palette for Palette {
     }
 }
 
-static CURRENT: RwLock<Palette> = RwLock::new(Palette::DEFAULT);
-
-pub(super) fn current() -> Palette {
-    *CURRENT.read().unwrap_or_else(|e| e.into_inner())
+/// Where [`apply`] keeps the palette, in the egui context's memory.
+fn palette_id() -> egui::Id {
+    egui::Id::new("rawmakase theme palette")
 }
 
-/// The default palette's grey `level` in the current palette: between the
-/// two palette colours whose levels surround it, and beyond the darkest and
-/// lightest along the same direction.
-pub(super) fn gray(level: u8) -> Color32 {
-    let palette = current();
-    if palette == Palette::DEFAULT {
-        return Color32::from_gray(level);
+/// The palette applied to `ctx`, or the default one if none was. This reads
+/// the context's memory under its lock: read it once per function or
+/// widget, not per row or pixel.
+pub(super) fn palette(ctx: &egui::Context) -> Palette {
+    ctx.data(|d| d.get_temp(palette_id()))
+        .unwrap_or(Palette::DEFAULT)
+}
+
+impl Palette {
+    /// The default palette's grey `level` in this palette: between the two
+    /// palette colours whose levels surround it, and beyond the darkest and
+    /// lightest along the same direction.
+    pub(super) fn gray(&self, level: u8) -> Color32 {
+        if *self == Palette::DEFAULT {
+            return Color32::from_gray(level);
+        }
+        map(self, level)
     }
-    map(&palette, level)
+
+    /// Behind the photo and the Navigator: a neutral grey as light as the
+    /// palette's window colour, so photos are judged against grey in any
+    /// theme (Lightroom's own backdrops are greys too).
+    pub(super) fn photo_backdrop(&self) -> Color32 {
+        Color32::from_gray(luma(self.window).round() as u8)
+    }
+
+    /// A selected row in the folder tree and preset list: Lightroom's slate
+    /// blue-grey, or the palette's surface tinted towards its accent so the
+    /// row's text stays readable.
+    pub(super) fn selected_row(&self) -> Color32 {
+        if *self == Palette::DEFAULT {
+            return Color32::from_rgb(47, 58, 66);
+        }
+        lerp(self.surface_active, self.accent, 0.3)
+    }
+    /// The bar beside a selected folder.
+    pub(super) fn selected_marker(&self) -> Color32 {
+        if *self == Palette::DEFAULT {
+            return Color32::from_rgb(135, 160, 176);
+        }
+        self.accent
+    }
+
+    /// The selection and primary-button colour.
+    pub(super) fn accent(&self) -> Color32 {
+        self.accent
+    }
+    /// The primary-button colour under the pointer.
+    pub(super) fn accent_hover(&self) -> Color32 {
+        self.accent_hover
+    }
+    /// Text on a selected row or hovered menu item, which the accent fills.
+    pub(super) fn on_accent_text(&self, level: u8) -> Color32 {
+        if *self == Palette::DEFAULT {
+            return Color32::from_gray(level);
+        }
+        self.on_accent
+    }
+    /// Text on the accent colour.
+    pub(super) fn on_accent(&self) -> Color32 {
+        self.on_accent
+    }
+    pub(super) fn danger(&self) -> Color32 {
+        self.danger
+    }
+    pub(super) fn warning(&self) -> Color32 {
+        self.warning
+    }
 }
 
 fn map(palette: &Palette, level: u8) -> Color32 {
@@ -187,65 +244,15 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-/// Behind the photo and the Navigator: a neutral grey as light as the
-/// palette's window colour, so photos are judged against grey in any theme
-/// (Lightroom's own backdrops are greys too).
-pub(super) fn photo_backdrop() -> Color32 {
-    Color32::from_gray(luma(current().window).round() as u8)
-}
 fn luma(c: Color32) -> f32 {
     0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32
 }
 
-/// A selected row in the folder tree and preset list: Lightroom's slate
-/// blue-grey, or the palette's surface tinted towards its accent so the
-/// row's text stays readable.
-pub(super) fn selected_row() -> Color32 {
-    let palette = current();
-    if palette == Palette::DEFAULT {
-        return Color32::from_rgb(47, 58, 66);
-    }
-    lerp(palette.surface_active, palette.accent, 0.3)
-}
-/// The bar beside a selected folder.
-pub(super) fn selected_marker() -> Color32 {
-    let palette = current();
-    if palette == Palette::DEFAULT {
-        return Color32::from_rgb(135, 160, 176);
-    }
-    palette.accent
-}
-
-/// The selection and primary-button colour.
-pub(super) fn accent() -> Color32 {
-    current().accent
-}
-/// The primary-button colour under the pointer.
-pub(super) fn accent_hover() -> Color32 {
-    current().accent_hover
-}
-/// Text on a selected row or hovered menu item, which the accent fills.
-pub(super) fn on_accent_text(level: u8) -> Color32 {
-    let palette = current();
-    if palette == Palette::DEFAULT {
-        return Color32::from_gray(level);
-    }
-    palette.on_accent
-}
-/// Text on the accent colour.
-pub(super) fn on_accent() -> Color32 {
-    current().on_accent
-}
-pub(super) fn danger() -> Color32 {
-    current().danger
-}
-pub(super) fn warning() -> Color32 {
-    current().warning
-}
-
-/// Makes `palette` current and styles egui's own widgets with it.
+/// Keeps `palette` in `ctx`, where [`palette`] reads it, and styles egui's
+/// own widgets with it.
 pub(super) fn apply(ctx: &egui::Context, palette: Palette, text: &fastframe_text::TextRendering) {
-    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = palette;
+    ctx.data_mut(|d| d.insert_temp(palette_id(), palette));
+    let gray = |level| palette.gray(level);
     let mut visuals = if palette.light {
         egui::Visuals::light()
     } else {
@@ -382,6 +389,10 @@ impl Themes {
             apply(ctx, wanted, &self.text);
         }
     }
+    /// The palette last applied, for drawing that has no egui context.
+    pub(super) fn applied(&self) -> Palette {
+        self.applied
+    }
     /// The user's pick, if they made one.
     pub(super) fn chosen(&self) -> Option<Option<String>> {
         self.chosen.clone()
@@ -462,6 +473,29 @@ mod tests {
         assert_eq!(map(&nord, 22), Color32::from_rgb(0x2e, 0x34, 0x40));
         assert_eq!(map(&nord, 225), Color32::from_rgb(0xd8, 0xde, 0xe9));
         assert_eq!(nord.accent, Color32::from_rgb(0x81, 0xa1, 0xc1));
+    }
+
+    #[test]
+    fn a_palette_belongs_to_the_context_it_is_applied_to() {
+        let nord: Palette = fastframe_theme::parse_palette(
+            r##"{"colors":{"window":"#2e3440","text":"#d8dee9","accent":"#81a1c1"}}"##,
+        )
+        .unwrap();
+        let themed = egui::Context::default();
+        apply(
+            &themed,
+            nord,
+            &fastframe_text::TextRendering::platform_default(),
+        );
+        assert_eq!(palette(&themed), nord);
+        assert_eq!(
+            palette(&themed).gray(22),
+            Color32::from_rgb(0x2e, 0x34, 0x40)
+        );
+        // Another context keeps the default greys.
+        let plain = egui::Context::default();
+        assert_eq!(palette(&plain), Palette::DEFAULT);
+        assert_eq!(palette(&plain).gray(22), Color32::from_gray(22));
     }
 
     fn themes(chosen: Option<Option<String>>, omarchy: bool) -> Themes {

@@ -276,6 +276,7 @@ impl Editor {
         panes: &Panes,
         pane: Pane,
     ) -> Option<Rect> {
+        let palette = theme::palette(ui.ctx());
         badge(ui, panes.after.clip, "Active");
         let rect = self.reference_rect(ui, pane);
         match (rect, self.reference.photo) {
@@ -288,7 +289,7 @@ impl Editor {
                     egui::Align2::CENTER_CENTER,
                     text,
                     egui::FontId::proportional(13.),
-                    theme::gray(150),
+                    palette.gray(150),
                 );
             }
         }
@@ -298,7 +299,7 @@ impl Editor {
                 egui::Align2::CENTER_CENTER,
                 error,
                 egui::FontId::proportional(12.),
-                theme::gray(170),
+                palette.gray(170),
             );
         }
         badge(ui, pane.clip, "Reference");
@@ -353,7 +354,7 @@ impl Editor {
             ui.painter().rect_stroke(
                 pane.clip.shrink(2.),
                 0.,
-                egui::Stroke::new(2., theme::accent()),
+                egui::Stroke::new(2., theme::palette(ui.ctx()).accent()),
                 egui::StrokeKind::Inside,
             );
         }

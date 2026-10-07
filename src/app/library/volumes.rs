@@ -115,6 +115,7 @@ pub(super) fn volume_row(
     photos: usize,
     open: bool,
 ) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     ui.add_space(4.);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), egui::Sense::click());
@@ -122,20 +123,20 @@ pub(super) fn volume_row(
     painter.rect_filled(
         rect,
         3.,
-        theme::gray(if response.hovered() { 64 } else { 56 }),
+        palette.gray(if response.hovered() { 64 } else { 56 }),
     );
     let y = rect.center().y;
     let led = egui::Rect::from_center_size(egui::pos2(rect.left() + 14., y), Vec2::new(5., 11.));
     if attached == Some(true) {
         painter.rect_filled(led, 1., Color32::from_rgb(110, 200, 90));
     } else {
-        painter.rect_filled(led, 1., theme::gray(26));
+        painter.rect_filled(led, 1., palette.gray(26));
         painter.rect_stroke(
             led,
             1.,
             egui::Stroke::new(
                 1.,
-                theme::gray(if attached == Some(false) { 150 } else { 90 }),
+                palette.gray(if attached == Some(false) { 150 } else { 90 }),
             ),
             egui::StrokeKind::Inside,
         );
@@ -145,7 +146,7 @@ pub(super) fn volume_row(
         egui::Align2::LEFT_CENTER,
         &volume.name,
         egui::FontId::proportional(12.5),
-        theme::gray(225),
+        palette.gray(225),
     );
     let gb = |bytes: u64| bytes as f64 / 1e9;
     let detail = match (attached, space) {
@@ -158,7 +159,7 @@ pub(super) fn volume_row(
         egui::Align2::RIGHT_CENTER,
         detail,
         egui::FontId::proportional(11.),
-        theme::gray(160),
+        palette.gray(160),
     );
     let c = egui::pos2(rect.right() - 13., y);
     let arrow = if open {
@@ -176,7 +177,7 @@ pub(super) fn volume_row(
     };
     painter.add(egui::Shape::convex_polygon(
         arrow,
-        theme::gray(200),
+        palette.gray(200),
         egui::Stroke::NONE,
     ));
     response.on_hover_text(match (&volume.mount, attached) {
