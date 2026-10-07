@@ -312,8 +312,8 @@ mod tests {
         let mut op = RedEyeOp {
             kind: EyeKind::Red,
             center: [0.5, 0.5],
-            radius: [MAX_RADIUS, 0.01],
-            correlation: MAX_CORRELATION,
+            radius: [0.25, 0.01],
+            correlation: 0.95,
             pupil_size: 1.,
             darken: 0.,
         };
@@ -321,10 +321,10 @@ mod tests {
         op.correlation = 0.96;
         assert!(op.validate().is_err());
         op.correlation = 0.;
-        op.radius[0] = MAX_RADIUS * 1.01;
+        op.radius[0] = 0.2501;
         assert!(op.validate().is_err());
         op.radius[0] = 0.1;
-        assert!(validate(&vec![op.clone(); MAX_OPS]).is_ok());
-        assert!(validate(&vec![op; MAX_OPS + 1]).is_err());
+        assert!(validate(&vec![op.clone(); 200]).is_ok());
+        assert!(validate(&vec![op; 201]).is_err());
     }
 }
