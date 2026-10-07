@@ -128,7 +128,7 @@ pub(crate) fn photo_pivot(blocks: &[[f32; 3]]) -> f32 {
         .iter()
         .map(|p| {
             let [r, g, b] = p.map(|v| srgb_decode(v.clamp(0., 1.)));
-            srgb_encode((0.2126 * r + 0.7152 * g + 0.0722 * b).clamp(1e-5, 1.))
+            srgb_encode((crate::color::luminance([r, g, b])).clamp(1e-5, 1.))
         })
         .collect();
     if lum.is_empty() {

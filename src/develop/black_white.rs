@@ -130,7 +130,7 @@ pub(crate) fn gray_grid(mix: [f32; 8]) -> Vec<[f32; 3]> {
 /// The gray a color (linear display RGB) becomes under `grid`, as linear luminance.
 pub(crate) fn gray(grid: &[[f32; 3]], rgb: [f32; 3]) -> f32 {
     let scaled = super::color_mixer::tables(grid, rgb.map(|v| v.max(0.)));
-    (0.2126 * scaled[0] + 0.7152 * scaled[1] + 0.0722 * scaled[2]).max(0.)
+    (crate::color::luminance(scaled)).max(0.)
 }
 
 /// The Basic panel's Treatment.
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn chart_gray_follows_camera_raws_measurements() {
         use super::{gray, gray_grid};
-        let lum = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+        let lum = |p: [f32; 3]| crate::color::luminance(p);
         let zero = gray_grid([0.; 8]);
         // Neutrals keep their luminance; a zero mix stays near the color's own.
         assert!((gray(&zero, [0.2; 3]) - 0.2).abs() < 0.01);

@@ -177,7 +177,7 @@ pub fn visualize_spots(image: &crate::develop::Rendered, threshold: f32) -> Vec<
     let lum: Vec<f32> = image
         .pixels
         .iter()
-        .map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2])
+        .map(|p| crate::color::luminance(*p))
         .collect();
     // Detail = luminance minus its 5×5 mean, from running sums.
     let r = 2usize;

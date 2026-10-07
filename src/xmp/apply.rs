@@ -981,7 +981,7 @@ impl Preset {
                 .step_by(64)
                 .map(|p| {
                     let q = mul(m.matrix, std::array::from_fn(|c| p[c] * r.wb[c]));
-                    (q[0] * 0.2126 + q[1] * 0.7152 + q[2] * 0.0722).max(1e-6)
+                    crate::color::luminance(q).max(1e-6)
                 })
                 .collect();
             l.sort_by(f32::total_cmp);

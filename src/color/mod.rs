@@ -2,6 +2,10 @@
 //! develop pipeline, XMP and the interface. Depends on nothing else in the crate.
 pub mod curve;
 
+/// Relative luminance with the Rec. 709 / sRGB weights, in the units of `p`.
+pub fn luminance(p: [f32; 3]) -> f32 {
+    0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
+}
 pub fn mul(m: [[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
     m.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
 }

@@ -975,7 +975,7 @@ fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow:
         let out = crate::develop::render(&im, &r.checked()?, 0)?;
         Ok(out.pixels[5 * out.width as usize + patch * 10 + 5])
     };
-    let luma = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+    let luma = |p: [f32; 3]| crate::color::luminance(p);
     // Tone Curve: the region chosen is the one whose slider changes the patch most.
     for patch in [0, 2] {
         let w = TargetWeights::new(Target::ToneCurve, &sample(&r, patch)?, &r);

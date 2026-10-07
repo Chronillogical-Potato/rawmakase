@@ -222,7 +222,7 @@ impl Effects {
             let gray = (p[0] + p[1] + p[2]) / 3.;
             p[c] += (p[c] - gray) * s * 0.35;
         }
-        let y = (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).max(0.);
+        let y = (crate::color::luminance(p)).max(0.);
         let tint = self.shadow_tint * (-y * 8.).exp() * y * 0.3;
         p[1] += tint;
         p[0] -= tint * 0.5;
@@ -353,7 +353,7 @@ pub(crate) fn spatial_finish_scaled(
         let y = origin[1] + i as u32 / im.width;
         let nx = ((x as f32 + 0.5) / full[0] as f32 - 0.5) * 2.;
         let ny = ((y as f32 + 0.5) / full[1] as f32 - 0.5) * 2.;
-        let l = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+        let l = crate::color::luminance(*p);
         if let Some(v) = &vignette {
             *p = v.apply(*p, v.mask(nx, ny));
         }

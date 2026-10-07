@@ -90,7 +90,7 @@ impl Sliders {
     }
 }
 pub(crate) fn luminance(rgb: [f32; 3]) -> f32 {
-    (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]).max(6e-4)
+    (crate::color::luminance(rgb)).max(6e-4)
 }
 impl LocalToneMap {
     /// `tone` maps a camera sample to linear display RGB after the profile tone curve.
