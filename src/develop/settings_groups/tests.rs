@@ -88,9 +88,9 @@ fn everything_changed() -> Recipe {
         saturation: 0.1,
         vibrance: 0.2,
         hsl: [[0.1, 0.2, 0.3]; 8],
-        point_colors: vec![crate::develop::point_color::PointColor {
+        point_colors: vec![crate::model::point_color::PointColor {
             shift: [0.2, 0.3, -0.1],
-            ..crate::develop::point_color::PointColor::sampled([1., 0.5, 0.3])
+            ..crate::model::point_color::PointColor::sampled([1., 0.5, 0.3])
         }],
         grading: [[0.5, 0.2, 0.1]; 3],
         noise_luma: 0.3,

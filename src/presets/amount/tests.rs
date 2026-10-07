@@ -380,7 +380,7 @@ fn parametric_splits_keep_growing_until_they_would_cross() {
 /// Point Color swatches scale their shifts; swatches added or taken away don't scale.
 #[test]
 fn point_color_shifts_scale_and_new_swatches_dont() {
-    use crate::develop::point_color::PointColor;
+    use crate::model::point_color::PointColor;
     let m = metadata();
     let before = Recipe {
         point_colors: vec![PointColor::sampled([0.6, 0.4, 0.2])],

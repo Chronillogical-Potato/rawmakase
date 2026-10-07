@@ -145,7 +145,7 @@ fn same_swatches(a: &Recipe, b: &Recipe) -> bool {
     let unshifted = |r: &Recipe| {
         r.point_colors
             .iter()
-            .map(|p| crate::develop::point_color::PointColor {
+            .map(|p| crate::model::point_color::PointColor {
                 shift: [0.; 3],
                 ..*p
             })
@@ -511,7 +511,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
             .point_colors
             .iter()
             .zip(point_colors)
-            .map(|(a, b)| crate::develop::point_color::PointColor {
+            .map(|(a, b)| crate::model::point_color::PointColor {
                 shift: lerp_all(a.shift, b.shift, t, -1., 1.),
                 ..*b
             })

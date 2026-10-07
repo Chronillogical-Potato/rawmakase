@@ -469,7 +469,7 @@ mod tests {
         let mut color = GroupSelection::none();
         color.set(SettingGroup::ColorAdjustments, GroupInclusion::Included);
         let info = PresetInfo::new("Warm skin", "User Presets");
-        use crate::develop::point_color::PointColor;
+        use crate::model::point_color::PointColor;
         let swatch = PointColor {
             shift: [0.1, -0.2, 0.15],
             variance: -0.3,

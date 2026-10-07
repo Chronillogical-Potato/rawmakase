@@ -503,7 +503,7 @@ pub(super) enum NoPointColors {
 
 /// `crs:PointColors` and `crs:ColorVariance`, one item per swatch.
 pub(super) fn point_colors(out: &mut String, r: &Recipe, empty: NoPointColors) {
-    use crate::develop::point_color::{ListText, format_list};
+    use crate::model::point_color::{ListText, format_list};
     let text = if r.point_colors.is_empty() {
         if empty == NoPointColors::Omit {
             return;

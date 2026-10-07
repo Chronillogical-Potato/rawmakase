@@ -104,7 +104,7 @@ fn point_colors_import_and_write_back() {
         "{packet}"
     );
     let again = parse(Path::new("again.xmp"), &packet).unwrap();
-    let swatches = crate::develop::point_color::parse_list(
+    let swatches = crate::model::point_color::parse_list(
         &again.settings["PointColors"],
         again.settings.get("ColorVariance").map(String::as_str),
     );

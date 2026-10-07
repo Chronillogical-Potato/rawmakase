@@ -3863,7 +3863,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     let pending = editor.preview.pending_recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
-        crate::develop::point_color::SwatchView::VisualizeRange
+        crate::model::point_color::SwatchView::VisualizeRange
     );
     assert_ne!(Some(pending), Some(&editor.effective_recipe()));
     // Not in Before, which shows the photo's defaults.

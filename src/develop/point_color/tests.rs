@@ -1,4 +1,8 @@
 use super::*;
+use crate::color::hsv::{hsv_to_rgb, rgb_to_hsv};
+use crate::model::point_color::{
+    MAX_SWATCHES, PointColor, SwatchView, visualize_range, without_visualization,
+};
 
 fn swatch(values: [f32; 19], variance: f32) -> PointColor {
     PointColor {

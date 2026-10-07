@@ -1,6 +1,7 @@
 //! Color arithmetic and tone-curve primitives shared by camera profiles, the
 //! develop pipeline, XMP and the interface. Depends on nothing else in the crate.
 pub mod curve;
+pub mod hsv;
 
 /// Relative luminance with the Rec. 709 / sRGB weights, in the units of `p`.
 pub fn luminance(p: [f32; 3]) -> f32 {
