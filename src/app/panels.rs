@@ -206,6 +206,103 @@ impl Editor {
     }
 }
 
+/// The width of the strip on a window edge that holds a panel's arrow.
+const EDGE: f32 = 12.;
+
+impl Editor {
+    /// The arrow strips on the left and right window edges, outside the side
+    /// panels. Draw after the filmstrip, so they sit above it as the panels do.
+    pub(super) fn side_edges(&mut self, ui: &mut egui::Ui) {
+        for panel in [WorkspacePanel::Left, WorkspacePanel::Right] {
+            self.edge(ui, panel);
+        }
+    }
+    /// The arrow strip on the bottom window edge, under the filmstrip. Draw
+    /// before any other bottom panel.
+    pub(super) fn bottom_edge(&mut self, ui: &mut egui::Ui) {
+        self.edge(ui, WorkspacePanel::Filmstrip);
+    }
+    /// Lightroom's panel arrow: a thin strip on the window edge beside `panel`,
+    /// with a triangle pointing the way the panel would go. A click on the
+    /// strip hides or shows the panel.
+    fn edge(&mut self, ui: &mut egui::Ui, panel: WorkspacePanel) {
+        let visibility = self.panels.of(self.module).visibility(panel);
+        let fill = super::theme::palette(ui.ctx()).gray(22);
+        let frame = egui::Frame::new().fill(fill);
+        let show = |ui: &mut egui::Ui| edge_arrow(ui, panel, visibility);
+        let clicked = match panel {
+            WorkspacePanel::Left => egui::Panel::left("left-edge")
+                .exact_size(EDGE)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, show),
+            WorkspacePanel::Right => egui::Panel::right("right-edge")
+                .exact_size(EDGE)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, show),
+            WorkspacePanel::Filmstrip => egui::Panel::bottom("bottom-edge")
+                .exact_size(EDGE)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, show),
+        }
+        .inner;
+        if clicked {
+            self.change_panels(PanelChange::Toggle(panel));
+        }
+    }
+}
+
+/// Draws an edge strip's arrow, filling the strip; returns whether it was clicked.
+fn edge_arrow(ui: &mut egui::Ui, panel: WorkspacePanel, visibility: Visibility) -> bool {
+    let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click());
+    let palette = super::theme::palette(ui.ctx());
+    let color = if response.hovered() {
+        palette.gray(230)
+    } else {
+        palette.gray(120)
+    };
+    // Shown, the arrow points off the window, the way the panel goes when hidden.
+    let outward = match panel {
+        WorkspacePanel::Left => egui::vec2(-1., 0.),
+        WorkspacePanel::Right => egui::vec2(1., 0.),
+        WorkspacePanel::Filmstrip => egui::vec2(0., 1.),
+    };
+    let tip = match visibility {
+        Visibility::Shown => outward,
+        Visibility::Hidden => -outward,
+    };
+    let across = egui::vec2(tip.y, tip.x);
+    let c = rect.center();
+    let size = 4.;
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![
+            c + tip * size,
+            c - tip * size + across * size,
+            c - tip * size - across * size,
+        ],
+        color,
+        egui::Stroke::NONE,
+    ));
+    let (name, key) = match panel {
+        WorkspacePanel::Left => ("the left panel", "F7"),
+        WorkspacePanel::Right => ("the right panel", "F8"),
+        WorkspacePanel::Filmstrip => ("the filmstrip", "F6"),
+    };
+    let verb = match visibility {
+        Visibility::Shown => "Hide",
+        Visibility::Hidden => "Show",
+    };
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(format!("{verb} {name} · {key}"))
+        .clicked()
+}
+
 /// The session's panels, or all shown if what was saved does not read.
 pub(crate) fn lenient<'de, D: Deserializer<'de>>(d: D) -> Result<WorkspacePanels, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
