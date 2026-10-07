@@ -12,7 +12,6 @@ use crate::develop::{
 use crate::model::operators::GrainModel;
 use anyhow::{Context, Result, ensure};
 use std::{
-    path::Path,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -78,7 +77,8 @@ pub struct Frame {
     pub released: Vec<wgpu::Texture>,
 }
 /// The sRGB-to-monitor transform sampled on a lattice of 8-bit values, so the shader
-/// applies it without lcms. Built once per profile.
+/// applies it without lcms. Built once per profile, from the transform the caller
+/// supplies (`raw::display_transform`), so the engine links no colour management.
 pub struct MonitorLut {
     size: u32,
     values: Vec<f32>,
@@ -86,13 +86,14 @@ pub struct MonitorLut {
 /// Lattice points per axis: 52 puts one on every fifth 8-bit value.
 const LUT_SIZE: u32 = 52;
 impl MonitorLut {
-    pub fn new(profile: &Path) -> Result<Self> {
+    /// Samples `transform`, which changes sRGB triples in place.
+    pub fn sample(transform: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<Self> {
         let n = LUT_SIZE as usize;
         let step = |i: usize| (i * 255 / (n - 1)) as u8;
         let mut rgb: Vec<u8> = (0..n * n * n)
             .flat_map(|i| [step(i / (n * n)), step(i / n % n), step(i % n)])
             .collect();
-        crate::raw::display_transform(profile, &mut rgb)?;
+        transform(&mut rgb)?;
         Ok(Self {
             size: LUT_SIZE,
             values: rgb.into_iter().map(f32::from).collect(),
@@ -717,4 +718,27 @@ fn readback(
         texture.size(),
     );
     (texture.width(), texture.height(), row, buffer)
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    #[test]
+    fn the_monitor_lut_samples_the_transform_it_is_given() -> Result<()> {
+        let n = LUT_SIZE as usize;
+        let identity = MonitorLut::sample(|_| Ok(()))?;
+        assert_eq!(identity.size, LUT_SIZE);
+        assert_eq!(identity.values.len(), n * n * n * 3);
+        // Red runs slowest, blue fastest, on every fifth 8-bit value.
+        assert_eq!(identity.values[..6], [0., 0., 0., 0., 0., 5.]);
+        assert_eq!(identity.values[identity.values.len() - 3..], [255.; 3]);
+        let inverted = MonitorLut::sample(|rgb| {
+            rgb.iter_mut().for_each(|v| *v = 255 - *v);
+            Ok(())
+        })?;
+        assert_eq!(inverted.values[..3], [255.; 3]);
+        assert!(MonitorLut::sample(|_| anyhow::bail!("no profile")).is_err());
+        Ok(())
+    }
 }
