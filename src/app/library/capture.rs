@@ -26,10 +26,16 @@ impl Library {
             return;
         }
         let missing = self
+            .session
             .folders
             .iter()
             .filter(|f| {
-                let mut photos = self.photos.iter().filter(|p| p.folder == f.id).peekable();
+                let mut photos = self
+                    .session
+                    .photos
+                    .iter()
+                    .filter(|p| p.folder == f.id)
+                    .peekable();
                 photos.peek().is_some() && photos.all(|p| !self.is_available(&p.path))
             })
             .count();
@@ -46,6 +52,7 @@ impl Library {
             return;
         }
         let todo: Vec<_> = self
+            .session
             .photos
             .iter()
             .filter(|p| {
@@ -79,7 +86,7 @@ impl Library {
             })
             .collect();
         if !dated.is_empty() {
-            match self.catalog.fill_capture_times(&dated) {
+            match self.session.catalog.fill_capture_times(&dated) {
                 Ok(()) => self.apply_capture_times(&dated),
                 // Read again after the next online check, which clears the
                 // photos tried.
@@ -95,7 +102,7 @@ impl Library {
     /// photos, keeping the selected photo selected and where it was on screen.
     pub(super) fn apply_capture_times(&mut self, times: &[(PhotoId, String)]) {
         let times: HashMap<PhotoId, &String> = times.iter().map(|(id, t)| (*id, t)).collect();
-        for photo in &mut self.photos {
+        for photo in &mut self.session.photos {
             if photo.captured.is_empty()
                 && let Some(time) = times
                     .get(&photo.id)
@@ -105,7 +112,7 @@ impl Library {
             }
         }
         self.resort_in_place(|library| {
-            library.photos.sort_by(|a, b| {
+            library.session.photos.sort_by(|a, b| {
                 (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
             });
         });
