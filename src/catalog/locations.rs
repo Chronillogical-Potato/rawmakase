@@ -8,7 +8,7 @@
 //! its root was added. The legacy `roots.mapped_path` and `folder_mappings`
 //! are copied into a computer's rows the first time it opens the catalog
 //! with this release; after that they are only written, for older releases.
-use super::Catalog;
+use super::{Catalog, FolderId, RootId};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::collections::HashMap;
@@ -139,7 +139,7 @@ pub struct Override {
 /// A root, where it is on this computer and elsewhere.
 #[derive(Clone, Debug)]
 pub struct RootLocations {
-    pub root: i64,
+    pub root: RootId,
     /// Where it was added.
     pub original: String,
     /// This computer's location of the root, if it has one.
@@ -154,7 +154,7 @@ pub struct RootLocations {
 /// A place on this computer where a root ('') or folder is.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FolderLocation {
-    pub root: i64,
+    pub root: RootId,
     pub relative: String,
     pub path: PathBuf,
 }
@@ -313,8 +313,8 @@ impl Catalog {
         &self.computer
     }
     /// This computer's locations, by root: (logical path, location).
-    pub(super) fn location_rows(&self) -> Result<HashMap<i64, Vec<(String, PathBuf)>>> {
-        let mut rows: HashMap<i64, Vec<(String, PathBuf)>> = HashMap::new();
+    pub(super) fn location_rows(&self) -> Result<HashMap<RootId, Vec<(String, PathBuf)>>> {
+        let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();
         let mut q = self.db.prepare(
             "SELECT root, relative_path, path FROM folder_locations WHERE computer=?
              ORDER BY root, relative_path",
@@ -330,8 +330,8 @@ impl Catalog {
         Ok(rows)
     }
     /// A folder's root and logical path.
-    fn logical_path(&self, folder: i64) -> Result<(i64, String)> {
-        let (root, original, relative, logical): (i64, String, String, Option<String>) = self
+    fn logical_path(&self, folder: FolderId) -> Result<(RootId, String)> {
+        let (root, original, relative, logical): (RootId, String, String, Option<String>) = self
             .db
             .query_row(
                 "SELECT f.root, r.original_path, f.relative_path, p.path
@@ -349,15 +349,20 @@ impl Catalog {
     }
     /// Finds root `id` at `path` on this computer, keeping its folders'
     /// own locations.
-    pub fn relink_root(&self, id: i64, path: &Path) -> Result<()> {
+    pub fn relink_root(&self, id: RootId, path: &Path) -> Result<()> {
         self.set_root_location(id, path, Overrides::Keep)
     }
     /// Finds root `id` at `path` on this computer, keeping or clearing the
     /// locations of folders below it.
-    pub fn relink_root_with(&mut self, id: i64, path: &Path, overrides: Overrides) -> Result<()> {
+    pub fn relink_root_with(
+        &mut self,
+        id: RootId,
+        path: &Path,
+        overrides: Overrides,
+    ) -> Result<()> {
         self.set_root_location(id, path, overrides)
     }
-    fn set_root_location(&self, id: i64, path: &Path, overrides: Overrides) -> Result<()> {
+    fn set_root_location(&self, id: RootId, path: &Path, overrides: Overrides) -> Result<()> {
         ensure!(path.is_dir(), "Choose an existing folder");
         let path = path.to_string_lossy();
         let tx = self.db.unchecked_transaction()?;
@@ -390,7 +395,7 @@ impl Catalog {
         Ok(())
     }
     /// Finds folder `id` and its subfolders at `path` on this computer.
-    pub fn relink_folder(&self, id: i64, path: &Path) -> Result<()> {
+    pub fn relink_folder(&self, id: FolderId, path: &Path) -> Result<()> {
         ensure!(path.is_dir(), "Choose an existing folder");
         let (root, logical) = self.logical_path(id)?;
         let path = path.to_string_lossy();
@@ -411,14 +416,14 @@ impl Catalog {
     /// Forgets this computer's location of root `root` ('') or of its folder
     /// `relative`: it is then found through the nearest location above it,
     /// else where its root was added. Folders below keep their own.
-    pub fn clear_folder_location(&mut self, root: i64, relative: &str) -> Result<()> {
+    pub fn clear_folder_location(&mut self, root: RootId, relative: &str) -> Result<()> {
         let tx = self.db.transaction()?;
         clear(&tx, &self.computer.id, root, relative)?;
         tx.commit()?;
         Ok(())
     }
     /// The folders below root `root` located separately on this computer.
-    pub fn root_overrides(&self, root: i64) -> Result<Vec<Override>> {
+    pub fn root_overrides(&self, root: RootId) -> Result<Vec<Override>> {
         Ok(self
             .location_rows()?
             .remove(&root)
@@ -431,7 +436,7 @@ impl Catalog {
     /// Every root with its locations, for Folder locations.
     pub fn folder_locations(&self) -> Result<Vec<RootLocations>> {
         let mut rows = self.location_rows()?;
-        let mut elsewhere: HashMap<i64, Vec<(String, String, PathBuf)>> = HashMap::new();
+        let mut elsewhere: HashMap<RootId, Vec<(String, String, PathBuf)>> = HashMap::new();
         let mut q = self.db.prepare(
             "SELECT l.root, c.name, l.relative_path, l.path FROM folder_locations l
              JOIN computers c ON c.id=l.computer WHERE l.computer<>?
@@ -493,7 +498,7 @@ impl Catalog {
 }
 /// Clears `computer`'s location of `relative` in `root` and, in the same
 /// transaction, the legacy mapping older releases read for it.
-fn clear(db: &Connection, computer: &str, root: i64, relative: &str) -> Result<()> {
+fn clear(db: &Connection, computer: &str, root: RootId, relative: &str) -> Result<()> {
     db.execute(
         "DELETE FROM folder_locations WHERE root=? AND relative_path=? AND computer=?",
         params![root, relative, computer],

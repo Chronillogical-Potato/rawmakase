@@ -1,5 +1,5 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
-use crate::catalog::{Catalog, Collection, Folder, Photo};
+use crate::catalog::{Catalog, Collection, Folder, FolderId, Photo, RootId};
 use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 pub enum Action {
     None,
     Develop(i64),
-    RelinkRoot(i64),
-    RelinkFolder(i64),
+    RelinkRoot(RootId),
+    RelinkFolder(FolderId),
     AddFolder,
 }
 impl Action {
@@ -58,7 +58,7 @@ pub struct Library {
     collections: Vec<Collection>,
     /// Each collection's photos, limited to the ones the Library shows.
     collection_photos: HashMap<crate::catalog::CollectionId, HashSet<i64>>,
-    roots: Vec<(i64, String, Option<String>)>,
+    roots: Vec<(RootId, String, Option<String>)>,
     /// Whether the folders missing on this computer were reported since the
     /// catalog opened.
     missing_noted: bool,

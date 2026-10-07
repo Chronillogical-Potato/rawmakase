@@ -49,7 +49,7 @@ fn legacy(catalog: &Path) -> Result<rusqlite::Connection> {
     Ok(rusqlite::Connection::open(catalog)?)
 }
 /// A folder by logical path; one an older release just added, by its own.
-fn folder_id(catalog: &Path, relative: &str) -> Result<i64> {
+fn folder_id(catalog: &Path, relative: &str) -> Result<FolderId> {
     Ok(legacy(catalog)?.query_row(
         "SELECT f.id FROM folders f LEFT JOIN folder_paths p ON p.folder=f.id
          WHERE COALESCE(p.path, f.relative_path)=?",
@@ -234,7 +234,7 @@ fn clearing_falls_back_to_the_nearest_remaining_location() -> Result<()> {
         path_of(&catalog, &linux(), "a.NEF")?,
         year_here.join("Trip/a.NEF")
     );
-    let legacy_rows: Vec<i64> = legacy(&catalog)?
+    let legacy_rows: Vec<FolderId> = legacy(&catalog)?
         .prepare("SELECT folder FROM folder_mappings")?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -512,7 +512,7 @@ fn a_windows_folder_and_the_same_folder_added_here_are_one_folder() -> Result<()
           INSERT INTO photos(folder,filename,original_path) VALUES(2,'a.NEF','D:\Photos\2024\Trip\a.NEF');",
     )?;
     let mut cat = Catalog::open_as(&catalog, &linux())?;
-    cat.relink_root(1, &here)?;
+    cat.relink_root(RootId(1), &here)?;
     assert_eq!(
         path_of(&catalog, &linux(), "a.NEF")?,
         here.join("2024/Trip/a.NEF")

@@ -193,7 +193,8 @@ fn main() -> Result<()> {
             root,
             folder,
         }) => {
-            rawmakase::catalog::Catalog::open(&catalog)?.relink_root(root, &folder)?;
+            rawmakase::catalog::Catalog::open(&catalog)?
+                .relink_root(rawmakase::catalog::RootId(root), &folder)?;
             println!("Root folder relinked");
         }
 
