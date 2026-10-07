@@ -22,6 +22,7 @@ mod defaults;
 mod descriptive;
 mod develop_history;
 mod edit_records;
+mod edit_rows;
 mod edits;
 mod info;
 mod ingest;
@@ -340,6 +341,8 @@ pub use sidecar::Merge;
 mod boundary_tests;
 #[cfg(test)]
 mod descriptive_tests;
+#[cfg(test)]
+mod edit_rows_tests;
 #[cfg(test)]
 mod locations_tests;
 #[cfg(test)]

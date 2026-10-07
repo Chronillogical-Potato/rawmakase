@@ -4,8 +4,8 @@ use super::db::{Reads, sql};
 use super::value::row;
 use super::{Catalog, PhotoId};
 use crate::edits::{SavedEdit, local_edits};
-use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
-use anyhow::{Context, Result, ensure};
+use crate::{export_settings::ExportOptions, model::recipe::Recipe};
+use anyhow::{Context, Result};
 use std::path::Path;
 
 /// One photo's change for [`Catalog::change_edits`].
@@ -68,68 +68,14 @@ impl Catalog {
     /// Saves or clears several photos' edits in one transaction. Clearing returns a
     /// photo to having no RAWmakase edit: no recipe, spots, masks or History.
     pub fn change_edits(&mut self, changes: &[EditChange<'_, '_>]) -> Result<()> {
-        let mut identities = Vec::new();
-        for change in changes {
-            if let EditChange::Save(e) = change {
-                e.recipe.validate()?;
-                e.export.validate()?;
-                identities.push(Identity::read(e.path)?);
-                // Refuse replacing an edit after the underlying source changed.
-                let _ = self.load_edit(e.id, e.path)?;
-            }
-        }
-        let edited_at = rawmakase_model::time::now_text();
+        // Checked first: reading files and the stored edits takes no lock.
+        let checked = changes
+            .iter()
+            .map(|change| self.check_edit(change))
+            .collect::<Result<Vec<_>>>()?;
         self.db.write(|w| {
-            let mut identities = identities.into_iter();
-            for change in changes {
-                let e = match change {
-                    EditChange::Save(e) => e,
-                    EditChange::Clear { id } => {
-                        ensure!(
-                            w.execute(
-                                sql!(
-                                    "UPDATE photos SET recipe=NULL,export_options=NULL,identity=NULL,edited_at=NULL
-                                     WHERE id=?"
-                                ),
-                                &[id]
-                            )? == 1,
-                            "Unknown photo"
-                        );
-                        w.execute(sql!("DELETE FROM local_edits WHERE photo=?"), &[id])?;
-                        w.execute(sql!("DELETE FROM develop_history WHERE photo=?"), &[id])?;
-                        continue;
-                    }
-                };
-                let identity = identities.next().expect("one identity per save");
-                let (saved, local) = e.recipe.split_local();
-                ensure!(
-                    w.execute(
-                        sql!(
-                            "UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=?
-                             WHERE id=?"
-                        ),
-                        &[
-                            &serde_json::to_string(&saved)?,
-                            &serde_json::to_string(e.export)?,
-                            &serde_json::to_string(&identity)?,
-                            &edited_at,
-                            &e.id
-                        ]
-                    )? == 1,
-                    "Unknown photo"
-                );
-                if local.is_empty() {
-                    w.execute(sql!("DELETE FROM local_edits WHERE photo=?"), &[&e.id])?;
-                } else {
-                    w.execute(
-                        sql!(
-                            "INSERT INTO local_edits(photo, data) VALUES (?, ?)
-                             ON CONFLICT(photo) DO UPDATE SET data=excluded.data"
-                        ),
-                        &[&e.id, &serde_json::to_string(&local)?],
-                    )?;
-                }
-                Self::put_history(w, e.id, e.history)?;
+            for change in &checked {
+                super::edit_rows::write_edit(w, change)?;
             }
             Ok(())
         })

@@ -118,6 +118,9 @@ inject a temporary file, without changing the process-wide environment.
   file before import. Lightroom import runs inside `Db::with_lightroom`, the
   only place `SqliteSql` runs; do not expose the connection publicly or put
   Lightroom-specific queries back into general catalog operations.
+- A photo's edit (its recipe, export options, identity and edit time, spots
+  and masks, and History) is written only by `catalog::edit_rows`: a checked
+  save or clear, an exact copy for a virtual copy, and removal with one.
 - Parsing XMP produces settings, while application validates and resolves a
   recipe. Collection discovery and favorites belong in `presets`.
 - Validate recipe changes at domain boundaries. Saved format versions and

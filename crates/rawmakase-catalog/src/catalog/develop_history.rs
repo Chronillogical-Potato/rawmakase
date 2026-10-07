@@ -2,7 +2,7 @@
 //! restarting. Stored zlib-compressed in `develop_history`; each step holds the full
 //! state it leaves, with large settings (camera profile, masks, spots, curves) stored
 //! once per History and referred to from every step that has them.
-use super::db::{Reads, Write, sql};
+use super::db::{Reads, sql};
 use super::{Catalog, PhotoId};
 use crate::model::recipe::Recipe;
 use anyhow::{Context, Result, ensure};
@@ -193,29 +193,5 @@ impl Catalog {
             .db
             .read_optional::<i64>(sql!("SELECT 1 FROM develop_history WHERE photo=?"), &[&id])?
             .is_some())
-    }
-    /// Stores `history` for the photo inside the transaction saving its edit.
-    pub(super) fn put_history(
-        w: &mut Write<'_>,
-        id: PhotoId,
-        history: HistoryUpdate<'_>,
-    ) -> Result<()> {
-        match history {
-            HistoryUpdate::Keep => {}
-            // An empty History stores as none (Sync's Undo on a photo that had none).
-            HistoryUpdate::Replace(h) if h.steps.is_empty() => {
-                w.execute(sql!("DELETE FROM develop_history WHERE photo=?"), &[&id])?;
-            }
-            HistoryUpdate::Replace(h) => {
-                w.execute(
-                    sql!(
-                        "INSERT INTO develop_history(photo, data) VALUES (?, ?)
-                         ON CONFLICT(photo) DO UPDATE SET data=excluded.data"
-                    ),
-                    &[&id, &encode(h)?],
-                )?;
-            }
-        }
-        Ok(())
     }
 }
