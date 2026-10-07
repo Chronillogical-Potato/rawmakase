@@ -3,12 +3,12 @@
 //! correction's reach is untouched.
 use crate::{chart_path, develop, embedded_profiles, measure};
 use rawmakase::{
+    camera_data::CameraImage,
     develop::{
         ImageFrame, Recipe, ViewMapping,
         red_eye::{Glow, RedEyeOp, find_pupil},
         render,
     },
-    raw::CameraImage,
 };
 
 const PUPIL: f32 = 14.;

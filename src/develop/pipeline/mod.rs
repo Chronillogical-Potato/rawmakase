@@ -5,8 +5,8 @@ use super::masks::{
 use super::{Geometry, Recipe, Rendered, ValidRecipe, mul, srgb_encode};
 use crate::color::srgb_decode;
 use crate::{
+    camera_data::{CameraImage, Metadata},
     develop::curve::{CurveLut, refine_saturation},
-    raw::{CameraImage, Metadata},
 };
 use anyhow::{Result, ensure};
 use rayon::prelude::*;

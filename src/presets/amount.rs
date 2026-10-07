@@ -21,12 +21,12 @@
 //! crop, geometry, Upright, spots, masks and Point Color swatches added or taken away
 //! don't scale: a preset that changes any of them gets no Amount.
 use crate::{
+    camera_data::Metadata,
     color::curve::ToneCurve,
     develop::{
         Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, effects::Effects, params::ParameterId,
         settings_groups::SettingGroup,
     },
-    raw::Metadata,
     xmp::Preset,
 };
 

@@ -29,13 +29,13 @@ struct Shift {
 /// Measures `im` once for every image made from the same decode (pyramid levels,
 /// reduced copies), which share its metadata. Renders call this with the decoded
 /// image before sampling, so the measurement never comes from a reduced copy.
-pub fn prime(im: &crate::raw::CameraImage) {
+pub fn prime(im: &crate::camera_data::CameraImage) {
     im.metadata
         .lateral_ca
         .get_or_init(|| estimate(&im.pixels, im.width, im.height));
 }
 /// The measurement made by [`prime`], if any.
-pub fn measured(im: &crate::raw::CameraImage) -> Option<&[Radial; 2]> {
+pub fn measured(im: &crate::camera_data::CameraImage) -> Option<&[Radial; 2]> {
     im.metadata.lateral_ca.get()?.as_ref()
 }
 

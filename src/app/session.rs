@@ -28,7 +28,7 @@ pub struct Session {
     pub develop: bool,
     /// Which demosaic full-size decodes use.
     #[serde(default)]
-    pub demosaic: crate::raw::Demosaic,
+    pub demosaic: crate::camera_data::Demosaic,
     /// The user turned off checking for updates, which is on by default.
     #[serde(default)]
     pub no_update_checks: bool,

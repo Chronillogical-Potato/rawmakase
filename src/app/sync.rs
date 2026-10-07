@@ -130,7 +130,7 @@ pub(super) fn synchronize(
     change: &BatchChange,
     targets: &[SyncTarget],
     defaults: &DevelopDefaults,
-    demosaic: crate::raw::Demosaic,
+    demosaic: crate::camera_data::Demosaic,
 ) -> SyncResult {
     let mut result = SyncResult {
         change: change.clone(),
@@ -202,7 +202,7 @@ fn prepare(
     change: &BatchChange,
     target: &SyncTarget,
     defaults: &DevelopDefaults,
-    demosaic: crate::raw::Demosaic,
+    demosaic: crate::camera_data::Demosaic,
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
@@ -263,7 +263,7 @@ fn prepare(
     // Guided solves this photo's own guides beside that analysis.
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let image = raw.develop(crate::raw::Decode::full(demosaic), &cancel)?;
+        let image = raw.develop(crate::camera_data::Decode::full(demosaic), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
             && after.upright.mode == crate::develop::UprightMode::Guided
         {
@@ -310,14 +310,14 @@ fn prepare(
 
 /// How much light a photo's camera settings let in, in stops from f/1, 1 s, ISO 100:
 /// what Match Total Exposures evens out. `None` without all three.
-pub(super) fn capture_stops(m: &crate::raw::Metadata) -> Option<f32> {
+pub(super) fn capture_stops(m: &crate::camera_data::Metadata) -> Option<f32> {
     (m.aperture > 0. && m.shutter > 0. && m.iso > 0.)
         .then(|| m.shutter.log2() - 2. * m.aperture.log2() + (m.iso / 100.).log2())
 }
 
 /// The Exposure that makes a photo shot with `target`'s settings as bright as the
 /// source: a photo that let in a stop more light gets a stop less Exposure.
-fn matched_exposure(source: &Settings, target: &crate::raw::Metadata) -> Option<f32> {
+fn matched_exposure(source: &Settings, target: &crate::camera_data::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
     let valid = &crate::develop::params::ParameterId::Exposure
         .descriptor()
@@ -610,7 +610,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         // The file that isn't a photo is reported; the two charts are saved.
         assert_eq!(result.synced.len(), 2);
@@ -676,7 +676,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..1],
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert_eq!(again.synced.len(), 1);
         restore(&c, &again.synced, SyncSide::Before, path)?;
@@ -690,7 +690,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..2],
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert!(again.synced.is_empty() && again.failed.is_empty());
         // A file changed while it had no edit is not given the old settings again.
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn match_total_exposures_evens_out_aperture_shutter_and_iso() -> Result<()> {
-        let camera = |aperture: f32, shutter: f32, iso: f32| crate::raw::Metadata {
+        let camera = |aperture: f32, shutter: f32, iso: f32| crate::camera_data::Metadata {
             aperture,
             shutter,
             iso,
@@ -744,7 +744,7 @@ mod tests {
             &BatchChange::MatchTotalExposures,
             &[target(photos[1].0, &photos[1].1)],
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert!(result.synced.is_empty());
         assert!(
@@ -795,7 +795,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert_eq!(c.load_edit(id, &path)?.unwrap().recipe.exposure, 0.);
@@ -829,7 +829,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
         assert!(result.failed[0].reason.contains("Lightroom edit"));
@@ -881,7 +881,7 @@ mod tests {
             &BatchChange::Settings(clarity),
             &targets,
             &defaults,
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         assert!(result.failed.is_empty(), "{:?}", result.failed);
         let starting =
@@ -918,7 +918,7 @@ mod tests {
             &BatchChange::Settings(GroupSelection::default()),
             &[target(photos[0].0, &photos[0].1)],
             &missing,
-            crate::raw::Demosaic::default(),
+            crate::camera_data::Demosaic::default(),
         );
         let notes: Vec<_> = result.notes.iter().map(|n| n.note.as_str()).collect();
         assert!(

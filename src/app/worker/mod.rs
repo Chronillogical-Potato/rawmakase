@@ -1,7 +1,7 @@
 use crate::{
+    camera_data::{CameraImage, Metadata},
     develop::{Recipe, Rendered},
     export_settings::ExportOptions,
-    raw::{CameraImage, Metadata},
 };
 use eframe::egui;
 use std::{
@@ -214,7 +214,7 @@ pub struct LoadJob {
     /// What the photo starts from when it has no edit.
     pub defaults: Arc<crate::raw_defaults::DevelopDefaults>,
     /// The demosaic of the full-size decode and of its decode-cache key.
-    pub demosaic: crate::raw::Demosaic,
+    pub demosaic: crate::camera_data::Demosaic,
 }
 /// A photo to develop into the decode cache ahead of time, so opening it next
 /// skips decoding. It has its own cancel flag: the photo on screen finishing
@@ -222,7 +222,7 @@ pub struct LoadJob {
 pub struct Prefetch {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
-    pub demosaic: crate::raw::Demosaic,
+    pub demosaic: crate::camera_data::Demosaic,
 }
 /// What is drawn over (or instead of) the rendered photo.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

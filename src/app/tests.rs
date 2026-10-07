@@ -1,8 +1,8 @@
 use super::widgets::tone_curve_ui;
 use super::*;
+use crate::camera_data::{CameraImage, Metadata};
 use crate::catalog::PhotoId;
 use crate::develop;
-use crate::raw::{CameraImage, Metadata};
 use eframe::egui::{Pos2, Rect};
 use std::sync::Arc;
 #[test]

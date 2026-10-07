@@ -133,16 +133,17 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(path);
     e.document.metadata = Some(Default::default());
-    e.document.set_image(Arc::new(crate::raw::CameraImage {
-        recovered: Default::default(),
-        width: 1,
-        height: 1,
-        pixels: vec![[0.1; 3]],
-        metadata: Default::default(),
-        fast: false,
-        scale_factor: 1.,
-        scale_clipped: 0,
-    }));
+    e.document
+        .set_image(Arc::new(crate::camera_data::CameraImage {
+            recovered: Default::default(),
+            width: 1,
+            height: 1,
+            pixels: vec![[0.1; 3]],
+            metadata: Default::default(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        }));
     e.document.pending_lightroom = Some("s = {}".into());
     e.module = Module::Develop;
     let library = e.library.as_mut().unwrap();
@@ -189,16 +190,17 @@ fn a_photo_opened_without_a_catalog_is_exported_only_while_its_file_is_there() -
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.path = Some(path.clone());
     e.document.metadata = Some(Default::default());
-    e.document.set_image(Arc::new(crate::raw::CameraImage {
-        recovered: Default::default(),
-        width: 1,
-        height: 1,
-        pixels: vec![[0.1; 3]],
-        metadata: Default::default(),
-        fast: false,
-        scale_factor: 1.,
-        scale_clipped: 0,
-    }));
+    e.document
+        .set_image(Arc::new(crate::camera_data::CameraImage {
+            recovered: Default::default(),
+            width: 1,
+            height: 1,
+            pixels: vec![[0.1; 3]],
+            metadata: Default::default(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        }));
     let scope = e.export_scope().expect("the open photo");
     assert!(scope.photos[0].open && scope.photos[0].id.is_none());
     std::fs::remove_file(&path)?;

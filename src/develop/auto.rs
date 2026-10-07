@@ -9,8 +9,8 @@ use super::{
     quality::recovered,
 };
 use crate::{
+    camera_data::{CameraImage, Metadata},
     color::srgb_decode,
-    raw::{CameraImage, Metadata},
 };
 use anyhow::{Result, bail, ensure};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -361,7 +361,7 @@ fn round(v: f32, steps: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raw::Metadata;
+    use crate::camera_data::Metadata;
 
     /// A 96 × 64 scene of smooth gradients, all channels scaled by `cast`.
     fn scene(cast: [f32; 3], level: f32) -> CameraImage {

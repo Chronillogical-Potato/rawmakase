@@ -2,7 +2,7 @@
 //! horizontal vanishing points, from which Level, Vertical, Full and Auto are camera
 //! rotations at the photo's focal length (docs/transform.md).
 use super::{Geometry, Recipe, image_space::LensMap};
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 
 /// The lens settings an analysis is made through, as they render: when any of them
 /// changes, the corrections analysed before no longer fit the photo. A setting a
@@ -562,7 +562,7 @@ pub fn rotations(v: &Vanishing) -> [Mat; 5] {
 
 /// Focal length in units of the long edge: 35mm-equivalent over 36 mm, as Lightroom's
 /// `UprightFocalLength35mm` (checked on its stored corrections).
-pub fn focal(m: &crate::raw::Metadata) -> f32 {
+pub fn focal(m: &crate::camera_data::Metadata) -> f32 {
     let equivalent = if m.focal_35mm > 0. {
         m.focal_35mm
     } else if m.focal > 0. {
@@ -693,7 +693,7 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
 pub fn store(
     r: &mut Recipe,
     corrections: &[[f32; 9]],
-    m: Option<&crate::raw::Metadata>,
+    m: Option<&crate::camera_data::Metadata>,
 ) -> Option<super::guided::Issue> {
     let guided = r
         .upright
@@ -910,7 +910,7 @@ mod tests {
             pixels: (0..300 * 200)
                 .map(|i| [0.05 + 0.9 * (i % 300) as f32 / 300.; 3])
                 .collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 300,
                 height: 200,
                 wb: [1.; 3],
@@ -945,7 +945,7 @@ mod tests {
             width: w as u32,
             height: h as u32,
             pixels: luminance.iter().map(|v| [v / 255.; 3]).collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: w as u32,
                 height: h as u32,
                 wb: [1.; 3],
@@ -1028,7 +1028,7 @@ mod tests {
             let off = straightened(&im, angle, [c, s], false);
             assert!(off.abs() < 1., "{tilt}°: {off} px off level");
         }
-        let f = focal(&crate::raw::Metadata::default());
+        let f = focal(&crate::camera_data::Metadata::default());
         for roll in [-2f32, 1.5] {
             let (luminance, w, h, d) = tilted(8., roll, f);
             let im = photo(&luminance, w, h);

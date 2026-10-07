@@ -3,10 +3,10 @@
 use super::brush::{self, Raster, Space};
 use super::range::{self, RangeInput};
 use super::{LocalDelta, MaskGroup, MaskOp, MaskShape};
+use crate::camera_data::CameraImage;
 use crate::develop::image_space::LensMap;
 use crate::develop::retouch::profile;
 use crate::develop::{Geometry, ImageFrame, Recipe, unit_to_u8};
-use crate::raw::CameraImage;
 use rayon::prelude::*;
 use std::sync::{Arc, Weak};
 

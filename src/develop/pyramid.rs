@@ -2,7 +2,7 @@
 //! previews. Level 0 is the recovered image; each further level halves both sides with
 //! a 2×2 box average in linear camera space. Levels are built on first use and kept
 //! for the photo, so zooming and slider edits reuse them.
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use rayon::prelude::*;
 use std::sync::Arc;
 

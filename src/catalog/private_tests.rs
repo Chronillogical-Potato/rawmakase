@@ -24,7 +24,7 @@ fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {
         (PhotoId(350644), "Sony", "ILCE-7M2"),
         (PhotoId(1062257), "Fujifilm", "X100F"),
     ] {
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             make: make.into(),
             model: model.into(),
             ..Default::default()
@@ -74,7 +74,7 @@ fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
     let texts: Vec<String> = q
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         width: 6000,
         height: 4000,
         ..Default::default()

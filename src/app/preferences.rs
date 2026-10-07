@@ -5,7 +5,7 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
-use crate::raw::Demosaic;
+use crate::camera_data::Demosaic;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 

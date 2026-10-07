@@ -14,6 +14,7 @@
 //! RAWmakase binary, its examples and its tests; it is not a stable public API.
 pub mod app;
 mod build_info;
+pub mod camera_data;
 pub mod camera_profiles;
 pub mod cameras;
 pub mod catalog;
