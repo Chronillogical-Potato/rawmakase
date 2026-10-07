@@ -1141,7 +1141,7 @@ impl Editor {
         if ctx.input(|i| i.viewport().close_requested())
             && (self.exporting() || self.activity.is_syncing() || !self.flush())
         {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            refuse_close(ctx);
             self.close_confirm = true;
         }
         if self.close_confirm {
@@ -1224,4 +1224,55 @@ pub(super) enum LayoutEdit {
     /// A drag or typing is under way: kept once it ends.
     Changing,
     Settled,
+}
+
+/// Keeps the window open for the "Work still pending" question, and shows it: Quit
+/// from the menu or the Dock reaches a minimized window, where the question would
+/// stay hidden until the window was restored.
+fn refuse_close(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    if ctx.input(|i| i.viewport().minimized == Some(true)) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refuse_close;
+    use eframe::egui::{self, ViewportCommand, ViewportId, ViewportInfo};
+
+    fn commands(minimized: bool) -> Vec<ViewportCommand> {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.viewports.insert(
+            ViewportId::ROOT,
+            ViewportInfo {
+                minimized: Some(minimized),
+                ..Default::default()
+            },
+        );
+        let mut output = ctx.run_ui(input, |ui| refuse_close(ui.ctx()));
+        output.textures_delta.clear();
+        // egui sets the theme on a first frame; only the window commands matter here.
+        output.viewport_output[&ViewportId::ROOT]
+            .commands
+            .iter()
+            .filter(|c| !matches!(c, ViewportCommand::SetTheme(_)))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn a_refused_close_shows_a_minimized_window_for_its_question() {
+        assert_eq!(
+            commands(true),
+            [
+                ViewportCommand::CancelClose,
+                ViewportCommand::Minimized(false),
+                ViewportCommand::Focus
+            ]
+        );
+        assert_eq!(commands(false), [ViewportCommand::CancelClose]);
+    }
 }
