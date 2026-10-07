@@ -11,7 +11,7 @@ use super::theme;
 use super::widgets::{
     SliderStyle, name_history_step, set_edit_context, setting_slider, slider_styled, slider_with,
 };
-use crate::develop::params::ParameterId;
+use crate::model::params::ParameterId;
 use crate::model::recipe::Recipe;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use std::f32::consts::TAU;

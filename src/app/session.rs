@@ -54,7 +54,7 @@ pub struct Session {
     pub library_layout: LibraryLayout,
     /// The groups Copy Settings copied last time; None until it has been used.
     #[serde(default)]
-    pub copy_groups: Option<crate::develop::settings_groups::GroupSelection>,
+    pub copy_groups: Option<crate::model::settings_groups::GroupSelection>,
     /// The Crop tool's guide overlay.
     #[serde(default)]
     pub crop_guides: CropGuideLayout,

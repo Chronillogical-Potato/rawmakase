@@ -39,6 +39,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [src/model/recipe.rs](../src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../src/model/panels.rs) the per-panel switches. |
+| [src/model/params.rs](../src/model/params.rs), [edit.rs](../src/model/edit.rs), [settings_groups.rs](../src/model/settings_groups.rs) | The sliders as parameters (ids, ranges, formatting), the rules an edit follows (which operator a changed setting takes, which panel it turns on), and the setting groups Copy Settings, Sync and presets move between photos. |
 | [src/model/effects.rs](../src/model/effects.rs) | The Effects, Detail and Calibration settings a recipe keeps (curves, grading, grain, vignettes, Defringe, noise reduction), their defaults, validation and the Effects panel's reset. Rendering them is in `develop/effects.rs`. |
 | [src/model/point_color.rs](../src/model/point_color.rs) | Point Color swatches as a recipe stores them, in Camera Raw's units: the sampled color, shifts, Variance and ranges, which swatches Camera Raw accepts, and their `crs:PointColors` text form. Selecting and changing colors, and the dropper, are in `develop/point_color.rs`. |
 | [src/model/red_eye.rs](../src/model/red_eye.rs) | Red Eye and Pet Eye corrections as a recipe stores them: the ellipse, Pupil Size, Darken and the catchlight, with their limits, the ellipse geometry the tool draws and edits, and the list that keeps corrections from a later release in place. Rendering and pupil detection are in `develop/red_eye/`. |
@@ -229,7 +230,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
-| [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `develop::settings_groups`. |
+| [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |
 | [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |

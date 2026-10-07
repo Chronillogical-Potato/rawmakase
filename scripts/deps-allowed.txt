@@ -69,7 +69,6 @@ develop -> raw
 dng -> optics
 dng -> tiff
 edit_session -> catalog
-edit_session -> develop
 edit_session -> model
 edit_session -> presets
 edits -> camera_data
@@ -127,7 +126,6 @@ photo -> lens
 photo -> raw
 presets -> camera_data
 presets -> color
-presets -> develop
 presets -> model
 presets -> storage
 presets -> xml

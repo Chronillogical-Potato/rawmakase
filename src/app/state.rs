@@ -529,7 +529,7 @@ impl Document {
 /// once the recipe changes otherwise (Reset, Undo, a preset), the request lapses.
 #[derive(Clone)]
 pub(super) struct PendingTreatment {
-    pub(super) treatment: crate::develop::Treatment,
+    pub(super) treatment: crate::model::recipe::Treatment,
     pub(super) recipe: Recipe,
 }
 

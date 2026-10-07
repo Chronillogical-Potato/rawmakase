@@ -260,7 +260,7 @@ impl SettingGroup {
                 to.profile_amount = from.profile_amount;
                 // The Treatment as it renders: a black & white profile that another
                 // camera can't use still leaves the photo black & white.
-                e.monochrome = from.treatment() == super::Treatment::BlackWhite;
+                e.monochrome = from.treatment() == super::recipe::Treatment::BlackWhite;
             }
             ToneCurve => {
                 to.curve = from.curve.clone();

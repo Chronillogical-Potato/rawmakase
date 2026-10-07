@@ -1,5 +1,5 @@
 use super::*;
-use crate::{app::Module, develop::params::ParameterId};
+use crate::{app::Module, model::params::ParameterId};
 mod mapping_tests {
     use super::*;
     use crate::model::recipe::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};

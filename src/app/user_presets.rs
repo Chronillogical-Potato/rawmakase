@@ -2,7 +2,7 @@
 //! menu, for presets in the user library's "User Presets" folder only.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, settings_transfer::PresetForm, theme};
-use crate::develop::settings_groups::GroupSelection;
+use crate::model::settings_groups::GroupSelection;
 use crate::presets::user::UserPresets;
 use crate::xmp::preset_write::PresetInfo;
 use eframe::egui::{self, Color32, Vec2};
@@ -175,7 +175,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::settings_groups::{GroupInclusion, SettingGroup};
+    use crate::model::settings_groups::{GroupInclusion, SettingGroup};
 
     #[test]
     fn new_develop_preset_writes_the_chosen_settings_to_the_user_library() {

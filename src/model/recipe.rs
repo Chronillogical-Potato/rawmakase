@@ -410,6 +410,17 @@ pub fn camera_matching_profile<'a>(
     })
 }
 impl Recipe {
+    /// The Treatment the photo renders with: Black & White by its own setting or by a
+    /// black & white profile.
+    pub fn treatment(&self) -> Treatment {
+        // As `with_profile_adjustments` renders it, without building the look.
+        if self.effects.monochrome || (self.engine >= 3 && is_monochrome(self.profile.as_deref())) {
+            Treatment::BlackWhite
+        } else {
+            Treatment::Color
+        }
+    }
+
     /// The look at its Profile Amount, and its internal controls added to the user's
     /// sliders without changing them.
     pub(crate) fn with_profile_adjustments(&self) -> std::borrow::Cow<'_, Self> {
@@ -1036,6 +1047,20 @@ fn is_zero(v: &f32) -> bool {
 fn is_one(v: &f32) -> bool {
     *v == 1.
 }
+/// The Basic panel's Treatment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Treatment {
+    Color,
+    BlackWhite,
+}
+
+/// Whether a profile renders black & white (an XMP look with `ConvertToGrayscale`).
+pub fn is_monochrome(profile: Option<&crate::camera_profiles::CameraProfile>) -> bool {
+    profile
+        .and_then(|p| p.enhanced.as_ref())
+        .is_some_and(|look| look.monochrome)
+}
+
 /// Whether Enable Profile Corrections is ticked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileCorrections {

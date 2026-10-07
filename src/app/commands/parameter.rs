@@ -1,8 +1,8 @@
 //! Parameter names and units shared by application command adapters.
-use crate::develop::params::ParameterId::*;
-use crate::develop::params::{format_value, nudged};
+use crate::model::params::ParameterId::*;
+use crate::model::params::{format_value, nudged};
 use crate::model::recipe::Recipe;
-use crate::{app::inspector::BANDS, develop::params::ParameterId};
+use crate::{app::inspector::BANDS, model::params::ParameterId};
 
 /// The Color Mixer's channels, in the order of `Recipe::hsl`.
 const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
@@ -10,7 +10,7 @@ const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
 /// A slider a dial can turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::app) enum Param {
-    /// A setting with a descriptor (see `develop::params`).
+    /// A setting with a descriptor (see `model::params`).
     Setting(ParameterId),
     /// A Color Mixer colour band (0 Red .. 7 Magenta), on the channel the
     /// panel's Hue / Sat / Lum selector shows.

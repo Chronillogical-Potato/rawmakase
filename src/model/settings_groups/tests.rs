@@ -595,7 +595,10 @@ fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
         ..Default::default()
     };
     assert!(!source.effects.monochrome);
-    assert_eq!(source.treatment(), crate::develop::Treatment::BlackWhite);
+    assert_eq!(
+        source.treatment(),
+        crate::model::recipe::Treatment::BlackWhite
+    );
     // The target camera has no such profile and keeps its own color one.
     let out = transfer(
         from(&source, &fuji),
@@ -608,7 +611,7 @@ fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
     );
     assert_eq!(
         out.recipe.treatment(),
-        crate::develop::Treatment::BlackWhite
+        crate::model::recipe::Treatment::BlackWhite
     );
 }
 

@@ -1562,7 +1562,7 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     let (steps, _) = editor.document.edit.history.steps();
     assert_eq!(steps[1].name, "White Balance");
     // Pasted onto a photo, the values were not estimated for it: the WB menu says Custom.
-    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    editor.copy_settings(crate::model::settings_groups::GroupSelection::default());
     editor.paste_settings();
     let r = &editor.document.edit.recipe;
     assert!(r.wb[0] < 1. && r.wb[2] > 1., "wb {:?}", r.wb);
@@ -1850,7 +1850,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     });
-    e.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    e.copy_settings(crate::model::settings_groups::GroupSelection::default());
     e.document.edit.recipe = Recipe::default();
     e.paste_settings();
     assert_eq!(e.document.edit.recipe.upright.mode, UprightMode::Vertical);
@@ -2463,7 +2463,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     };
     copied.update_wb(&first);
     editor.document.edit.recipe = copied.clone();
-    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    editor.copy_settings(crate::model::settings_groups::GroupSelection::default());
     // Pasted onto a photo from another camera.
     editor.document.metadata = Some(second.clone());
     editor.document.edit.recipe = Recipe::default();
@@ -2488,7 +2488,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
 }
 #[test]
 fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
-    use crate::develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
+    use crate::model::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -4506,7 +4506,7 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
             let top = ui.cursor().min;
             super::widgets::setting_slider(
                 ui,
-                crate::develop::params::ParameterId::Exposure,
+                crate::model::params::ParameterId::Exposure,
                 value,
                 0.,
             );

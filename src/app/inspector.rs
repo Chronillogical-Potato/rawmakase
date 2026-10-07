@@ -11,14 +11,15 @@ use super::widgets::{
 use super::worker::AutoKind;
 use super::{Editor, bulk_import::ImportKind};
 use crate::app::icons::{self, Icon};
-use crate::app::theme;
-use crate::develop::{Treatment, params::ParameterId, targeted::Target};
 use crate::model::panels::{Panel, PanelState};
+use crate::model::params::ParameterId;
 use crate::model::recipe::Recipe;
+use crate::model::recipe::Treatment;
 use crate::model::{
     operators::{SharpeningModel, SharpeningSliders},
     white_balance::NamedWhiteBalance,
 };
+use crate::{app::theme, develop::targeted::Target};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
@@ -1870,7 +1871,7 @@ enum GuidedAction {
 }
 
 /// The slider for develop setting `id`, and what changing it implies for the rest
-/// of the recipe (`develop::edit`).
+/// of the recipe (`model::edit`).
 fn setting_control(
     ui: &mut egui::Ui,
     r: &mut Recipe,
@@ -1880,5 +1881,5 @@ fn setting_control(
 ) {
     let previous = *id.value_mut(r);
     setting_slider(ui, id, id.value_mut(r), default);
-    crate::develop::edit::setting_changed(r, id, previous, photo);
+    crate::model::edit::setting_changed(r, id, previous, photo);
 }

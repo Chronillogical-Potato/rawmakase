@@ -3,7 +3,7 @@
 //! updated, renamed or deleted from the app; imported and built-in presets are not.
 use crate::model::recipe::Recipe;
 use crate::{
-    develop::settings_groups::{GroupInclusion, GroupSelection},
+    model::settings_groups::{GroupInclusion, GroupSelection},
     storage::Replace,
     xmp::{
         Preset,
@@ -227,7 +227,7 @@ mod tests {
         };
         let mut groups = GroupSelection::none();
         groups.set(
-            crate::develop::settings_groups::SettingGroup::Exposure,
+            crate::model::settings_groups::SettingGroup::Exposure,
             GroupInclusion::Included,
         );
         let r = Recipe {

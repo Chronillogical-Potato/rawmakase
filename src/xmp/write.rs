@@ -241,7 +241,7 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
         }
     }
     // Black & white by Treatment or by a black & white profile, as Lightroom writes it.
-    let black_white = r.treatment() == crate::develop::Treatment::BlackWhite;
+    let black_white = r.treatment() == crate::model::recipe::Treatment::BlackWhite;
     s.text(
         "ConvertToGrayscale",
         if black_white { "True" } else { "False" },

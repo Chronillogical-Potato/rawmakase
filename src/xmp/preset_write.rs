@@ -5,7 +5,7 @@ use crate::model::recipe::Recipe;
 use crate::xml::{escape_text, ns::CRS, xmpmeta};
 use crate::{
     color::curve::ToneCurve,
-    develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
+    model::settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
 };
 use std::fmt::Write;
 
@@ -279,7 +279,7 @@ pub(crate) fn group_of_key(key: &str) -> Option<SettingGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::settings_groups::GroupInclusion;
+    use crate::model::settings_groups::GroupInclusion;
     use std::path::Path;
 
     /// A recipe whose every written setting differs from the default.

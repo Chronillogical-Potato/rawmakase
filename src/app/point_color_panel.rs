@@ -39,7 +39,7 @@ impl super::Editor {
         self.module == Module::Develop
             && !self.view.compare.before_only()
             && self.view.mixer_tab == super::state::MixerTab::PointColor
-            && r.treatment() == crate::develop::Treatment::Color
+            && r.treatment() == crate::model::recipe::Treatment::Color
             && renders_point_color(r)
     }
     /// Point Color's dropper at (`u`, `v`) of the shown photo: samples the color there

@@ -1,6 +1,6 @@
 //! Sync Settings: the open photo's settings, by group, onto the other photos selected
 //! with it, as one change that one Undo reverses. Each target's settings are worked
-//! out for its own camera (see `develop::settings_groups`), off the UI thread.
+//! out for its own camera (see `model::settings_groups`), off the UI thread.
 use super::{
     Editor,
     history::{History, Step},
@@ -10,9 +10,9 @@ use super::{
 use crate::model::recipe::Recipe;
 use crate::{
     catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory},
-    develop::settings_groups::{self, GroupSelection, Source, Target},
     edits::{self, Origin},
     export_settings::ExportOptions,
+    model::settings_groups::{self, GroupSelection, Source, Target},
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, ensure};
@@ -317,7 +317,7 @@ pub(super) fn capture_stops(m: &crate::camera_data::Metadata) -> Option<f32> {
 /// source: a photo that let in a stop more light gets a stop less Exposure.
 fn matched_exposure(source: &Settings, target: &crate::camera_data::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
-    let valid = &crate::develop::params::ParameterId::Exposure
+    let valid = &crate::model::params::ParameterId::Exposure
         .descriptor()
         .valid;
     Some((source.recipe.exposure + difference).clamp(*valid.start(), *valid.end()))

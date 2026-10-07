@@ -1,7 +1,7 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::develop::params::{self, LocalParameterId, ParameterId, format_value};
 use crate::model::panels::PanelState;
+use crate::model::params::{self, LocalParameterId, ParameterId, format_value};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
@@ -1122,7 +1122,7 @@ pub(super) fn slider_styled(
             // Lightroom's keys over a hovered slider: Up and Down move it by its
             // smallest shown step, ten with Shift.
             let unit = step.unwrap_or(10f32.powi(-(decimals as i32)) / scale);
-            *value = crate::develop::params::nudged(*value, nudge * unit, start..=end);
+            *value = crate::model::params::nudged(*value, nudge * unit, start..=end);
         }
         let x = to_rail(*value, rail);
         if gradient.is_none() {

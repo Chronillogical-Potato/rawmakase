@@ -7,9 +7,9 @@
 use super::state::Tool;
 use super::{Editor, history::Step, theme};
 use crate::app::Module;
-use crate::develop::Treatment;
 use crate::develop::targeted::{DRAG_RATE, HslChannel, Target, TargetSample, TargetWeights};
 use crate::model::recipe::Recipe;
+use crate::model::recipe::Treatment;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// A drag with the tool, from the press to the sample's arrival or the release,

@@ -1,13 +1,11 @@
 //! Copy Settings, Paste Settings and Paste from Previous: settings moving from one
-//! photo to another by group (see `develop::settings_groups`).
+//! photo to another by group (see `model::settings_groups`).
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, theme};
 use crate::model::recipe::Recipe;
 use crate::{
     camera_data::Metadata,
-    develop::settings_groups::{
-        self, GroupInclusion, GroupSelection, SettingGroup, Source, Target,
-    },
+    model::settings_groups::{self, GroupInclusion, GroupSelection, SettingGroup, Source, Target},
 };
 use eframe::egui::{self, Color32, Vec2};
 

@@ -24,8 +24,7 @@ use crate::model::recipe::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN};
 use crate::{
     camera_data::Metadata,
     color::curve::ToneCurve,
-    develop::{params::ParameterId, settings_groups::SettingGroup},
-    model::effects::Effects,
+    model::{effects::Effects, params::ParameterId, settings_groups::SettingGroup},
     xmp::Preset,
 };
 
