@@ -12,6 +12,18 @@ pub(super) struct Selection {
     pub selected: HashSet<PhotoId>,
     pub anchor: Option<PhotoId>,
 }
+impl Selection {
+    /// Without photo `id`, which is gone.
+    pub(super) fn forget_photo(&mut self, id: PhotoId) {
+        self.selected.remove(&id);
+        if self.active == Some(id) {
+            self.active = None;
+        }
+        if self.anchor == Some(id) {
+            self.anchor = None;
+        }
+    }
+}
 
 /// How a grid cell is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
