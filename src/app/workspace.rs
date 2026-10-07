@@ -1132,8 +1132,20 @@ impl Editor {
         egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
     }
 
+    /// Whether quitting now would cut off work: an export or Sync Settings running,
+    /// or an edit that failed to save.
+    pub(super) fn quitting_would_cut_off_work(&self) -> bool {
+        self.exporting()
+            || self.activity.is_syncing()
+            || matches!(
+                self.document.edit.save,
+                crate::edit_session::save_state::SaveState::Failed { .. }
+            )
+    }
     fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
+        // For a quit the close guard doesn't see (the Dock, logging out).
+        crate::platform::quit::set_work_pending(self.quitting_would_cut_off_work());
         if let Some(due) = self.document.edit.save.due_in() {
             // Just after it is due, so the frame finds it ready.
             ctx.request_repaint_after(due + Duration::from_millis(10));
@@ -1141,7 +1153,7 @@ impl Editor {
         if ctx.input(|i| i.viewport().close_requested())
             && (self.exporting() || self.activity.is_syncing() || !self.flush())
         {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            refuse_close(ctx);
             self.close_confirm = true;
         }
         if self.close_confirm {
@@ -1224,4 +1236,73 @@ pub(super) enum LayoutEdit {
     /// A drag or typing is under way: kept once it ends.
     Changing,
     Settled,
+}
+
+/// Keeps the window open for the "Work still pending" question, and shows it: Quit
+/// from the app menu (Cmd-Q) reaches a minimized window, where the question would
+/// stay hidden until the window was restored. Quit from the Dock reaches it too while
+/// work is pending (`platform::quit`).
+fn refuse_close(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    if ctx.input(|i| i.viewport().minimized == Some(true)) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refuse_close;
+    use eframe::egui::{self, ViewportCommand, ViewportId, ViewportInfo};
+
+    fn commands(minimized: bool) -> Vec<ViewportCommand> {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.viewports.insert(
+            ViewportId::ROOT,
+            ViewportInfo {
+                minimized: Some(minimized),
+                ..Default::default()
+            },
+        );
+        let mut output = ctx.run_ui(input, |ui| refuse_close(ui.ctx()));
+        output.textures_delta.clear();
+        // egui sets the theme on a first frame; only the window commands matter here.
+        output.viewport_output[&ViewportId::ROOT]
+            .commands
+            .iter()
+            .filter(|c| !matches!(c, ViewportCommand::SetTheme(_)))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn a_refused_close_shows_a_minimized_window_for_its_question() {
+        assert_eq!(
+            commands(true),
+            [
+                ViewportCommand::CancelClose,
+                ViewportCommand::Minimized(false),
+                ViewportCommand::Focus
+            ]
+        );
+        assert_eq!(commands(false), [ViewportCommand::CancelClose]);
+    }
+
+    #[test]
+    fn a_failed_save_is_work_a_quit_would_cut_off() {
+        let ctx = egui::Context::default();
+        let mut editor = crate::app::Editor::with_context(
+            &ctx,
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
+        assert!(!editor.quitting_would_cut_off_work());
+        editor.document.edit.save.mark_changed();
+        // Unsaved but savable: quitting saves it.
+        assert!(!editor.quitting_would_cut_off_work());
+        editor.document.edit.save.failed("disk full".into());
+        assert!(editor.quitting_would_cut_off_work());
+    }
 }

@@ -20,12 +20,11 @@ changes what one waits on, updates its row here.
 4. **Never hold a bounded receiver while joining its sender.** A worker blocked in
    `send` on a full channel never sees its stop signal.
 5. **The exit hook runs on every exit path, but cannot refuse one.** On macOS,
-   quitting from the Dock or by logging out closes the window without a close
-   request, so eframe calls `App::on_exit` but never the close guard, and the
-   process ends right after it. `on_exit` therefore saves what it can
-   synchronously: the edit and the autosave in flight. It cannot keep an export or
-   Sync Settings running, or ask what to do about an edit that fails to save; see
-   Quit on macOS below.
+   quitting from the Dock or by logging out with nothing pending closes the window
+   without a close request, so eframe calls `App::on_exit` but never the close
+   guard, and the process ends right after it. `on_exit` therefore saves what it
+   can synchronously: the edit and the autosave in flight. Pending work is kept
+   from that path before it starts; see Quit on macOS below.
 6. **One deadline bounds every join.** The loaders, previews, exports and output
    jobs read photo files, often on a network share, so a stalled read can outlast
    their current job. They are joinable only under the shared deadline: a worker
@@ -96,15 +95,14 @@ before closing when the edit cannot be saved. winit's app menu binds Quit to
 window's `performClose:` instead (`platform/quit.rs`): Cmd-Q and the menu's Quit
 then close the window as its close button does, and the guard runs.
 
-Quitting from the Dock or by logging out still sends `terminate:`, which only
-`applicationShouldTerminate:` could refuse, and winit does not offer it. On those
-paths `on_exit` cannot refuse either, so:
-
-- the edit and the autosave in flight are saved synchronously;
-- a running export is cut off: its finished photos stay, and the photo being
-  written is not published, as exports write a temporary file and rename it;
-- Sync Settings stops partway, leaving some of its photos synced and some not;
-- an edit that fails to save is lost without a word.
+Quitting from the Dock or by logging out still sends `terminate:`. winit's app
+delegate has no `applicationShouldTerminate:`, so the app adds one
+(`platform/quit.rs`). While an export or Sync Settings runs, or an edit failed to
+save, it cancels the quit and closes the window instead, so the close guard asks
+first, restoring a minimized window to show its question. With nothing pending it
+lets the quit go at once, as before, and `on_exit` saves the edit and the
+autosave in flight synchronously. A logout the app cancels this way stops, and
+macOS says the app interrupted it.
 
 ## Where the code stands
 
@@ -113,9 +111,6 @@ place in the catalog (#269), cancels the jobs in progress, and stops and waits f
 the develop loader, the preview renderer, the Reference View loader and the export
 queue under a 3 s deadline (#270). Still to do:
 
-- **Quitting from the Dock or by logging out cannot be refused** (see above): it
-  cuts off a running export or Sync Settings. Cmd-Q and the menu's Quit go
-  through the close guard.
 - **The edit is saved without a deadline**, so a catalog on a stalled network share
   would hold up quitting.
 - **The close guard misses folder jobs and command output jobs.**
