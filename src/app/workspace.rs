@@ -1227,8 +1227,9 @@ pub(super) enum LayoutEdit {
 }
 
 /// Keeps the window open for the "Work still pending" question, and shows it: Quit
-/// from the menu or the Dock reaches a minimized window, where the question would
-/// stay hidden until the window was restored.
+/// from the app menu (Cmd-Q) reaches a minimized window, where the question would
+/// stay hidden until the window was restored. Quit from the Dock bypasses the close
+/// guard (docs/shutdown.md).
 fn refuse_close(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
     if ctx.input(|i| i.viewport().minimized == Some(true)) {
