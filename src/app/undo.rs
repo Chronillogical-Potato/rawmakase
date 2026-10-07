@@ -39,6 +39,46 @@ pub(super) enum Command {
     Sync(Box<super::sync::SyncCommand>),
 }
 
+impl Command {
+    /// Takes photo `id` out of the command; false when nothing of it is left.
+    fn forget_photo(&mut self, id: PhotoId) -> bool {
+        match self {
+            Command::Metadata { change, develop } => {
+                // Made in Develop on that photo, which is gone: undone in the Library.
+                if *develop == Some(id) {
+                    *develop = None;
+                }
+                change.before.retain(|m| m.0 != id);
+                change.after.retain(|m| m.0 != id);
+                change.place_before.forget_photo(id);
+                change.place_after.forget_photo(id);
+                !change.before.is_empty()
+            }
+            Command::Collection(change) => {
+                change.added.retain(|p| *p != id);
+                change.removed.retain(|p| *p != id);
+                change.place_before.forget_photo(id);
+                change.place_after.forget_photo(id);
+                !(change.added.is_empty() && change.removed.is_empty())
+            }
+            Command::Descriptive(change) => {
+                change.before.retain(|s| s.photo != id);
+                change.after.retain(|s| s.photo != id);
+                change.ratings_before.retain(|m| m.0 != id);
+                change.ratings_after.retain(|m| m.0 != id);
+                change.place_before.forget_photo(id);
+                change.place_after.forget_photo(id);
+                !change.before.is_empty()
+            }
+            Command::Develop { photo, .. } => *photo != Some(id),
+            Command::Sync(sync) => {
+                sync.edits.retain(|e| e.id != id);
+                !sync.edits.is_empty()
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct UndoLog {
     undo: VecDeque<Command>,
@@ -52,13 +92,13 @@ impl UndoLog {
         self.undo.push_back(command);
         self.redo.clear();
     }
-    /// Drops commands that wrote a photo now removed, so its id, if a new photo gets
-    /// it, is never written by them.
+    /// Takes a photo now removed out of every command, Undo's and Redo's alike: the
+    /// catalog can give its id to the next photo added, which no command made
+    /// before may then write. A command with nothing else left is dropped; one that
+    /// also changed other photos keeps undoing and redoing those.
     pub(super) fn forget_photo(&mut self, id: PhotoId) {
-        let touches =
-            |c: &Command| matches!(c, Command::Sync(s) if s.edits.iter().any(|e| e.id == id));
-        self.undo.retain(|c| !touches(c));
-        self.redo.retain(|c| !touches(c));
+        self.undo.retain_mut(|c| c.forget_photo(id));
+        self.redo.retain_mut(|c| c.forget_photo(id));
     }
     pub(super) fn clear(&mut self) {
         self.undo.clear();
