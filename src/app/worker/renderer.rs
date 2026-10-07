@@ -475,7 +475,11 @@ fn render(
             }
             if let Some(region) = job.region {
                 let out = if job.recipe.engine < 3 {
-                    Output::Pixels(develop::render_region(&job.image, &job.recipe, region)?)
+                    Output::Pixels(develop::render_region(
+                        &job.image,
+                        &job.recipe.checked()?,
+                        region,
+                    )?)
                 } else {
                     // While editing at 100%, a reduced preview keeps sliders responsive;
                     // a newer job cancels the full-resolution render that follows.

@@ -7,7 +7,7 @@ use crate::develop::{
     stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache, TextureKey},
 };
 use crate::{
-    develop::{self, Geometry, Recipe, Rendered},
+    develop::{self, Geometry, Recipe, Rendered, ValidRecipe},
     raw::CameraImage,
 };
 use anyhow::{Context, Result, ensure};
@@ -161,8 +161,8 @@ mod tests {
         let saved = serde_json::to_vec(&r)?;
         let restored: Recipe = serde_json::from_slice(&saved)?;
         assert_eq!(r, restored);
-        let full = render(&im, &r, 0, None)?;
-        let tile = render(&im, &r, 0, Some([30, 25, 40, 40]))?;
+        let full = render(&im, &r.checked()?, 0, None)?;
+        let tile = render(&im, &r.checked()?, 0, Some([30, 25, 40, 40]))?;
         for y in 0..40 {
             for x in 0..40 {
                 let a = tile.pixels[y * 40 + x];
@@ -172,10 +172,10 @@ mod tests {
                 }
             }
         }
-        assert_eq!(full.pixels, render(&im, &r, 0, None)?.pixels);
+        assert_eq!(full.pixels, render(&im, &r.checked()?, 0, None)?.pixels);
         assert_ne!(
             full.pixels,
-            render(&im, &Recipe::default(), 0, None)?.pixels
+            render(&im, &Recipe::default().checked()?, 0, None)?.pixels
         );
         Ok(())
     }
@@ -189,9 +189,9 @@ mod tests {
             highlights: -0.4,
             ..Default::default()
         };
-        let full = render(&im, &r, 0, None)?;
+        let full = render(&im, &r.checked()?, 0, None)?;
         for [x, y, w, h] in [[0, 0, 20, 30], [30, 25, 40, 40], [80, 60, 16, 20]] {
-            let tile = render(&im, &r, 0, Some([x, y, w, h]))?;
+            let tile = render(&im, &r.checked()?, 0, Some([x, y, w, h]))?;
             for yy in 0..h {
                 for xx in 0..w {
                     let a = tile.pixels[(yy * w + xx) as usize];
@@ -211,9 +211,9 @@ mod tests {
             sharpening: 0.8,
             ..Default::default()
         };
-        let full = render(&im, &r, 0, None)?;
+        let full = render(&im, &r.checked()?, 0, None)?;
         let expected = resize(full, 48);
-        let fit = render(&im, &r, 48, None)?;
+        let fit = render(&im, &r.checked()?, 48, None)?;
         assert_eq!(fit.pixels, expected.pixels);
         Ok(())
     }
@@ -235,7 +235,7 @@ mod tests {
         assert!(
             render_cancellable(
                 &im,
-                &Recipe::default(),
+                &Recipe::default().checked().unwrap(),
                 0,
                 None,
                 &std::sync::atomic::AtomicBool::new(true)

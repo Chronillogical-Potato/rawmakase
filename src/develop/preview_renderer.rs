@@ -124,7 +124,7 @@ impl PreviewRenderer {
         }
         quality::render_preview(
             image,
-            recipe,
+            &recipe.checked()?,
             max_edge,
             region,
             cancel,
@@ -381,7 +381,9 @@ mod tests {
         let full = p.render(&a, &r, 400, None, &cancel).unwrap();
         assert_eq!(
             full.pixels,
-            quality::render(&a, &r, 400, None).unwrap().pixels
+            quality::render(&a, &r.checked().unwrap(), 400, None)
+                .unwrap()
+                .pixels
         );
     }
     /// A textured photo with detail, local and spatial effects: the pyramid Fit stays
@@ -408,7 +410,7 @@ mod tests {
         r.effects.grain = 0.3;
         let cancel = AtomicBool::new(false);
         for edge in [100, 180, 300] {
-            let expected = quality::render(&im, &r, edge, None).unwrap();
+            let expected = quality::render(&im, &r.checked().unwrap(), edge, None).unwrap();
             let fit = PreviewRenderer::default()
                 .render(&im, &r, edge, None, &cancel)
                 .unwrap();
@@ -554,7 +556,7 @@ mod tests {
                 }
                 _ => {}
             }
-            let expected = quality::render(&im, &r, 200, None).unwrap();
+            let expected = quality::render(&im, &r.checked().unwrap(), 200, None).unwrap();
             let fit = warm.render(&im, &r, 200, None, &cancel).unwrap();
             let fresh = PreviewRenderer::default()
                 .render(&im, &r, 200, None, &cancel)
@@ -571,7 +573,7 @@ mod tests {
             assert!(error < 0.01, "edit {edit}: mean error {error}");
             let region = [260, 160, 90, 80];
             let tile = warm.render(&im, &r, 0, Some(region), &cancel).unwrap();
-            let full = quality::render(&im, &r, 0, Some(region)).unwrap();
+            let full = quality::render(&im, &r.checked().unwrap(), 0, Some(region)).unwrap();
             assert_eq!(tile.pixels, full.pixels);
         }
         // The healed dust is gone from the export.
@@ -581,8 +583,15 @@ mod tests {
             [0.08, 0.02],
         )];
         r.straighten = 0.;
-        let healed = quality::render(&im, &r, 0, Some([300, 200, 1, 1])).unwrap();
-        let dusty = quality::render(&im, &Recipe::default(), 0, Some([300, 200, 1, 1])).unwrap();
+        let healed =
+            quality::render(&im, &r.checked().unwrap(), 0, Some([300, 200, 1, 1])).unwrap();
+        let dusty = quality::render(
+            &im,
+            &Recipe::default().checked().unwrap(),
+            0,
+            Some([300, 200, 1, 1]),
+        )
+        .unwrap();
         assert!(healed.pixels[0][1] > dusty.pixels[0][1] + 0.2);
     }
     /// A red eye correction stays on its eye through crop, straightening, rotation and
@@ -625,7 +634,7 @@ mod tests {
                 ..Default::default()
             };
             let at = |r: &Recipe| {
-                let full = quality::render(&im, r, 0, None).unwrap();
+                let full = quality::render(&im, &r.checked().unwrap(), 0, None).unwrap();
                 let [u, v] = ViewMapping::new(&im, r).to_view(op.center);
                 let (x, y) = (
                     (u * full.width as f32) as usize,
@@ -648,7 +657,7 @@ mod tests {
             assert_eq!(fit.pixels, fresh.pixels, "{rotation}: stale pyramid");
             let region = [40, 30, 60, 50];
             let tile = warm.render(&im, &r, 0, Some(region), &cancel).unwrap();
-            let full = quality::render(&im, &r, 0, Some(region)).unwrap();
+            let full = quality::render(&im, &r.checked().unwrap(), 0, Some(region)).unwrap();
             assert_eq!(tile.pixels, full.pixels);
         }
         // Older process versions render it too, in previews, regions and exports.

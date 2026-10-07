@@ -115,7 +115,7 @@ pub fn prepare(
     cancelled()?;
     progress(0.4);
     let options = settings.options();
-    let mut rendered = crate::develop::render(&image, &photo.recipe, options.max_edge)?;
+    let mut rendered = crate::develop::render(&image, &photo.recipe.checked()?, options.max_edge)?;
     if let Some(w) = &watermark
         && !w.apply(&mut rendered)
     {

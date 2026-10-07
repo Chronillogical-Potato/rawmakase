@@ -47,7 +47,7 @@ fn imported_profiles_render_and_roundtrip() -> anyhow::Result<()> {
             scale_clipped: 0,
             recovered: Default::default(),
         };
-        let out = develop::render(&im, &recipe, 0)?;
+        let out = develop::render(&im, &recipe.checked()?, 0)?;
         assert!(
             out.pixels
                 .iter()
@@ -113,8 +113,8 @@ fn imported_enhanced_profiles_match_camera_and_resolve_xmp() -> anyhow::Result<(
             scale_clipped: 0,
             recovered: Default::default(),
         };
-        let full = develop::render(&image, &recipe, 0)?;
-        let tile = develop::render_region(&image, &recipe, [4, 4, 8, 8])?;
+        let full = develop::render(&image, &recipe.checked()?, 0)?;
+        let tile = develop::render_region(&image, &recipe.checked()?, [4, 4, 8, 8])?;
         for y in 0..8 {
             for x in 0..8 {
                 assert_eq!(tile.pixels[y * 8 + x], full.pixels[(y + 4) * 16 + x + 4]);

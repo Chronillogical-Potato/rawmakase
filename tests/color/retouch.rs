@@ -72,10 +72,10 @@ fn dust_on_gradient_and_texture_heals_cleanly() {
             op
         })
         .collect();
-    let reference = render(&clean, &recipe, 0).unwrap();
+    let reference = render(&clean, &recipe.checked().unwrap(), 0).unwrap();
     let score = |recipe: &Recipe| {
         let expected = &reference;
-        let actual = render(&dusty, recipe, 0).unwrap();
+        let actual = render(&dusty, &recipe.checked().unwrap(), 0).unwrap();
         let rw = expected.width as usize;
         let map = ViewMapping::new(&clean, recipe);
         let mut worst: f64 = 0.;

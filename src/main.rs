@@ -325,7 +325,7 @@ fn main() -> Result<()> {
                 rawmakase::presets::save_preset(&path, &edit)?;
             }
             let developed = t.elapsed();
-            let out = develop::render(&im, &edit, max_edge)?;
+            let out = develop::render(&im, &edit.checked()?, max_edge)?;
             let rendered = t.elapsed() - developed;
             rawmakase::export::export_with(
                 &output,
@@ -376,7 +376,7 @@ fn main() -> Result<()> {
             for i in 0..iterations {
                 r.exposure = (i % 8) as f32 / 8.;
                 let t = Instant::now();
-                std::hint::black_box(develop::render(&small, &r, 1600)?);
+                std::hint::black_box(develop::render(&small, &r.checked()?, 1600)?);
                 times.push(t.elapsed().as_secs_f64() * 1000.);
             }
             times.sort_by(f64::total_cmp);

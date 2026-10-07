@@ -45,7 +45,7 @@ fn raw_development_and_export() -> anyhow::Result<()> {
         recipe.exposure = -1.;
         recipe.rotation = 1;
         recipe.crop = [0.1, 0.1, 0.9, 0.9];
-        let output = develop::render(&image, &recipe, 320)?;
+        let output = develop::render(&image, &recipe.checked()?, 320)?;
         assert!(output.height > output.width);
         for extension in ["jpg", "tiff"] {
             let p = temp.path().join(format!("{index}.{extension}"));
@@ -131,7 +131,7 @@ fn navigation_memory_stress() -> anyhow::Result<()> {
                 .develop(Decode::full(Default::default()), &AtomicBool::new(false))?;
             let small = develop::preview(&im, 1600);
             let r = Recipe::for_metadata(&im.metadata);
-            let _ = develop::render(&small, &r, 1600)?;
+            let _ = develop::render(&small, &r.checked()?, 1600)?;
         }
         let memory = rss();
         if i == 5 {
