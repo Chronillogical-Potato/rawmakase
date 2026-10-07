@@ -331,6 +331,8 @@ pub use sidecar::Merge;
 mod descriptive_tests;
 #[cfg(test)]
 mod locations_tests;
+#[cfg(test)]
+mod portable_sql_tests;
 pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;
