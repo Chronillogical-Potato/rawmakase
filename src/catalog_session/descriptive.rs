@@ -51,10 +51,19 @@ impl CatalogSession {
             listed: self.refresh_keywords(ids),
         })
     }
-    /// Puts photos' descriptive metadata back as `values` has it, and lists
-    /// them again.
-    pub fn restore_descriptive(&mut self, values: &[MetadataSnapshot]) -> Result<()> {
+    /// Puts photos' descriptive metadata back as `values` has it, with the
+    /// rating, flag and label in `ratings` (none for a change that left them),
+    /// then lists them again. Both are written before anything is read back,
+    /// so a failed read never leaves an undo half done.
+    pub fn restore_descriptive(
+        &mut self,
+        values: &[MetadataSnapshot],
+        ratings: &[(PhotoId, i32, i32, String)],
+    ) -> Result<()> {
         self.catalog.restore_metadata(values)?;
+        if !ratings.is_empty() {
+            self.set_ratings(ratings)?;
+        }
         let ids: Vec<PhotoId> = values.iter().map(|s| s.photo).collect();
         self.refresh_photos(&ids)
     }

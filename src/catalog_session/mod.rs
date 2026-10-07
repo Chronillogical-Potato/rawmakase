@@ -326,8 +326,10 @@ mod tests {
         assert_ne!(change.before, change.after);
         assert_eq!(session.photos[0].keywords, "Kraków");
         // Undone: the lists follow the catalog back.
-        session.restore_descriptive(&change.before)?;
+        session.restore_descriptive(&change.before, &[(a, 3, -1, "Blue".into())])?;
         assert_eq!(session.photos[0].keywords, "");
+        assert_eq!(session.photos[0].rating, 3);
+        assert_eq!(session.catalog.photos()?[0].label, "Blue");
         assert_eq!(session.catalog.metadata_snapshot(&[a])?, change.before);
 
         let copy = session.create_virtual_copy(a)?;

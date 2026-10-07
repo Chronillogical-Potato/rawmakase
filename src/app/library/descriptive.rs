@@ -172,10 +172,13 @@ impl Library {
             .filter(|s| self.photo(s.photo).is_some())
             .cloned()
             .collect();
-        self.session.restore_descriptive(&values)?;
-        if !ratings.is_empty() {
-            self.set_metadata(ratings)?;
-        }
+        // A photo removed since (a virtual copy) is left out of the ratings too.
+        let ratings: Vec<super::Metadata> = ratings
+            .iter()
+            .filter(|(id, ..)| self.photo(*id).is_some())
+            .cloned()
+            .collect();
+        self.session.restore_descriptive(&values, &ratings)?;
         self.resort_by_capture_time();
         self.filter();
         self.fields.reload();
