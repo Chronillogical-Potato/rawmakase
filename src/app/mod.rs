@@ -331,7 +331,7 @@ impl Editor {
     fn session_path(&self) -> Option<PathBuf> {
         self.library
             .as_ref()
-            .map(|l| l.catalog.path.clone())
+            .map(|l| l.session.catalog.path.clone())
             .or_else(|| self.document.path.clone())
     }
 }

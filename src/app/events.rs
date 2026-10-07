@@ -311,7 +311,7 @@ impl Editor {
                 let reloaded = self
                     .library
                     .as_ref()
-                    .is_some_and(|old| old.catalog.path == l.catalog.path);
+                    .is_some_and(|old| old.session.catalog.path == l.session.catalog.path);
                 if !reloaded {
                     self.undo_log.clear();
                     // Photo ids belong to their catalog, and so does the reference.
@@ -369,12 +369,15 @@ impl Editor {
         self.document.edit.save.saved();
         self.status = status;
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
-            self.document.lightroom_history =
-                l.catalog.lightroom_history(photo).unwrap_or_default();
-            self.document.snapshots.list = l.catalog.snapshots(photo).unwrap_or_default();
+            self.document.lightroom_history = l
+                .session
+                .catalog
+                .lightroom_history(photo)
+                .unwrap_or_default();
+            self.document.snapshots.list = l.session.catalog.snapshots(photo).unwrap_or_default();
             // The edit as the catalog stores it, read once: the Lightroom settings
             // applied below are the ones read with it.
-            let record = l.catalog.edit_record(photo);
+            let record = l.session.catalog.edit_record(photo);
             let saved = record
                 .as_ref()
                 .map_err(|e| anyhow::anyhow!("{e:#}"))
@@ -385,7 +388,7 @@ impl Editor {
                     self.document.edit.recipe = saved.recipe;
                     self.document.export = saved.export;
                     // A History that cannot be read leaves the edit as it is.
-                    if let Ok(Some(history)) = l.catalog.load_history(photo) {
+                    if let Ok(Some(history)) = l.session.catalog.load_history(photo) {
                         self.document.edit.history =
                             super::history::History::restored(history, &self.document.edit.recipe);
                     }

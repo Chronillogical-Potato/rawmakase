@@ -3,6 +3,7 @@
 # fits the layering in docs/architecture.md.
 app -> camera_profiles
 app -> catalog
+app -> catalog_session
 app -> color
 app -> decode
 app -> decode_cache
@@ -43,6 +44,9 @@ catalog -> storage
 catalog -> tiff
 catalog -> xml
 catalog -> xmp
+catalog_session -> catalog
+catalog_session -> platform
+catalog_session -> storage
 comparison -> camera_profiles
 comparison -> develop
 comparison -> photo
