@@ -1,6 +1,6 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::catalog::Folder;
+use crate::catalog::{Folder, FolderId, RootId};
 use eframe::egui::{self, Vec2};
 use std::{collections::HashSet, path::PathBuf};
 #[derive(Default)]
@@ -8,15 +8,15 @@ pub(super) struct FolderNode {
     pub(super) key: String,
     pub(super) name: String,
     pub(super) path: PathBuf,
-    pub(super) root: Option<i64>,
-    pub(super) folder: Option<i64>,
+    pub(super) root: Option<RootId>,
+    pub(super) folder: Option<FolderId>,
     pub(super) own_count: usize,
     pub(super) count: usize,
-    pub(super) ids: HashSet<i64>,
+    pub(super) ids: HashSet<FolderId>,
     pub(super) children: std::collections::BTreeMap<String, FolderNode>,
 }
 impl FolderNode {
-    pub(super) fn root(id: i64, name: String, path: PathBuf) -> Self {
+    pub(super) fn root(id: RootId, name: String, path: PathBuf) -> Self {
         Self {
             key: format!("root:{id}"),
             name,
@@ -57,8 +57,9 @@ impl FolderNode {
     }
 }
 pub(super) enum TreeAction {
-    Select(String, HashSet<i64>),
-    Relink(bool, i64),
+    Select(String, HashSet<FolderId>),
+    RelinkRoot(RootId),
+    RelinkFolder(FolderId),
 }
 pub(super) fn folder_tree_row(
     ui: &mut egui::Ui,
@@ -141,8 +142,8 @@ pub(super) fn folder_tree_row(
     }
     let relink = || {
         node.root
-            .map(|id| TreeAction::Relink(true, id))
-            .or_else(|| node.folder.map(|id| TreeAction::Relink(false, id)))
+            .map(TreeAction::RelinkRoot)
+            .or_else(|| node.folder.map(TreeAction::RelinkFolder))
     };
     let mut action = None;
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
