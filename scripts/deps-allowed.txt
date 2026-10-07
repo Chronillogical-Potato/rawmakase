@@ -14,7 +14,9 @@ app -> stats
 app -> time
 app -> updates
 app -> watermark
+catalog_session -> photo
 catalog_session -> platform
+catalog_session -> raw
 comparison -> develop
 comparison -> photo
 decode -> decode_cache

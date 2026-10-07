@@ -2,7 +2,6 @@
 //! time, for the catalog: capture times, camera settings. Dropping the
 //! reader stops it.
 use crate::catalog::PhotoId;
-use eframe::egui;
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -12,24 +11,23 @@ use std::{
     },
 };
 
+/// Called after each batch is read, so whoever shows it polls (a window
+/// asks for a repaint).
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
 /// Photos read between two updates of the catalog.
 const BATCH: usize = 32;
 
-pub(super) struct Reader<T> {
+pub(crate) struct Reader<T> {
     rx: Receiver<Vec<(PhotoId, T)>>,
     cancel: Arc<AtomicBool>,
 }
 impl<T: Send + 'static> Reader<T> {
     /// Reads `photos` with `read` on a thread of its own.
-    pub(super) fn start(
-        photos: Vec<(PhotoId, PathBuf)>,
-        ctx: &egui::Context,
-        read: fn(&Path) -> T,
-    ) -> Self {
+    pub(crate) fn start(photos: Vec<(PhotoId, PathBuf)>, wake: Wake, read: fn(&Path) -> T) -> Self {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancelled = cancel.clone();
-        let ctx = ctx.clone();
         crate::raw::spawn_background(move || {
             for batch in photos.chunks(BATCH) {
                 if cancelled.load(Ordering::Relaxed) {
@@ -39,13 +37,13 @@ impl<T: Send + 'static> Reader<T> {
                 if tx.send(read).is_err() {
                     return;
                 }
-                ctx.request_repaint();
+                wake();
             }
         });
         Self { rx, cancel }
     }
     /// The batches read since the last call, and whether reading is done.
-    pub(super) fn poll(&self) -> (Vec<(PhotoId, T)>, bool) {
+    pub(crate) fn poll(&self) -> (Vec<(PhotoId, T)>, bool) {
         let mut out = Vec::new();
         loop {
             match self.rx.try_recv() {

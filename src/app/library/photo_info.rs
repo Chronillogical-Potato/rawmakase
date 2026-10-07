@@ -4,10 +4,8 @@
 //! kept in the catalog, a row of nothing for a file without any.
 use super::Library;
 use crate::app::theme;
-use crate::catalog::PhotoId;
 use crate::metadata::PhotoInfo;
 use eframe::egui;
-use std::path::Path;
 
 impl Library {
     /// The active photo's info, read from the catalog once per photo.
@@ -70,29 +68,13 @@ impl Library {
     }
     /// Reads the info of the photos that have none, unless already reading.
     pub(super) fn start_photo_info(&mut self) {
-        // Asked again while reading (a volume came back): once it is done.
-        if self.info_reader.is_some() {
-            self.info_again = true;
-            return;
-        }
-        let Ok(missing) = self.session.catalog.photos_without_info() else {
-            return;
-        };
-        let missing: std::collections::HashSet<PhotoId> = missing.into_iter().collect();
-        let todo: Vec<_> = self
-            .session
-            .photos
-            .iter()
-            .filter(|p| missing.contains(&p.id) && self.is_available(&p.path))
-            .map(|p| (p.id, p.path.clone()))
-            .collect();
-        if !todo.is_empty() {
-            self.info_reader = Some(super::background::Reader::start(todo, &self.ctx, read));
-        }
+        let availability = &self.availability;
+        self.session
+            .start_photo_info(|path| availability.is_available(path));
     }
     /// Whether photo info is still being read from files.
     pub(in crate::app) fn reading_photo_info(&self) -> bool {
-        self.info_reader.is_some()
+        self.session.reading_photo_info()
     }
     /// Counts each save of info read from files.
     pub(in crate::app) fn photo_info_saves(&self) -> u64 {
@@ -100,34 +82,21 @@ impl Library {
     }
     /// Saves the info read so far.
     pub(super) fn poll_photo_info(&mut self) {
-        let Some(reader) = &self.info_reader else {
-            return;
-        };
-        let (read, done) = reader.poll();
-        if done {
-            self.info_reader = None;
-            if std::mem::take(&mut self.info_again) {
-                self.start_photo_info();
-            }
+        let polled = self.session.poll_photo_info();
+        if polled.start_again {
+            self.start_photo_info();
         }
-        // A file that could not be read is left for the next online check.
-        let infos: Vec<_> = read
-            .into_iter()
-            .filter_map(|(id, info)| Some((id, info?)))
-            .collect();
-        if !infos.is_empty() {
-            match self.session.catalog.fill_photo_info(&infos) {
-                Ok(()) => {
-                    self.info_saves += 1;
-                    self.info = None;
-                    self.hover_info = None;
-                    self.cell_info.clear();
-                    // Sorted by aspect ratio, the new sizes find their places.
-                    if self.filters.sort == super::sort::Sort::AspectRatio {
-                        self.resort_in_place(|library| library.sort_keys = None);
-                    }
-                }
-                Err(e) => self.message = format!("Photo info could not be saved: {e}"),
+        if let Some(e) = polled.error {
+            self.message = format!("Photo info could not be saved: {e}");
+        }
+        if polled.saved > 0 {
+            self.info_saves += 1;
+            self.info = None;
+            self.hover_info = None;
+            self.cell_info.clear();
+            // Sorted by aspect ratio, the new sizes find their places.
+            if self.filters.sort == super::sort::Sort::AspectRatio {
+                self.resort_in_place(|library| library.sort_keys = None);
             }
         }
     }
@@ -221,43 +190,4 @@ impl Library {
             y += size + 5.;
         }
     }
-}
-
-/// The file's info: `None` when it cannot be read now, `Some(None)` when it
-/// has none.
-fn read(path: &Path) -> Option<Option<PhotoInfo>> {
-    if !super::background::can_read(path) {
-        return None;
-    }
-    Some(if crate::storage::is_raw(path) {
-        // A RAW LibRaw cannot open now (still copying, a network error) is
-        // tried again later.
-        Some(PhotoInfo::from_metadata(
-            &crate::photo::open(path).ok()?.metadata,
-        ))
-    } else {
-        let mut info = crate::exif::photo_info(path).unwrap_or_default();
-        // A header that cannot be read yet (a file still being copied) is
-        // tried again later.
-        info.dimensions = Some(raster_dimensions(path)?);
-        (info != PhotoInfo::default()).then_some(info)
-    })
-}
-
-/// A JPEG, TIFF or PNG's size as shown, after its EXIF orientation, from its
-/// header alone.
-fn raster_dimensions(path: &Path) -> Option<(u32, u32)> {
-    use image::ImageDecoder;
-    let mut decoder = image::ImageReader::open(path)
-        .ok()?
-        .with_guessed_format()
-        .ok()?
-        .into_decoder()
-        .ok()?;
-    let (w, h) = decoder.dimensions();
-    let turned = decoder.orientation().is_ok_and(|o| {
-        use image::metadata::Orientation::*;
-        matches!(o, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH)
-    });
-    Some(if turned { (h, w) } else { (w, h) })
 }

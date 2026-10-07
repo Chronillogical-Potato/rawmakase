@@ -159,15 +159,7 @@ impl Library {
     }
     /// Sets rating, flag and label in the catalog, then as shown.
     fn write_ratings(&mut self, values: &[Metadata]) -> Result<()> {
-        self.session.catalog.set_metadata_of(values)?;
-        for (id, rating, flag, label) in values {
-            if let Some(p) = self.session.photos.iter_mut().find(|p| p.id == *id) {
-                p.rating = *rating;
-                p.flag = *flag;
-                p.label = label.clone();
-            }
-        }
-        Ok(())
+        self.session.set_ratings(values)
     }
 }
 /// Rating, flag and label of each photo given.
