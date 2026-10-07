@@ -48,14 +48,31 @@ pub(super) fn catalog_statements() -> Vec<Statement> {
     found
 }
 
-/// The production code of the file at `path`: without its trailing
-/// `#[cfg(test)] mod …` and without comments, whose examples don't run.
+/// `source` without its trailing inline test module (`#[cfg(test)] mod
+/// tests { … }`). A `#[cfg(test)] mod tests;` declaration holds no code
+/// and production code may follow it, so it is kept.
+pub(super) fn without_tests(source: &str) -> &str {
+    let mut from = 0;
+    while let Some(found) = source[from..].find("#[cfg(test)]\nmod ") {
+        let at = from + found;
+        let line = source[at + "#[cfg(test)]\n".len()..]
+            .lines()
+            .next()
+            .unwrap_or("");
+        if line.trim_end().ends_with('{') {
+            return &source[..at];
+        }
+        from = at + 1;
+    }
+    source
+}
+
+/// The production code of the file at `path`: without its inline test
+/// module and without comments, whose examples don't run.
 fn production(path: &Path) -> String {
     let source = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
-    let code = source
-        .find("#[cfg(test)]\nmod ")
-        .map_or(&source[..], |at| &source[..at]);
-    code.lines()
+    without_tests(&source)
+        .lines()
         .filter(|line| !line.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n")
@@ -234,6 +251,15 @@ fn statements_are_read_whole() {
             (Kind::Sqlite, r#"DELETE FROM lr.x WHERE "photo"=?"#.into()),
             (Kind::Portable, "SELECT 1 FROM photos".into()),
         ]
+    );
+}
+
+#[test]
+fn only_inline_test_modules_are_left_out() {
+    let source = "#[cfg(test)]\nmod tests;\nfn a() {}\n#[cfg(test)]\nmod more {\n}\n";
+    assert_eq!(
+        without_tests(source),
+        "#[cfg(test)]\nmod tests;\nfn a() {}\n"
     );
 }
 
