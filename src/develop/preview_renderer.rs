@@ -105,13 +105,14 @@ impl PreviewRenderer {
         );
         if recipe.engine < 3 {
             return match region {
-                Some(region) => super::render_region_legacy(image, recipe, region),
+                Some(region) => super::render_region_legacy(image, &recipe.checked()?, region),
                 // Older engines develop without highlight recovery, so their Fit
                 // uses a reduced copy of the camera image instead of the pyramid.
                 None if max_edge > 0 && image.width.max(image.height) > max_edge * 5 / 2 => {
-                    super::render_legacy(&super::preview(image, max_edge * 2), recipe, max_edge)
+                    let shown = super::preview(image, max_edge * 2);
+                    super::render_legacy(&shown, &recipe.checked()?, max_edge)
                 }
-                None => super::render_legacy(image, recipe, max_edge),
+                None => super::render_legacy(image, &recipe.checked()?, max_edge),
             }
             .map(Output::Pixels);
         }
@@ -659,8 +660,9 @@ mod tests {
         let [x, y] = [eye[0] as u32, eye[1] as u32];
         for (before, after) in [
             (
-                super::super::render_legacy(&im, &legacy(vec![]), 0).unwrap(),
-                super::super::render_legacy(&im, &legacy(vec![op.clone()]), 0).unwrap(),
+                super::super::render_legacy(&im, &legacy(vec![]).checked().unwrap(), 0).unwrap(),
+                super::super::render_legacy(&im, &legacy(vec![op.clone()]).checked().unwrap(), 0)
+                    .unwrap(),
             ),
             (
                 warm.render(&im, &legacy(vec![]), 0, Some([x, y, 1, 1]), &cancel)

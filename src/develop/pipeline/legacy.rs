@@ -1,8 +1,7 @@
 //! Rendering for the oldest engines, kept as it was so saved edits still render the same.
 use super::*;
 
-pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
-    r.validate()?;
+pub fn render_legacy(im: &CameraImage, r: &ValidRecipe, max_edge: u32) -> Result<Rendered> {
     let im = legacy_retouched(im, r);
     render_legacy_inner(&im, &r.resolved(&im.metadata), max_edge)
 }
@@ -111,7 +110,11 @@ fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
 }
 
 /// Render a rectangle of the full output at one sample per output pixel.
-pub fn render_region_legacy(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
+pub fn render_region_legacy(
+    im: &CameraImage,
+    r: &ValidRecipe,
+    region: [u32; 4],
+) -> Result<Rendered> {
     let im = legacy_retouched(im, r);
     let im = im.as_ref();
     let r = r.resolved(&im.metadata);

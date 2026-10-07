@@ -43,6 +43,8 @@ pub mod quality;
 mod recipe;
 pub mod red_eye;
 mod rendered;
+mod valid;
+pub use valid::ValidRecipe;
 pub mod retouch;
 mod stage_cache;
 mod white_balance;
