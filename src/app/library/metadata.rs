@@ -72,11 +72,14 @@ impl Library {
         // Only a change to the active photo moves the selection: one made to
         // another (a filmstrip menu) leaves the photo shown where it is.
         let was_active = self.selection.active == Some(lead);
-        let position = self.visible.iter().position(|i| self.photos[*i].id == lead);
+        let position = self
+            .visible
+            .iter()
+            .position(|i| self.session.photos[*i].id == lead);
         let following: Vec<_> = position.map_or_else(Vec::new, |at| {
             self.visible[at + 1..]
                 .iter()
-                .map(|i| self.photos[*i].id)
+                .map(|i| self.session.photos[*i].id)
                 .filter(|id| !ids.contains(id))
                 .collect()
         });
@@ -97,17 +100,22 @@ impl Library {
         if self.filters.sort != super::sort::Sort::CaptureTime {
             self.scroll_to_active = true;
         }
-        let next = following
-            .into_iter()
-            .find(|next| self.visible.iter().any(|i| self.photos[*i].id == *next));
-        let still_visible = self.visible.iter().any(|i| self.photos[*i].id == lead);
+        let next = following.into_iter().find(|next| {
+            self.visible
+                .iter()
+                .any(|i| self.session.photos[*i].id == *next)
+        });
+        let still_visible = self
+            .visible
+            .iter()
+            .any(|i| self.session.photos[*i].id == lead);
         let advance = advance && changes.len() == 1;
         if was_active && (advance || !still_visible) {
             let to = next.or_else(|| {
                 if still_visible {
                     Some(lead)
                 } else {
-                    self.visible.last().map(|i| self.photos[*i].id)
+                    self.visible.last().map(|i| self.session.photos[*i].id)
                 }
             });
             // Photos still selected and shown stay selected.
@@ -151,9 +159,9 @@ impl Library {
     }
     /// Sets rating, flag and label in the catalog, then as shown.
     fn write_ratings(&mut self, values: &[Metadata]) -> Result<()> {
-        self.catalog.set_metadata_of(values)?;
+        self.session.catalog.set_metadata_of(values)?;
         for (id, rating, flag, label) in values {
-            if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
+            if let Some(p) = self.session.photos.iter_mut().find(|p| p.id == *id) {
                 p.rating = *rating;
                 p.flag = *flag;
                 p.label = label.clone();

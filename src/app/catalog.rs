@@ -28,8 +28,8 @@ impl Editor {
             tx,
             ctx.clone(),
             move |tx| {
-                let result = crate::app::library::Library::load(&path, ctx.clone())
-                    .map(Box::new)
+                let result = crate::catalog_session::CatalogSession::open(&path)
+                    .map(|opened| Box::new(crate::app::library::Library::new(opened, ctx.clone())))
                     .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(Event::CatalogReady(result));
             },
@@ -47,7 +47,10 @@ impl Editor {
         }
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        let current = self.library.as_ref().map(|l| l.catalog.path.clone());
+        let current = self
+            .library
+            .as_ref()
+            .map(|l| l.session.catalog.path.clone());
         super::task::spawn(
             tx,
             ctx.clone(),
@@ -197,7 +200,11 @@ impl Editor {
             self.develop_catalog_photo(id);
             return;
         }
-        let Some(current) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
+        let Some(current) = self
+            .library
+            .as_ref()
+            .map(|l| l.session.catalog.path.clone())
+        else {
             if self.activity.is_dialog() {
                 // The catalog is still opening; add the photo once it is ready.
                 self.pending_photo = Some(super::PendingPhoto {
@@ -237,7 +244,10 @@ impl Editor {
                         "{} matches more than one folder of the catalog; add it with Add Folder…",
                         folder.display()
                     );
-                    let mut library = crate::app::library::Library::load(&current, ctx.clone())?;
+                    let mut library = crate::app::library::Library::new(
+                        crate::catalog_session::CatalogSession::open(&current)?,
+                        ctx.clone(),
+                    );
                     // Says why the photo wasn't added when its folder is linked elsewhere.
                     folder_added(&mut library, &added.report, &added.conflicts);
                     Ok(library)
@@ -256,6 +266,7 @@ impl Editor {
     pub(super) fn catalog_photo_at(&self, path: &std::path::Path) -> Option<PhotoId> {
         self.library
             .as_ref()?
+            .session
             .photos
             .iter()
             // A location stored through a symlink spells the path differently;

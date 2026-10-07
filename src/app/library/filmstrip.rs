@@ -178,7 +178,7 @@ impl Library {
         let position = current.and_then(|current| {
             self.visible
                 .iter()
-                .position(|i| self.photos[*i].id == current)
+                .position(|i| self.session.photos[*i].id == current)
         });
         // The grid's edits cover its selection; elsewhere the photo shown.
         let whole_selection = library && self.view() == View::Grid;
@@ -263,7 +263,7 @@ impl Library {
                     redraw(ui.ctx(), "filmstrip scrolled past a shorter list");
                 }
                 for n in cells {
-                    let photo = self.photos[self.visible[n]].clone();
+                    let photo = self.session.photos[self.visible[n]].clone();
                     let mark = if current == Some(photo.id) {
                         Mark::Active
                     } else if self.selection.selected.contains(&photo.id) {

@@ -275,6 +275,7 @@ impl Editor {
                         .as_ref()
                         .map(|library| {
                             library
+                                .session
                                 .catalog
                                 .path
                                 .file_stem()
