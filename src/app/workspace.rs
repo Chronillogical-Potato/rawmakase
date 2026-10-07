@@ -955,14 +955,15 @@ impl Editor {
                     }
                 }
             });
-            // As in Lightroom, Shift+Cmd+C opens Copy Settings.
-            if copy {
+            // As in Lightroom, Shift+Cmd+C opens Copy Settings. Not while a folder is
+            // being picked: the folder question that follows would replace it.
+            if copy && !self.activity.is_busy() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Copy);
             }
             if match_exposures && !self.sync_targets().is_empty() && !self.activity.is_busy() {
                 self.start_sync(super::sync::BatchChange::MatchTotalExposures);
             }
-            if new_preset {
+            if new_preset && !self.activity.is_busy() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::NewPreset);
             }
             if sync && !self.sync_targets().is_empty() && !self.activity.is_busy() {
