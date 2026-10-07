@@ -57,7 +57,7 @@ impl Outputs {
                 != Status::Running
         })
     }
-    /// The jobs still running.
+    /// The jobs still running, cancelled or not.
     fn running(&self) -> impl Iterator<Item = &Job> {
         self.jobs.values().filter(|j| {
             j.state
@@ -67,9 +67,10 @@ impl Outputs {
                 == Status::Running
         })
     }
-    /// Whether any job is still running.
+    /// Whether any job not cancelled is still running.
     pub(crate) fn any_running(&self) -> bool {
-        self.running().next().is_some()
+        self.running()
+            .any(|job| !job.cancel.load(Ordering::Relaxed))
     }
     /// Cancels every job still running, after the stage it is in.
     pub(crate) fn cancel_all(&self) {

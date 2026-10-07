@@ -4732,6 +4732,9 @@ fn closing_while_the_catalog_does_not_answer_keeps_the_window_open() -> anyhow::
     );
     assert!(e.close_confirm);
     assert!(e.autosave.busy(), "the save goes on");
+    // Closes once the save is done, without asking again.
+    assert!(e.close_after_work);
+    assert!(e.quit_by.is_none());
     assert!(e.document.edit.save_state().needs_save());
     Ok(())
 }

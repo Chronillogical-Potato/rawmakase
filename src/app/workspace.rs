@@ -1163,7 +1163,7 @@ impl Editor {
         } else if self.activity.is_changing_folder() {
             Some("the folder change")
         } else if self.automation.outputs_running() {
-            Some("the output the control socket asked for")
+            Some(OUTPUT)
         } else {
             None
         }
@@ -1177,14 +1177,22 @@ impl Editor {
             ctx.request_repaint_after(due + Duration::from_millis(10));
         }
         if ctx.input(|i| i.viewport().close_requested()) {
-            let waits = self.closing_waits_for().is_some();
-            if waits || self.flush_by(Instant::now() + super::exit::DEADLINE) != Flushed::Saved {
+            let until = Instant::now() + super::exit::DEADLINE;
+            let flushed = if self.closing_waits_for().is_some() {
+                None
+            } else {
+                Some(self.flush_by(until))
+            };
+            if flushed == Some(Flushed::Saved) {
+                self.quit_by = Some(until);
+            } else {
                 refuse_close(ctx);
                 self.close_confirm = true;
-                self.close_after_work = waits;
+                // Work still running, or a save still in flight, closes once done.
+                self.close_after_work = flushed != Some(Flushed::Failed);
             }
         }
-        if self.close_after_work && self.closing_waits_for().is_none() {
+        if self.close_after_work && self.closing_waits_for().is_none() && !self.autosave.busy() {
             self.close_confirm = false;
             self.close_after_work = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1205,6 +1213,11 @@ impl Editor {
                     self.close_confirm = false;
                     self.close_after_work = false;
                 }
+                if waits_for == Some(OUTPUT) && ui.button("Cancel it and close").clicked() {
+                    // A cancelled output no longer holds up closing; the exit hook
+                    // still waits for it, under its deadline.
+                    self.automation.cancel_outputs();
+                }
                 if waits_for.is_none() && ui.button("Close without saving").clicked() {
                     self.document.edit.save_state_mut().saved();
                     if let Some(library) = &mut self.library {
@@ -1220,6 +1233,9 @@ impl Editor {
         }
     }
 }
+
+/// What the close guard calls an export or preview a control command started.
+const OUTPUT: &str = "the output the control socket asked for";
 
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
