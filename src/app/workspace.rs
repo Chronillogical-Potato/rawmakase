@@ -1132,17 +1132,18 @@ impl Editor {
         egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
     }
 
-    /// Whether quitting now would cut off work: an export or Sync Settings running,
-    /// or an edit that failed to save.
+    /// Whether quitting now would cut off work or could lose an edit: an export or
+    /// Sync Settings running, or an edit, Copy Name or metadata field not saved
+    /// yet, pending, being saved or failed. A quit the close guard doesn't see (the
+    /// Dock, logging out) then closes the window instead, so the guard saves first
+    /// and asks if that fails: an earlier save succeeding says nothing of the next.
     pub(super) fn quitting_would_cut_off_work(&self) -> bool {
         self.exporting()
             || self.activity.is_syncing()
-            || matches!(
-                self.document.edit.save,
-                crate::edit_session::save_state::SaveState::Failed { .. }
-            )
+            || self.document.edit.save.needs_save()
+            || self.library.as_ref().is_some_and(|l| l.has_drafts())
     }
-    fn pending_work(&mut self, ctx: &egui::Context) {
+    pub(super) fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
         // For a quit the close guard doesn't see (the Dock, logging out).
         crate::platform::quit::set_work_pending(self.quitting_would_cut_off_work());
@@ -1290,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_save_is_work_a_quit_would_cut_off() {
+    fn an_unsaved_or_failed_edit_is_work_a_quit_would_cut_off() {
         let ctx = egui::Context::default();
         let mut editor = crate::app::Editor::with_context(
             &ctx,
@@ -1299,10 +1300,15 @@ mod tests {
             None,
         );
         assert!(!editor.quitting_would_cut_off_work());
+        // Not saved yet: its first save may fail, so the close guard saves it.
         editor.document.edit.save.mark_changed();
-        // Unsaved but savable: quitting saves it.
-        assert!(!editor.quitting_would_cut_off_work());
+        assert!(editor.quitting_would_cut_off_work());
+        // Being saved in the background: the guard waits for the result.
+        editor.document.edit.save.saving();
+        assert!(editor.quitting_would_cut_off_work());
         editor.document.edit.save.failed("disk full".into());
         assert!(editor.quitting_would_cut_off_work());
+        editor.document.edit.save.saved();
+        assert!(!editor.quitting_would_cut_off_work());
     }
 }
