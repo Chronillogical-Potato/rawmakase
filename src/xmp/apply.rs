@@ -543,7 +543,7 @@ impl Preset {
         settings.seen.insert("PointColors".into());
         settings.seen.insert("ColorVariance".into());
         if let Some(points) = v.get("PointColors") {
-            r.point_colors = crate::develop::point_color::parse_list(
+            r.point_colors = crate::model::point_color::parse_list(
                 points,
                 v.get("ColorVariance").map(String::as_str),
             )?;

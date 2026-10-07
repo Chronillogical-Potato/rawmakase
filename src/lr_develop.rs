@@ -147,7 +147,7 @@ pub fn convert_develop(
                 };
                 preset.settings.insert(
                     key.clone(),
-                    items.join(crate::develop::point_color::LIST_SEPARATOR),
+                    items.join(crate::model::point_color::LIST_SEPARATOR),
                 );
             } else if key.starts_with("ToneCurve") && !key.contains("Name") {
                 let values = value

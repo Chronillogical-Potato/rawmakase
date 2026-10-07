@@ -270,7 +270,7 @@ fn lightroom_point_colors_import() -> Result<()> {
         convert_develop(&text, &m, &[], None)?.0.point_colors,
         r.point_colors
             .iter()
-            .map(|p| crate::develop::point_color::PointColor { variance: 0., ..*p })
+            .map(|p| crate::model::point_color::PointColor { variance: 0., ..*p })
             .collect::<Vec<_>>()
     );
     let (r, w) = convert_develop(

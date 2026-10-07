@@ -294,9 +294,9 @@ impl Editor {
             // Visualize Range renders the selected swatch's selection instead of its
             // adjustment; never as the photo's thumbnail.
             let mut recipe = self.effective_recipe();
-            let visualize = self.visualized_swatch().and_then(|i| {
-                crate::develop::point_color::visualize_range(&recipe.point_colors, i)
-            });
+            let visualize = self
+                .visualized_swatch()
+                .and_then(|i| crate::model::point_color::visualize_range(&recipe.point_colors, i));
             let thumbnail = region.is_none() && self.shows_library_edit() && visualize.is_none();
             if let Some(list) = visualize {
                 recipe.point_colors = list;

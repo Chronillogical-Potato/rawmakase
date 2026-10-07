@@ -796,7 +796,7 @@ fn rgb_tables_follow_the_colour_controls_on_every_engine() {
 #[test]
 fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
     use crate::develop::panels::{Panel, PanelState};
-    use crate::develop::point_color::PointColor;
+    use crate::model::point_color::PointColor;
     let im = fixture();
     let plain = Recipe {
         reference_curves: true,
@@ -835,7 +835,8 @@ fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
 #[test]
 fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
     use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
-    use crate::develop::point_color::{PointColor, add_sample};
+    use crate::develop::point_color::add_sample;
+    use crate::model::point_color::PointColor;
     let im = fixture();
     let plain = Recipe {
         reference_curves: true,
@@ -873,7 +874,7 @@ fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
 }
 #[test]
 fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow::Result<()> {
-    use crate::develop::point_color::{PointColor, visualize_range};
+    use crate::model::point_color::{PointColor, visualize_range};
     let im = fixture();
     let mut r = Recipe {
         reference_curves: true,
@@ -897,7 +898,8 @@ fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow
 #[test]
 fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Result<()> {
     use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
-    use crate::develop::point_color::{PointColor, visualize, visualize_range};
+    use crate::develop::point_color::visualize;
+    use crate::model::point_color::{PointColor, visualize_range};
     let im = fixture();
     let mut r = Recipe {
         reference_curves: true,
@@ -1323,8 +1325,7 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
 /// second curve after the user's by the layered one, as Camera Raw 18.7 renders it.
 #[test]
 fn a_looks_parametric_curve_follows_the_users() {
-    use crate::develop::parametric::ParametricCurve;
-    use crate::model::operators::ParametricModel;
+    use crate::{develop::parametric::ParametricCurve, model::operators::ParametricModel};
     let mut m = fixture().metadata;
     m.cam_xyz = [
         [1.1434, -0.4948, -0.121],
@@ -1441,8 +1442,7 @@ fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
 /// original's on an old edit, Lightroom's after Detail's reset chose the measured one.
 #[test]
 fn process_update_sharpens_with_the_recipe_operator_default() {
-    use crate::develop::sharpening::SharpeningSliders;
-    use crate::model::operators::SharpeningModel;
+    use crate::{develop::sharpening::SharpeningSliders, model::operators::SharpeningModel};
     let mut old = Recipe {
         engine: 1,
         ..Default::default()

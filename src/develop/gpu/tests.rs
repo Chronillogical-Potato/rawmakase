@@ -302,14 +302,14 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     mono.effects.gray_mix = [0.3, -0.7, 0.1, 0., -0.2, 0.9, 0., -1.];
     recipes.push(mono);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
-    let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
+    let mut warm = crate::model::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
     warm.shift = [0.4, -0.5, 0.3];
     warm.variance = 0.6;
     warm.range = 0.8;
-    let mut red = crate::develop::point_color::PointColor::sampled([5.8, 0.4, 0.1]);
+    let mut red = crate::model::point_color::PointColor::sampled([5.8, 0.4, 0.1]);
     red.shift = [-0.6, 0.7, -0.4];
     red.range = 0.2;
-    let mut cool = crate::develop::point_color::PointColor::sampled([3.5, 0.3, 0.3]);
+    let mut cool = crate::model::point_color::PointColor::sampled([3.5, 0.3, 0.3]);
     cool.shift = [0.2, 0.3, 0.];
     cool.variance = -0.8;
     r.point_colors = vec![warm, red, cool];
@@ -318,7 +318,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     // Visualize Range of the second swatch.
     let mut visualized = r.clone();
     visualized.point_colors =
-        crate::develop::point_color::visualize_range(&r.point_colors, 1).unwrap();
+        crate::model::point_color::visualize_range(&r.point_colors, 1).unwrap();
     recipes.push(visualized);
     r.effects.defringe = [0.5, 0.3];
     recipes.push(r.clone());

@@ -115,6 +115,7 @@ lr_develop -> camera_data
 lr_develop -> camera_profiles
 lr_develop -> color
 lr_develop -> develop
+lr_develop -> model
 lr_develop -> xmp
 model -> color
 optics -> xml

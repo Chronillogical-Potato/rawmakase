@@ -204,7 +204,7 @@ pub(crate) fn mask_weights(
         plain.masks.clear();
         // Range masks select from the photo as it renders, never as Visualize Range
         // grays it.
-        crate::develop::point_color::without_visualization(&mut plain.point_colors);
+        crate::model::point_color::without_visualization(&mut plain.point_colors);
         let im = toned.source();
         let gpu = stages.as_deref_mut().and_then(|s| {
             let params = pixel_params::pixel_params(im, &plain)?;

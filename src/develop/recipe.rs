@@ -228,7 +228,7 @@ pub struct Recipe {
     /// `crs:ColorVariance`). Omitted when empty, so releases that predate it read the
     /// recipe (and keep the swatches when they are set).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub point_colors: Vec<crate::develop::point_color::PointColor>,
+    pub point_colors: Vec<crate::model::point_color::PointColor>,
     pub grading: [[f32; 3]; 3],
     pub noise_luma: f32,
     pub noise_chroma: f32,

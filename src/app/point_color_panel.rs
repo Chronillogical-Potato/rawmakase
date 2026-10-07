@@ -4,8 +4,11 @@
 use super::state::{PointColorView, Tool, ViewState};
 use super::theme;
 use super::widgets::{name_history_step, set_edit_context, slider_with};
-use crate::app::Module;
-use crate::develop::point_color::{MAX_SWATCHES, PointColor, PointColors, add_sample};
+use crate::model::point_color::{MAX_SWATCHES, PointColor};
+use crate::{
+    app::Module,
+    develop::point_color::{PointColors, add_sample},
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Whether the recipe's process renders Point Color (engine 4 with the measured curves).
@@ -454,7 +457,7 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 
 /// HSV of linear ProPhoto RGB (hue in radians) as a display color.
 fn hsv(h: f32, s: f32, v: f32) -> Color32 {
-    display(crate::develop::point_color::hsv_to_rgb(h, s, v))
+    display(crate::color::hsv::hsv_to_rgb(h, s, v))
 }
 
 /// Linear ProPhoto RGB as an sRGB display color.
