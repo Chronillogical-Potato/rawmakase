@@ -8,8 +8,6 @@ license = "MIT"
 publish = false
 
 [features]
-# Catalog row ids as SQLite values, for the catalog.
-sql = ["dep:rusqlite"]
 # Fixtures and helpers the app's own tests build on.
 test-support = []
 
@@ -17,7 +15,6 @@ test-support = []
 rawmakase-protocol = { path = "../rawmakase-protocol", version = "0.1.0" }
 anyhow = "1"
 flate2 = "1"
-rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 unicode-normalization = "0.1"
 rayon = "1.12"
 roxmltree = "0.21.1"
