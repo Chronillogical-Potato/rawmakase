@@ -36,7 +36,7 @@ pub(crate) fn render_base(
     let masked = base
         .masks
         .iter()
-        .any(crate::develop::masks::MaskGroup::is_active);
+        .any(crate::model::masks::MaskGroup::is_active);
     let Some(stages) = stages else {
         if !masked {
             return Ok((
@@ -175,7 +175,7 @@ pub(crate) fn mask_weights(
     if !r
         .masks
         .iter()
-        .any(crate::develop::masks::MaskGroup::is_active)
+        .any(crate::model::masks::MaskGroup::is_active)
     {
         return Ok(None);
     }

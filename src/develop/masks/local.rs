@@ -10,9 +10,8 @@
 //! - Texture and Clarity scale the local-contrast detail of the camera image.
 //! - Hue and Saturation rotate and scale Oklab chroma after the colour mixer.
 //! - Sharpness and Noise change the finishing sharpening and noise reduction.
-use super::LocalAdjust;
-use crate::camera_data::Metadata;
-use crate::develop::Recipe;
+use crate::model::masks::LocalAdjust;
+use crate::{camera_data::Metadata, develop::Recipe};
 
 /// Slots of a [`LocalDelta`].
 pub(crate) mod slot {

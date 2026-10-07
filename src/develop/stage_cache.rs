@@ -412,7 +412,7 @@ impl SampleKey {
 #[derive(PartialEq)]
 pub(crate) struct MaskKey {
     samples: SampleKey,
-    masks: Vec<(Vec<super::masks::MaskComponent>, bool)>,
+    masks: Vec<(Vec<crate::model::masks::MaskComponent>, bool)>,
     recipe: Option<Recipe>,
 }
 impl MaskKey {

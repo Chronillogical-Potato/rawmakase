@@ -209,7 +209,7 @@ impl Param {
                     _ => "percent",
                 };
                 let local = param
-                    .local_shown(&crate::develop::masks::LocalAdjust::default())
+                    .local_shown(&crate::model::masks::LocalAdjust::default())
                     .is_some();
                 super::reply::Parameter {
                     name,
@@ -229,7 +229,7 @@ impl Param {
             .collect();
         items
     }
-    fn local_value(self, a: &mut crate::develop::masks::LocalAdjust) -> Option<&mut f32> {
+    fn local_value(self, a: &mut crate::model::masks::LocalAdjust) -> Option<&mut f32> {
         Some(match self {
             Self::Setting(Exposure) => &mut a.exposure,
             Self::Setting(Temperature) => &mut a.temperature,
@@ -246,7 +246,7 @@ impl Param {
             _ => return None,
         })
     }
-    pub(in crate::app) fn local_shown(self, a: &crate::develop::masks::LocalAdjust) -> Option<f32> {
+    pub(in crate::app) fn local_shown(self, a: &crate::model::masks::LocalAdjust) -> Option<f32> {
         let mut copy = *a;
         self.local_value(&mut copy).map(|v| {
             *v * if self == Self::Setting(Exposure) {
@@ -258,7 +258,7 @@ impl Param {
     }
     pub(in crate::app) fn local_set(
         self,
-        a: &mut crate::develop::masks::LocalAdjust,
+        a: &mut crate::model::masks::LocalAdjust,
         shown: Option<f32>,
         ticks: i32,
     ) -> super::Result<String> {

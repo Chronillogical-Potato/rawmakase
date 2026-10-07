@@ -262,7 +262,7 @@ pub struct Recipe {
     pub red_eye: crate::model::red_eye::RedEyeList,
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub masks: Vec<crate::develop::masks::MaskGroup>,
+    pub masks: Vec<crate::model::masks::MaskGroup>,
     /// Lightroom's panel switches; omitted while every panel is on.
     #[serde(default, skip_serializing_if = "PanelSwitches::all_on")]
     pub panels: PanelSwitches,
@@ -280,7 +280,7 @@ pub struct LocalEdits {
     #[serde(skip_serializing_if = "crate::model::red_eye::RedEyeList::is_blank")]
     pub red_eye: crate::model::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub masks: Vec<crate::develop::masks::MaskGroup>,
+    pub masks: Vec<crate::model::masks::MaskGroup>,
 }
 impl LocalEdits {
     pub fn is_empty(&self) -> bool {
@@ -289,7 +289,7 @@ impl LocalEdits {
     pub fn validate(&self) -> Result<()> {
         crate::model::retouch::validate(&self.retouch)?;
         crate::model::red_eye::validate(&self.red_eye)?;
-        crate::develop::masks::validate(&self.masks)
+        crate::model::masks::validate(&self.masks)
     }
 }
 impl Default for Recipe {
@@ -674,7 +674,7 @@ impl Recipe {
         // Every other number is range-checked above, which also rejects NaN.
         crate::model::retouch::validate(&self.retouch)?;
         crate::model::red_eye::validate(&self.red_eye)?;
-        crate::develop::masks::validate(&self.masks)?;
+        crate::model::masks::validate(&self.masks)?;
         Ok(())
     }
     /// The recipe as saved, without spots and masks, and those apart.

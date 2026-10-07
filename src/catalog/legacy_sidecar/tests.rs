@@ -88,7 +88,6 @@ fn changed_source_refused() -> Result<()> {
 /// recipe that releases before them read; they load back into the recipe.
 #[test]
 fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
-    use crate::develop::masks;
     let d = tempfile::tempdir()?;
     let raw = d.path().join("photo.ARW");
     fs::write(&raw, b"fixture")?;
@@ -107,12 +106,14 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
         opacity: 1.,
         offset: [0.1, 0.],
     });
-    r.masks.push(masks::MaskGroup {
-        components: vec![masks::MaskComponent::new(masks::MaskShape::Linear {
-            from: [0.5, 0.],
-            to: [0.5, 0.5],
-        })],
-        adjust: masks::LocalAdjust {
+    r.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Linear {
+                from: [0.5, 0.],
+                to: [0.5, 0.5],
+            },
+        )],
+        adjust: crate::model::masks::LocalAdjust {
             exposure: -1.,
             ..Default::default()
         },

@@ -474,7 +474,7 @@ mod tests {
     }
     #[test]
     fn mask_shadows_reduce_the_photo_once() {
-        use crate::develop::masks::{MaskComponent, MaskGroup, MaskShape};
+        use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
         let (w, h) = (300, 200);
         let mut im = image(w, h, 0.);
         for (i, p) in im.pixels.iter_mut().enumerate() {
@@ -600,8 +600,7 @@ mod tests {
     /// flips, and renders the same in Fit, regions and exports.
     #[test]
     fn red_eye_follows_geometry_and_agrees_between_previews_and_export() {
-        use crate::develop::ViewMapping;
-        use crate::model::red_eye::RedEyeOp;
+        use crate::{develop::ViewMapping, model::red_eye::RedEyeOp};
         let (w, h) = (480, 320);
         let mut im = image(w, h, 0.);
         let eye = [300., 120.];
@@ -696,7 +695,7 @@ mod tests {
     /// Mask edits (sliders, shapes, ranges, visibility) never reuse stale weights.
     #[test]
     fn cached_mask_weights_follow_every_edit() {
-        use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+        use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
         let (w, h) = (300, 200);
         let mut im = image(w, h, 0.);
         for (i, p) in im.pixels.iter_mut().enumerate() {
@@ -732,7 +731,7 @@ mod tests {
             },
             &|r| {
                 r.masks[0].components.push(MaskComponent {
-                    op: crate::develop::masks::MaskOp::Intersect,
+                    op: crate::model::masks::MaskOp::Intersect,
                     ..MaskComponent::new(MaskShape::LuminanceRange {
                         low: 0.3,
                         high: 1.,

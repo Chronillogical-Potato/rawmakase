@@ -1,11 +1,8 @@
 use super::*;
+use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use crate::{
-    develop::{
-        UprightMode,
-        masks::{MaskComponent, MaskGroup, MaskShape},
-        panels::PanelState,
-    },
+    develop::{UprightMode, panels::PanelState},
     model::effects::VignetteStyle,
 };
 use serde_json::Value;
