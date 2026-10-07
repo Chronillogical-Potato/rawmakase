@@ -490,7 +490,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     // `ca`: 1 the measured aberration alone, 2 with the built-in distortion. Each
     // spatial run has another vignette style and amount.
     use crate::develop::ClipOverlay;
-    use crate::develop::effects::VignetteStyle::*;
+    use crate::model::effects::VignetteStyle::*;
     let (none, both) = (
         ClipOverlay::NONE,
         ClipOverlay {

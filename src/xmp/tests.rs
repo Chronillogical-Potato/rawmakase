@@ -375,7 +375,7 @@ fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
 }
 #[test]
 fn every_lightroom_vignette_style_imports() -> Result<()> {
-    use crate::develop::effects::VignetteStyle;
+    use crate::model::effects::VignetteStyle;
     for (code, style) in [
         ("1", VignetteStyle::HighlightPriority),
         ("2", VignetteStyle::ColorPriority),

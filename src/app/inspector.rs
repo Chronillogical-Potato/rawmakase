@@ -1728,7 +1728,7 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
 }
 /// Defringe's Amount and hue range for Purple, then Green. Double-clicking a hue
 /// resets it to that color's own default range.
-pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effects::Effects) {
+pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::model::effects::Effects) {
     for (i, name, hue) in [(0, "Purple", [0.55, 0.9]), (1, "Green", [0.2, 0.5])] {
         ui.push_id(("defringe", i), |ui| {
             slider_with(
@@ -1740,7 +1740,7 @@ pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::develop::effect
                 Some((20., 0)),
                 None,
             );
-            let defaults = crate::develop::effects::DEFRINGE_RANGES[i];
+            let defaults = crate::model::effects::DEFRINGE_RANGES[i];
             let [lo, hi] = &mut e.defringe_ranges[i];
             let colors = hue.map(|h| {
                 let c = crate::develop::color::hue_rgb(h).map(|v| (v * 180.) as u8);

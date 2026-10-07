@@ -2392,14 +2392,14 @@ fn the_preset_list_is_kept_until_what_it_shows_changes() {
 #[test]
 fn double_clicking_a_defringe_hue_resets_it_to_its_colors_default() {
     let ctx = egui::Context::default();
-    let mut effects = crate::develop::effects::Effects {
+    let mut effects = crate::model::effects::Effects {
         // Green below its default, as the fringe selector can leave it.
         defringe_ranges: [[0.1, 0.95], [0.0, 0.2]],
         ..Default::default()
     };
     let mut time = 0.;
     let mut frame =
-        |effects: &mut crate::develop::effects::Effects, events: Vec<egui::Event>, wait: f64| {
+        |effects: &mut crate::model::effects::Effects, events: Vec<egui::Event>, wait: f64| {
             time += wait;
             let mut output = ctx.run_ui(
                 egui::RawInput {

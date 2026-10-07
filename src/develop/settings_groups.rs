@@ -647,7 +647,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         panels: _,
         unknown: _,
     } = r;
-    let crate::develop::effects::Effects {
+    let crate::model::effects::Effects {
         channels: _,
         parametric: _,
         splits: _,
