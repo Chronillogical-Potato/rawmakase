@@ -8,7 +8,7 @@ fn catalog() -> Result<(tempfile::TempDir, std::path::PathBuf, Db)> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("Boundary.rawmakase");
     Db::create(&path)?;
-    let mut db = Db::open(&path)?;
+    let mut db = Db::open(&CatalogLocation::File(path.clone()))?;
     db.write(|w| {
         w.execute(
             sql!("INSERT INTO roots(id, original_path) VALUES (1, '/photos')"),

@@ -3,7 +3,7 @@
 //! enough to stall the interface mid-edit. Saves before navigation stay
 //! synchronous, after waiting for the one in flight.
 use crate::{
-    catalog::{Catalog, PhotoId, SavedHistory},
+    catalog::{Catalog, CatalogLocation, PhotoId, SavedHistory},
     export_settings::ExportOptions,
     model::recipe::Recipe,
 };
@@ -18,7 +18,7 @@ use std::{
 /// An edit to write, as it was when the save started.
 pub(super) struct Job {
     /// The catalog the edit goes to, and the photo in it.
-    pub catalog: PathBuf,
+    pub catalog: CatalogLocation,
     pub photo: PhotoId,
     pub raw: PathBuf,
     pub recipe: Recipe,
@@ -30,7 +30,7 @@ pub(super) struct Job {
 #[derive(Debug)]
 pub(super) enum Completion {
     /// Written to the catalog at this path.
-    Saved(PathBuf),
+    Saved(CatalogLocation),
     /// The save failed, or panicked; the saver keeps running.
     Failed(String),
     /// The saver thread is gone without reporting. The next save starts a new one.
@@ -38,7 +38,7 @@ pub(super) enum Completion {
 }
 impl Completion {
     /// Where the edit was saved, or the error to show.
-    pub(crate) fn into_result(self) -> Result<PathBuf, String> {
+    pub(crate) fn into_result(self) -> Result<CatalogLocation, String> {
         match self {
             Self::Saved(path) => Ok(path),
             Self::Failed(error) => Err(error),
@@ -48,7 +48,7 @@ impl Completion {
 }
 
 /// Writes one job, reusing the catalog connection between jobs.
-type Saver = fn(&mut Option<Catalog>, &Job) -> anyhow::Result<PathBuf>;
+type Saver = fn(&mut Option<Catalog>, &Job) -> anyhow::Result<CatalogLocation>;
 
 /// The saver thread's two ends, held while it runs.
 struct Worker {
@@ -175,11 +175,14 @@ fn run(jobs: Receiver<Job>, completions: Sender<Completion>, ctx: egui::Context,
 }
 
 /// Keeps the catalog open between saves.
-fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
-    let path = &job.catalog;
-    if catalog.as_ref().is_none_or(|c: &Catalog| &c.path != path) {
+fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<CatalogLocation> {
+    let location = &job.catalog;
+    if catalog
+        .as_ref()
+        .is_none_or(|c: &Catalog| c.location() != location)
+    {
         *catalog = None;
-        *catalog = Some(Catalog::open(path)?);
+        *catalog = Some(Catalog::open(location)?);
     }
     let c = catalog.as_mut().expect("opened above");
     c.save_edit(
@@ -189,14 +192,14 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
         &job.export,
         crate::catalog::HistoryUpdate::of(&job.history),
     )?;
-    Ok(path.clone())
+    Ok(location.clone())
 }
 
 #[cfg(test)]
 impl Autosave {
     /// An autosave whose saves take a minute, as on a stalled network share.
     pub(super) fn stalled() -> Self {
-        fn stall(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
+        fn stall(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<CatalogLocation> {
             std::thread::sleep(std::time::Duration::from_secs(60));
             Ok(job.catalog.clone())
         }
@@ -214,7 +217,7 @@ mod tests {
 
     fn job(photo: PhotoId) -> Job {
         Job {
-            catalog: PathBuf::from("test.rawmakase"),
+            catalog: CatalogLocation::File("test.rawmakase".into()),
             photo,
             raw: PathBuf::from("image.ARW"),
             recipe: Recipe::default(),
@@ -228,7 +231,7 @@ mod tests {
     }
 
     /// Panics on photo 1 and saves every other photo.
-    fn panics_on_photo_one(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
+    fn panics_on_photo_one(_: &mut Option<Catalog>, job: &Job) -> anyhow::Result<CatalogLocation> {
         assert_ne!(job.photo, PhotoId(1), "save panicked");
         Ok(job.catalog.clone())
     }

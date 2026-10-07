@@ -308,10 +308,9 @@ impl Editor {
                 };
                 // Commands never cross catalogs; reloading this one (after
                 // adding or relinking a folder) keeps them.
-                let reloaded = self
-                    .library
-                    .as_ref()
-                    .is_some_and(|old| old.session.catalog.path == l.session.catalog.path);
+                let reloaded = self.library.as_ref().is_some_and(|old| {
+                    old.session.catalog.location() == l.session.catalog.location()
+                });
                 if !reloaded {
                     self.undo_log.clear();
                     // Photo ids belong to their catalog, and so does the reference.

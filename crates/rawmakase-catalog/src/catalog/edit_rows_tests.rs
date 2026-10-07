@@ -3,6 +3,7 @@
 use super::*;
 use crate::{export_settings::ExportOptions, model::recipe::Recipe};
 use std::path::Path;
+use std::path::PathBuf;
 
 /// The catalog's statements that write a photo's edit columns or rows.
 fn writes_an_edit(statement: &str) -> bool {

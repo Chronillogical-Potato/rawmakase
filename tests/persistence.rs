@@ -136,7 +136,8 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
         assert_eq!(saved.export.quality, 92);
         assert_eq!(saved.export.max_edge, 0);
     }
-    let db = rusqlite::Connection::open(&catalog.path)?;
+    let rawmakase::catalog::CatalogLocation::File(path) = catalog.location().clone();
+    let db = rusqlite::Connection::open(&path)?;
     let corrupt_options = r#"{"quality":0,"max_edge":0}"#;
     db.execute(
         "UPDATE photos SET export_options=? WHERE id=?",

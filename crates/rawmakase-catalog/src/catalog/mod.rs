@@ -6,11 +6,11 @@
 //! `ingest`, and everything Lightroom-specific under `lightroom`.
 use anyhow::{Result, ensure};
 use db::{Db, Reads, Write, sql};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use value::row;
 
 pub struct Catalog {
-    pub path: PathBuf,
+    location: CatalogLocation,
     db: Db,
     /// The computer it is open on, whose folder locations apply.
     computer: locations::Computer,
@@ -28,6 +28,7 @@ mod info;
 mod ingest;
 pub mod legacy_sidecar;
 pub mod lightroom;
+mod location;
 pub mod locations;
 mod models;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
@@ -44,6 +45,7 @@ pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
 pub use ingest::{Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
+pub use location::CatalogLocation;
 pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
 pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
@@ -59,8 +61,8 @@ impl Catalog {
         Self::open(path)
     }
     /// Opens a catalog on this computer.
-    pub fn open(path: &Path) -> Result<Self> {
-        Self::open_as(path, &locations::Computer::this())
+    pub fn open(location: impl Into<CatalogLocation>) -> Result<Self> {
+        Self::open_as(location, &locations::Computer::this())
     }
     /// Opens a catalog on `computer`, whose folder locations apply.
     ///
@@ -68,14 +70,22 @@ impl Catalog {
     /// release can't read is left as it was. An open writes only what is
     /// missing for this computer, and a catalog that can't be readied isn't
     /// opened.
-    pub fn open_as(path: &Path, computer: &locations::Computer) -> Result<Self> {
+    pub fn open_as(
+        location: impl Into<CatalogLocation>,
+        computer: &locations::Computer,
+    ) -> Result<Self> {
+        let location = location.into();
         let mut catalog = Self {
-            path: path.into(),
-            db: Db::open(path)?,
+            db: Db::open(&location)?,
+            location,
             computer: computer.clone(),
         };
         catalog.prepare()?;
         Ok(catalog)
+    }
+    /// Where the catalog is, to name it and open it again.
+    pub fn location(&self) -> &CatalogLocation {
+        &self.location
     }
     /// Readies an open catalog for this computer. Usually there is nothing
     /// to do, and nothing is written.

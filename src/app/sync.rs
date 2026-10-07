@@ -9,7 +9,9 @@ use super::{
 };
 use crate::model::recipe::Recipe;
 use crate::{
-    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory},
+    catalog::{
+        Catalog, CatalogLocation, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory,
+    },
     edits::{self, Origin},
     export_settings::ExportOptions,
     model::settings_groups::{self, GroupSelection, Source, Target},
@@ -75,10 +77,10 @@ pub(crate) struct SyncNote {
 }
 
 /// What a Sync did, in which catalog.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SyncResult {
     pub change: BatchChange,
-    pub catalog: PathBuf,
+    pub catalog: CatalogLocation,
     pub synced: Vec<Synced>,
     pub failed: Vec<SyncFailure>,
     pub notes: Vec<SyncNote>,
@@ -132,8 +134,10 @@ pub(super) fn synchronize(
 ) -> SyncResult {
     let mut result = SyncResult {
         change: change.clone(),
-        catalog: catalog.path.clone(),
-        ..Default::default()
+        catalog: catalog.location().clone(),
+        synced: Vec::new(),
+        failed: Vec::new(),
+        notes: Vec::new(),
     };
     let mut prepared = Vec::new();
     for target in targets {
@@ -467,7 +471,7 @@ impl Editor {
         let (Some(source), Some(library)) = (self.current_settings(), &self.library) else {
             return;
         };
-        let catalog = library.session.catalog.path.clone();
+        let catalog = library.session.catalog.location().clone();
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
         let defaults = self.raw_defaults.clone();
         let demosaic = self.demosaic;
@@ -507,7 +511,7 @@ impl Editor {
     pub(super) fn synced(&mut self, result: SyncResult) {
         self.activity.finish_sync();
         // A result for a catalog no longer open must not reach this one's undo log.
-        if self.library.as_ref().map(|l| &l.session.catalog.path) != Some(&result.catalog) {
+        if self.library.as_ref().map(|l| l.session.catalog.location()) != Some(&result.catalog) {
             return;
         }
         let done = result.synced.len();
@@ -808,7 +812,7 @@ mod tests {
         recipe.exposure = 0.3;
         let source = Settings { recipe, metadata };
         // Settings cut off mid-value.
-        rusqlite::Connection::open(&c.path)?.execute(
+        c.db_for_tests().execute(
             "UPDATE photos SET lightroom_develop='s = { Exposure2012 = ' WHERE id=?",
             [photos[1].0.0],
         )?;
@@ -846,7 +850,7 @@ mod tests {
             photos,
         } = catalog()?;
         let lightroom_text = "s = { Exposure2012 = 0.25 }";
-        rusqlite::Connection::open(&c.path)?.execute(
+        c.db_for_tests().execute(
             "UPDATE photos SET lightroom_develop=? WHERE id=?",
             rusqlite::params![lightroom_text, photos[1].0.0],
         )?;

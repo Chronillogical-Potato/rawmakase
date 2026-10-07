@@ -118,6 +118,10 @@ inject a temporary file, without changing the process-wide environment.
   file before import. Lightroom import runs inside `Db::with_lightroom`, the
   only place `SqliteSql` runs; do not expose the connection publicly or put
   Lightroom-specific queries back into general catalog operations.
+- The app names and reopens a catalog by its `CatalogLocation`, never by a
+  path: sessions, autosave, Sync and folder jobs carry it, and behaviour that
+  only makes sense for a file (its size, revealing it, the path `session.json`
+  keeps) matches on `CatalogLocation::File`.
 - A photo's edit (its recipe, export options, identity and edit time, spots
   and masks, and History) is written only by `catalog::edit_rows`: a checked
   save or clear, an exact copy for a virtual copy, and removal with one.

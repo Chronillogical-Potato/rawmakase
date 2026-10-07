@@ -7,6 +7,7 @@ use super::widgets::pretty_path;
 use super::worker::Event;
 use crate::app::Module;
 use crate::app::theme;
+use crate::catalog::CatalogLocation;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -40,7 +41,7 @@ fn user_camera_raw() -> Option<PathBuf> {
 pub(super) struct Onboarding {
     pub(super) visible: bool,
     scanned: bool,
-    scanned_for: Option<PathBuf>,
+    scanned_for: Option<CatalogLocation>,
     /// How many times the catalog had saved photo info read from files when
     /// it last scanned; a later save may add cameras.
     info_saves: u64,
@@ -252,7 +253,7 @@ impl Editor {
         let catalog = self
             .library
             .as_ref()
-            .map(|l| l.session.catalog.path.clone());
+            .map(|l| l.session.catalog.location().clone());
         // And once the catalog has read cameras from new photos' files, when
         // the reader is done rather than at each of its saves.
         let read = self.library.as_ref().is_some_and(|l| {
@@ -300,12 +301,7 @@ impl Editor {
         let catalog = self.library.as_ref().map(|l| {
             format!(
                 "{} · {} photos",
-                l.session
-                    .catalog
-                    .path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy(),
+                l.session.catalog.location().name(),
                 l.session.photos.len()
             )
         });
@@ -577,7 +573,7 @@ impl Editor {
         let _ = self.save_session();
     }
     /// Scans in the background; until the result arrives the steps say so.
-    fn start_onboarding_scan(&mut self, catalog: Option<PathBuf>) {
+    fn start_onboarding_scan(&mut self, catalog: Option<CatalogLocation>) {
         // The catalog already records each photo's camera; no RAW is opened.
         let models = self
             .library
@@ -828,7 +824,8 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
             frame(&mut editor);
         }
-        assert_eq!(editor.onboarding.scanned_for.as_deref(), Some(&*catalog));
+        let catalog = CatalogLocation::File(catalog);
+        assert_eq!(editor.onboarding.scanned_for.as_ref(), Some(&catalog));
         assert!(editor.onboarding.found.cameras.is_empty());
 
         // A scan superseded by a later one is ignored.

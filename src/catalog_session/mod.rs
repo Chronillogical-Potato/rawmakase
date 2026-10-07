@@ -4,7 +4,9 @@ mod backfill;
 pub(crate) mod background;
 mod descriptive;
 
-use crate::catalog::{Catalog, Collection, CollectionId, Folder, Photo, PhotoId, RootId};
+use crate::catalog::{
+    Catalog, CatalogLocation, Collection, CollectionId, Folder, Photo, PhotoId, RootId,
+};
 use anyhow::Result;
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
@@ -34,9 +36,9 @@ pub(crate) struct Opened {
 }
 
 impl CatalogSession {
-    pub(crate) fn open(path: &Path) -> Result<Opened> {
+    pub(crate) fn open(location: &CatalogLocation) -> Result<Opened> {
         crate::platform::network::prepare_filesystem_bridge();
-        let mut catalog = Catalog::open(path)?;
+        let mut catalog = Catalog::open(location)?;
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();
@@ -186,7 +188,7 @@ mod tests {
         catalog.change_collection(collection, &[a], &[])?;
         drop(catalog);
 
-        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
         assert_eq!(session.photos.len(), 2);
         assert_eq!(session.folders.len(), 1);
         assert_eq!(session.folders[0].count, 2);
@@ -216,7 +218,7 @@ mod tests {
         image::RgbImage::new(6, 4).save(folder.join("b.png"))?;
         let path = directory.path().join("library.rawmakase");
         Catalog::create(&path)?.add_folder(&folder)?;
-        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
         let id = |session: &CatalogSession, name: &str| {
             session
                 .photos
@@ -283,7 +285,7 @@ mod tests {
         image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
         let path = directory.path().join("library.rawmakase");
         Catalog::create(&path)?.add_folder(&folder)?;
-        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
         let a = session.photos[0].id;
 
         session.set_ratings(&[(a, 4, 1, "Red".into())])?;
@@ -332,7 +334,7 @@ mod tests {
         image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
         let path = directory.path().join("library.rawmakase");
         Catalog::create(&path)?.add_folder(&folder)?;
-        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
         let a = session.photos[0].id;
 
         let change = session.edit_descriptive(
@@ -370,7 +372,7 @@ mod tests {
         image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
         let path = directory.path().join("library.rawmakase");
         Catalog::create(&path)?.add_folder(&folder)?;
-        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
         let a = session.photos[0].id;
 
         // The photos read again would include the copy; a later read fails.

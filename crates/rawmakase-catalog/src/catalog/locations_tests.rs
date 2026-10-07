@@ -3,6 +3,7 @@
 use super::locations::{Computer, Overrides, resolve_in};
 use super::*;
 use rusqlite::params;
+use std::path::PathBuf;
 
 fn computer(id: &str) -> Computer {
     Computer {

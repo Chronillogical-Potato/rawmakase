@@ -335,7 +335,7 @@ fn keyword_lookup_uses_the_first_of_lightroom_duplicates() -> Result<()> {
 #[test]
 fn catalogs_with_the_new_tables_stay_version_1() -> Result<()> {
     let (dir, cat, _) = catalog(1)?;
-    let path = cat.path.clone();
+    let CatalogLocation::File(path) = cat.location().clone();
     drop(cat);
     let db = Connection::open(&path)?;
     assert_eq!(
@@ -355,7 +355,7 @@ fn a_photo_removed_by_an_older_release_takes_its_rows_and_a_reused_id_has_none()
     cat.set_text(&[copy], TextField::Title, "Copy title")?;
     cat.set_creators(&[copy], &["Someone".into()])?;
     cat.clear_location(&[copy])?;
-    let path = cat.path.clone();
+    let CatalogLocation::File(path) = cat.location().clone();
     drop(cat);
     {
         // 0.1.12's remove_virtual_copy, which knows none of the new tables,

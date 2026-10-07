@@ -224,7 +224,7 @@ impl Library {
     /// Opens the catalog at `path`, for tests.
     #[cfg(test)]
     pub(crate) fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
-        Ok(Self::new(CatalogSession::open(path)?, ctx))
+        Ok(Self::new(CatalogSession::open(&path.into())?, ctx))
     }
     /// Reads the catalog again and checks which files are online, for tests.
     #[cfg(test)]
