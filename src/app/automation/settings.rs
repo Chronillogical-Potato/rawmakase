@@ -120,10 +120,21 @@ fn set_dial(config: &mut Config, cc: u8, choice: DialUse) {
 }
 
 fn small(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(12.).color(theme::gray(135)));
+    ui.label(
+        egui::RichText::new(text)
+            .size(12.)
+            .color(theme::palette(ui.ctx()).gray(135)),
+    );
 }
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(135))).wrap());
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(12.)
+                .color(theme::palette(ui.ctx()).gray(135)),
+        )
+        .wrap(),
+    );
 }
 
 fn mappings(

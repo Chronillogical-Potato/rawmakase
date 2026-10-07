@@ -188,6 +188,7 @@ impl Editor {
         }
     }
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         let closing = ctx.input(|i| i.viewport().close_requested());
         if !self.preferences.open || self.preferences.tab != Tab::Catalog || closing {
             self.save_defaults();
@@ -201,7 +202,7 @@ impl Editor {
         }
         let response = egui::Modal::new(egui::Id::new("preferences"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame())
+            .frame(modal_frame(&palette))
             .show(ctx, |ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(WIDTH, HEIGHT), Sense::hover());
                 let sidebar = egui::Rect::from_min_size(rect.min, Vec2::new(SIDEBAR, HEIGHT));
@@ -213,12 +214,12 @@ impl Editor {
                         ne: 0,
                         se: 0,
                     },
-                    theme::gray(27),
+                    palette.gray(27),
                 );
                 ui.painter().vline(
                     sidebar.right(),
                     sidebar.y_range(),
-                    Stroke::new(1., theme::gray(45)),
+                    Stroke::new(1., palette.gray(45)),
                 );
                 let mut side = ui.new_child(
                     egui::UiBuilder::new().max_rect(sidebar.shrink2(Vec2::new(12., 20.))),
@@ -236,7 +237,7 @@ impl Editor {
                 content.label(
                     egui::RichText::new(self.preferences.tab.title())
                         .size(18.)
-                        .color(theme::gray(236)),
+                        .color(palette.gray(236)),
                 );
                 content.add_space(10.);
                 match self.preferences.tab {
@@ -271,7 +272,7 @@ impl Editor {
                 ui.painter().hline(
                     (sidebar.right() + 1.)..=rect.right(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., theme::gray(45)),
+                    Stroke::new(1., palette.gray(45)),
                 );
                 let mut bar = ui.new_child(
                     egui::UiBuilder::new()
@@ -287,7 +288,7 @@ impl Editor {
                         egui::Label::new(
                             egui::RichText::new(&self.status)
                                 .size(12.)
-                                .color(theme::gray(160)),
+                                .color(palette.gray(160)),
                         )
                         .truncate(),
                     );
@@ -299,11 +300,12 @@ impl Editor {
         }
     }
     fn preferences_tabs(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         ui.spacing_mut().item_spacing.y = 2.;
         ui.label(
             egui::RichText::new("Preferences")
                 .size(11.)
-                .color(theme::gray(130)),
+                .color(palette.gray(130)),
         );
         ui.add_space(8.);
         for tab in Tab::ALL {
@@ -311,9 +313,9 @@ impl Editor {
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::click());
             let selected = self.preferences.tab == tab;
             if selected {
-                ui.painter().rect_filled(rect, 5., theme::accent());
+                ui.painter().rect_filled(rect, 5., palette.accent());
             } else if response.hovered() {
-                ui.painter().rect_filled(rect, 5., theme::gray(40));
+                ui.painter().rect_filled(rect, 5., palette.gray(40));
             }
             ui.painter().text(
                 rect.left_center() + Vec2::new(12., 0.),
@@ -321,9 +323,9 @@ impl Editor {
                 tab.title(),
                 egui::FontId::proportional(13.),
                 if selected {
-                    theme::on_accent_text(250)
+                    palette.on_accent_text(250)
                 } else {
-                    theme::gray(205)
+                    palette.gray(205)
                 },
             );
             if response.clicked() && !selected {
@@ -674,23 +676,36 @@ pub(super) fn group(ui: &mut egui::Ui, title: &str) {
         egui::RichText::new(title)
             .size(12.)
             .strong()
-            .color(theme::gray(175)),
+            .color(theme::palette(ui.ctx()).gray(175)),
     );
 }
 pub(super) fn gap(ui: &mut egui::Ui) {
     ui.add_space(14.);
 }
 fn value(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).color(theme::gray(225))).truncate());
+    ui.add(
+        egui::Label::new(egui::RichText::new(text).color(theme::palette(ui.ctx()).gray(225)))
+            .truncate(),
+    );
 }
 fn path_value(ui: &mut egui::Ui, path: &Path) {
     ui.add(
-        egui::Label::new(egui::RichText::new(pretty_path(path)).color(theme::gray(225))).truncate(),
+        egui::Label::new(
+            egui::RichText::new(pretty_path(path)).color(theme::palette(ui.ctx()).gray(225)),
+        )
+        .truncate(),
     )
     .on_hover_text(path.display().to_string());
 }
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(135))).wrap());
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(12.)
+                .color(theme::palette(ui.ctx()).gray(135)),
+        )
+        .wrap(),
+    );
 }
 fn reveal_button(ui: &mut egui::Ui, path: &Path) {
     let exists = path.exists();
@@ -703,11 +718,12 @@ fn reveal_button(ui: &mut egui::Ui, path: &Path) {
 }
 /// The workspace bar's Preferences button: a gear in a 28 px slot.
 pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., theme::gray(38));
+        ui.painter().rect_filled(rect, 4., palette.gray(38));
     }
-    let color = theme::gray(if response.hovered() { 235 } else { 175 });
+    let color = palette.gray(if response.hovered() { 235 } else { 175 });
     super::icons::paint_at(
         ui.painter(),
         super::icons::Icon::Settings,

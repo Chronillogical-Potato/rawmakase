@@ -103,6 +103,7 @@ pub(super) fn color_grading_ui(ui: &mut egui::Ui, r: &mut Recipe, view: &mut Gra
 }
 
 fn view_buttons(ui: &mut egui::Ui, view: &mut GradingView) {
+    let palette = theme::palette(ui.ctx());
     let size = Vec2::new(30., 24.);
     let gap = 4.;
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
@@ -121,9 +122,9 @@ fn view_buttons(ui: &mut egui::Ui, view: &mut GradingView) {
         let selected = *view == option;
         if selected || response.hovered() {
             ui.painter()
-                .rect_filled(rect, 4., theme::gray(if selected { 62 } else { 48 }));
+                .rect_filled(rect, 4., palette.gray(if selected { 62 } else { 48 }));
         }
-        let color = theme::gray(if selected || response.hovered() {
+        let color = palette.gray(if selected || response.hovered() {
             235
         } else {
             165
@@ -154,7 +155,7 @@ fn view_icon(painter: &egui::Painter, view: GradingView, c: Pos2, color: Color32
         GradingView::Single(Region::Midtones) => 120,
         GradingView::Single(Region::Highlights) => 235,
     };
-    painter.circle(c, 6., theme::gray(fill), stroke);
+    painter.circle(c, 6., theme::palette(painter.ctx()).gray(fill), stroke);
 }
 
 /// Midtones above, Shadows and Highlights side by side below, each with its numbers.
@@ -190,7 +191,7 @@ fn region_column(ui: &mut egui::Ui, rect: Rect, r: &mut Recipe, region: Region, 
         egui::Align2::CENTER_CENTER,
         region.title(),
         egui::FontId::proportional(11.),
-        theme::gray(190),
+        theme::palette(ui.ctx()).gray(190),
     );
     let wheel_rect = Rect::from_min_size(
         Pos2::new(rect.center().x - diameter / 2., rect.top() + CAPTION),
@@ -211,6 +212,7 @@ fn region_column(ui: &mut egui::Ui, rect: Rect, r: &mut Recipe, region: Region, 
 
 /// One large wheel with Hue, Saturation and Luminance sliders.
 fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
+    let palette = theme::palette(ui.ctx());
     let grade = region.grade(r);
     let diameter = ui.available_width().min(LARGE_WHEEL);
     let (row, _) =
@@ -241,7 +243,7 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
             0. ..=1.,
             0.,
             None,
-            Some((theme::gray(90), tint)),
+            Some((palette.gray(90), tint)),
         );
         slider_with(
             ui,
@@ -250,7 +252,7 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
             -1. ..=1.,
             0.,
             None,
-            Some((theme::gray(25), theme::gray(210))),
+            Some((palette.gray(25), palette.gray(210))),
         );
     });
 }
@@ -544,7 +546,11 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     }
     paint_disc(ui.painter(), center, radius, 72, 10);
     let painter = ui.painter();
-    painter.circle_stroke(center, radius, Stroke::new(1., theme::gray(28)));
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(1., theme::palette(ui.ctx()).gray(28)),
+    );
     painter.circle_filled(center, 1.5, Color32::from_gray(150));
     let puck = center + after.offset() * radius;
     let active = response.hovered() || response.dragged();
@@ -637,6 +643,7 @@ struct LuminanceClick {
 
 /// A small wheel's Luminance: a dark-to-light rail with its number, −100 to 100.
 fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region) {
+    let palette = theme::palette(ui.ctx());
     let field = Rect::from_min_size(
         Pos2::new(rect.right() - 40., rect.center().y - 9.),
         Vec2::new(40., 18.),
@@ -721,10 +728,10 @@ fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region
         *value = percent / 100.;
     }
     let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(rail.left_top(), theme::gray(25));
-    mesh.colored_vertex(rail.right_top(), theme::gray(210));
-    mesh.colored_vertex(rail.right_bottom(), theme::gray(210));
-    mesh.colored_vertex(rail.left_bottom(), theme::gray(25));
+    mesh.colored_vertex(rail.left_top(), palette.gray(25));
+    mesh.colored_vertex(rail.right_top(), palette.gray(210));
+    mesh.colored_vertex(rail.right_bottom(), palette.gray(210));
+    mesh.colored_vertex(rail.left_bottom(), palette.gray(25));
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     let painter = ui.painter();
@@ -735,11 +742,11 @@ fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region
             Pos2::new(rail.center().x, area.center().y - 4.),
             Pos2::new(rail.center().x, area.center().y + 4.),
         ],
-        Stroke::new(1., theme::gray(115)),
+        Stroke::new(1., palette.gray(115)),
     );
     let thumb = Pos2::new(x, area.center().y);
-    painter.circle_filled(thumb, 3.5, theme::gray(205));
-    painter.circle_stroke(thumb, 3.5, Stroke::new(1., theme::gray(26)));
+    painter.circle_filled(thumb, 3.5, palette.gray(205));
+    painter.circle_stroke(thumb, 3.5, Stroke::new(1., palette.gray(26)));
     if *value != before {
         name_history_step(
             ui,

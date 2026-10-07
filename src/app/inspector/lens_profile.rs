@@ -110,5 +110,9 @@ fn setup_row(
 }
 
 fn muted(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(11.).color(theme::gray(200)));
+    ui.label(
+        egui::RichText::new(text)
+            .size(11.)
+            .color(theme::palette(ui.ctx()).gray(200)),
+    );
 }

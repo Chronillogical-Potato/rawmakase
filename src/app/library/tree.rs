@@ -68,6 +68,7 @@ pub(super) fn folder_tree_row(
     expanded: &mut HashSet<String>,
     selected: &str,
 ) -> Option<TreeAction> {
+    let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
@@ -79,9 +80,9 @@ pub(super) fn folder_tree_row(
             rect,
             3.,
             if active {
-                theme::selected_row()
+                palette.selected_row()
             } else {
-                theme::gray(43)
+                palette.gray(43)
             },
         );
     }
@@ -89,7 +90,7 @@ pub(super) fn folder_tree_row(
         painter.rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(2., rect.height())),
             0.,
-            theme::selected_marker(),
+            palette.selected_marker(),
         );
     }
     let indent = depth.min(12) as f32 * 14.;
@@ -103,14 +104,14 @@ pub(super) fn folder_tree_row(
         } else {
             Icon::ChevronRight
         };
-        icons::paint_at(painter, chevron, Pos2::new(x, y), 11., theme::gray(150));
+        icons::paint_at(painter, chevron, Pos2::new(x, y), 11., palette.gray(150));
     }
     icons::paint_at(
         painter,
         Icon::Folder,
         Pos2::new(x + 13., y),
         13.,
-        theme::gray(145),
+        palette.gray(145),
     );
     let can_relink = node.root.is_some() || node.folder.is_some();
     let label_rect = Rect::from_min_max(
@@ -126,18 +127,18 @@ pub(super) fn folder_tree_row(
     painter.galley(
         Pos2::new(label_rect.left(), y - text.size().y / 2.),
         text,
-        theme::gray(if active { 235 } else { 190 }),
+        palette.gray(if active { 235 } else { 190 }),
     );
     painter.text(
         Pos2::new(rect.right() - 27., y),
         Align2::RIGHT_CENTER,
         node.count.to_string(),
         FontId::proportional(10.),
-        theme::gray(125),
+        palette.gray(125),
     );
     if can_relink && (response.hovered() || node.root.is_some()) {
         for dx in [-3., 0., 3.] {
-            painter.circle_filled(Pos2::new(rect.right() - 12. + dx, y), 1., theme::gray(160));
+            painter.circle_filled(Pos2::new(rect.right() - 12. + dx, y), 1., palette.gray(160));
         }
     }
     let relink = || {

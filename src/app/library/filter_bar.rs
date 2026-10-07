@@ -18,7 +18,7 @@ impl Library {
     pub(super) fn filter_bar(&mut self, ui: &mut egui::Ui) {
         let mut changed = false;
         egui::Frame::new()
-            .fill(theme::gray(38))
+            .fill(theme::palette(ui.ctx()).gray(38))
             .inner_margin(egui::Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -74,14 +74,15 @@ impl Library {
         self.turn_on(changed)
     }
     fn flag_filter(&mut self, ui: &mut egui::Ui, compact: bool) -> bool {
+        let palette = theme::palette(ui.ctx());
         if !compact {
-            ui.label(filter_caption("Flag"));
+            ui.label(filter_caption(&palette, "Flag"));
         }
         let mut changed = false;
         for (flag, name) in [(1, "Picked"), (0, "Unflagged"), (-1, "Rejected")] {
             let on = self.filters.flags.contains(&flag);
             let (rect, response) = toggle_cell(ui, 22., on);
-            flag_icon(ui.painter(), rect.center(), flag, on);
+            flag_icon(ui.painter(), &palette, rect.center(), flag, on);
             if response.on_hover_text(name).clicked() {
                 toggle(&mut self.filters.flags, flag);
                 changed = true;
@@ -90,8 +91,9 @@ impl Library {
         self.turn_on(changed)
     }
     fn rating_filter(&mut self, ui: &mut egui::Ui, compact: bool) -> bool {
+        let palette = theme::palette(ui.ctx());
         if !compact {
-            ui.label(filter_caption("Rating"));
+            ui.label(filter_caption(&palette, "Rating"));
         }
         let mut changed = false;
         let filters = &mut self.filters;
@@ -138,8 +140,9 @@ impl Library {
         self.turn_on(changed)
     }
     fn label_filter(&mut self, ui: &mut egui::Ui, compact: bool) -> bool {
+        let palette = theme::palette(ui.ctx());
         if !compact {
-            ui.label(filter_caption("Color"));
+            ui.label(filter_caption(&palette, "Color"));
         }
         let mut chips: Vec<(Label, &str)> = LABELS
             .iter()
@@ -157,14 +160,14 @@ impl Library {
             let painter = ui.painter();
             match &label {
                 Label::Color(color) => {
-                    painter.rect_filled(chip, 1., label_color(color).unwrap_or_default());
+                    painter.rect_filled(chip, 1., label_color(&palette, color).unwrap_or_default());
                 }
                 Label::None => {
-                    let stroke = egui::Stroke::new(1., theme::gray(150));
+                    let stroke = egui::Stroke::new(1., palette.gray(150));
                     painter.rect_stroke(chip, 1., stroke, egui::StrokeKind::Inside);
                 }
                 Label::Other => {
-                    painter.rect_filled(chip, 1., theme::gray(150));
+                    painter.rect_filled(chip, 1., palette.gray(150));
                 }
             }
             if response.on_hover_text(name).clicked() {
@@ -175,8 +178,9 @@ impl Library {
         self.turn_on(changed)
     }
     fn kind_filter(&mut self, ui: &mut egui::Ui, compact: bool) -> bool {
+        let palette = theme::palette(ui.ctx());
         if !compact {
-            ui.label(filter_caption("Kind"));
+            ui.label(filter_caption(&palette, "Kind"));
         }
         let changed = segmented(
             ui,
@@ -192,10 +196,11 @@ impl Library {
     }
     /// Clear when the bar applies; when Cmd+L turned it off, a way back on.
     fn filters_switch(&mut self, ui: &mut egui::Ui) -> bool {
+        let palette = theme::palette(ui.ctx());
         let toggle_keys = keys_text("Cmd+L");
         if !self.filters.enabled {
             let clicked = ui
-                .add(egui::Button::new(filter_caption("Filters Off")).small())
+                .add(egui::Button::new(filter_caption(&palette, "Filters Off")).small())
                 .on_hover_text(format!("Turn the filters back on ({toggle_keys})"))
                 .clicked();
             if clicked {
@@ -208,7 +213,7 @@ impl Library {
         }
         let clicked = ui
             .add(
-                egui::Button::new(filter_caption("Clear"))
+                egui::Button::new(filter_caption(&palette, "Clear"))
                     .small()
                     .frame(false),
             )
@@ -254,19 +259,20 @@ fn star_toggle(ui: &mut egui::Ui, lit: bool) -> egui::Response {
         egui::Align2::CENTER_CENTER,
         "★",
         egui::FontId::proportional(12.),
-        theme::gray(level),
+        theme::palette(ui.ctx()).gray(level),
     );
     response
 }
 
 /// A square toggle `width` wide, its background showing whether it is on.
 fn toggle_cell(ui: &mut egui::Ui, width: f32, on: bool) -> (Rect, egui::Response) {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, TOGGLE_HEIGHT), egui::Sense::click());
     let fill = if on {
-        Some(theme::gray(78))
+        Some(palette.gray(78))
     } else if response.hovered() {
-        Some(theme::gray(55))
+        Some(palette.gray(55))
     } else {
         None
     };

@@ -88,19 +88,20 @@ impl Editor {
     }
     /// The Save Point Curve window, while open.
     pub(super) fn curve_save_window(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         let Some(saving) = &mut self.curves.saving else {
             return;
         };
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("save-point-curve"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame().inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
             .show(ctx, |ui| {
                 ui.set_width(380.);
                 ui.label(
                     egui::RichText::new("Save Point Curve")
                         .size(17.)
-                        .color(theme::gray(235)),
+                        .color(palette.gray(235)),
                 );
                 ui.add_space(6.);
                 ui.label(
@@ -108,7 +109,7 @@ impl Editor {
                         "Saves the RGB, Red, Green and Blue curves for the Point Curve menu.",
                     )
                     .size(11.)
-                    .color(theme::gray(150)),
+                    .color(palette.gray(150)),
                 );
                 ui.add_space(12.);
                 let field = ui.add(

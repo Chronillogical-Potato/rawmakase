@@ -384,7 +384,7 @@ fn magnifier(ui: &egui::Ui, texture: egui::TextureId, photo: Rect, at: Pos2, are
         Pos2::new(centre.x + half.x, centre.y + half.y),
     );
     painter.rect_filled(frame.expand(2.), 3., Color32::from_black_alpha(200));
-    painter.rect_filled(frame, 0., super::theme::photo_backdrop());
+    painter.rect_filled(frame, 0., super::theme::palette(ui.ctx()).photo_backdrop());
     painter.image(texture, frame, uv, Color32::WHITE);
     let c = frame.center();
     for d in [Vec2::new(8., 0.), Vec2::new(0., 8.)] {

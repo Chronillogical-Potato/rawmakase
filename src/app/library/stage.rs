@@ -36,6 +36,7 @@ impl Library {
         role: Option<&str>,
         active: bool,
     ) -> Option<Rect> {
+        let palette = theme::palette(ui.ctx());
         // A tile too small for a caption shows the photo alone.
         let captioned = rect.height() > CAPTION * 3.;
         let image_area = if captioned {
@@ -54,7 +55,7 @@ impl Library {
                 ui.painter().rect_stroke(
                     at.expand(3.),
                     1.,
-                    egui::Stroke::new(1.5, theme::gray(225)),
+                    egui::Stroke::new(1.5, palette.gray(225)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -66,7 +67,7 @@ impl Library {
                 egui::Align2::CENTER_BOTTOM,
                 note,
                 egui::FontId::proportional(11.),
-                theme::gray(170),
+                palette.gray(170),
             );
         }
         if captioned {
@@ -137,6 +138,7 @@ fn caption_strip(
     photo: &Photo,
     active: bool,
 ) {
+    let palette = theme::palette(painter.ctx());
     let y = rect.center().y;
     let mut x = rect.left();
     if let Some(role) = role {
@@ -145,7 +147,7 @@ fn caption_strip(
             egui::Align2::LEFT_CENTER,
             role.to_uppercase(),
             egui::FontId::proportional(10.5),
-            theme::gray(if active { 200 } else { 125 }),
+            palette.gray(if active { 200 } else { 125 }),
         );
         x = shown.right() + 10.;
     }
@@ -154,7 +156,7 @@ fn caption_strip(
         egui::Align2::LEFT_CENTER,
         format!("{}{}", photo.filename, super::cell::copy_suffix(photo)),
         egui::FontId::proportional(12.),
-        theme::gray(if active { 235 } else { 175 }),
+        palette.gray(if active { 235 } else { 175 }),
     );
     let mut x = name.right() + 12.;
     if photo.rating > 0 {
@@ -163,15 +165,15 @@ fn caption_strip(
             egui::Align2::LEFT_CENTER,
             "★".repeat(photo.rating.clamp(0, 5) as usize),
             egui::FontId::proportional(11.),
-            theme::gray(210),
+            palette.gray(210),
         );
         x = stars.right() + 10.;
     }
     if photo.flag != 0 {
-        flag_icon(painter, egui::pos2(x + 6., y), photo.flag, true);
+        flag_icon(painter, &palette, egui::pos2(x + 6., y), photo.flag, true);
         x += 20.;
     }
-    if let Some(color) = label_color(&photo.label) {
+    if let Some(color) = label_color(&palette, &photo.label) {
         let chip = Rect::from_center_size(egui::pos2(x + 5., y), Vec2::splat(10.));
         painter.rect_filled(chip, 1., color);
     }

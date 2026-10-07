@@ -536,6 +536,7 @@ impl Editor {
     }
     fn create_row(&mut self, ui: &mut egui::Ui) {
         let pending = self.view.masking.pending;
+        let palette = theme::palette(ui.ctx());
         control_label(ui, "Create", |ui| {
             let w = (ui.available_width() - 4. * 4.) / 5.;
             for (kind, name, key) in Kind::ALL {
@@ -544,7 +545,7 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    theme::gray(if active {
+                    palette.gray(if active {
                         72
                     } else if response.hovered() {
                         50
@@ -587,6 +588,7 @@ impl Editor {
         });
     }
     fn mask_list(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let selected = self.selected_mask();
         let mut select = None;
         let mut select_component = None;
@@ -600,7 +602,7 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    theme::gray(if active {
+                    palette.gray(if active {
                         64
                     } else if response.hovered() {
                         46
@@ -633,7 +635,7 @@ impl Editor {
                         egui::Align2::LEFT_CENTER,
                         mask_name(mask, i),
                         egui::FontId::proportional(11.5),
-                        theme::gray(if mask.hidden { 120 } else { 225 }),
+                        palette.gray(if mask.hidden { 120 } else { 225 }),
                     );
                 }
                 if let Some(c) = mask.components.first() {
@@ -681,7 +683,7 @@ impl Editor {
                             ui.painter().rect_filled(
                                 rect,
                                 3.,
-                                theme::gray(if active { 56 } else { 42 }),
+                                palette.gray(if active { 56 } else { 42 }),
                             );
                         }
                         let op = match (k, c.op) {
@@ -701,7 +703,7 @@ impl Editor {
                             egui::Align2::LEFT_CENTER,
                             format!("{op}{}{invert}", c.shape.kind()),
                             egui::FontId::proportional(11.),
-                            theme::gray(200),
+                            palette.gray(200),
                         );
                         if response.clicked() {
                             select_component = Some(k);
@@ -1115,7 +1117,8 @@ fn draw_shape(
 }
 /// Small icons for each kind of mask.
 fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
-    let color = theme::gray(if strong { 240 } else { 170 });
+    let palette = theme::palette(painter.ctx());
+    let color = palette.gray(if strong { 240 } else { 170 });
     let stroke = Stroke::new(1.3, color);
     match kind {
         Kind::Brush => {
@@ -1141,7 +1144,7 @@ fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
             }
         }
         Kind::Luminance => {
-            painter.circle_filled(c, 5.5, theme::gray(60));
+            painter.circle_filled(c, 5.5, palette.gray(60));
             let half = (0..=18)
                 .map(|i| {
                     let t = std::f32::consts::FRAC_PI_2 + i as f32 / 18. * std::f32::consts::PI;
@@ -1159,6 +1162,6 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
         icon,
         c,
         14.,
-        theme::gray(if hovered { 235 } else { 160 }),
+        theme::palette(painter.ctx()).gray(if hovered { 235 } else { 160 }),
     );
 }

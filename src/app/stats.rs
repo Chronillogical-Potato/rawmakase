@@ -111,6 +111,7 @@ impl Editor {
     /// toolbar. Waits for first-run setup, modal windows and the update
     /// notice. Only Share turns sharing on.
     pub(super) fn usage_stats_notice(&mut self, ctx: &egui::Context, modal: bool) {
+        let palette = theme::palette(ctx);
         if !self.stats.unasked()
             || self.session_file.is_none()
             || !self.onboarding_done
@@ -126,7 +127,7 @@ impl Editor {
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-16., 112.))
             .show(ctx, |ui| {
-                modal_frame()
+                modal_frame(&palette)
                     .inner_margin(egui::Margin::same(16))
                     .shadow(egui::Shadow {
                         offset: [0, 6],
@@ -140,7 +141,7 @@ impl Editor {
                         ui.label(
                             egui::RichText::new("Help make RAWmakase better")
                                 .size(14.)
-                                .color(theme::gray(236)),
+                                .color(palette.gray(236)),
                         );
                         note(
                             ui,
@@ -225,10 +226,11 @@ impl Editor {
 
 /// The exact report, always shown where sharing is decided.
 fn details(ui: &mut egui::Ui, stats: &UsageStats) {
+    let palette = theme::palette(ui.ctx());
     let Some(report) = stats.report() else { return };
     note(ui, "What’s sent:");
     egui::Frame::new()
-        .fill(theme::gray(24))
+        .fill(palette.gray(24))
         .corner_radius(4.)
         .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
@@ -237,7 +239,7 @@ fn details(ui: &mut egui::Ui, stats: &UsageStats) {
                     egui::RichText::new(report.pretty())
                         .monospace()
                         .size(11.)
-                        .color(theme::gray(190)),
+                        .color(palette.gray(190)),
                 )
                 .wrap(),
             );
@@ -245,7 +247,14 @@ fn details(ui: &mut egui::Ui, stats: &UsageStats) {
 }
 
 fn note(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(theme::gray(160))).wrap());
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(12.)
+                .color(theme::palette(ui.ctx()).gray(160)),
+        )
+        .wrap(),
+    );
 }
 
 #[cfg(test)]

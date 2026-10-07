@@ -11,7 +11,7 @@ pub(super) fn toolbar_divider(ui: &mut egui::Ui) {
             rect.center_top() + Vec2::new(0., 6.),
             rect.center_bottom() - Vec2::new(0., 6.),
         ],
-        Stroke::new(1., theme::gray(53)),
+        Stroke::new(1., theme::palette(ui.ctx()).gray(53)),
     );
 }
 pub(super) fn toolbar_action(
@@ -22,6 +22,7 @@ pub(super) fn toolbar_action(
     enabled: bool,
     icon: u8,
 ) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(width, 32.),
         if enabled {
@@ -31,7 +32,7 @@ pub(super) fn toolbar_action(
         },
     );
     let hover = enabled && response.hovered();
-    let fill = theme::gray(if selected {
+    let fill = palette.gray(if selected {
         62
     } else if hover {
         48
@@ -39,7 +40,7 @@ pub(super) fn toolbar_action(
         29
     });
     ui.painter().rect_filled(rect, 5., fill);
-    let color = theme::gray(if !enabled {
+    let color = palette.gray(if !enabled {
         85
     } else if selected || hover {
         235
@@ -272,6 +273,7 @@ fn section_header(
     switch: Option<&mut PanelState>,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> bool {
+    let palette = theme::palette(ui.ctx());
     let resettable = button != HeaderButton::None;
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
     let key = section_key(title);
@@ -329,12 +331,12 @@ fn section_header(
     ui.painter().rect_filled(
         rect,
         3.,
-        theme::gray(if toggle.hovered() { 60 } else { 51 }),
+        palette.gray(if toggle.hovered() { 60 } else { 51 }),
     );
     ui.painter().rect_stroke(
         rect,
         3.,
-        Stroke::new(1., theme::gray(if open { 70 } else { 62 })),
+        Stroke::new(1., palette.gray(if open { 70 } else { 62 })),
         egui::StrokeKind::Inside,
     );
     let c = Pos2::new(rect.left() + 13., rect.center().y);
@@ -353,7 +355,7 @@ fn section_header(
     };
     ui.painter().add(egui::Shape::convex_polygon(
         triangle,
-        theme::gray(if toggle.hovered() { 235 } else { 190 }),
+        palette.gray(if toggle.hovered() { 235 } else { 190 }),
         Stroke::NONE,
     ));
     ui.painter().text(
@@ -361,14 +363,14 @@ fn section_header(
         egui::Align2::LEFT_CENTER,
         title,
         egui::FontId::proportional(13.),
-        theme::gray(match (enabled, toggle.hovered()) {
+        palette.gray(match (enabled, toggle.hovered()) {
             (false, _) => 140,
             (true, true) => 250,
             (true, false) => 235,
         }),
     );
     if resettable {
-        let color = theme::gray(if reset.hovered() { 240 } else { 150 });
+        let color = palette.gray(if reset.hovered() { 240 } else { 150 });
         let icon = if button == HeaderButton::Add {
             Icon::Add
         } else {
@@ -433,12 +435,13 @@ fn section_header(
 }
 /// Lightroom's panel switch: a small track with its knob to the right when on.
 fn paint_switch(painter: &egui::Painter, c: Pos2, state: PanelState, hovered: bool) {
+    let palette = theme::palette(painter.ctx());
     let track = Rect::from_center_size(c, Vec2::new(20., 10.));
     let on = state == PanelState::On;
     painter.rect_filled(
         track,
         5.,
-        theme::gray(match (on, hovered) {
+        palette.gray(match (on, hovered) {
             (true, true) => 175,
             (true, false) => 150,
             (false, true) => 80,
@@ -448,7 +451,7 @@ fn paint_switch(painter: &egui::Painter, c: Pos2, state: PanelState, hovered: bo
     painter.rect_stroke(
         track,
         5.,
-        Stroke::new(1., theme::gray(if on { 120 } else { 95 })),
+        Stroke::new(1., palette.gray(if on { 120 } else { 95 })),
         egui::StrokeKind::Inside,
     );
     let knob = if on {
@@ -456,7 +459,7 @@ fn paint_switch(painter: &egui::Painter, c: Pos2, state: PanelState, hovered: bo
     } else {
         track.left_center() + Vec2::new(5., 0.)
     };
-    painter.circle_filled(knob, 3.5, theme::gray(if on { 235 } else { 140 }));
+    painter.circle_filled(knob, 3.5, palette.gray(if on { 235 } else { 140 }));
 }
 #[derive(Clone, Default)]
 struct CurveInteraction {
@@ -466,8 +469,9 @@ struct CurveInteraction {
 /// Lightroom's curve backdrop: mid-gray field, the image histogram behind the
 /// curve, a quarter grid and a dark frame. `channel` 0 is RGB, 1–3 are R, G, B.
 fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channel: usize) {
+    let palette = theme::palette(ui.ctx());
     let painter = ui.painter();
-    painter.rect_filled(rect, 0., theme::gray(82));
+    painter.rect_filled(rect, 0., palette.gray(82));
     let bins: Vec<f32> = (0..256)
         .map(|i| match channel {
             1..=3 => histogram[channel - 1][i] as f32,
@@ -480,7 +484,7 @@ fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channe
         1 => Color32::from_rgb(112, 62, 60),
         2 => Color32::from_rgb(62, 102, 66),
         3 => Color32::from_rgb(62, 78, 118),
-        _ => theme::gray(58),
+        _ => palette.gray(58),
     };
     if bins.iter().any(|v| *v > 0.) {
         let mut mesh = egui::Mesh::default();
@@ -518,16 +522,16 @@ fn curve_backdrop(ui: &egui::Ui, rect: Rect, histogram: &[[u32; 256]; 3], channe
     painter.rect_stroke(
         rect,
         0.,
-        Stroke::new(1., theme::gray(15)),
+        Stroke::new(1., palette.gray(15)),
         egui::StrokeKind::Outside,
     );
 }
-fn curve_color(channel: usize) -> Color32 {
+fn curve_color(palette: &theme::Palette, channel: usize) -> Color32 {
     match channel {
         1 => Color32::from_rgb(240, 110, 100),
         2 => Color32::from_rgb(120, 215, 125),
         3 => Color32::from_rgb(120, 160, 245),
-        _ => theme::gray(255),
+        _ => palette.gray(255),
     }
 }
 /// Read-out under a curve: the input and output values at the pointer.
@@ -539,7 +543,7 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
             egui::Align2::CENTER_CENTER,
             format!("{:.0} / {:.0}", x * 255., y * 255.),
             egui::FontId::proportional(11.),
-            theme::gray(170),
+            theme::palette(ui.ctx()).gray(170),
         );
     }
 }
@@ -554,6 +558,7 @@ pub(super) fn parametric_curve_ui(
     histogram: &[[u32; 256]; 3],
     targeted: Option<usize>,
 ) {
+    let palette = theme::palette(ui.ctx());
     let size = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
     let rect = outer.shrink(4.);
@@ -602,7 +607,7 @@ pub(super) fn parametric_curve_ui(
         })
         .collect();
     ui.painter()
-        .add(egui::Shape::line(pts, Stroke::new(2., theme::gray(255))));
+        .add(egui::Shape::line(pts, Stroke::new(2., palette.gray(255))));
     let name = hovered_region.map(|i| ["Shadows", "Darks", "Lights", "Highlights"][i]);
     response
         .on_hover_cursor(egui::CursorIcon::ResizeVertical)
@@ -615,7 +620,7 @@ pub(super) fn parametric_curve_ui(
     ui.painter().rect_filled(
         Rect::from_x_y_ranges(track.x_range(), track.top() + 2.0..=track.top() + 4.),
         1.,
-        theme::gray(60),
+        palette.gray(60),
     );
     for i in 0..3 {
         let x = track.left() + effects.splits[i] * track.width();
@@ -641,7 +646,7 @@ pub(super) fn parametric_curve_ui(
         if r.double_clicked() {
             effects.splits[i] = [0.25, 0.5, 0.75][i];
         }
-        let color = theme::gray(if r.hovered() || r.dragged() { 240 } else { 175 });
+        let color = palette.gray(if r.hovered() || r.dragged() { 240 } else { 175 });
         let top = Pos2::new(x, track.top() + 3.);
         ui.painter().add(egui::Shape::convex_polygon(
             vec![top, top + Vec2::new(5., 9.), top + Vec2::new(-5., 9.)],
@@ -656,6 +661,7 @@ pub(super) fn tone_curve_ui(
     histogram: &[[u32; 256]; 3],
     channel: usize,
 ) {
+    let palette = theme::palette(ui.ctx());
     let id = ui.make_persistent_id("tone-curve-editor");
     let mut state = ui
         .ctx()
@@ -742,7 +748,7 @@ pub(super) fn tone_curve_ui(
         .collect();
     ui.painter().add(egui::Shape::line(
         pts,
-        Stroke::new(2., curve_color(channel)),
+        Stroke::new(2., curve_color(&palette, channel)),
     ));
     for (i, p) in curve.points.iter().enumerate() {
         let p = screen(*p);
@@ -751,9 +757,9 @@ pub(super) fn tone_curve_ui(
             p,
             if active { 5.5 } else { 4.5 },
             if state.selected == Some(i) {
-                theme::gray(25)
+                palette.gray(25)
             } else {
-                theme::gray(255)
+                palette.gray(255)
             },
         );
         ui.painter().circle_stroke(
@@ -762,9 +768,9 @@ pub(super) fn tone_curve_ui(
             Stroke::new(
                 1.5,
                 if state.selected == Some(i) {
-                    theme::gray(255)
+                    palette.gray(255)
                 } else {
-                    theme::gray(20)
+                    palette.gray(20)
                 },
             ),
         );
@@ -817,7 +823,7 @@ pub(super) fn tone_curve_ui(
     ui.label(
         egui::RichText::new("Click to add · drag to shape · right-click to remove")
             .size(10.)
-            .color(theme::gray(125)),
+            .color(palette.gray(125)),
     );
     ui.ctx().data_mut(|d| d.insert_temp(id, state));
 }
@@ -964,6 +970,7 @@ pub(super) fn slider_styled(
     default: f32,
     style: SliderStyle,
 ) -> SliderEvent {
+    let palette = theme::palette(ui.ctx());
     let SliderStyle {
         display,
         gradient,
@@ -1010,7 +1017,7 @@ pub(super) fn slider_styled(
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            theme::gray(190),
+            palette.gray(190),
         );
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
@@ -1088,7 +1095,7 @@ pub(super) fn slider_styled(
             mesh.add_triangle(0, 2, 3);
             ui.painter().add(mesh);
         } else {
-            ui.painter().rect_filled(rail, 1., theme::gray(83));
+            ui.painter().rect_filled(rail, 1., palette.gray(83));
         }
         // A tick where a centred slider rests, or a coloured one's default (Temp's As
         // Shot); a slider from zero up, like Feather, fills from its left end.
@@ -1099,7 +1106,7 @@ pub(super) fn slider_styled(
                     Pos2::new(neutral, area.center().y - 4.),
                     Pos2::new(neutral, area.center().y + 4.),
                 ],
-                Stroke::new(1., theme::gray(115)),
+                Stroke::new(1., palette.gray(115)),
             );
         }
         if response.double_clicked() {
@@ -1124,7 +1131,7 @@ pub(super) fn slider_styled(
                     Pos2::new(neutral, area.center().y),
                     Pos2::new(x, area.center().y),
                 ],
-                Stroke::new(2., theme::gray(153)),
+                Stroke::new(2., palette.gray(153)),
             );
         }
         let center = Pos2::new(x, area.center().y);
@@ -1135,10 +1142,10 @@ pub(super) fn slider_styled(
             } else {
                 3.5
             },
-            theme::gray(205),
+            palette.gray(205),
         );
         ui.painter()
-            .circle_stroke(center, 3.5, Stroke::new(1., theme::gray(26)));
+            .circle_stroke(center, 3.5, Stroke::new(1., palette.gray(26)));
         response.on_hover_text(
             "Drag to adjust · double-click to reset. Drag or type the number for precise edits.",
         );
@@ -1234,15 +1241,12 @@ const SEGMENT_MIN_PADDING: f32 = 8.;
 /// The pill's gap to the track.
 const SEGMENT_INSET: f32 = 2.;
 fn label_widths(ui: &egui::Ui, labels: &[&str], font: f32) -> Vec<f32> {
+    let white = theme::palette(ui.ctx()).gray(255);
     labels
         .iter()
         .map(|label| {
             ui.painter()
-                .layout_no_wrap(
-                    (*label).into(),
-                    egui::FontId::proportional(font),
-                    theme::gray(255),
-                )
+                .layout_no_wrap((*label).into(), egui::FontId::proportional(font), white)
                 .size()
                 .x
         })
@@ -1303,10 +1307,11 @@ fn segment_track(
     selected: Option<usize>,
     style: &SegmentStyle,
 ) -> Vec<egui::Response> {
+    let palette = theme::palette(ui.ctx());
     let inset = SEGMENT_INSET;
     let radius = control_radius(style.height);
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
-    ui.painter().rect_filled(track, radius, theme::gray(21));
+    ui.painter().rect_filled(track, radius, palette.gray(21));
     let (widths, font) = segment_layout(ui, labels, style, track.width() - 2. * inset);
     let starts: Vec<f32> = widths
         .iter()
@@ -1361,15 +1366,15 @@ fn segment_track(
     for (index, response) in responses.iter().enumerate() {
         if selected != Some(index) && enabled && response.hovered() {
             ui.painter()
-                .rect_filled(segment(index as f32), radius - inset, theme::gray(30));
+                .rect_filled(segment(index as f32), radius - inset, palette.gray(30));
         }
     }
     if selected.is_some() {
         ui.painter().rect(
             segment(position),
             radius - inset,
-            theme::gray(44),
-            Stroke::new(1., theme::gray(58)),
+            palette.gray(44),
+            Stroke::new(1., palette.gray(58)),
             egui::StrokeKind::Inside,
         );
     }
@@ -1381,14 +1386,14 @@ fn segment_track(
             None => 0.,
         };
         let color = if enabled {
-            theme::gray(140).lerp_to_gamma(theme::gray(245), weight)
+            palette.gray(140).lerp_to_gamma(palette.gray(245), weight)
         } else {
-            theme::gray(70)
+            palette.gray(70)
         };
         let text = ui.painter().layout_no_wrap(
             (*label).into(),
             egui::FontId::proportional(font),
-            theme::gray(255),
+            palette.gray(255),
         );
         ui.painter()
             .galley_with_override_text_color(rect.center() - text.size() / 2., text, color);
@@ -1419,12 +1424,13 @@ pub(super) fn action_button(
     kind: ButtonKind,
     enabled: bool,
 ) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     let height = TOOLBAR_SEGMENTS.height;
     let (padding, icon_size, gap) = (12., 14., 6.);
     let text = ui.painter().layout_no_wrap(
         label.into(),
         egui::FontId::proportional(TOOLBAR_SEGMENTS.font),
-        theme::gray(255),
+        palette.gray(255),
     );
     let content = text.size().x + icon.map_or(0., |_| icon_size + gap);
     let (rect, response) = ui.allocate_exact_size(
@@ -1438,26 +1444,26 @@ pub(super) fn action_button(
     let hovered = enabled && response.hovered();
     let pressed = enabled && response.is_pointer_button_down_on();
     let (fill, stroke, ink) = match (kind, enabled) {
-        (_, false) => (theme::gray(34), theme::gray(44), theme::gray(85)),
+        (_, false) => (palette.gray(34), palette.gray(44), palette.gray(85)),
         (ButtonKind::Primary, true) => (
             if hovered && !pressed {
-                theme::accent_hover()
+                palette.accent_hover()
             } else {
-                theme::accent()
+                palette.accent()
             },
             Color32::TRANSPARENT,
-            theme::on_accent(),
+            palette.on_accent(),
         ),
         (ButtonKind::Secondary, true) => (
-            theme::gray(if pressed {
+            palette.gray(if pressed {
                 36
             } else if hovered {
                 50
             } else {
                 42
             }),
-            theme::gray(60),
-            theme::gray(225),
+            palette.gray(60),
+            palette.gray(225),
         ),
     };
     ui.painter().rect(
@@ -1522,6 +1528,7 @@ pub(super) fn menu_item(
     enabled: bool,
     checked: bool,
 ) -> bool {
+    let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), 24.),
         if enabled {
@@ -1531,12 +1538,12 @@ pub(super) fn menu_item(
         },
     );
     if enabled && response.hovered() {
-        ui.painter().rect_filled(rect, 3., theme::accent());
+        ui.painter().rect_filled(rect, 3., palette.accent());
     }
     let color = if enabled && response.hovered() {
-        theme::on_accent_text(250)
+        palette.on_accent_text(250)
     } else {
-        theme::gray(if enabled { 215 } else { 100 })
+        palette.gray(if enabled { 215 } else { 100 })
     };
     if checked {
         let c = rect.left_center() + Vec2::new(11., 0.);
@@ -1555,7 +1562,7 @@ pub(super) fn menu_item(
             egui::Align2::RIGHT_CENTER,
             shortcut,
             egui::FontId::proportional(11.),
-            theme::gray(if enabled { 140 } else { 90 }),
+            palette.gray(if enabled { 140 } else { 90 }),
         );
     }
     enabled && response.clicked()
@@ -1564,7 +1571,7 @@ pub(super) fn menu_separator(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.), Sense::hover());
     ui.painter().line_segment(
         [rect.left_center(), rect.right_center()],
-        Stroke::new(1., theme::gray(55)),
+        Stroke::new(1., theme::palette(ui.ctx()).gray(55)),
     );
 }
 /// True for a context-menu click: a right click, or Control-click on macOS.
@@ -1591,6 +1598,7 @@ pub(super) fn context_menu(response: &egui::Response, add: impl FnOnce(&mut egui
 /// Makes egui submenu buttons match `menu_item` rows: same height, text
 /// inset and hover color.
 pub(super) fn submenu_style(ui: &mut egui::Ui) {
+    let palette = theme::palette(ui.ctx());
     let spacing = ui.spacing_mut();
     spacing.item_spacing.y = 0.;
     spacing.button_padding = Vec2::new(22., 4.);
@@ -1601,25 +1609,26 @@ pub(super) fn submenu_style(ui: &mut egui::Ui) {
         &mut visuals.widgets.open,
         &mut visuals.widgets.active,
     ] {
-        widget.weak_bg_fill = theme::accent();
-        widget.bg_fill = theme::accent();
+        widget.weak_bg_fill = palette.accent();
+        widget.bg_fill = palette.accent();
         widget.bg_stroke = Stroke::NONE;
-        widget.fg_stroke = Stroke::new(1., theme::on_accent_text(250));
+        widget.fg_stroke = Stroke::new(1., palette.on_accent_text(250));
     }
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1., theme::gray(215));
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1., palette.gray(215));
 }
 /// The frame of a modal window such as Preferences or Export.
-pub(super) fn modal_frame() -> egui::Frame {
+pub(super) fn modal_frame(palette: &theme::Palette) -> egui::Frame {
     egui::Frame::new()
-        .fill(theme::gray(33))
-        .stroke(Stroke::new(1., theme::gray(52)))
+        .fill(palette.gray(33))
+        .stroke(Stroke::new(1., palette.gray(52)))
         .corner_radius(10.)
 }
 /// The button that confirms a modal window ("Done", "Export").
 pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     ui.add(
-        egui::Button::new(egui::RichText::new(text).color(theme::on_accent()))
-            .fill(theme::accent())
+        egui::Button::new(egui::RichText::new(text).color(palette.on_accent()))
+            .fill(palette.accent())
             .min_size(Vec2::new(84., 30.)),
     )
 }
@@ -1637,17 +1646,22 @@ pub(super) fn confirm_modal<T: Copy>(
     buttons: &[(&str, T)],
     dismissed: T,
 ) -> Option<T> {
+    let palette = theme::palette(ctx);
     let mut choice = None;
     let response = egui::Modal::new(egui::Id::new(id))
-        .frame(modal_frame().inner_margin(24))
+        .frame(modal_frame(&palette).inner_margin(24))
         .show(ctx, |ui| {
             ui.set_width(420.);
-            ui.label(egui::RichText::new(title).size(15.).color(theme::gray(236)));
+            ui.label(
+                egui::RichText::new(title)
+                    .size(15.)
+                    .color(palette.gray(236)),
+            );
             ui.add_space(6.);
             let detail = egui::Label::new(
                 egui::RichText::new(detail)
                     .size(12.)
-                    .color(theme::gray(150)),
+                    .color(palette.gray(150)),
             );
             ui.add(if truncated { detail.truncate() } else { detail });
             ui.add_space(20.);
@@ -1681,7 +1695,7 @@ pub(super) fn form_row(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mu
             egui::Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(13.),
-            theme::gray(150),
+            theme::palette(ui.ctx()).gray(150),
         );
         contents(ui);
     });

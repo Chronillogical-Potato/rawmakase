@@ -125,6 +125,7 @@ impl Editor {
     /// Before the first image arrives: the Library preview of the photo being
     /// opened with a spinner, or a hint when nothing is open.
     fn loading_placeholder(&self, ui: &mut egui::Ui, area: Rect) {
+        let palette = theme::palette(ui.ctx());
         // A photo counts as opening until its first render arrives, even after
         // the decode has finished; only an empty document shows the hint.
         let opening = self.load.is_running()
@@ -136,7 +137,7 @@ impl Editor {
                 egui::Align2::CENTER_CENTER,
                 "Pick a photo in the Library to edit it",
                 egui::FontId::proportional(15.),
-                theme::gray(120),
+                palette.gray(120),
             );
             return;
         }
@@ -168,7 +169,7 @@ impl Editor {
             egui::Align2::LEFT_CENTER,
             "Loading photo…",
             egui::FontId::proportional(12.),
-            theme::gray(225),
+            palette.gray(225),
         );
     }
     /// Sets a zoom level; 0 means Fit.
@@ -238,7 +239,8 @@ impl Editor {
     pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) {
         let (whole, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        ui.painter().rect_filled(whole, 0., theme::photo_backdrop());
+        ui.painter()
+            .rect_filled(whole, 0., theme::palette(ui.ctx()).photo_backdrop());
         // The edit's side of the viewport; all of it unless Before shows beside it.
         let panes = before_after::panes(self.view.compare, whole);
         let area = panes.after.area;
@@ -792,6 +794,7 @@ impl Editor {
         region: Option<Rect>,
         area: Rect,
     ) {
+        let palette = theme::palette(ui.ctx());
         const CELLS: i32 = 5;
         const CELL: f32 = 30.;
         let painter = ui
@@ -842,7 +845,7 @@ impl Editor {
             ))
         });
         let values =
-            painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::gray(225));
+            painter.layout_no_wrap(text, egui::FontId::proportional(13.), palette.gray(225));
         let grid = CELLS as f32 * CELL;
         let pad = 8.;
         let line = 24.;
@@ -871,17 +874,17 @@ impl Editor {
             }
             .as_shape(frame, 8.),
         );
-        painter.rect_filled(frame, 8., theme::gray(24));
+        painter.rect_filled(frame, 8., palette.gray(24));
         painter.text(
             Pos2::new(frame.center().x, frame.top() + line / 2.),
             egui::Align2::CENTER_CENTER,
             self.view.loupe_prompt(),
             egui::FontId::proportional(12.),
-            theme::gray(215),
+            palette.gray(215),
         );
         let origin = Pos2::new(frame.center().x - grid / 2., frame.top() + line);
         let cells = Rect::from_min_size(origin, Vec2::splat(grid));
-        painter.rect_filled(cells, 0., theme::gray(60));
+        painter.rect_filled(cells, 0., palette.gray(60));
         let half = CELLS / 2;
         for j in 0..CELLS {
             for i in 0..CELLS {
@@ -891,7 +894,7 @@ impl Editor {
                 )
                 .shrink(0.5);
                 let color = pixel(cx + i - half, cy + j - half)
-                    .map_or(theme::photo_backdrop(), |[r, g, b]| {
+                    .map_or(palette.photo_backdrop(), |[r, g, b]| {
                         Color32::from_rgb(r, g, b)
                     });
                 painter.rect_filled(cell, 0., color);
@@ -913,7 +916,7 @@ impl Editor {
         painter.galley(
             Pos2::new(frame.center().x, frame.bottom() - line / 2.) - values.size() / 2.,
             values,
-            theme::gray(225),
+            palette.gray(225),
         );
     }
 }

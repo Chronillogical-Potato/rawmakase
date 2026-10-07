@@ -323,6 +323,7 @@ impl Library {
     }
     /// Compare in place of the grid: the two photos, with a toolbar.
     pub(super) fn compare(&mut self, ui: &mut egui::Ui) -> Action {
+        let palette = theme::palette(ui.ctx());
         if self.keep_compared_shown().is_none() {
             self.close_compare();
             return Action::None;
@@ -331,14 +332,14 @@ impl Library {
         egui::Panel::bottom("library-compare-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::gray(38))
+                    .fill(palette.gray(38))
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
             .show(ui, |ui| self.compare_toolbar(ui));
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
-        ui.painter().rect_filled(area, 0., theme::gray(36));
+        ui.painter().rect_filled(area, 0., palette.gray(36));
         let inner = area.shrink(MARGIN);
         let half = Vec2::new((inner.width() - MARGIN) / 2., inner.height());
         let panes = [
@@ -354,6 +355,7 @@ impl Library {
         Action::None
     }
     fn compare_toolbar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let button = |ui: &mut egui::Ui, text: &str, hover: &str, enabled: bool| {
             ui.add_enabled(
                 enabled,
@@ -376,7 +378,10 @@ impl Library {
                 if button(ui, "Done", "Back to the grid (Esc)", true) {
                     self.close_compare();
                 }
-                ui.label(filter_caption("Left / Right change the candidate"));
+                ui.label(filter_caption(
+                    &palette,
+                    "Left / Right change the candidate",
+                ));
             });
         });
     }
@@ -391,7 +396,7 @@ impl Library {
                 egui::Align2::CENTER_CENTER,
                 "No other photo to compare",
                 egui::FontId::proportional(12.),
-                theme::gray(120),
+                theme::palette(ui.ctx()).gray(120),
             );
             return;
         };

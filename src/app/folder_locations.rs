@@ -112,6 +112,7 @@ impl LocationsView {
 impl Editor {
     /// The Folder locations block of Preferences › Catalog.
     pub(super) fn folder_locations_block(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let ctx = ui.ctx().clone();
         let Some(library) = &self.library else {
             return;
@@ -140,9 +141,9 @@ impl Editor {
         });
         let found = view.found.lock().unwrap().clone();
         let status = |path: &Path| match found.get(path) {
-            Some(true) => ("Found", theme::gray(150)),
+            Some(true) => ("Found", palette.gray(150)),
             Some(false) => ("Offline", egui::Color32::from_rgb(222, 150, 90)),
-            None => ("Checking…", theme::gray(120)),
+            None => ("Checking…", palette.gray(120)),
         };
         enum Click {
             Change(FolderAction),
@@ -156,7 +157,7 @@ impl Editor {
                 .unwrap_or_else(|| root.original.clone());
             ui.add_space(6.);
             egui::Frame::new()
-                .fill(theme::gray(36))
+                .fill(palette.gray(36))
                 .corner_radius(6.)
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
@@ -223,7 +224,7 @@ impl Editor {
                                     pretty_path(path)
                                 ))
                                 .size(11.)
-                                .color(theme::gray(120)),
+                                .color(palette.gray(120)),
                             )
                             .truncate(),
                         );
@@ -465,6 +466,7 @@ fn entry(
     status: (&str, egui::Color32),
     clearable: bool,
 ) -> Option<Button> {
+    let palette = theme::palette(ui.ctx());
     let mut clicked = None;
     // Buttons and status first, from the right, so a long name can't push
     // them out of the window; the name takes what is left.
@@ -488,7 +490,7 @@ fn entry(
                     egui::RichText::new(name)
                         .size(13.)
                         .strong()
-                        .color(theme::gray(230)),
+                        .color(palette.gray(230)),
                 )
                 .truncate(),
             );
@@ -498,12 +500,12 @@ fn entry(
         egui::Label::new(
             egui::RichText::new(pretty_path(path))
                 .size(12.)
-                .color(theme::gray(200)),
+                .color(palette.gray(200)),
         )
         .truncate(),
     )
     .on_hover_text(path.display().to_string());
-    ui.label(egui::RichText::new(note).size(11.).color(theme::gray(125)));
+    ui.label(egui::RichText::new(note).size(11.).color(palette.gray(125)));
     clicked
 }
 /// The catalog at `path` opened again after a folder change, with what the

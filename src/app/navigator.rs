@@ -121,6 +121,7 @@ pub(super) fn navigator(
     zoom: Option<Zoom>,
     shown: Option<[f32; 4]>,
 ) -> Option<Change> {
+    let palette = theme::palette(ui.ctx());
     let mut change = None;
     ui.spacing_mut().item_spacing.y = 0.;
     section(ui, "Navigator", false, |ui| {
@@ -141,14 +142,14 @@ pub(super) fn navigator(
             Vec2::new(ui.available_width(), ui.available_width() * 0.66),
             sense,
         );
-        ui.painter().rect_filled(rect, 0., theme::photo_backdrop());
+        ui.painter().rect_filled(rect, 0., palette.photo_backdrop());
         let Some((texture, size)) = photo else {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "No photo selected",
                 egui::FontId::proportional(11.),
-                theme::gray(95),
+                palette.gray(95),
             );
             return;
         };

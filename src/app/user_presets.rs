@@ -97,19 +97,20 @@ impl Editor {
     }
     /// The Rename Preset window, while one is being renamed.
     pub(super) fn preset_rename_window(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         let Some(super::Modal::RenamePreset(rename)) = &mut self.modal else {
             return;
         };
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("rename-preset"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame().inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
             .show(ctx, |ui| {
                 ui.set_width(380.);
                 ui.label(
                     egui::RichText::new("Rename Preset")
                         .size(17.)
-                        .color(theme::gray(235)),
+                        .color(palette.gray(235)),
                 );
                 ui.add_space(12.);
                 let field = ui

@@ -329,6 +329,7 @@ impl Editor {
     }
     /// The Red Eye drawer below the tool strip.
     pub(super) fn red_eye_panel(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         super::widgets::set_edit_context(ui, "Red Eye");
         let selected = self
             .view
@@ -422,8 +423,8 @@ impl Editor {
             if ui
                 .add_sized(
                     [w, 22.],
-                    egui::Button::new(egui::RichText::new("Close").color(theme::on_accent()))
-                        .fill(theme::accent()),
+                    egui::Button::new(egui::RichText::new("Close").color(palette.on_accent()))
+                        .fill(palette.accent()),
                 )
                 .on_hover_text("Close the tool")
                 .clicked()

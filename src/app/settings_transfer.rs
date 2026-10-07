@@ -113,19 +113,20 @@ impl Editor {
     }
     /// Lightroom's Copy Settings: a checkbox per group, under its section.
     pub(super) fn copy_dialog_window(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
         let Some(super::Modal::CopySettings(dialog)) = &mut self.modal else {
             return;
         };
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("copy-settings"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame().inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
             .show(ctx, |ui| {
                 ui.set_width(COLUMN * 2. + GAP);
                 ui.label(
                     egui::RichText::new(dialog.purpose.title())
                         .size(17.)
-                        .color(theme::gray(235)),
+                        .color(palette.gray(235)),
                 );
                 ui.add_space(14.);
                 if dialog.purpose == Transfer::NewPreset {

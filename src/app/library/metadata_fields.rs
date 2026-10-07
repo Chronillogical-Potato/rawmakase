@@ -338,6 +338,7 @@ impl Library {
     /// The Keywording panel: the keywords of the photos shown, one per row
     /// (with "*" when only some have it), and a field to add more.
     pub(super) fn keyword_fields(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         self.sync_fields();
         let mut remove = None;
         for (keyword, all) in &self.fields.keywords {
@@ -357,7 +358,7 @@ impl Library {
                 rect.left_center(),
                 button.left() - rect.left(),
                 &name,
-                theme::gray(VALUE_GRAY),
+                palette.gray(VALUE_GRAY),
             );
             let tip = if *all {
                 "Remove this keyword".to_string()
@@ -387,9 +388,12 @@ impl Library {
         let response = ui.add_enabled(!targets.is_empty(), |ui: &mut egui::Ui| {
             ui.put(
                 rect.shrink2(Vec2::new(0., 1.)),
-                panel_edit(egui::TextEdit::singleline(&mut self.fields.keyword_entry))
-                    .hint_text("Add keywords: Child < Parent, …")
-                    .vertical_align(egui::Align::Center),
+                panel_edit(
+                    &palette,
+                    egui::TextEdit::singleline(&mut self.fields.keyword_entry),
+                )
+                .hint_text("Add keywords: Child < Parent, …")
+                .vertical_align(egui::Align::Center),
             )
         });
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -405,13 +409,18 @@ impl Library {
     }
 }
 
-fn edit<'t>(text: &'t mut String, shared: &Shared<String>, multiline: bool) -> egui::TextEdit<'t> {
+fn edit<'t>(
+    palette: &theme::Palette,
+    text: &'t mut String,
+    shared: &Shared<String>,
+    multiline: bool,
+) -> egui::TextEdit<'t> {
     let edit = if multiline {
         egui::TextEdit::multiline(text).desired_rows(3)
     } else {
         egui::TextEdit::singleline(text)
     };
-    panel_edit(edit).hint_text(if *shared == Shared::Mixed { MIXED } else { "" })
+    panel_edit(palette, edit).hint_text(if *shared == Shared::Mixed { MIXED } else { "" })
 }
 /// What a text row's field did this frame.
 struct RowInput {
@@ -428,6 +437,7 @@ fn text_row(
     shared: &Shared<String>,
     multiline: bool,
 ) -> RowInput {
+    let palette = theme::palette(ui.ctx());
     let height = if multiline { CAPTION } else { ROW };
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), height),
@@ -443,14 +453,14 @@ fn text_row(
             .show(&mut child, |ui| {
                 ui.add_sized(
                     Vec2::new(field.width(), field.height()),
-                    edit(text, shared, true),
+                    edit(&palette, text, shared, true),
                 )
             })
             .inner
     } else {
         ui.put(
             field,
-            edit(text, shared, false).vertical_align(egui::Align::Center),
+            edit(&palette, text, shared, false).vertical_align(egui::Align::Center),
         )
     };
     RowInput {
@@ -479,6 +489,7 @@ fn creator_rows(
     names: &mut Vec<String>,
     shared: &Shared<Vec<String>>,
 ) -> CreatorInput {
+    let palette = theme::palette(ui.ctx());
     let mut commit = false;
     let mut typed = false;
     let mut clicked = None;
@@ -507,7 +518,7 @@ fn creator_rows(
         };
         let response = ui.put(
             text,
-            panel_edit(egui::TextEdit::singleline(name))
+            panel_edit(&palette, egui::TextEdit::singleline(name))
                 .hint_text(hint)
                 .vertical_align(egui::Align::Center),
         );

@@ -305,18 +305,19 @@ impl Editor {
 /// The tool's button in a panel: a target, lit while the tool is open. Returns
 /// whether it was clicked.
 pub(super) fn target_button(ui: &mut egui::Ui, rect: Rect, active: bool, tip: &str) -> bool {
+    let palette = theme::palette(ui.ctx());
     let response = ui
         .interact(rect, ui.id().with(("targeted", tip)), Sense::click())
         .on_hover_text(tip);
     let fill = if active {
-        theme::gray(72)
+        palette.gray(72)
     } else if response.hovered() {
-        theme::gray(50)
+        palette.gray(50)
     } else {
         Color32::TRANSPARENT
     };
     ui.painter().rect_filled(rect, 3., fill);
-    let ink = theme::gray(if active || response.hovered() {
+    let ink = palette.gray(if active || response.hovered() {
         235
     } else {
         175

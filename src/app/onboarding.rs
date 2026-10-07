@@ -260,7 +260,7 @@ impl Editor {
         }
         let ctx = ui.ctx().clone();
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::gray(24)))
+            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).gray(24)))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
@@ -281,6 +281,7 @@ impl Editor {
     }
 
     fn onboarding_steps(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let palette = theme::palette(ui.ctx());
         ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
         text(ui, "Set up RAWmakase", 24., 240);
         ui.add_space(6.);
@@ -329,7 +330,7 @@ impl Editor {
             if let Some(work) = &self.catalog_work {
                 ui.add_space(10.);
                 ui.horizontal(|ui| {
-                    ui.add(egui::Spinner::new().size(12.).color(theme::gray(170)));
+                    ui.add(egui::Spinner::new().size(12.).color(palette.gray(170)));
                     hint(
                         ui,
                         &format!("{work} This can take a few minutes for a large catalog."),
@@ -539,9 +540,9 @@ impl Editor {
                     egui::Button::new(
                         egui::RichText::new("Start")
                             .size(14.)
-                            .color(theme::on_accent()),
+                            .color(palette.on_accent()),
                     )
-                    .fill(theme::accent())
+                    .fill(palette.accent())
                     .min_size(Vec2::new(120., 34.)),
                 )
                 .on_disabled_hover_text("Choose a catalog first")
@@ -620,9 +621,10 @@ fn step(
     done: Option<&str>,
     contents: impl FnOnce(&mut egui::Ui),
 ) {
+    let palette = theme::palette(ui.ctx());
     egui::Frame::new()
-        .fill(theme::gray(32))
-        .stroke(Stroke::new(1., theme::gray(44)))
+        .fill(palette.gray(32))
+        .stroke(Stroke::new(1., palette.gray(44)))
         .corner_radius(8.)
         .inner_margin(egui::Margin::symmetric(20, 18))
         .show(ui, |ui| {
@@ -638,16 +640,16 @@ fn step(
                         super::icons::Icon::Check,
                         c,
                         14.,
-                        theme::on_accent(),
+                        palette.on_accent(),
                     );
                 } else {
-                    ui.painter().circle_filled(c, 11., theme::gray(52));
+                    ui.painter().circle_filled(c, 11., palette.gray(52));
                     ui.painter().text(
                         c,
                         egui::Align2::CENTER_CENTER,
                         number.to_string(),
                         egui::FontId::proportional(12.),
-                        theme::gray(210),
+                        palette.gray(210),
                     );
                 }
                 ui.add_space(10.);
@@ -670,7 +672,7 @@ fn text(ui: &mut egui::Ui, value: &str, size: f32, gray: u8) {
     ui.label(
         egui::RichText::new(value)
             .size(size)
-            .color(theme::gray(gray)),
+            .color(theme::palette(ui.ctx()).gray(gray)),
     );
 }
 fn body(ui: &mut egui::Ui, value: &str) {
@@ -679,7 +681,7 @@ fn body(ui: &mut egui::Ui, value: &str) {
             egui::RichText::new(value)
                 .size(13.)
                 .line_height(Some(19.))
-                .color(theme::gray(170)),
+                .color(theme::palette(ui.ctx()).gray(170)),
         )
         .wrap(),
     );
@@ -696,12 +698,17 @@ fn names_camera(name: &str, camera: &str) -> bool {
 /// A hint with a spinner, while the scan runs.
 fn looking(ui: &mut egui::Ui, value: &str) {
     ui.horizontal(|ui| {
-        ui.add(egui::Spinner::new().size(12.).color(theme::gray(170)));
+        ui.add(
+            egui::Spinner::new()
+                .size(12.)
+                .color(theme::palette(ui.ctx()).gray(170)),
+        );
         hint(ui, value);
     });
 }
 /// A labelled folder path in a quiet monospace chip.
 fn location(ui: &mut egui::Ui, label: &str, path: &str) {
+    let palette = theme::palette(ui.ctx());
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(48., 22.), Sense::hover());
         ui.painter().text(
@@ -709,10 +716,10 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(11.),
-            theme::gray(125),
+            palette.gray(125),
         );
         egui::Frame::new()
-            .fill(theme::gray(24))
+            .fill(palette.gray(24))
             .corner_radius(4.)
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
@@ -721,7 +728,7 @@ fn location(ui: &mut egui::Ui, label: &str, path: &str) {
                         egui::RichText::new(path)
                             .monospace()
                             .size(11.)
-                            .color(theme::gray(180)),
+                            .color(palette.gray(180)),
                     )
                     .truncate(),
                 );
@@ -766,13 +773,14 @@ fn import_buttons(ui: &mut egui::Ui, found: Option<String>, enabled: bool) -> Op
     choice
 }
 fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
     ui.add(
         egui::Button::new(
             egui::RichText::new(label)
                 .size(13.)
-                .color(theme::on_accent()),
+                .color(palette.on_accent()),
         )
-        .fill(theme::accent())
+        .fill(palette.accent())
         .min_size(Vec2::new(0., 28.)),
     )
 }

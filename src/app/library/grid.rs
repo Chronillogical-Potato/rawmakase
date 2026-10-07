@@ -7,8 +7,9 @@ use eframe::egui::{self, Vec2};
 
 impl Library {
     pub(super) fn grid_toolbar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         egui::Frame::new()
-            .fill(theme::gray(38))
+            .fill(palette.gray(38))
             .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -29,7 +30,7 @@ impl Library {
                         ui.add(
                             egui::Slider::new(&mut self.thumb_size, 110. ..=360.).show_value(false),
                         );
-                        ui.label(filter_caption("Thumbnails"));
+                        ui.label(filter_caption(&palette, "Thumbnails"));
                     });
                 });
             });
@@ -103,78 +104,80 @@ impl Library {
             let rows = (after / columns) as f32 - (before / columns) as f32;
             scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * height).max(0.));
         }
-        egui::Frame::new().fill(theme::gray(44)).show(ui, |ui| {
-            // A key moved the active photo: bring its row into view.
-            if std::mem::take(&mut self.scroll_to_active)
-                && let Some(at) = self
-                    .selection
-                    .active
-                    .and_then(|id| self.visible.iter().position(|i| self.photos[*i].id == id))
-            {
-                let top = (at / columns) as f32 * height;
-                let view = ui.available_height();
-                if top < self.grid_offset {
-                    scroll = scroll.vertical_scroll_offset(top);
-                } else if top + height > self.grid_offset + view {
-                    scroll = scroll.vertical_scroll_offset(top + height - view);
-                }
-            }
-            let output = scroll.show_rows(
-                ui,
-                height,
-                self.visible.len().div_ceil(columns),
-                |ui, rows| {
-                    self.grid_shown = rows.start * columns..rows.end * columns;
-                    for row in rows {
-                        ui.horizontal(|ui| {
-                            for col in 0..columns {
-                                let Some(&index) = self.visible.get(row * columns + col) else {
-                                    break;
-                                };
-                                let p = self.photos[index].clone();
-                                let exists = self.is_available(&p.path);
-                                self.request_previews(&p, ui.ctx());
-                                let shown = cell::Shown {
-                                    mark: self.mark(p.id),
-                                    number: row * columns + col + 1,
-                                    available: exists,
-                                    quick: self.in_quick(p.id),
-                                    style: self.cell_style,
-                                    details: if self.cell_style == cell::Style::Expanded {
-                                        self.cell_details(&p)
-                                    } else {
-                                        String::new()
-                                    },
-                                };
-                                let (response, edit) =
-                                    photo_cell(ui, &p, self.texture(&p), shown, width);
-                                let response = if response.hovered() {
-                                    let text = self.hover_text(&p);
-                                    response.on_hover_text(text)
-                                } else {
-                                    response
-                                };
-                                if response.clicked() {
-                                    self.click(p.id, ui.input(|i| i.modifiers));
-                                } else if response.secondary_clicked() {
-                                    // A menu on a selected photo acts on the selection.
-                                    self.make_active(p.id);
-                                }
-                                // As in Lightroom, a double-click opens the Loupe.
-                                if response.double_clicked() {
-                                    self.make_active(p.id);
-                                    self.open_loupe();
-                                }
-                                if let Some(edit) = edit {
-                                    metadata_edit = Some((p.clone(), edit));
-                                }
-                            }
-                        });
+        egui::Frame::new()
+            .fill(theme::palette(ui.ctx()).gray(44))
+            .show(ui, |ui| {
+                // A key moved the active photo: bring its row into view.
+                if std::mem::take(&mut self.scroll_to_active)
+                    && let Some(at) = self
+                        .selection
+                        .active
+                        .and_then(|id| self.visible.iter().position(|i| self.photos[*i].id == id))
+                {
+                    let top = (at / columns) as f32 * height;
+                    let view = ui.available_height();
+                    if top < self.grid_offset {
+                        scroll = scroll.vertical_scroll_offset(top);
+                    } else if top + height > self.grid_offset + view {
+                        scroll = scroll.vertical_scroll_offset(top + height - view);
                     }
-                },
-            );
-            self.grid_offset = output.state.offset.y;
-        });
+                }
+                let output = scroll.show_rows(
+                    ui,
+                    height,
+                    self.visible.len().div_ceil(columns),
+                    |ui, rows| {
+                        self.grid_shown = rows.start * columns..rows.end * columns;
+                        for row in rows {
+                            ui.horizontal(|ui| {
+                                for col in 0..columns {
+                                    let Some(&index) = self.visible.get(row * columns + col) else {
+                                        break;
+                                    };
+                                    let p = self.photos[index].clone();
+                                    let exists = self.is_available(&p.path);
+                                    self.request_previews(&p, ui.ctx());
+                                    let shown = cell::Shown {
+                                        mark: self.mark(p.id),
+                                        number: row * columns + col + 1,
+                                        available: exists,
+                                        quick: self.in_quick(p.id),
+                                        style: self.cell_style,
+                                        details: if self.cell_style == cell::Style::Expanded {
+                                            self.cell_details(&p)
+                                        } else {
+                                            String::new()
+                                        },
+                                    };
+                                    let (response, edit) =
+                                        photo_cell(ui, &p, self.texture(&p), shown, width);
+                                    let response = if response.hovered() {
+                                        let text = self.hover_text(&p);
+                                        response.on_hover_text(text)
+                                    } else {
+                                        response
+                                    };
+                                    if response.clicked() {
+                                        self.click(p.id, ui.input(|i| i.modifiers));
+                                    } else if response.secondary_clicked() {
+                                        // A menu on a selected photo acts on the selection.
+                                        self.make_active(p.id);
+                                    }
+                                    // As in Lightroom, a double-click opens the Loupe.
+                                    if response.double_clicked() {
+                                        self.make_active(p.id);
+                                        self.open_loupe();
+                                    }
+                                    if let Some(edit) = edit {
+                                        metadata_edit = Some((p.clone(), edit));
+                                    }
+                                }
+                            });
+                        }
+                    },
+                );
+                self.grid_offset = output.state.offset.y;
+            });
         ui.spacing_mut().item_spacing = spacing;
         if let Some((photo, menu)) = metadata_edit
             && let Some(id) = self.photo_action(ui.ctx(), &photo, menu, true)
@@ -233,7 +236,8 @@ impl Library {
 impl Library {
     /// Lightroom's Sort: the order from a menu, its direction from the arrow.
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
-        ui.label(filter_caption("Sort"));
+        let palette = theme::palette(ui.ctx());
+        ui.label(filter_caption(&palette, "Sort"));
         let mut changed = false;
         ui.menu_button(
             egui::RichText::new(self.filters.sort.name()).size(11.),
@@ -276,7 +280,7 @@ impl Library {
         ui.menu_button(
             egui::RichText::new(self.cell_style.name())
                 .size(11.)
-                .color(theme::gray(150)),
+                .color(theme::palette(ui.ctx()).gray(150)),
             |ui| {
                 for style in cell::Style::ALL {
                     if ui
@@ -293,6 +297,6 @@ impl Library {
         .on_hover_text(format!("How grid cells show their photos ({keys} cycles)"));
     }
 }
-pub(super) fn filter_caption(text: &str) -> egui::RichText {
-    egui::RichText::new(text).size(11.).color(theme::gray(150))
+pub(super) fn filter_caption(palette: &theme::Palette, text: &str) -> egui::RichText {
+    egui::RichText::new(text).size(11.).color(palette.gray(150))
 }

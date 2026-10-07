@@ -11,6 +11,7 @@ use eframe::egui::{self, Stroke, Vec2};
 
 impl Editor {
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         let ctx = ui.ctx().clone();
         // The buttons follow the shared log, which also holds Library changes.
         self.sync_undo();
@@ -18,7 +19,7 @@ impl Editor {
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::gray(29))
+                    .fill(palette.gray(29))
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
             .show(ui, |ui| {
@@ -26,11 +27,11 @@ impl Editor {
                 ui.spacing_mut().interact_size.y = 32.;
                 ui.spacing_mut().item_spacing.x = 8.;
                 ui.visuals_mut().button_frame = true;
-                ui.visuals_mut().widgets.inactive.bg_fill = theme::gray(38);
-                ui.visuals_mut().widgets.inactive.weak_bg_fill = theme::gray(38);
-                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1., theme::gray(53));
-                ui.visuals_mut().widgets.hovered.bg_fill = theme::gray(52);
-                ui.visuals_mut().widgets.hovered.weak_bg_fill = theme::gray(52);
+                ui.visuals_mut().widgets.inactive.bg_fill = palette.gray(38);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = palette.gray(38);
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1., palette.gray(53));
+                ui.visuals_mut().widgets.hovered.bg_fill = palette.gray(52);
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = palette.gray(52);
                 ui.horizontal(|ui| {
                     if toolbar_action(ui, "", 32., false, can_undo, 1)
                         .on_hover_text("Undo · Ctrl+Z")

@@ -179,5 +179,11 @@ fn metadata_row(ui: &mut egui::Ui, key: &str, value: &str) -> egui::Response {
 fn info_text(ui: &mut egui::Ui, text: &str) {
     let (rect, _) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.), egui::Sense::hover());
-    paint_truncated(ui, rect.left_center(), rect.width(), text, theme::gray(150));
+    paint_truncated(
+        ui,
+        rect.left_center(),
+        rect.width(),
+        text,
+        theme::palette(ui.ctx()).gray(150),
+    );
 }
