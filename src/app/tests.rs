@@ -5044,3 +5044,172 @@ fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::
     assert_eq!(saved.recipe.exposure, 0.);
     Ok(())
 }
+/// A frame of the whole window, with a button holding the keyboard focus when
+/// `focus` says so.
+fn panel_frame(e: &mut Editor, events: Vec<egui::Event>, focus: FocusedButton) {
+    let ctx = e.context.clone();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            if focus == FocusedButton::Yes {
+                egui::Area::new(egui::Id::new("focus-holder"))
+                    .show(ui.ctx(), |ui| ui.button("focused").request_focus());
+            }
+            e.draw(ui)
+        },
+    );
+    output.textures_delta.clear();
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FocusedButton {
+    Yes,
+    No,
+}
+fn key_down(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+    vec![egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }]
+}
+#[test]
+fn tab_hides_develops_side_panels_and_the_photo_takes_their_room() {
+    use super::panels::WorkspacePanel;
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("session.json");
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session::default(),
+        Some(session.clone()),
+    );
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    // Panels take their width in the first frames.
+    for _ in 0..3 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    let with_panels = e.view.viewport;
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::Tab, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!e.panel_shown(WorkspacePanel::Left));
+    assert!(!e.panel_shown(WorkspacePanel::Right));
+    assert!(e.panel_shown(WorkspacePanel::Filmstrip));
+    assert!(e.view.viewport.x > with_panels.x + 400.);
+    assert_eq!(e.view.viewport.y, with_panels.y);
+    // Tab took no focus to the first control on its way.
+    assert!(ctx.memory(|m| m.focused().is_none()));
+    // Kept for the next launch, for Develop only.
+    let saved: crate::app::session::Session =
+        serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
+    assert_eq!(saved.panels, e.panels);
+    assert!(saved.panels.library.shown(WorkspacePanel::Left));
+    // Shift+Tab hides the filmstrip and status bar too; again shows everything.
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::Tab, egui::Modifiers::SHIFT),
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!e.panel_shown(WorkspacePanel::Filmstrip));
+    assert!(e.view.viewport.y > with_panels.y);
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::Tab, egui::Modifiers::SHIFT),
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert_eq!(e.view.viewport, with_panels);
+    // F8 hides the adjustments alone.
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::F8, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    assert!(e.panel_shown(WorkspacePanel::Left));
+    assert!(!e.panel_shown(WorkspacePanel::Right));
+}
+#[test]
+fn tab_moves_the_focus_on_while_a_control_has_it() {
+    use super::panels::WorkspacePanel;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::Yes);
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::Tab, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    assert!(e.panel_shown(WorkspacePanel::Left));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+}
+#[test]
+fn each_module_keeps_its_own_panels() -> anyhow::Result<()> {
+    use super::panels::WorkspacePanel;
+    let (_d, mut e, _ids) = editor_with_catalog(&["a.RAF"])?;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::F7, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    assert!(!e.panel_shown(WorkspacePanel::Left));
+    e.module = Module::Develop;
+    assert!(e.panel_shown(WorkspacePanel::Left));
+    e.module = Module::Library;
+    // The Library draws with its filmstrip hidden.
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::F6, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    assert!(!e.panel_shown(WorkspacePanel::Filmstrip));
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    Ok(())
+}
+#[test]
+fn hiding_the_presets_ends_a_preset_preview() {
+    use super::panels::PanelChange;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.presets.preview = Some(Recipe {
+        exposure: 1.,
+        ..Default::default()
+    });
+    e.presets.hover = Some((0, std::time::Instant::now()));
+    assert!(e.change_panels(PanelChange::Sides));
+    assert!(e.presets.preview.is_none());
+    assert!(e.presets.hover.is_none());
+}
+#[test]
+fn the_library_info_panel_stays_while_a_field_in_it_cannot_be_saved() -> anyhow::Result<()> {
+    use super::panels::{PanelChange, WorkspacePanel};
+    let (_d, mut e, ids) = editor_with_catalog(&["a.ARW"])?;
+    let library = e.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(ids[0])?.value;
+    library.session.catalog.remove_virtual_copy(copy)?;
+    library.set_copy_name_draft(copy, "B&W");
+    assert!(!e.change_panels(PanelChange::Toggle(WorkspacePanel::Right)));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    assert!(e.status.starts_with("Not saved"));
+    // The left panel holds no field; it hides.
+    assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Left)));
+    e.library.as_mut().unwrap().discard_drafts();
+    assert!(e.change_panels(PanelChange::Sides));
+    assert!(!e.panel_shown(WorkspacePanel::Right));
+    Ok(())
+}

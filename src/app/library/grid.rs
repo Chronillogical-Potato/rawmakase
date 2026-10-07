@@ -40,8 +40,9 @@ impl Library {
             });
     }
     /// Brings the photos up to date before the filmstrip and the view draw
-    /// them, so both show the same order and the same active photo.
-    pub(super) fn prepare(&mut self, ctx: &egui::Context) {
+    /// them, so both show the same order and the same active photo; with the
+    /// filmstrip hidden, before the view alone.
+    pub(crate) fn prepare(&mut self, ctx: &egui::Context) {
         self.poll_previews(ctx);
         // Back from Develop, sorted by edit time: edits made there move
         // their photos.
