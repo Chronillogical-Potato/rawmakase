@@ -4,6 +4,7 @@
 use super::locations::Computer;
 use super::*;
 use rusqlite::Connection;
+use std::path::PathBuf;
 
 fn computer(id: &str) -> Computer {
     Computer {

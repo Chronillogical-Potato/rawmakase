@@ -5,6 +5,7 @@ use super::locations::Computer;
 use super::*;
 use crate::{export_settings::ExportOptions, model::recipe::Recipe};
 use rusqlite::params;
+use std::path::PathBuf;
 
 /// A catalog with `n` photos added from a folder, their ids and the folder.
 fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<PhotoId>, PathBuf)> {
@@ -114,7 +115,7 @@ fn locating_a_root_or_folder_again_moves_it() -> Result<()> {
 #[test]
 fn adopting_legacy_mappings_of_duplicate_folders_keeps_the_last_added() -> Result<()> {
     let (dir, cat, _, _) = catalog(1)?;
-    let path = cat.path.clone();
+    let CatalogLocation::File(path) = cat.location().clone();
     let folder = cat.folders()?[0].clone();
     drop(cat);
     // An older release added the same folder twice and mapped each copy.

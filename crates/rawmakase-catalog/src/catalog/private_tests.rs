@@ -4,6 +4,7 @@ use crate::lr_develop::{convert_develop, develop_fields};
 use crate::storage::Identity;
 use anyhow::Context;
 use rusqlite::{Connection, OpenFlags};
+use std::path::PathBuf;
 #[test]
 #[ignore = "Requires private Lightroom catalog; set RAWMAKASE_LRCAT"]
 fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {

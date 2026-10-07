@@ -16,6 +16,7 @@ mod tests;
 #[cfg(test)]
 mod value_tests;
 
+use super::CatalogLocation;
 use super::value::{FromRow, FromValue, ToValue, ValueRef};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
@@ -53,9 +54,10 @@ impl Db {
         Ok(())
     }
 
-    /// Connects to the catalog at `path` and checks it is one this release
-    /// reads, before anything is written.
-    pub(in crate::catalog) fn open(path: &Path) -> Result<Self> {
+    /// Connects to the catalog at `location` and checks it is one this
+    /// release reads, before anything is written.
+    pub(in crate::catalog) fn open(location: &CatalogLocation) -> Result<Self> {
+        let CatalogLocation::File(path) = location;
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         ensure!(
             db.query_row("PRAGMA application_id", [], |r| r.get::<_, i64>(0))? == APPLICATION_ID,
