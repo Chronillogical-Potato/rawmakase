@@ -12,8 +12,8 @@ use crate::develop::{
     ImageFrame,
     masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape},
     red_eye::{self, EyeKind, RedEyeOp},
-    retouch::{RetouchMode, RetouchOp, RetouchShape},
 };
+use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::BTreeMap;
 

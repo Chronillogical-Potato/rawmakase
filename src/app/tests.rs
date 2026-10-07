@@ -830,7 +830,7 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
 }
 #[test]
 fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
-    use crate::develop::retouch::RetouchShape;
+    use crate::model::retouch::RetouchShape;
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -935,7 +935,7 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
     frame(vec![egui::Event::PointerMoved(p), button(p, true, none)]);
     frame(vec![egui::Event::PointerMoved(q)]);
     let (ops, ..) = frame(vec![button(q, false, none)]);
-    let source = |op: &crate::develop::retouch::RetouchOp| {
+    let source = |op: &crate::model::retouch::RetouchOp| {
         [op.pin()[0] + op.offset[0], op.pin()[1] + op.offset[1]]
     };
     assert!((ops[0].pin()[0] - before.pin()[0] - 0.1).abs() < 0.01);
@@ -3496,9 +3496,9 @@ fn a_wheel_scroll_resizing_a_spot_is_one_history_step() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3581,9 +3581,9 @@ fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3625,9 +3625,9 @@ fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3679,9 +3679,9 @@ fn a_wheel_scroll_closes_once_paused_even_while_a_button_goes_down() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -3728,9 +3728,9 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
         .edit
         .recipe
         .retouch
-        .push(crate::develop::retouch::RetouchOp {
-            mode: crate::develop::retouch::RetouchMode::Heal,
-            shape: crate::develop::retouch::RetouchShape::Spot {
+        .push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.02,
             },
@@ -4325,9 +4325,9 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
         },
         ..Default::default()
     });
-    local.retouch = vec![develop::retouch::RetouchOp {
-        mode: develop::retouch::RetouchMode::Heal,
-        shape: develop::retouch::RetouchShape::Spot {
+    local.retouch = vec![crate::model::retouch::RetouchOp {
+        mode: crate::model::retouch::RetouchMode::Heal,
+        shape: crate::model::retouch::RetouchShape::Spot {
             center: [0.3, 0.3],
             radius: 0.03,
         },

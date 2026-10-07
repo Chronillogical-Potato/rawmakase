@@ -3,6 +3,7 @@ use super::*;
 use crate::camera_data::CameraImage;
 use crate::develop::red_eye::RedEyeOp;
 use crate::model::operators::RetouchModel;
+use crate::model::retouch::{RetouchMode, RetouchShape};
 use std::sync::atomic::AtomicBool;
 
 fn image(width: u32, height: u32, f: impl Fn(f32, f32) -> [f32; 3]) -> CameraImage {

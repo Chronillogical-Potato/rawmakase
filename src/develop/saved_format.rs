@@ -169,11 +169,11 @@ mod tests {
     /// fields; and fields from newer releases survive a round trip.
     #[test]
     fn saved_recipes_write_only_the_known_fields() {
-        use crate::develop::{Recipe, retouch};
+        use crate::develop::Recipe;
         let mut r = Recipe::default();
-        r.retouch.push(retouch::RetouchOp {
-            mode: retouch::RetouchMode::Heal,
-            shape: retouch::RetouchShape::Spot {
+        r.retouch.push(crate::model::retouch::RetouchOp {
+            mode: crate::model::retouch::RetouchMode::Heal,
+            shape: crate::model::retouch::RetouchShape::Spot {
                 center: [0.5, 0.5],
                 radius: 0.01,
             },

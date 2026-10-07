@@ -88,7 +88,7 @@ fn changed_source_refused() -> Result<()> {
 /// recipe that releases before them read; they load back into the recipe.
 #[test]
 fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
-    use crate::develop::{masks, retouch};
+    use crate::develop::masks;
     let d = tempfile::tempdir()?;
     let raw = d.path().join("photo.ARW");
     fs::write(&raw, b"fixture")?;
@@ -97,9 +97,9 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
         exposure: 0.4,
         ..Default::default()
     };
-    r.retouch.push(retouch::RetouchOp {
-        mode: retouch::RetouchMode::Clone,
-        shape: retouch::RetouchShape::Spot {
+    r.retouch.push(crate::model::retouch::RetouchOp {
+        mode: crate::model::retouch::RetouchMode::Clone,
+        shape: crate::model::retouch::RetouchShape::Spot {
             center: [0.4, 0.5],
             radius: 0.02,
         },
