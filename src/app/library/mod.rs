@@ -674,7 +674,7 @@ impl Library {
     }
     /// Whether a Copy Name or metadata field holds typing not saved yet.
     pub(super) fn has_drafts(&self) -> bool {
-        self.copy_names.draft.is_some() || self.has_unsaved_fields()
+        self.copy_names.is_unsaved(&self.session.photos) || self.has_unsaved_fields()
     }
     /// Drops a Copy Name or metadata field that could not be saved, e.g.
     /// closing without saving.

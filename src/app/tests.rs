@@ -4661,12 +4661,18 @@ fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::
     editor.document.edit.save.mark_changed();
     assert!(editor.flush());
     assert!(!editor.quitting_would_cut_off_work());
-    // A Copy Name being typed is saved by the guard too.
+    // A copy shown keeps its saved name as the draft: nothing to save. A name
+    // being typed is saved by the guard too.
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(id)?;
+    let saved_name = library.photo(copy).unwrap().copy_name.clone();
+    library.set_copy_name_draft(copy, &saved_name);
+    assert!(!editor.quitting_would_cut_off_work());
     editor
         .library
         .as_mut()
         .unwrap()
-        .set_copy_name_draft(id, "B&W");
+        .set_copy_name_draft(copy, "B&W");
     assert!(editor.quitting_would_cut_off_work());
     editor.library.as_mut().unwrap().discard_drafts();
     // The catalog stops taking edits; the next change is not saved yet.
