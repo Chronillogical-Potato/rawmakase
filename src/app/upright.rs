@@ -1,14 +1,15 @@
 //! The Transform panel's Upright analysis, run off the UI thread.
 use super::{Editor, worker::Event};
-use crate::develop::{Recipe, UprightMode};
+use crate::model::recipe::Recipe;
+use crate::model::transform::UprightMode;
 
 /// What the analysis measures: the photo's orientation and lens correction.
-pub(super) fn inputs(r: &Recipe) -> (u8, bool, bool, crate::develop::upright::LensInputs) {
+pub(super) fn inputs(r: &Recipe) -> (u8, bool, bool, crate::model::transform::LensInputs) {
     (
         r.rotation,
         r.flip_x,
         r.flip_y,
-        crate::develop::upright::LensInputs::of(r),
+        crate::model::transform::LensInputs::of(r),
     )
 }
 

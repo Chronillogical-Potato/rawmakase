@@ -1,5 +1,5 @@
 use super::*;
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use anyhow::Result;
 use std::fs::{self, File};
 #[test]

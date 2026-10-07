@@ -3,7 +3,7 @@
 //! table is parsed as data; no interpreter runs. Used to show and resolve photos
 //! imported from Lightroom; reading the Lightroom catalog itself is
 //! `catalog::lightroom`.
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use crate::xmp::look::LookAmount;
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;
@@ -81,7 +81,7 @@ pub fn convert_develop(
     text: &str,
     m: &crate::camera_data::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-    image: Option<&crate::camera_data::CameraImage>,
+    image: Option<&dyn crate::xmp::PhotoMeasures>,
 ) -> Result<(Recipe, Vec<String>)> {
     let fields = develop_fields(text)?;
     let mut preset = crate::xmp::Preset {
@@ -147,7 +147,7 @@ pub fn convert_develop(
                 };
                 preset.settings.insert(
                     key.clone(),
-                    items.join(crate::develop::point_color::LIST_SEPARATOR),
+                    items.join(crate::model::point_color::LIST_SEPARATOR),
                 );
             } else if key.starts_with("ToneCurve") && !key.contains("Name") {
                 let values = value
@@ -309,8 +309,10 @@ pub fn convert_develop(
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
     }
     warnings.extend(recipe.missing_lens_profile(m));
-    let local =
-        crate::xmp::local::convert(&local_settings, crate::develop::ImageFrame::for_metadata(m));
+    let local = crate::xmp::local::convert(
+        &local_settings,
+        crate::model::image_frame::ImageFrame::for_metadata(m),
+    );
     if let Some(retouch) = local.retouch {
         recipe.retouch = retouch;
     }

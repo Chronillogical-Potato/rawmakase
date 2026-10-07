@@ -4,7 +4,7 @@ use super::dialogs::FileDialog;
 use super::widgets::{section, segmented};
 use super::worker::Event;
 use crate::app::theme;
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use anyhow::Context as _;
 use eframe::egui::{self, Sense, Stroke, Vec2};
 use std::sync::Arc;
@@ -339,7 +339,10 @@ impl Editor {
                     &self.document.edit.recipe,
                     m,
                     &self.document.profiles,
-                    self.document.full().map(|image| image.as_ref()),
+                    self.document
+                        .measures()
+                        .as_ref()
+                        .map(|m| m as &dyn crate::xmp::PhotoMeasures),
                 )
             {
                 this_photos_upright(&mut r, &self.document.edit.recipe);
@@ -447,7 +450,10 @@ impl Editor {
             &self.document.edit.recipe,
             m,
             &self.document.profiles,
-            self.document.full().map(|image| image.as_ref()),
+            self.document
+                .measures()
+                .as_ref()
+                .map(|m| m as &dyn crate::xmp::PhotoMeasures),
         )?;
         let substitute = preset
             .profile_substitute(m, &self.document.profiles)
@@ -850,7 +856,10 @@ impl Editor {
                 &step.text,
                 m,
                 &self.document.profiles,
-                self.document.full().map(|image| image.as_ref()),
+                self.document
+                    .measures()
+                    .as_ref()
+                    .map(|m| m as &dyn crate::xmp::PhotoMeasures),
             ) {
                 Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
                     if !skipped.is_empty() {
@@ -892,11 +901,12 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
         let mode = r.upright.mode;
         r.upright.clone_from(&current.upright);
         r.upright.mode = mode;
-        if mode == crate::develop::UprightMode::Guided && r.upright.correction().is_none() {
+        if mode == crate::model::transform::UprightMode::Guided && r.upright.correction().is_none()
+        {
             r.upright.mode = current.upright.mode;
         }
     }
-    use crate::develop::upright::LensInputs;
+    use crate::model::transform::LensInputs;
     if LensInputs::of(r) != LensInputs::of(current) {
         r.upright.analyse_again();
     }
@@ -972,7 +982,7 @@ mod tests {
     #[test]
     fn presets_with_new_lens_settings_drop_the_photos_upright_analysis() {
         let mut current = Recipe::default();
-        current.upright.mode = crate::develop::UprightMode::Level;
+        current.upright.mode = crate::model::transform::UprightMode::Level;
         current.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
         let mut same = current.clone();
         same.exposure = 1.;
@@ -982,6 +992,9 @@ mod tests {
         lens.lens_manual_distortion = 0.3;
         this_photos_upright(&mut lens, &current);
         assert!(lens.upright.corrections.is_empty());
-        assert_eq!(lens.upright.mode, crate::develop::UprightMode::Level);
+        assert_eq!(
+            lens.upright.mode,
+            crate::model::transform::UprightMode::Level
+        );
     }
 }

@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The Texture this recipe renders with the measured operator, or 0 when it takes the
 /// original one (older recipes, earlier engines).
-pub(crate) fn measured(r: &super::Recipe) -> f32 {
+pub(crate) fn measured(r: &crate::model::recipe::Recipe) -> f32 {
     if r.engine >= 4 && r.texture_model == TextureModel::Measured {
         r.effects.texture
     } else {

@@ -1,7 +1,7 @@
 //! A frame edits exactly one document generation, even when navigation happens mid-frame.
 use super::Editor;
-use crate::develop::Recipe;
 use crate::edit_session::FrameOutcome;
+use crate::model::recipe::Recipe;
 use eframe::egui;
 
 pub(super) struct EditFrame {
@@ -17,7 +17,7 @@ pub(super) struct EditFrame {
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct RenderModes {
     crop: bool,
-    clipping: crate::develop::ClipOverlay,
+    clipping: crate::rendered::ClipOverlay,
     compare: super::before_after::Compare,
     zoom: bool,
     /// The swatch Point Color's Visualize Range shows.
@@ -99,7 +99,8 @@ impl Editor {
         // The Guided tool goes with the mode, however it was left: a reset, an undo, a
         // preset, with the Transform panel open or not.
         if self.view.is(super::state::Tool::Guided)
-            && self.document.edit.recipe.upright.mode != crate::develop::UprightMode::Guided
+            && self.document.edit.recipe.upright.mode
+                != crate::model::transform::UprightMode::Guided
         {
             self.view.tool = super::state::Tool::None;
         }

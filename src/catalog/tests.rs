@@ -2,7 +2,7 @@ use super::lightroom::import_lightroom;
 use super::*;
 use crate::lr_develop::{convert_develop, develop_fields};
 use crate::metadata::{LangAlt, PhotoInfo, Value};
-use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
+use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;
     db.execute_batch("CREATE TABLE AgLibraryRootFolder(id_local INTEGER, absolutePath TEXT);
@@ -270,7 +270,7 @@ fn lightroom_point_colors_import() -> Result<()> {
         convert_develop(&text, &m, &[], None)?.0.point_colors,
         r.point_colors
             .iter()
-            .map(|p| crate::develop::point_color::PointColor { variance: 0., ..*p })
+            .map(|p| crate::model::point_color::PointColor { variance: 0., ..*p })
             .collect::<Vec<_>>()
     );
     let (r, w) = convert_develop(
@@ -354,7 +354,7 @@ fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
 }
 #[test]
 fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let m = crate::camera_data::Metadata::default();
     // Lightroom stores every switch, on or off, with each edit.
     let all_on: Vec<String> = Panel::ALL
@@ -557,7 +557,6 @@ fn bitmaps_are_stored_once_by_hash() -> Result<()> {
 }
 #[test]
 fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
-    use crate::develop::masks;
     let d = tempfile::tempdir()?;
     let photos = d.path().join("photos");
     std::fs::create_dir(&photos)?;
@@ -567,14 +566,16 @@ fn catalog_keeps_spots_and_masks_out_of_the_recipe_column() -> Result<()> {
     c.add_folder(&photos)?;
     let id = c.photos()?[0].id;
     let mut r = Recipe::default();
-    r.masks.push(masks::MaskGroup {
-        components: vec![masks::MaskComponent::new(masks::MaskShape::Radial {
-            center: [0.5, 0.5],
-            radii: [0.2, 0.1],
-            angle: 0.,
-            feather: 0.5,
-        })],
-        adjust: masks::LocalAdjust {
+    r.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
+                center: [0.5, 0.5],
+                radii: [0.2, 0.1],
+                angle: 0.,
+                feather: 0.5,
+            },
+        )],
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },
@@ -1253,7 +1254,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
         ..Default::default()
     };
     let mut legacy_on = legacy;
-    legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
+    legacy_on.set_profile_corrections(&m, crate::model::recipe::ProfileCorrections::On);
     assert!(!legacy_on.lens_builtin);
     assert_eq!(legacy_on.missing_lens_profile(&m), None);
     Ok(())

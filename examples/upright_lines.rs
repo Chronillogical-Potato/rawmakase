@@ -4,10 +4,8 @@
 //! line, in centred long-edge units of the displayed photo, after a `#` line with the
 //! corrections for each Upright mode.
 use anyhow::{Context, Result};
-use rawmakase::{
-    camera_data,
-    develop::{Recipe, upright},
-};
+use rawmakase::model::recipe::Recipe;
+use rawmakase::{camera_data, develop::upright};
 use std::sync::atomic::AtomicBool;
 
 fn main() -> Result<()> {

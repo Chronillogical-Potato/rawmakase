@@ -57,7 +57,7 @@ pub fn point_color_pick(
         [develop::pipeline::PixelOutput::PointColor],
         cancel,
     )?;
-    let [h, s, v] = develop::point_color::rgb_to_hsv(mean);
+    let [h, s, v] = crate::color::hsv::rgb_to_hsv(mean);
     Ok([
         (h / std::f32::consts::TAU * 6.).rem_euclid(6.),
         s.clamp(0., 1.),

@@ -295,8 +295,8 @@ fn heals(ops: &[RetouchOp]) -> Retouching<'_> {
         model: RetouchModel::Original,
     }
 }
-fn frame_of(im: &CameraImage) -> crate::develop::ImageFrame {
-    crate::develop::ImageFrame::new(im)
+fn frame_of(im: &CameraImage) -> crate::model::image_frame::ImageFrame {
+    crate::model::image_frame::ImageFrame::new(im)
 }
 #[test]
 fn automatic_source_avoids_texture_edges_and_asks_again_for_the_next() {
@@ -336,7 +336,7 @@ fn automatic_source_avoids_texture_edges_and_asks_again_for_the_next() {
 #[test]
 fn placed_brush_covers_its_path() {
     let im = image(200, 100, |_, _| [0.3; 3]);
-    let frame = crate::develop::ImageFrame::new(&im);
+    let frame = crate::model::image_frame::ImageFrame::new(&im);
     let op = RetouchOp {
         mode: RetouchMode::Clone,
         shape: RetouchShape::Brush {
@@ -386,7 +386,7 @@ fn measured_feather_crosses_half_where_camera_raw_does() {
 /// Lightroom's spots take the measured one.
 #[test]
 fn old_spots_keep_their_feather() {
-    use crate::develop::Recipe;
+    use crate::model::recipe::Recipe;
     let im = image(64, 48, |_, _| [0.2; 3]);
     let op = spot(RetouchMode::Clone, &im, [20., 20.], 6., [20., 0.]);
     let mut old = Recipe::default();

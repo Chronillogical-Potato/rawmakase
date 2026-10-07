@@ -1,7 +1,8 @@
 use super::local::slot;
 use super::*;
-use crate::camera_data::CameraImage;
-use crate::develop::{Geometry, Recipe};
+use crate::model::masks::{BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape};
+use crate::model::recipe::Recipe;
+use crate::{camera_data::CameraImage, develop::Geometry};
 use std::sync::Arc;
 
 fn image(width: u32, height: u32) -> CameraImage {
@@ -39,7 +40,7 @@ fn group(components: Vec<MaskComponent>) -> MaskGroup {
     }
 }
 /// Weights of one mask over the whole `w` × `h` image, row by row.
-fn weights(im: &CameraImage, m: MaskGroup, range: Option<&crate::develop::Rendered>) -> Vec<f32> {
+fn weights(im: &CameraImage, m: MaskGroup, range: Option<&crate::rendered::Rendered>) -> Vec<f32> {
     let r = Recipe::default();
     let g = Geometry::new(im, &r, 0);
     let masks = [m];
@@ -291,7 +292,7 @@ fn cached_auto_masks_follow_the_pyramid_level() {
 #[test]
 fn ranges_use_the_developed_colors() {
     let im = image(100, 10);
-    let developed = crate::develop::Rendered {
+    let developed = crate::rendered::Rendered {
         width: 100,
         height: 10,
         pixels: (0..1000)
@@ -428,7 +429,7 @@ fn partial_masks_blend_and_amount_scales() {
         0,
     )
     .unwrap();
-    let at = |im: &crate::develop::Rendered, x: usize| im.pixels[40 * 120 + x][1];
+    let at = |im: &crate::rendered::Rendered, x: usize| im.pixels[40 * 120 + x][1];
     assert!((at(&masked, 20) - at(&half, 20)).abs() < 1e-5);
     assert!((at(&masked, 100) - at(&plain, 100)).abs() < 1e-5);
     let _ = slot::EXPOSURE;

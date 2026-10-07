@@ -67,7 +67,7 @@ fn presets_changing_settings_that_dont_scale_get_no_amount() {
             SettingGroup::TransformAdjustments,
         ),
         (
-            |r| r.upright.mode = crate::develop::UprightMode::Level,
+            |r| r.upright.mode = crate::model::transform::UprightMode::Level,
             SettingGroup::UprightMode,
         ),
         (|r| r.straighten = 2., SettingGroup::Crop),
@@ -209,8 +209,8 @@ fn point_curves_blend_their_outputs() {
 #[test]
 fn choices_that_arent_numbers_follow_the_preset_above_zero() {
     use crate::{
-        develop::panels::{Panel, PanelState},
         model::effects::VignetteStyle,
+        model::panels::{Panel, PanelState},
     };
     let m = metadata();
     let before = Recipe::default();
@@ -380,7 +380,7 @@ fn parametric_splits_keep_growing_until_they_would_cross() {
 /// Point Color swatches scale their shifts; swatches added or taken away don't scale.
 #[test]
 fn point_color_shifts_scale_and_new_swatches_dont() {
-    use crate::develop::point_color::PointColor;
+    use crate::model::point_color::PointColor;
     let m = metadata();
     let before = Recipe {
         point_colors: vec![PointColor::sampled([0.6, 0.4, 0.2])],

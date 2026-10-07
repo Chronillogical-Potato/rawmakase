@@ -322,7 +322,7 @@ mod tests {
     use crate::app::worker::{Event, LoadedHeader};
     use crate::camera_data::Metadata;
     use crate::camera_profiles::{CameraProfile, open};
-    use crate::develop::Recipe;
+    use crate::model::recipe::Recipe;
 
     #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
     fn x100f() -> Metadata {

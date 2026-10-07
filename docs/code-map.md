@@ -15,7 +15,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | Work | Start here | Related work |
 | --- | --- | --- |
-| Add a develop adjustment | [Recipe](../src/develop/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
+| Add a develop adjustment | [Recipe](../src/model/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
 | Change preview quality or detail | [Quality rendering](../src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
 | Support another XMP setting | [Parser](../src/xmp/parse.rs), [application stages](../src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../src/presets/library.rs) | Preset browser UI and shared asset paths |
@@ -23,7 +23,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/develop/saved_format.rs) | Catalog edits, native presets and persistence tests |
+| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -38,10 +38,17 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/edits.rs](../src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../src/catalog/edit_records.rs) reads the stored records. |
 | [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
+| [src/model/recipe.rs](../src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../src/model/panels.rs) the per-panel switches. |
+| [src/model/params.rs](../src/model/params.rs), [edit.rs](../src/model/edit.rs), [settings_groups.rs](../src/model/settings_groups.rs) | The sliders as parameters (ids, ranges, formatting), the rules an edit follows (which operator a changed setting takes, which panel it turns on), and the setting groups Copy Settings, Sync and presets move between photos. |
 | [src/model/effects.rs](../src/model/effects.rs) | The Effects, Detail and Calibration settings a recipe keeps (curves, grading, grain, vignettes, Defringe, noise reduction), their defaults, validation and the Effects panel's reset. Rendering them is in `develop/effects.rs`. |
+| [src/model/point_color.rs](../src/model/point_color.rs) | Point Color swatches as a recipe stores them, in Camera Raw's units: the sampled color, shifts, Variance and ranges, which swatches Camera Raw accepts, and their `crs:PointColors` text form. Selecting and changing colors, and the dropper, are in `develop/point_color.rs`. |
 | [src/model/red_eye.rs](../src/model/red_eye.rs) | Red Eye and Pet Eye corrections as a recipe stores them: the ellipse, Pupil Size, Darken and the catchlight, with their limits, the ellipse geometry the tool draws and edits, and the list that keeps corrections from a later release in place. Rendering and pupil detection are in `develop/red_eye/`. |
 | [src/model/retouch.rs](../src/model/retouch.rs) | Heal and Clone operations as a recipe stores them: mode, spot or brushed shape, feather, opacity and source offset, with their limits and edits (move, resize). Rendering and source search are in `develop/retouch/`. |
-| [src/model/operators.rs](../src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did. The renderer picks its operator from them. |
+| [src/model/image_frame.rs](../src/model/image_frame.rs) | Image space: positions normalised to the oriented photo before lens correction, Transform and crop, where masks, spots and red eye corrections are kept, and how they map to decoded pixels. |
+| [src/model/masks.rs](../src/model/masks.rs) | Masks as a recipe stores them: groups of brush, gradient and range components with their local adjustment, Amount and visibility, and their limits. Rendering their weights is in `develop/masks/`. |
+| [src/model/transform.rs](../src/model/transform.rs) | The Transform panel's settings as a recipe stores them: the manual sliders, Upright's mode with its analysed corrections and Guided guides, and Lightroom's guides read from older edits. Rendering, analysis and solving are in `develop/geometry.rs`, `upright.rs` and `guided.rs`. |
+| [src/model/white_balance.rs](../src/model/white_balance.rs) | Fallback illuminant and as-shot temperature estimation from a RAW's metadata, and Lightroom's named white balance presets. |
+| [src/model/operators.rs](../src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did, and the Sharpening sliders' defaults for each. The renderer picks its operator from them. |
 | [src/camera_data.rs](../src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
@@ -64,11 +71,11 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | File | Responsibility |
 | --- | --- |
 | [develop/mod.rs](../src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
-| [recipe.rs](../src/develop/recipe.rs) | Serialized adjustment model, defaults, validation, rendering-engine compatibility and profile selection. |
+| [recipe.rs](../src/develop/recipe.rs) | What rendering makes of a recipe: the measured manual Vignetting and Color noise reduction run on the camera image. |
 | [raw_defaults.rs](../src/raw_defaults.rs) | Raw defaults: the master and per-camera choices (Adobe Default, Camera Settings, RAWmakase Default or a preset), and resolving a photo's starting settings with a fallback note. See [raw defaults](xmp-presets.md#raw-defaults). |
 | [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
 | [orientation.rs](../src/develop/orientation.rs) | Rotate and Flip on the photo as shown, keeping the crop and straightening on the same part of the photo. |
-| [image_space.rs](../src/develop/image_space.rs) | Image space, where spots and masks keep positions (oriented photo before lens correction, Transform and crop), and its mapping to and from the view, including the lens distortion inverse. |
+| [image_space.rs](../src/develop/image_space.rs) | Image space's mapping to and from the view, including the lens distortion inverse. The frame itself is `model/image_frame.rs`. |
 | [retouch/mod.rs](../src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
 | [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
 | [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image (red eye corrections, then Heal and Clone): built at once for exports, updated in dirty 256-pixel tiles for previews. |
@@ -105,12 +112,11 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [gpu/uniforms.rs](../src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
-| [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
+| [rendered.rs](../src/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
 | [color/curve.rs](../src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
-| [white_balance.rs](../src/develop/white_balance.rs) | Fallback illuminant and as-shot temperature estimation. |
 | [black_white.rs](../src/develop/black_white.rs) | Treatment (Color or Black & White, kept with black & white profiles) and the Auto black & white mix, fitted to Camera Raw's Auto. See [color mixer](color-mixer.md#black--white). |
 | [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders, Vibrance and Saturation predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
 
@@ -166,7 +172,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | --- | --- |
 | [storage/mod.rs](../src/storage/mod.rs) | Shared persistence and path API. |
 | [files.rs](../src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
-| [develop/saved_format.rs](../src/develop/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
+| [model/saved_format.rs](../src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [identity.rs](../src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
 | [catalog/legacy_sidecar.rs](../src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
@@ -224,7 +230,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | --- | --- |
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
-| [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `develop::settings_groups`. |
+| [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |
 | [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |

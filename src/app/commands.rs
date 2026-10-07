@@ -13,7 +13,7 @@ pub(super) use reply::{Outcome, Reply};
 #[derive(Default)]
 pub(super) struct Automation {
     pub revision: u64,
-    observed: Option<(u64, crate::develop::Recipe)>,
+    observed: Option<(u64, crate::model::recipe::Recipe)>,
     outputs: output::Outputs,
     turn: Option<(std::time::Instant, TurnScope)>,
 }
@@ -768,7 +768,7 @@ impl Editor {
             };
             if let Param::Setting(id) = param {
                 let photo = self.document.metadata.as_ref();
-                crate::develop::edit::setting_changed(recipe, id, before, photo);
+                crate::model::edit::setting_changed(recipe, id, before, photo);
             }
             shown
         };
@@ -876,9 +876,9 @@ impl Editor {
                     ExportPrevious => self.export_with_previous(),
                     ToggleMono => self.toggle_treatment(),
                     Treatment(bw) => self.set_treatment(if bw {
-                        crate::develop::Treatment::BlackWhite
+                        crate::model::recipe::Treatment::BlackWhite
                     } else {
-                        crate::develop::Treatment::Color
+                        crate::model::recipe::Treatment::Color
                     }),
                     Compare => self.set_compare(
                         self.view

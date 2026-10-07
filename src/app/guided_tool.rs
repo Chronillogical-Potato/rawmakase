@@ -2,9 +2,9 @@
 //! guides drawn along edges that should be vertical or horizontal, each end movable,
 //! with a loupe while an end is placed and an optional grid. Every gesture is one
 //! History step, and the correction is solved again after it (docs/transform.md).
-use super::Editor;
-use super::state::Tool;
-use crate::develop::{Geometry, UprightGuide, UprightMode, guided};
+use super::{Editor, state::Tool};
+use crate::develop::{Geometry, guided};
+use crate::model::transform::{UprightGuide, UprightMode};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 /// Shortest guide drawn on screen, in points: a click or a slip is not a guide.
@@ -72,7 +72,7 @@ fn released(
     let mut out = guides.to_vec();
     match drag {
         GuideDrag::New { from, to } => {
-            if from.distance(to) < MIN_DRAWN || out.len() >= guided::MAX_GUIDES {
+            if from.distance(to) < MIN_DRAWN || out.len() >= crate::model::transform::MAX_GUIDES {
                 return None;
             }
             out.push(UprightGuide {
@@ -242,7 +242,7 @@ impl Editor {
                         to: origin,
                     })
                 }
-                _ if guides.len() >= guided::MAX_GUIDES => {
+                _ if guides.len() >= crate::model::transform::MAX_GUIDES => {
                     self.status =
                         "Guided Upright takes four guides; delete one to draw another".into();
                     None
@@ -451,7 +451,7 @@ mod tests {
                 b: [0.2, 0.8]
             }]
         );
-        let full = [one; guided::MAX_GUIDES];
+        let full = [one; crate::model::transform::MAX_GUIDES];
         let fifth = GuideDrag::New {
             from: Pos2::new(50., 10.),
             to: Pos2::new(52., 90.),

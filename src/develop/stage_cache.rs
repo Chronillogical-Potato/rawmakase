@@ -7,10 +7,11 @@
 //! [`stage_recipes`] places every recipe field: a new field does not compile until it
 //! is added to the stages that read it, or to those that only later stages read.
 use super::{
-    Geometry, Recipe,
+    Geometry,
     pipeline::{Samples, Toned},
     quality::LocalBlurs,
 };
+use crate::model::recipe::Recipe;
 use crate::{camera_data::CameraImage, model::effects::Effects};
 use anyhow::Result;
 use std::sync::Arc;
@@ -412,7 +413,7 @@ impl SampleKey {
 #[derive(PartialEq)]
 pub(crate) struct MaskKey {
     samples: SampleKey,
-    masks: Vec<(Vec<super::masks::MaskComponent>, bool)>,
+    masks: Vec<(Vec<crate::model::masks::MaskComponent>, bool)>,
     recipe: Option<Recipe>,
 }
 impl MaskKey {

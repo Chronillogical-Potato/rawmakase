@@ -15,7 +15,7 @@ const LOOK_AMOUNT: u32 = 8;
 const RGB_TABLE: u32 = 9;
 
 /// The schema and pipeline version to write `r` with.
-pub fn saved_version(r: &super::Recipe) -> u32 {
+pub fn saved_version(r: &super::recipe::Recipe) -> u32 {
     let Some(look) = r.profile.as_ref().and_then(|p| p.enhanced.as_ref()) else {
         return SCHEMA;
     };
@@ -88,7 +88,7 @@ mod tests {
     /// stays at 6.
     #[test]
     fn only_looks_with_new_fields_raise_the_saved_version() {
-        use crate::{camera_data::Metadata, camera_profiles::CameraProfile, develop::Recipe};
+        use crate::{camera_data::Metadata, camera_profiles::CameraProfile, model::recipe::Recipe};
         let m = Metadata {
             make: "Test".into(),
             model: "Camera".into(),
@@ -169,7 +169,7 @@ mod tests {
     /// fields; and fields from newer releases survive a round trip.
     #[test]
     fn saved_recipes_write_only_the_known_fields() {
-        use crate::develop::Recipe;
+        use crate::model::recipe::Recipe;
         let mut r = Recipe::default();
         r.retouch.push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,

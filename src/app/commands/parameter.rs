@@ -1,12 +1,8 @@
 //! Parameter names and units shared by application command adapters.
-use crate::app::inspector::BANDS;
-use crate::develop::{
-    Recipe,
-    params::{
-        ParameterId::{self, *},
-        format_value, nudged,
-    },
-};
+use crate::model::params::ParameterId::*;
+use crate::model::params::{format_value, nudged};
+use crate::model::recipe::Recipe;
+use crate::{app::inspector::BANDS, model::params::ParameterId};
 
 /// The Color Mixer's channels, in the order of `Recipe::hsl`.
 const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
@@ -14,7 +10,7 @@ const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];
 /// A slider a dial can turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::app) enum Param {
-    /// A setting with a descriptor (see `develop::params`).
+    /// A setting with a descriptor (see `model::params`).
     Setting(ParameterId),
     /// A Color Mixer colour band (0 Red .. 7 Magenta), on the channel the
     /// panel's Hue / Sat / Lum selector shows.
@@ -209,7 +205,7 @@ impl Param {
                     _ => "percent",
                 };
                 let local = param
-                    .local_shown(&crate::develop::masks::LocalAdjust::default())
+                    .local_shown(&crate::model::masks::LocalAdjust::default())
                     .is_some();
                 super::reply::Parameter {
                     name,
@@ -229,7 +225,7 @@ impl Param {
             .collect();
         items
     }
-    fn local_value(self, a: &mut crate::develop::masks::LocalAdjust) -> Option<&mut f32> {
+    fn local_value(self, a: &mut crate::model::masks::LocalAdjust) -> Option<&mut f32> {
         Some(match self {
             Self::Setting(Exposure) => &mut a.exposure,
             Self::Setting(Temperature) => &mut a.temperature,
@@ -246,7 +242,7 @@ impl Param {
             _ => return None,
         })
     }
-    pub(in crate::app) fn local_shown(self, a: &crate::develop::masks::LocalAdjust) -> Option<f32> {
+    pub(in crate::app) fn local_shown(self, a: &crate::model::masks::LocalAdjust) -> Option<f32> {
         let mut copy = *a;
         self.local_value(&mut copy).map(|v| {
             *v * if self == Self::Setting(Exposure) {
@@ -258,7 +254,7 @@ impl Param {
     }
     pub(in crate::app) fn local_set(
         self,
-        a: &mut crate::develop::masks::LocalAdjust,
+        a: &mut crate::model::masks::LocalAdjust,
         shown: Option<f32>,
         ticks: i32,
     ) -> super::Result<String> {

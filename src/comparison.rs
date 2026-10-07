@@ -1,5 +1,6 @@
 //! Reproducible, unscaled comparisons against an externally rendered sRGB reference.
-use crate::develop::{self, Recipe};
+use crate::develop;
+use crate::model::recipe::Recipe;
 use anyhow::{Result, ensure};
 use std::{path::Path, sync::atomic::AtomicBool};
 pub fn compare(

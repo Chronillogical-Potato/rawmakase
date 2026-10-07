@@ -1,4 +1,4 @@
-use rawmakase::{camera_data::Metadata, camera_profiles, develop::Recipe, presets};
+use rawmakase::{camera_data::Metadata, camera_profiles, model::recipe::Recipe, presets};
 #[test]
 #[ignore = "Private XMP library installed in user data directory"]
 fn supplied_library_audit() -> anyhow::Result<()> {

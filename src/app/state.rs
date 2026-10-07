@@ -2,8 +2,8 @@
 use crate::catalog::PhotoId;
 use crate::{
     camera_data::{CameraImage, Metadata},
-    develop::Recipe,
     export_settings::ExportOptions,
+    model::recipe::Recipe,
 };
 use eframe::egui::{self, Vec2};
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -151,7 +151,7 @@ pub(super) struct PreviewState {
     pub(super) region: Option<Picture>,
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<Picture>,
-    pub(super) histogram: crate::develop::Histogram,
+    pub(super) histogram: crate::rendered::Histogram,
     /// The shown pixels of `texture` and `region` while the white balance selector
     /// is active, for its loupe.
     pub(super) samples: Option<image::RgbImage>,
@@ -160,8 +160,8 @@ pub(super) struct PreviewState {
     pub(super) samples_requested: bool,
     /// The recipe the shown samples were rendered with, and that of the render in
     /// flight.
-    pub(super) samples_recipe: Option<crate::develop::Recipe>,
-    pub(super) pending_recipe: Option<crate::develop::Recipe>,
+    pub(super) samples_recipe: Option<Recipe>,
+    pub(super) pending_recipe: Option<Recipe>,
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
     pub(super) last_region: Option<[u32; 4]>,
@@ -181,7 +181,7 @@ impl Default for PreviewState {
             texture: None,
             region: None,
             navigator: None,
-            histogram: crate::develop::Histogram::EMPTY,
+            histogram: crate::rendered::Histogram::EMPTY,
             samples: None,
             region_samples: None,
             samples_requested: false,
@@ -381,7 +381,7 @@ impl PreviewState {
         self.texture = None;
         self.region = None;
         self.navigator = None;
-        self.histogram = crate::develop::Histogram::EMPTY;
+        self.histogram = crate::rendered::Histogram::EMPTY;
         self.status.clear();
         self.last_fit_edge = 0;
         self.last_region = None;
@@ -496,6 +496,12 @@ impl Document {
     pub fn full(&self) -> Option<&Arc<CameraImage>> {
         self.image.as_ref()
     }
+    /// What applying XMP or Lightroom settings measures for Auto, on the full-size
+    /// image when it is decoded.
+    pub fn measures(&self) -> Option<crate::develop::Measures<'_>> {
+        self.full()
+            .map(|image| crate::develop::Measures(image.as_ref()))
+    }
     pub fn set_image(&mut self, full: Arc<CameraImage>) {
         self.image = Some(full);
         self.color_spread = Default::default();
@@ -529,7 +535,7 @@ impl Document {
 /// once the recipe changes otherwise (Reset, Undo, a preset), the request lapses.
 #[derive(Clone)]
 pub(super) struct PendingTreatment {
-    pub(super) treatment: crate::develop::Treatment,
+    pub(super) treatment: crate::model::recipe::Treatment,
     pub(super) recipe: Recipe,
 }
 

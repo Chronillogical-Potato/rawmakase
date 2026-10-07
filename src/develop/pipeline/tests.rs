@@ -133,7 +133,7 @@ fn old_recipes_keep_original_profile_tones() {
 
 #[test]
 fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let im = fixture();
     let mut edited = Recipe::default();
     edited.effects.vignette = -0.8;
@@ -159,7 +159,7 @@ fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
 }
 #[test]
 fn panel_switches_round_trip_and_old_recipes_have_every_panel_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let old: Recipe =
         serde_json::from_value(serde_json::to_value(Recipe::default()).unwrap()).unwrap();
     assert!(old.panels.all_on());
@@ -621,7 +621,7 @@ fn transform_scales_and_fills_uncovered_area_with_white() {
     assert_eq!(small.pixels[0], [1.; 3]);
     let centre = |x: &Rendered| x.pixels[(4 * x.width + 6) as usize];
     assert!((0..3).all(|c| (centre(&small)[c] - centre(&plain)[c]).abs() < 0.05));
-    r.transform = crate::develop::Transform {
+    r.transform = crate::model::transform::Transform {
         vertical: 0.6,
         horizontal: -0.3,
         rotate: 4.,
@@ -795,8 +795,8 @@ fn rgb_tables_follow_the_colour_controls_on_every_engine() {
 }
 #[test]
 fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
-    use crate::develop::point_color::PointColor;
+    use crate::model::panels::{Panel, PanelState};
+    use crate::model::point_color::PointColor;
     let im = fixture();
     let plain = Recipe {
         reference_curves: true,
@@ -834,8 +834,8 @@ fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
 }
 #[test]
 fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
-    use crate::develop::point_color::{PointColor, add_sample};
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::{develop::point_color::add_sample, model::point_color::PointColor};
     let im = fixture();
     let plain = Recipe {
         reference_curves: true,
@@ -873,7 +873,7 @@ fn point_colors_dropper_samples_the_photo_as_rendered() -> anyhow::Result<()> {
 }
 #[test]
 fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow::Result<()> {
-    use crate::develop::point_color::{PointColor, visualize_range};
+    use crate::model::point_color::{PointColor, visualize_range};
     let im = fixture();
     let mut r = Recipe {
         reference_curves: true,
@@ -896,8 +896,9 @@ fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow
 }
 #[test]
 fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
-    use crate::develop::point_color::{PointColor, visualize, visualize_range};
+    use crate::develop::point_color::visualize;
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
+    use crate::model::point_color::{PointColor, visualize_range};
     let im = fixture();
     let mut r = Recipe {
         reference_curves: true,
@@ -935,8 +936,8 @@ fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Res
 }
 #[test]
 fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow::Result<()> {
-    use crate::develop::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     use crate::develop::targeted::{HslChannel, Target, TargetWeights};
+    use crate::model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape};
     // Four patches: a dark gray, an orange, a light gray and a blue.
     let patches = [
         [0.03, 0.03, 0.03],
@@ -1184,8 +1185,8 @@ fn lens_profile_distortion_with_constrain_crop_renders_no_white() {
 /// reports nothing missing.
 #[test]
 fn lens_corrections_panel_off_bypasses_the_chosen_profile() {
-    use crate::develop::panels::{Panel, PanelState};
     use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    use crate::model::panels::{Panel, PanelState};
     let im = lens_photo();
     let mut r = profile_recipe(LensProfileSetup::Custom, "Gone.lcp");
     assert!(r.missing_lens_profile(&im.metadata).is_some());
@@ -1238,8 +1239,8 @@ fn a_missing_named_lens_profile_is_reported() {
 /// switched-off panel turns on with it.
 #[test]
 fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
-    use crate::develop::panels::Panel;
     use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    use crate::model::panels::Panel;
     let before = profile_recipe(LensProfileSetup::Auto, "");
     let after = profile_recipe(LensProfileSetup::Custom, MINE);
     assert!(Panel::LensCorrections.holds_change(&before, &after));
@@ -1323,8 +1324,7 @@ fn contrast_and_whites_are_measured_on_the_photo_alone() {
 /// second curve after the user's by the layered one, as Camera Raw 18.7 renders it.
 #[test]
 fn a_looks_parametric_curve_follows_the_users() {
-    use crate::develop::parametric::ParametricCurve;
-    use crate::model::operators::ParametricModel;
+    use crate::{develop::parametric::ParametricCurve, model::operators::ParametricModel};
     let mut m = fixture().metadata;
     m.cam_xyz = [
         [1.1434, -0.4948, -0.121],
@@ -1441,8 +1441,7 @@ fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
 /// original's on an old edit, Lightroom's after Detail's reset chose the measured one.
 #[test]
 fn process_update_sharpens_with_the_recipe_operator_default() {
-    use crate::develop::sharpening::SharpeningSliders;
-    use crate::model::operators::SharpeningModel;
+    use crate::model::operators::{SharpeningModel, SharpeningSliders};
     let mut old = Recipe {
         engine: 1,
         ..Default::default()

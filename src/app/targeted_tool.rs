@@ -8,7 +8,8 @@ use super::state::Tool;
 use super::{Editor, history::Step, theme};
 use crate::app::Module;
 use crate::develop::targeted::{DRAG_RATE, HslChannel, Target, TargetSample, TargetWeights};
-use crate::develop::{Recipe, Treatment};
+use crate::model::recipe::Recipe;
+use crate::model::recipe::Treatment;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// A drag with the tool, from the press to the sample's arrival or the release,
@@ -357,7 +358,7 @@ pub(super) fn hsl_target(index: usize) -> Target {
 mod tests {
     use super::*;
     use crate::camera_data::{CameraImage, Metadata};
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     use std::sync::Arc;
 
     /// An editor showing a 200 × 200 photo: an orange left half, a gray right one.

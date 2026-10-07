@@ -7,8 +7,8 @@
 //! and resolve them later, off the UI thread. Upright's analysis needs the
 //! developed photo, so it is a step of its own: [`crate::develop::upright::complete`].
 use crate::{
-    camera_data::Metadata, camera_profiles::CameraProfile, develop::Recipe,
-    export_settings::ExportOptions, raw_defaults::DevelopDefaults, storage::Identity,
+    camera_data::Metadata, camera_profiles::CameraProfile, export_settings::ExportOptions,
+    model::recipe::Recipe, raw_defaults::DevelopDefaults, storage::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};
@@ -143,8 +143,8 @@ pub fn resolve(
 }
 
 /// Spots and masks from their stored text; none when there is none.
-pub(crate) fn local_edits(text: Option<&str>) -> Result<crate::develop::LocalEdits> {
-    let local: crate::develop::LocalEdits = match text {
+pub(crate) fn local_edits(text: Option<&str>) -> Result<crate::model::recipe::LocalEdits> {
+    let local: crate::model::recipe::LocalEdits = match text {
         Some(d) => serde_json::from_str(d)?,
         None => Default::default(),
     };

@@ -1,12 +1,17 @@
 //! Mask weights for a rendered region: each output pixel is traced back to image space
 //! (geometry, then lens distortion) and every mask evaluated there.
+use super::LocalDelta;
 use super::brush::{self, Raster, Space};
 use super::range::{self, RangeInput};
-use super::{LocalDelta, MaskGroup, MaskOp, MaskShape};
-use crate::camera_data::CameraImage;
-use crate::develop::image_space::LensMap;
-use crate::develop::retouch::profile;
-use crate::develop::{Geometry, ImageFrame, Recipe, unit_to_u8};
+use crate::develop::Geometry;
+use crate::model::image_frame::ImageFrame;
+use crate::model::masks::{MaskGroup, MaskOp, MaskShape};
+use crate::model::recipe::Recipe;
+use crate::rendered::unit_to_u8;
+use crate::{
+    camera_data::CameraImage,
+    develop::{image_space::LensMap, retouch::profile},
+};
 use rayon::prelude::*;
 use std::sync::{Arc, Weak};
 

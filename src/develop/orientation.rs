@@ -1,6 +1,6 @@
 //! Rotate and Flip as the Crop panel applies them: on the photo as shown, keeping the
 //! crop and straightening on the same part of the photo (docs/transform.md#crop-and-straighten).
-use super::Recipe;
+use crate::model::recipe::Recipe;
 
 /// A quarter turn of the photo as shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,8 +55,7 @@ pub fn mirror(r: &mut Recipe, mirror: Mirror) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::camera_data::CameraImage;
-    use crate::develop::Geometry;
+    use crate::{camera_data::CameraImage, develop::Geometry};
 
     fn photo() -> CameraImage {
         CameraImage {

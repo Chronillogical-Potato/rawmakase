@@ -458,7 +458,7 @@ fn stale_preview_results_are_discarded() {
         id: old,
         pane: worker::Pane::After,
         preview: worker::Preview::Pixels {
-            image: develop::Rendered {
+            image: crate::rendered::Rendered {
                 width: 1,
                 height: 1,
                 pixels: vec![[1.; 3]],
@@ -466,7 +466,7 @@ fn stale_preview_results_are_discarded() {
             display_rgb: vec![255; 3],
             navigator: None,
         },
-        histogram: Box::new(develop::Histogram::EMPTY),
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
         thumbnail: None,
         samples: None,
         stage: worker::RenderStage::Fit,
@@ -490,7 +490,7 @@ fn before_and_after_renders_go_to_their_own_side() {
         id: after,
         pane,
         preview: worker::Preview::Pixels {
-            image: develop::Rendered {
+            image: crate::rendered::Rendered {
                 width: 1,
                 height: 1,
                 pixels: vec![[0.5; 3]],
@@ -498,7 +498,7 @@ fn before_and_after_renders_go_to_their_own_side() {
             display_rgb: vec![value; 3],
             navigator: None,
         },
-        histogram: Box::new(develop::Histogram::EMPTY),
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
         thumbnail: None,
         samples: None,
         stage: worker::RenderStage::Fit,
@@ -646,7 +646,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                 id: current,
                 pane: worker::Pane::After,
                 preview: worker::Preview::Pixels {
-                    image: develop::Rendered {
+                    image: crate::rendered::Rendered {
                         width: 1,
                         height: 1,
                         pixels: vec![[0.5; 3]],
@@ -654,7 +654,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                     display_rgb: vec![128; 3],
                     navigator: None,
                 },
-                histogram: Box::new(develop::Histogram::EMPTY),
+                histogram: Box::new(crate::rendered::Histogram::EMPTY),
                 thumbnail: None,
                 samples: None,
                 stage,
@@ -1072,7 +1072,7 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
 }
 #[test]
 fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -1250,7 +1250,7 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
 }
 #[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
-    use crate::develop::masks::MaskShape;
+    use crate::model::masks::MaskShape;
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -1379,7 +1379,7 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     // Add a subtracted brush to the brush mask, then delete the mask with Delete.
     editor.create_mask(
         mask_tool::Kind::Brush,
-        Some(crate::develop::masks::MaskOp::Subtract),
+        Some(crate::model::masks::MaskOp::Subtract),
     );
     assert_eq!(editor.document.edit.recipe.masks[2].components.len(), 2);
     frame(
@@ -1564,7 +1564,7 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     let (steps, _) = editor.document.edit.history.steps();
     assert_eq!(steps[1].name, "White Balance");
     // Pasted onto a photo, the values were not estimated for it: the WB menu says Custom.
-    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    editor.copy_settings(crate::model::settings_groups::GroupSelection::default());
     editor.paste_settings();
     let r = &editor.document.edit.recipe;
     assert!(r.wb[0] < 1. && r.wb[2] > 1., "wb {:?}", r.wb);
@@ -1799,7 +1799,7 @@ fn auto_is_off_while_its_settings_stand() {
 }
 #[test]
 fn undoing_an_upright_mode_turns_it_off_once_analysed() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.edit.recipe.clone();
@@ -1829,7 +1829,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
 }
 #[test]
 fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
@@ -1852,7 +1852,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     });
-    e.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    e.copy_settings(crate::model::settings_groups::GroupSelection::default());
     e.document.edit.recipe = Recipe::default();
     e.paste_settings();
     assert_eq!(e.document.edit.recipe.upright.mode, UprightMode::Vertical);
@@ -1860,7 +1860,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
 }
 #[test]
 fn upright_analysis_yields_to_corrections_applied_meanwhile() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.edit.recipe.upright.mode = UprightMode::Level;
@@ -2478,7 +2478,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     };
     copied.update_wb(&first);
     editor.document.edit.recipe = copied.clone();
-    editor.copy_settings(crate::develop::settings_groups::GroupSelection::default());
+    editor.copy_settings(crate::model::settings_groups::GroupSelection::default());
     // Pasted onto a photo from another camera.
     editor.document.metadata = Some(second.clone());
     editor.document.edit.recipe = Recipe::default();
@@ -2503,7 +2503,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
 }
 #[test]
 fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
-    use crate::develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
+    use crate::model::settings_groups::{GroupInclusion, GroupSelection, SettingGroup};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -2584,7 +2584,7 @@ fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     };
     frame(vec![], false, &mut e);
     frame(vec![j()], false, &mut e);
-    let both = develop::ClipOverlay {
+    let both = crate::rendered::ClipOverlay {
         shadows: true,
         highlights: true,
     };
@@ -2595,7 +2595,10 @@ fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     assert_eq!(e.view.clipping.overlay(), both);
     frame(vec![], false, &mut e);
     frame(vec![j()], false, &mut e);
-    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
+    assert_eq!(
+        e.view.clipping.overlay(),
+        crate::rendered::ClipOverlay::NONE
+    );
 }
 #[test]
 fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
@@ -2612,7 +2615,10 @@ fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
     // was turned on.
     let frame = e.begin_edit_frame();
     e.finish_edit_frame(frame, &ctx);
-    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
+    assert_eq!(
+        e.view.clipping.overlay(),
+        crate::rendered::ClipOverlay::NONE
+    );
 }
 #[test]
 fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result<()> {
@@ -2931,7 +2937,7 @@ fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
 /// correction (docs/transform.md#guided-upright).
 #[test]
 fn guided_upright_gestures_are_one_history_step_each() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.module = Module::Develop;
@@ -3304,7 +3310,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert_eq!(editor.document.edit.recipe.upright.corrections, analysed);
     // A new Upright mode is an edit of its own.
     let frame = editor.begin_edit_frame();
-    editor.document.edit.recipe.upright.mode = crate::develop::UprightMode::Level;
+    editor.document.edit.recipe.upright.mode = crate::model::transform::UprightMode::Level;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0).unwrap();
@@ -3396,7 +3402,7 @@ fn red_eye_brackets_resize_the_circle_a_click_uses() {
 #[test]
 fn scrolling_over_the_photo_resizes_the_brush_spot_and_red_eye_circle() {
     use super::brush_scroll::{Adjust, MaskBrush, Scroll};
-    use crate::develop::masks::{MaskComponent, MaskGroup, MaskShape};
+    use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -3884,7 +3890,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     let pending = editor.preview.pending_recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
-        crate::develop::point_color::SwatchView::VisualizeRange
+        crate::model::point_color::SwatchView::VisualizeRange
     );
     assert_ne!(Some(pending), Some(&editor.effective_recipe()));
     // Not in Before, which shows the photo's defaults.
@@ -3947,7 +3953,7 @@ fn click_at(at: Pos2, button: egui::PointerButton) -> Vec<egui::Event> {
 }
 #[test]
 fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
-    use crate::develop::panels::PanelState;
+    use crate::model::panels::PanelState;
     let ctx = egui::Context::default();
     let mut state = PanelState::On;
     let area = std::cell::Cell::new(Rect::NOTHING);
@@ -3981,11 +3987,11 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
 }
 #[test]
 fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    let frame = |editor: &mut Editor, edit: &dyn Fn(&mut develop::Recipe)| {
+    let frame = |editor: &mut Editor, edit: &dyn Fn(&mut crate::model::recipe::Recipe)| {
         let started = editor.begin_edit_frame();
         edit(&mut editor.document.edit.recipe);
         editor.finish_edit_frame(started, &ctx);
@@ -4219,16 +4225,16 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let mut saved = Recipe::with_profiles(&metadata, &profiles);
     saved.exposure = 0.4;
-    saved.masks.push(develop::masks::MaskGroup {
-        components: vec![develop::masks::MaskComponent::new(
-            develop::masks::MaskShape::Radial {
+    saved.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
                 center: [0.5, 0.5],
                 radii: [0.2, 0.1],
                 angle: 0.,
                 feather: 0.5,
             },
         )],
-        adjust: develop::masks::LocalAdjust {
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },
@@ -4336,16 +4342,16 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     // a: a mask and a spot.
     let mut local = base.clone();
     local.exposure = 0.3;
-    local.masks.push(develop::masks::MaskGroup {
-        components: vec![develop::masks::MaskComponent::new(
-            develop::masks::MaskShape::Radial {
+    local.masks.push(crate::model::masks::MaskGroup {
+        components: vec![crate::model::masks::MaskComponent::new(
+            crate::model::masks::MaskShape::Radial {
                 center: [0.5, 0.5],
                 radii: [0.2, 0.1],
                 angle: 0.,
                 feather: 0.5,
             },
         )],
-        adjust: develop::masks::LocalAdjust {
+        adjust: crate::model::masks::LocalAdjust {
             shadows: 0.5,
             ..Default::default()
         },
@@ -4369,16 +4375,16 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     )?;
     // c: nothing. d: Upright Auto, e: Guided, neither analysed.
     let mut auto = base.clone();
-    auto.upright.mode = develop::UprightMode::Auto;
+    auto.upright.mode = crate::model::transform::UprightMode::Auto;
     save(&c, &ids[3], &auto)?;
     let mut guided = base.clone();
-    guided.upright.mode = develop::UprightMode::Guided;
+    guided.upright.mode = crate::model::transform::UprightMode::Guided;
     guided.upright.guides = vec![
-        develop::UprightGuide {
+        crate::model::transform::UprightGuide {
             a: [0.2, 0.1],
             b: [0.25, 0.9],
         },
-        develop::UprightGuide {
+        crate::model::transform::UprightGuide {
             a: [0.8, 0.1],
             b: [0.75, 0.9],
         },
@@ -4533,7 +4539,7 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
             let top = ui.cursor().min;
             super::widgets::setting_slider(
                 ui,
-                crate::develop::params::ParameterId::Exposure,
+                crate::model::params::ParameterId::Exposure,
                 value,
                 0.,
             );
@@ -4566,7 +4572,7 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
 }
 #[test]
 fn a_swatch_added_while_color_mixer_is_off_turns_it_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let (mut editor, _) =
         editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);

@@ -3,8 +3,8 @@
 use super::control_row;
 use crate::app::theme;
 use crate::camera_data::Metadata;
-use crate::develop::Recipe;
 use crate::lens::choice::{LensProfileSetup, ProfileMenus};
+use crate::model::recipe::Recipe;
 use eframe::egui;
 
 /// Draws the menus, or the profile in use as text when no imported profile fits.

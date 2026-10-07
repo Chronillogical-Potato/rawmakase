@@ -1,9 +1,8 @@
 //! Brush components rasterised once into an image-space coverage bitmap, then sampled
 //! at every render. The raster covers the strokes' bounds with at least four pixels
 //! per brush radius, up to 2048 on the long side, and is cached by the strokes' hash.
-use super::BrushStroke;
-use crate::camera_data::CameraImage;
-use crate::develop::retouch::profile;
+use crate::model::masks::BrushStroke;
+use crate::{camera_data::CameraImage, develop::retouch::profile};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -82,7 +81,7 @@ pub(crate) fn key(strokes: &[BrushStroke]) -> u64 {
 /// Camera colours along the strokes for Auto Mask, sampled from the photo.
 pub(crate) struct Guide<'a> {
     pub(crate) image: &'a CameraImage,
-    pub(crate) frame: crate::develop::ImageFrame,
+    pub(crate) frame: crate::model::image_frame::ImageFrame,
 }
 impl Guide<'_> {
     /// Log camera RGB at image-space position `p`.

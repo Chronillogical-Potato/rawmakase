@@ -1,9 +1,7 @@
-use super::Editor;
-use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
-use crate::app::Module;
-use crate::catalog::PhotoId;
-use crate::develop::{Geometry, Recipe};
+use super::{Editor, state::Picture};
+use crate::model::recipe::Recipe;
+use crate::{app::Module, catalog::PhotoId, develop::Geometry};
 use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 
@@ -294,9 +292,9 @@ impl Editor {
             // Visualize Range renders the selected swatch's selection instead of its
             // adjustment; never as the photo's thumbnail.
             let mut recipe = self.effective_recipe();
-            let visualize = self.visualized_swatch().and_then(|i| {
-                crate::develop::point_color::visualize_range(&recipe.point_colors, i)
-            });
+            let visualize = self
+                .visualized_swatch()
+                .and_then(|i| crate::model::point_color::visualize_range(&recipe.point_colors, i));
             let thumbnail = region.is_none() && self.shows_library_edit() && visualize.is_none();
             if let Some(list) = visualize {
                 recipe.point_colors = list;

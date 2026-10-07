@@ -14,7 +14,6 @@ pub mod color_noise;
 mod crop_constraint;
 // Develop code names the curve primitives as `develop::curve`, where they began.
 use crate::color::curve;
-pub mod edit;
 pub mod effects;
 mod geometry;
 pub mod gpu;
@@ -24,15 +23,11 @@ mod local_tone;
 mod local_tone_data;
 pub mod masks;
 mod orientation;
-pub mod panels;
 pub mod parametric;
-pub mod params;
 mod pipeline;
 pub mod point_color;
 mod preview_renderer;
 mod pyramid;
-pub mod saved_format;
-pub mod settings_groups;
 pub mod sharpening;
 pub mod targeted;
 pub mod texture;
@@ -41,30 +36,19 @@ pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
 pub mod red_eye;
-mod rendered;
-mod valid;
-pub use valid::ValidRecipe;
 pub mod retouch;
 mod stage_cache;
-mod white_balance;
 
 pub use crate::color::{mul, srgb_encode};
 pub use auto::{
-    AutoTone, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
+    AutoTone, Measures, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,
 };
-pub use black_white::{AutoMix, ColorSpread, Treatment, is_monochrome};
-pub use geometry::{Geometry, Transform, Upright, UprightGuide, UprightMode, display_axes};
-pub use image_space::{ImageFrame, ViewMapping};
+pub use black_white::{AutoMix, ColorSpread};
+pub use geometry::{Geometry, rendered_crop};
+pub use image_space::ViewMapping;
 pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{
     neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
-pub use recipe::{
-    EXPOSURE_LIMIT, LocalEdits, ProfileCorrections, ProfilePreference, Recipe, TEMPERATURE_MAX,
-    TEMPERATURE_MIN, TINT_LIMIT, camera_matching_names, camera_matching_profile,
-};
-pub(crate) use rendered::unit_to_u8;
-pub use rendered::{ClipOverlay, Histogram, Rendered};
-pub use white_balance::NamedWhiteBalance;

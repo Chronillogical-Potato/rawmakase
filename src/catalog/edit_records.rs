@@ -53,9 +53,11 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::masks;
+
     use crate::edits::{Origin, resolve};
-    use crate::{develop::Recipe, export_settings::ExportOptions, raw_defaults::DevelopDefaults};
+    use crate::{
+        export_settings::ExportOptions, model::recipe::Recipe, raw_defaults::DevelopDefaults,
+    };
     use std::path::Path;
 
     /// Each photo's catalog id and file.
@@ -95,14 +97,16 @@ mod tests {
         // Saved, masks included: they are stored apart from the recipe.
         let mut saved = Recipe::with_profiles(&metadata, &profiles);
         saved.exposure = 0.4;
-        saved.masks.push(masks::MaskGroup {
-            components: vec![masks::MaskComponent::new(masks::MaskShape::Radial {
-                center: [0.5, 0.5],
-                radii: [0.2, 0.1],
-                angle: 0.,
-                feather: 0.5,
-            })],
-            adjust: masks::LocalAdjust {
+        saved.masks.push(crate::model::masks::MaskGroup {
+            components: vec![crate::model::masks::MaskComponent::new(
+                crate::model::masks::MaskShape::Radial {
+                    center: [0.5, 0.5],
+                    radii: [0.2, 0.1],
+                    angle: 0.,
+                    feather: 0.5,
+                },
+            )],
+            adjust: crate::model::masks::LocalAdjust {
                 shadows: 0.5,
                 ..Default::default()
             },

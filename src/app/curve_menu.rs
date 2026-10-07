@@ -3,7 +3,7 @@
 //! curve under a name. Choosing a curve is one History step.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, theme};
-use crate::develop::panels::{Panel, PanelState};
+use crate::model::panels::{Panel, PanelState};
 use crate::presets::curves::{BuiltinCurve, PointCurve, SavedCurve, SavedCurves};
 use eframe::egui::{self, Color32, Vec2};
 
@@ -263,7 +263,7 @@ mod tests {
         e.save_point_curve(&store, "Green Lift");
         assert!(e.status.contains("already saved"), "{}", e.status);
 
-        e.document.edit.recipe = crate::develop::Recipe::default();
+        e.document.edit.recipe = crate::model::recipe::Recipe::default();
         let frame = e.begin_edit_frame();
         e.choose_point_curve(CurveChoice::Saved(saved[0].clone()));
         e.finish_edit_frame(frame, &ctx);

@@ -1,6 +1,6 @@
 use super::*;
 use crate::xml::ns::{CRS, RDF};
-use crate::{camera_data::Metadata, develop::Recipe};
+use crate::{camera_data::Metadata, model::recipe::Recipe};
 use anyhow::Result;
 use std::path::Path;
 fn xml(attrs: &str, body: &str) -> String {
@@ -104,7 +104,7 @@ fn point_colors_import_and_write_back() {
         "{packet}"
     );
     let again = parse(Path::new("again.xmp"), &packet).unwrap();
-    let swatches = crate::develop::point_color::parse_list(
+    let swatches = crate::model::point_color::parse_list(
         &again.settings["PointColors"],
         again.settings.get("ColorVariance").map(String::as_str),
     );
@@ -213,7 +213,12 @@ fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
     let attrs =
         r#"c:WhiteBalance="Auto" c:CropLeft="0" c:CropTop="0" c:CropRight="0.45" c:CropBottom="1""#;
     let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;
-    let result = preset.apply(&Recipe::default(), &m, &[], Some(&im))?;
+    let result = preset.apply(
+        &Recipe::default(),
+        &m,
+        &[],
+        Some(&crate::develop::Measures(&im)),
+    )?;
     assert_eq!(result.crop, [0., 0., 0.45, 1.]);
     let cropped = Recipe {
         crop: result.crop,
@@ -488,7 +493,7 @@ fn empty_flags_are_unset_and_curves_still_apply() -> Result<()> {
 /// dab); AI masks are reported, not imported.
 #[test]
 fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
-    use crate::develop::masks::{MaskOp, MaskShape};
+    use crate::model::masks::{MaskOp, MaskShape};
     use crate::model::retouch::{RetouchMode, RetouchShape};
     let dabs =
         "<r:li>d 0.200000 0.700000</r:li><r:li>r 0.030000</r:li><r:li>d 0.300000 0.700000</r:li>";
@@ -607,7 +612,7 @@ fn lightroom_catalog_tables_parse_as_data() -> Result<()> {
     let node = Node::from_lua(text)?;
     let mut local = std::collections::BTreeMap::new();
     local.insert("RetouchAreas".to_string(), node);
-    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&Metadata {
         width: 300,
         height: 200,
         ..Default::default()
@@ -635,7 +640,7 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
         None,
     )?;
     let u = &r.upright;
-    assert_eq!(u.mode, crate::develop::UprightMode::Vertical);
+    assert_eq!(u.mode, crate::model::transform::UprightMode::Vertical);
     assert_eq!(u.corrections.len(), 6);
     assert!((u.corrections[4][6] + 2.019_842_6).abs() < 1e-6);
     assert_eq!(u.lightroom["UprightFocalLength35mm"], "34.9225");
@@ -647,7 +652,7 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
     )?;
     let r = preset.apply(&Recipe::default(), &Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 0.5);
-    assert_eq!(r.upright.mode, crate::develop::UprightMode::Level);
+    assert_eq!(r.upright.mode, crate::model::transform::UprightMode::Level);
     assert!(r.upright.corrections.is_empty());
     // A photo's own settings without Lightroom's correction are reported.
     let sidecar = parse(
@@ -726,10 +731,8 @@ fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<(
 /// through the old lens settings; settings that change nothing rendered keep it.
 #[test]
 fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Result<()> {
-    use crate::develop::{
-        UprightMode,
-        panels::{Panel, PanelState},
-    };
+    use crate::model::panels::{Panel, PanelState};
+    use crate::model::transform::UprightMode;
     let mut base = Recipe::default();
     base.upright.mode = UprightMode::Level;
     base.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
@@ -836,7 +839,12 @@ fn auto_grayscale_mix_uses_stored_mixer_or_estimates_it() -> Result<()> {
         scale_factor: 1.,
         scale_clipped: 0,
     };
-    let r = auto.apply(&base, &photo_metadata, &[], Some(&im))?;
+    let r = auto.apply(
+        &base,
+        &photo_metadata,
+        &[],
+        Some(&crate::develop::Measures(&im)),
+    )?;
     let spread = crate::develop::ColorSpread::measure(&im);
     let expected = crate::develop::AutoMix {
         spread: &spread,
@@ -940,7 +948,7 @@ fn constrain_crop_imports() -> Result<()> {
 /// opens to be solved on the photo.
 #[test]
 fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
-    use crate::develop::{UprightGuide, UprightMode};
+    use crate::model::transform::{UprightGuide, UprightMode};
     let identity = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,1.000000000";
     let guided = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.100000000,1.000000000";
     let attrs = format!(
@@ -1112,7 +1120,7 @@ fn red_eye_catalog_tables_parse_as_data() -> Result<()> {
         pupilDarkenAmount = 0.5, pupilSize = 0.5, showPetEyeHighlight = 1 } }"#;
     let mut local = std::collections::BTreeMap::new();
     local.insert("RedEyeInfo".to_string(), Node::from_lua(text)?);
-    let frame = crate::develop::ImageFrame::for_metadata(&Metadata {
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&Metadata {
         width: 6000,
         height: 4000,
         ..Default::default()
@@ -1482,4 +1490,23 @@ fn lightroom_manual_vignetting_takes_the_measured_operator() -> Result<()> {
     let r = apply(r#"c:Exposure2012="0.5""#)?;
     assert_eq!(r.lens_vignette_model, LensVignetteModel::Original);
     Ok(())
+}
+
+/// A packet records the crop it is given as rendered, else the recipe's own.
+#[test]
+fn packets_record_the_rendered_crop() {
+    let r = Recipe {
+        crop: [0.1, 0.2, 0.9, 0.8],
+        ..Default::default()
+    };
+    let mut photo = crate::xmp::write::Photo {
+        settings: true,
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(packet.contains(r#"crs:CropLeft="0.100000""#), "{packet}");
+    photo.crop = Some([0.15, 0.25, 0.85, 0.75]);
+    let packet = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(packet.contains(r#"crs:CropLeft="0.150000""#), "{packet}");
+    assert!(packet.contains(r#"crs:CropBottom="0.750000""#), "{packet}");
 }

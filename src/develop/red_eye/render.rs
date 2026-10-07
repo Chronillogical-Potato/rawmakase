@@ -5,11 +5,9 @@
 //! the red cast leaves no trace, then Darken scales it. Pupil Size scales the ellipse.
 //! The constants are fitted to Camera Raw 18.7 renders of synthetic pupils (see
 //! docs/retouching.md).
+use crate::model::image_frame::ImageFrame;
 use crate::model::red_eye::{EyeKind, RedEyeOp, half, mahalanobis2};
-use crate::{
-    camera_data::CameraImage,
-    develop::{ImageFrame, retouch::profile},
-};
+use crate::{camera_data::CameraImage, develop::retouch::profile};
 
 /// A rectangle of decoded pixels, `[x0, y0, x1, y1)`.
 type PixelRect = [i32; 4];
@@ -74,7 +72,7 @@ impl Placed {
             EyeKind::Pet {
                 catchlight: Some(c),
             } => {
-                let o = crate::develop::image_space::turn(frame.turns, 0.5 + c[0], 0.5 + c[1]);
+                let o = crate::model::image_frame::turn(frame.turns, 0.5 + c[0], 0.5 + c[1]);
                 let o = [o[0] - 0.5, o[1] - 0.5];
                 Some([
                     center[0] + o[0] * radius[0] * half,

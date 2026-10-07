@@ -1,8 +1,11 @@
 //! The Basic panel's Treatment and the B&W panel's Auto. Each runs during an edit
 //! frame, which records it as one History step under the name it gives.
 use super::{Editor, history::Step};
-use crate::camera_data::Metadata;
-use crate::develop::{AutoMix, ColorSpread, Treatment};
+use crate::model::recipe::Treatment;
+use crate::{
+    camera_data::Metadata,
+    develop::{AutoMix, ColorSpread},
+};
 
 /// What converting to black & white does to a mix that was never set: Lightroom's
 /// "Apply auto mix when first converting to black and white" preference, on by
@@ -106,8 +109,8 @@ impl Editor {
     ) {
         let r = &self.document.edit.recipe;
         // Measured only for a first conversion by a black & white profile.
-        let converts = crate::develop::is_monochrome(r.profile.as_deref())
-            && !crate::develop::is_monochrome(old)
+        let converts = crate::model::recipe::is_monochrome(r.profile.as_deref())
+            && !crate::model::recipe::is_monochrome(old)
             && !r.effects.monochrome
             && r.effects.gray_mix == [0.; 8];
         let colors = converts.then(|| self.first_conversion_colors()).flatten();

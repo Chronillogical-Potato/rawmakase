@@ -10,7 +10,7 @@
 use crate::app::worker::{Event, Latest, LoadJob};
 use crate::catalog::PhotoId;
 #[cfg(test)]
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use eframe::egui::{self, Vec2};
 use std::{
     path::PathBuf,
@@ -40,7 +40,7 @@ pub struct Editor {
     /// The settings of the photo open before this one, for Paste from Previous.
     previous_settings: Option<settings_transfer::Settings>,
     /// The groups Copy Settings last copied.
-    copy_groups: crate::develop::settings_groups::GroupSelection,
+    copy_groups: crate::model::settings_groups::GroupSelection,
     /// The Point Curve menu's saved curves and its Save window.
     curves: curve_menu::CurveMenu,
     /// Collapsed panel sections as last saved to the session.

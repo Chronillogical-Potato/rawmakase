@@ -1,97 +1,16 @@
-use super::Recipe;
-use crate::camera_data::CameraImage;
-use serde::{Deserialize, Serialize};
+use crate::model::recipe::Recipe;
+use crate::{camera_data::CameraImage, model::transform::Transform};
 
-/// Lightroom's Transform panel (manual sliders). Applied after lens correction and
-/// before crop, in the oriented frame. Slider values are Lightroom's divided by 100,
-/// except `rotate` (degrees) and `scale` (1 = 100%).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct Transform {
-    pub vertical: f32,
-    pub horizontal: f32,
-    pub rotate: f32,
-    pub aspect: f32,
-    pub scale: f32,
-    pub offset_x: f32,
-    pub offset_y: f32,
-}
-impl Default for Transform {
-    fn default() -> Self {
-        Self {
-            vertical: 0.,
-            horizontal: 0.,
-            rotate: 0.,
-            aspect: 0.,
-            scale: 1.,
-            offset_x: 0.,
-            offset_y: 0.,
-        }
+/// The crop as rendered, `[left, top, right, bottom]`: with Constrain Crop, the crop
+/// constrained to the photo, which is what Lightroom stores; otherwise the recipe's.
+pub fn rendered_crop(r: &Recipe, m: &crate::camera_data::Metadata) -> [f32; 4] {
+    if r.constrain_crop {
+        Geometry::for_metadata(m, &r.as_rendered()).crop()
+    } else {
+        r.crop
     }
-}
-/// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
-/// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
-pub fn display_axes(turns: u8, flip_x: bool, flip_y: bool) -> [[f32; 2]; 2] {
-    let recorded = |x: f32, y: f32| {
-        let x = if flip_x { 1. - x } else { x };
-        let y = if flip_y { 1. - y } else { y };
-        super::image_space::turn(turns, x, y)
-    };
-    let [ox, oy] = recorded(0., 0.);
-    let [xx, xy] = recorded(1., 0.);
-    let [yx, yy] = recorded(0., 1.);
-    [[xx - ox, yx - ox], [xy - oy, yy - oy]]
 }
 impl Transform {
-    /// The sliders as Lightroom shows them on the displayed photo, when `self` holds
-    /// them as stored, in the recorded frame (`m` from [`display_axes`]). Lightroom
-    /// stores Vertical −70 on a photo turned 90° left as `PerspectiveHorizontal` +70.
-    pub fn displayed(&self, m: [[f32; 2]; 2]) -> Self {
-        self.reoriented([[m[0][0], m[1][0]], [m[0][1], m[1][1]]])
-    }
-    /// The stored sliders for sliders shown on the displayed photo: the inverse of
-    /// [`Self::displayed`].
-    pub fn recorded(&self, m: [[f32; 2]; 2]) -> Self {
-        self.reoriented(m)
-    }
-    /// Perspective (h, v) and offsets (x, −y) are vectors in the frame; a swap of axes
-    /// flips Aspect, and a mirror flips Rotate.
-    fn reoriented(&self, m: [[f32; 2]; 2]) -> Self {
-        let map = |[x, y]: [f32; 2]| [m[0][0] * x + m[0][1] * y, m[1][0] * x + m[1][1] * y];
-        let [horizontal, vertical] = map([self.horizontal, self.vertical]);
-        let [offset_x, minus_y] = map([self.offset_x, -self.offset_y]);
-        let determinant = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-        Self {
-            vertical,
-            horizontal,
-            rotate: self.rotate * determinant,
-            aspect: if m[0][0] == 0. {
-                -self.aspect
-            } else {
-                self.aspect
-            },
-            scale: self.scale,
-            offset_x,
-            offset_y: -minus_y,
-        }
-    }
-    pub fn is_identity(&self) -> bool {
-        *self == Self::default()
-    }
-    pub fn validate(&self) -> bool {
-        [
-            self.vertical,
-            self.horizontal,
-            self.aspect,
-            self.offset_x,
-            self.offset_y,
-        ]
-        .iter()
-        .all(|v| v.is_finite() && v.abs() <= 1.)
-            && self.rotate.is_finite()
-            && self.rotate.abs() <= 10.
-            && (0.5..=1.5).contains(&self.scale)
-    }
     /// Homography from output to source coordinates, both centred, y down, in units
     /// of the long edge. The forward (source-to-output) matrix was fitted to Camera Raw
     /// 18.6 renders (docs/transform.md): Rotate applies first, then Vertical and
@@ -124,168 +43,6 @@ impl Transform {
         ];
         let forward = mat(offset, mat(scale, mat(perspective, rotate)));
         crate::color::inverse(forward)
-    }
-}
-/// Lightroom's Upright modes, in Adobe's `crs:PerspectiveUpright` order.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum UprightMode {
-    #[default]
-    Off,
-    Auto,
-    Full,
-    Level,
-    Vertical,
-    Guided,
-}
-impl UprightMode {
-    pub const ALL: [Self; 6] = [
-        Self::Off,
-        Self::Auto,
-        Self::Full,
-        Self::Level,
-        Self::Vertical,
-        Self::Guided,
-    ];
-    /// Adobe's `crs:PerspectiveUpright` value, which also indexes `UprightTransform_N`.
-    pub fn code(self) -> usize {
-        self as usize
-    }
-    pub fn from_code(code: usize) -> Option<Self> {
-        Self::ALL.get(code).copied()
-    }
-}
-/// Lightroom's Upright: the chosen mode and the correction for each mode, as Lightroom
-/// stores them so that switching modes needs no new analysis.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default, from = "StoredUpright")]
-pub struct Upright {
-    pub mode: UprightMode,
-    /// Forward (source-to-output) homographies indexed by [`UprightMode::code`], row
-    /// major, in 0–1 coordinates of the photo as the camera recorded it, before any
-    /// rotation or flip and after the camera's default crop. This is how Lightroom
-    /// stores `crs:UprightTransform_N`; Camera Raw renders them exactly (docs/transform.md).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub corrections: Vec<[f32; 9]>,
-    /// Guided Upright's guides, drawn on this photo; `corrections` holds what they
-    /// solve to.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub guides: Vec<UprightGuide>,
-    /// Lightroom's other Upright settings (analysis centre, focal length, version),
-    /// kept to write back unchanged.
-    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub lightroom: std::collections::BTreeMap<String, String>,
-}
-/// [`Upright`] as saved. Edits saved before guides were editable kept Lightroom's
-/// guides among its other settings; they become guides when read.
-#[derive(Deserialize)]
-#[serde(default)]
-#[derive(Default)]
-struct StoredUpright {
-    mode: UprightMode,
-    corrections: Vec<[f32; 9]>,
-    guides: Vec<UprightGuide>,
-    lightroom: std::collections::BTreeMap<String, String>,
-}
-impl From<StoredUpright> for Upright {
-    fn from(s: StoredUpright) -> Self {
-        let StoredUpright {
-            mode,
-            corrections,
-            mut guides,
-            mut lightroom,
-        } = s;
-        if guides.is_empty() {
-            let mut found: Vec<(usize, UprightGuide)> = lightroom
-                .iter()
-                .filter_map(|(key, value)| {
-                    let i = key.strip_prefix("UprightFourSegments_")?.parse().ok()?;
-                    Some((i, super::guided::parse_guide(value)?))
-                })
-                .collect();
-            found.sort_by_key(|(i, _)| *i);
-            guides = found
-                .into_iter()
-                .map(|(_, g)| g)
-                .take(super::guided::MAX_GUIDES)
-                .collect();
-        }
-        lightroom.retain(|key, _| !key.starts_with("UprightFourSegments"));
-        Self {
-            mode,
-            corrections,
-            guides,
-            lightroom,
-        }
-    }
-}
-/// A Guided Upright guide: a line drawn along an edge that should be vertical or
-/// horizontal. Its ends are in 0–1 coordinates of the photo as recorded, where Upright
-/// applies: after lens corrections, before the photo is turned or flipped for display
-/// and before Upright itself, so the guide stays on the edge it was drawn along
-/// whatever the correction (docs/transform.md#guided-upright).
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct UprightGuide {
-    pub a: [f32; 2],
-    pub b: [f32; 2],
-}
-impl Upright {
-    pub fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-    /// Keeps the mode but drops what was analysed from one photo, for settings moving
-    /// to another: the corrections, and Lightroom's analysis details.
-    pub fn clear_analysis(&mut self) {
-        self.corrections.clear();
-        self.lightroom.clear();
-        self.guides.clear();
-        // Guided can't be analysed again without its guides.
-        if self.mode == UprightMode::Guided {
-            self.mode = UprightMode::Off;
-        }
-    }
-    /// Drops the corrections analysed through lens settings that changed since, for a new
-    /// analysis of the same photo. Guided keeps its guides, to solve again; without
-    /// guides it has nothing to solve from and turns Off.
-    pub fn analyse_again(&mut self) {
-        self.corrections.clear();
-        self.lightroom.clear();
-        if self.mode == UprightMode::Guided && self.guides.is_empty() {
-            self.mode = UprightMode::Off;
-        }
-    }
-    /// Whether the mode needs an analysis (or, for Guided, its guides solved) that is
-    /// not there yet.
-    pub fn needs_analysis(&self) -> bool {
-        let missing = self.corrections.len() <= self.mode.code();
-        match self.mode {
-            UprightMode::Off => false,
-            UprightMode::Guided => missing && !self.guides.is_empty(),
-            _ => missing,
-        }
-    }
-    pub fn validate(&self) -> bool {
-        self.corrections.len() <= UprightMode::ALL.len()
-            && self.guides.len() <= super::guided::MAX_GUIDES
-            && self
-                .guides
-                .iter()
-                .all(|g| g.a.iter().chain(&g.b).all(|v| v.is_finite()))
-            && self.corrections.iter().all(|m| {
-                let [a, b, c, d, e, f, g, h, i] = *m;
-                let determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-                // Rendering inverts it; a singular one would silently render as Off.
-                m.iter().all(|v| v.is_finite()) && determinant.abs() > 1e-6
-            })
-    }
-    /// The chosen mode's correction, when it is not the identity.
-    pub fn correction(&self) -> Option<[[f32; 3]; 3]> {
-        if self.mode == UprightMode::Off {
-            return None;
-        }
-        let m = self.corrections.get(self.mode.code())?;
-        let m: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| m[3 * i + j]));
-        (m != IDENTITY && m[2][2] != 0.).then_some(m)
     }
 }
 /// Lightroom's manual lens Distortion, measured on Camera Raw 18.7 renders of the
@@ -401,7 +158,7 @@ pub struct Geometry {
 impl Geometry {
     pub fn new(im: &CameraImage, r: &Recipe, max_edge: u32) -> Self {
         Self::with_frame(
-            super::ImageFrame::new(im),
+            crate::model::image_frame::ImageFrame::new(im),
             [im.width, im.height],
             r,
             max_edge,
@@ -411,14 +168,19 @@ impl Geometry {
     /// the photo is decoded.
     pub fn for_metadata(m: &crate::camera_data::Metadata, r: &Recipe) -> Self {
         Self::with_frame(
-            super::ImageFrame::for_metadata(m),
+            crate::model::image_frame::ImageFrame::for_metadata(m),
             [m.width.max(1), m.height.max(1)],
             r,
             0,
         )
     }
     /// For a photo decoded at `size` pixels with `frame`.
-    fn with_frame(frame: super::ImageFrame, size: [u32; 2], r: &Recipe, max_edge: u32) -> Self {
+    fn with_frame(
+        frame: crate::model::image_frame::ImageFrame,
+        size: [u32; 2],
+        r: &Recipe,
+        max_edge: u32,
+    ) -> Self {
         let turns = (frame.turns + r.rotation) % 4;
         let [w, h] = frame.size();
         let (ow, oh) = if r.rotation % 2 == 1 { (h, w) } else { (w, h) };
@@ -433,8 +195,8 @@ impl Geometry {
         let transform = Self::homography(r, frame_width, frame_height);
         // Off with the Lens Corrections panel, for callers that pass the stored recipe
         // (the white balance picker) rather than the rendered one.
-        let lens_panel = r.panels.state(super::panels::Panel::LensCorrections);
-        let manual = (r.engine >= 4 && lens_panel == super::panels::PanelState::On)
+        let lens_panel = r.panels.state(crate::model::panels::Panel::LensCorrections);
+        let manual = (r.engine >= 4 && lens_panel == crate::model::panels::PanelState::On)
             .then(|| ManualDistortion::new(r.lens_manual_distortion, frame_width, frame_height))
             .flatten();
         let mut g = Self {
@@ -639,7 +401,7 @@ impl Geometry {
             }
             None => (x, y),
         };
-        let [mut x, mut y] = super::image_space::turn((4 - self.turns) % 4, x, y);
+        let [mut x, mut y] = crate::model::image_frame::turn((4 - self.turns) % 4, x, y);
         if self.flip_x {
             x = 1. - x;
         }
@@ -680,6 +442,7 @@ impl super::crop_constraint::Covers for Geometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::transform::display_axes;
 
     #[test]
     fn sliders_show_along_the_displayed_axes_as_in_lightroom() {
@@ -805,8 +568,8 @@ mod manual_distortion_tests {
         assert!(Geometry::new(&im, &old, 0).manual.is_none());
         let mut off = distorted(0.5);
         off.panels.set(
-            crate::develop::panels::Panel::LensCorrections,
-            crate::develop::panels::PanelState::Off,
+            crate::model::panels::Panel::LensCorrections,
+            crate::model::panels::PanelState::Off,
         );
         assert!(Geometry::new(&im, &off, 0).manual.is_none());
     }
@@ -841,40 +604,9 @@ mod manual_distortion_tests {
     }
 }
 #[cfg(test)]
-mod upright_tests {
-    use super::*;
-    #[test]
-    fn clearing_the_analysis_turns_guided_off() {
-        let mut u = Upright {
-            mode: UprightMode::Guided,
-            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6],
-            ..Default::default()
-        };
-        u.clear_analysis();
-        assert_eq!(u.mode, UprightMode::Off);
-        u.mode = UprightMode::Vertical;
-        u.clear_analysis();
-        assert_eq!(u.mode, UprightMode::Vertical);
-    }
-}
-#[cfg(test)]
-mod singular_tests {
-    use super::*;
-    #[test]
-    fn singular_upright_corrections_are_invalid() {
-        let mut u = Upright {
-            mode: UprightMode::Level,
-            corrections: vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4],
-            ..Default::default()
-        };
-        assert!(u.validate());
-        u.corrections[3] = [1., 0., 0., 0., 0., 0., 0., 0., 1.];
-        assert!(!u.validate());
-    }
-}
-#[cfg(test)]
 mod constrain_crop_tests {
     use super::*;
+    use crate::model::transform::{Upright, UprightMode};
     fn photo() -> CameraImage {
         CameraImage {
             width: 300,
@@ -1042,6 +774,17 @@ mod constrain_crop_tests {
     /// At Scale 50 only the middle half of the frame has a source pixel: the crop
     /// becomes that half, the largest one at the photo's aspect.
     #[test]
+    fn the_rendered_crop_is_the_constrained_one_only_with_constrain_crop() {
+        let mut r = Recipe::default();
+        r.transform.vertical = 1.;
+        let m = photo().metadata;
+        assert_eq!(rendered_crop(&r, &m), r.crop);
+        r.constrain_crop = true;
+        let constrained = rendered_crop(&r, &m);
+        assert_eq!(constrained, Geometry::for_metadata(&m, &r).crop());
+        assert_ne!(constrained, r.crop);
+    }
+    #[test]
     fn constrain_crop_takes_the_largest_crop_that_fits() {
         let mut r = Recipe {
             constrain_crop: true,
@@ -1116,7 +859,7 @@ mod constrain_crop_tests {
     /// Distortion alone renders the stored crop.
     #[test]
     fn transform_panel_off_bypasses_constrain_crop() {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         let mut r = Recipe {
             constrain_crop: true,
             lens_manual_distortion: 0.5,

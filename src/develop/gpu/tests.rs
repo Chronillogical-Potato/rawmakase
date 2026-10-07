@@ -302,14 +302,14 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     mono.effects.gray_mix = [0.3, -0.7, 0.1, 0., -0.2, 0.9, 0., -1.];
     recipes.push(mono);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
-    let mut warm = crate::develop::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
+    let mut warm = crate::model::point_color::PointColor::sampled([0.6, 0.5, 0.2]);
     warm.shift = [0.4, -0.5, 0.3];
     warm.variance = 0.6;
     warm.range = 0.8;
-    let mut red = crate::develop::point_color::PointColor::sampled([5.8, 0.4, 0.1]);
+    let mut red = crate::model::point_color::PointColor::sampled([5.8, 0.4, 0.1]);
     red.shift = [-0.6, 0.7, -0.4];
     red.range = 0.2;
-    let mut cool = crate::develop::point_color::PointColor::sampled([3.5, 0.3, 0.3]);
+    let mut cool = crate::model::point_color::PointColor::sampled([3.5, 0.3, 0.3]);
     cool.shift = [0.2, 0.3, 0.];
     cool.variance = -0.8;
     r.point_colors = vec![warm, red, cool];
@@ -318,7 +318,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     // Visualize Range of the second swatch.
     let mut visualized = r.clone();
     visualized.point_colors =
-        crate::develop::point_color::visualize_range(&r.point_colors, 1).unwrap();
+        crate::model::point_color::visualize_range(&r.point_colors, 1).unwrap();
     recipes.push(visualized);
     r.effects.defringe = [0.5, 0.3];
     recipes.push(r.clone());
@@ -489,8 +489,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let cancel = AtomicBool::new(false);
     // `ca`: 1 the measured aberration alone, 2 with the built-in distortion. Each
     // spatial run has another vignette style and amount.
-    use crate::develop::ClipOverlay;
     use crate::model::effects::VignetteStyle::*;
+    use crate::rendered::ClipOverlay;
     let (none, both) = (
         ClipOverlay::NONE,
         ClipOverlay {
@@ -544,7 +544,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.straighten = 3.;
             recipe.crop = [0.05, 0.1, 0.95, 0.92];
             recipe.transform.vertical = 0.2;
-            recipe.upright.mode = crate::develop::UprightMode::Level;
+            recipe.upright.mode = crate::model::transform::UprightMode::Level;
             recipe.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
             recipe.upright.corrections[3] = [1.02, 0.01, -0.02, -0.02, 1.02, 0.01, 0.01, 0., 1.];
             recipe.lens_builtin = true;
@@ -596,8 +596,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             // either side of it; such pixels are compared without the overlay.
             let near = |v: f32| {
                 [
-                    crate::develop::rendered::HIGHLIGHT_CLIP,
-                    crate::develop::rendered::SHADOW_CLIP,
+                    crate::rendered::HIGHLIGHT_CLIP,
+                    crate::rendered::SHADOW_CLIP,
                 ]
                 .iter()
                 .any(|t| (v - t).abs() < 1e-4)
@@ -631,7 +631,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             let histogram = expected.histogram();
             // Counted from the same values, so within the GPU's float rounding.
             let clipped =
-                |h: &crate::develop::Histogram| [h.clipped.shadows, h.clipped.highlights].concat();
+                |h: &crate::rendered::Histogram| [h.clipped.shadows, h.clipped.highlights].concat();
             for (gpu, cpu) in clipped(&frame.histogram).iter().zip(clipped(&histogram)) {
                 assert!(
                     gpu.abs_diff(cpu) <= cpu / 100 + 2,
@@ -709,7 +709,7 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
     for x in [0, 4, 8, 12, 16] {
         let display = super::Display {
             slot: super::Slot::Region,
-            clipping: crate::develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             monitor: None,
             navigator: None,
             thumbnail: None,
@@ -744,11 +744,14 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
+    use crate::model::masks::LocalAdjust;
     use crate::{
         camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
-        develop::masks::{LocalAdjust, MaskWeights},
-        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        develop::{
+            masks::MaskWeights,
+            pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        },
     };
     use std::sync::Arc;
     let metadata = Metadata {

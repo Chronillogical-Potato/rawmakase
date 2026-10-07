@@ -1,7 +1,7 @@
 //! RAWmakase JSON recipes, including migration of earlier pipeline versions.
 use crate::{
-    develop::Recipe,
-    develop::saved_format::{migrate_recipe, saved_version},
+    model::recipe::Recipe,
+    model::saved_format::{migrate_recipe, saved_version},
     storage::atomic_json,
 };
 use anyhow::Result;
@@ -16,7 +16,7 @@ struct Preset {
     /// Masks, kept outside the recipe so releases before them read the rest (the
     /// envelope accepts unknown keys in every release).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    masks: Vec<crate::develop::masks::MaskGroup>,
+    masks: Vec<crate::model::masks::MaskGroup>,
 }
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;
@@ -41,7 +41,7 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     let mut v: serde_json::Value = serde_json::from_reader(File::open(path)?)?;
     migrate_recipe(&mut v)?;
     let p: Preset = serde_json::from_value(v)?;
-    let mut recipe = p.recipe.with_local(crate::develop::LocalEdits {
+    let mut recipe = p.recipe.with_local(crate::model::recipe::LocalEdits {
         retouch: Vec::new(),
         red_eye: Default::default(),
         masks: p.masks,
@@ -55,7 +55,7 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
 /// or red eye, so the photo keeps its own and their panel switches; the preset's masks
 /// replace the photo's only when it has any, as in Lightroom.
 pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
-    use crate::develop::panels::Panel;
+    use crate::model::panels::Panel;
     preset.retouch = photo.retouch.clone();
     preset.retouch_model = photo.retouch_model;
     preset.red_eye = photo.red_eye.clone();
@@ -71,7 +71,7 @@ pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     use crate::model::red_eye::RedEyeOp;
     #[test]
     fn a_preset_leaves_the_photos_red_eye_and_its_switch() {

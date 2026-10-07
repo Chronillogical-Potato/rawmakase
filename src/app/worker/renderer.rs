@@ -1,6 +1,7 @@
 use super::{
     Event, Latest, Pane, Preview, RenderJob, RenderStage, RetiredTextures, TaskKind, send,
 };
+use crate::model::recipe::Recipe;
 use crate::{
     develop::{self, gpu, quality::Output},
     raw,
@@ -30,23 +31,23 @@ const QUICK_REGION: std::time::Duration = std::time::Duration::from_millis(40);
 /// A finished render and the view it shows.
 struct Shown {
     image: Arc<crate::camera_data::CameraImage>,
-    recipe: develop::Recipe,
+    recipe: Recipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
-    clipping: develop::ClipOverlay,
+    clipping: crate::rendered::ClipOverlay,
     monitor: Option<PathBuf>,
     navigator: bool,
     overlay: super::Overlay,
     out: Shot,
 }
 enum Shot {
-    Pixels(develop::Rendered),
+    Pixels(crate::rendered::Rendered),
     /// A presented frame, valid while its texture still holds `generation`.
     Frame {
         texture: wgpu::Texture,
         generation: u64,
         preview: Presented,
-        histogram: Box<develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
     },
 }
 impl Shown {
@@ -217,11 +218,7 @@ struct PaneState {
     quick_region: bool,
     /// The whole photo's histogram for the last edit shown at 100%, so panning
     /// there does not render the whole photo again.
-    whole_shown: Option<(
-        Arc<crate::camera_data::CameraImage>,
-        develop::Recipe,
-        Histogram,
-    )>,
+    whole_shown: Option<(Arc<crate::camera_data::CameraImage>, Recipe, Histogram)>,
 }
 
 fn render(
@@ -274,7 +271,7 @@ fn render(
         let monitor = match (&job.monitor, textures.is_some()) {
             (Some(path), true) => {
                 if lut.as_ref().is_none_or(|(p, _)| p != path) {
-                    let built = gpu::MonitorLut::new(path)
+                    let built = gpu::MonitorLut::sample(|rgb| raw::display_transform(path, rgb))
                         .map(Arc::new)
                         .map_err(|e| e.to_string());
                     *lut = Some((path.clone(), built));
@@ -319,7 +316,7 @@ fn render(
             )
         };
         // CPU pixels: display bytes, overlays and reduced copies here, off the UI thread.
-        let publish_pixels = |out: develop::Rendered, stage: RenderStage, gpu: bool| {
+        let publish_pixels = |out: crate::rendered::Rendered, stage: RenderStage, gpu: bool| {
             if job.cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -557,7 +554,7 @@ fn render(
     }
 }
 
-type Histogram = Box<develop::Histogram>;
+type Histogram = Box<crate::rendered::Histogram>;
 
 /// At 100% the view shows a region, but the histogram describes the whole
 /// photo, as Lightroom's does: from the Fit render of the same edit when there
@@ -567,15 +564,11 @@ fn whole_histogram(
     job: &RenderJob,
     processor: &mut develop::PreviewRenderer,
     fit: &Option<Shown>,
-    whole: &mut Option<(
-        Arc<crate::camera_data::CameraImage>,
-        develop::Recipe,
-        Histogram,
-    )>,
+    whole: &mut Option<(Arc<crate::camera_data::CameraImage>, Recipe, Histogram)>,
     tx: &Sender<Event>,
     ctx: &egui::Context,
 ) -> anyhow::Result<()> {
-    let same = |image: &Arc<crate::camera_data::CameraImage>, recipe: &develop::Recipe| {
+    let same = |image: &Arc<crate::camera_data::CameraImage>, recipe: &Recipe| {
         Arc::ptr_eq(image, &job.image) && *recipe == job.recipe
     };
     let histogram = if let Some((.., histogram)) = whole.as_ref().filter(|(i, r, _)| same(i, r)) {
@@ -645,7 +638,7 @@ mod tests {
         rx: &std::sync::mpsc::Receiver<Event>,
         id: u64,
         image: &Arc<CameraImage>,
-        recipe: &develop::Recipe,
+        recipe: &Recipe,
         region: Option<[u32; 4]>,
     ) -> Vec<(RenderStage, Vec<[f32; 3]>)> {
         run_in(worker, rx, Pane::After, id, image, recipe, region)
@@ -657,7 +650,7 @@ mod tests {
         pane: Pane,
         id: u64,
         image: &Arc<CameraImage>,
-        recipe: &develop::Recipe,
+        recipe: &Recipe,
         region: Option<[u32; 4]>,
     ) -> Vec<(RenderStage, Vec<[f32; 3]>)> {
         worker.submit(RenderJob {
@@ -669,7 +662,7 @@ mod tests {
             recipe: recipe.clone(),
             region,
             monitor: None,
-            clipping: develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             navigator: region.is_none(),
             thumbnail: false,
             samples: false,
@@ -701,7 +694,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
         let image = image();
-        let mut recipe = develop::Recipe::default();
+        let mut recipe = Recipe::default();
         let region = Some([10, 10, 80, 60]);
         let fit = run(&worker, &rx, 1, &image, &recipe, None);
         assert_eq!(fit.len(), 1);
@@ -727,8 +720,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
         let image = image();
-        let mut recipe = develop::Recipe::default();
-        let before = develop::Recipe {
+        let mut recipe = Recipe::default();
+        let before = Recipe {
             exposure: -1.,
             ..Default::default()
         };
@@ -751,7 +744,7 @@ mod tests {
     fn a_panicking_render_fails_and_the_next_one_succeeds() {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
-        let recipe = develop::Recipe::default();
+        let recipe = Recipe::default();
         // Fewer pixels than its size says: indexing it panics.
         let mut broken = (*image()).clone();
         broken.pixels.truncate(10);
@@ -764,7 +757,7 @@ mod tests {
             recipe: recipe.clone(),
             region: None,
             monitor: None,
-            clipping: develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             navigator: true,
             thumbnail: false,
             samples: false,
@@ -788,10 +781,10 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
         let image = image();
-        let mut recipe = develop::Recipe::default();
+        let mut recipe = Recipe::default();
         let region = Some([10, 10, 80, 60]);
         // The histogram each job ends with, as the app keeps it.
-        let histogram = |id: u64, recipe: &develop::Recipe, region: Option<[u32; 4]>| {
+        let histogram = |id: u64, recipe: &Recipe, region: Option<[u32; 4]>| {
             worker.submit(RenderJob {
                 id,
                 pane: Pane::After,
@@ -801,7 +794,7 @@ mod tests {
                 recipe: recipe.clone(),
                 region,
                 monitor: None,
-                clipping: develop::ClipOverlay::NONE,
+                clipping: crate::rendered::ClipOverlay::NONE,
                 navigator: region.is_none(),
                 thumbnail: false,
                 samples: false,

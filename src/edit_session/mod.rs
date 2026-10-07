@@ -3,7 +3,7 @@
 pub mod history;
 pub mod save_state;
 
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use history::{History, Step};
 use save_state::SaveState;
 
@@ -47,7 +47,7 @@ impl EditSession {
     /// step, named `step` or for what changed, to be saved. Returns whether the
     /// settings changed.
     pub fn commit(&mut self, before: Recipe, step: Option<Step>) -> bool {
-        crate::develop::edit::turn_on_edited_panel(&before, &mut self.recipe);
+        crate::model::edit::turn_on_edited_panel(&before, &mut self.recipe);
         if let Some(step) = step {
             self.history.label(step);
         }
@@ -69,7 +69,7 @@ impl EditSession {
     /// edit that changed only a switched-off panel turns it on.
     pub fn finish(&mut self, frame: Frame, gesture: Gesture) -> FrameOutcome {
         if !self.history.is_replaying() {
-            crate::develop::edit::turn_on_edited_panel(&frame.before, &mut self.recipe);
+            crate::model::edit::turn_on_edited_panel(&frame.before, &mut self.recipe);
         }
         let held = gesture == Gesture::Held;
         if self.history.observe(frame.before, &self.recipe, held) {

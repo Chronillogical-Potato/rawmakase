@@ -4,8 +4,10 @@
 Production code in `src/<module>` may use another top-level module only when
 `scripts/deps-allowed.txt` lists that edge. `check` fails on an edge missing
 from the list, so no new dependency appears unnoticed, and on a listed edge the
-code no longer has, so a removed dependency cannot quietly come back. The
-target layering is in docs/architecture.md.
+code no longer has, so a removed dependency cannot quietly come back. It also
+fails on a cycle, and on a module reaching, through any chain, one that
+`scripts/deps-closures.txt` says it never may (the edit's values never reach
+LibRaw or the renderer). The target layering is in docs/architecture.md.
 
     python3 scripts/deps.py check    # what CI runs
     python3 scripts/deps.py report   # every edge with its sites, and the cycles
@@ -24,6 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 ALLOWED = ROOT / "scripts" / "deps-allowed.txt"
+CLOSURES = ROOT / "scripts" / "deps-closures.txt"
 
 
 def blank(text):
@@ -247,6 +250,67 @@ def read_allowed():
     return {tuple(part.strip() for part in e.split("->")) for e in entries if e}
 
 
+def reaches(edges, module):
+    """Every module `module` uses, directly or through others."""
+    graph = defaultdict(set)
+    for source, target in edges:
+        graph[source].add(target)
+    seen, todo = set(), [module]
+    while todo:
+        for target in graph[todo.pop()]:
+            if target not in seen:
+                seen.add(target)
+                todo.append(target)
+    return seen
+
+
+def read_closures():
+    """(module, forbidden modules) from deps-closures.txt: `catalog never raw develop`."""
+    rules = []
+    for line in CLOSURES.read_text(encoding="utf-8").splitlines():
+        words = line.split("#")[0].split()
+        if words:
+            if len(words) < 3 or words[1] != "never":
+                sys.exit(f"{CLOSURES.relative_to(ROOT)}: expected `module never other...`: {line}")
+            rules.append((words[0], words[2:]))
+    return rules
+
+
+def path_to(edges, source, target):
+    """One chain of modules from `source` to `target`, for the message."""
+    graph = defaultdict(set)
+    for a, b in edges:
+        graph[a].add(b)
+    previous, todo = {source: None}, [source]
+    while todo:
+        node = todo.pop(0)
+        for next_node in sorted(graph[node]):
+            if next_node not in previous:
+                previous[next_node] = node
+                todo.append(next_node)
+    chain, node = [], target
+    while node is not None:
+        chain.append(node)
+        node = previous[node]
+    return " -> ".join(reversed(chain))
+
+
+def check_closures(edges):
+    broken = 0
+    known = set(top_level_modules())
+    for module, forbidden in read_closures():
+        for name in [module, *forbidden]:
+            if name not in known:
+                print(f"{CLOSURES.relative_to(ROOT)} names {name}, which is no top-level module")
+                broken += 1
+        reached = reaches(edges, module)
+        for other in forbidden:
+            if other in reached:
+                print(f"{module} must not reach {other}, but does: {path_to(edges, module, other)}")
+                broken += 1
+    return broken
+
+
 def check(edges):
     allowed = read_allowed()
     new = sorted(set(edges) - allowed)
@@ -262,9 +326,14 @@ def check(edges):
             "\nA new edge between top-level modules needs a reason. If it fits the layering in\n"
             "docs/architecture.md, add it to the allow-list in the same pull request."
         )
-    if not new and not stale:
-        print(f"{len(edges)} module dependencies, all allowed; {len(cycles(edges))} cycle(s) remain.")
-    return 1 if new or stale else 0
+    found = cycles(edges)
+    for component in found:
+        print("Cycle between " + ", ".join(component))
+    broken = check_closures(edges)
+    if not new and not stale and not found and not broken:
+        rules = len(read_closures())
+        print(f"{len(edges)} module dependencies, all allowed; no cycles; {rules} closure rules hold.")
+    return 1 if new or stale or found or broken else 0
 
 
 def report(edges):

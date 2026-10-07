@@ -1,8 +1,9 @@
 //! What changing a develop setting implies for the rest of the recipe. The
 //! panels, the control socket and MIDI all change settings this way, so the side
 //! effects of a change live in one place rather than in each of them.
-use super::{Recipe, params::ParameterId};
+use super::params::ParameterId;
 use crate::camera_data::Metadata;
+use crate::model::recipe::Recipe;
 
 /// Brings the recipe in line after setting `id` changed from `previous`:
 /// - a new Temp or Tint recomputes the white balance multipliers for `photo`,
@@ -32,7 +33,7 @@ pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Op
 /// its settings, as Lightroom does, so the change shows: a slider in it, or an edit
 /// made another way (B&W Auto, Clear Guides, the fringe picker, a swatch).
 pub fn turn_on_edited_panel(before: &Recipe, after: &mut Recipe) {
-    use super::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let edited = Panel::ALL.into_iter().find(|panel| {
         before.panels.state(*panel) == PanelState::Off
             && after.panels.state(*panel) == PanelState::Off
@@ -73,7 +74,7 @@ mod tests {
 
     #[test]
     fn only_a_change_to_one_switched_off_panel_turns_it_on() {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         let mut before = Recipe::default();
         before.panels.set(Panel::Detail, PanelState::Off);
         let mut after = before.clone();

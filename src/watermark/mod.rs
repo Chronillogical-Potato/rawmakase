@@ -5,7 +5,7 @@
 //! `watermarks`, a graphic one with its own copy of the image.
 pub mod fonts;
 mod raster;
-use crate::develop::Rendered;
+use crate::rendered::Rendered;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

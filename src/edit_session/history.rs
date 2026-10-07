@@ -1,7 +1,7 @@
 //! Bounded edit history; a pointer gesture is a single transaction. Each step
 //! is named, like Lightroom's History panel ("Exposure +0.50").
 use crate::catalog::{SavedHistory, SavedStep};
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use std::collections::VecDeque;
 
 const LIMIT: usize = 100;
@@ -466,7 +466,7 @@ fn describe(before: &Recipe, after: &Recipe) -> Step {
 
 /// Lightroom names a panel switch "Enable Tone Curve", "Yes" or "No".
 fn panel_switch_step(before: &Recipe, after: &Recipe) -> Step {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let Some(panel) = Panel::ALL
         .into_iter()
         .find(|p| after.panels.state(*p) != before.panels.state(*p))
@@ -581,7 +581,7 @@ mod tests {
     use super::*;
     #[test]
     fn a_panel_switch_is_one_step_named_as_lightroom_names_it() {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         let mut history = History::default();
         let mut recipe = Recipe::default();
         let before = recipe.clone();
@@ -696,7 +696,6 @@ mod tests {
     }
     #[test]
     fn retouch_and_mask_edits_have_lightroom_names() {
-        use crate::develop::masks;
         let before = Recipe::default();
         let mut after = before.clone();
         after.retouch.push(crate::model::retouch::RetouchOp {
@@ -712,10 +711,12 @@ mod tests {
         assert_eq!(describe(&before, &after).name, "Spot Removal");
         assert_eq!(describe(&after, &before).name, "Delete Spot");
         let mut masked = before.clone();
-        masked.masks.push(masks::MaskGroup {
-            components: vec![masks::MaskComponent::new(masks::MaskShape::Brush {
-                strokes: Vec::new(),
-            })],
+        masked.masks.push(crate::model::masks::MaskGroup {
+            components: vec![crate::model::masks::MaskComponent::new(
+                crate::model::masks::MaskShape::Brush {
+                    strokes: Vec::new(),
+                },
+            )],
             ..Default::default()
         });
         masked.masks.push(masked.masks[0].clone());

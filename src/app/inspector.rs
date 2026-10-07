@@ -1,5 +1,3 @@
-use super::Editor;
-use super::bulk_import::ImportKind;
 use super::clipping::{self, ClipSide};
 use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
@@ -11,14 +9,17 @@ use super::widgets::{
     setting_slider, slider, slider_with, switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
+use super::{Editor, bulk_import::ImportKind};
 use crate::app::icons::{self, Icon};
-use crate::app::theme;
-use crate::develop::panels::{Panel, PanelState};
-use crate::develop::params::ParameterId;
-use crate::develop::sharpening::SharpeningSliders;
-use crate::develop::targeted::Target;
-use crate::develop::{NamedWhiteBalance, Recipe, Treatment};
-use crate::model::operators::SharpeningModel;
+use crate::model::panels::{Panel, PanelState};
+use crate::model::params::ParameterId;
+use crate::model::recipe::Recipe;
+use crate::model::recipe::Treatment;
+use crate::model::{
+    operators::{SharpeningModel, SharpeningSliders},
+    white_balance::NamedWhiteBalance,
+};
+use crate::{app::theme, develop::targeted::Target};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
@@ -1211,9 +1212,9 @@ impl Editor {
                         && let Some(m) = &metadata
                     {
                         let state = if on {
-                            crate::develop::ProfileCorrections::On
+                            crate::model::recipe::ProfileCorrections::On
                         } else {
-                            crate::develop::ProfileCorrections::Off
+                            crate::model::recipe::ProfileCorrections::Off
                         };
                         r.set_profile_corrections(m, state);
                     }
@@ -1325,7 +1326,7 @@ impl Editor {
                 hint_row(ui, "Update the process in Calibration to use Transform.");
             }
             ui.add_enabled_ui(supported, |ui| {
-                use crate::develop::UprightMode;
+                use crate::model::transform::UprightMode;
                 // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1373,7 +1374,7 @@ impl Editor {
                             guided_action = Some(GuidedAction::Toggle);
                         }
                         ui.label(
-                            egui::RichText::new(format!("{count} of {}", crate::develop::guided::MAX_GUIDES))
+                            egui::RichText::new(format!("{count} of {}", crate::model::transform::MAX_GUIDES))
                                 .color(palette.gray(170)),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1404,9 +1405,9 @@ impl Editor {
                 // Stored as Camera Raw applies them, before the photo is turned for
                 // display; shown, as in Lightroom, along the displayed photo's axes.
                 let turns = metadata.as_ref().map_or(0, |m| {
-                    crate::develop::ImageFrame::for_metadata(m).turns
+                    crate::model::image_frame::ImageFrame::for_metadata(m).turns
                 });
-                let axes = crate::develop::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
+                let axes = crate::model::transform::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y);
                 let mut shown = r.transform.displayed(axes);
                 let t = &mut shown;
                 setting_slider(ui, ParameterId::TransformVertical, &mut t.vertical, 0.);
@@ -1870,7 +1871,7 @@ enum GuidedAction {
 }
 
 /// The slider for develop setting `id`, and what changing it implies for the rest
-/// of the recipe (`develop::edit`).
+/// of the recipe (`model::edit`).
 fn setting_control(
     ui: &mut egui::Ui,
     r: &mut Recipe,
@@ -1880,5 +1881,5 @@ fn setting_control(
 ) {
     let previous = *id.value_mut(r);
     setting_slider(ui, id, id.value_mut(r), default);
-    crate::develop::edit::setting_changed(r, id, previous, photo);
+    crate::model::edit::setting_changed(r, id, previous, photo);
 }

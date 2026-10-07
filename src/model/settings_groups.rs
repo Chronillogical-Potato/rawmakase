@@ -6,7 +6,8 @@
 //! gains, the camera's exposure baseline, Upright's analysis, which camera profile
 //! file a profile name means). The rest are the photo's own and never transfer: its
 //! orientation, the preset it came from, and settings from a newer release.
-use super::{Recipe, panels::Panel};
+use crate::model::panels::Panel;
+use crate::model::recipe::Recipe;
 use crate::{camera_data::Metadata, camera_profiles::CameraProfile};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
@@ -259,7 +260,7 @@ impl SettingGroup {
                 to.profile_amount = from.profile_amount;
                 // The Treatment as it renders: a black & white profile that another
                 // camera can't use still leaves the photo black & white.
-                e.monochrome = from.treatment() == super::Treatment::BlackWhite;
+                e.monochrome = from.treatment() == super::recipe::Treatment::BlackWhite;
             }
             ToneCurve => {
                 to.curve = from.curve.clone();
@@ -456,10 +457,10 @@ pub struct Source<'a> {
     pub metadata: &'a Metadata,
 }
 
-/// How a photo is turned and flipped for display (see [`super::display_axes`]).
+/// How a photo is turned and flipped for display (see [`crate::model::transform::display_axes`]).
 fn display_axes(r: &Recipe, m: &Metadata) -> [[f32; 2]; 2] {
-    let turns = super::ImageFrame::for_metadata(m).turns;
-    super::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y)
+    let turns = crate::model::image_frame::ImageFrame::for_metadata(m).turns;
+    crate::model::transform::display_axes((turns + r.rotation) % 4, r.flip_x, r.flip_y)
 }
 
 /// The source's settings in `selection` applied over `to`, with everything that depends
@@ -538,11 +539,14 @@ pub fn transfer(
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
     let exact = selection.contains(SettingGroup::UprightTransforms);
-    if !exact && super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
+    if !exact
+        && crate::model::transform::LensInputs::of(&recipe)
+            != crate::model::transform::LensInputs::of(to)
+    {
         // Guided solves again from this photo's guides.
-        let guided = recipe.upright.mode == super::UprightMode::Guided;
+        let guided = recipe.upright.mode == crate::model::transform::UprightMode::Guided;
         recipe.upright.analyse_again();
-        if guided && recipe.upright.mode != super::UprightMode::Guided {
+        if guided && recipe.upright.mode != crate::model::transform::UprightMode::Guided {
             notes.push(
                 "New lens corrections need Guided Upright's guides drawn again; left Off".into(),
             );
@@ -554,11 +558,11 @@ pub fn transfer(
     let upright = &mut recipe.upright;
     if selection.contains(SettingGroup::UprightMode)
         && !exact
-        && upright.mode == super::UprightMode::Guided
+        && upright.mode == crate::model::transform::UprightMode::Guided
         && upright.corrections.len() <= upright.mode.code()
         && upright.guides.is_empty()
     {
-        upright.mode = super::UprightMode::Off;
+        upright.mode = crate::model::transform::UprightMode::Off;
         notes.push("Guided Upright needs guides drawn on this photo; left Off".into());
     }
     Transferred { recipe, notes }

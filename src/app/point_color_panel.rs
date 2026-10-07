@@ -4,12 +4,16 @@
 use super::state::{PointColorView, Tool, ViewState};
 use super::theme;
 use super::widgets::{name_history_step, set_edit_context, slider_with};
-use crate::app::Module;
-use crate::develop::point_color::{MAX_SWATCHES, PointColor, PointColors, add_sample};
+use crate::model::point_color::{MAX_SWATCHES, PointColor};
+use crate::model::recipe::Recipe;
+use crate::{
+    app::Module,
+    develop::point_color::{PointColors, add_sample},
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Whether the recipe's process renders Point Color (engine 4 with the measured curves).
-pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
+pub(super) fn renders_point_color(r: &Recipe) -> bool {
     r.engine >= 4 && r.reference_curves
 }
 
@@ -17,7 +21,7 @@ pub(super) fn renders_point_color(r: &crate::develop::Recipe) -> bool {
 /// worded to finish "… in Calibration to use …", or `None` when the process renders
 /// them. Its Update button is only shown below process 4, so it is named only then,
 /// and Reference tone curves whenever they are off: Update leaves them as they were.
-pub(super) fn point_color_steps(r: &crate::develop::Recipe) -> Option<&'static str> {
+pub(super) fn point_color_steps(r: &Recipe) -> Option<&'static str> {
     match (r.engine >= 4, r.reference_curves) {
         (false, false) => Some("Update the process and turn on Reference tone curves"),
         (false, true) => Some("Update the process"),
@@ -35,7 +39,7 @@ impl super::Editor {
         self.module == Module::Develop
             && !self.view.compare.before_only()
             && self.view.mixer_tab == super::state::MixerTab::PointColor
-            && r.treatment() == crate::develop::Treatment::Color
+            && r.treatment() == crate::model::recipe::Treatment::Color
             && renders_point_color(r)
     }
     /// Point Color's dropper at (`u`, `v`) of the shown photo: samples the color there
@@ -76,7 +80,7 @@ impl super::Editor {
     /// away; or says why not. A sample of a photo edited since is dropped.
     pub(super) fn point_color_sample_ready(
         &mut self,
-        sampled: &crate::develop::Recipe,
+        sampled: &Recipe,
         result: Result<[f32; 3], String>,
     ) {
         self.document.point_color_pick.invalidate();
@@ -454,7 +458,7 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 
 /// HSV of linear ProPhoto RGB (hue in radians) as a display color.
 fn hsv(h: f32, s: f32, v: f32) -> Color32 {
-    display(crate::develop::point_color::hsv_to_rgb(h, s, v))
+    display(crate::color::hsv::hsv_to_rgb(h, s, v))
 }
 
 /// Linear ProPhoto RGB as an sRGB display color.
@@ -491,7 +495,7 @@ mod tests {
     /// Reference tone curves while they are off, which Update does not turn on.
     #[test]
     fn point_color_steps_name_the_controls_that_are_there() {
-        use crate::develop::Recipe;
+        use crate::model::recipe::Recipe;
         let cases = [
             (
                 3,

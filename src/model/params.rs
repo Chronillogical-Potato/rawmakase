@@ -6,9 +6,8 @@
 //! A control's interactive range can be narrower than the values a recipe may
 //! hold: the Exposure slider spans ±5 EV, while an imported edit can carry up to
 //! ±8. Relative input must not quietly pull such a value into the narrower range.
-use super::{
-    EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT, masks::LocalAdjust,
-};
+use crate::model::masks::LocalAdjust;
+use crate::model::recipe::{EXPOSURE_LIMIT, Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
 use std::ops::RangeInclusive;
 
 /// The Crop panel's Angle limit either way, in degrees, as `Recipe::validate` allows.
