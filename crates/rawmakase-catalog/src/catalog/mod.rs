@@ -373,4 +373,6 @@ pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;
 #[cfg(test)]
+mod sql_scan;
+#[cfg(test)]
 mod tests;
