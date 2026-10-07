@@ -11,7 +11,7 @@ use anyhow::{Result, ensure};
 
 /// Read Metadata from Files while its files are being read.
 pub(super) struct Reread {
-    reader: super::background::Reader<(
+    reader: crate::catalog_session::background::Reader<(
         Option<crate::catalog::FileMetadata>,
         crate::catalog::SidecarReport,
     )>,
@@ -221,9 +221,9 @@ impl Library {
         self.message = format!("Reading metadata from {}…", plural(n, "file", "files"));
         self.reread = Some(Reread {
             paths: photos.iter().cloned().collect(),
-            reader: super::background::Reader::start(
+            reader: crate::catalog_session::background::Reader::start(
                 photos,
-                &self.ctx,
+                self.wake(),
                 crate::catalog::read_file_metadata,
             ),
             read: Vec::new(),
@@ -313,23 +313,7 @@ impl Library {
     /// Rating, flag, label, capture time and keywords of `ids`, read again
     /// from the catalog, and the photos shown.
     fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
-        let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
-        let fresh: std::collections::HashMap<PhotoId, crate::catalog::Photo> = self
-            .session
-            .catalog
-            .photos()?
-            .into_iter()
-            .filter(|p| wanted.contains(&p.id))
-            .map(|p| (p.id, p))
-            .collect();
-        for p in &mut self.session.photos {
-            if let Some(f) = fresh.get(&p.id) {
-                p.rating = f.rating;
-                p.flag = f.flag;
-                p.label = f.label.clone();
-                p.captured = f.captured.clone();
-            }
-        }
+        self.session.refresh_photos(ids)?;
         self.sort_keys = None;
         // A capture time read may move the photo, as the catalog sorts.
         self.resort_in_place(|library| {
@@ -337,7 +321,8 @@ impl Library {
                 (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
             });
         });
-        self.refresh_keywords(ids)
+        self.filter();
+        Ok(())
     }
     /// The descriptive changes made since the last call, for the undo log.
     pub(in crate::app) fn take_descriptive_done(&mut self) -> Vec<DescriptiveCommand> {
@@ -346,22 +331,7 @@ impl Library {
     /// The keywords shown for `ids`, read again from the catalog, and the
     /// photos shown, which a text filter may pick by them.
     fn refresh_keywords(&mut self, ids: &[PhotoId]) -> Result<()> {
-        let mut names = std::collections::HashMap::new();
-        for id in ids {
-            let keywords: Vec<String> = self
-                .session
-                .catalog
-                .keywords(*id)?
-                .into_iter()
-                .map(|k| k.name)
-                .collect();
-            names.insert(*id, keywords.join(", "));
-        }
-        for p in &mut self.session.photos {
-            if let Some(n) = names.remove(&p.id) {
-                p.keywords = n;
-            }
-        }
+        self.session.refresh_keywords(ids)?;
         self.filter();
         Ok(())
     }

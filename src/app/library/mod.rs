@@ -112,22 +112,14 @@ pub struct Library {
     collection_done: Vec<quick::CollectionCommand>,
     /// Descriptive metadata changes not yet handed to the shared undo log.
     descriptive_done: Vec<DescriptiveCommand>,
-    /// Reads capture times for photos added from folders.
-    capture: Option<background::Reader<capture::Read>>,
-    /// Reads camera settings and sizes for photos added from folders.
-    info_reader: Option<background::Reader<Option<Option<crate::metadata::PhotoInfo>>>>,
     /// The Loupe's Info overlay.
     loupe_info: photo_info::Overlay,
-    /// Photo info was asked for while it was being read.
-    info_again: bool,
     /// Times photo info read from files was saved, so views know to refresh.
     info_saves: u64,
     /// The hovered grid photo's info, for its tooltip.
     hover_info: Option<(PhotoId, Option<crate::metadata::PhotoInfo>)>,
     /// The active photo's info, as last read from the catalog.
     info: Option<(PhotoId, Option<crate::metadata::PhotoInfo>)>,
-    /// Photos the capture-time backfill tried since the last online check.
-    capture_tried: HashSet<PhotoId>,
     /// A photo to keep in place in the grid after a re-sort, with its
     /// position before it.
     keep_in_place: Option<(PhotoId, usize)>,
@@ -155,9 +147,10 @@ impl Library {
     /// The Library over a catalog read with [`CatalogSession::open`].
     pub fn new(opened: Opened, ctx: egui::Context) -> Self {
         let Opened {
-            session,
+            mut session,
             keyword_export,
         } = opened;
+        session.wake_with(wake(&ctx));
         let loupe = loupe::Loupe::new(&ctx);
         let screen = screen::ScreenPreviews::new(&ctx);
         let mut s = Self {
@@ -195,14 +188,10 @@ impl Library {
             defaults: Default::default(),
             stamps: Default::default(),
             loupe_direction: 1,
-            capture: None,
-            info_reader: None,
             info: None,
-            info_again: false,
             info_saves: 0,
             hover_info: None,
             loupe_info: Default::default(),
-            capture_tried: HashSet::new(),
             keep_in_place: None,
             grid_offset: 0.,
             grid_shown: 0..usize::MAX,
@@ -317,6 +306,10 @@ impl Library {
         if !self.is_available(path) {
             self.availability.start(&self.session.photos, &self.ctx);
         }
+    }
+    /// Asks for a repaint, for a background read with something to show.
+    fn wake(&self) -> crate::catalog_session::Wake {
+        wake(&self.ctx)
     }
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
@@ -748,7 +741,6 @@ fn edit_source(catalog: &Catalog, id: PhotoId) -> Option<previews::EditSource> {
 }
 
 mod availability;
-mod background;
 mod capture;
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
@@ -797,4 +789,10 @@ impl Library {
         let (message, detail) = &self.message_detail;
         (*message == self.message && !detail.is_empty()).then_some(detail.as_str())
     }
+}
+
+/// Asks `ctx` for a repaint, for a background read with something to show.
+fn wake(ctx: &egui::Context) -> crate::catalog_session::Wake {
+    let ctx = ctx.clone();
+    std::sync::Arc::new(move || ctx.request_repaint())
 }

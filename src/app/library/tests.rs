@@ -926,7 +926,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
     library.select(Some(a));
     library.wait_for_availability();
     let started = std::time::Instant::now();
-    while library.capture.is_some() {
+    while library.session.reading_capture_times() {
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         library.poll_capture_times();
         std::thread::yield_now();
@@ -950,7 +950,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
         ["z.ARW", "c.jpg", "b.jpg", "a.tif"]
     );
     library.start_capture_times();
-    assert!(library.capture.is_none());
+    assert!(!library.session.reading_capture_times());
     Ok(())
 }
 fn ids_of(library: &Library) -> Vec<PhotoId> {
@@ -1432,7 +1432,7 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     let id = library.session.photos[0].id;
     library.wait_for_availability();
     let started = std::time::Instant::now();
-    while library.info_reader.is_some() {
+    while library.session.reading_photo_info() {
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         library.poll_photo_info();
         std::thread::yield_now();
@@ -1772,7 +1772,7 @@ fn grid_cells_cycle_through_lightrooms_styles() -> Result<()> {
     let mut library = Library::load(&path, egui::Context::default())?;
     library.wait_for_availability();
     let started = std::time::Instant::now();
-    while library.info_reader.is_some() {
+    while library.session.reading_photo_info() {
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         std::thread::sleep(std::time::Duration::from_millis(5));
         library.poll_photo_info();

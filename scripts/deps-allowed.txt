@@ -18,7 +18,9 @@ app -> updates
 app -> watermark
 catalog -> edits
 catalog_session -> catalog
+catalog_session -> photo
 catalog_session -> platform
+catalog_session -> raw
 comparison -> develop
 comparison -> photo
 decode -> decode_cache

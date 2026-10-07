@@ -4,7 +4,7 @@
 //! change is one undoable command.
 use super::{Library, Place};
 use crate::app::widgets::plural;
-use crate::catalog::{CollectionKind, PhotoId, QUICK_COLLECTION};
+use crate::catalog::PhotoId;
 use anyhow::Result;
 
 /// A change to a collection's photos, for the shared undo log.
@@ -24,23 +24,11 @@ pub struct CollectionCommand {
 impl Library {
     /// The Quick Collection, once there is one.
     pub(super) fn quick(&self) -> Option<crate::catalog::CollectionId> {
-        self.session
-            .collections
-            .iter()
-            .find(|c| {
-                c.kind == CollectionKind::System && c.name == QUICK_COLLECTION && c.parent.is_none()
-            })
-            .map(|c| c.id)
+        self.session.quick_collection()
     }
     /// The Quick Collection, made if there is none yet.
     fn ensure_quick(&mut self) -> Result<crate::catalog::CollectionId> {
-        if let Some(id) = self.quick() {
-            return Ok(id);
-        }
-        let id = self.session.catalog.quick_collection()?;
-        self.session.collections = self.session.catalog.collections()?;
-        self.session.collection_photos.entry(id).or_default();
-        Ok(id)
+        self.session.ensure_quick_collection()
     }
     pub(super) fn in_quick(&self, id: PhotoId) -> bool {
         self.quick()
