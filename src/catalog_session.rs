@@ -128,7 +128,7 @@ mod tests {
         // The photos read again would include the copy; a later read fails.
         session.catalog.create_virtual_copy(a)?;
         rusqlite::Connection::open(&path)?
-            .execute_batch("ALTER TABLE roots RENAME TO roots_gone")?;
+            .execute_batch("ALTER TABLE collection_photos RENAME TO collection_photos_gone")?;
         assert!(session.reload().is_err());
         assert_eq!(session.photos.len(), 1);
         assert_eq!(session.folders[0].count, 1);
