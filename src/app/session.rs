@@ -5,7 +5,7 @@ use crate::storage::{data_dir, read_json_or_default};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 #[derive(Default, Serialize, Deserialize)]
-pub struct Session {
+pub(crate) struct Session {
     pub last_path: Option<PathBuf>,
     pub monitor: Option<PathBuf>,
     /// Titles of panel sections the user collapsed; all others start open.
@@ -67,7 +67,7 @@ pub struct Session {
 /// names as [`LibraryLayout`]; a name this version does not know reads as the default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct CropGuideLayout {
+pub(crate) struct CropGuideLayout {
     /// "grid", "thirds", "diagonal", "triangle", "golden-ratio" or "golden-spiral".
     pub guide: String,
     pub orientation: u32,
@@ -80,7 +80,7 @@ pub struct CropGuideLayout {
 /// version reads as far as it is understood and the rest is the default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct LibraryLayout {
+pub(crate) struct LibraryLayout {
     /// "grid", "loupe", "compare" or "survey".
     pub view: String,
     pub sort: String,
@@ -97,7 +97,7 @@ pub struct LibraryLayout {
     /// Cmd+L turned the filter bar off.
     pub filters_off: bool,
 }
-pub fn load_session() -> Session {
+pub(crate) fn load_session() -> Session {
     read_json_or_default(&data_dir().join("session.json"))
 }
 

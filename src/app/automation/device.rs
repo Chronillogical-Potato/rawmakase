@@ -15,7 +15,7 @@ pub(super) struct Device {
     stop: Option<std::sync::mpsc::Sender<()>>,
 }
 impl Device {
-    pub fn new(binding: DeviceConfig) -> Self {
+    pub(crate) fn new(binding: DeviceConfig) -> Self {
         #[cfg(any(test, target_os = "macos", target_os = "windows"))]
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
@@ -31,7 +31,7 @@ impl Device {
             stop: None,
         }
     }
-    pub fn start(
+    pub(crate) fn start(
         &mut self,
         tx: Sender<Msg>,
         ctx: egui::Context,
@@ -50,7 +50,7 @@ impl Device {
             );
         }
     }
-    pub fn sync_midi_epoch(&mut self) {
+    pub(crate) fn sync_midi_epoch(&mut self) {
         let epoch = locked(&self.status).epoch;
         if epoch != self.midi_epoch {
             self.midi_epoch = epoch;
@@ -76,7 +76,7 @@ impl Device {
         self.photo_ticks %= self.binding.mapping.photo_detent;
         step.signum()
     }
-    pub fn translate(&mut self, msg: Msg) -> commands::Result<Option<Command>> {
+    pub(crate) fn translate(&mut self, msg: Msg) -> commands::Result<Option<Command>> {
         use commands::{Action as A, Error, Operation as O};
         match &msg {
             Msg::Cc(cc, value) => {

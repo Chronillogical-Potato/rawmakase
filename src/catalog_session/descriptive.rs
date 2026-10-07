@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 /// A descriptive metadata change to some photos.
 #[derive(Clone, Debug, PartialEq)]
-pub enum DescriptiveEdit {
+pub(crate) enum DescriptiveEdit {
     /// The default language's text; empty clears the field.
     Text(TextField, String),
     /// In order; none clears the field.
@@ -21,7 +21,7 @@ pub enum DescriptiveEdit {
 
 /// What a [`DescriptiveEdit`] changed.
 #[derive(Debug)]
-pub struct DescriptiveChange {
+pub(crate) struct DescriptiveChange {
     pub before: Vec<MetadataSnapshot>,
     pub after: Vec<MetadataSnapshot>,
     /// Reading the photos' keywords back into the lists: the change is saved
@@ -31,7 +31,7 @@ pub struct DescriptiveChange {
 
 impl CatalogSession {
     /// Makes `edit` to `ids` in the catalog and lists their keywords again.
-    pub fn edit_descriptive(
+    pub(crate) fn edit_descriptive(
         &mut self,
         ids: &[PhotoId],
         edit: DescriptiveEdit,
@@ -55,7 +55,7 @@ impl CatalogSession {
     /// rating, flag and label in `ratings` (none for a change that left them),
     /// then lists them again. Both are written before anything is read back,
     /// so a failed read never leaves an undo half done.
-    pub fn restore_descriptive(
+    pub(crate) fn restore_descriptive(
         &mut self,
         values: &[MetadataSnapshot],
         ratings: &[(PhotoId, i32, i32, String)],
@@ -69,7 +69,7 @@ impl CatalogSession {
     }
     /// Writes what was read from the files of `ids` (Read Metadata from
     /// Files), replacing the catalog's values, and lists them again.
-    pub fn apply_file_metadata(
+    pub(crate) fn apply_file_metadata(
         &mut self,
         ids: &[PhotoId],
         read: &[(PhotoId, PathBuf, FileMetadata)],
@@ -79,18 +79,18 @@ impl CatalogSession {
         Ok(written)
     }
     /// Makes a virtual copy of `id` and reads the lists again.
-    pub fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
+    pub(crate) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
         let copy = self.catalog.create_virtual_copy(id)?;
         self.reload()?;
         Ok(copy)
     }
     /// Makes copy `id` its photo's master and reads the lists again.
-    pub fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
+    pub(crate) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
         self.catalog.set_copy_as_master(id)?;
         self.reload()
     }
     /// Removes virtual copy `id` and reads the lists again.
-    pub fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<()> {
+    pub(crate) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<()> {
         self.catalog.remove_virtual_copy(id)?;
         self.reload()
     }

@@ -23,7 +23,7 @@ pub(super) struct Reread {
 
 /// A descriptive metadata change, for the shared undo log.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DescriptiveCommand {
+pub(crate) struct DescriptiveCommand {
     /// Orders it among other changes made in the same frame.
     pub sequence: u64,
     pub before: Vec<MetadataSnapshot>,
@@ -68,11 +68,11 @@ impl DescriptiveCommand {
     }
 }
 
-pub use crate::catalog_session::DescriptiveEdit;
+pub(crate) use crate::catalog_session::DescriptiveEdit;
 
 /// Keywords typed as Lightroom takes them: separated by commas, a child
 /// before its parents, "Child < Parent". Returns their paths, top first.
-pub fn parse_keywords(text: &str) -> Result<Vec<Vec<String>>> {
+pub(crate) fn parse_keywords(text: &str) -> Result<Vec<Vec<String>>> {
     let mut paths = Vec::new();
     for entry in text.split(',') {
         if entry.trim().is_empty() {

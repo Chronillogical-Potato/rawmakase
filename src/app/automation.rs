@@ -61,7 +61,7 @@ struct Waiting {
     deadline: Instant,
 }
 impl Hub {
-    pub fn inactive() -> Self {
+    pub(crate) fn inactive() -> Self {
         let (_, rx) = mpsc::sync_channel(256);
         Self::new(Settings::default(), rx)
     }
@@ -82,7 +82,7 @@ impl Hub {
             waits: Vec::new(),
         }
     }
-    pub fn start(ctx: &egui::Context) -> Self {
+    pub(crate) fn start(ctx: &egui::Context) -> Self {
         let (tx, rx) = mpsc::sync_channel(256);
         let (settings, error) = match Settings::load() {
             Ok(s) => (s, None),

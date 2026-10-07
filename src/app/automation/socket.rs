@@ -31,7 +31,7 @@ pub(super) struct Request {
     stop: Arc<AtomicBool>,
 }
 impl Request {
-    pub fn begin(&self) -> bool {
+    pub(crate) fn begin(&self) -> bool {
         if self.stop.load(Ordering::SeqCst) || Instant::now() >= self.deadline {
             let _ = self
                 .phase

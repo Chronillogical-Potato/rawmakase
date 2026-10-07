@@ -22,12 +22,12 @@ pub(super) struct Survey {
 
 impl Library {
     #[cfg(test)]
-    pub fn survey_open(&self) -> bool {
+    pub(crate) fn survey_open(&self) -> bool {
         self.survey.open
     }
     /// N: the selected photos side by side; the active one alone if it is
     /// the only one.
-    pub fn open_survey(&mut self) {
+    pub(crate) fn open_survey(&mut self) {
         if self.selection.active.is_none() {
             self.select(self.visible.first().map(|i| self.session.photos[*i].id));
         }
@@ -39,7 +39,7 @@ impl Library {
         self.survey.open = true;
     }
     /// Esc or G: back to the grid, the selection as Survey left it.
-    pub fn close_survey(&mut self) {
+    pub(crate) fn close_survey(&mut self) {
         if self.survey.open {
             self.survey.open = false;
             self.scroll_to_active = true;
@@ -83,7 +83,7 @@ impl Library {
     /// A rating, flag or label key in Survey: the active photo only. A
     /// photo the filter now hides leaves the survey and the next one
     /// surveyed becomes active; with Shift, the next one does anyway.
-    pub fn edit_surveyed(
+    pub(crate) fn edit_surveyed(
         &mut self,
         edit: crate::app::photo_metadata::Edit,
         advance: bool,

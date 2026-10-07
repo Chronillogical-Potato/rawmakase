@@ -9,35 +9,35 @@ pub(super) enum Activity {
     Syncing,
 }
 impl Activity {
-    pub fn is_busy(&self) -> bool {
+    pub(crate) fn is_busy(&self) -> bool {
         !matches!(self, Self::Idle)
     }
-    pub fn is_dialog(&self) -> bool {
+    pub(crate) fn is_dialog(&self) -> bool {
         matches!(self, Self::ChoosingFile)
     }
-    pub fn begin_dialog(&mut self) -> bool {
+    pub(crate) fn begin_dialog(&mut self) -> bool {
         if self.is_busy() {
             return false;
         }
         *self = Self::ChoosingFile;
         true
     }
-    pub fn begin_sync(&mut self) -> bool {
+    pub(crate) fn begin_sync(&mut self) -> bool {
         if self.is_busy() {
             return false;
         }
         *self = Self::Syncing;
         true
     }
-    pub fn is_syncing(&self) -> bool {
+    pub(crate) fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
-    pub fn finish_sync(&mut self) {
+    pub(crate) fn finish_sync(&mut self) {
         if self.is_syncing() {
             *self = Self::Idle;
         }
     }
-    pub fn finish_dialog(&mut self) {
+    pub(crate) fn finish_dialog(&mut self) {
         if self.is_dialog() {
             *self = Self::Idle;
         }

@@ -10,7 +10,7 @@ use eframe::egui::{self, Vec2};
 impl Library {
     /// Right panel: the selected photo's rating, flag, label and file details.
     /// The layout is identical with or without a selection, so nothing moves.
-    pub fn info_panel(&mut self, ui: &mut egui::Ui) -> Action {
+    pub(crate) fn info_panel(&mut self, ui: &mut egui::Ui) -> Action {
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
         let photo = self.selected().and_then(|id| self.photo(id)).cloned();
@@ -137,7 +137,7 @@ impl Library {
     }
     /// Rating, flag and label of `id`; a change applies to the whole
     /// selection when `whole_selection` (the Grid) and `id` is in it.
-    pub fn metadata_controls(
+    pub(crate) fn metadata_controls(
         &mut self,
         ui: &mut egui::Ui,
         id: PhotoId,

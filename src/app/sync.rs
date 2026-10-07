@@ -28,7 +28,7 @@ pub(super) struct SyncTarget {
 
 /// One photo's edit before and after a Sync.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Synced {
+pub(crate) struct Synced {
     pub id: PhotoId,
     pub path: PathBuf,
     /// The edit before, or none when the photo had no RAWmakase edit yet.
@@ -44,7 +44,7 @@ pub struct Synced {
 
 /// A photo's edit before a Sync.
 #[derive(Clone, Debug, PartialEq)]
-pub enum EditBefore {
+pub(crate) enum EditBefore {
     Saved(Box<Recipe>),
     /// No RAWmakase edit: Develop started it from `starting`, its Lightroom edit or
     /// the camera defaults. Undo returns the photo to having none.
@@ -62,21 +62,21 @@ impl EditBefore {
 
 /// A photo a Sync left as it was, and why.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SyncFailure {
+pub(crate) struct SyncFailure {
     pub name: String,
     pub reason: String,
 }
 
 /// A setting a Sync could not apply as asked on one photo (see `Transferred::notes`).
 #[derive(Clone, Debug, PartialEq)]
-pub struct SyncNote {
+pub(crate) struct SyncNote {
     pub name: String,
     pub note: String,
 }
 
 /// What a Sync did, in which catalog.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct SyncResult {
+pub(crate) struct SyncResult {
     pub change: BatchChange,
     pub catalog: PathBuf,
     pub synced: Vec<Synced>,
@@ -94,7 +94,7 @@ pub(super) struct SyncCommand {
 
 /// What a batch change does to each of the other selected photos.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub enum BatchChange {
+pub(crate) enum BatchChange {
     /// Sync Settings: the open photo's settings in these groups.
     Settings(GroupSelection),
     /// Lightroom's Match Total Exposures: each photo's Exposure set so that its
@@ -104,7 +104,7 @@ pub enum BatchChange {
 }
 impl BatchChange {
     /// The History step and Undo name.
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             BatchChange::Settings(_) => "Synchronize Settings",
             BatchChange::MatchTotalExposures => "Match Total Exposures",

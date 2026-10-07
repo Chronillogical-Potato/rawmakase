@@ -87,7 +87,7 @@ pub(super) struct Command {
     pub target: Target,
 }
 impl Command {
-    pub fn new(operation: Operation) -> Self {
+    pub(crate) fn new(operation: Operation) -> Self {
         Self {
             operation,
             target: Target::default(),
@@ -254,20 +254,20 @@ impl Action {
             _ => return None,
         })
     }
-    pub fn parse(name: &str) -> Option<Self> {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
         Self::NAMED
             .iter()
             .find(|(n, _)| *n == name)
             .map(|(_, action)| *action)
     }
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         Self::NAMED
             .iter()
             .find(|(_, action)| *action == self)
             .expect("named action")
             .0
     }
-    pub fn names() -> Vec<&'static str> {
+    pub(crate) fn names() -> Vec<&'static str> {
         Self::NAMED.iter().map(|(name, _)| *name).collect()
     }
 }
@@ -278,7 +278,7 @@ pub(super) struct Error {
     pub message: String,
 }
 impl Error {
-    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),

@@ -11,7 +11,7 @@ use std::collections::HashSet;
 impl Library {
     /// The left panel; without `navigator` when the editor shows its own,
     /// as for a RAW in the Loupe.
-    pub fn sidebar(&mut self, ui: &mut egui::Ui, navigator: bool) -> Action {
+    pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui, navigator: bool) -> Action {
         let palette = theme::palette(ui.ctx());
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;

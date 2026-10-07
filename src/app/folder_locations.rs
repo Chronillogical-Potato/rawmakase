@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// A question only the user can answer before a folder change is made.
-pub enum FolderQuestion {
+pub(crate) enum FolderQuestion {
     /// A root moves while folders below it have their own locations here.
     Overrides {
         catalog: PathBuf,

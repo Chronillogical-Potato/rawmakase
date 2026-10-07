@@ -7,10 +7,10 @@ use crate::catalog::{Photo, PhotoId};
 use anyhow::Result;
 
 /// Rating, flag and label of a photo.
-pub type Metadata = (PhotoId, i32, i32, String);
+pub(crate) type Metadata = (PhotoId, i32, i32, String);
 /// A metadata change made through the Library, for the shared undo log.
 #[derive(Clone, Debug, PartialEq)]
-pub struct MetadataCommand {
+pub(crate) struct MetadataCommand {
     /// Orders it among Develop steps made in the same frame.
     pub sequence: u64,
     pub before: Vec<Metadata>,
@@ -24,7 +24,7 @@ pub struct MetadataCommand {
 impl Library {
     /// Sets the rating, flag or label of one photo, as Develop and the
     /// filmstrip do; see `edit_photos`.
-    pub fn edit_metadata(
+    pub(crate) fn edit_metadata(
         &mut self,
         id: PhotoId,
         edit: Edit,
@@ -34,7 +34,7 @@ impl Library {
     }
     /// A metadata key in the Grid: Lightroom applies it to every selected
     /// photo.
-    pub fn edit_selection(&mut self, edit: Edit, advance: bool) -> Result<Option<PhotoId>> {
+    pub(crate) fn edit_selection(&mut self, edit: Edit, advance: bool) -> Result<Option<PhotoId>> {
         self.edit_photos(&self.selected_ids(), edit, advance)
     }
     /// Sets the rating, flag or label of `ids` in one transaction. A toggle

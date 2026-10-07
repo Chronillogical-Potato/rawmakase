@@ -9,14 +9,14 @@ pub(super) enum Profile {
     Custom,
 }
 impl Profile {
-    pub const ALL: [Self; 2] = [Self::Loupedeck, Self::Custom];
-    pub fn label(self) -> &'static str {
+    pub(crate) const ALL: [Self; 2] = [Self::Loupedeck, Self::Custom];
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Loupedeck => "Loupedeck+",
             Self::Custom => "Custom MIDI device",
         }
     }
-    pub fn mapping(self) -> Config {
+    pub(crate) fn mapping(self) -> Config {
         match self {
             Self::Loupedeck => Config::loupedeck(),
             Self::Custom => Config {
@@ -30,10 +30,10 @@ impl Profile {
             },
         }
     }
-    pub fn dials(self) -> &'static [(&'static str, u8)] {
+    pub(crate) fn dials(self) -> &'static [(&'static str, u8)] {
         if self == Self::Loupedeck { &DIALS } else { &[] }
     }
-    pub fn buttons(self) -> &'static [(&'static str, u8)] {
+    pub(crate) fn buttons(self) -> &'static [(&'static str, u8)] {
         if self == Self::Loupedeck {
             &BUTTONS
         } else {

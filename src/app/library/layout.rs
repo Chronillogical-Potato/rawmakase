@@ -96,7 +96,7 @@ fn label_from_key(key: &str) -> Label {
 
 impl Library {
     /// How the Library shows its photos now, to keep.
-    pub fn layout(&self) -> LibraryLayout {
+    pub(crate) fn layout(&self) -> LibraryLayout {
         let filters = &self.filters;
         LibraryLayout {
             view: self.view().key().into(),
@@ -115,7 +115,7 @@ impl Library {
     }
     /// Returns to a layout kept from last time, after the source and
     /// selection are restored, so a Loupe, Compare or Survey has its photos.
-    pub fn apply_layout(&mut self, layout: &LibraryLayout) {
+    pub(crate) fn apply_layout(&mut self, layout: &LibraryLayout) {
         let filters = &mut self.filters;
         filters.sort = Sort::from_key(&layout.sort);
         filters.reverse = layout.reverse;

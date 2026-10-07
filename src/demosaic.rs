@@ -13,9 +13,9 @@
 use rayon::prelude::*;
 
 /// Side of the colour pattern: a common multiple of the 2, 6 and 16 pixel periods.
-pub const PATTERN: usize = 48;
+pub(crate) const PATTERN: usize = 48;
 
-pub struct Cfa<'a> {
+pub(crate) struct Cfa<'a> {
     pub data: &'a [f32],
     pub width: usize,
     pub height: usize,
@@ -55,7 +55,7 @@ impl Cfa<'_> {
     }
 }
 
-pub fn demosaic(cfa: &Cfa) -> Vec<[f32; 3]> {
+pub(crate) fn demosaic(cfa: &Cfa) -> Vec<[f32; 3]> {
     let green = if cfa.is_bayer() {
         green_bayer(cfa)
     } else {

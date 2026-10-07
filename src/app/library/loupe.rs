@@ -270,11 +270,11 @@ fn key(photo: &Photo, edge: u32) -> Key {
 }
 
 impl Library {
-    pub fn loupe_open(&self) -> bool {
+    pub(crate) fn loupe_open(&self) -> bool {
         self.loupe.open
     }
     /// E, Return or a double-click: the active photo, large.
-    pub fn open_loupe(&mut self) {
+    pub(crate) fn open_loupe(&mut self) {
         if self.selection.active.is_none() {
             self.select(self.visible.first().map(|i| self.session.photos[*i].id));
         }
@@ -289,7 +289,7 @@ impl Library {
     /// The RAW the Loupe shows through Develop's pipeline: the active photo,
     /// when it is a RAW and online. JPEG, TIFF, PNG and offline photos are
     /// shown by the Loupe's own preview instead.
-    pub fn loupe_develops(&self) -> Option<PhotoId> {
+    pub(crate) fn loupe_develops(&self) -> Option<PhotoId> {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)
@@ -350,7 +350,7 @@ impl Library {
         before
     }
     /// G or Esc: back to the grid, at the active photo.
-    pub fn close_loupe(&mut self) {
+    pub(crate) fn close_loupe(&mut self) {
         self.loupe.before_click = None;
         if self.loupe.open {
             self.loupe.open = false;

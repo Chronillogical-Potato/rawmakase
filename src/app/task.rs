@@ -39,7 +39,7 @@ enum Phase {
 /// A worker asked to stop, to wait for at exit (see docs/shutdown.md).
 pub(super) struct Stopping(Option<std::thread::JoinHandle<()>>);
 impl Stopping {
-    pub fn new(thread: Option<std::thread::JoinHandle<()>>) -> Self {
+    pub(crate) fn new(thread: Option<std::thread::JoinHandle<()>>) -> Self {
         Self(thread)
     }
     fn finished(&self) -> bool {
@@ -77,24 +77,24 @@ pub(super) struct Task {
     phase: Phase,
 }
 impl Task {
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.generation
     }
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         matches!(self.phase, Phase::Running)
     }
-    pub fn start(&mut self) -> (u64, Arc<AtomicBool>) {
+    pub(crate) fn start(&mut self) -> (u64, Arc<AtomicBool>) {
         self.invalidate();
         self.cancel = Arc::new(AtomicBool::new(false));
         self.phase = Phase::Running;
         (self.generation, self.cancel.clone())
     }
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
         self.generation += 1;
         self.phase = Phase::Idle;
     }
-    pub fn finish(&mut self, generation: u64) {
+    pub(crate) fn finish(&mut self, generation: u64) {
         if generation == self.generation {
             self.phase = Phase::Idle;
         }

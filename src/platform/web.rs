@@ -2,7 +2,7 @@
 use anyhow::Result;
 use std::process::Command;
 
-pub fn open(url: &str) -> Result<()> {
+pub(crate) fn open(url: &str) -> Result<()> {
     if cfg!(target_os = "macos") {
         Command::new("open").arg(url).spawn()?;
     } else if cfg!(windows) {

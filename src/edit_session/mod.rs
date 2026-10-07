@@ -1,7 +1,7 @@
 //! The edit of the photo open in Develop, apart from the window that shows it:
 //! its History and whether it still needs saving.
-pub mod history;
-pub mod save_state;
+pub(crate) mod history;
+pub(crate) mod save_state;
 
 use crate::model::recipe::Recipe;
 use history::{History, Step};
@@ -9,7 +9,7 @@ use save_state::SaveState;
 
 /// Whether a drag, a wheel scroll or a dial turn is still changing the settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Gesture {
+pub(crate) enum Gesture {
     /// Still under way: its change becomes one step once it ends.
     Held,
     /// None, or it ended this frame.
@@ -17,18 +17,18 @@ pub enum Gesture {
 }
 
 /// The settings as a frame of the editor found them, from [`EditSession::begin`].
-pub struct Frame {
+pub(crate) struct Frame {
     before: Recipe,
 }
 impl Frame {
-    pub fn before(&self) -> &Recipe {
+    pub(crate) fn before(&self) -> &Recipe {
         &self.before
     }
 }
 
 /// What a frame did to the settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameOutcome {
+pub(crate) enum FrameOutcome {
     Unchanged,
     /// Changed, by an edit, Undo or a History click, and marked for saving.
     Edited,
@@ -37,7 +37,7 @@ pub enum FrameOutcome {
 /// The edit of the photo open in Develop: its settings, the History of how they
 /// came to be, and whether they still need saving.
 #[derive(Default)]
-pub struct EditSession {
+pub(crate) struct EditSession {
     recipe: Recipe,
     history: History,
     save: SaveState,
@@ -47,13 +47,13 @@ pub struct EditSession {
 }
 impl EditSession {
     /// The settings.
-    pub fn recipe(&self) -> &Recipe {
+    pub(crate) fn recipe(&self) -> &Recipe {
         &self.recipe
     }
     /// The settings to change in place, while an editor frame is open: the frame
     /// records the change as a History step, marks it for saving and turns on a
     /// switched-off panel it changed. Outside a frame, [`Self::change`] does that.
-    pub fn recipe_mut(&mut self) -> &mut Recipe {
+    pub(crate) fn recipe_mut(&mut self) -> &mut Recipe {
         // Tests drive the panels' handlers directly, with no frame around them.
         debug_assert!(
             self.frame_open || cfg!(test),
@@ -64,7 +64,11 @@ impl EditSession {
     /// Changes the settings outside an editor frame (a command, a preset, a result
     /// computed off the UI thread) as one History step, `step` or one named for what
     /// changed, to be saved. Returns what `edit` returns.
-    pub fn change<T>(&mut self, step: Option<Step>, edit: impl FnOnce(&mut Recipe) -> T) -> T {
+    pub(crate) fn change<T>(
+        &mut self,
+        step: Option<Step>,
+        edit: impl FnOnce(&mut Recipe) -> T,
+    ) -> T {
         let before = self.recipe.clone();
         let out = edit(&mut self.recipe);
         // A change that changed nothing is no step, and names none.
@@ -75,84 +79,68 @@ impl EditSession {
     }
     /// The settings, to store what was analysed from the photo (Upright's
     /// corrections, Guided's solution) rather than an edit: no History step.
-    pub fn analysed_mut(&mut self) -> &mut Recipe {
+    pub(crate) fn analysed_mut(&mut self) -> &mut Recipe {
         &mut self.recipe
-    }
-    /// Sets `id` to `value` with what a change to it implies (see
-    /// [`crate::model::edit::setting_changed`]), inside an editor frame or a
-    /// [`Self::change`].
-    pub fn set_parameter(
-        recipe: &mut Recipe,
-        id: crate::model::params::ParameterId,
-        value: f32,
-        photo: Option<&crate::camera_data::Metadata>,
-    ) {
-        let previous = *id.value_mut(recipe);
-        *id.value_mut(recipe) = value;
-        crate::model::edit::setting_changed(recipe, id, previous, photo);
     }
     /// Starts over with `recipe`, recording nothing: a photo opened, a snapshot or
     /// History state shown, settings read back. History and save state are the
     /// caller's to set alongside, as the case needs.
-    pub fn replace(&mut self, recipe: Recipe) -> Recipe {
+    pub(crate) fn replace(&mut self, recipe: Recipe) -> Recipe {
         std::mem::replace(&mut self.recipe, recipe)
     }
     /// Ends a gesture still held (a drag, a wheel scroll), as one History step.
-    pub fn finish_gesture(&mut self) {
+    pub(crate) fn finish_gesture(&mut self) {
         self.history.finish_gesture(&self.recipe);
     }
     /// The History read back from `saved`, for the current settings.
-    pub fn restore_history(&mut self, saved: crate::model::saved_history::SavedHistory) {
+    pub(crate) fn restore_history(&mut self, saved: crate::model::saved_history::SavedHistory) {
         self.history = History::restored(saved, &self.recipe);
     }
     /// Returns the settings to `target`, the state History has at `at`, as the step
     /// `step` (Undo of a catalog command, say).
-    pub fn restore(&mut self, at: history::Mark, target: &Recipe, step: Step) {
+    pub(crate) fn restore(&mut self, at: history::Mark, target: &Recipe, step: Step) {
         self.history.restore(at, target, &mut self.recipe, step);
     }
     /// Sets the settings to `target` as History step `step`.
-    pub fn set(&mut self, target: &Recipe, step: Step) {
+    pub(crate) fn set(&mut self, target: &Recipe, step: Step) {
         self.history.set(target, &mut self.recipe, step);
     }
     /// The settings and every state History keeps, to bring all up to date at once
     /// (Upright's analysis arriving, say).
-    pub fn states_mut(&mut self) -> impl Iterator<Item = &mut Recipe> {
+    pub(crate) fn states_mut(&mut self) -> impl Iterator<Item = &mut Recipe> {
         std::iter::once(&mut self.recipe).chain(self.history.states_mut())
     }
     /// The History of how the settings came to be.
-    pub fn history(&self) -> &History {
+    pub(crate) fn history(&self) -> &History {
         &self.history
     }
     /// The History, to name, end or replace steps; stepping through it moves the
     /// settings with it (see [`Self::undo`] and [`Self::jump`]).
-    pub fn history_mut(&mut self) -> &mut History {
+    pub(crate) fn history_mut(&mut self) -> &mut History {
         &mut self.history
     }
     /// Undoes the latest History step on the settings.
-    pub fn undo(&mut self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn undo(&mut self) -> bool {
         self.history.undo(&mut self.recipe)
     }
-    /// Redoes the next History step on the settings.
-    pub fn redo(&mut self) -> bool {
-        self.history.redo(&mut self.recipe)
-    }
     /// Shows History state `applied` (steps applied), as a History click does.
-    pub fn jump(&mut self, applied: usize) -> bool {
+    pub(crate) fn jump(&mut self, applied: usize) -> bool {
         self.history.jump(applied, &mut self.recipe)
     }
     /// Whether the settings still need saving, and why not if they can't be.
-    pub fn save_state(&self) -> &SaveState {
+    pub(crate) fn save_state(&self) -> &SaveState {
         &self.save
     }
     /// The save state, for autosave and for settings saved with the edit that are
     /// not History steps (export options).
-    pub fn save_state_mut(&mut self) -> &mut SaveState {
+    pub(crate) fn save_state_mut(&mut self) -> &mut SaveState {
         &mut self.save
     }
     /// Records the change from `before` to the current settings as one History
     /// step, named `step` or for what changed, to be saved. Returns whether the
     /// settings changed.
-    pub fn commit(&mut self, before: Recipe, step: Option<Step>) -> bool {
+    pub(crate) fn commit(&mut self, before: Recipe, step: Option<Step>) -> bool {
         crate::model::edit::turn_on_edited_panel(&before, &mut self.recipe);
         if let Some(step) = step {
             self.history.label(step);
@@ -164,7 +152,7 @@ impl EditSession {
         changed
     }
     /// Starts a frame of the editor, which may edit the settings.
-    pub fn begin(&mut self) -> Frame {
+    pub(crate) fn begin(&mut self) -> Frame {
         self.frame_open = true;
         self.history.begin_frame();
         Frame {
@@ -174,7 +162,7 @@ impl EditSession {
     /// Ends `frame`: an edit made while a `gesture` is held is recorded once it is
     /// released, as one step; Undo and History clicks are not recorded again. An
     /// edit that changed only a switched-off panel turns it on.
-    pub fn finish(&mut self, frame: Frame, gesture: Gesture) -> FrameOutcome {
+    pub(crate) fn finish(&mut self, frame: Frame, gesture: Gesture) -> FrameOutcome {
         self.frame_open = false;
         if !self.history.is_replaying() {
             crate::model::edit::turn_on_edited_panel(&frame.before, &mut self.recipe);
@@ -191,7 +179,7 @@ impl EditSession {
 
 /// A number that orders the changes made in the same frame, edits and catalog
 /// commands alike.
-pub fn sequence() -> u64 {
+pub(crate) fn sequence() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     NEXT.fetch_add(1, Ordering::Relaxed)

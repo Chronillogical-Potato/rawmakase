@@ -11,7 +11,7 @@ use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Color32, Vec2};
 
 /// The strip's height, the same in every view.
-pub const HEIGHT: f32 = 128.;
+pub(crate) const HEIGHT: f32 = 128.;
 /// The id of the strip's panel; its scroll area is salted the same way.
 /// Every view draws the one panel, so the strip keeps its scroll position.
 pub(super) const ID: &str = "filmstrip";
@@ -19,14 +19,14 @@ pub(super) const ID: &str = "filmstrip";
 /// The module the strip is shown in. Both mark the whole selection; the Library lets
 /// the view shown take a click, and Develop marks the photo it has open as active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Module {
+pub(crate) enum Module {
     Library,
     Develop,
 }
 
 /// What happened in the strip this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Outcome {
+pub(crate) struct Outcome {
     pub pick: Option<Pick>,
     /// A rating, flag or label was changed from the strip.
     pub metadata_changed: bool,
@@ -45,7 +45,7 @@ pub(super) struct State {
 
 /// Draws the frame again before it is shown, as egui allows once a frame
 /// (else on the next frame): for a change made after the strip was drawn.
-pub fn redraw(ctx: &egui::Context, reason: &'static str) {
+pub(crate) fn redraw(ctx: &egui::Context, reason: &'static str) {
     ctx.request_discard(reason);
     if !ctx.will_discard() {
         ctx.request_repaint();
@@ -67,7 +67,7 @@ pub(super) fn in_view(
 
 /// A photo chosen in the filmstrip: clicked, or opened from its menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Pick {
+pub(crate) enum Pick {
     Show(PhotoId),
     Develop(PhotoId),
     /// Develop's Set as Reference Photo.
@@ -75,13 +75,13 @@ pub enum Pick {
 }
 /// A catalog photo dragged from Develop's filmstrip, e.g. onto Reference View.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DraggedPhoto(pub PhotoId);
+pub(crate) struct DraggedPhoto(pub PhotoId);
 
 impl Library {
     /// The Library's strip: brings the views up to date, draws the strip
     /// with the active photo, and carries out a click as the view shown
     /// takes it. Call before the side panels, so it spans the window.
-    pub fn library_filmstrip(&mut self, ui: &mut egui::Ui) -> Action {
+    pub(crate) fn library_filmstrip(&mut self, ui: &mut egui::Ui) -> Action {
         self.prepare(ui.ctx());
         let active = self.selection.active;
         match self.filmstrip_panel(ui, active, Module::Library).pick {
@@ -93,7 +93,7 @@ impl Library {
     /// scroll area serve every view, so the strip stays where it was when
     /// they change. `current` is the photo shown: Develop's, or the active
     /// one.
-    pub fn filmstrip_panel(
+    pub(crate) fn filmstrip_panel(
         &mut self,
         ui: &mut egui::Ui,
         current: Option<PhotoId>,
@@ -108,13 +108,13 @@ impl Library {
     /// Whether the selection changed after the strip was drawn, as a click
     /// in the grid below does: the strip then needs another frame to mark
     /// it and bring it into view.
-    pub fn filmstrip_behind(&self) -> bool {
+    pub(crate) fn filmstrip_behind(&self) -> bool {
         self.strip.drawn.0 != self.selection || self.strip.drawn.1 != self.shown_version
     }
     /// A filmstrip click in Develop with Cmd or Shift: the photo joins or leaves the
     /// selection, or a range does, as in the grid, while the photo open stays active.
     /// Returns whether it was taken here; a plain click opens the photo instead.
-    pub fn develop_select(
+    pub(crate) fn develop_select(
         &mut self,
         id: PhotoId,
         open: Option<PhotoId>,

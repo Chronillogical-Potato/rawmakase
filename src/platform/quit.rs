@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static WORK_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Records whether quitting now would cut off work (see [`WORK_PENDING`]).
-pub fn set_work_pending(pending: bool) {
+pub(crate) fn set_work_pending(pending: bool) {
     WORK_PENDING.store(pending, Ordering::Relaxed);
 }
 
@@ -21,7 +21,7 @@ pub fn set_work_pending(pending: bool) {
 /// the item's target, not the responder chain, so Quit still works while the
 /// window is minimized and not key. Elsewhere it does nothing.
 #[cfg(target_os = "macos")]
-pub fn through_close_guard(app: &impl winit::raw_window_handle::HasWindowHandle) {
+pub(crate) fn through_close_guard(app: &impl winit::raw_window_handle::HasWindowHandle) {
     use objc2::{MainThreadMarker, sel};
     use objc2_app_kit::{NSApplication, NSView};
     use winit::raw_window_handle::RawWindowHandle;
@@ -127,4 +127,4 @@ extern "C-unwind" fn should_terminate(
 
 /// Elsewhere quitting already closes the window first.
 #[cfg(not(target_os = "macos"))]
-pub fn through_close_guard(_app: &impl winit::raw_window_handle::HasWindowHandle) {}
+pub(crate) fn through_close_guard(_app: &impl winit::raw_window_handle::HasWindowHandle) {}

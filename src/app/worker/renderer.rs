@@ -133,13 +133,13 @@ impl Textures {
 
 /// The preview renderer: one thread, with a lane for the edit and one for Before, so
 /// each keeps its latest job and the edit's goes first.
-pub struct Renderer(Latest<RenderJob>);
+pub(crate) struct Renderer(Latest<RenderJob>);
 impl Renderer {
     /// Stops rendering once the current job is done.
     pub(in crate::app) fn stop(&mut self) -> crate::app::task::Stopping {
         self.0.stop()
     }
-    pub fn submit(&self, job: RenderJob) {
+    pub(crate) fn submit(&self, job: RenderJob) {
         let lane = match job.pane {
             Pane::After => 0,
             Pane::Before => 1,
@@ -150,7 +150,7 @@ impl Renderer {
 
 /// A CPU-only renderer, for headless tests.
 #[cfg(test)]
-pub fn renderer(tx: Sender<Event>, ctx: egui::Context) -> Renderer {
+pub(crate) fn renderer(tx: Sender<Event>, ctx: egui::Context) -> Renderer {
     renderer_with_backend(tx, ctx, RenderBackend::Cpu)
 }
 pub(in crate::app) fn renderer_with_backend(
