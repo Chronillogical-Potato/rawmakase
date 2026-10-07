@@ -83,8 +83,8 @@ pass. Use the current stable Rust, as CI does; newer clippy releases add lints.
 
 ```bash
 cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
 A `v*` tag builds and publishes a release, so the same applies before tagging.
