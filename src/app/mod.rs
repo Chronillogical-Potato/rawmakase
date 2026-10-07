@@ -10,7 +10,7 @@
 use crate::app::worker::{Event, Latest, LoadJob};
 use crate::catalog::PhotoId;
 #[cfg(test)]
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use eframe::egui::{self, Vec2};
 use std::{
     path::PathBuf,

@@ -2,7 +2,7 @@ use super::*;
 use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use crate::model::transform::UprightMode;
-use crate::{develop::panels::PanelState, model::effects::VignetteStyle};
+use crate::{model::effects::VignetteStyle, model::panels::PanelState};
 use serde_json::Value;
 use std::collections::BTreeMap;
 

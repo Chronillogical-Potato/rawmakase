@@ -2,7 +2,7 @@ use super::lightroom::import_lightroom;
 use super::*;
 use crate::lr_develop::{convert_develop, develop_fields};
 use crate::metadata::{LangAlt, PhotoInfo, Value};
-use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
+use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
 fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;
     db.execute_batch("CREATE TABLE AgLibraryRootFolder(id_local INTEGER, absolutePath TEXT);
@@ -354,7 +354,7 @@ fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
 }
 #[test]
 fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let m = crate::camera_data::Metadata::default();
     // Lightroom stores every switch, on or off, with each edit.
     let all_on: Vec<String> = Panel::ALL
@@ -1254,7 +1254,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
         ..Default::default()
     };
     let mut legacy_on = legacy;
-    legacy_on.set_profile_corrections(&m, crate::develop::ProfileCorrections::On);
+    legacy_on.set_profile_corrections(&m, crate::model::recipe::ProfileCorrections::On);
     assert!(!legacy_on.lens_builtin);
     assert_eq!(legacy_on.missing_lens_profile(&m), None);
     Ok(())

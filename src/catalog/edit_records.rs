@@ -55,7 +55,9 @@ mod tests {
     use super::*;
 
     use crate::edits::{Origin, resolve};
-    use crate::{develop::Recipe, export_settings::ExportOptions, raw_defaults::DevelopDefaults};
+    use crate::{
+        export_settings::ExportOptions, model::recipe::Recipe, raw_defaults::DevelopDefaults,
+    };
     use std::path::Path;
 
     /// Each photo's catalog id and file.

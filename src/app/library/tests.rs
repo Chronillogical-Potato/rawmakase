@@ -1817,7 +1817,7 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
     library.catalog.save_edit(
         b9,
         &path,
-        &crate::develop::Recipe::default(),
+        &crate::model::recipe::Recipe::default(),
         &Default::default(),
         crate::catalog::HistoryUpdate::Keep,
     )?;

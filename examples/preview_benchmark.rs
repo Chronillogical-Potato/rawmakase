@@ -3,10 +3,8 @@
 //! Times what the desktop does: the first Fit after opening, Fit renders while a
 //! slider moves, a 100% region, and the full-resolution render used for export.
 use anyhow::{Context, Result};
-use rawmakase::{
-    camera_data,
-    develop::{self, Recipe},
-};
+use rawmakase::model::recipe::Recipe;
+use rawmakase::{camera_data, develop};
 use std::{sync::atomic::AtomicBool, time::Instant};
 
 /// Fit size of a 1600-pixel viewport, the size used by earlier measurements.

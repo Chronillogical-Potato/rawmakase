@@ -1,6 +1,5 @@
-use super::Recipe;
-use crate::camera_data::CameraImage;
-use crate::model::transform::Transform;
+use crate::model::recipe::Recipe;
+use crate::{camera_data::CameraImage, model::transform::Transform};
 
 /// How the displayed photo's axes lie in the frame the camera recorded: `m` maps a
 /// displayed direction (x right, y down) to a recorded one. Its entries are 0 or ±1.
@@ -195,8 +194,8 @@ impl Geometry {
         let transform = Self::homography(r, frame_width, frame_height);
         // Off with the Lens Corrections panel, for callers that pass the stored recipe
         // (the white balance picker) rather than the rendered one.
-        let lens_panel = r.panels.state(super::panels::Panel::LensCorrections);
-        let manual = (r.engine >= 4 && lens_panel == super::panels::PanelState::On)
+        let lens_panel = r.panels.state(crate::model::panels::Panel::LensCorrections);
+        let manual = (r.engine >= 4 && lens_panel == crate::model::panels::PanelState::On)
             .then(|| ManualDistortion::new(r.lens_manual_distortion, frame_width, frame_height))
             .flatten();
         let mut g = Self {
@@ -567,8 +566,8 @@ mod manual_distortion_tests {
         assert!(Geometry::new(&im, &old, 0).manual.is_none());
         let mut off = distorted(0.5);
         off.panels.set(
-            crate::develop::panels::Panel::LensCorrections,
-            crate::develop::panels::PanelState::Off,
+            crate::model::panels::Panel::LensCorrections,
+            crate::model::panels::PanelState::Off,
         );
         assert!(Geometry::new(&im, &off, 0).manual.is_none());
     }
@@ -847,7 +846,7 @@ mod constrain_crop_tests {
     /// Distortion alone renders the stored crop.
     #[test]
     fn transform_panel_off_bypasses_constrain_crop() {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         let mut r = Recipe {
             constrain_crop: true,
             lens_manual_distortion: 0.5,

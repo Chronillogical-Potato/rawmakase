@@ -1,9 +1,8 @@
 use super::*;
-use crate::app::Module;
-use crate::develop::params::ParameterId;
+use crate::{app::Module, develop::params::ParameterId};
 mod mapping_tests {
     use super::*;
-    use crate::develop::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
+    use crate::model::recipe::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, TINT_LIMIT};
     #[test]
     fn encoder_values_are_relative() {
         assert_eq!(
@@ -122,7 +121,7 @@ mod mapping_tests {
         assert!((r.contrast - 0.35).abs() < 1e-6);
         assert_eq!(Param::Setting(ParameterId::Contrast).shown(&mut r, 0), 35.);
         Param::Setting(ParameterId::Exposure).set(&mut r, 99., 0);
-        assert_eq!(r.exposure, crate::develop::EXPOSURE_LIMIT);
+        assert_eq!(r.exposure, crate::model::recipe::EXPOSURE_LIMIT);
         Param::Setting(ParameterId::Temperature).set(&mut r, 1., 0);
         assert_eq!(r.temperature, TEMPERATURE_MIN);
         // A band addressed by channel ignores the Mixer's selector and B&W.

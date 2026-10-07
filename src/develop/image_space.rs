@@ -5,8 +5,9 @@
 //! crop, normalised to 0–1 on both axes, before lens correction, Transform, crop,
 //! straightening and the user's rotation and flips. A spot stays on the dust particle
 //! whatever those settings do.
-use super::{Geometry, Recipe};
+use super::Geometry;
 use crate::camera_data::CameraImage;
+use crate::model::recipe::Recipe;
 
 /// Image space of one decoded image (or pyramid level) of a photo.
 #[derive(Clone, Copy, Debug, PartialEq)]

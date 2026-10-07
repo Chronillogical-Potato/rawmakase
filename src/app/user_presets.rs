@@ -239,7 +239,7 @@ mod tests {
         let library = |name: &str| {
             let info = PresetInfo::new(name, "Mine");
             let text = crate::xmp::preset_write::preset(
-                &crate::develop::Recipe::default(),
+                &crate::model::recipe::Recipe::default(),
                 &info,
                 &GroupSelection::all(),
             );

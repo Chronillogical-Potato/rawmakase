@@ -4,7 +4,7 @@
 //! Lightroom stores one `Enable*` flag per panel in each photo's develop settings. The
 //! settings each switch covers follow the panel layout Lightroom Classic 15 names in
 //! its own history (the Basic panel and crop have no switch).
-use super::Recipe;
+use super::recipe::Recipe;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 

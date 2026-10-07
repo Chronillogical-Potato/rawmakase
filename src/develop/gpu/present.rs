@@ -4,12 +4,13 @@
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input, uniforms::PresentParams};
 use crate::develop::{
-    ClipOverlay, Histogram, Recipe,
+    ClipOverlay, Histogram,
     effects::{GrainField, PostCropVignette},
     pipeline::pixel_params::PixelParams,
     quality,
 };
 use crate::model::operators::GrainModel;
+use crate::model::recipe::Recipe;
 use anyhow::{Context, Result, ensure};
 use std::{
     path::Path,

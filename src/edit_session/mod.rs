@@ -3,7 +3,7 @@
 pub mod history;
 pub mod save_state;
 
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use history::{History, Step};
 use save_state::SaveState;
 

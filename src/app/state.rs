@@ -2,8 +2,8 @@
 use crate::catalog::PhotoId;
 use crate::{
     camera_data::{CameraImage, Metadata},
-    develop::Recipe,
     export_settings::ExportOptions,
+    model::recipe::Recipe,
 };
 use eframe::egui::{self, Vec2};
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -160,8 +160,8 @@ pub(super) struct PreviewState {
     pub(super) samples_requested: bool,
     /// The recipe the shown samples were rendered with, and that of the render in
     /// flight.
-    pub(super) samples_recipe: Option<crate::develop::Recipe>,
-    pub(super) pending_recipe: Option<crate::develop::Recipe>,
+    pub(super) samples_recipe: Option<Recipe>,
+    pub(super) pending_recipe: Option<Recipe>,
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
     pub(super) last_region: Option<[u32; 4]>,

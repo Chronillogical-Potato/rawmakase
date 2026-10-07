@@ -208,7 +208,7 @@ impl Editor {
     }
     /// A snapshot's settings for this photo; one from Lightroom is converted, and
     /// what it could not render is said in the status line.
-    fn snapshot_settings(&mut self, id: i64) -> Option<crate::develop::Recipe> {
+    fn snapshot_settings(&mut self, id: i64) -> Option<crate::model::recipe::Recipe> {
         let snapshot = self.snapshot(id).cloned()?;
         let recipe = match snapshot.settings {
             SnapshotSettings::Recipe(recipe) => *recipe,
@@ -264,7 +264,7 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
 mod tests {
     use super::*;
     use crate::app::Module;
-    use crate::develop::Recipe;
+    use crate::model::recipe::Recipe;
 
     #[test]
     fn a_snapshot_saves_names_and_restores_the_edit_as_a_history_step() -> anyhow::Result<()> {

@@ -1,6 +1,7 @@
+use crate::model::recipe::Recipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
-    develop::{Recipe, Rendered},
+    develop::Rendered,
     export_settings::ExportOptions,
 };
 use eframe::egui;
@@ -82,7 +83,7 @@ pub enum Event {
         /// The sampling task's generation; a later sample or a put-away dropper
         /// supersedes it.
         generation: u64,
-        sampled: Box<crate::develop::Recipe>,
+        sampled: Box<Recipe>,
         result: Result<[f32; 3], String>,
     },
     /// The Targeted Adjustment Tool's sample for the photo loaded as `id`, taken
@@ -91,20 +92,20 @@ pub enum Event {
         id: u64,
         /// The sampling task's generation; a later drag supersedes it.
         generation: u64,
-        sampled: Box<crate::develop::Recipe>,
+        sampled: Box<Recipe>,
         result: Result<crate::develop::targeted::TargetSample, String>,
     },
     /// An Auto estimate for the photo loaded as `id`.
     Auto {
         id: u64,
         kind: AutoKind,
-        result: Result<Box<crate::develop::Recipe>, String>,
+        result: Result<Box<Recipe>, String>,
     },
     /// Upright's corrections for the photo loaded as `id`, analysed from `analysed`.
     Upright {
         id: u64,
         generation: u64,
-        analysed: Box<crate::develop::Recipe>,
+        analysed: Box<Recipe>,
         result: Result<Vec<[f32; 9]>, String>,
     },
     /// The Crop panel's Auto straighten angle for the photo loaded as `id`, analysed
@@ -112,7 +113,7 @@ pub enum Event {
     Straighten {
         id: u64,
         generation: u64,
-        analysed: Box<crate::develop::Recipe>,
+        analysed: Box<Recipe>,
         result: Result<Option<f32>, String>,
     },
     /// The setup assistant's scan for cameras, profiles and presets.

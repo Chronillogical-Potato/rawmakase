@@ -1,7 +1,7 @@
 //! Lightroom's Treatment (Color or Black & White) and the Auto black & white mix.
-use super::Recipe;
 use crate::camera_data::{CameraImage, Metadata};
 use crate::camera_profiles::CameraProfile;
+use crate::model::recipe::Recipe;
 use std::sync::Arc;
 
 /// How the photo's colors spread, as Auto black & white measures them: the mean and

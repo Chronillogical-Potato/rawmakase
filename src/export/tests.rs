@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::recipe::Recipe;
 #[test]
 fn icc_export_and_sixteen_bit_precision() -> Result<()> {
     use image::ImageDecoder;
@@ -53,7 +54,7 @@ fn icc_export_and_sixteen_bit_precision() -> Result<()> {
 }
 #[test]
 fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
-    use crate::develop::Recipe;
+    use crate::model::recipe::Recipe;
     let m = Metadata {
         make: "Sony".into(),
         model: "ILCE-7M2".into(),
@@ -135,7 +136,7 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     assert_eq!(back.upright, r.upright);
     assert!(back.lens_ca);
     // Panel switches: an off panel is written and read back; on ones are left out.
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     r.panels.set(Panel::Effects, PanelState::Off);
     let packet = crate::xmp::write::packet(&r, &m, &photo);
     assert!(packet.contains("crs:EnableEffects=\"False\""));
@@ -162,7 +163,7 @@ fn a_turned_and_mirrored_crop_round_trips_through_xmp() -> Result<()> {
         cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
-    let mut r = crate::develop::Recipe {
+    let mut r = Recipe {
         crop: [0.1, 0.25, 0.6, 0.875],
         straighten: 4.5,
         ..Default::default()
@@ -178,7 +179,7 @@ fn a_turned_and_mirrored_crop_round_trips_through_xmp() -> Result<()> {
     };
     let packet = crate::xmp::write::packet(&r, &m, &photo);
     let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
-        &crate::develop::Recipe::default(),
+        &Recipe::default(),
         &m,
         &[],
         None,
@@ -206,7 +207,7 @@ fn constrain_crop_writes_the_crop_as_rendered() -> Result<()> {
         cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
-    let mut r = crate::develop::Recipe {
+    let mut r = Recipe {
         constrain_crop: true,
         crop: [0.1, 0., 1., 0.9],
         ..Default::default()
@@ -223,7 +224,7 @@ fn constrain_crop_writes_the_crop_as_rendered() -> Result<()> {
     assert!(packet.contains("crs:CropConstrainToWarp=\"1\""));
     assert!(packet.contains("crs:HasCrop=\"True\""));
     let back = crate::xmp::parse(Path::new("export.xmp"), &packet)?.apply(
-        &crate::develop::Recipe::default(),
+        &Recipe::default(),
         &m,
         &[],
         None,
@@ -604,7 +605,7 @@ fn exiftool_reads_extended_xmp_back() -> Result<()> {
         return Ok(());
     }
     let dir = tempfile::tempdir()?;
-    let r = crate::develop::Recipe {
+    let r = Recipe {
         exposure: 0.4,
         ..Default::default()
     };
@@ -665,11 +666,7 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
         format: "image/jpeg".into(),
         ..Default::default()
     };
-    let packet = crate::xmp::write::packet(
-        &crate::develop::Recipe::default(),
-        &Metadata::default(),
-        &photo,
-    );
+    let packet = crate::xmp::write::packet(&Recipe::default(), &Metadata::default(), &photo);
     let doc = roxmltree::Document::parse(&packet)?;
     const DC: &str = "http://purl.org/dc/elements/1.1/";
     let items = |ns: &str, name: &str| -> Vec<(Option<String>, String)> {
@@ -715,11 +712,11 @@ fn descriptive_fields_are_written_as_lightroom_does() -> Result<()> {
 /// Lightroom's packets, and RAWmakase's for measured recipes, set the measured ones.
 #[test]
 fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
-    use crate::develop::Recipe;
     use crate::model::operators::{
         CalibrationModel, ClarityModel, GrainModel, LensVignetteModel, MixerModel, NoiseModel,
         SaturationModel, SharpeningModel, TextureModel, VibranceModel,
     };
+    use crate::model::recipe::Recipe;
     let m = Metadata {
         wb: [2., 1., 1.5],
         daylight_wb: [2., 1., 1.5],

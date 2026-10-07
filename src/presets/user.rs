@@ -1,11 +1,9 @@
 //! Presets made in RAWmakase: XMP files in the user library's "User Presets" folder,
 //! one folder per group, which Lightroom and Camera Raw can read too. Only these are
 //! updated, renamed or deleted from the app; imported and built-in presets are not.
+use crate::model::recipe::Recipe;
 use crate::{
-    develop::{
-        Recipe,
-        settings_groups::{GroupInclusion, GroupSelection},
-    },
+    develop::settings_groups::{GroupInclusion, GroupSelection},
     storage::Replace,
     xmp::{
         Preset,

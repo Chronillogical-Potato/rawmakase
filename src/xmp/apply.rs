@@ -1,8 +1,9 @@
 use super::Preset;
+use crate::model::recipe::Recipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
     camera_profiles::CameraProfile,
-    develop::{Recipe, mul},
+    develop::mul,
 };
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -998,7 +999,7 @@ impl Preset {
     /// Lightroom's panel switches. A panel is off when any of its keys says so, and
     /// turned back on by a setting that says it is on.
     fn apply_panels(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         for panel in Panel::ALL {
             let mut state = None;
             for key in panel.lightroom_keys() {
@@ -1073,9 +1074,9 @@ impl Preset {
         )?;
         if let Some(enable) = number(v, "LensProfileEnable")? {
             let state = if enable != 0. {
-                crate::develop::ProfileCorrections::On
+                crate::model::recipe::ProfileCorrections::On
             } else {
-                crate::develop::ProfileCorrections::Off
+                crate::model::recipe::ProfileCorrections::Off
             };
             r.set_profile_corrections(m, state);
         }

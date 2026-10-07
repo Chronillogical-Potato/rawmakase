@@ -4,10 +4,10 @@
 //! Saturation are predicted from a reduced render of the photo before its adjustments,
 //! by linear fits to Lightroom's own Auto values.
 use super::{
-    Recipe,
     pipeline::{preview, render},
     quality::recovered,
 };
+use crate::model::recipe::Recipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
     color::srgb_decode,

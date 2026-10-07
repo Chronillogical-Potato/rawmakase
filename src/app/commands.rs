@@ -13,7 +13,7 @@ pub(super) use reply::{Outcome, Reply};
 #[derive(Default)]
 pub(super) struct Automation {
     pub revision: u64,
-    observed: Option<(u64, crate::develop::Recipe)>,
+    observed: Option<(u64, crate::model::recipe::Recipe)>,
     outputs: output::Outputs,
     turn: Option<(std::time::Instant, TurnScope)>,
 }

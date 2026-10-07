@@ -8,8 +8,8 @@ use crate::export_settings::ExportSettings;
 use crate::{
     camera_data::{CameraImage, Demosaic},
     decode::{DecodePolicy, FullSize},
-    develop::Recipe,
     exif,
+    model::recipe::Recipe,
     raw::Raw,
 };
 use anyhow::{Result, ensure};

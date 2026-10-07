@@ -31,7 +31,7 @@ pub(crate) struct Retouching<'a> {
     pub(crate) model: RetouchModel,
 }
 impl<'a> Retouching<'a> {
-    pub(crate) fn of(r: &'a crate::develop::Recipe) -> Self {
+    pub(crate) fn of(r: &'a crate::model::recipe::Recipe) -> Self {
         Self {
             red_eye: &r.red_eye,
             retouch: &r.retouch,

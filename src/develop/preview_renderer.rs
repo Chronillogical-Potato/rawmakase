@@ -1,9 +1,13 @@
 //! Stateful desktop preview backend. Export remains on the reference CPU path.
 use super::{
-    Geometry, Recipe, Rendered, ValidRecipe, gpu, pyramid::Pyramid, quality, quality::Output,
+    Geometry, Rendered, gpu,
+    pyramid::Pyramid,
+    quality::{self, Output},
     stage_cache::StageCache,
 };
 use crate::camera_data::CameraImage;
+use crate::model::recipe::Recipe;
+use crate::model::valid::ValidRecipe;
 use anyhow::Result;
 use std::sync::{Arc, atomic::AtomicBool};
 

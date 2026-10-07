@@ -1,8 +1,9 @@
 //! Lightroom's Upright analysis: straight lines in the photo give its vertical and
 //! horizontal vanishing points, from which Level, Vertical, Full and Auto are camera
 //! rotations at the photo's focal length (docs/transform.md).
-use super::{Geometry, Recipe, image_space::LensMap};
+use super::{Geometry, image_space::LensMap};
 use crate::camera_data::CameraImage;
+use crate::model::recipe::Recipe;
 
 /// The lens settings an analysis is made through, as they render: when any of them
 /// changes, the corrections analysed before no longer fit the photo. A setting a
@@ -936,8 +937,8 @@ mod tests {
         // Not with the Lens Corrections panel switched off, which bypasses it.
         let mut off = r;
         off.panels.set(
-            crate::develop::panels::Panel::LensCorrections,
-            crate::develop::panels::PanelState::Off,
+            crate::model::panels::Panel::LensCorrections,
+            crate::model::panels::PanelState::Off,
         );
         let (image, w, h) = analysis_image(&im, &off);
         assert!(image[h / 2 * w] < 255.);

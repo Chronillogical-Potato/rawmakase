@@ -8,8 +8,8 @@
 use super::{Replace, assemble::Values, job};
 use crate::export_settings::{Existing, ExportSettings};
 use crate::{
-    develop::Recipe,
     edits::{self, EditRecord, Origin, PhotoRecord},
+    model::recipe::Recipe,
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, bail, ensure};

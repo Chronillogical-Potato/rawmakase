@@ -2,7 +2,7 @@
 //! Blacks, Shadows, Exposure, Highlights and Whites, and dragging sideways in
 //! one moves that slider. The regions are fifths of the width, along the
 //! histogram's grid lines.
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use eframe::egui::{self, CursorIcon, Rect, Sense};
 
 /// A histogram region and the Basic slider it drives.

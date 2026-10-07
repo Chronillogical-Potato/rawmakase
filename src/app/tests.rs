@@ -1070,7 +1070,7 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
 }
 #[test]
 fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
@@ -3926,7 +3926,7 @@ fn click_at(at: Pos2, button: egui::PointerButton) -> Vec<egui::Event> {
 }
 #[test]
 fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
-    use crate::develop::panels::PanelState;
+    use crate::model::panels::PanelState;
     let ctx = egui::Context::default();
     let mut state = PanelState::On;
     let area = std::cell::Cell::new(Rect::NOTHING);
@@ -3960,11 +3960,11 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
 }
 #[test]
 fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    let frame = |editor: &mut Editor, edit: &dyn Fn(&mut develop::Recipe)| {
+    let frame = |editor: &mut Editor, edit: &dyn Fn(&mut crate::model::recipe::Recipe)| {
         let started = editor.begin_edit_frame();
         edit(&mut editor.document.edit.recipe);
         editor.finish_edit_frame(started, &ctx);
@@ -4539,7 +4539,7 @@ fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {
 }
 #[test]
 fn a_swatch_added_while_color_mixer_is_off_turns_it_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let ctx = egui::Context::default();
     let (mut editor, _) =
         editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);

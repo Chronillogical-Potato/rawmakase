@@ -2,8 +2,10 @@ use super::masks::{
     LocalDelta, LocalMath, MaskWeights,
     local::{self, slot},
 };
-use super::{Geometry, Recipe, Rendered, ValidRecipe, mul, srgb_encode};
+use super::{Geometry, Rendered, mul, srgb_encode};
 use crate::color::srgb_decode;
+use crate::model::recipe::Recipe;
+use crate::model::valid::ValidRecipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
     develop::curve::{CurveLut, refine_saturation},

@@ -4,11 +4,12 @@
 //! photo's highlights. The gain is computed on the Shadows/Highlights map's grid, so
 //! previews, tiles and exports agree. See docs/tone-controls.md#clarity.
 use crate::model::operators::ClarityModel;
+use crate::model::recipe::Recipe;
 use rayon::prelude::*;
 
 /// The Clarity this recipe renders with the measured operator, or 0 when its Clarity
 /// takes the original one (older recipes, negative values, earlier engines).
-pub(crate) fn measured(r: &super::Recipe) -> f32 {
+pub(crate) fn measured(r: &Recipe) -> f32 {
     let clarity = r.effects.clarity;
     if r.engine >= 4
         && r.reference_curves
@@ -262,7 +263,7 @@ mod tests {
     #[test]
     fn new_edits_measure_positive_clarity_and_saved_recipes_keep_the_original() {
         let m = crate::camera_data::Metadata::default();
-        let mut new = super::super::Recipe::with_profiles(&m, &[]);
+        let mut new = Recipe::with_profiles(&m, &[]);
         assert_eq!(new.clarity_model, ClarityModel::Measured);
         new.effects.clarity = 0.4;
         assert_eq!(measured(&new), 0.4);
@@ -273,7 +274,7 @@ mod tests {
         let mut json = serde_json::to_value(&new).unwrap();
         assert!(json.get("clarity_model").is_some());
         json.as_object_mut().unwrap().remove("clarity_model");
-        let old: super::super::Recipe = serde_json::from_value(json).unwrap();
+        let old: Recipe = serde_json::from_value(json).unwrap();
         assert_eq!(old.clarity_model, ClarityModel::Original);
         assert_eq!(measured(&old), 0.);
         // Clarity added to a photo without any takes the measured operator.

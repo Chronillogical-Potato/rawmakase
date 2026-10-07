@@ -3,7 +3,8 @@
 //! color and calibration and a profile tone curve, which every new photo uses. Other
 //! recipes return `None` and render on the CPU, which stays the reference.
 use super::{CurveSet, Source, profile_matrix};
-use crate::develop::{Recipe, local_tone::LocalToneMap};
+use crate::develop::local_tone::LocalToneMap;
+use crate::model::recipe::Recipe;
 
 /// Named slots of the parameter array and their lengths. `wgsl_prelude` turns them into
 /// `P_*` index constants for the shader.

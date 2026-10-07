@@ -2,7 +2,7 @@
 //! kept beside them, and the bitmaps recipes refer to by hash.
 use super::{Catalog, PhotoId};
 use crate::edits::{SavedEdit, local_edits};
-use crate::{develop::Recipe, export_settings::ExportOptions, storage::Identity};
+use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::path::Path;
@@ -106,7 +106,7 @@ impl Catalog {
         Ok(())
     }
     /// The photo's spots and masks, saved apart from its recipe.
-    fn local_edits(&self, id: PhotoId) -> Result<crate::develop::LocalEdits> {
+    fn local_edits(&self, id: PhotoId) -> Result<crate::model::recipe::LocalEdits> {
         local_edits(self.local_text(id)?.as_deref())
     }
     /// The photo's spots and masks as stored, unread.

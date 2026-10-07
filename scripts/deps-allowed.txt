@@ -36,13 +36,13 @@ camera_profiles -> cameras
 camera_profiles -> color
 camera_profiles -> storage
 camera_profiles -> xml
-catalog -> develop
 catalog -> edits
 catalog -> exif
 catalog -> export_settings
 catalog -> ids
 catalog -> jpeg
 catalog -> metadata
+catalog -> model
 catalog -> storage
 catalog -> tiff
 catalog -> xml
@@ -50,6 +50,7 @@ catalog -> xmp
 comparison -> camera_data
 comparison -> camera_profiles
 comparison -> develop
+comparison -> model
 comparison -> photo
 comparison -> presets
 decode -> camera_data
@@ -73,10 +74,10 @@ edit_session -> model
 edit_session -> presets
 edits -> camera_data
 edits -> camera_profiles
-edits -> develop
 edits -> export_settings
 edits -> lr_develop
 edits -> metadata
+edits -> model
 edits -> raw_defaults
 edits -> storage
 exif -> camera_data
@@ -116,7 +117,10 @@ lr_develop -> develop
 lr_develop -> model
 lr_develop -> xmp
 model -> camera_data
+model -> camera_profiles
 model -> color
+model -> lens
+model -> optics
 optics -> xml
 photo -> camera_profiles
 photo -> dng
@@ -133,7 +137,7 @@ raw -> camera_data
 raw -> demosaic
 raw_defaults -> camera_data
 raw_defaults -> camera_profiles
-raw_defaults -> develop
+raw_defaults -> model
 raw_defaults -> presets
 raw_defaults -> xmp
 stats -> storage

@@ -1,6 +1,7 @@
 //! Additional photographic controls used by imported XMP recipes.
-use crate::develop::{Recipe, Rendered};
+use crate::develop::Rendered;
 use crate::model::effects::{Effects, VignetteStyle};
+use crate::model::recipe::Recipe;
 use rayon::prelude::*;
 mod grain;
 mod lens_vignette;
@@ -341,7 +342,7 @@ mod tests {
     fn fringe_selector_turns_back_hsl_hue_shifts() {
         let purple = [0.6, 0.3, 0.8];
         let pick = |hue_shift: f32| {
-            let mut r = crate::develop::Recipe {
+            let mut r = crate::model::recipe::Recipe {
                 engine: 3,
                 ..Default::default()
             };

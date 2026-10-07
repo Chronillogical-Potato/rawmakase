@@ -3,7 +3,7 @@
 //! state it leaves, with large settings (camera profile, masks, spots, curves) stored
 //! once per History and referred to from every step that has them.
 use super::{Catalog, PhotoId};
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use anyhow::{Context, Result, ensure};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rusqlite::{OptionalExtension, params};

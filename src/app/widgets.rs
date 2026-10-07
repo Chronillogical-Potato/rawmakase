@@ -1,7 +1,7 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::develop::panels::PanelState;
 use crate::develop::params::{self, LocalParameterId, ParameterId, format_value};
+use crate::model::panels::PanelState;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(super) fn toolbar_divider(ui: &mut egui::Ui) {

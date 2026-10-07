@@ -9,8 +9,8 @@
 //! `d / (1 + (|d| / halo)³)`, dark halos at 0.57 of light ones. Detail mostly scales
 //! the strength (0.3× at 0, 2.1× at 100 against the default 25) and Masking leaves out
 //! the weakest detail. Radius maps to a slightly different blur than its value.
-use super::Recipe;
 use crate::model::operators::SharpeningModel;
+use crate::model::recipe::Recipe;
 
 /// Radius: the slider's values, the Gaussian sigma and a strength factor.
 const RADIUS: [f32; 6] = [0.5, 0.8, 1., 1.5, 2., 3.];

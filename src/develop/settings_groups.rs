@@ -6,7 +6,8 @@
 //! gains, the camera's exposure baseline, Upright's analysis, which camera profile
 //! file a profile name means). The rest are the photo's own and never transfer: its
 //! orientation, the preset it came from, and settings from a newer release.
-use super::{Recipe, panels::Panel};
+use crate::model::panels::Panel;
+use crate::model::recipe::Recipe;
 use crate::{camera_data::Metadata, camera_profiles::CameraProfile};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};

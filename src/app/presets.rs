@@ -4,7 +4,7 @@ use super::dialogs::FileDialog;
 use super::widgets::{section, segmented};
 use super::worker::Event;
 use crate::app::theme;
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use anyhow::Context as _;
 use eframe::egui::{self, Sense, Stroke, Vec2};
 use std::sync::Arc;

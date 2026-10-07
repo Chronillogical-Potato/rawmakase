@@ -1,10 +1,5 @@
-use rawmakase::{
-    camera_data::Decode,
-    develop::{self, Recipe},
-    export,
-    export_settings::ExportOptions,
-    storage,
-};
+use rawmakase::model::recipe::Recipe;
+use rawmakase::{camera_data::Decode, develop, export, export_settings::ExportOptions, storage};
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 #[test]
 #[ignore = "Set RAWMAKASE_FIXTURES to a folder containing private ARW and RAF fixtures"]

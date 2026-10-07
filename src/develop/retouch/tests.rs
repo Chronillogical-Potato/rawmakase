@@ -386,7 +386,7 @@ fn measured_feather_crosses_half_where_camera_raw_does() {
 /// Lightroom's spots take the measured one.
 #[test]
 fn old_spots_keep_their_feather() {
-    use crate::develop::Recipe;
+    use crate::model::recipe::Recipe;
     let im = image(64, 48, |_, _| [0.2; 3]);
     let op = spot(RetouchMode::Clone, &im, [20., 20.], 6., [20., 0.]);
     let mut old = Recipe::default();

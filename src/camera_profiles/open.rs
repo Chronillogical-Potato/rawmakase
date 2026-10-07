@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn new_photos_default_to_rawmakase_color_without_adobe_profiles() {
-        use crate::develop::Recipe;
+        use crate::model::recipe::Recipe;
         use std::sync::Arc;
         let m = camera();
         let profiles: Vec<_> = [standard(&m), color(&m)]

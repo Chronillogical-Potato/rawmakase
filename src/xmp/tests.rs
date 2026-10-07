@@ -1,6 +1,6 @@
 use super::*;
 use crate::xml::ns::{CRS, RDF};
-use crate::{camera_data::Metadata, develop::Recipe};
+use crate::{camera_data::Metadata, model::recipe::Recipe};
 use anyhow::Result;
 use std::path::Path;
 fn xml(attrs: &str, body: &str) -> String {
@@ -726,7 +726,7 @@ fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<(
 /// through the old lens settings; settings that change nothing rendered keep it.
 #[test]
 fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     use crate::model::transform::UprightMode;
     let mut base = Recipe::default();
     base.upright.mode = UprightMode::Level;

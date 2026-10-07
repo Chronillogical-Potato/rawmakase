@@ -133,7 +133,7 @@ fn old_recipes_keep_original_profile_tones() {
 
 #[test]
 fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let im = fixture();
     let mut edited = Recipe::default();
     edited.effects.vignette = -0.8;
@@ -159,7 +159,7 @@ fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
 }
 #[test]
 fn panel_switches_round_trip_and_old_recipes_have_every_panel_on() {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     let old: Recipe =
         serde_json::from_value(serde_json::to_value(Recipe::default()).unwrap()).unwrap();
     assert!(old.panels.all_on());
@@ -795,7 +795,7 @@ fn rgb_tables_follow_the_colour_controls_on_every_engine() {
 }
 #[test]
 fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
-    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::panels::{Panel, PanelState};
     use crate::model::point_color::PointColor;
     let im = fixture();
     let plain = Recipe {
@@ -1185,8 +1185,8 @@ fn lens_profile_distortion_with_constrain_crop_renders_no_white() {
 /// reports nothing missing.
 #[test]
 fn lens_corrections_panel_off_bypasses_the_chosen_profile() {
-    use crate::develop::panels::{Panel, PanelState};
     use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    use crate::model::panels::{Panel, PanelState};
     let im = lens_photo();
     let mut r = profile_recipe(LensProfileSetup::Custom, "Gone.lcp");
     assert!(r.missing_lens_profile(&im.metadata).is_some());
@@ -1239,8 +1239,8 @@ fn a_missing_named_lens_profile_is_reported() {
 /// switched-off panel turns on with it.
 #[test]
 fn a_lens_profile_choice_belongs_to_the_lens_corrections_panel() {
-    use crate::develop::panels::Panel;
     use crate::lens::choice::{LensProfileSetup, tests::MINE};
+    use crate::model::panels::Panel;
     let before = profile_recipe(LensProfileSetup::Auto, "");
     let after = profile_recipe(LensProfileSetup::Custom, MINE);
     assert!(Panel::LensCorrections.holds_change(&before, &after));

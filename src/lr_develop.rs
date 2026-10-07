@@ -3,7 +3,7 @@
 //! table is parsed as data; no interpreter runs. Used to show and resolve photos
 //! imported from Lightroom; reading the Lightroom catalog itself is
 //! `catalog::lightroom`.
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use crate::xmp::look::LookAmount;
 use anyhow::{Context, Result, ensure};
 use std::path::PathBuf;

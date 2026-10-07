@@ -1,12 +1,12 @@
 //! Writes a Lightroom Develop preset: the chosen setting groups of a recipe as an XMP
 //! file Lightroom and Camera Raw read, laid out as the presets Lightroom writes.
 use super::write::{curve, settings};
-use crate::color::curve::ToneCurve;
-use crate::develop::{
-    Recipe,
-    settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
-};
+use crate::model::recipe::Recipe;
 use crate::xml::{escape_text, ns::CRS, xmpmeta};
+use crate::{
+    color::curve::ToneCurve,
+    develop::settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
+};
 use std::fmt::Write;
 
 /// A preset's name, group and identity.
@@ -134,9 +134,9 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
     }
     // Each chosen panel's switch as the photo has it, on or off, so applying the
     // preset also sets that panel the same way.
-    for panel in crate::develop::panels::Panel::ALL {
+    for panel in crate::model::panels::Panel::ALL {
         if groups.groups().any(|g| g.panel() == Some(panel)) {
-            let on = r.panels.state(panel) == crate::develop::panels::PanelState::On;
+            let on = r.panels.state(panel) == crate::model::panels::PanelState::On;
             for key in panel.lightroom_keys() {
                 attributes.push((key.to_string(), if on { "True" } else { "False" }.into()));
             }
@@ -296,8 +296,8 @@ mod tests {
         r.effects.grain = 0.2;
         r.curve.points = vec![[0., 0.1], [1., 1.]];
         r.panels.set(
-            crate::develop::panels::Panel::Effects,
-            crate::develop::panels::PanelState::Off,
+            crate::model::panels::Panel::Effects,
+            crate::model::panels::PanelState::Off,
         );
         r
     }
@@ -553,8 +553,8 @@ mod tests {
         // As the photo has it: an Effects panel switched off stays off.
         let mut off = Recipe::default();
         off.panels.set(
-            crate::develop::panels::Panel::Effects,
-            crate::develop::panels::PanelState::Off,
+            crate::model::panels::Panel::Effects,
+            crate::model::panels::PanelState::Off,
         );
         let text = preset(&off, &info, &grain);
         assert!(text.contains(r#"crs:EnableEffects="False""#), "{text}");
@@ -597,8 +597,8 @@ mod tests {
             "{text}"
         );
         assert_eq!(
-            all.panels.state(crate::develop::panels::Panel::Effects),
-            crate::develop::panels::PanelState::Off
+            all.panels.state(crate::model::panels::Panel::Effects),
+            crate::model::panels::PanelState::Off
         );
         Ok(())
     }

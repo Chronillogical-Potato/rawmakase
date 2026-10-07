@@ -11,7 +11,7 @@
 //! - Hue and Saturation rotate and scale Oklab chroma after the colour mixer.
 //! - Sharpness and Noise change the finishing sharpening and noise reduction.
 use crate::model::masks::LocalAdjust;
-use crate::{camera_data::Metadata, develop::Recipe};
+use crate::{camera_data::Metadata, model::recipe::Recipe};
 
 /// Slots of a [`LocalDelta`].
 pub(crate) mod slot {
@@ -98,7 +98,7 @@ impl LocalMath {
                 .and_then(|p| p.white_balance(temperature, tint, m))
         };
         let t = r.temperature;
-        let warmer = 1. / (1. / t - MIRED).max(1. / crate::develop::TEMPERATURE_MAX);
+        let warmer = 1. / (1. / t - MIRED).max(1. / crate::model::recipe::TEMPERATURE_MAX);
         let white_balance = match (wb(t, r.tint), wb(warmer, r.tint), wb(t, r.tint + TINT)) {
             (Some(base), Some(temp), Some(tint)) => {
                 let gain = |w: [f32; 3]| std::array::from_fn(|c| (w[c] / base[c]).log2());

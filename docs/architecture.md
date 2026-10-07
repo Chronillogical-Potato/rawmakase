@@ -22,12 +22,12 @@ files should preserve.
 | `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
 | `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), and Adobe lens profiles (LCP) as data; depends only on `xml` | `mod.rs`, `lcp.rs` |
 | `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement, plus profile selection | `embedded.rs`, `lcp.rs`, `auto_ca.rs`, `choice.rs` |
-| `model` | What an edit is, as values shared by the renderer, the catalog and file formats; so far the operator versions a recipe records (`operators.rs`), which keep saved edits rendering as they did, the Effects, Detail and Calibration settings (`effects.rs`) the Heal and Clone operations (`retouch.rs`) the Red Eye corrections (`red_eye.rs`) the Point Color swatches (`point_color.rs`) the masks with their local adjustments (`masks.rs`) the Transform panel with Upright (`transform.rs`) and white balance from metadata with Lightroom's named presets (`white_balance.rs`) | `operators.rs`, `effects.rs`, `retouch.rs`, `red_eye.rs`, `point_color.rs`, `masks.rs`, `transform.rs`, `white_balance.rs` |
-| `develop` | Validated recipes, geometry, color processing, curves, effects, local adjustments, detail rendering, the GPU port and output pixel buffers | `recipe.rs`, `pipeline/`, `quality/`, `geometry.rs`, `gpu/` |
+| `model` | What an edit is, as values shared by the renderer, the catalog and file formats: the `Recipe` with its validation (`ValidRecipe`), saved versions and migration, panel switches, and the settings it is made of: operator versions, Effects, Heal and Clone, Red Eye, Point Color, masks, Transform with Upright, and white balance from metadata. Depends on camera profiles, lenses and optics, never on rendering | `recipe.rs`, `valid.rs`, `saved_format.rs`, `panels.rs`, `operators.rs`, `effects.rs`, `masks.rs`, `transform.rs` |
+| `develop` | Rendering a recipe: geometry, color processing, curves, effects, local adjustments, detail rendering, the GPU port and output pixel buffers | `pipeline/`, `quality/`, `geometry.rs`, `gpu/` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes | `parse.rs`, `apply.rs` |
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
-| `storage` | RAW identity checks, application paths and atomic JSON writes. Saved-recipe versions are `develop::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs` |
+| `storage` | RAW identity checks, application paths and atomic JSON writes. Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs` |
 | `export_settings` | Export choices as values: the Export dialog's settings and a photo's saved `ExportOptions` | `export_settings.rs` |
 | `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `ids` | Typed catalog row ids (`PhotoId`, `FolderId`, `RootId`, `CollectionId`), stored and serialized as their integers; a leaf, so edit resolution and export use them below the catalog | `ids.rs` |
@@ -127,7 +127,7 @@ inject a temporary file, without changing the process-wide environment.
 The library API is internal: the RAWmakase binary, its examples and its tests are
 its only clients, so modules and functions change freely with them and nothing is
 kept for outside callers. The compatibility surface is the saved data: recipe and
-preset envelopes are versioned and migrated by `develop::saved_format`; a catalog must
+preset envelopes are versioned and migrated by `model::saved_format`; a catalog must
 be exactly version 1 to open (other versions are refused, the file left
 unchanged), and its schema only ever gains tables, applied idempotently on open;
 see [catalogs](catalogs.md#sqlite-format-version-1).

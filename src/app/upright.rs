@@ -1,6 +1,6 @@
 //! The Transform panel's Upright analysis, run off the UI thread.
 use super::{Editor, worker::Event};
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use crate::model::transform::UprightMode;
 
 /// What the analysis measures: the photo's orientation and lens correction.

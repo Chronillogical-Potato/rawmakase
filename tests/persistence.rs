@@ -2,8 +2,8 @@
 use anyhow::Result;
 use rawmakase::{
     catalog::{Catalog, legacy_sidecar},
-    develop::Recipe,
     export_settings::ExportOptions,
+    model::recipe::Recipe,
     presets, storage,
 };
 use std::{fs, path::Path, process::Command};

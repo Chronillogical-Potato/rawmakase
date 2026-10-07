@@ -1,12 +1,8 @@
 //! Parameter names and units shared by application command adapters.
-use crate::app::inspector::BANDS;
-use crate::develop::{
-    Recipe,
-    params::{
-        ParameterId::{self, *},
-        format_value, nudged,
-    },
-};
+use crate::develop::params::ParameterId::*;
+use crate::develop::params::{format_value, nudged};
+use crate::model::recipe::Recipe;
+use crate::{app::inspector::BANDS, develop::params::ParameterId};
 
 /// The Color Mixer's channels, in the order of `Recipe::hsl`.
 const MIXER_CHANNELS: [&str; 3] = ["Hue", "Saturation", "Luminance"];

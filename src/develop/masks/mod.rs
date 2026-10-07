@@ -21,7 +21,7 @@ pub(crate) use range::oklab;
 /// or has no components.
 pub fn overlay_weights(
     image: &crate::camera_data::CameraImage,
-    recipe: &crate::develop::Recipe,
+    recipe: &crate::model::recipe::Recipe,
     index: usize,
     out: &crate::develop::Rendered,
     region: Option<[u32; 4]>,

@@ -1,5 +1,3 @@
-use super::Editor;
-use super::bulk_import::ImportKind;
 use super::clipping::{self, ClipSide};
 use super::crop_tool::{Guide, GuideShow, Ruler};
 use super::dialogs::FileDialog;
@@ -11,15 +9,16 @@ use super::widgets::{
     setting_slider, slider, slider_with, switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
+use super::{Editor, bulk_import::ImportKind};
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::develop::panels::{Panel, PanelState};
-use crate::develop::params::ParameterId;
-use crate::develop::targeted::Target;
-use crate::develop::{Recipe, Treatment};
-use crate::model::operators::SharpeningModel;
-use crate::model::operators::SharpeningSliders;
-use crate::model::white_balance::NamedWhiteBalance;
+use crate::develop::{Treatment, params::ParameterId, targeted::Target};
+use crate::model::panels::{Panel, PanelState};
+use crate::model::recipe::Recipe;
+use crate::model::{
+    operators::{SharpeningModel, SharpeningSliders},
+    white_balance::NamedWhiteBalance,
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
@@ -1212,9 +1211,9 @@ impl Editor {
                         && let Some(m) = &metadata
                     {
                         let state = if on {
-                            crate::develop::ProfileCorrections::On
+                            crate::model::recipe::ProfileCorrections::On
                         } else {
-                            crate::develop::ProfileCorrections::Off
+                            crate::model::recipe::ProfileCorrections::Off
                         };
                         r.set_profile_corrections(m, state);
                     }

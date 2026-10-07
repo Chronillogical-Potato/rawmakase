@@ -95,7 +95,7 @@ fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
         }
         let edits = convert(&local, frame);
         photos += 1;
-        let mut recipe = crate::develop::Recipe::default();
+        let mut recipe = crate::model::recipe::Recipe::default();
         if let Some(r) = edits.retouch {
             spots += r.len();
             recipe.retouch = r;

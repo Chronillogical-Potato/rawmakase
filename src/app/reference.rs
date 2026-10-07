@@ -12,12 +12,12 @@ use super::Editor;
 use super::before_after::{Axis, Compare, Pane, Panes, badge};
 use super::navigator::Zoom;
 use super::worker::{ReferenceImage, ReferenceJob, Resolution};
-use crate::app::library::DraggedPhoto;
-use crate::app::theme;
-use crate::catalog::PhotoId;
+use crate::model::recipe::Recipe;
 use crate::{
+    app::{library::DraggedPhoto, theme},
     camera_data::CameraImage,
-    develop::{Geometry, Recipe},
+    catalog::PhotoId,
+    develop::Geometry,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::sync::Arc;

@@ -5,12 +5,10 @@
 //! Only photos without a RAWmakase or Lightroom edit follow these. Lightroom edits
 //! are stored relative to Adobe's defaults, so they always convert from Adobe
 //! Default, and a saved edit stays as it is until Reset.
-use crate::{
-    camera_data::Metadata,
-    camera_profiles::CameraProfile,
-    develop::{ProfilePreference, Recipe, camera_matching_names, camera_matching_profile},
-    xmp::Preset,
+use crate::model::recipe::{
+    ProfilePreference, Recipe, camera_matching_names, camera_matching_profile,
 };
+use crate::{camera_data::Metadata, camera_profiles::CameraProfile, xmp::Preset};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
 

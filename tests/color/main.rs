@@ -227,7 +227,7 @@ pub fn render(
     xmp: &str,
     max_edge: u32,
 ) -> anyhow::Result<Rendered> {
-    let base = rawmakase::develop::Recipe::with_profiles(&im.metadata, profiles);
+    let base = rawmakase::model::recipe::Recipe::with_profiles(&im.metadata, profiles);
     let preset = rawmakase::xmp::parse(Path::new("case.xmp"), xmp)?;
     let recipe = preset.apply(&base, &im.metadata, profiles, Some(im))?;
     rawmakase::develop::render(im, &recipe.checked()?, max_edge)
@@ -884,7 +884,7 @@ fn auto_black_white_mix_matches_camera_raw_on_the_chart() {
     const CAMERA_RAW: [i32; 8] = [-9, -19, -23, -27, -18, 11, 16, 4];
     let im = develop(&chart_path("synthetic-d65"));
     let profiles = embedded_profiles(&im);
-    let r = rawmakase::develop::Recipe::with_profiles(&im.metadata, &profiles);
+    let r = rawmakase::model::recipe::Recipe::with_profiles(&im.metadata, &profiles);
     let spread = rawmakase::develop::ColorSpread::measure(&im);
     let auto = rawmakase::develop::AutoMix {
         spread: &spread,

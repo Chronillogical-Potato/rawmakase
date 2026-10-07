@@ -13,11 +13,11 @@
 use crate::model::operators::GradingModel;
 
 use super::{
-    Recipe,
     color_grade_curves::ChannelCurves,
     color_grade_data::{BINS, LUMINANCE, TINT},
 };
 use crate::color::{mul, srgb_decode, srgb_encode};
+use crate::model::recipe::Recipe;
 
 /// Engine 4 grading, applied to linear display RGB after the color mixer.
 pub(crate) enum ColorGrade {

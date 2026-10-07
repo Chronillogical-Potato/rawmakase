@@ -7,12 +7,10 @@ use super::{
     settings_transfer::Settings,
     worker::Event,
 };
+use crate::model::recipe::Recipe;
 use crate::{
     catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory},
-    develop::{
-        Recipe,
-        settings_groups::{self, GroupSelection, Source, Target},
-    },
+    develop::settings_groups::{self, GroupSelection, Source, Target},
     edits::{self, Origin},
     export_settings::ExportOptions,
     raw_defaults::DevelopDefaults,
@@ -245,7 +243,7 @@ fn prepare(
             },
         ),
         BatchChange::MatchTotalExposures => settings_groups::Transferred {
-            recipe: crate::develop::Recipe {
+            recipe: crate::model::recipe::Recipe {
                 exposure: matched_exposure(source, &metadata).with_context(|| {
                     format!("{} has no aperture, shutter speed or ISO", target.name)
                 })?,

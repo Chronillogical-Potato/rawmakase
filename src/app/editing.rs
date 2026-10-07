@@ -1,7 +1,7 @@
 //! A frame edits exactly one document generation, even when navigation happens mid-frame.
 use super::Editor;
-use crate::develop::Recipe;
 use crate::edit_session::FrameOutcome;
+use crate::model::recipe::Recipe;
 use eframe::egui;
 
 pub(super) struct EditFrame {
