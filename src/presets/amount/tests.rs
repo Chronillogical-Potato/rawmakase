@@ -208,9 +208,9 @@ fn point_curves_blend_their_outputs() {
 
 #[test]
 fn choices_that_arent_numbers_follow_the_preset_above_zero() {
-    use crate::develop::{
-        effects::VignetteStyle,
-        panels::{Panel, PanelState},
+    use crate::{
+        develop::panels::{Panel, PanelState},
+        model::effects::VignetteStyle,
     };
     let m = metadata();
     let before = Recipe::default();

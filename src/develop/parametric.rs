@@ -69,7 +69,7 @@ impl ParametricCurve {
 /// drawing it in the Tone Curve panel.
 pub fn samples(
     model: ParametricModel,
-    e: &crate::develop::effects::Effects,
+    e: &crate::model::effects::Effects,
     count: usize,
 ) -> Vec<f32> {
     let at = |i: usize| i as f32 / count as f32;

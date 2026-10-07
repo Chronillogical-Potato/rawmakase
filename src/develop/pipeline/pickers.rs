@@ -7,7 +7,7 @@ use super::*;
 /// legacy channel curves change it, so the picked colour is the one those stages
 /// render closest to the shown colour.
 ///
-/// [`Effects::pick_fringe_hue`]: crate::develop::effects::Effects::pick_fringe_hue
+/// [`Effects::pick_fringe_hue`]: crate::model::effects::Effects::pick_fringe_hue
 pub fn pick_fringe(r: &mut Recipe, m: &Metadata, rgb: [f32; 3]) -> Option<usize> {
     let hue_of = |lab: [f32; 3]| {
         lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU

@@ -50,7 +50,7 @@ pub struct Recipe {
     /// Use the DCP tone curve without a second generic scene shoulder.
     #[serde(default)]
     pub profile_tone: bool,
-    pub effects: crate::develop::effects::Effects,
+    pub effects: crate::model::effects::Effects,
     /// Which operator renders Grain. Missing means the original grain, so recipes
     /// saved before the measured one look as they did; omitted at that default, and
     /// kept by releases that predate it.
@@ -477,7 +477,7 @@ impl Recipe {
             for (v, l) in e.parametric.iter_mut().zip(s.parametric) {
                 *v = add(*v, l);
             }
-            if e.splits == crate::develop::effects::Effects::default().splits {
+            if e.splits == crate::model::effects::Effects::default().splits {
                 e.splits = s.splits;
             }
         }
@@ -831,7 +831,7 @@ impl Recipe {
     /// Lightroom's Amount 25 for raw files with the measured operator (Detail and
     /// Smoothness 50), off with the original.
     pub fn set_color_noise_defaults(&mut self, model: crate::model::operators::NoiseModel) {
-        let d = crate::develop::effects::Effects::default();
+        let d = crate::model::effects::Effects::default();
         self.noise_model = model;
         self.noise_chroma = match model {
             crate::model::operators::NoiseModel::Original => 0.,
