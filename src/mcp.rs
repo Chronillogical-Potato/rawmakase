@@ -9,7 +9,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
@@ -26,7 +26,7 @@ pub struct Cli {
 
 /// The protocol's [`rawmakase_protocol::Target`], with the guards an MCP client
 /// must always send.
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct McpTarget {
     /// Catalog photo ID from get_state (omit only for an uncataloged photo).
@@ -106,7 +106,7 @@ impl From<McpTarget> for rawmakase_protocol::Target {
     }
 }
 /// The protocol's [`rawmakase_protocol::CurveChannel`], described for MCP clients.
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum CurveChannel {
     Rgb,

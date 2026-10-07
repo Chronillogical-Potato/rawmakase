@@ -739,6 +739,7 @@ fn clarity_added_by_command_takes_the_measured_operator() {
     .unwrap();
     assert_eq!(e.document.edit.recipe.clarity_model, ClarityModel::Original);
 }
+
 #[test]
 fn the_protocol_states_the_curve_limits_the_app_enforces() {
     use crate::color::curve::{MAX_POINTS, MIN_INPUT_SPACING};
