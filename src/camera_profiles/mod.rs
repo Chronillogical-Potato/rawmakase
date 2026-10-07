@@ -621,11 +621,11 @@ mod look_settings;
 pub mod open;
 mod rgb_table;
 pub use dcp::{d65_color_matrix, from_bytes};
-pub use enhanced::{AmountRange, RgbLook};
+pub use enhanced::RgbLook;
 pub use library::{
     adobe_installed, builtin, compose_look, import_files, installed, library_dirs, load,
 };
-pub use look_settings::{LookSettings, Toning, Vignette};
+pub use look_settings::LookSettings;
 pub(crate) use rgb_table::{Dimensions, Gamut};
 #[cfg(test)]
 mod tests;

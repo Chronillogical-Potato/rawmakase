@@ -374,6 +374,7 @@ impl ExportSettings {
             Naming::Filename
         })
     }
+    #[cfg(test)]
     pub fn file_name(&self, source: &Path) -> String {
         self.file_name_for(source, &NameContext::ONE).0
     }
@@ -499,6 +500,7 @@ fn date(captured: &str) -> Option<String> {
 }
 
 /// "DSC0001-2.jpg", "DSC0001-3.jpg"… for the first name not taken.
+#[cfg(test)]
 pub fn unique(path: &Path) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let extension = path.extension().unwrap_or_default().to_string_lossy();

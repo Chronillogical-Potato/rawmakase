@@ -128,30 +128,6 @@ impl RetouchOp {
         }
         self.offset = [self.offset[0] - delta[0], self.offset[1] - delta[1]];
     }
-    /// Image-space bounds of the destination, `[x0, y0, x1, y1]`, for a photo whose
-    /// width is `aspect` times its height.
-    pub fn bounds(&self, aspect: f32) -> [f32; 4] {
-        let (rx, ry) = radii(self.radius(), aspect);
-        let mut b = [
-            f32::INFINITY,
-            f32::INFINITY,
-            f32::NEG_INFINITY,
-            f32::NEG_INFINITY,
-        ];
-        let mut add = |p: [f32; 2]| {
-            b = [
-                b[0].min(p[0] - rx),
-                b[1].min(p[1] - ry),
-                b[2].max(p[0] + rx),
-                b[3].max(p[1] + ry),
-            ];
-        };
-        match &self.shape {
-            RetouchShape::Spot { center, .. } => add(*center),
-            RetouchShape::Brush { points, .. } => points.iter().for_each(|p| add(*p)),
-        }
-        b
-    }
 }
 /// A long-edge fraction as normalised x and y radii.
 pub(crate) fn radii(r: f32, aspect: f32) -> (f32, f32) {

@@ -116,7 +116,6 @@ pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
                     metadata,
                     recipe,
                     export: ExportOptions::default(),
-                    protected: false,
                     status: "Original".into(),
                 })),
             );

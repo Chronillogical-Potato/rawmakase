@@ -16,7 +16,6 @@ pub struct LoadedHeader {
     pub metadata: Metadata,
     pub recipe: Recipe,
     pub export: ExportOptions,
-    pub protected: bool,
     pub status: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,5 +273,5 @@ pub use latest::Latest;
 pub(crate) use latest::panic_message;
 pub use loader::loader;
 pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
+pub use renderer::Renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};
-pub use renderer::{Renderer, renderer};

@@ -308,10 +308,6 @@ pub(super) fn prepare(db: &mut Connection, computer: &Computer) -> Result<()> {
 }
 
 impl Catalog {
-    /// The computer this catalog was opened on.
-    pub fn computer(&self) -> &Computer {
-        &self.computer
-    }
     /// This computer's locations, by root: (logical path, location).
     pub(super) fn location_rows(&self) -> Result<HashMap<RootId, Vec<(String, PathBuf)>>> {
         let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();

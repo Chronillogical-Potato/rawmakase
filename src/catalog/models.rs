@@ -39,7 +39,6 @@ pub struct Folder {
     pub relative: String,
     pub id: super::FolderId,
     pub root: super::RootId,
-    pub name: String,
     pub path: PathBuf,
     pub count: usize,
 }
@@ -49,7 +48,6 @@ pub struct Collection {
     pub name: String,
     pub parent: Option<super::CollectionId>,
     pub kind: CollectionKind,
-    pub count: usize,
 }
 /// The name Lightroom gives its Quick Collection.
 pub const QUICK_COLLECTION: &str = "quick collection";

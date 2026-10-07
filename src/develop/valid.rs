@@ -6,8 +6,7 @@ use anyhow::Result;
 use std::borrow::Cow;
 
 /// A recipe that passed [`Recipe::validate`]: borrowed from the recipe checked, or
-/// owned when it was changed since. It reads as the recipe; changing it goes through
-/// [`map`](Self::map), which checks the result again.
+/// owned. It reads as the recipe.
 #[derive(Clone, Debug)]
 pub struct ValidRecipe<'a>(Cow<'a, Recipe>);
 
@@ -18,6 +17,7 @@ impl Recipe {
         Ok(ValidRecipe(Cow::Borrowed(self)))
     }
     /// This recipe, checked and kept.
+    #[cfg(test)]
     pub fn into_checked(self) -> Result<ValidRecipe<'static>> {
         self.validate()?;
         Ok(ValidRecipe(Cow::Owned(self)))
@@ -26,6 +26,7 @@ impl Recipe {
 
 impl ValidRecipe<'_> {
     /// A copy changed by `change`, checked again.
+    #[cfg(test)]
     pub fn map(&self, change: impl FnOnce(&mut Recipe)) -> Result<ValidRecipe<'static>> {
         let mut changed = self.0.as_ref().clone();
         change(&mut changed);
