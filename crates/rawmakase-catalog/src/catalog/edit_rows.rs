@@ -64,10 +64,15 @@ impl Catalog {
     }
 }
 
-/// Saves or clears one photo's edit, stamping when it was edited. Clearing
-/// returns the photo to having no RAWmakase edit: no recipe, spots, masks or
-/// History.
-pub(super) fn write_edit(w: &mut Write<'_>, change: &CheckedChange<'_>) -> Result<()> {
+/// Saves or clears one photo's edit, stamping a save with `edited_at`, as
+/// catalogs store times ([`rawmakase_model::time::now_text`]); every photo
+/// of one change gets the same. Clearing returns the photo to having no
+/// RAWmakase edit: no recipe, spots, masks or History.
+pub(super) fn write_edit(
+    w: &mut Write<'_>,
+    change: &CheckedChange<'_>,
+    edited_at: &str,
+) -> Result<()> {
     let id = &change.id;
     let Some(e) = &change.save else {
         ensure!(
@@ -87,13 +92,7 @@ pub(super) fn write_edit(w: &mut Write<'_>, change: &CheckedChange<'_>) -> Resul
     ensure!(
         w.execute(
             sql!("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=? WHERE id=?"),
-            &[
-                &e.recipe,
-                &e.export,
-                &e.identity,
-                &rawmakase_model::time::now_text(),
-                id
-            ]
+            &[&e.recipe, &e.export, &e.identity, &edited_at, id]
         )? == 1,
         "Unknown photo"
     );

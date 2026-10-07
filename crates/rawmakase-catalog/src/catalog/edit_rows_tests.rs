@@ -19,19 +19,80 @@ fn writes_an_edit(statement: &str) -> bool {
     photos || rows
 }
 
-/// Every string literal in `source`, roughly: enough to find SQL.
-fn literals(source: &str) -> Vec<String> {
+/// The string literals in `source`, in order, with their ends: enough to
+/// read SQL.
+fn literals(source: &str) -> Vec<(usize, usize, String)> {
+    let bytes = source.as_bytes();
     let mut found = Vec::new();
-    let mut rest = source;
-    while let Some(start) = rest.find('"') {
-        let after = &rest[start + 1..];
-        let mut end = 0;
-        let bytes = after.as_bytes();
-        while end < bytes.len() && bytes[end] != b'"' {
-            end += if bytes[end] == b'\\' { 2 } else { 1 };
+    let mut i = 0;
+    while i < bytes.len() {
+        // A raw string: r"…" or r#"…"#.
+        if bytes[i] == b'r' && matches!(bytes.get(i + 1), Some(b'"' | b'#')) {
+            let hashes = bytes[i + 1..].iter().take_while(|b| **b == b'#').count();
+            if bytes.get(i + 1 + hashes) == Some(&b'"') {
+                let start = i + 2 + hashes;
+                let end = format!("\"{}", "#".repeat(hashes));
+                let close = source[start..]
+                    .find(&end)
+                    .map_or(bytes.len(), |n| start + n);
+                found.push((i, close + end.len(), source[start..close].to_string()));
+                i = close + end.len();
+                continue;
+            }
         }
-        found.push(after[..end.min(after.len())].to_string());
-        rest = &after[(end + 1).min(after.len())..];
+        if bytes[i] == b'"' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && bytes[end] != b'"' {
+                end += if bytes[end] == b'\\' { 2 } else { 1 };
+            }
+            let end = end.min(bytes.len());
+            found.push((i, end + 1, source[start..end].to_string()));
+            i = end + 1;
+            continue;
+        }
+        i += 1;
+    }
+    found
+}
+
+/// Each statement given to `sql!` or `sqlite_sql!` in `source`, its
+/// literals joined as `concat!` joins them. A statement can only run as one
+/// of these, so they are all a write to an edit could be.
+fn statements(source: &str) -> Vec<String> {
+    let literals = literals(source);
+    let mut found = Vec::new();
+    for (at, _) in source.match_indices("sql!(") {
+        // The macro's arguments end at the parenthesis that closes it,
+        // outside any literal.
+        let mut depth = 0;
+        let mut end = at + "sql!".len();
+        let mut i = end;
+        while i < source.len() {
+            if let Some((_, after, _)) = literals.iter().find(|(start, _, _)| *start == i) {
+                i = *after;
+                continue;
+            }
+            match source.as_bytes()[i] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        found.push(
+            literals
+                .iter()
+                .filter(|(start, _, _)| (at..end).contains(start))
+                .map(|(_, _, text)| text.as_str())
+                .collect(),
+        );
     }
     found
 }
@@ -57,9 +118,9 @@ fn only_edit_rows_writes_a_photos_edit() {
             let production = source
                 .find("#[cfg(test)]\nmod ")
                 .map_or(&source[..], |at| &source[..at]);
-            for literal in literals(production) {
-                if writes_an_edit(&literal) {
-                    offenders.push(format!("{name}: {}", literal.trim()));
+            for statement in statements(production) {
+                if writes_an_edit(&statement) {
+                    offenders.push(format!("{name}: {}", statement.trim()));
                 }
             }
         }
@@ -82,6 +143,12 @@ fn the_scan_finds_edit_writes() {
         "UPDATE develop_snapshots SET recipe=? WHERE id=?"
     ));
     assert!(!writes_an_edit("SELECT recipe FROM photos WHERE id=?"));
+    // Pieces joined by concat!, and raw strings.
+    let source = r##"sql!(concat!("UPDATE photos ", "SET recipe=? WHERE id=?")) sql!(r#"DELETE FROM local_edits WHERE "photo"=?"#) sql!("SELECT 1")"##;
+    let found = statements(source);
+    assert_eq!(found.len(), 3);
+    assert!(writes_an_edit(&found[0]) && writes_an_edit(&found[1]));
+    assert!(!writes_an_edit(&found[2]));
 }
 
 /// A catalog with one photo carrying a saved edit and a History, its file and id.

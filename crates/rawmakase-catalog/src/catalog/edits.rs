@@ -73,9 +73,11 @@ impl Catalog {
             .iter()
             .map(|change| self.check_edit(change))
             .collect::<Result<Vec<_>>>()?;
+        // One time for the whole change, as a Sync to many photos is one edit.
+        let edited_at = rawmakase_model::time::now_text();
         self.db.write(|w| {
             for change in &checked {
-                super::edit_rows::write_edit(w, change)?;
+                super::edit_rows::write_edit(w, change, &edited_at)?;
             }
             Ok(())
         })
