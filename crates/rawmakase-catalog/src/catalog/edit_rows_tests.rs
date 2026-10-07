@@ -6,7 +6,12 @@ use std::path::Path;
 
 /// The catalog's statements that write a photo's edit columns or rows.
 fn writes_an_edit(statement: &str) -> bool {
-    let s = statement.to_ascii_lowercase();
+    // Words as SQL reads them: any whitespace between them is one space.
+    let s = statement
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let edit_column = ["recipe", "export_options", "identity", "edited_at"]
         .iter()
         .any(|c| s.contains(c));
@@ -134,6 +139,8 @@ fn only_edit_rows_writes_a_photos_edit() {
 #[test]
 fn the_scan_finds_edit_writes() {
     assert!(writes_an_edit("UPDATE photos SET recipe=? WHERE id=?"));
+    assert!(writes_an_edit("UPDATE\n    photos SET recipe=? WHERE id=?"));
+    assert!(writes_an_edit("DELETE  FROM\tlocal_edits WHERE photo=?"));
     assert!(writes_an_edit("DELETE FROM local_edits WHERE photo=?"));
     assert!(writes_an_edit(
         "INSERT INTO develop_history(photo, data) VALUES (?, ?)"
