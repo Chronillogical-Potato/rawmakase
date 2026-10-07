@@ -162,7 +162,7 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
         &job.raw,
         &job.recipe,
         &job.export,
-        job.history.update(),
+        crate::catalog::HistoryUpdate::of(&job.history),
     )?;
     Ok(path.clone())
 }

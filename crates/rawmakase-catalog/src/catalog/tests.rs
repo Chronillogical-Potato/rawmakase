@@ -1133,7 +1133,7 @@ fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
         steps: Vec::new(),
         applied: 0,
     };
-    c.save_edit(id, &photo, &edited, &export, empty.update())?;
+    c.save_edit(id, &photo, &edited, &export, HistoryUpdate::of(&empty))?;
     let count = |c: &Catalog| -> Result<i64> {
         Ok(c.db.query_row("SELECT COUNT(*) FROM develop_history", [], |r| r.get(0))?)
     };
@@ -1193,14 +1193,14 @@ fn develop_history_stores_each_large_setting_once() -> Result<()> {
         steps,
         applied: 100,
     };
-    let encoded = history.encode()?;
+    let encoded = super::develop_history::encode(&history)?;
     // A hundred steps cost less than two recipes would uncompressed.
     assert!(
         encoded.len() < 2 * one,
         "{} bytes for a {one}-byte recipe",
         encoded.len()
     );
-    assert_eq!(SavedHistory::decode(&encoded)?, Some(history));
+    assert_eq!(super::develop_history::decode(&encoded)?, Some(history));
     Ok(())
 }
 #[test]

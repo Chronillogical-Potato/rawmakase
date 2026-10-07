@@ -18,20 +18,7 @@ const MAX_BYTES: u64 = 256 << 20;
 /// Settings longer than this (as JSON) are stored once and referred to.
 const POOLED_BYTES: usize = 256;
 
-/// A History as saved: the state before its first step, every step with the state it
-/// leaves, done steps first, and how many are applied.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SavedHistory {
-    pub origin: Recipe,
-    pub steps: Vec<SavedStep>,
-    pub applied: usize,
-}
-#[derive(Clone, Debug, PartialEq)]
-pub struct SavedStep {
-    pub name: String,
-    pub value: String,
-    pub recipe: Recipe,
-}
+pub use crate::model::saved_history::{SavedHistory, SavedStep};
 
 /// What saving an edit does to its stored History.
 #[derive(Clone, Copy, Debug)]
@@ -108,80 +95,86 @@ impl StoredState {
     }
 }
 
-impl SavedHistory {
-    /// How saving the edit treats the stored History. Without steps nothing was
-    /// recorded here, so a stored one (even one this release cannot read, from a
-    /// newer release) is kept.
-    pub fn update(&self) -> HistoryUpdate<'_> {
-        if self.steps.is_empty() {
-            HistoryUpdate::Keep
+impl<'a> HistoryUpdate<'a> {
+    /// How saving the edit treats the stored History, given `history`. Without steps
+    /// nothing was recorded here, so a stored one (even one this release cannot read,
+    /// from a newer release) is kept.
+    pub fn of(history: &'a SavedHistory) -> Self {
+        if history.steps.is_empty() {
+            Self::Keep
         } else {
-            HistoryUpdate::Replace(self)
+            Self::Replace(history)
         }
     }
-    pub fn encode(&self) -> Result<Vec<u8>> {
-        ensure!(self.applied <= self.steps.len(), "Invalid History position");
-        let mut pool = Pool::default();
-        let origin = pool.state(&self.origin)?;
-        let steps = self
+}
+
+/// `history` as stored.
+pub fn encode(history: &SavedHistory) -> Result<Vec<u8>> {
+    ensure!(
+        history.applied <= history.steps.len(),
+        "Invalid History position"
+    );
+    let mut pool = Pool::default();
+    let origin = pool.state(&history.origin)?;
+    let steps = history
+        .steps
+        .iter()
+        .map(|s| {
+            Ok(StoredStep {
+                name: s.name.clone(),
+                value: s.value.clone(),
+                state: pool.state(&s.recipe)?,
+            })
+        })
+        .collect::<Result<_>>()?;
+    let stored = Stored {
+        version: VERSION,
+        pool: pool.values,
+        origin,
+        steps,
+        applied: history.applied,
+    };
+    let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
+    serde_json::to_writer(&mut z, &stored)?;
+    Ok(z.finish()?)
+}
+
+/// The History in `data`; `None` for a format from a newer release.
+pub fn decode(data: &[u8]) -> Result<Option<SavedHistory>> {
+    let mut text = Vec::new();
+    ZlibDecoder::new(data)
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut text)?;
+    ensure!(text.len() as u64 <= MAX_BYTES, "Develop History too large");
+    let value: Value = serde_json::from_slice(&text)?;
+    let version = value
+        .get("version")
+        .and_then(Value::as_u64)
+        .context("Develop History without a version")?;
+    if version > u64::from(VERSION) {
+        return Ok(None);
+    }
+    let stored: Stored = serde_json::from_value(value)?;
+    ensure!(
+        stored.applied <= stored.steps.len(),
+        "Invalid History position"
+    );
+    let pool = stored.pool;
+    Ok(Some(SavedHistory {
+        origin: stored.origin.recipe(&pool)?,
+        steps: stored
             .steps
-            .iter()
+            .into_iter()
             .map(|s| {
-                Ok(StoredStep {
-                    name: s.name.clone(),
-                    value: s.value.clone(),
-                    state: pool.state(&s.recipe)?,
+                Ok(SavedStep {
+                    name: s.name,
+                    value: s.value,
+                    recipe: s.state.recipe(&pool)?,
                 })
             })
-            .collect::<Result<_>>()?;
-        let stored = Stored {
-            version: VERSION,
-            pool: pool.values,
-            origin,
-            steps,
-            applied: self.applied,
-        };
-        let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
-        serde_json::to_writer(&mut z, &stored)?;
-        Ok(z.finish()?)
-    }
-    /// The History in `data`; `None` for a format from a newer release.
-    pub fn decode(data: &[u8]) -> Result<Option<Self>> {
-        let mut text = Vec::new();
-        ZlibDecoder::new(data)
-            .take(MAX_BYTES + 1)
-            .read_to_end(&mut text)?;
-        ensure!(text.len() as u64 <= MAX_BYTES, "Develop History too large");
-        let value: Value = serde_json::from_slice(&text)?;
-        let version = value
-            .get("version")
-            .and_then(Value::as_u64)
-            .context("Develop History without a version")?;
-        if version > u64::from(VERSION) {
-            return Ok(None);
-        }
-        let stored: Stored = serde_json::from_value(value)?;
-        ensure!(
-            stored.applied <= stored.steps.len(),
-            "Invalid History position"
-        );
-        let pool = stored.pool;
-        Ok(Some(Self {
-            origin: stored.origin.recipe(&pool)?,
-            steps: stored
-                .steps
-                .into_iter()
-                .map(|s| {
-                    Ok(SavedStep {
-                        name: s.name,
-                        value: s.value,
-                        recipe: s.state.recipe(&pool)?,
-                    })
-                })
-                .collect::<Result<_>>()?,
-            applied: stored.applied,
-        }))
-    }
+            .collect::<Result<_>>()?,
+        applied: stored.applied,
+    }))
 }
 
 impl Catalog {
@@ -196,7 +189,7 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        Ok(data.and_then(|d| SavedHistory::decode(&d).ok().flatten()))
+        Ok(data.and_then(|d| decode(&d).ok().flatten()))
     }
     /// Whether the photo has a stored History, readable here or not.
     pub fn has_history(&self, id: PhotoId) -> Result<bool> {
@@ -223,7 +216,7 @@ impl Catalog {
             HistoryUpdate::Replace(h) => {
                 tx.execute(
                     "INSERT OR REPLACE INTO develop_history(photo, data) VALUES (?, ?)",
-                    params![id, h.encode()?],
+                    params![id, encode(h)?],
                 )?;
             }
         }

@@ -172,6 +172,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | --- | --- |
 | [storage/mod.rs](../crates/rawmakase-model/src/storage/mod.rs) | Shared persistence and path API. |
 | [files.rs](../crates/rawmakase-model/src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
+| [model/saved_history.rs](../crates/rawmakase-model/src/model/saved_history.rs) | A Develop History as kept between sessions, as plain values: Develop's History restores from it and the catalog stores it, neither depending on the other. |
 | [model/saved_format.rs](../crates/rawmakase-model/src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../crates/rawmakase-model/src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [identity.rs](../crates/rawmakase-model/src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
@@ -182,7 +183,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog_session/background.rs](../src/catalog_session/background.rs) | Reading many photos' files a batch at a time on a thread, waking whoever shows them after each batch; also used by Read Metadata from Files. |
 | [catalog/mod.rs](../crates/rawmakase-catalog/src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
 | [catalog/edits.rs](../crates/rawmakase-catalog/src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
-| [catalog/develop_history.rs](../crates/rawmakase-catalog/src/catalog/develop_history.rs) | A photo's Develop History, saved in the same transaction as its edit; large settings are stored once per History. |
+| [catalog/develop_history.rs](../crates/rawmakase-catalog/src/catalog/develop_history.rs) | A photo's Develop History (`model::saved_history`), stored in the same transaction as its edit; large settings are stored once per History. |
 | [catalog/copies.rs](../crates/rawmakase-catalog/src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../crates/rawmakase-catalog/src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
 | [catalog/locations.rs](../crates/rawmakase-catalog/src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
