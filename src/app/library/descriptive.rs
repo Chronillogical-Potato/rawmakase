@@ -68,17 +68,7 @@ impl DescriptiveCommand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum DescriptiveEdit {
-    /// The default language's text; empty clears the field.
-    Text(TextField, String),
-    /// In order; none clears the field.
-    Creators(Vec<String>),
-    ClearLocation,
-    /// Keywords by path, top first.
-    AddKeywords(Vec<Vec<String>>),
-    RemoveKeyword(i64),
-}
+pub use crate::catalog_session::DescriptiveEdit;
 
 /// Keywords typed as Lightroom takes them: separated by commas, a child
 /// before its parents, "Child < Parent". Returns their paths, top first.
@@ -133,7 +123,6 @@ impl Library {
             return Ok(());
         }
         let place_before = place.clone().unwrap_or_else(|| self.place());
-        let before = self.session.catalog.metadata_snapshot(&ids)?;
         let what = match &edit {
             DescriptiveEdit::Text(TextField::Title, _) => "Title",
             DescriptiveEdit::Text(TextField::Caption, _) => "Caption",
@@ -143,19 +132,14 @@ impl Library {
             DescriptiveEdit::AddKeywords(_) => "Keywords added",
             DescriptiveEdit::RemoveKeyword(_) => "Keyword removed",
         };
-        let made = match edit {
-            DescriptiveEdit::Text(field, text) => self.session.catalog.set_text(&ids, field, &text),
-            DescriptiveEdit::Creators(names) => self.session.catalog.set_creators(&ids, &names),
-            DescriptiveEdit::ClearLocation => self.session.catalog.clear_location(&ids),
-            DescriptiveEdit::AddKeywords(paths) => self.session.catalog.add_keywords(&ids, &paths),
-            DescriptiveEdit::RemoveKeyword(keyword) => {
-                self.session.catalog.remove_keyword(&ids, keyword)
-            }
-        };
-        made?;
-        let after = self.session.catalog.metadata_snapshot(&ids)?;
+        let crate::catalog_session::DescriptiveChange {
+            before,
+            after,
+            listed,
+        } = self.session.edit_descriptive(&ids, edit)?;
+        self.filter();
         if before == after {
-            return self.refresh_keywords(&ids);
+            return listed;
         }
         let summary = match ids.len() {
             1 => what.to_string(),
@@ -172,7 +156,7 @@ impl Library {
         self.fields.reload();
         // Recorded first: a change saved is one undo can reverse, even if
         // what is shown can't be read again.
-        self.refresh_keywords(&ids)
+        listed
     }
     /// Puts photos' descriptive metadata back, with their rating, flag and
     /// label where the command set them, for undo and redo, without
@@ -188,12 +172,12 @@ impl Library {
             .filter(|s| self.photo(s.photo).is_some())
             .cloned()
             .collect();
-        self.session.catalog.restore_metadata(&values)?;
+        self.session.restore_descriptive(&values)?;
         if !ratings.is_empty() {
             self.set_metadata(ratings)?;
         }
-        let ids: Vec<PhotoId> = values.iter().map(|s| s.photo).collect();
-        self.refresh_photos(&ids)?;
+        self.resort_by_capture_time();
+        self.filter();
         self.fields.reload();
         Ok(())
     }
@@ -275,12 +259,10 @@ impl Library {
         let before = self.session.catalog.metadata_snapshot(&ids)?;
         let ratings_before = self.ratings_by_id(&wanted);
         let mut report = reread.report;
-        let written = self
-            .session
-            .catalog
-            .apply_file_metadata(&read, crate::catalog::Merge::Overwrite)?;
+        let written = self.session.apply_file_metadata(&ids, &read)?;
         report.unreadable.extend(written.unreadable);
-        self.refresh_photos(&ids)?;
+        self.resort_by_capture_time();
+        self.filter();
         let after = self.session.catalog.metadata_snapshot(&ids)?;
         let ratings_after = self.ratings_by_id(&wanted);
         let n = ids.len();
@@ -310,29 +292,8 @@ impl Library {
         found.sort_by_key(|m| m.0);
         found
     }
-    /// Rating, flag, label, capture time and keywords of `ids`, read again
-    /// from the catalog, and the photos shown.
-    fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
-        self.session.refresh_photos(ids)?;
-        self.sort_keys = None;
-        // A capture time read may move the photo, as the catalog sorts.
-        self.resort_in_place(|library| {
-            library.session.photos.sort_by(|a, b| {
-                (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
-            });
-        });
-        self.filter();
-        Ok(())
-    }
     /// The descriptive changes made since the last call, for the undo log.
     pub(in crate::app) fn take_descriptive_done(&mut self) -> Vec<DescriptiveCommand> {
         std::mem::take(&mut self.descriptive_done)
-    }
-    /// The keywords shown for `ids`, read again from the catalog, and the
-    /// photos shown, which a text filter may pick by them.
-    fn refresh_keywords(&mut self, ids: &[PhotoId]) -> Result<()> {
-        self.session.refresh_keywords(ids)?;
-        self.filter();
-        Ok(())
     }
 }
