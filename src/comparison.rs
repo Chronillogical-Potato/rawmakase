@@ -26,7 +26,7 @@ pub fn compare(
         crate::raw::Decode::full(Default::default()),
         &AtomicBool::new(false),
     )?;
-    let render = develop::render(&image, &edit, 0)?;
+    let render = develop::render(&image, &edit.checked()?, 0)?;
     let reference = image::open(reference)?.to_rgb32f();
     ensure!(
         (reference.width(), reference.height()) == (render.width, render.height),

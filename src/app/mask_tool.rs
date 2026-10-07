@@ -509,7 +509,7 @@ impl Editor {
         let y = ((v * g.height as f32) as u32)
             .saturating_sub(1)
             .min(g.height - h);
-        let out = crate::develop::render_region(im, &r, [x, y, w, h]).ok()?;
+        let out = crate::develop::render_region(im, &r.checked().ok()?, [x, y, w, h]).ok()?;
         let n = out.pixels.len() as f32;
         let mean = out
             .pixels

@@ -383,8 +383,8 @@ fn full_frame_mask_equals_the_global_slider() {
             }],
             ..base.clone()
         };
-        let a = crate::develop::render(&im, &masked, 0).unwrap();
-        let b = crate::develop::render(&im, &global, 0).unwrap();
+        let a = crate::develop::render(&im, &masked.checked().unwrap(), 0).unwrap();
+        let b = crate::develop::render(&im, &global.checked().unwrap(), 0).unwrap();
         let max = a
             .pixels
             .iter()
@@ -415,14 +415,16 @@ fn partial_masks_blend_and_amount_scales() {
         amount: 0.5,
         ..Default::default()
     });
-    let masked = crate::develop::render(&im, &r, 0).unwrap();
-    let plain = crate::develop::render(&im, &base, 0).unwrap();
+    let masked = crate::develop::render(&im, &r.checked().unwrap(), 0).unwrap();
+    let plain = crate::develop::render(&im, &base.checked().unwrap(), 0).unwrap();
     let half = crate::develop::render(
         &im,
         &Recipe {
             exposure: 0.5,
             ..base
-        },
+        }
+        .checked()
+        .unwrap(),
         0,
     )
     .unwrap();

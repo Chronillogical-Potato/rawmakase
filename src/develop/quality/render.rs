@@ -338,7 +338,7 @@ fn crop(im: Rendered, [x, y, w, h]: [u32; 4]) -> Rendered {
 }
 pub fn render(
     im: &CameraImage,
-    r: &Recipe,
+    r: &ValidRecipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
 ) -> Result<Rendered> {
@@ -352,7 +352,7 @@ pub fn render(
 }
 pub fn render_cancellable(
     im: &CameraImage,
-    r: &Recipe,
+    r: &ValidRecipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
@@ -361,7 +361,7 @@ pub fn render_cancellable(
 }
 pub(crate) fn render_preview(
     im: &CameraImage,
-    r: &Recipe,
+    r: &ValidRecipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
     cancel: &std::sync::atomic::AtomicBool,
@@ -371,7 +371,6 @@ pub(crate) fn render_preview(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
         "Render superseded"
     );
-    r.validate()?;
     let effective = r.resolved(&im.metadata);
     let r = effective.as_ref();
     if let Some(p) = &r.profile {

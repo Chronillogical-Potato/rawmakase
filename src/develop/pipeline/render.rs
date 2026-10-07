@@ -2,15 +2,15 @@
 use super::*;
 
 /// Shared full/preview renderer. Geometry is sampled in rows; no full-sized intermediate color image.
-pub fn render(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
+pub fn render(im: &CameraImage, r: &ValidRecipe, max_edge: u32) -> Result<Rendered> {
     if r.engine < 3 {
-        return render_legacy(im, &r.checked()?, max_edge);
+        return render_legacy(im, r, max_edge);
     }
     crate::develop::quality::render(im, r, max_edge, None)
 }
-pub fn render_region(im: &CameraImage, r: &Recipe, region: [u32; 4]) -> Result<Rendered> {
+pub fn render_region(im: &CameraImage, r: &ValidRecipe, region: [u32; 4]) -> Result<Rendered> {
     if r.engine < 3 {
-        return render_region_legacy(im, &r.checked()?, region);
+        return render_region_legacy(im, r, region);
     }
     crate::develop::quality::render(im, r, 0, Some(region))
 }

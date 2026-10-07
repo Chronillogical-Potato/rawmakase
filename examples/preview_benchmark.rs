@@ -117,7 +117,8 @@ fn main() -> Result<()> {
         }
         recipe.exposure = iterations as f32 * 0.1;
         let t = Instant::now();
-        let full = develop::quality::render_cancellable(&image, &recipe, 0, None, &cancel)?;
+        let full =
+            develop::quality::render_cancellable(&image, &recipe.checked()?, 0, None, &cancel)?;
         println!("Export resolution, local={local}: {:.1} ms", ms(t));
         let reference = develop::quality::resize(full, FIT);
         let modes: &[&str] = if local {

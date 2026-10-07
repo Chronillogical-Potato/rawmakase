@@ -246,7 +246,7 @@ struct Measure {
 impl Measure {
     fn of(im: &CameraImage, r: &Recipe, cancel: &AtomicBool) -> Result<Self> {
         check_cancel(cancel)?;
-        let out = render(im, r, TONE_EDGE)?;
+        let out = render(im, &r.checked()?, TONE_EDGE)?;
         ensure!(!out.pixels.is_empty(), "Nothing to measure for Auto");
         let mut luma = Vec::with_capacity(out.pixels.len());
         let mut peak = Vec::with_capacity(out.pixels.len());
@@ -520,7 +520,7 @@ mod tests {
             .collect();
         let out = render(
             &tone_copy(&big, &r, &AtomicBool::new(false)).unwrap(),
-            &r,
+            &r.checked().unwrap(),
             0,
         )
         .unwrap();

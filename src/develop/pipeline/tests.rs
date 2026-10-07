@@ -144,7 +144,7 @@ fn switched_off_panels_render_as_if_at_their_defaults() -> anyhow::Result<()> {
         exposure: 0.3,
         ..Default::default()
     };
-    let pixels = |r: &Recipe| crate::develop::render(&im, r, 0).map(|out| out.pixels);
+    let pixels = |r: &Recipe| crate::develop::render(&im, &r.checked()?, 0).map(|out| out.pixels);
     assert_ne!(pixels(&edited)?, pixels(&plain)?);
     assert_eq!(pixels(&off)?, pixels(&plain)?);
     // Through the preview renderer too, which the editor and thumbnails use.
@@ -362,8 +362,8 @@ fn viewport_matches_full_export_with_detail_and_geometry() -> Result<()> {
     r.effects.shadow_tint = 0.3;
     r.curve.insert([0.4, 0.5]);
     r.effects.channels[0].insert([0.6, 0.7]);
-    let full = render(&im, &r, 0)?;
-    let tile = render_region(&im, &r, [1, 2, 4, 5])?;
+    let full = render(&im, &r.checked()?, 0)?;
+    let tile = render_region(&im, &r.checked()?, [1, 2, 4, 5])?;
     for y in 0..5 {
         for x in 0..4 {
             let a = full.pixels[(y + 2) * full.width as usize + x + 1];
@@ -593,8 +593,8 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
     let centre = |r: &Rendered| lum(r.pixels[(4 * r.width + 6) as usize]);
     assert!(corner(&a) > corner(&b) + 0.01);
     assert!(corner(&a) > centre(&a) && (corner(&b) - centre(&b)).abs() < 1e-5);
-    let region = render_region(&im, &on, [3, 2, 4, 3]).unwrap();
-    let full = render(&im, &on, 0).unwrap();
+    let region = render_region(&im, &on.checked().unwrap(), [3, 2, 4, 3]).unwrap();
+    let full = render(&im, &on.checked().unwrap(), 0).unwrap();
     for y in 0..3 {
         for x in 0..4 {
             let p = region.pixels[(y * 4 + x) as usize];
@@ -610,9 +610,9 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
 fn transform_scales_and_fills_uncovered_area_with_white() {
     let im = fixture();
     let mut r = Recipe::for_metadata(&im.metadata);
-    let plain = render(&im, &r, 0).unwrap();
+    let plain = render(&im, &r.checked().unwrap(), 0).unwrap();
     r.transform.scale = 0.5;
-    let small = render(&im, &r, 0).unwrap();
+    let small = render(&im, &r.checked().unwrap(), 0).unwrap();
     assert_eq!((small.width, small.height), (plain.width, plain.height));
     // Halving the scale leaves the corners uncovered and keeps the centre.
     assert_eq!(small.pixels[0], [1.; 3]);
@@ -627,8 +627,8 @@ fn transform_scales_and_fills_uncovered_area_with_white() {
         ..Default::default()
     };
     assert!(r.validate().is_ok());
-    let full = render(&im, &r, 0).unwrap();
-    let region = render_region(&im, &r, [2, 1, 5, 4]).unwrap();
+    let full = render(&im, &r.checked().unwrap(), 0).unwrap();
+    let region = render_region(&im, &r.checked().unwrap(), [2, 1, 5, 4]).unwrap();
     for y in 0..4 {
         for x in 0..5 {
             let p = region.pixels[(y * 5 + x) as usize];
@@ -747,10 +747,10 @@ fn constrain_crop_renders_no_white() {
             .filter(|p| p.iter().all(|v| *v > 0.99))
             .count()
     };
-    let free = render(&im, &r, 0).unwrap();
+    let free = render(&im, &r.checked().unwrap(), 0).unwrap();
     assert!(white(&free) > 100, "{}", white(&free));
     r.constrain_crop = true;
-    let constrained = render(&im, &r, 0).unwrap();
+    let constrained = render(&im, &r.checked().unwrap(), 0).unwrap();
     assert_eq!(white(&constrained), 0);
     let aspect = constrained.width as f32 / constrained.height as f32;
     assert!((aspect - 1.5).abs() < 0.06, "{aspect}");
@@ -810,7 +810,7 @@ fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
         range: 1.,
         ..PointColor::sampled([2., 0.5, 0.2])
     }];
-    let pixels = |r: &Recipe| crate::develop::render(&im, r, 0).map(|out| out.pixels);
+    let pixels = |r: &Recipe| crate::develop::render(&im, &r.checked()?, 0).map(|out| out.pixels);
     assert_ne!(pixels(&edited)?, pixels(&plain)?);
     // Camera Raw leaves Point Color out of black & white.
     let mono = |r: &Recipe| {
@@ -882,7 +882,7 @@ fn visualize_range_leaves_what_it_does_not_select_gray_under_grading() -> anyhow
     // A magenta swatch, which none of the fixture's greens is.
     r.point_colors = vec![PointColor::sampled([5., 0.8, 0.3])];
     r.point_colors = visualize_range(&r.point_colors, 0).unwrap();
-    let out = crate::develop::render(&im, &r, 0)?;
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
     for p in &out.pixels {
         assert!(
             (p[0] - p[1]).abs() < 2e-3 && (p[1] - p[2]).abs() < 2e-3,
@@ -904,7 +904,7 @@ fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Res
     // A magenta swatch, which none of the fixture's greens is.
     r.point_colors = vec![PointColor::sampled([5., 0.8, 0.3])];
     // A Color Range mask on the fixture's own green brightens it.
-    let green = crate::develop::render(&im, &r, 0)?.pixels[40];
+    let green = crate::develop::render(&im, &r.checked()?, 0)?.pixels[40];
     r.masks.push(MaskGroup {
         components: vec![MaskComponent::new(MaskShape::ColorRange {
             samples: vec![srgb_to_lab(green.map(srgb_decode))],
@@ -916,10 +916,10 @@ fn visualize_range_leaves_color_range_masks_selecting_the_photo() -> anyhow::Res
         },
         ..Default::default()
     });
-    let shown = crate::develop::render(&im, &r, 0)?;
+    let shown = crate::develop::render(&im, &r.checked()?, 0)?;
     let mut visualized = r.clone();
     visualized.point_colors = visualize_range(&r.point_colors, 0).unwrap();
-    let gray = crate::develop::render(&im, &visualized, 0)?;
+    let gray = crate::develop::render(&im, &visualized.checked()?, 0)?;
     // The mask still brightens the greens: Visualize Range only grays them.
     for (a, b) in shown.pixels.iter().zip(&gray.pixels) {
         let expected = visualize(*a, 0.);
@@ -972,7 +972,7 @@ fn targeted_adjustments_sample_the_photo_where_each_control_sees_it() -> anyhow:
     };
     // The rendered patch, encoded sRGB.
     let shown = |r: &Recipe, patch: usize| -> anyhow::Result<[f32; 3]> {
-        let out = crate::develop::render(&im, r, 0)?;
+        let out = crate::develop::render(&im, &r.checked()?, 0)?;
         Ok(out.pixels[5 * out.width as usize + patch * 10 + 5])
     };
     let luma = |p: [f32; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
@@ -1145,7 +1145,7 @@ fn lens_profile_amounts_scale_the_correction() {
     );
     // As rendered: corners brighten with the amount, and 0 matches no profile.
     let lum = |r: &Recipe| {
-        let out = render(&im, r, 0).unwrap();
+        let out = render(&im, &r.checked().unwrap(), 0).unwrap();
         out.pixels[0].iter().sum::<f32>()
     };
     let none = lum(&Recipe::default());
@@ -1168,11 +1168,11 @@ fn lens_profile_distortion_with_constrain_crop_renders_no_white() {
         lens_distortion: 2.,
         ..profile_recipe(LensProfileSetup::Custom, OTHER)
     };
-    assert_eq!(white(&render(&im, &r, 0).unwrap()), 0);
+    assert_eq!(white(&render(&im, &r.checked().unwrap(), 0).unwrap()), 0);
     r.transform.vertical = 0.6;
-    assert!(white(&render(&im, &r, 0).unwrap()) > 100);
+    assert!(white(&render(&im, &r.checked().unwrap(), 0).unwrap()) > 100);
     r.constrain_crop = true;
-    let constrained = render(&im, &r, 0).unwrap();
+    let constrained = render(&im, &r.checked().unwrap(), 0).unwrap();
     assert_eq!(white(&constrained), 0);
     let aspect = constrained.width as f32 / constrained.height as f32;
     assert!((aspect - 1.5).abs() < 0.06, "{aspect}");
@@ -1191,8 +1191,10 @@ fn lens_corrections_panel_off_bypasses_the_chosen_profile() {
     assert!(r.as_rendered().lens_correction(&im.metadata).is_none());
     assert_eq!(r.lens_profile_choice.setup, LensProfileSetup::Custom);
     assert_eq!(
-        render(&im, &r, 0).unwrap().pixels,
-        render(&im, &Recipe::default(), 0).unwrap().pixels
+        render(&im, &r.checked().unwrap(), 0).unwrap().pixels,
+        render(&im, &Recipe::default().checked().unwrap(), 0)
+            .unwrap()
+            .pixels
     );
     r.lens_profile_choice.id = profile_recipe(LensProfileSetup::Custom, "Gone.lcp")
         .lens_profile_choice
@@ -1366,7 +1368,7 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
     r.lens_vignette_model = LensVignetteModel::Measured;
     r.effects.lens_vignette = -0.5;
     let lum = |p: [f32; 3]| p.iter().sum::<f32>();
-    let full = render(&im, &r, 0).unwrap();
+    let full = render(&im, &r.checked().unwrap(), 0).unwrap();
     let at = |im: &Rendered, x: u32, y: u32| lum(im.pixels[(y * im.width + x) as usize]);
     let (corner, centre) = (at(&full, 11, 0), at(&full, 6, 4));
     assert!(corner < centre * 0.9, "{corner} {centre}");
@@ -1378,20 +1380,26 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
         },
         ..r.clone()
     };
-    assert!(at(&render(&im, &lighter, 0).unwrap(), 11, 0) > centre * 1.1);
+    assert!(at(&render(&im, &lighter.checked().unwrap(), 0).unwrap(), 11, 0) > centre * 1.1);
     // The gain belongs to the whole photo: a crop keeps each pixel's.
     let cropped = Recipe {
         crop: [0.5, 0., 1., 1.],
         ..r.clone()
     };
-    let half = render(&im, &cropped, 0).unwrap();
+    let half = render(&im, &cropped.checked().unwrap(), 0).unwrap();
     assert!((at(&half, half.width - 1, 0) - corner).abs() < 1e-3);
     // Recipes saved before keep the original operator, which lightened at -0.5.
     let original = Recipe {
         lens_vignette_model: LensVignetteModel::Original,
         ..r.clone()
     };
-    assert!(at(&render(&im, &original, 0).unwrap(), 11, 0) > centre);
+    assert!(
+        at(
+            &render(&im, &original.checked().unwrap(), 0).unwrap(),
+            11,
+            0
+        ) > centre
+    );
     let json = serde_json::to_value(&original).unwrap();
     assert!(json.get("lens_vignette_model").is_none());
     let back: Recipe = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
@@ -1474,9 +1482,9 @@ fn new_edits_render_grain_at_camera_raw_strength() -> anyhow::Result<()> {
     let mut r = Recipe::with_profiles(&m, &[]);
     r.sharpening = 0.;
     r.noise_chroma = 0.;
-    let flat = crate::develop::render(&im, &r, 0)?;
+    let flat = crate::develop::render(&im, &r.checked()?, 0)?;
     r.effects.grain = 0.5;
-    let grain = crate::develop::render(&im, &r, 0)?;
+    let grain = crate::develop::render(&im, &r.checked()?, 0)?;
     let lightness = |p: &[f32; 3]| {
         let v = p[1];
         let y = if v <= 0.04045 {
@@ -1543,7 +1551,7 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     );
     r.sharpening = 0.;
     let chroma_noise = |r: &Recipe| -> anyhow::Result<f32> {
-        let out = crate::develop::render(&im, r, 0)?;
+        let out = crate::develop::render(&im, &r.checked()?, 0)?;
         let ab: Vec<[f32; 2]> = out
             .pixels
             .iter()

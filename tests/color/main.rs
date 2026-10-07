@@ -230,7 +230,7 @@ pub fn render(
     let base = rawmakase::develop::Recipe::with_profiles(&im.metadata, profiles);
     let preset = rawmakase::xmp::parse(Path::new("case.xmp"), xmp)?;
     let recipe = preset.apply(&base, &im.metadata, profiles, Some(im))?;
-    rawmakase::develop::render(im, &recipe, max_edge)
+    rawmakase::develop::render(im, &recipe.checked()?, max_edge)
 }
 
 /// The DNG's own embedded profile, and nothing from the user's library. A DNG
