@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Which operator renders positive Clarity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClarityModel {
-    /// The detail gain of `quality.rs`: what recipes saved before the measured one
+    /// The detail gain of `quality::local`: what recipes saved before the measured one
     /// keep, so they render as they did.
     #[default]
     Original,
