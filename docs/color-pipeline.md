@@ -40,7 +40,7 @@ The fit preview area-averages camera data to a maximum 1600-pixel edge before th
 
 ## Out-of-gamut colors
 
-Colors the edit pushes outside sRGB, such as a saturated orange brightened past white or a strong white-balance shift, reach sRGB in one of two ways (`GamutModel` in `develop/pipeline.rs`, `P_GAMUT_CLIP` in `develop.wgsl`):
+Colors the edit pushes outside sRGB, such as a saturated orange brightened past white or a strong white-balance shift, reach sRGB in one of two ways (`GamutModel` in `develop/pipeline/pixel.rs`, `P_GAMUT_CLIP` in `develop.wgsl`):
 
 - **Clip** (new edits): each linear channel is clipped to 0–1 on its own, as Camera Raw's conversion to sRGB does. A color keeps its in-gamut channels, so a too-bright orange turns toward yellow rather than toward gray.
 - **Compress** (edits saved before this model): chroma moves toward the neutral of the same Oklab lightness until every channel fits, which keeps the hue but desaturates.
