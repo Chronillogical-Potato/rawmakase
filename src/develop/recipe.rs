@@ -253,7 +253,7 @@ pub struct Recipe {
     /// Heal and Clone operations, in order. Saved apart from the recipe (see
     /// [`LocalEdits`]); omitted from recipe JSON when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    pub retouch: Vec<crate::model::retouch::RetouchOp>,
     /// Red eye corrections, in order; saved apart, as `retouch`.
     #[serde(
         default,
@@ -276,7 +276,7 @@ pub struct Recipe {
 #[serde(default)]
 pub struct LocalEdits {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub retouch: Vec<crate::develop::retouch::RetouchOp>,
+    pub retouch: Vec<crate::model::retouch::RetouchOp>,
     #[serde(skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank")]
     pub red_eye: crate::develop::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -287,7 +287,7 @@ impl LocalEdits {
         self.retouch.is_empty() && self.red_eye.is_blank() && self.masks.is_empty()
     }
     pub fn validate(&self) -> Result<()> {
-        crate::develop::retouch::validate(&self.retouch)?;
+        crate::model::retouch::validate(&self.retouch)?;
         crate::develop::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)
     }
@@ -672,7 +672,7 @@ impl Recipe {
             "Invalid Profile Amount"
         );
         // Every other number is range-checked above, which also rejects NaN.
-        crate::develop::retouch::validate(&self.retouch)?;
+        crate::model::retouch::validate(&self.retouch)?;
         crate::develop::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)?;
         Ok(())
@@ -792,7 +792,7 @@ impl Recipe {
     }
     /// Adds a Heal or Clone operation. The first on a recipe has no spots of the
     /// original feather to keep, so it takes the measured one.
-    pub fn add_retouch(&mut self, op: crate::develop::retouch::RetouchOp) {
+    pub fn add_retouch(&mut self, op: crate::model::retouch::RetouchOp) {
         if self.retouch.is_empty() {
             self.retouch_model = crate::model::operators::RetouchModel::Measured;
         }

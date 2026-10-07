@@ -212,4 +212,45 @@ mod tests {
         assert!(serde_json::from_str::<Effects>(r#"{"unknown": 1}"#).is_err());
         assert!(Effects::default().validate().is_ok());
     }
+
+    /// Every setting's stored name and default, as saved edits and presets hold them.
+    #[test]
+    fn stored_defaults_keep_every_name() {
+        let stored = serde_json::to_value(Effects::default()).unwrap();
+        let curve = serde_json::to_value(ToneCurve::default()).unwrap();
+        let expected = serde_json::json!({
+            "channels": [curve.clone(), curve.clone(), curve],
+            "parametric": [0.0, 0.0, 0.0, 0.0],
+            "splits": [0.25, 0.5, 0.75],
+            "calibration": [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+            "shadow_tint": 0.0,
+            "monochrome": false,
+            "gray_mix": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "balance": 0.0,
+            "blending": 0.5,
+            "global_grade": [0.0, 0.0, 0.0],
+            "clarity": 0.0,
+            "texture": 0.0,
+            "dehaze": 0.0,
+            "grain": 0.0,
+            "grain_size": 0.25,
+            "grain_roughness": 0.5,
+            "grain_seed": 42,
+            "vignette": 0.0,
+            "vignette_midpoint": 0.5,
+            "vignette_roundness": 0.0,
+            "vignette_feather": 0.5,
+            "vignette_highlights": 0.0,
+            "vignette_style": 1,
+            "lens_vignette": 0.0,
+            "lens_vignette_midpoint": 0.5,
+            "defringe": [0.0, 0.0],
+            "defringe_ranges": [[0.3_f32, 0.7_f32], [0.4_f32, 0.6_f32]],
+            "luma_detail": 0.5,
+            "luma_contrast": 0.0,
+            "chroma_detail": 0.5,
+            "chroma_smoothness": 0.5,
+        });
+        assert_eq!(stored, expected);
+    }
 }

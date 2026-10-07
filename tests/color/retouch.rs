@@ -3,10 +3,8 @@
 use crate::{chart_path, develop, embedded_profiles, measure};
 use rawmakase::{
     camera_data::CameraImage,
-    develop::{
-        ImageFrame, Recipe, ViewMapping, render,
-        retouch::{RetouchMode, RetouchOp, RetouchShape, find_source},
-    },
+    develop::{ImageFrame, Recipe, ViewMapping, render, retouch::find_source},
+    model::retouch::{RetouchMode, RetouchOp, RetouchShape},
 };
 
 /// The chart's camera and metadata with a gradient above a lit texture, so results

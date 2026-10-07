@@ -5,7 +5,7 @@
 //! difference between destination and source on a one-pixel ring outside the shape is
 //! extended inward as a membrane (the solution of Laplace's equation). A constant or
 //! linear difference is therefore reproduced exactly, and the source's texture is kept.
-use super::{RetouchMode, RetouchOp, RetouchShape};
+use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use crate::{camera_data::CameraImage, develop::ImageFrame};
 use rayon::prelude::*;
 

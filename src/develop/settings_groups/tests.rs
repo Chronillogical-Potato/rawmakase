@@ -1,10 +1,10 @@
 use super::*;
+use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use crate::{
     develop::{
         UprightMode,
         masks::{MaskComponent, MaskGroup, MaskShape},
         panels::PanelState,
-        retouch::{RetouchMode, RetouchOp, RetouchShape},
     },
     model::effects::VignetteStyle,
 };
