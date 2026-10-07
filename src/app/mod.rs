@@ -433,7 +433,11 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
     let mut app = SurfaceGate(eframe::create_native(
         "RAWmakase",
         options,
-        Box::new(move |cc| Ok(Box::new(Editor::new(cc, path, launch)))),
+        Box::new(move |cc| {
+            // The event loop has built the app menu by now.
+            crate::platform::quit::through_close_guard(cc);
+            Ok(Box::new(Editor::new(cc, path, launch)))
+        }),
         &event_loop,
     ));
     event_loop.run_app_on_demand(&mut app)?;
