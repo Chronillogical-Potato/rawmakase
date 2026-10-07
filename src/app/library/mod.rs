@@ -678,6 +678,10 @@ impl Library {
     pub(super) fn set_copy_name_draft(&mut self, id: PhotoId, name: &str) {
         self.copy_names.draft = Some((id, name.into()));
     }
+    /// Whether a Copy Name or metadata field holds typing not saved yet.
+    pub(super) fn has_drafts(&self) -> bool {
+        self.copy_names.is_unsaved(&self.session.photos) || self.has_unsaved_fields()
+    }
     /// Drops a Copy Name or metadata field that could not be saved, e.g.
     /// closing without saving.
     pub(super) fn discard_drafts(&mut self) {
