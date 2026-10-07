@@ -229,7 +229,12 @@ pub fn render(
 ) -> anyhow::Result<Rendered> {
     let base = rawmakase::model::recipe::Recipe::with_profiles(&im.metadata, profiles);
     let preset = rawmakase::xmp::parse(Path::new("case.xmp"), xmp)?;
-    let recipe = preset.apply(&base, &im.metadata, profiles, Some(im))?;
+    let recipe = preset.apply(
+        &base,
+        &im.metadata,
+        profiles,
+        Some(&rawmakase::develop::Measures(im)),
+    )?;
     rawmakase::develop::render(im, &recipe.checked()?, max_edge)
 }
 

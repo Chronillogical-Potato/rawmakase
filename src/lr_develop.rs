@@ -81,7 +81,7 @@ pub fn convert_develop(
     text: &str,
     m: &crate::camera_data::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-    image: Option<&crate::camera_data::CameraImage>,
+    image: Option<&dyn crate::xmp::PhotoMeasures>,
 ) -> Result<(Recipe, Vec<String>)> {
     let fields = develop_fields(text)?;
     let mut preset = crate::xmp::Preset {

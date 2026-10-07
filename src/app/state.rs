@@ -496,6 +496,12 @@ impl Document {
     pub fn full(&self) -> Option<&Arc<CameraImage>> {
         self.image.as_ref()
     }
+    /// What applying XMP or Lightroom settings measures for Auto, on the full-size
+    /// image when it is decoded.
+    pub fn measures(&self) -> Option<crate::develop::Measures<'_>> {
+        self.full()
+            .map(|image| crate::develop::Measures(image.as_ref()))
+    }
     pub fn set_image(&mut self, full: Arc<CameraImage>) {
         self.image = Some(full);
         self.color_spread = Default::default();

@@ -42,11 +42,11 @@ mod stage_cache;
 
 pub use crate::color::{mul, srgb_encode};
 pub use auto::{
-    AutoTone, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
+    AutoTone, Measures, auto_tone, auto_tone_basis, auto_tone_cancellable, auto_white_balance,
     auto_white_balance_cancellable,
 };
 pub use black_white::{AutoMix, ColorSpread};
-pub use geometry::Geometry;
+pub use geometry::{Geometry, rendered_crop};
 pub use image_space::ViewMapping;
 pub use orientation::{Mirror, QuarterTurn, mirror, turn};
 pub use pipeline::{

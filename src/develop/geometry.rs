@@ -1,6 +1,15 @@
 use crate::model::recipe::Recipe;
 use crate::{camera_data::CameraImage, model::transform::Transform};
 
+/// The crop as rendered, `[left, top, right, bottom]`: with Constrain Crop, the crop
+/// constrained to the photo, which is what Lightroom stores; otherwise the recipe's.
+pub fn rendered_crop(r: &Recipe, m: &crate::camera_data::Metadata) -> [f32; 4] {
+    if r.constrain_crop {
+        Geometry::for_metadata(m, &r.as_rendered()).crop()
+    } else {
+        r.crop
+    }
+}
 impl Transform {
     /// Homography from output to source coordinates, both centred, y down, in units
     /// of the long edge. The forward (source-to-output) matrix was fitted to Camera Raw
@@ -764,6 +773,17 @@ mod constrain_crop_tests {
     }
     /// At Scale 50 only the middle half of the frame has a source pixel: the crop
     /// becomes that half, the largest one at the photo's aspect.
+    #[test]
+    fn the_rendered_crop_is_the_constrained_one_only_with_constrain_crop() {
+        let mut r = Recipe::default();
+        r.transform.vertical = 1.;
+        let m = photo().metadata;
+        assert_eq!(rendered_crop(&r, &m), r.crop);
+        r.constrain_crop = true;
+        let constrained = rendered_crop(&r, &m);
+        assert_eq!(constrained, Geometry::for_metadata(&m, &r).crop());
+        assert_ne!(constrained, r.crop);
+    }
     #[test]
     fn constrain_crop_takes_the_largest_crop_that_fits() {
         let mut r = Recipe {

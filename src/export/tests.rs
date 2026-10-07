@@ -213,13 +213,15 @@ fn constrain_crop_writes_the_crop_as_rendered() -> Result<()> {
         ..Default::default()
     };
     r.transform.vertical = 0.5;
-    let photo = crate::xmp::write::Photo {
-        settings: true,
-        format: "image/jpeg".into(),
-        ..Default::default()
-    };
     let rendered = crate::develop::Geometry::for_metadata(&m, &r).crop();
     assert_ne!(rendered, r.crop);
+    // As the export job writes it.
+    let mut photo = crate::xmp::write::Photo {
+        settings: true,
+        format: "image/jpeg".into(),
+        crop: Some(crate::develop::rendered_crop(&r, &m)),
+        ..Default::default()
+    };
     let packet = crate::xmp::write::packet(&r, &m, &photo);
     assert!(packet.contains("crs:CropConstrainToWarp=\"1\""));
     assert!(packet.contains("crs:HasCrop=\"True\""));
@@ -239,6 +241,7 @@ fn constrain_crop_writes_the_crop_as_rendered() -> Result<()> {
     }
     // Off, the crop is written as it is.
     r.constrain_crop = false;
+    photo.crop = Some(crate::develop::rendered_crop(&r, &m));
     let packet = crate::xmp::write::packet(&r, &m, &photo);
     assert!(packet.contains("crs:CropConstrainToWarp=\"0\""));
     assert!(packet.contains("crs:CropLeft=\"0.100000\""));

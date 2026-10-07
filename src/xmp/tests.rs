@@ -213,7 +213,12 @@ fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
     let attrs =
         r#"c:WhiteBalance="Auto" c:CropLeft="0" c:CropTop="0" c:CropRight="0.45" c:CropBottom="1""#;
     let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;
-    let result = preset.apply(&Recipe::default(), &m, &[], Some(&im))?;
+    let result = preset.apply(
+        &Recipe::default(),
+        &m,
+        &[],
+        Some(&crate::develop::Measures(&im)),
+    )?;
     assert_eq!(result.crop, [0., 0., 0.45, 1.]);
     let cropped = Recipe {
         crop: result.crop,
@@ -834,7 +839,12 @@ fn auto_grayscale_mix_uses_stored_mixer_or_estimates_it() -> Result<()> {
         scale_factor: 1.,
         scale_clipped: 0,
     };
-    let r = auto.apply(&base, &photo_metadata, &[], Some(&im))?;
+    let r = auto.apply(
+        &base,
+        &photo_metadata,
+        &[],
+        Some(&crate::develop::Measures(&im)),
+    )?;
     let spread = crate::develop::ColorSpread::measure(&im);
     let expected = crate::develop::AutoMix {
         spread: &spread,
@@ -1480,4 +1490,23 @@ fn lightroom_manual_vignetting_takes_the_measured_operator() -> Result<()> {
     let r = apply(r#"c:Exposure2012="0.5""#)?;
     assert_eq!(r.lens_vignette_model, LensVignetteModel::Original);
     Ok(())
+}
+
+/// A packet records the crop it is given as rendered, else the recipe's own.
+#[test]
+fn packets_record_the_rendered_crop() {
+    let r = Recipe {
+        crop: [0.1, 0.2, 0.9, 0.8],
+        ..Default::default()
+    };
+    let mut photo = crate::xmp::write::Photo {
+        settings: true,
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(packet.contains(r#"crs:CropLeft="0.100000""#), "{packet}");
+    photo.crop = Some([0.15, 0.25, 0.85, 0.75]);
+    let packet = crate::xmp::write::packet(&r, &Metadata::default(), &photo);
+    assert!(packet.contains(r#"crs:CropLeft="0.150000""#), "{packet}");
+    assert!(packet.contains(r#"crs:CropBottom="0.750000""#), "{packet}");
 }

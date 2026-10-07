@@ -218,7 +218,10 @@ impl Editor {
                     &text,
                     m,
                     &self.document.profiles,
-                    self.document.full().map(|image| image.as_ref()),
+                    self.document
+                        .measures()
+                        .as_ref()
+                        .map(|m| m as &dyn crate::xmp::PhotoMeasures),
                 ) {
                     Ok((recipe, skipped)) => {
                         if !skipped.is_empty() {

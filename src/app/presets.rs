@@ -339,7 +339,10 @@ impl Editor {
                     &self.document.edit.recipe,
                     m,
                     &self.document.profiles,
-                    self.document.full().map(|image| image.as_ref()),
+                    self.document
+                        .measures()
+                        .as_ref()
+                        .map(|m| m as &dyn crate::xmp::PhotoMeasures),
                 )
             {
                 this_photos_upright(&mut r, &self.document.edit.recipe);
@@ -447,7 +450,10 @@ impl Editor {
             &self.document.edit.recipe,
             m,
             &self.document.profiles,
-            self.document.full().map(|image| image.as_ref()),
+            self.document
+                .measures()
+                .as_ref()
+                .map(|m| m as &dyn crate::xmp::PhotoMeasures),
         )?;
         let substitute = preset
             .profile_substitute(m, &self.document.profiles)
@@ -850,7 +856,10 @@ impl Editor {
                 &step.text,
                 m,
                 &self.document.profiles,
-                self.document.full().map(|image| image.as_ref()),
+                self.document
+                    .measures()
+                    .as_ref()
+                    .map(|m| m as &dyn crate::xmp::PhotoMeasures),
             ) {
                 Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
                     if !skipped.is_empty() {

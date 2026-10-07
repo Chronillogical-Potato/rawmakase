@@ -358,6 +358,27 @@ fn round(v: f32, steps: f32) -> f32 {
     (v * steps).round() / steps
 }
 
+/// The measurements applying XMP settings asks of a decoded photo (see
+/// [`crate::xmp::PhotoMeasures`]).
+pub struct Measures<'a>(pub &'a CameraImage);
+
+impl crate::xmp::PhotoMeasures for Measures<'_> {
+    fn camera_image(&self) -> &CameraImage {
+        self.0
+    }
+    fn auto_white_balance(&self, base: &Recipe) -> Result<Recipe> {
+        auto_white_balance(self.0, base)
+    }
+    fn auto_gray_mix(&self, r: &Recipe, m: &Metadata) -> [f32; 8] {
+        let spread = super::ColorSpread::measure(self.0);
+        super::AutoMix {
+            spread: &spread,
+            metadata: m,
+        }
+        .for_recipe(r)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

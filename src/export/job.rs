@@ -209,6 +209,10 @@ fn xmp(
             lens: fields.lens,
             settings: fields.develop,
             format: settings.mime_type().into(),
+            crop: Some(crate::develop::rendered_crop(
+                &photo.recipe,
+                &image.metadata,
+            )),
         },
     )
 }

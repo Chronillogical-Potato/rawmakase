@@ -66,6 +66,7 @@ develop -> lens
 develop -> model
 develop -> optics
 develop -> raw
+develop -> xmp
 dng -> optics
 dng -> tiff
 edit_session -> catalog
@@ -146,7 +147,6 @@ xmp -> build_info
 xmp -> camera_data
 xmp -> camera_profiles
 xmp -> color
-xmp -> develop
 xmp -> exif
 xmp -> lens
 xmp -> metadata

@@ -1,10 +1,7 @@
+use super::PhotoMeasures;
 use super::Preset;
 use crate::model::recipe::Recipe;
-use crate::{
-    camera_data::{CameraImage, Metadata},
-    camera_profiles::CameraProfile,
-    develop::mul,
-};
+use crate::{camera_data::Metadata, camera_profiles::CameraProfile, color::mul};
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -107,7 +104,7 @@ impl Preset {
         base: &Recipe,
         m: &Metadata,
         profiles: &[Arc<CameraProfile>],
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<Recipe> {
         ensure!(self.blockers.is_empty(), "{}", self.blockers.join("; "));
         let mut settings = Settings {
@@ -150,7 +147,7 @@ impl Preset {
         base: &Recipe,
         m: &Metadata,
         profiles: &[Arc<CameraProfile>],
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<(Recipe, Vec<String>)> {
         if let Ok(recipe) = self.apply(base, m, profiles, image) {
             return Ok((recipe, Vec::new()));
@@ -477,7 +474,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         let v = settings.values;
         settings.seen.insert("WhiteBalance".into());
@@ -506,9 +503,9 @@ impl Preset {
                     r.tint = tint;
                     r.update_wb(m);
                     r.auto_white_balance = Some([r.temperature, r.tint]);
-                } else if let Some(im) = image {
+                } else if let Some(photo) = image {
                     // Settings without resolved values get the WB menu's Auto.
-                    *r = crate::develop::auto_white_balance(im, r)?;
+                    *r = photo.auto_white_balance(r)?;
                 }
             }
             Some("Custom") | None => {
@@ -708,7 +705,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         settings.seen.insert("AutoGrayscaleMix".into());
         if self.leaves_auto_gray_mix(r)? {
@@ -718,14 +715,9 @@ impl Preset {
             }
         }
         if self.leaves_auto_gray_mix(r)?
-            && let Some(im) = image
+            && let Some(photo) = image
         {
-            let spread = crate::develop::ColorSpread::measure(im);
-            r.effects.gray_mix = crate::develop::AutoMix {
-                spread: &spread,
-                metadata: m,
-            }
-            .for_recipe(r);
+            r.effects.gray_mix = photo.auto_gray_mix(r, m);
         }
         Ok(())
     }
@@ -969,7 +961,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         let v = settings.values;
         settings.seen.insert("AutoTone".into());
@@ -977,9 +969,10 @@ impl Preset {
         // so every route (open, reset, history, hover) renders the same edit.
         if boolean(v, "AutoTone")? == Some(true)
             && !v.contains_key("Exposure2012")
-            && let Some(im) = image
+            && let Some(photo) = image
         {
-            let mut l: Vec<f32> = im
+            let mut l: Vec<f32> = photo
+                .camera_image()
                 .pixels
                 .iter()
                 .step_by(64)
