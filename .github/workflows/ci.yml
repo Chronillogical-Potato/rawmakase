@@ -85,11 +85,12 @@ jobs:
           rustup toolchain install "$msrv" --profile minimal
           cargo +"$msrv" check --locked --all-targets
       - run: cargo fmt --check
-      # The protocol crate and the standalone client build without the app's
-      # native libraries; fmt above covers the whole workspace.
-      - name: Check the control protocol and client
+      # The model, the protocol crate and the standalone client build without the
+      # app's native libraries, wgpu or GUI; fmt above covers the whole workspace.
+      - name: Check the model, the control protocol and client
         run: |
-          cargo clippy --locked --all-targets -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+          cargo test --locked -p rawmakase-model --all-features
           cargo test --locked -p rawmakase-protocol -p rawmakase-ctl
       - run: cargo clippy --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
