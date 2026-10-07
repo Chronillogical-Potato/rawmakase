@@ -26,6 +26,7 @@ mod descriptive;
 mod develop_history;
 mod edit_records;
 mod edits;
+mod ids;
 mod info;
 mod ingest;
 pub mod legacy_sidecar;
@@ -40,6 +41,7 @@ pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
+pub use ids::CollectionId;
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
@@ -199,7 +201,7 @@ impl Catalog {
     }
     /// Lightroom's Quick Collection: the one imported with the catalog, or a
     /// new one made the same way.
-    pub fn quick_collection(&mut self) -> Result<i64> {
+    pub fn quick_collection(&mut self) -> Result<CollectionId> {
         use rusqlite::OptionalExtension;
         const KIND: &str = "com.adobe.ag.library.collection";
         let found = self
@@ -217,12 +219,12 @@ impl Catalog {
             "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?)",
             params![models::QUICK_COLLECTION, KIND],
         )?;
-        Ok(self.db.last_insert_rowid())
+        Ok(CollectionId(self.db.last_insert_rowid()))
     }
     /// Adds `add` to and removes `remove` from a collection, in one transaction.
     pub fn change_collection(
         &mut self,
-        collection: i64,
+        collection: CollectionId,
         add: &[i64],
         remove: &[i64],
     ) -> Result<()> {
@@ -230,13 +232,13 @@ impl Catalog {
         for photo in add {
             tx.execute(
                 "INSERT OR IGNORE INTO collection_photos(collection, photo) VALUES (?, ?)",
-                [collection, *photo],
+                params![collection, photo],
             )?;
         }
         for photo in remove {
             tx.execute(
                 "DELETE FROM collection_photos WHERE collection=? AND photo=?",
-                [collection, *photo],
+                params![collection, photo],
             )?;
         }
         tx.commit()?;
@@ -245,7 +247,7 @@ impl Catalog {
     /// Every collection's photos, by collection.
     pub fn collection_photos(
         &self,
-    ) -> Result<std::collections::HashMap<i64, std::collections::HashSet<i64>>> {
+    ) -> Result<std::collections::HashMap<CollectionId, std::collections::HashSet<i64>>> {
         let mut members: std::collections::HashMap<_, std::collections::HashSet<_>> =
             Default::default();
         let mut query = self

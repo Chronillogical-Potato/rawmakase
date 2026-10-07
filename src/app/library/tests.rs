@@ -673,7 +673,7 @@ fn attribute_filters_match_lightroom() -> Result<()> {
     assert!(!library.filters.enabled && library.filters.bar_set());
     assert_eq!(ids_of(&library).len(), 5);
     // Revealing a photo keeps filters that are off: they hide nothing.
-    library.filters.collection = Some(999);
+    library.filters.collection = Some(crate::catalog::CollectionId(999));
     library.filter();
     library.show(ids[0]);
     assert_eq!(library.filters.collection, None);
@@ -847,7 +847,7 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
         .collect();
     assert_eq!(trips, [("Alps", 0), ("Japan", 2)]);
 
-    library.select_collection(11);
+    library.select_collection(crate::catalog::CollectionId(11));
     assert_eq!(library.visible.len(), 2);
     assert_eq!(library.source_name(), "Japan");
     assert_eq!(library.source_key(), "collection:11");
@@ -1501,7 +1501,7 @@ fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
     library.step_candidate(1);
     library.step_candidate(-1);
     assert_eq!(library.selected(), Some(ids[2]));
-    library.filters.collection = Some(1);
+    library.filters.collection = Some(crate::catalog::CollectionId(1));
     library.filters.members = [ids[2], ids[3]].into();
     library.filter();
     assert_eq!(library.keep_compared_shown(), Some(ids[2]));

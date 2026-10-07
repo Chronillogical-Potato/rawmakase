@@ -74,7 +74,7 @@ pub(super) enum Kind {
 pub(super) struct Filters {
     /// Folder ids in the chosen folder and its subfolders; None is All Photographs.
     pub folder_scope: Option<HashSet<i64>>,
-    pub collection: Option<i64>,
+    pub collection: Option<crate::catalog::CollectionId>,
     /// The chosen collection's photos.
     pub members: HashSet<i64>,
     pub query: String,
