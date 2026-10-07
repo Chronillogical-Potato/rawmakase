@@ -111,6 +111,12 @@ extern "C-unwind" fn should_terminate(
     }
     match app.windowWithWindowNumber(WINDOW_NUMBER.load(Ordering::Relaxed)) {
         Some(window) => {
+            // The question must be seen: the app may be hidden or behind others,
+            // as when quitting from the Dock or logging out.
+            app.unhide(None);
+            // `activate` needs macOS 14; RAWmakase supports macOS 11.
+            #[allow(deprecated)]
+            app.activateIgnoringOtherApps(true);
             // The close guard asks, restoring a minimized window to show its question.
             window.performClose(None);
             NSApplicationTerminateReply::TerminateCancel
