@@ -25,7 +25,7 @@
 - Handle save failures before navigation or termination becomes irreversible.
   A pending save is not a successful save.
 
-## Tests and code review
+## Tests
 
 - Reproduce bugs with a failing regression test before fixing them. Test
   observable behavior at the relevant boundary, including UI or protocol input
@@ -33,16 +33,33 @@
 - For lifecycle changes, cover relevant failure and transition cases: stale
   completion, deletion/recreation, cancellation, worker loss and save failure.
   Prefer deterministic tests.
-- Review affected callers and error paths, not only the diff. Prioritize data
-  integrity, compatibility and user-visible behavior over structural preferences.
-- Support findings with a location, triggering scenario and consequence.
-  Distinguish confirmed bugs, potential risks, pre-existing issues and design
-  preferences.
 - Run relevant dependency, workspace and rendering checks alongside the required
   CI checks. Report skipped coverage; do not infer correctness or architectural
   isolation from passing tests alone.
+
+## Code review
+
+- Take an adversarial, evidence-driven approach to review: challenge correctness
+  claims and try to falsify important assumptions with concrete scenarios and
+  targeted checks. Do not manufacture findings to appear thorough.
+- Establish the review scope, base revision and intended behavior first. Read
+  `docs/architecture.md`, `docs/code-map.md` and relevant module documentation.
+  For review-only requests, report findings without modifying code.
+- Review affected callers and error paths, not only the diff. Prioritize data
+  integrity, compatibility and user-visible behavior over structural preferences.
+- Verify the architecture and lifecycle invariants above across affected paths,
+  especially saved-edit compatibility, session consistency, job inputs and cache
+  identity, stale results, worker failure and shutdown, and save-before-navigation.
+- Support each actionable finding with severity, an exact file and line,
+  triggering scenario, consequence and evidence or a minimal reproduction.
+  Suggest the smallest coherent correction when supported by the evidence.
+  Distinguish confirmed bugs, potential risks and pre-existing issues; keep
+  design preferences out of the defect list.
 - Judge refactors against their intended outcomes. File moves, new structs and
   new crates do not by themselves establish ownership or encapsulation.
+- Lead review reports with findings ordered by severity, followed by unresolved
+  questions, verification gaps and a brief assessment against the intended
+  outcome. If no actionable defects are found, say so and state coverage limits.
 
 ## Addressing code review comments
 
