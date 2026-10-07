@@ -265,7 +265,7 @@ fn prepare(
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let image = raw.develop(crate::camera_data::Decode::full(demosaic), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
-            && after.upright.mode == crate::develop::UprightMode::Guided
+            && after.upright.mode == crate::model::transform::UprightMode::Guided
         {
             notes.push(issue.message().into());
         }
@@ -811,7 +811,7 @@ mod tests {
         } = catalog()?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let mut recipe = Recipe::default();
-        recipe.upright.mode = crate::develop::UprightMode::Guided;
+        recipe.upright.mode = crate::model::transform::UprightMode::Guided;
         recipe.exposure = 0.3;
         let source = Settings { recipe, metadata };
         // Settings cut off mid-value.

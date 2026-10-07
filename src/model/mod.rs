@@ -5,3 +5,4 @@ pub mod operators;
 pub mod point_color;
 pub mod red_eye;
 pub mod retouch;
+pub mod transform;

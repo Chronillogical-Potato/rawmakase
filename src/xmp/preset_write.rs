@@ -560,7 +560,7 @@ mod tests {
         assert!(text.contains(r#"crs:EnableEffects="False""#), "{text}");
         // Upright travels as its mode only, never this photo's corrections.
         let mut upright = Recipe::default();
-        upright.upright.mode = crate::develop::UprightMode::Level;
+        upright.upright.mode = crate::model::transform::UprightMode::Level;
         upright.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
         let text = preset(&upright, &info, &GroupSelection::all());
         assert!(text.contains("crs:PerspectiveUpright"));

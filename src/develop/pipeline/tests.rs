@@ -621,7 +621,7 @@ fn transform_scales_and_fills_uncovered_area_with_white() {
     assert_eq!(small.pixels[0], [1.; 3]);
     let centre = |x: &Rendered| x.pixels[(4 * x.width + 6) as usize];
     assert!((0..3).all(|c| (centre(&small)[c] - centre(&plain)[c]).abs() < 0.05));
-    r.transform = crate::develop::Transform {
+    r.transform = crate::model::transform::Transform {
         vertical: 0.6,
         horizontal: -0.3,
         rotate: 4.,

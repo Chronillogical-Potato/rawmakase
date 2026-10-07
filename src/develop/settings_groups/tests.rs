@@ -1,10 +1,8 @@
 use super::*;
 use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
-use crate::{
-    develop::{UprightMode, panels::PanelState},
-    model::effects::VignetteStyle,
-};
+use crate::model::transform::UprightMode;
+use crate::{develop::panels::PanelState, model::effects::VignetteStyle};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -523,7 +521,7 @@ fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
 /// Upright Transforms copies a solved correction, guides and all.
 #[test]
 fn guides_stay_with_their_photo_unless_upright_transforms_copies_the_correction() {
-    use crate::develop::UprightGuide;
+    use crate::model::transform::UprightGuide;
     let m = camera("Fujifilm", "X100F");
     let target = Target {
         metadata: &m,

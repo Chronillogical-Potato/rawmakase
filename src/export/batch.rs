@@ -525,7 +525,7 @@ fn render(
     )?);
     // Upright's corrections, as Develop works them out once the photo is open.
     if let Some(issue) = crate::develop::upright::complete(&mut recipe, &image)
-        && recipe.upright.mode == crate::develop::UprightMode::Guided
+        && recipe.upright.mode == crate::model::transform::UprightMode::Guided
     {
         notes.push(issue.message().into());
     }

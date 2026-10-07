@@ -83,8 +83,8 @@ fn develop_settings_round_trip_through_the_exported_xmp() -> Result<()> {
     r.curve.points = vec![[0., 0.1], [0.5, 0.55], [1., 1.]];
     r.curve_saturation = 0.35;
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
-    r.upright = crate::develop::Upright {
-        mode: crate::develop::UprightMode::Level,
+    r.upright = crate::model::transform::Upright {
+        mode: crate::model::transform::UprightMode::Level,
         corrections: vec![
             identity,
             identity,

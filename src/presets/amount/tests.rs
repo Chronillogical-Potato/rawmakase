@@ -67,7 +67,7 @@ fn presets_changing_settings_that_dont_scale_get_no_amount() {
             SettingGroup::TransformAdjustments,
         ),
         (
-            |r| r.upright.mode = crate::develop::UprightMode::Level,
+            |r| r.upright.mode = crate::model::transform::UprightMode::Level,
             SettingGroup::UprightMode,
         ),
         (|r| r.straighten = 2., SettingGroup::Crop),

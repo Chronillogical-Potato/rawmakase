@@ -1325,7 +1325,7 @@ impl Editor {
                 hint_row(ui, "Update the process in Calibration to use Transform.");
             }
             ui.add_enabled_ui(supported, |ui| {
-                use crate::develop::UprightMode;
+                use crate::model::transform::UprightMode;
                 // As Lightroom: Update beside the heading, then the modes in two rows.
                 control_row(ui, "Upright", |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1373,7 +1373,7 @@ impl Editor {
                             guided_action = Some(GuidedAction::Toggle);
                         }
                         ui.label(
-                            egui::RichText::new(format!("{count} of {}", crate::develop::guided::MAX_GUIDES))
+                            egui::RichText::new(format!("{count} of {}", crate::model::transform::MAX_GUIDES))
                                 .color(palette.gray(170)),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

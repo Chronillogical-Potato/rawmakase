@@ -287,7 +287,7 @@ mod tests {
         };
         r.transform.vertical = 0.3;
         r.transform.rotate = 2.;
-        r.upright.mode = crate::develop::UprightMode::Vertical;
+        r.upright.mode = crate::model::transform::UprightMode::Vertical;
         r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
         r.upright.corrections[4] = [1.1, 0.02, -0.05, 0.03, 1.05, -0.02, 0.2, 0.01, 1.];
         let map = ViewMapping::new(&im, &r);
@@ -308,7 +308,7 @@ mod tests {
         let im = image(6);
         let plain = Recipe::default();
         let mut r = plain.clone();
-        r.upright.mode = crate::develop::UprightMode::Auto;
+        r.upright.mode = crate::model::transform::UprightMode::Auto;
         r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
         r.upright.corrections[1] = [1., 0., 0.1, 0., 1., 0., 0., 0., 1.];
         let (a, b) = (Geometry::new(&im, &plain, 0), Geometry::new(&im, &r, 0));

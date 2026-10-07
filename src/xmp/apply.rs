@@ -1116,7 +1116,7 @@ impl Preset {
 
     /// Lightroom's Upright mode and the corrections it stored for every mode.
     fn apply_upright(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
-        use crate::develop::UprightMode;
+        use crate::model::transform::UprightMode;
         let v = settings.values;
         settings.seen.insert("PerspectiveUpright".into());
         let mut lightroom = BTreeMap::new();
@@ -1135,9 +1135,9 @@ impl Preset {
                 let i: usize = i
                     .parse()
                     .ok()
-                    .filter(|&i| i < crate::develop::guided::MAX_GUIDES)
+                    .filter(|&i| i < crate::model::transform::MAX_GUIDES)
                     .with_context(|| format!("Unsupported {key}"))?;
-                let guide = crate::develop::guided::parse_guide(value)
+                let guide = crate::model::transform::parse_guide(value)
                     .with_context(|| format!("Invalid {key}"))?;
                 if guides.len() <= i {
                     guides.resize(i + 1, None);
@@ -1195,7 +1195,7 @@ impl Preset {
             stored || mode != UprightMode::Guided,
             "Guided Upright without Lightroom's stored correction is not supported yet"
         );
-        r.upright = crate::develop::Upright {
+        r.upright = crate::model::transform::Upright {
             mode,
             corrections,
             guides,

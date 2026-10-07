@@ -540,9 +540,9 @@ pub fn transfer(
     let exact = selection.contains(SettingGroup::UprightTransforms);
     if !exact && super::upright::LensInputs::of(&recipe) != super::upright::LensInputs::of(to) {
         // Guided solves again from this photo's guides.
-        let guided = recipe.upright.mode == super::UprightMode::Guided;
+        let guided = recipe.upright.mode == crate::model::transform::UprightMode::Guided;
         recipe.upright.analyse_again();
-        if guided && recipe.upright.mode != super::UprightMode::Guided {
+        if guided && recipe.upright.mode != crate::model::transform::UprightMode::Guided {
             notes.push(
                 "New lens corrections need Guided Upright's guides drawn again; left Off".into(),
             );
@@ -554,11 +554,11 @@ pub fn transfer(
     let upright = &mut recipe.upright;
     if selection.contains(SettingGroup::UprightMode)
         && !exact
-        && upright.mode == super::UprightMode::Guided
+        && upright.mode == crate::model::transform::UprightMode::Guided
         && upright.corrections.len() <= upright.mode.code()
         && upright.guides.is_empty()
     {
-        upright.mode = super::UprightMode::Off;
+        upright.mode = crate::model::transform::UprightMode::Off;
         notes.push("Guided Upright needs guides drawn on this photo; left Off".into());
     }
     Transferred { recipe, notes }

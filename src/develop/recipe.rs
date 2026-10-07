@@ -243,10 +243,13 @@ pub struct Recipe {
     pub constrain_crop: bool,
     /// Transform panel sliders (engine 4).
     #[serde(default)]
-    pub transform: crate::develop::Transform,
+    pub transform: crate::model::transform::Transform,
     /// Lightroom's Upright (engine 4), applied before the Transform sliders.
-    #[serde(default, skip_serializing_if = "crate::develop::Upright::is_default")]
-    pub upright: crate::develop::Upright,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::model::transform::Upright::is_default"
+    )]
+    pub upright: crate::model::transform::Upright,
     pub rotation: u8,
     pub flip_x: bool,
     pub flip_y: bool,

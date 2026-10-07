@@ -1797,7 +1797,7 @@ fn auto_is_off_while_its_settings_stand() {
 }
 #[test]
 fn undoing_an_upright_mode_turns_it_off_once_analysed() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.edit.recipe.clone();
@@ -1827,7 +1827,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
 }
 #[test]
 fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
@@ -1858,7 +1858,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
 }
 #[test]
 fn upright_analysis_yields_to_corrections_applied_meanwhile() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.document.edit.recipe.upright.mode = UprightMode::Level;
@@ -2916,7 +2916,7 @@ fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
 /// correction (docs/transform.md#guided-upright).
 #[test]
 fn guided_upright_gestures_are_one_history_step_each() {
-    use crate::develop::UprightMode;
+    use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.module = Module::Develop;
@@ -3289,7 +3289,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert_eq!(editor.document.edit.recipe.upright.corrections, analysed);
     // A new Upright mode is an edit of its own.
     let frame = editor.begin_edit_frame();
-    editor.document.edit.recipe.upright.mode = crate::develop::UprightMode::Level;
+    editor.document.edit.recipe.upright.mode = crate::model::transform::UprightMode::Level;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0).unwrap();
@@ -4342,16 +4342,16 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     )?;
     // c: nothing. d: Upright Auto, e: Guided, neither analysed.
     let mut auto = base.clone();
-    auto.upright.mode = develop::UprightMode::Auto;
+    auto.upright.mode = crate::model::transform::UprightMode::Auto;
     save(&c, &ids[3], &auto)?;
     let mut guided = base.clone();
-    guided.upright.mode = develop::UprightMode::Guided;
+    guided.upright.mode = crate::model::transform::UprightMode::Guided;
     guided.upright.guides = vec![
-        develop::UprightGuide {
+        crate::model::transform::UprightGuide {
             a: [0.2, 0.1],
             b: [0.25, 0.9],
         },
-        develop::UprightGuide {
+        crate::model::transform::UprightGuide {
             a: [0.8, 0.1],
             b: [0.75, 0.9],
         },

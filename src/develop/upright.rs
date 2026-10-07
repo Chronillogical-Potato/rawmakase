@@ -679,7 +679,7 @@ pub fn analyse(im: &CameraImage, r: &Recipe) -> Vec<[f32; 9]> {
     let rotations = rotations(&found);
     let mut out = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
     for (code, rotation) in rotations.iter().enumerate().skip(1) {
-        let mode = super::UprightMode::from_code(code).unwrap_or_default();
+        let mode = crate::model::transform::UprightMode::from_code(code).unwrap_or_default();
         out[code] = shown.correction(camera_turn(*rotation, f), mode);
     }
     out
@@ -698,7 +698,7 @@ pub fn store(
     let guided = r
         .upright
         .corrections
-        .get(super::UprightMode::Guided.code())
+        .get(crate::model::transform::UprightMode::Guided.code())
         .copied()
         .filter(|_| r.upright.guides.is_empty());
     r.upright.corrections = corrections.to_vec();
@@ -718,8 +718,8 @@ pub fn complete(r: &mut Recipe, im: &CameraImage) -> Option<super::guided::Issue
     if !r.upright.needs_analysis() {
         return None;
     }
-    if r.upright.mode == super::UprightMode::Guided
-        && r.upright.corrections.len() == super::UprightMode::Guided.code()
+    if r.upright.mode == crate::model::transform::UprightMode::Guided
+        && r.upright.corrections.len() == crate::model::transform::UprightMode::Guided.code()
     {
         return super::guided::store(r, &im.metadata);
     }
@@ -782,8 +782,12 @@ impl Displayed {
     /// The stored correction for homography `g` of the displayed photo, framed as
     /// Lightroom frames `mode`: a forward homography in 0–1 coordinates of the recorded
     /// frame, row major, scaled to end in 1.
-    pub(super) fn correction(&self, g: Mat, mode: super::UprightMode) -> [f32; 9] {
-        let level = mode == super::UprightMode::Level;
+    pub(super) fn correction(
+        &self,
+        g: Mat,
+        mode: crate::model::transform::UprightMode,
+    ) -> [f32; 9] {
+        let level = mode == crate::model::transform::UprightMode::Level;
         let g = mat(framing(g, self.width, self.height, level), g);
         let g = mat(self.to_recorded, mat(g, self.from_recorded));
         std::array::from_fn(|i| g[i / 3][i % 3] / g[2][2])
@@ -826,7 +830,7 @@ mod tests {
     /// without guides kept, and Lightroom's analysis details dropped.
     #[test]
     fn completing_upright_stores_what_develops_analysis_does() {
-        use crate::develop::{UprightGuide, UprightMode};
+        use crate::model::transform::{UprightGuide, UprightMode};
         let flat = photo(&[100.; 300 * 200], 300, 200);
         let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
         let imported = [2., 0., 0., 0., 1., 0., 0., 0., 1.];

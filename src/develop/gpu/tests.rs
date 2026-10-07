@@ -544,7 +544,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.straighten = 3.;
             recipe.crop = [0.05, 0.1, 0.95, 0.92];
             recipe.transform.vertical = 0.2;
-            recipe.upright.mode = crate::develop::UprightMode::Level;
+            recipe.upright.mode = crate::model::transform::UprightMode::Level;
             recipe.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
             recipe.upright.corrections[3] = [1.02, 0.01, -0.02, -0.02, 1.02, 0.01, 0.01, 0., 1.];
             recipe.lens_builtin = true;

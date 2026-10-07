@@ -654,7 +654,10 @@ mod tests {
         let applied = upright
             .apply(&Recipe::with_profiles(&m, &profiles), &m, &profiles, None)
             .unwrap();
-        assert_ne!(applied.upright.mode, crate::develop::UprightMode::Off);
+        assert_ne!(
+            applied.upright.mode,
+            crate::model::transform::UprightMode::Off
+        );
         let defaults = DevelopDefaults::with_presets(
             RawDefaults {
                 master: preset_choice("upright"),

@@ -635,7 +635,7 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
         None,
     )?;
     let u = &r.upright;
-    assert_eq!(u.mode, crate::develop::UprightMode::Vertical);
+    assert_eq!(u.mode, crate::model::transform::UprightMode::Vertical);
     assert_eq!(u.corrections.len(), 6);
     assert!((u.corrections[4][6] + 2.019_842_6).abs() < 1e-6);
     assert_eq!(u.lightroom["UprightFocalLength35mm"], "34.9225");
@@ -647,7 +647,7 @@ fn upright_imports_lightroom_stored_corrections() -> Result<()> {
     )?;
     let r = preset.apply(&Recipe::default(), &Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 0.5);
-    assert_eq!(r.upright.mode, crate::develop::UprightMode::Level);
+    assert_eq!(r.upright.mode, crate::model::transform::UprightMode::Level);
     assert!(r.upright.corrections.is_empty());
     // A photo's own settings without Lightroom's correction are reported.
     let sidecar = parse(
@@ -726,10 +726,8 @@ fn manual_distortion_imports_and_needs_the_current_process_version() -> Result<(
 /// through the old lens settings; settings that change nothing rendered keep it.
 #[test]
 fn new_lens_settings_drop_an_upright_analysis_made_through_the_old_ones() -> Result<()> {
-    use crate::develop::{
-        UprightMode,
-        panels::{Panel, PanelState},
-    };
+    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::transform::UprightMode;
     let mut base = Recipe::default();
     base.upright.mode = UprightMode::Level;
     base.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
@@ -940,7 +938,7 @@ fn constrain_crop_imports() -> Result<()> {
 /// opens to be solved on the photo.
 #[test]
 fn guided_upright_guides_round_trip_as_camera_raw_writes_them() -> Result<()> {
-    use crate::develop::{UprightGuide, UprightMode};
+    use crate::model::transform::{UprightGuide, UprightMode};
     let identity = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,1.000000000";
     let guided = "1.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.100000000,1.000000000";
     let attrs = format!(

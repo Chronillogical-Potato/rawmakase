@@ -892,7 +892,8 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
         let mode = r.upright.mode;
         r.upright.clone_from(&current.upright);
         r.upright.mode = mode;
-        if mode == crate::develop::UprightMode::Guided && r.upright.correction().is_none() {
+        if mode == crate::model::transform::UprightMode::Guided && r.upright.correction().is_none()
+        {
             r.upright.mode = current.upright.mode;
         }
     }
@@ -972,7 +973,7 @@ mod tests {
     #[test]
     fn presets_with_new_lens_settings_drop_the_photos_upright_analysis() {
         let mut current = Recipe::default();
-        current.upright.mode = crate::develop::UprightMode::Level;
+        current.upright.mode = crate::model::transform::UprightMode::Level;
         current.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
         let mut same = current.clone();
         same.exposure = 1.;
@@ -982,6 +983,9 @@ mod tests {
         lens.lens_manual_distortion = 0.3;
         this_photos_upright(&mut lens, &current);
         assert!(lens.upright.corrections.is_empty());
-        assert_eq!(lens.upright.mode, crate::develop::UprightMode::Level);
+        assert_eq!(
+            lens.upright.mode,
+            crate::model::transform::UprightMode::Level
+        );
     }
 }

@@ -93,6 +93,7 @@ export -> exif
 export -> export_settings
 export -> jpeg
 export -> metadata
+export -> model
 export -> photo
 export -> raw
 export -> raw_defaults

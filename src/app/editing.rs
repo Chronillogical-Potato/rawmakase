@@ -99,7 +99,8 @@ impl Editor {
         // The Guided tool goes with the mode, however it was left: a reset, an undo, a
         // preset, with the Transform panel open or not.
         if self.view.is(super::state::Tool::Guided)
-            && self.document.edit.recipe.upright.mode != crate::develop::UprightMode::Guided
+            && self.document.edit.recipe.upright.mode
+                != crate::model::transform::UprightMode::Guided
         {
             self.view.tool = super::state::Tool::None;
         }

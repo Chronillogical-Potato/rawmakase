@@ -2,11 +2,11 @@
 //! vertical or horizontal solve to a turn of the camera, framed as Upright frames its
 //! other modes (docs/transform.md#guided-upright).
 use super::upright::{self, Displayed, IDENTITY, Mat, Segment, apply, cross, dot, unit};
-use super::{ImageFrame, Recipe, UprightGuide, UprightMode};
+use super::{ImageFrame, Recipe};
 use crate::camera_data::Metadata;
+use crate::model::transform::MAX_GUIDES;
+use crate::model::transform::{UprightGuide, UprightMode};
 
-/// Lightroom's limit on guides.
-pub const MAX_GUIDES: usize = 4;
 /// Shortest guide that counts, in units of the photo's long edge.
 pub const MIN_LENGTH: f32 = 0.02;
 /// Largest turn of the camera a correction may make, in degrees.
@@ -335,24 +335,6 @@ fn least_turn(nv: [f32; 3], nh: [f32; 3]) -> Mat {
     }
     best = 0.5 * (lo + hi);
     at(best).unwrap_or(IDENTITY)
-}
-
-/// A guide as Camera Raw writes `UprightFourSegments_N`: "x1,y1,x2,y2", 0–1
-/// coordinates separated by commas; None unless it is four finite numbers.
-pub fn parse_guide(value: &str) -> Option<UprightGuide> {
-    let v: Vec<f32> = value
-        .split(',')
-        .map(|x| x.trim().parse::<f32>())
-        .collect::<Result<_, _>>()
-        .ok()?;
-    let [x1, y1, x2, y2]: [f32; 4] = v.try_into().ok()?;
-    [x1, y1, x2, y2]
-        .iter()
-        .all(|x| x.is_finite())
-        .then_some(UprightGuide {
-            a: [x1, y1],
-            b: [x2, y2],
-        })
 }
 
 /// Solves this recipe's guides into its Guided correction (`UprightTransform_5`),
