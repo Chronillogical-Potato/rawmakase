@@ -101,7 +101,7 @@ impl Library {
             return (stand_in, None);
         }
         let stamp = self.edit_stamp(ctx, photo.id);
-        let (catalog, defaults) = (&self.catalog, &self.defaults);
+        let (catalog, defaults) = (&self.session.catalog, &self.defaults);
         let edit = || {
             super::edit_source(catalog, photo.id)
                 .or_else(|| Some(EditSource::Defaults(defaults.clone())))
@@ -121,7 +121,7 @@ impl Library {
         match stamps.get(&id) {
             Some((stamp, read)) if now - read < STAMP_AGE => *stamp,
             _ => {
-                let stamp = self.catalog.edit_stamp(id).unwrap_or_default();
+                let stamp = self.session.catalog.edit_stamp(id).unwrap_or_default();
                 stamps.retain(|_, (_, read)| now - *read < STAMP_AGE);
                 stamps.insert(id, (stamp, now));
                 stamp

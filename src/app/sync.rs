@@ -467,7 +467,7 @@ impl Editor {
         let (Some(source), Some(library)) = (self.current_settings(), &self.library) else {
             return;
         };
-        let catalog = library.catalog.path.clone();
+        let catalog = library.session.catalog.path.clone();
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
         let defaults = self.raw_defaults.clone();
         let demosaic = self.demosaic;
@@ -512,7 +512,7 @@ impl Editor {
                 .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
         }
         // A result for a catalog no longer open must not reach this one's undo log.
-        if self.library.as_ref().map(|l| &l.catalog.path) != Some(&result.catalog) {
+        if self.library.as_ref().map(|l| &l.session.catalog.path) != Some(&result.catalog) {
             return;
         }
         let done = result.synced.len();

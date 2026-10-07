@@ -136,6 +136,7 @@ impl Editor {
         ) {
             let history = self.document.edit.history.saved(&self.document.edit.recipe);
             let saved = l
+                .session
                 .catalog
                 .save_edit(
                     id,
@@ -144,7 +145,7 @@ impl Editor {
                     &self.document.export,
                     history.update(),
                 )
-                .map(|()| l.catalog.path.clone());
+                .map(|()| l.session.catalog.path.clone());
             match saved {
                 Ok(p) => {
                     self.saved_to(&p);
@@ -179,7 +180,7 @@ impl Editor {
             return;
         };
         let job = super::autosave::Job {
-            catalog: l.catalog.path.clone(),
+            catalog: l.session.catalog.path.clone(),
             photo,
             raw,
             recipe: self.document.edit.recipe.clone(),

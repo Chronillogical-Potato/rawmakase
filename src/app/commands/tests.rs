@@ -256,7 +256,7 @@ fn refused_open_does_not_claim_another_photo_opened() -> anyhow::Result<()> {
         &db,
         ctx.clone(),
     )?));
-    let id = e.library.as_ref().unwrap().photos[0].id;
+    let id = e.library.as_ref().unwrap().session.photos[0].id;
     std::fs::remove_file(missing)?;
     e.document.catalog_photo = Some(PhotoId(999));
     let error = e
@@ -356,7 +356,7 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
         &db,
         ctx.clone(),
     )?));
-    let id = e.library.as_ref().unwrap().photos[0].id;
+    let id = e.library.as_ref().unwrap().session.photos[0].id;
     e.document.catalog_photo = Some(id);
     e.document.path = Some(source.clone());
     set(&mut e, &ctx, 1.25).unwrap();
@@ -369,6 +369,7 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
         e.library
             .as_ref()
             .unwrap()
+            .session
             .catalog
             .load_edit(id, &source)?
             .unwrap()
@@ -629,8 +630,8 @@ fn library_metadata_requires_stable_id_despite_selection_changes() -> anyhow::Re
     )?));
     e.module = Module::Library;
     let library = e.library.as_mut().unwrap();
-    let first = library.photos[0].id;
-    let second = library.photos[1].id;
+    let first = library.session.photos[0].id;
+    let second = library.session.photos[1].id;
     library.make_active(first);
     let state = e.command_state();
     e.library.as_mut().unwrap().make_active(second);

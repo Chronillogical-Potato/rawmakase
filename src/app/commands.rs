@@ -503,6 +503,7 @@ impl Editor {
                     .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
                 let query = query.to_lowercase();
                 let all: Vec<_> = library
+                    .session
                     .photos
                     .iter()
                     .filter(|p| query.is_empty() || p.filename.to_lowercase().contains(&query))
@@ -990,7 +991,7 @@ impl Editor {
             .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
         let id = match target {
             PhotoTarget::Id(id) => id,
-            PhotoTarget::Name(name) => match find_photos(&library.photos, &name)[..] {
+            PhotoTarget::Name(name) => match find_photos(&library.session.photos, &name)[..] {
                 [] => return Err(Error::new("not_found", "No photo matches this name")),
                 [photo] => photo.id,
                 ref many => {
