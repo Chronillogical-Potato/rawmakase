@@ -122,10 +122,10 @@ impl Editor {
         // A slider or histogram drag still held when the photo is left (Left or Right
         // with the button down) is saved as a step of its own; History records it
         // once the save succeeds.
-        if self.document.edit.history.in_gesture() {
-            self.document.edit.save.mark_changed();
+        if self.document.edit.history().in_gesture() {
+            self.document.edit.save_state_mut().mark_changed();
         }
-        if !self.document.edit.save.needs_save() {
+        if !self.document.edit.save_state().needs_save() {
             self.finish_gesture();
             return true;
         }
@@ -134,14 +134,18 @@ impl Editor {
             &self.library,
             self.document.catalog_photo,
         ) {
-            let history = self.document.edit.history.saved(&self.document.edit.recipe);
+            let history = self
+                .document
+                .edit
+                .history()
+                .saved(self.document.edit.recipe());
             let saved = l
                 .session
                 .catalog
                 .save_edit(
                     id,
                     path,
-                    &self.document.edit.recipe,
+                    self.document.edit.recipe(),
                     &self.document.export,
                     history.update(),
                 )
@@ -149,10 +153,10 @@ impl Editor {
             match saved {
                 Ok(p) => {
                     self.saved_to(&p);
-                    self.document.edit.save.saved();
+                    self.document.edit.save_state_mut().saved();
                 }
                 Err(e) => {
-                    self.document.edit.save.failed(e.to_string());
+                    self.document.edit.save_state_mut().failed(e.to_string());
                     self.status = format!("Edits not saved: {e}");
                     return false;
                 }
@@ -167,8 +171,8 @@ impl Editor {
         if let Some(completion) = self.autosave.poll() {
             self.background_saved(completion);
         }
-        if !self.document.edit.save.ready()
-            || self.document.edit.history.in_gesture()
+        if !self.document.edit.save_state().ready()
+            || self.document.edit.history().in_gesture()
             || self.autosave.busy()
         {
             return;
@@ -183,12 +187,16 @@ impl Editor {
             catalog: l.session.catalog.path.clone(),
             photo,
             raw,
-            recipe: self.document.edit.recipe.clone(),
+            recipe: self.document.edit.recipe().clone(),
             export: self.document.export.clone(),
-            history: self.document.edit.history.saved(&self.document.edit.recipe),
+            history: self
+                .document
+                .edit
+                .history()
+                .saved(self.document.edit.recipe()),
         };
         match self.autosave.submit(job, ctx) {
-            Ok(()) => self.document.edit.save.saving(),
+            Ok(()) => self.document.edit.save_state_mut().saving(),
             // No saver thread: save here, as before.
             Err(_) => {
                 self.flush();
@@ -198,7 +206,7 @@ impl Editor {
     fn background_saved(&mut self, completion: super::autosave::Completion) {
         let saved = completion.into_result();
         let result = saved.as_ref().map(|_| ()).map_err(Clone::clone);
-        if !self.document.edit.save.finished(result) {
+        if !self.document.edit.save_state_mut().finished(result) {
             return;
         }
         match saved {
@@ -219,7 +227,7 @@ impl Editor {
             self.presets
                 .preview
                 .as_ref()
-                .unwrap_or(&self.document.edit.recipe)
+                .unwrap_or(self.document.edit.recipe())
                 .clone()
         };
         if self.view.is(super::state::Tool::Crop) {
@@ -244,7 +252,7 @@ impl Editor {
             && !self.view.picks_color()
             && !self.view.compare.before_only();
         pc.selected
-            .filter(|i| shown && *i < self.document.edit.recipe.point_colors.len())
+            .filter(|i| shown && *i < self.document.edit.recipe().point_colors.len())
     }
     /// What the active tool draws into the rendered preview.
     pub(super) fn overlay(&self) -> super::worker::Overlay {
@@ -254,7 +262,7 @@ impl Editor {
                 Overlay::Spots(self.view.retouch.threshold)
             }
             Tool::Mask if self.view.masking.overlay => match self.view.masking.selected {
-                Some(index) if index < self.document.edit.recipe.masks.len() => Overlay::Mask {
+                Some(index) if index < self.document.edit.recipe().masks.len() => Overlay::Mask {
                     index,
                     color: [230, 40, 40],
                     opacity: 0.5,
