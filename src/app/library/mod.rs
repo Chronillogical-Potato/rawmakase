@@ -233,8 +233,9 @@ impl Library {
         self.screen.retry_failed();
         self.filter();
     }
-    /// Reads the catalog again without checking which files are online,
-    /// for changes that add or remove no file, such as virtual copies.
+    /// Reads the catalog again without checking which files are online, for
+    /// tests.
+    #[cfg(test)]
     fn reload(&mut self) -> Result<()> {
         self.session.reload()?;
         self.reloaded();
@@ -510,8 +511,8 @@ impl Library {
     }
     /// Creates a virtual copy of `id` and selects it.
     pub(super) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
-        let copy = self.session.catalog.create_virtual_copy(id)?;
-        self.reload()?;
+        let copy = self.session.create_virtual_copy(id)?;
+        self.reloaded();
         self.show(copy);
         if let Some(p) = self.photo(copy) {
             self.message = format!("Created {} of {}", p.copy_name, p.filename);
@@ -519,8 +520,8 @@ impl Library {
         Ok(copy)
     }
     pub(super) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
-        self.session.catalog.set_copy_as_master(id)?;
-        self.reload()?;
+        self.session.set_copy_as_master(id)?;
+        self.reloaded();
         self.show(id);
         if let Some(p) = self.photo(id) {
             self.message = format!("This copy is now the master of {}", p.filename);
@@ -530,10 +531,12 @@ impl Library {
     /// Removes virtual copy `id`; returns its master, which is selected.
     pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<Option<PhotoId>> {
         let photo = self.photo(id).cloned();
-        self.session.catalog.remove_virtual_copy(id)?;
+        // Forgotten first: once the copy is removed its id can be reused, so its
+        // previews must go even if reading the catalog again fails.
         self.cache.forget(id);
         self.screen.forget(id);
-        self.reload()?;
+        self.session.remove_virtual_copy(id)?;
+        self.reloaded();
         let master = photo.as_ref().and_then(|p| p.master);
         if let Some(master) = master {
             self.show(master);

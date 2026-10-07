@@ -65,9 +65,11 @@ impl Library {
             self.start_capture_times();
         }
     }
-    /// Re-sorts after capture times were filled in, as the catalog orders
-    /// photos, keeping the selected photo selected and where it was on screen.
-    fn resort_by_capture_time(&mut self) {
+    /// Re-sorts after capture times were filled in or read again, as the
+    /// catalog orders photos, keeping the selected photo selected and where it
+    /// was on screen.
+    pub(super) fn resort_by_capture_time(&mut self) {
+        self.sort_keys = None;
         self.resort_in_place(|library| {
             library.session.photos.sort_by(|a, b| {
                 (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
