@@ -12,7 +12,8 @@ set -euo pipefail
 forbidden='^(rawmakase|wgpu.*|naga|egui.*|eframe|epaint|winit|lcms2.*|libraw.*|fastframe-fonts) '
 status=0
 for crate in rawmakase-model rawmakase-interop rawmakase-catalog rawmakase-protocol; do
-    found=$(cargo tree --locked -p "$crate" --all-features -e normal,build \
+    # Every platform's dependencies, not only this machine's.
+    found=$(cargo tree --locked -p "$crate" --all-features --target all -e normal,build \
         --prefix none --format '{p}' | sort -u | grep -E "$forbidden" || true)
     if [ -n "$found" ]; then
         echo "$crate must not depend on:" >&2
