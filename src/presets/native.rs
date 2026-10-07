@@ -89,7 +89,7 @@ mod tests {
         // The photo's spots keep the feather they were made with.
         let mut preset = Recipe {
             exposure: 0.5,
-            retouch_model: crate::develop::retouch::RetouchModel::Measured,
+            retouch_model: crate::model::operators::RetouchModel::Measured,
             ..Default::default()
         };
         preset.panels.set(Panel::RedEye, PanelState::Off);

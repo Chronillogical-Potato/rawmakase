@@ -257,7 +257,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.midtone = 1.2;
     recipes.push(r.clone());
     // The measured parametric curve, with moved splits, from here on.
-    r.parametric_model = crate::develop::parametric::ParametricModel::Measured;
+    r.parametric_model = crate::model::operators::ParametricModel::Measured;
     r.effects.parametric = [0.3, 0.2, -0.3, -0.2];
     r.effects.splits = [0.2, 0.45, 0.8];
     r.shadows = 0.5;
@@ -274,21 +274,21 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     recipes.push(r.clone());
     // Measured grading curves, at Blending and Balance the original tables don't cover.
     let mut measured = r.clone();
-    measured.grading_model = crate::develop::color_grade::GradingModel::Measured;
+    measured.grading_model = crate::model::operators::GradingModel::Measured;
     measured.grading[2] = [0.1, 0.5, 0.2];
     measured.effects.blending = 0.8;
     measured.effects.balance = -0.3;
     recipes.push(measured.clone());
     // Out-of-gamut colors clipped per channel.
-    measured.gamut_model = crate::develop::GamutModel::Clip;
+    measured.gamut_model = crate::model::operators::GamutModel::Clip;
     measured.saturation = 0.8;
     recipes.push(measured.clone());
     // Calibration measured on Camera Raw, between its measured slider positions.
-    measured.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
+    measured.calibration_model = crate::model::operators::CalibrationModel::Measured;
     measured.effects.calibration = [[0.3, -0.75], [-0.4, 0.5], [0.9, 0.1]];
     recipes.push(measured.clone());
     // Saturation fading to gray below −50, with and without band sliders.
-    measured.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+    measured.saturation_model = crate::model::operators::SaturationModel::Gray;
     measured.saturation = -0.7;
     recipes.push(measured.clone());
     measured.hsl = [[0.; 3]; 8];
@@ -298,7 +298,7 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     // Black & white from the chart tables, with a mix between measured positions.
     let mut mono = r.clone();
     mono.effects.monochrome = true;
-    mono.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+    mono.black_white_model = crate::model::operators::BlackWhiteModel::Chart;
     mono.effects.gray_mix = [0.3, -0.7, 0.1, 0., -0.2, 0.9, 0., -1.];
     recipes.push(mono);
     // Point Color: overlapping swatches, one across red, with Variance and Range.
@@ -506,7 +506,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         highlights: true,
         ..none
     };
-    use crate::develop::effects::LensVignetteModel::{Measured, Original};
+    use crate::model::operators::LensVignetteModel::{Measured, Original};
     for (spatial, clipping, ca, (style, vignette), lens_vignette) in [
         (false, shadows, 0, (HighlightPriority, 0.), Original),
         (true, none, 0, (HighlightPriority, -0.3), Original),
@@ -525,11 +525,11 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.effects.grain = 0.4;
             // The measured grain on Color Priority cases, the original on the others.
             if style == ColorPriority {
-                recipe.grain_model = crate::develop::effects::GrainModel::Measured;
+                recipe.grain_model = crate::model::operators::GrainModel::Measured;
             }
             // The measured Clarity, in the map, on Paint Overlay cases.
             if style == PaintOverlay {
-                recipe.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+                recipe.clarity_model = crate::model::operators::ClarityModel::Measured;
             }
             recipe.effects.vignette = vignette;
             recipe.effects.vignette_style = style;
@@ -844,12 +844,12 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     r.whites = 0.3;
     for (model, whites) in [
         (
-            crate::develop::basic_tone::ContrastModel::Original,
-            crate::develop::basic_tone::WhitesModel::Original,
+            crate::model::operators::ContrastModel::Original,
+            crate::model::operators::WhitesModel::Original,
         ),
         (
-            crate::develop::basic_tone::ContrastModel::Adaptive,
-            crate::develop::basic_tone::WhitesModel::Adaptive,
+            crate::model::operators::ContrastModel::Adaptive,
+            crate::model::operators::WhitesModel::Adaptive,
         ),
     ] {
         r.contrast_model = model;

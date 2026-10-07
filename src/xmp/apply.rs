@@ -415,16 +415,16 @@ impl Preset {
         // Lightroom's Saturation means Camera Raw's fade to gray, also on a recipe saved
         // before; RAWmakase's own packet names it when a recipe kept the tables.
         if settings.values.contains_key("Saturation") {
-            r.saturation_model = crate::develop::color_mixer::SaturationModel::Gray;
+            r.saturation_model = crate::model::operators::SaturationModel::Gray;
         }
         if settings.keeps_original(super::write::ORIGINAL_SATURATION) {
-            r.saturation_model = crate::develop::color_mixer::SaturationModel::Original;
+            r.saturation_model = crate::model::operators::SaturationModel::Original;
         }
         if settings.values.contains_key("Vibrance") {
-            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Chart;
+            r.vibrance_model = crate::model::operators::VibranceModel::Chart;
         }
         if settings.keeps_original(super::write::ORIGINAL_VIBRANCE) {
-            r.vibrance_model = crate::develop::color_mixer::VibranceModel::Original;
+            r.vibrance_model = crate::model::operators::VibranceModel::Original;
         }
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
@@ -446,11 +446,11 @@ impl Preset {
         .iter()
         .any(|k| settings.values.contains_key(*k))
         {
-            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Measured;
+            r.sharpening_model = crate::model::operators::SharpeningModel::Measured;
         }
         // RAWmakase's own packet for a recipe that kept the original operator.
         if settings.keeps_original(super::write::ORIGINAL_SHARPENING) {
-            r.sharpening_model = crate::develop::sharpening::SharpeningModel::Original;
+            r.sharpening_model = crate::model::operators::SharpeningModel::Original;
         }
         settings.assign("LuminanceSmoothing", &mut r.noise_luma, 0.01, 0., 1.)?;
         settings.assign("ColorNoiseReduction", &mut r.noise_chroma, 0.01, 0., 1.)?;
@@ -463,10 +463,10 @@ impl Preset {
         .iter()
         .any(|k| settings.values.contains_key(*k))
         {
-            r.noise_model = crate::develop::color_noise::NoiseModel::Measured;
+            r.noise_model = crate::model::operators::NoiseModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_COLOR_NOISE) {
-            r.noise_model = crate::develop::color_noise::NoiseModel::Original;
+            r.noise_model = crate::model::operators::NoiseModel::Original;
         }
         Ok(())
     }
@@ -594,19 +594,19 @@ impl Preset {
             .iter()
             .any(|band| v.contains_key(&format!("GrayMixer{band}")))
         {
-            r.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+            r.black_white_model = crate::model::operators::BlackWhiteModel::Chart;
         }
         if settings.keeps_original(super::write::ORIGINAL_BLACK_WHITE) {
-            r.black_white_model = crate::develop::black_white::BlackWhiteModel::Original;
+            r.black_white_model = crate::model::operators::BlackWhiteModel::Original;
         }
         let mixer_keys = bands.iter().flat_map(|band| {
             ["Hue", "Saturation", "Luminance"].map(|control| format!("{control}Adjustment{band}"))
         });
         if mixer_keys.into_iter().any(|key| v.contains_key(&key)) {
-            r.mixer_model = crate::develop::color_mixer::MixerModel::Chart;
+            r.mixer_model = crate::model::operators::MixerModel::Chart;
         }
         if settings.keeps_original(super::write::ORIGINAL_COLOR_MIXER) {
-            r.mixer_model = crate::develop::color_mixer::MixerModel::Original;
+            r.mixer_model = crate::model::operators::MixerModel::Original;
         }
         let primaries = [
             "RedHue",
@@ -617,10 +617,10 @@ impl Preset {
             "BlueSaturation",
         ];
         if primaries.iter().any(|key| v.contains_key(*key)) {
-            r.calibration_model = crate::develop::calibration::CalibrationModel::Measured;
+            r.calibration_model = crate::model::operators::CalibrationModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_CALIBRATION) {
-            r.calibration_model = crate::develop::calibration::CalibrationModel::Original;
+            r.calibration_model = crate::model::operators::CalibrationModel::Original;
         }
         if [
             "RedHue",
@@ -710,7 +710,7 @@ impl Preset {
         if self.leaves_auto_gray_mix(r)? {
             // Lightroom's Auto mix means Camera Raw's measured gray, as its values do.
             if !settings.keeps_original(super::write::ORIGINAL_BLACK_WHITE) {
-                r.black_white_model = crate::develop::black_white::BlackWhiteModel::Chart;
+                r.black_white_model = crate::model::operators::BlackWhiteModel::Chart;
             }
         }
         if self.leaves_auto_gray_mix(r)?
@@ -802,18 +802,18 @@ impl Preset {
         settings.assign("Clarity2012", &mut r.effects.clarity, 0.01, -1., 1.)?;
         // Lightroom's Clarity means the measured operator, also on a recipe saved before.
         if settings.values.contains_key("Clarity2012") {
-            r.clarity_model = crate::develop::clarity::ClarityModel::Measured;
+            r.clarity_model = crate::model::operators::ClarityModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_CLARITY) {
-            r.clarity_model = crate::develop::clarity::ClarityModel::Original;
+            r.clarity_model = crate::model::operators::ClarityModel::Original;
         }
         settings.assign("Texture", &mut r.effects.texture, 0.01, -1., 1.)?;
         // Lightroom's Texture means the measured operator, also on a recipe saved before.
         if settings.values.contains_key("Texture") {
-            r.texture_model = crate::develop::texture::TextureModel::Measured;
+            r.texture_model = crate::model::operators::TextureModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_TEXTURE) {
-            r.texture_model = crate::develop::texture::TextureModel::Original;
+            r.texture_model = crate::model::operators::TextureModel::Original;
         }
         settings.assign("Dehaze", &mut r.effects.dehaze, 0.01, -1., 1.)?;
         settings.assign("GrainAmount", &mut r.effects.grain, 0.01, 0., 1.)?;
@@ -830,10 +830,10 @@ impl Preset {
             .iter()
             .any(|k| settings.values.contains_key(*k))
         {
-            r.grain_model = crate::develop::effects::GrainModel::Measured;
+            r.grain_model = crate::model::operators::GrainModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_GRAIN) {
-            r.grain_model = crate::develop::effects::GrainModel::Original;
+            r.grain_model = crate::model::operators::GrainModel::Original;
         }
         settings.seen.insert("GrainSeed".into());
         if let Some(seed) = v.get("GrainSeed") {
@@ -901,10 +901,10 @@ impl Preset {
             .iter()
             .any(|k| settings.values.contains_key(*k))
         {
-            r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+            r.lens_vignette_model = crate::model::operators::LensVignetteModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_LENS_VIGNETTE) {
-            r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Original;
+            r.lens_vignette_model = crate::model::operators::LensVignetteModel::Original;
         }
         for (i, name) in ["Purple", "Green"].iter().enumerate() {
             settings.assign(
@@ -1213,7 +1213,7 @@ impl Preset {
         let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
         if let Some(retouch) = edits.retouch {
             // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
-            r.retouch_model = crate::develop::retouch::RetouchModel::Measured;
+            r.retouch_model = crate::model::operators::RetouchModel::Measured;
             r.retouch = retouch;
         }
         if let Some(red_eye) = edits.red_eye {

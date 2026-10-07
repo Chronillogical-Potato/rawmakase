@@ -14,23 +14,7 @@
 //! the 21 measured settings. Camera Raw's slightly negative pixel-to-pixel correlation
 //! at small sizes (its grain is a little "blue") is not modelled.
 use super::Effects;
-use serde::{Deserialize, Serialize};
-
-/// Which operator renders a recipe's grain.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GrainModel {
-    /// RAWmakase's first grain: what recipes saved before the measured model keep, so
-    /// they render as they did.
-    #[default]
-    Original,
-    /// The grain measured in Camera Raw.
-    Measured,
-}
-impl GrainModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
+use crate::model::operators::GrainModel;
 
 /// The long edge, in pixels, at which grain sizes below are given.
 const REFERENCE_EDGE: f32 = 6000.;

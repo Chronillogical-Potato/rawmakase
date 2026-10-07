@@ -5,10 +5,11 @@
 use super::{Processor, develop::Input, uniforms::PresentParams};
 use crate::develop::{
     ClipOverlay, Histogram, Recipe,
-    effects::{GrainField, GrainModel, PostCropVignette},
+    effects::{GrainField, PostCropVignette},
     pipeline::pixel_params::PixelParams,
     quality,
 };
+use crate::model::operators::GrainModel;
 use anyhow::{Context, Result, ensure};
 use std::{
     path::Path,

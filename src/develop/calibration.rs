@@ -6,23 +6,7 @@
 //! −100, −50, +50 and +100 of each primary slider, fitted through RAWmakase's own
 //! pipeline on a dense synthetic chart and interpolated between those positions
 //! (docs/rendering-quality.md#camera-calibration).
-use serde::{Deserialize, Serialize};
-
-/// Which fit renders Camera Calibration's primary Hue and Saturation sliders.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CalibrationModel {
-    /// Coefficients from isolated Adobe Standard/X100F controls, scaled linearly:
-    /// what recipes saved before the measured fit keep, so they render as they did.
-    #[default]
-    Original,
-    /// Camera Raw 18.7's change at four slider positions, interpolated.
-    Measured,
-}
-impl CalibrationModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
+use crate::model::operators::CalibrationModel;
 
 /// A neutral-preserving change to the calibration matrix: row `r` gains
 /// `a[r]`, `−(a[r] + b[r])` and `b[r]` in its three columns.

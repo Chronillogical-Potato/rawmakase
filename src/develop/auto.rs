@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn auto_measures_with_the_default_sharpening_operator() {
         let mut r = Recipe::default();
-        r.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        r.set_sharpening_defaults(crate::model::operators::SharpeningModel::Measured);
         r.sharpening_detail = 0.9;
         assert_eq!(auto_tone_basis(&r), auto_tone_basis(&Recipe::default()));
     }

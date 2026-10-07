@@ -543,7 +543,7 @@ fn lightroom_spots_and_masks_convert_to_image_space() -> Result<()> {
     // Lightroom's spots render with Camera Raw's feather.
     assert_eq!(
         r.retouch_model,
-        crate::develop::retouch::RetouchModel::Measured
+        crate::model::operators::RetouchModel::Measured
     );
     let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
     let spot = &r.retouch[0];
@@ -1319,10 +1319,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
 /// operators it could not have rendered with; Lightroom's values select them.
 #[test]
 fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<()> {
-    use crate::develop::{
-        calibration::CalibrationModel,
-        color_mixer::{MixerModel, SaturationModel},
-    };
+    use crate::model::operators::{CalibrationModel, MixerModel, SaturationModel};
     let m = Metadata::default();
     let fresh = Recipe::with_profiles(&m, &[]);
     let settings = r#"c:Saturation="-80" c:RedHue="20" c:HueAdjustmentBlue="30""#;
@@ -1350,7 +1347,7 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
     assert_eq!(named.saturation_model, SaturationModel::Original);
     assert_eq!(
         named.sharpening_model,
-        crate::develop::sharpening::SharpeningModel::Original
+        crate::model::operators::SharpeningModel::Original
     );
     // A packet with the current marker says it itself.
     let attrs = format!(
@@ -1398,7 +1395,7 @@ fn packets_from_earlier_rawmakase_keep_the_operators_measured_since() -> Result<
 /// earlier Vibrance; format 3 names it when kept.
 #[test]
 fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
-    use crate::develop::color_mixer::{SaturationModel, VibranceModel};
+    use crate::model::operators::{SaturationModel, VibranceModel};
     let m = Metadata::default();
     let fresh = Recipe::with_profiles(&m, &[]);
     let apply = |markers: &str| {
@@ -1411,20 +1408,20 @@ fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
     assert_eq!(two.vibrance_model, VibranceModel::Original);
     assert_eq!(
         two.black_white_model,
-        crate::develop::black_white::BlackWhiteModel::Original
+        crate::model::operators::BlackWhiteModel::Original
     );
     assert_eq!(two.saturation_model, SaturationModel::Gray);
     let three = apply("3")?;
     assert_eq!(three.vibrance_model, VibranceModel::Chart);
     assert_eq!(
         three.black_white_model,
-        crate::develop::black_white::BlackWhiteModel::Chart
+        crate::model::operators::BlackWhiteModel::Chart
     );
     Ok(())
 }
 #[test]
 fn lightroom_auto_black_white_takes_the_measured_gray() -> Result<()> {
-    use crate::develop::black_white::BlackWhiteModel;
+    use crate::model::operators::BlackWhiteModel;
     // Recipe::default() stands for a recipe saved before the measured gray.
     let r = parse(
         Path::new("p.xmp"),
@@ -1439,7 +1436,7 @@ fn lightroom_auto_black_white_takes_the_measured_gray() -> Result<()> {
 }
 #[test]
 fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
-    use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+    use crate::model::operators::{CalibrationModel, MixerModel};
     // Recipe::default() stands for a recipe saved before the measured operators.
     let apply = |attrs: &str| {
         parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(
@@ -1452,7 +1449,7 @@ fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
     let r = apply(r#"c:LuminanceAdjustmentBlue="-40" c:RedHue="20" c:Saturation="-30""#)?;
     assert_eq!(
         r.saturation_model,
-        crate::develop::color_mixer::SaturationModel::Gray
+        crate::model::operators::SaturationModel::Gray
     );
     assert_eq!(r.mixer_model, MixerModel::Chart);
     assert_eq!(r.calibration_model, CalibrationModel::Measured);
@@ -1469,7 +1466,7 @@ fn lightroom_mixer_and_calibration_take_the_measured_operators() -> Result<()> {
 }
 #[test]
 fn lightroom_manual_vignetting_takes_the_measured_operator() -> Result<()> {
-    use crate::develop::effects::LensVignetteModel;
+    use crate::model::operators::LensVignetteModel;
     // Recipe::default() stands for a recipe saved before the measured operator.
     let apply = |attrs: &str| {
         parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(

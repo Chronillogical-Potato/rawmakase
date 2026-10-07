@@ -383,7 +383,7 @@ mod tests {
     /// same way where it's applied; without the Sharpening group it says nothing of it.
     #[test]
     fn presets_carry_the_original_sharpening_of_their_photo() -> anyhow::Result<()> {
-        use crate::develop::sharpening::SharpeningModel;
+        use crate::model::operators::SharpeningModel;
         let info = PresetInfo::new("Crisp", "User Presets");
         let source = Recipe {
             sharpening: 0.5,
@@ -411,7 +411,7 @@ mod tests {
     }
     #[test]
     fn process_version_presets_carry_the_original_mixer_and_calibration() -> anyhow::Result<()> {
-        use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
+        use crate::model::operators::{CalibrationModel, MixerModel};
         let info = PresetInfo::new("Old process", "User Presets");
         let source = Recipe::default();
         let m = crate::camera_data::Metadata {
@@ -433,7 +433,7 @@ mod tests {
     }
     #[test]
     fn saturation_presets_carry_the_photos_saturation_operator() -> anyhow::Result<()> {
-        use crate::develop::color_mixer::SaturationModel;
+        use crate::model::operators::SaturationModel;
         let info = PresetInfo::new("Muted", "User Presets");
         let source = Recipe {
             saturation: -0.8,
