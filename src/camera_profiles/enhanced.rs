@@ -215,7 +215,7 @@ impl Enhanced {
             curve: Box::new(CurveLut::from_fn(|i| {
                 let y = curve.values()[i];
                 if amount > 1. {
-                    y + (curve.evaluate(y) - y) * (amount - 1.)
+                    y + (curve.evaluate_as_look(y) - y) * (amount - 1.)
                 } else {
                     let x = i as f32 / 4096.;
                     x + (y - x) * amount
@@ -240,7 +240,7 @@ impl Enhanced {
     }
     pub(super) fn apply_curve(&self, rgb: [f32; 3]) -> [f32; 3] {
         let p = rgb.map(|v| srgb_encode(v.clamp(0., 1.)));
-        let eval = |v: f32| self.curve.evaluate(v);
+        let eval = |v: f32| self.curve.evaluate_as_look(v);
         let lo = p.into_iter().fold(f32::INFINITY, f32::min);
         let hi = p.into_iter().fold(0., f32::max);
         let a = eval(lo);

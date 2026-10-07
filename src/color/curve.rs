@@ -251,6 +251,15 @@ impl CurveLut {
         let t = p - i as f32;
         self.0[i] * (1. - t) + self.0[i + 1] * t
     }
+    /// The same interpolation written as a step from the lower sample, as camera
+    /// profile looks have always evaluated their curve. It can round differently
+    /// from [`evaluate`](Self::evaluate) in the last bit, and saved edits must keep
+    /// rendering exactly as they did.
+    pub fn evaluate_as_look(&self, x: f32) -> f32 {
+        let p = x.clamp(0., 1.) * 4096.;
+        let i = (p as usize).min(4095);
+        self.0[i] + (self.0[i + 1] - self.0[i]) * (p - i as f32)
+    }
 }
 
 impl Serialize for CurveLut {
