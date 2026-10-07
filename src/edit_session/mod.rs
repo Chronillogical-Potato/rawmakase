@@ -102,7 +102,7 @@ impl EditSession {
         self.history.finish_gesture(&self.recipe);
     }
     /// The History read back from `saved`, for the current settings.
-    pub fn restore_history(&mut self, saved: crate::catalog::SavedHistory) {
+    pub fn restore_history(&mut self, saved: crate::model::saved_history::SavedHistory) {
         self.history = History::restored(saved, &self.recipe);
     }
     /// Returns the settings to `target`, the state History has at `at`, as the step

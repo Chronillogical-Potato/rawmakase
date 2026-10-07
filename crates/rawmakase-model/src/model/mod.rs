@@ -11,6 +11,7 @@ pub mod recipe;
 pub mod red_eye;
 pub mod retouch;
 pub mod saved_format;
+pub mod saved_history;
 pub mod settings_groups;
 pub mod transform;
 pub mod valid;

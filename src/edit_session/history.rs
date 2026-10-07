@@ -1,7 +1,7 @@
 //! Bounded edit history; a pointer gesture is a single transaction. Each step
 //! is named, like Lightroom's History panel ("Exposure +0.50").
-use crate::catalog::{SavedHistory, SavedStep};
 use crate::model::recipe::Recipe;
+use crate::model::saved_history::{SavedHistory, SavedStep};
 use std::collections::VecDeque;
 
 const LIMIT: usize = 100;
