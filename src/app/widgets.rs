@@ -1815,7 +1815,7 @@ mod slider_tests {
                 |ui| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
                         });
                 },
@@ -1866,7 +1866,7 @@ mod slider_tests {
                 |ui| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
                         });
                 },
