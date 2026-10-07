@@ -908,6 +908,10 @@ pub(super) struct SliderStyle {
     pub drag_step: Option<f32>,
     /// A hue wheel of 0–360° as the rail.
     pub hue_rail: bool,
+    /// What a typed value may be, `(low, high)`, when wider than the rail: a
+    /// descriptor's valid range, as Exposure's ±8 EV beside its ±5 rail. `None`
+    /// keeps typing to the rail's range.
+    pub typed: Option<(f32, f32)>,
 }
 /// The Temp slider's rail, blue to yellow.
 pub(super) const TEMPERATURE_GRADIENT: (Color32, Color32) = (
@@ -960,6 +964,7 @@ fn descriptor_slider<Id>(
         reciprocal: matches!(d.tick, params::Tick::Mireds(_)),
         drag_step: d.drag_step,
         hue_rail: false,
+        typed: Some((*d.valid.start(), *d.valid.end())),
     };
     slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
 }
@@ -978,11 +983,15 @@ pub(super) fn slider_styled(
         reciprocal,
         drag_step: step,
         hue_rail,
+        typed,
     } = style;
     let mut event = SliderEvent::None;
     let start = *range.start();
     let end = *range.end();
     let span = end - start;
+    // Typing takes any value the setting may hold; the rail and dragging the number
+    // stay within the rail.
+    let (typed_low, typed_high) = typed.unwrap_or((start, end));
     let (scale, decimals) = display.unwrap_or(if start >= -1. && end <= 1. {
         (100., 0)
     } else if span >= 100. {
@@ -1042,7 +1051,7 @@ pub(super) fn slider_styled(
                     // An imported value beyond the range shows as it is, rather
                     // than being clamped by drawing it.
                     egui::DragValue::new(&mut displayed)
-                        .range(start * scale..=end * scale)
+                        .range(typed_low * scale..=typed_high * scale)
                         .clamp_existing_to_range(false)
                         .speed(span * scale / 500.)
                         .custom_formatter(move |v, _| format_value(v, decimals, signed))
@@ -1051,7 +1060,14 @@ pub(super) fn slider_styled(
             })
             .inner;
         if value_response.changed() {
-            *value = (displayed / scale).clamp(start, end);
+            let entered = displayed / scale;
+            *value = if value_response.dragged() {
+                // Relative input: never further out than the rail, never snapping
+                // a value already beyond it.
+                params::nudged(before, entered - before, start..=end)
+            } else {
+                entered.clamp(typed_low, typed_high)
+            };
         }
         let area = Rect::from_min_max(
             Pos2::new(label_rect.right(), row.top()),
@@ -1750,5 +1766,123 @@ mod slider_tests {
                 tick: Tick::Shown
             }
         );
+    }
+
+    /// Frames of Exposure's slider in a 400 × 40 panel: a click on its number
+    /// field, then `typed` and Return. Returns the value after.
+    fn type_into_exposure(start: f32, typed: &str) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let field = Pos2::new(400. - SLIDER_VALUE_WIDTH / 2., 12.);
+        let frames = [
+            vec![egui::Event::PointerMoved(field)],
+            vec![egui::Event::PointerButton {
+                pos: field,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            }],
+            vec![egui::Event::PointerButton {
+                pos: field,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+            vec![egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }],
+            vec![egui::Event::Text(typed.into())],
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+            vec![],
+        ];
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show_inside(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    #[test]
+    fn typed_values_take_the_settings_valid_range_beyond_the_rail() {
+        // Exposure's rail spans ±5 EV; a recipe may hold ±8.
+        assert_eq!(type_into_exposure(0., "6"), 6.);
+        assert_eq!(type_into_exposure(0., "-7.5"), -7.5);
+        assert_eq!(type_into_exposure(0., "9"), 8.);
+        assert_eq!(type_into_exposure(0., "1.25"), 1.25);
+    }
+
+    /// Exposure's number field dragged by `dx` points from `start`.
+    fn drag_exposure(start: f32, dx: f32) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let field = Pos2::new(400. - SLIDER_VALUE_WIDTH / 2., 12.);
+        let to = field + Vec2::new(dx, 0.);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let mut frames = vec![
+            vec![egui::Event::PointerMoved(field)],
+            vec![button(field, true)],
+        ];
+        for step in 1..=10 {
+            frames.push(vec![egui::Event::PointerMoved(
+                field + (to - field) * step as f32 / 10.,
+            )]);
+        }
+        frames.push(vec![button(to, false)]);
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show_inside(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    #[test]
+    fn dragging_the_number_stays_on_the_rail_and_never_pushes_further_out() {
+        assert_eq!(drag_exposure(0., 3000.), 5.);
+        assert_eq!(drag_exposure(0., -3000.), -5.);
+        // An imported 6.5 EV: dragging further out leaves it; back in moves it.
+        assert_eq!(drag_exposure(6.5, 300.), 6.5);
+        let back = drag_exposure(6.5, -30.);
+        assert!(back < 6.5 && back > 5., "{back}");
     }
 }
