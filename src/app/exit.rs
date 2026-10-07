@@ -40,7 +40,11 @@ impl Editor {
         self.remember_place(super::workspace::LayoutEdit::Settled);
         // Only now: the save went through it.
         stopping.push(self.autosave.close());
-        task::wait_for(stopping, until.saturating_duration_since(Instant::now()))
+        let waited = task::wait_for(stopping, until.saturating_duration_since(Instant::now()));
+        // Exports cut off at the deadline end with the process, which leaves their
+        // temporary files behind.
+        crate::export::remove_unfinished();
+        waited
     }
     /// Every job in progress stops at its next check.
     fn cancel_jobs(&mut self) {

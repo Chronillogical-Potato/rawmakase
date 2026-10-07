@@ -818,3 +818,20 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.vibrance_model, VibranceModel::Chart);
     Ok(())
 }
+#[test]
+fn a_temporary_file_cut_off_at_exit_is_removed_and_one_done_with_forgotten() -> Result<()> {
+    static WRITING: Writing = Writing(Mutex::new(Vec::new()));
+    let dir = tempfile::tempdir()?;
+    // A worker still writing when the process ends: its file is never dropped.
+    let cut_off = NamedTempFile::new_in(dir.path())?;
+    let _unfinished = WRITING.track(cut_off.path());
+    let (_, cut_off) = cut_off.keep()?;
+    // One done with, either way, is forgotten.
+    let done = NamedTempFile::new_in(dir.path())?;
+    drop(WRITING.track(done.path()));
+    assert_eq!(*WRITING.paths(), std::slice::from_ref(&cut_off));
+    WRITING.remove_all();
+    assert!(!cut_off.exists());
+    assert!(done.path().exists());
+    Ok(())
+}
