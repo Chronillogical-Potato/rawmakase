@@ -3248,6 +3248,7 @@ dependencies = [
  "skrifa 0.47.0",
  "tempfile",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

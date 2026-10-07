@@ -30,3 +30,7 @@ unicode-normalization = "0.1"
 
 [dev-dependencies]
 rawmakase-model = { path = "../rawmakase-model", version = "0.1.0", features = ["test-support"] }
+
+# The Desktop and Pictures folders export settings default to.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
