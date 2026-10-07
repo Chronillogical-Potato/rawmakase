@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn a_looks_profile_amount_is_written_and_read_back() -> anyhow::Result<()> {
         use crate::camera_profiles::CameraProfile;
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             make: "Test".into(),
             model: "Camera".into(),
             cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
@@ -359,7 +359,7 @@ mod tests {
         let text = preset(&edited(), &info, &tones);
         assert!(text.contains(r#"crs:SupportsAmount="True""#), "{text}");
         let parsed = crate::xmp::parse(Path::new("Soft.xmp"), &text)?;
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             wb: [2., 1., 1.8],
             daylight_wb: [2., 1., 1.8],
             matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
@@ -390,7 +390,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(source.sharpening_model, SharpeningModel::Original);
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             wb: [2., 1., 1.8],
             daylight_wb: [2., 1., 1.8],
             matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
@@ -414,7 +414,7 @@ mod tests {
         use crate::develop::{calibration::CalibrationModel, color_mixer::MixerModel};
         let info = PresetInfo::new("Old process", "User Presets");
         let source = Recipe::default();
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             wb: [2., 1., 1.8],
             daylight_wb: [2., 1., 1.8],
             matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
@@ -483,7 +483,7 @@ mod tests {
             point_colors: vec![PointColor::sampled([3., 0.5, 0.5])],
             ..Default::default()
         };
-        let m = crate::raw::Metadata::default();
+        let m = crate::camera_data::Metadata::default();
         let applied = crate::xmp::parse(Path::new("Warm.xmp"), &preset(&r, &info, &color))?.apply(
             &target,
             &m,
@@ -527,7 +527,7 @@ mod tests {
         ] {
             assert!(!parsed.settings.contains_key(key), "{key}");
         }
-        let m = crate::raw::Metadata {
+        let m = crate::camera_data::Metadata {
             wb: [2., 1., 1.8],
             daylight_wb: [2., 1., 1.8],
             matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],

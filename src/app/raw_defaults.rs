@@ -319,9 +319,9 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
 mod tests {
     use super::*;
     use crate::app::worker::{Event, LoadedHeader};
+    use crate::camera_data::Metadata;
     use crate::camera_profiles::{CameraProfile, open};
     use crate::develop::Recipe;
-    use crate::raw::Metadata;
 
     #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
     fn x100f() -> Metadata {
@@ -589,7 +589,7 @@ mod tests {
             .tx
             .send(Event::Ready {
                 id: generation,
-                full: Arc::new(crate::raw::CameraImage {
+                full: Arc::new(crate::camera_data::CameraImage {
                     recovered: Default::default(),
                     width: 12,
                     height: 8,
@@ -628,7 +628,7 @@ mod tests {
             cancel: Default::default(),
             prefetch: None,
             defaults: defaults.clone(),
-            demosaic: crate::raw::Demosaic::default(),
+            demosaic: crate::camera_data::Demosaic::default(),
         });
         let header = loop {
             match rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap() {

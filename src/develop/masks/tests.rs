@@ -1,7 +1,7 @@
 use super::local::slot;
 use super::*;
+use crate::camera_data::CameraImage;
 use crate::develop::{Geometry, Recipe};
-use crate::raw::CameraImage;
 use std::sync::Arc;
 
 fn image(width: u32, height: u32) -> CameraImage {
@@ -15,7 +15,7 @@ fn image(width: u32, height: u32) -> CameraImage {
                 [v * 1.1, v, v * 0.8]
             })
             .collect(),
-        metadata: crate::raw::Metadata {
+        metadata: crate::camera_data::Metadata {
             width,
             height,
             wb: [1.; 3],

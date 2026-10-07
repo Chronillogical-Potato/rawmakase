@@ -23,7 +23,7 @@ pub fn compare(
         )
     };
     let image = raw.develop(
-        crate::raw::Decode::full(Default::default()),
+        crate::camera_data::Decode::full(Default::default()),
         &AtomicBool::new(false),
     )?;
     let render = develop::render(&image, &edit.checked()?, 0)?;

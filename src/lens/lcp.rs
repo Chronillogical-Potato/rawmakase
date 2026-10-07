@@ -4,9 +4,9 @@
 //! its choices for "Enable Profile Corrections" (`optics::lcp::PhotoProfiles`); the
 //! one that fits its lens best is the automatic choice. The profiles' data and the
 //! correction model are in `optics::lcp`; matching them to a photo is here.
+use crate::camera_data::Metadata;
 use crate::optics::lcp::{Candidate, Chromatic, Entry, ImportedProfile, PhotoProfiles, parse};
 use crate::optics::{LensCorrection, Radial};
-use crate::raw::Metadata;
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::HashSet,

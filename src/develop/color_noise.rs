@@ -14,7 +14,7 @@
 //!
 //! Camera Raw also reduces strong single-pixel colour lines by about a quarter, which
 //! this keeps, and takes out somewhat less noise than this on very noisy photos.
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};

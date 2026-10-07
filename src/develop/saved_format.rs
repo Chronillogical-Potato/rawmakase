@@ -88,7 +88,7 @@ mod tests {
     /// stays at 6.
     #[test]
     fn only_looks_with_new_fields_raise_the_saved_version() {
-        use crate::{camera_profiles::CameraProfile, develop::Recipe, raw::Metadata};
+        use crate::{camera_data::Metadata, camera_profiles::CameraProfile, develop::Recipe};
         let m = Metadata {
             make: "Test".into(),
             model: "Camera".into(),

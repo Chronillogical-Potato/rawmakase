@@ -11,11 +11,11 @@ use super::{
     develop::{Developer, DeviceSamples},
 };
 use crate::{
+    camera_data::CameraImage,
     develop::{
         pipeline::pixel_params::PixelParams,
         stage_cache::{BlurKey, SampleKey},
     },
-    raw::CameraImage,
 };
 use anyhow::{Context, Result, ensure};
 use std::{

@@ -356,8 +356,8 @@ pub(super) fn hsl_target(index: usize) -> Target {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera_data::{CameraImage, Metadata};
     use crate::develop::panels::{Panel, PanelState};
-    use crate::raw::{CameraImage, Metadata};
     use std::sync::Arc;
 
     /// An editor showing a 200 × 200 photo: an orange left half, a gray right one.

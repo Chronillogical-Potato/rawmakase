@@ -5,7 +5,7 @@ use crate::xml::{
     self, escape_text,
     ns::{AUX, CRS, DC, LR, PHOTOSHOP, XMP, XMP_MM},
 };
-use crate::{color::curve::ToneCurve, develop::Recipe, raw::Metadata};
+use crate::{camera_data::Metadata, color::curve::ToneCurve, develop::Recipe};
 use std::fmt::Write;
 
 /// A keyword's path, top first, and which of its names an export writes.

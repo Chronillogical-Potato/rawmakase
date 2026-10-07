@@ -2,8 +2,8 @@
 //! at every render. The raster covers the strokes' bounds with at least four pixels
 //! per brush radius, up to 2048 on the long side, and is cached by the strokes' hash.
 use super::BrushStroke;
+use crate::camera_data::CameraImage;
 use crate::develop::retouch::profile;
-use crate::raw::CameraImage;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 

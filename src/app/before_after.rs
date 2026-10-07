@@ -13,8 +13,8 @@
 //! reference photo in Before's place, rendered in the same lane.
 use super::state::{Picture, TextureMode};
 use super::{Editor, history::Step};
+use crate::camera_data::CameraImage;
 use crate::develop::{ClipOverlay, Geometry, Recipe};
-use crate::raw::CameraImage;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::{path::PathBuf, sync::Arc};
 
@@ -625,7 +625,7 @@ mod tests {
             pixels: (0..w * h)
                 .map(|i| [0.1 + (i % w) as f32 / 200.; 3])
                 .collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: w,
                 height: h,
                 wb: [1.; 3],

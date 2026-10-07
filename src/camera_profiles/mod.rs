@@ -1,8 +1,8 @@
 //! DCP forward-matrix profiles. Unsupported matrix-only/HDR/triple-illuminant profiles
 //! are rejected explicitly. Copyright and rendering data travel with the recipe.
 use crate::{
+    camera_data::Metadata,
     color::{mul, srgb_encode},
-    raw::Metadata,
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};

@@ -2,7 +2,7 @@
 //! X100F values were read from Lightroom-generated DNGs of DSCF7845 (ISO 400)
 //! and DSCF7853 (ISO 200), both DR100. See docs/macos-lightroom-validation.md.
 //! Per-camera baseline exposures live in data/cameras.toml (crate::cameras).
-use crate::raw::{HighlightTonePriority, Metadata};
+use crate::camera_data::{HighlightTonePriority, Metadata};
 fn x100f(m: &Metadata) -> bool {
     m.make.eq_ignore_ascii_case("Fujifilm") && m.model.eq_ignore_ascii_case("X100F")
 }

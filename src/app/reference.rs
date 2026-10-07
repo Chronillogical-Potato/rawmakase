@@ -16,8 +16,8 @@ use crate::app::library::DraggedPhoto;
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use crate::{
+    camera_data::CameraImage,
     develop::{Geometry, Recipe},
-    raw::CameraImage,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::sync::Arc;

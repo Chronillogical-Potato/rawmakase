@@ -1,8 +1,8 @@
 use super::Preset;
 use crate::{
+    camera_data::{CameraImage, Metadata},
     camera_profiles::CameraProfile,
     develop::{Recipe, mul},
-    raw::{CameraImage, Metadata},
 };
 use anyhow::{Context, Result, ensure};
 use std::{

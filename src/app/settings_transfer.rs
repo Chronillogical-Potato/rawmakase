@@ -3,11 +3,11 @@
 use super::Editor;
 use super::theme;
 use super::widgets::{modal_frame, primary_button};
+use crate::camera_data::Metadata;
 use crate::develop::{
     Recipe,
     settings_groups::{self, GroupInclusion, GroupSelection, SettingGroup, Source, Target},
 };
-use crate::raw::Metadata;
 use eframe::egui::{self, Color32, Vec2};
 
 /// A photo's settings with its camera, as Copy or leaving a photo keeps them.

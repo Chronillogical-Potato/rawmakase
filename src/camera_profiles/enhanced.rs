@@ -662,7 +662,7 @@ pub(super) mod tests {
     #[test]
     #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
     fn enhanced_profile_roundtrip_keeps_camera_and_old_profiles_unchanged() -> Result<()> {
-        let mut base = CameraProfile::camera_matrix_default(&crate::raw::Metadata {
+        let mut base = CameraProfile::camera_matrix_default(&crate::camera_data::Metadata {
             make: "Fujifilm".into(),
             model: "X100F".into(),
             cam_xyz: [
@@ -746,7 +746,7 @@ pub(super) mod tests {
     }
     #[test]
     fn creative_looks_name_no_base_and_go_over_any_camera_profile() -> Result<()> {
-        let mut base = CameraProfile::camera_matrix_default(&crate::raw::Metadata {
+        let mut base = CameraProfile::camera_matrix_default(&crate::camera_data::Metadata {
             make: "Test".into(),
             model: "Camera".into(),
             cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
@@ -809,7 +809,7 @@ pub(super) mod tests {
     #[test]
     fn rgb_table_looks_parse_compose_and_scale_with_amount() -> Result<()> {
         use super::super::rgb_table::tests::{fade, table_bytes};
-        let mut base = CameraProfile::camera_matrix_default(&crate::raw::Metadata {
+        let mut base = CameraProfile::camera_matrix_default(&crate::camera_data::Metadata {
             make: "Test".into(),
             model: "Camera".into(),
             cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],

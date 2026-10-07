@@ -1875,7 +1875,7 @@ fn setting_control(
     r: &mut Recipe,
     id: ParameterId,
     default: f32,
-    photo: Option<&crate::raw::Metadata>,
+    photo: Option<&crate::camera_data::Metadata>,
 ) {
     let previous = *id.value_mut(r);
     setting_slider(ui, id, id.value_mut(r), default);

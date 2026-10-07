@@ -5,10 +5,10 @@
 use super::{Event, Latest, send};
 use crate::{
     app::library::EditSource,
+    camera_data,
     decode::{DecodePolicy, FullSize},
     decode_cache::DecodeCache,
     develop::Recipe,
-    raw,
 };
 use eframe::egui;
 use std::{
@@ -28,11 +28,11 @@ pub(in crate::app) struct ReferenceJob {
     pub edit: EditSource,
     pub cancel: Arc<AtomicBool>,
     /// The demosaic of the full-size decode and of its decode-cache key.
-    pub demosaic: raw::Demosaic,
+    pub demosaic: camera_data::Demosaic,
 }
 /// The reference photo, developed: the half-size decode first, then the full one.
 pub struct ReferenceImage {
-    pub image: Arc<raw::CameraImage>,
+    pub image: Arc<camera_data::CameraImage>,
     pub recipe: Recipe,
     pub resolution: Resolution,
 }
@@ -90,7 +90,7 @@ fn develop(
         });
         return Ok(());
     }
-    let half = raw.develop(raw::Decode::Half, &job.cancel)?;
+    let half = raw.develop(camera_data::Decode::Half, &job.cancel)?;
     if job.cancel.load(Ordering::Relaxed) {
         return Ok(());
     }
@@ -116,7 +116,7 @@ fn develop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raw::Demosaic;
+    use crate::camera_data::Demosaic;
 
     /// The preference is never changed here: the job alone decides which
     /// demosaic is decoded, and the cache entry is keyed with that one.

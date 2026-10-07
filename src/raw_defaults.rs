@@ -6,9 +6,9 @@
 //! are stored relative to Adobe's defaults, so they always convert from Adobe
 //! Default, and a saved edit stays as it is until Reset.
 use crate::{
+    camera_data::Metadata,
     camera_profiles::CameraProfile,
     develop::{ProfilePreference, Recipe, camera_matching_names, camera_matching_profile},
-    raw::Metadata,
     xmp::Preset,
 };
 use serde::{Deserialize, Deserializer, Serialize};
