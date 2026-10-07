@@ -435,7 +435,7 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         options,
         Box::new(move |cc| {
             // The event loop has built the app menu by now.
-            crate::platform::quit::through_close_guard();
+            crate::platform::quit::through_close_guard(cc);
             Ok(Box::new(Editor::new(cc, path, launch)))
         }),
         &event_loop,
