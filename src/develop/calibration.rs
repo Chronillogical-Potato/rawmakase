@@ -200,7 +200,7 @@ impl Calibration {
         if self.shadow == 0. {
             return q;
         }
-        let y = (0.2126 * q[0] + 0.7152 * q[1] + 0.0722 * q[2]).max(0.);
+        let y = (crate::color::luminance(q)).max(0.);
         let amount = self.shadow.abs() * y * (-6. * y).exp();
         // Normalized green/magenta shifts are asymmetric: either green or its
         // complementary channels are attenuated, rather than lifting all shadows.

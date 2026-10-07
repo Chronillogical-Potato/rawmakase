@@ -4,6 +4,7 @@
 //! See docs/macos-lightroom-validation.md for the tested range and limitations.
 use crate::{
     camera_profiles::{PRO_TO_RGB, RGB_TO_PRO},
+    color::mul,
     develop::Recipe,
 };
 
@@ -25,9 +26,6 @@ pub(crate) fn hue_rgb(hue: f32) -> [f32; 3] {
         4 => [x, 0., 1.],
         _ => [1., 0., x],
     }
-}
-fn mul(m: [[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
-    m.map(|row| row.iter().zip(p).map(|(a, b)| a * b).sum())
 }
 fn tint_channel(value: f32, tint: f32) -> f32 {
     // Symmetric, endpoint-preserving response in the ProPhoto display domain.

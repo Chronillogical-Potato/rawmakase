@@ -114,7 +114,7 @@ impl LuminanceGrade {
         std::array::from_fn(|c| table[i][c] * (1. - t) + table[i + 1][c] * t)
     }
     fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let y = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]).max(0.);
+        let y = (crate::color::luminance(rgb)).max(0.);
         let l = srgb_encode(y.min(1.));
         let g = Self::at(&self.gain, l);
         let o = Self::at(&self.offset, l);
