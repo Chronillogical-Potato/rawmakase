@@ -13,6 +13,8 @@
 //! and `docs/architecture.md` records ownership rules. This library exists for the
 //! RAWmakase binary, its examples and its tests; it is not a stable public API.
 // The values a photo's edit is made of, built on their own (crates/rawmakase-model).
+// The catalog and which edit a photo develops with (crates/rawmakase-catalog).
+pub use rawmakase_catalog::{catalog, edits};
 // File formats and presets over the model (crates/rawmakase-interop).
 pub use rawmakase_interop::{exif, export_settings, jpeg, lr_develop, presets, raw_defaults, xmp};
 pub use rawmakase_model::{
@@ -21,7 +23,6 @@ pub use rawmakase_model::{
 };
 pub mod app;
 mod build_info;
-pub mod catalog;
 pub mod catalog_session;
 pub mod comparison;
 pub mod decode;
@@ -29,7 +30,6 @@ pub mod decode_cache;
 pub mod demosaic;
 pub mod develop;
 pub mod edit_session;
-pub mod edits;
 pub mod export;
 pub mod photo;
 pub mod platform;

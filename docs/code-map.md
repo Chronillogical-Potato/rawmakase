@@ -21,9 +21,9 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Change preset discovery/import | [Preset library](../crates/rawmakase-interop/src/presets/library.rs) | Preset browser UI and shared asset paths |
 | Add DCP support | [DCP reader](../crates/rawmakase-model/src/camera_profiles/dcp.rs), [profile model](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
-| Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
-| Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../crates/rawmakase-interop/src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
+| Change native catalog behavior | [Catalog API](../crates/rawmakase-catalog/src/catalog/mod.rs), [schema](../crates/rawmakase-catalog/src/catalog/schema.sql) | Models, catalog tests, library UI |
+| Improve Lightroom import | [Importer](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs), [Develop translation](../crates/rawmakase-interop/src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
+| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../crates/rawmakase-catalog/src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -35,7 +35,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/lib.rs](../src/lib.rs) | The module list. The library serves the binary, examples and tests; it is not a stable public API. |
 | [src/photo.rs](../src/photo.rs) | Opens a photo for developing: `Raw::open_file`'s facts, then embedded lens tables, a DNG's profile, baseline exposure, colour matrix and crop, and the imported lens profiles that fit. |
 | [crates/rawmakase-model/src/ids.rs](../crates/rawmakase-model/src/ids.rs) | Typed catalog row ids: photo, folder, root and collection, each stored and serialized as its integer. |
-| [src/edits.rs](../src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../src/catalog/edit_records.rs) reads the stored records. |
+| [crates/rawmakase-catalog/src/edits.rs](../crates/rawmakase-catalog/src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../crates/rawmakase-catalog/src/catalog/edit_records.rs) reads the stored records. |
 | [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [crates/rawmakase-model/src/model/recipe.rs](../crates/rawmakase-model/src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../crates/rawmakase-model/src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../crates/rawmakase-model/src/model/panels.rs) the per-panel switches. |
@@ -175,20 +175,20 @@ recipes and the installed preset collection; they do not own the renderer.
 | [model/saved_format.rs](../crates/rawmakase-model/src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../crates/rawmakase-model/src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [identity.rs](../crates/rawmakase-model/src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
-| [catalog/legacy_sidecar.rs](../src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
+| [catalog/legacy_sidecar.rs](../crates/rawmakase-catalog/src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
 | [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults and other preferences. |
-| [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
-| [catalog/edits.rs](../src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
-| [catalog/develop_history.rs](../src/catalog/develop_history.rs) | A photo's Develop History, saved in the same transaction as its edit; large settings are stored once per History. |
-| [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
-| [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
-| [catalog/locations.rs](../src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
-| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../crates/rawmakase-model/src/metadata.rs). |
-| [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
-| [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
-| [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
+| [catalog/mod.rs](../crates/rawmakase-catalog/src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
+| [catalog/edits.rs](../crates/rawmakase-catalog/src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
+| [catalog/develop_history.rs](../crates/rawmakase-catalog/src/catalog/develop_history.rs) | A photo's Develop History, saved in the same transaction as its edit; large settings are stored once per History. |
+| [catalog/copies.rs](../crates/rawmakase-catalog/src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
+| [catalog/ingest.rs](../crates/rawmakase-catalog/src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
+| [catalog/locations.rs](../crates/rawmakase-catalog/src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
+| [models.rs](../crates/rawmakase-catalog/src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../crates/rawmakase-model/src/metadata.rs). |
+| [schema.sql](../crates/rawmakase-catalog/src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
+| [preview_cache.rs](../crates/rawmakase-catalog/src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
+| [lightroom/mod.rs](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
 | [lr_develop.rs](../crates/rawmakase-interop/src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
-| [lightroom/history.rs](../src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
+| [lightroom/history.rs](../crates/rawmakase-catalog/src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
 | [export/mod.rs](../src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
 | [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
 | [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
@@ -348,9 +348,9 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [develop/pipeline/tests.rs](../src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
 | [camera_profiles/tests.rs](../crates/rawmakase-model/src/camera_profiles/tests.rs) | Profile parsing and validation. |
 | [xmp/tests.rs](../crates/rawmakase-interop/src/xmp/tests.rs), [presets/tests.rs](../crates/rawmakase-interop/src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
-| [catalog/legacy_sidecar/tests.rs](../src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
-| [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
-| [catalog/locations_tests.rs](../src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
+| [catalog/legacy_sidecar/tests.rs](../crates/rawmakase-catalog/src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
+| [catalog/tests.rs](../crates/rawmakase-catalog/src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
+| [catalog/locations_tests.rs](../crates/rawmakase-catalog/src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
 | [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
 | [develop/gpu/tests.rs](../src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
 | [tests/color/](../tests/color/main.rs), [tests/corpus/README.md](../tests/corpus/README.md) | The color corpus: synthetic chart DNGs rendered and compared with committed snapshots and Camera Raw renders on every `cargo test`; private photo and Adobe-profile tiers behind `RAWMAKASE_CORPUS`. |
@@ -359,7 +359,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [tests/raw_fixtures.rs](../tests/raw_fixtures.rs) | Ignored private RAW development/export and repeated-navigation memory tests (`RAWMAKASE_FIXTURES`). |
 | [tests/private_profiles.rs](../tests/private_profiles.rs) | Ignored installed/private DCP coverage (`RAWMAKASE_PROFILES`). |
 | [tests/xmp_presets.rs](../tests/xmp_presets.rs) | Ignored installed XMP collection audit. |
-| [catalog/private_tests.rs](../src/catalog/private_tests.rs) | Ignored private Lightroom catalog validation (`RAWMAKASE_LRCAT`). |
+| [catalog/private_tests.rs](../crates/rawmakase-catalog/src/catalog/private_tests.rs) | Ignored private Lightroom catalog validation (`RAWMAKASE_LRCAT`). |
 | [tests/data/README.md](../tests/data/README.md), [curve samples](../tests/data/lightroom-point-curves.json) | Small checked-in Lightroom point-curve reference data and its provenance. |
 | [scripts/make-curve-fixtures.py](../scripts/make-curve-fixtures.py) | Generates synthetic TIFF ramps for manual Lightroom curve comparisons. |
 | [scripts/compare-preview.py](../scripts/compare-preview.py) | Compares resized sRGB previews without exposure/color fitting; distinct from the Rust comparison command. |
