@@ -183,6 +183,11 @@ impl Editor {
         self.document.edit.finish_gesture();
         self.sync_undo();
     }
+    /// [`Self::finish_gesture`] for a gesture whose state was just saved.
+    pub(super) fn finish_saved_gesture(&mut self) {
+        self.document.edit.finish_saved_gesture();
+        self.sync_undo();
+    }
     /// Waits while Sync writes edits, which Undo could otherwise race.
     pub(super) fn undo(&mut self) {
         self.command_history(false);

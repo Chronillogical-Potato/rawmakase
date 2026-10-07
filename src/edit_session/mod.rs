@@ -101,6 +101,11 @@ impl EditSession {
             self.save.mark_changed();
         }
     }
+    /// Ends a gesture still held whose state was just saved (the photo being
+    /// left mid-drag): one History step, with nothing new to save.
+    pub(crate) fn finish_saved_gesture(&mut self) {
+        self.history.finish_gesture(&self.recipe);
+    }
     /// Ends a gesture still held as the settings were when `frame` began, as one
     /// History step to be saved: what changes later in the frame is a step of
     /// its own.
@@ -304,6 +309,18 @@ mod tests {
         session.finish_gesture();
         assert_eq!(session.history().steps().1, 1);
         assert!(session.save_state().needs_save());
+    }
+
+    #[test]
+    fn a_gesture_whose_state_was_saved_stays_saved_when_it_ends() {
+        let mut session = EditSession::default();
+        let frame = session.begin();
+        session.recipe_mut().exposure = 1.;
+        session.finish(frame, Gesture::Held);
+        session.save_state_mut().saved();
+        session.finish_saved_gesture();
+        assert_eq!(session.history().steps().1, 1);
+        assert!(!session.save_state().needs_save());
     }
 
     #[test]
