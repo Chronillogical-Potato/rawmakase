@@ -2,11 +2,13 @@
 //! shows it: opening needs no UI, and reading it again keeps the lists in step.
 mod backfill;
 pub(crate) mod background;
+mod descriptive;
 
 use crate::catalog::{Catalog, Collection, CollectionId, Folder, Photo, PhotoId, RootId};
 use anyhow::Result;
 pub use backfill::Saved;
 pub use background::Wake;
+pub use descriptive::{DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -302,6 +304,44 @@ mod tests {
         assert_eq!(session.quick_collection(), Some(quick));
         assert_eq!(session.ensure_quick_collection()?, quick);
         assert!(session.collection_photos[&quick].is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn descriptive_edits_and_copies_change_the_catalog_and_the_lists() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+        let path = directory.path().join("library.rawmakase");
+        Catalog::create(&path)?.add_folder(&folder)?;
+        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let a = session.photos[0].id;
+
+        let change = session.edit_descriptive(
+            &[a],
+            DescriptiveEdit::AddKeywords(vec![vec!["Places".into(), "Kraków".into()]]),
+        )?;
+        assert!(change.listed.is_ok());
+        assert_ne!(change.before, change.after);
+        assert_eq!(session.photos[0].keywords, "Kraków");
+        // Undone: the lists follow the catalog back.
+        session.restore_descriptive(&change.before, &[(a, 3, -1, "Blue".into())])?;
+        assert_eq!(session.photos[0].keywords, "");
+        assert_eq!(session.photos[0].rating, 3);
+        assert_eq!(session.catalog.photos()?[0].label, "Blue");
+        assert_eq!(session.catalog.metadata_snapshot(&[a])?, change.before);
+
+        let copy = session.create_virtual_copy(a)?;
+        assert!(session.photos.iter().any(|p| p.id == copy));
+        session.set_copy_as_master(copy)?;
+        assert_eq!(
+            session.photos.iter().find(|p| p.id == a).unwrap().master,
+            Some(copy)
+        );
+        session.remove_virtual_copy(a)?;
+        assert_eq!(session.photos.len(), 1);
+        assert_eq!(session.folders[0].count, 1);
         Ok(())
     }
 
