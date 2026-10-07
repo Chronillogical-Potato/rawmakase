@@ -26,7 +26,9 @@ impl Editor {
                     self.catalog_ready(result);
                 }
                 // The dialog's own DialogClosed follows.
-                Event::FolderQuestion(question) => self.folder_question = Some(*question),
+                Event::FolderQuestion(question) => {
+                    self.modal = Some(super::Modal::FolderQuestion(*question))
+                }
 
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();

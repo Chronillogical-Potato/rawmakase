@@ -278,7 +278,7 @@ impl Editor {
     }
     /// Asks the pending folder question, then carries out the change.
     pub(super) fn folder_question_window(&mut self, ctx: &egui::Context) {
-        let Some(question) = &mut self.folder_question else {
+        let Some(super::Modal::FolderQuestion(question)) = &mut self.modal else {
             return;
         };
         match question {
@@ -318,7 +318,7 @@ impl Editor {
                     return;
                 };
                 let (catalog, root, path) = (catalog.clone(), *root, path.clone());
-                self.folder_question = None;
+                self.modal = None;
                 if let Some(overrides) = choice {
                     self.folder_job(
                         catalog,
@@ -340,7 +340,7 @@ impl Editor {
                 let Some(ambiguity) = open.first() else {
                     let (catalog, folder, choices) =
                         (catalog.clone(), folder.clone(), std::mem::take(chosen));
-                    self.folder_question = None;
+                    self.modal = None;
                     self.folder_job(catalog, FolderJob::Import { folder, choices }, ctx);
                     return;
                 };
@@ -397,7 +397,7 @@ impl Editor {
                             options: answered.options,
                         });
                     }
-                    None => self.folder_question = None,
+                    None => self.modal = None,
                 }
             }
         }

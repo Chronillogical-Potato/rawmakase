@@ -54,13 +54,9 @@ impl Editor {
         // Preferences is modal: keys go to it, not to the photo behind.
         let modal = self.preferences.open
             || self.export_modal()
-            || self.remove_copy.is_some()
-            || self.read_metadata.is_some()
+            || self.modal.is_some()
             || self.not_editable.is_some()
-            || self.folder_question.is_some()
             || self.view.shortcuts
-            || self.copy_dialog.is_some()
-            || self.preset_rename.is_some()
             || self.curve_save_open();
         if !modal {
             self.metadata_shortcuts(&ctx);
@@ -96,7 +92,7 @@ impl Editor {
             self.virtual_copy(request);
         }
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
-            self.read_metadata = Some(ids);
+            self.modal = Some(super::Modal::ReadMetadata(ids));
         }
         if let Some(library) = &mut self.library
             && library.take_reread_finished()
