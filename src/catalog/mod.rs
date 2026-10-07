@@ -41,7 +41,7 @@ pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
-pub use ids::CollectionId;
+pub use ids::{CollectionId, FolderId, RootId};
 pub use ingest::{Added, Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
@@ -144,8 +144,8 @@ impl Catalog {
         let folders = q
             .query_map([], |r| {
                 Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
+                    r.get::<_, FolderId>(0)?,
+                    r.get::<_, RootId>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, Option<String>>(4)?,
@@ -277,7 +277,7 @@ impl Catalog {
             .collect::<rusqlite::Result<_>>()?)
     }
     /// Every root: where it was added and this computer's location of it.
-    pub fn roots(&self) -> Result<Vec<(i64, String, Option<String>)>> {
+    pub fn roots(&self) -> Result<Vec<(RootId, String, Option<String>)>> {
         Ok(self
             .db
             .prepare(

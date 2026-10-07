@@ -1,7 +1,7 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
-use super::Catalog;
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
+use super::{Catalog, FolderId, RootId};
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -26,7 +26,7 @@ pub struct Added {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Conflict {
     pub directory: PathBuf,
-    pub root: i64,
+    pub root: RootId,
     /// The catalog folder it would have been, by logical path.
     pub relative: String,
     /// Where that folder is on this computer.
@@ -62,7 +62,7 @@ pub struct Choice {
 /// Where a folder on disk goes in the catalog.
 enum Place {
     /// A folder of an existing root, by logical path.
-    Folder(i64, String),
+    Folder(RootId, String),
     /// A folder of the root the added folder becomes, by logical path.
     New(String),
 }
@@ -160,7 +160,7 @@ impl Catalog {
         }
         let tx = self.db.transaction()?;
         let mut new_root = None;
-        let mut folders: HashMap<(i64, String), i64> = HashMap::new();
+        let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
         let mut added = Vec::new();
         for file in files {
             let Some(place) = file.parent().and_then(|d| places.get(d)) else {
@@ -176,7 +176,7 @@ impl Catalog {
                                 "INSERT INTO roots(original_path) VALUES(?)",
                                 [folder.to_string_lossy()],
                             )?;
-                            *new_root.insert(tx.last_insert_rowid())
+                            *new_root.insert(RootId(tx.last_insert_rowid()))
                         }
                     };
                     (root, logical.clone())
@@ -207,7 +207,7 @@ impl Catalog {
                         "SELECT min(f.id) FROM folders f JOIN folder_paths p ON p.folder=f.id
                              WHERE f.root=? AND p.path=?",
                         params![root, logical],
-                        |r| r.get::<_, Option<i64>>(0),
+                        |r| r.get::<_, Option<FolderId>>(0),
                     )?;
                     let id = match existing {
                         Some(id) => id,
@@ -218,7 +218,7 @@ impl Catalog {
                                 "INSERT INTO folders(root,relative_path) VALUES(?,?)",
                                 params![root, native.to_string_lossy()],
                             )?;
-                            let id = tx.last_insert_rowid();
+                            let id = FolderId(tx.last_insert_rowid());
                             tx.execute(
                                 "INSERT INTO folder_paths(folder,path) VALUES(?,?)",
                                 params![id, logical],
@@ -313,7 +313,7 @@ struct Matcher {
     /// Every location: where each root was added, its own and every
     /// folder's on this computer; with its path as the disk has it.
     locations: Vec<(FolderLocation, PathBuf)>,
-    roots: HashMap<i64, Root>,
+    roots: HashMap<RootId, Root>,
 }
 /// Where a root was added and its rows on this computer, as stored and as
 /// the disk has them.

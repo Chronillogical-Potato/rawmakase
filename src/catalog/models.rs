@@ -2,7 +2,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
     pub id: i64,
-    pub folder: i64,
+    pub folder: super::FolderId,
     pub path: PathBuf,
     pub filename: String,
     pub captured: String,
@@ -37,8 +37,8 @@ impl Photo {
 #[derive(Clone, Debug)]
 pub struct Folder {
     pub relative: String,
-    pub id: i64,
-    pub root: i64,
+    pub id: super::FolderId,
+    pub root: super::RootId,
     pub name: String,
     pub path: PathBuf,
     pub count: usize,

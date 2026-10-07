@@ -4,7 +4,7 @@ use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
 use crate::app::theme;
 use crate::app::widgets::section;
-use crate::catalog::CollectionKind;
+use crate::catalog::{CollectionKind, FolderId, RootId};
 use eframe::egui::{self, Vec2};
 use std::collections::HashSet;
 
@@ -66,7 +66,7 @@ impl Library {
                     // Lightroom-style volume headers with an attached light.
                     let mut volumes: std::collections::BTreeMap<
                         crate::platform::volume::Volume,
-                        Vec<(i64, String, Option<String>)>,
+                        Vec<(RootId, String, Option<String>)>,
                     > = Default::default();
                     for root in self.roots.clone() {
                         let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
@@ -140,12 +140,9 @@ impl Library {
                                     self.filters.collection = None;
                                     self.filter();
                                 }
-                                Some(TreeAction::Relink(root, id)) => {
-                                    action = if root {
-                                        Action::RelinkRoot(id)
-                                    } else {
-                                        Action::RelinkFolder(id)
-                                    }
+                                Some(TreeAction::RelinkRoot(id)) => action = Action::RelinkRoot(id),
+                                Some(TreeAction::RelinkFolder(id)) => {
+                                    action = Action::RelinkFolder(id)
                                 }
                                 None => {}
                             }
@@ -215,11 +212,11 @@ impl Library {
     /// and selects `photo` if it is in it.
     /// The folders a folder key covers now: the folder and its subfolders.
     /// None for a key that names no folder in the catalog.
-    pub(super) fn folder_scope(&self, key: &str) -> Option<HashSet<i64>> {
+    pub(super) fn folder_scope(&self, key: &str) -> Option<HashSet<FolderId>> {
         let rest = key.strip_prefix("root:")?;
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
-        let root = root.parse::<i64>().ok()?;
-        let ids: HashSet<i64> = self
+        let root = root.parse::<i64>().ok().map(RootId)?;
+        let ids: HashSet<FolderId> = self
             .folders
             .iter()
             .filter(|f| {
@@ -246,7 +243,7 @@ impl Library {
         }
         if let Some(rest) = key.strip_prefix("root:") {
             let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
-            if let Ok(root) = root.parse::<i64>()
+            if let Some(root) = root.parse::<i64>().ok().map(RootId)
                 && let Some(ids) = self.folder_scope(key)
             {
                 self.selected_folder = key.to_string();

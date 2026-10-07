@@ -98,7 +98,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
     let ctx = egui::Context::default();
     let photo = Photo {
         id: 1,
-        folder: 1,
+        folder: FolderId(1),
         path: "photo.RAF".into(),
         filename: "photo.RAF".into(),
         captured: String::new(),
@@ -209,7 +209,7 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
 #[test]
 fn tree_locate_action_uses_the_clicked_root() {
     let ctx = egui::Context::default();
-    let root = FolderNode::root(42, "Photos".into(), "/missing".into());
+    let root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
     let mut expanded = HashSet::new();
     let mut target = egui::Pos2::ZERO;
     let mut located = None;
@@ -241,16 +241,16 @@ fn tree_locate_action_uses_the_clicked_root() {
                     ui.available_rect_before_wrap().right() - 12.,
                     ui.cursor().top() + 14.5,
                 );
-                if let Some(TreeAction::Relink(is_root, id)) =
+                if let Some(TreeAction::RelinkRoot(id)) =
                     folder_tree_row(ui, &root, 0, &mut expanded, "")
                 {
-                    located = Some((is_root, id));
+                    located = Some(id);
                 }
             },
         );
         output.textures_delta.clear();
     }
-    assert_eq!(located, Some((true, 42)));
+    assert_eq!(located, Some(RootId(42)));
 }
 #[test]
 fn batched_availability_distinguishes_files_directories_and_missing_paths() -> Result<()> {
@@ -276,11 +276,11 @@ fn batched_availability_distinguishes_files_directories_and_missing_paths() -> R
 }
 #[test]
 fn hierarchy_includes_unregistered_parents_and_descendant_counts() {
-    let mut root = FolderNode::root(1, "Photos".into(), "/old".into());
+    let mut root = FolderNode::root(RootId(1), "Photos".into(), "/old".into());
     for (id, relative, count) in [(10, "2026/09/Trip/", 2), (11, "2026/10/", 3)] {
         root.insert(&Folder {
-            id,
-            root: 1,
+            id: FolderId(id),
+            root: RootId(1),
             name: relative.into(),
             relative: relative.into(),
             path: PathBuf::from("/old").join(relative),
@@ -292,8 +292,11 @@ fn hierarchy_includes_unregistered_parents_and_descendant_counts() {
     assert_eq!(root.children.len(), 1);
     let year = &root.children["2026"];
     assert_eq!(year.count, 5);
-    assert_eq!(year.ids, HashSet::from([10, 11]));
-    assert_eq!(year.children["09"].children["Trip"].folder, Some(10));
+    assert_eq!(year.ids, HashSet::from([FolderId(10), FolderId(11)]));
+    assert_eq!(
+        year.children["09"].children["Trip"].folder,
+        Some(FolderId(10))
+    );
 }
 #[test]
 fn root_mapping_survives_reopen() -> Result<()> {
@@ -1294,7 +1297,7 @@ fn flag_steps_up_and_down_and_stops_at_the_ends() {
     use crate::app::photo_metadata::Edit;
     let photo = |flag| Photo {
         id: 1,
-        folder: 1,
+        folder: FolderId(1),
         path: "a.RAF".into(),
         filename: "a.RAF".into(),
         captured: String::new(),

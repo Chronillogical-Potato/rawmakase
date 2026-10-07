@@ -25,8 +25,8 @@ pub(super) enum CatalogDialog {
 #[derive(Clone, Copy)]
 pub(super) enum FolderAction {
     Add,
-    RelinkRoot(i64),
-    RelinkFolder(i64),
+    RelinkRoot(crate::catalog::RootId),
+    RelinkFolder(crate::catalog::FolderId),
 }
 
 impl Editor {
