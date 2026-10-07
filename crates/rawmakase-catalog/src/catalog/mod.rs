@@ -35,6 +35,14 @@ mod models;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "queries move to these values with catalog::db (#341)"
+    )
+)]
+mod value;
 pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 pub use defaults::MetadataDefaults;
