@@ -6,7 +6,8 @@
 //! request; the app answers once a frame has handled it. The app's own
 //! `rawmakase control` and MCP server use this crate too.
 use clap::{Parser, Subcommand};
-use rawmakase_protocol::{Endpoint, PROTOCOL, Target};
+use rawmakase_protocol::request::{MAX_TICKS, Module, Press};
+use rawmakase_protocol::{Endpoint, PROTOCOL, Request, Target};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -318,92 +319,126 @@ impl Connection {
     }
 }
 
-/// What the command asks of the app: its requests, in order.
+/// What the command asks of the app: its requests, in order, as JSON.
 fn requests(command: &Command) -> Result<Vec<Value>, String> {
+    commands(command)?.iter().map(to_json).collect()
+}
+
+/// A request as it travels; only a path that is not UTF-8 cannot.
+fn to_json(request: &Request) -> Result<Value, String> {
+    serde_json::to_value(request).map_err(|e| e.to_string())
+}
+
+/// What the command asks of the app: its requests, in order.
+fn commands(command: &Command) -> Result<Vec<Request>, String> {
+    let absolute = |path: &PathBuf| std::path::absolute(path).map_err(|e| e.to_string());
+    let action = |name: &str| Request::Action {
+        action: name.into(),
+    };
     Ok(match command {
-        Command::Capabilities => vec![json!({"cmd":"capabilities"})],
+        Command::Capabilities => vec![Request::Capabilities],
         Command::Photos {
             query,
             offset,
             limit,
-        } => vec![json!({"cmd":"photos","query":query,"offset":offset,"limit":limit})],
-        Command::Presets { group } => vec![json!({"cmd":"presets","group":group})],
+        } => vec![Request::Photos {
+            query: Some(query.clone()),
+            offset: Some(*offset as u64),
+            limit: Some(*limit as u64),
+        }],
+        Command::Presets { group } => vec![Request::Presets {
+            group: group.clone(),
+        }],
         Command::Preset { name, group, id } => {
             if *id {
-                vec![json!({"cmd":"preset","id":name})]
+                vec![Request::Preset {
+                    id: Some(name.clone()),
+                    name: None,
+                    group: None,
+                }]
             } else {
-                vec![json!({"cmd":"preset","name":name,"group":group})]
+                vec![Request::Preset {
+                    id: None,
+                    name: Some(name.clone()),
+                    group: group.clone(),
+                }]
             }
         }
-        Command::Action { name } => vec![json!({"cmd":"action","action":name})],
-        Command::Save => vec![json!({"cmd":"save"})],
-        Command::Export { path, max_edge, .. } => {
-            let mut value =
-                json!({"cmd":"export","path":std::path::absolute(path).map_err(|e|e.to_string())?});
-            if let Some(edge) = max_edge {
-                value["max_edge"] = (*edge).into();
-            }
-            vec![value]
-        }
-        Command::Preview { path, max_edge, .. } => vec![
-            json!({"cmd":"preview","path":std::path::absolute(path).map_err(|e|e.to_string())?,"max_edge":max_edge}),
-        ],
-        Command::Job { id } => vec![json!({"cmd":"job","job_id":id})],
-        Command::State | Command::Get { .. } | Command::Controls => vec![json!({"cmd": "state"})],
-        Command::Set { slider, value } => {
-            vec![json!({"cmd": "set", "param": slider, "value": value})]
-        }
-        Command::Turn { slider, ticks } => {
-            vec![json!({"cmd": "turn", "param": slider, "ticks": ticks})]
-        }
+        Command::Action { name } => vec![action(name)],
+        Command::Save => vec![Request::Save],
+        Command::Export { path, max_edge, .. } => vec![Request::Export {
+            path: absolute(path)?,
+            max_edge: *max_edge,
+        }],
+        Command::Preview { path, max_edge, .. } => vec![Request::Preview {
+            path: absolute(path)?,
+            max_edge: Some(*max_edge),
+        }],
+        Command::Job { id } => vec![Request::Job { job_id: *id }],
+        Command::State | Command::Get { .. } | Command::Controls => vec![Request::State],
+        Command::Set { slider, value } => vec![Request::Set {
+            param: slider.clone(),
+            value: *value,
+        }],
+        Command::Turn { slider, ticks } => vec![Request::Turn {
+            param: slider.clone(),
+            ticks: *ticks,
+        }],
         Command::Dial { control, ticks } => {
-            if ticks.unsigned_abs() > 1000 {
-                return Err("ticks must be within 1000".into());
+            if ticks.unsigned_abs() > MAX_TICKS.unsigned_abs() {
+                return Err(format!("ticks must be within {MAX_TICKS}"));
             }
             let cc = find(&controls("dials", "cc"), control)?;
             dial_values(*ticks)
                 .into_iter()
-                .map(|value| json!({"cmd": "cc", "cc": cc, "value": value}))
+                .map(|value| Request::Cc { cc, value })
                 .collect()
         }
         Command::Press { button, down, up } => {
             let note = find(&controls("buttons", "note"), button)?;
             let press = if *down {
-                "down"
+                Press::Down
             } else if *up {
-                "up"
+                Press::Up
             } else {
-                "click"
+                Press::Click
             };
-            vec![json!({"cmd": "note", "note": note, "press": press})]
+            vec![Request::Note { note, press }]
         }
-        Command::Key { combo } => vec![json!({"cmd": "action", "action": combo})],
-        Command::Mixer { channel } => {
-            vec![json!({"cmd": "action", "action": format!("mixer:{channel}")})]
-        }
-        Command::Bw => vec![json!({"cmd": "action", "action": "toggle:bw"})],
+        Command::Key { combo } => vec![action(combo)],
+        Command::Mixer { channel } => vec![action(&format!("mixer:{channel}"))],
+        Command::Bw => vec![action("toggle:bw")],
         Command::Open { name, id, .. } => {
             if *id {
                 let id: i64 = name
                     .parse()
                     .map_err(|_| format!("\"{name}\" is not an id"))?;
-                vec![json!({"cmd": "open", "id": id})]
+                vec![Request::Open {
+                    id: Some(id),
+                    name: None,
+                }]
             } else {
-                vec![json!({"cmd": "open", "name": name})]
+                vec![Request::Open {
+                    id: None,
+                    name: Some(name.clone()),
+                }]
             }
         }
-        Command::Search { text } => {
-            vec![json!({"cmd": "search", "text": text.clone().unwrap_or_default()})]
-        }
-        Command::Library => vec![json!({"cmd": "module", "module": "library"})],
-        Command::Develop => vec![json!({"cmd": "module", "module": "develop"})],
-        Command::Photo { direction } => {
-            let step = match direction {
+        Command::Search { text } => vec![Request::Search {
+            text: text.clone().unwrap_or_default(),
+        }],
+        Command::Library => vec![Request::Module {
+            module: Module::Library,
+        }],
+        Command::Develop => vec![Request::Module {
+            module: Module::Develop,
+        }],
+        Command::Photo { direction } => vec![Request::Photo {
+            step: match direction {
                 Direction::Next => 1,
                 Direction::Prev => -1,
-            };
-            vec![json!({"cmd": "photo", "step": step})]
-        }
+            },
+        }],
     })
 }
 
@@ -411,7 +446,7 @@ fn requests(command: &Command) -> Result<Vec<Value>, String> {
 fn wait_loaded(connection: &Connection, id: Option<i64>, seconds: u64) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_secs(seconds);
     loop {
-        let state = connection.ask(json!({"cmd": "state"}))?;
+        let state = connection.ask(to_json(&Request::State)?)?;
         if state["loaded"] == true && (id.is_none() || state["photo_id"].as_i64() == id) {
             return Ok(state);
         }
@@ -487,7 +522,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
             .ok_or("Missing output job ID")?;
         let deadline = Instant::now() + Duration::from_secs(*timeout);
         loop {
-            state = connection.ask(json!({"cmd":"job","job_id":id}))?;
+            state = connection.ask(to_json(&Request::Job { job_id: id })?)?;
             match state["result"]["status"].as_str() {
                 Some("completed") => break,
                 Some("failed") => {

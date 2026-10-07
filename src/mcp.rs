@@ -1,6 +1,7 @@
 //! MCP is a protocol adapter: all editing stays in the running Editor.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rawmakase_ctl::{Connection, default_data_dir};
+use rawmakase_protocol::{Request, request::Until};
 use rmcp::{
     RoleServer, ServerHandler, ServiceExt,
     handler::server::wrapper::Parameters,
@@ -183,16 +184,27 @@ fn result(reply: Value) -> CallToolResult {
 /// Returns once the app reports `until` (see the `wait` command), or after a
 /// second, so a cancelled call is still noticed. An app too old to wait gets a
 /// short pause instead; the caller reads the state either way.
-fn wait_for(connection: &Connection, until: Value) {
-    let mut request = until;
-    request["cmd"] = json!("wait");
-    request["timeout_ms"] = json!(1000);
-    if ask(connection, request).is_err() {
+fn wait_for(connection: &Connection, until: Until) {
+    let request = Request::Wait {
+        until,
+        timeout_ms: Some(1000),
+    };
+    if ask(connection, &request, None).is_err() {
         std::thread::sleep(Duration::from_millis(100));
     }
 }
 
-fn ask(connection: &Connection, request: Value) -> Result<Value, CallToolResult> {
+/// Sends `request`, guarded by `target` when there is one.
+fn ask(
+    connection: &Connection,
+    request: &Request,
+    target: Option<McpTarget>,
+) -> Result<Value, CallToolResult> {
+    let mut request =
+        serde_json::to_value(request).map_err(|e| error("invalid_request", e.to_string()))?;
+    if let Some(target) = target {
+        request["target"] = json!(rawmakase_protocol::Target::from(target));
+    }
     let reply = connection
         .request(request)
         .map_err(|e| error("connection_error", e))?;
@@ -227,8 +239,8 @@ impl Server {
         .await
         .unwrap_or_else(|e| error("adapter_error", e.to_string()))
     }
-    async fn send(&self, request: Value) -> CallToolResult {
-        self.work(move |connection| match ask(&connection, request) {
+    async fn send(&self, request: Request, target: Option<McpTarget>) -> CallToolResult {
+        self.work(move |connection| match ask(&connection, &request, target) {
             Ok(reply) => result(reply),
             Err(e) => e,
         })
@@ -249,21 +261,26 @@ impl Server {
         annotations(read_only_hint = true)
     )]
     async fn get_state(&self) -> CallToolResult {
-        self.send(json!({"cmd":"state"})).await
+        self.send(Request::State, None).await
     }
     #[tool(
         description = "Discover supported actions, parameter names, units, ranges and mask support.",
         annotations(read_only_hint = true)
     )]
     async fn get_capabilities(&self) -> CallToolResult {
-        self.send(json!({"cmd":"capabilities"})).await
+        self.send(Request::Capabilities, None).await
     }
     #[tool(
         description = "Find catalog photos by filename and return IDs for open_photo.",
         annotations(read_only_hint = true)
     )]
     async fn find_photos(&self, Parameters(p): Parameters<PhotoQuery>) -> CallToolResult {
-        self.send(json!({"cmd":"photos","query":p.query.unwrap_or_default(),"offset":p.offset.unwrap_or(0),"limit":p.limit.unwrap_or(100)})).await
+        let request = Request::Photos {
+            query: Some(p.query.unwrap_or_default()),
+            offset: Some(p.offset.unwrap_or(0) as u64),
+            limit: Some(p.limit.unwrap_or(100) as u64),
+        };
+        self.send(request, None).await
     }
     #[tool(
         description = "Open a catalog photo in Develop and wait up to 30 seconds for decoding. Fails if another photo replaces it. Opening may save the previous edit."
@@ -275,13 +292,13 @@ impl Server {
     ) -> CallToolResult {
         self.work(move |c| {
             if context.ct.is_cancelled() { return error("cancelled", "Tool call was cancelled"); }
-            let opened = match ask(&c, json!({"cmd":"open","id":p.id})) { Ok(r) => r, Err(e) => return e };
+            let opened = match ask(&c, &Request::Open { id: Some(p.id), name: None }, None) { Ok(r) => r, Err(e) => return e };
             let generation = opened["state"]["generation"].clone();
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 if context.ct.is_cancelled() { return error("cancelled", "Stopped waiting; opening may already have applied"); }
-                wait_for(&c, json!({"until":"loaded","photo_id":p.id}));
-                let reply = match ask(&c, json!({"cmd":"state"})) { Ok(r) => r, Err(e) => return e };
+                wait_for(&c, Until::Loaded { photo_id: p.id });
+                let reply = match ask(&c, &Request::State, None) { Ok(r) => r, Err(e) => return e };
                 let state = &reply["state"];
                 if state["photo_id"].as_i64().is_some_and(|id| id != p.id) || state["generation"] != generation || state["mode"] != "develop" {
                     return error("stale_target", "Another document replaced the requested photo; read state");
@@ -295,22 +312,28 @@ impl Server {
         description = "Set one parameter in displayed units. Requires current generation/revision; mask scope is optional. Returns updated state and guards. Values are clamped to supported ranges."
     )]
     async fn set_parameter(&self, Parameters(p): Parameters<Parameter>) -> CallToolResult {
-        self.send(json!({"cmd":"set","param":p.param,"value":p.value,"target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Set {
+            param: p.param,
+            value: p.value.into(),
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Run a named application action, including undo/redo, treatment, rating or reset. Requires fresh target guards. Some actions open dialogs; prefer export_photo for unattended export. Never blindly retry toggle/relative actions."
     )]
     async fn run_action(&self, Parameters(p): Parameters<Action>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":p.action,"target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Action { action: p.action };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Replace the RGB, red, green or blue point curve with a natural cubic curve. Coordinates are normalized 0–1. Changes one channel as one undo step, preserving all other curves. Read get_state tone_curve before editing."
     )]
     async fn set_tone_curve(&self, Parameters(p): Parameters<ToneCurve>) -> CallToolResult {
-        self.send(json!({"cmd":"curve","channel":rawmakase_protocol::CurveChannel::from(p.channel),"points":p.points,"target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Curve {
+            channel: p.channel.into(),
+            points: p.points,
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Apply a built-in RGB tone curve: linear, medium_contrast or strong_contrast. Preserves individual red, green and blue curves."
@@ -321,43 +344,52 @@ impl Server {
             CurvePreset::MediumContrast => "curve:medium_contrast",
             CurvePreset::StrongContrast => "curve:strong_contrast",
         };
-        self.send(json!({"cmd":"action","action":action,"target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Action {
+            action: action.into(),
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "List develop presets (built-in and imported) with ids, names, groups and, for the open photo, any issue: settings that do not fit it and would be skipped.",
         annotations(read_only_hint = true)
     )]
     async fn list_presets(&self, Parameters(p): Parameters<PresetQuery>) -> CallToolResult {
-        self.send(json!({"cmd":"presets","group":p.group})).await
+        self.send(Request::Presets { group: p.group }, None).await
     }
     #[tool(
         description = "Apply a develop preset to the open photo as one undo step, as clicking it in the Presets panel does. Name it by id, or by name with an optional group. Returns the settings skipped as not fitting this photo and any substituted profile."
     )]
     async fn apply_preset(&self, Parameters(p): Parameters<DevelopPreset>) -> CallToolResult {
-        self.send(json!({"cmd":"preset","id":p.id,"name":p.name,"group":p.group,"target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Preset {
+            id: p.id,
+            name: p.name,
+            group: p.group,
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Start automatic tone adjustment for the current photo. Poll get_state until auto_running is false, then inspect the values and preview the result. This reply confirms starting, not successful completion."
     )]
     async fn auto_tone(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":"auto_tone","target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Action {
+            action: "auto_tone".into(),
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Start automatic white balance. Poll get_state until auto_running is false, then inspect temperature/tint and preview. This reply confirms starting, not successful completion."
     )]
     async fn auto_white_balance(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":"auto_white_balance","target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        let request = Request::Action {
+            action: "auto_white_balance".into(),
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Save the current Develop edit to its catalog. Success confirms persistence; protected edits return an error."
     )]
     async fn save_photo(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"save","target":rawmakase_protocol::Target::from(p.target)}))
-            .await
+        self.send(Request::Save, Some(p.target)).await
     }
     #[tool(
         description = "Render the guarded edit and return a JPEG image for visual inspection, plus its captured revision. Waits up to 120 seconds. Uses a temporary file, with no user output path."
@@ -378,18 +410,18 @@ impl Server {
         description = "Start exporting the guarded edit to a new JPEG/TIFF file. Returns a job ID; call get_job until status is completed before claiming the file exists. Does not overwrite files."
     )]
     async fn export_photo(&self, Parameters(p): Parameters<Export>) -> CallToolResult {
-        let mut request = json!({"cmd":"export","path":p.path,"target":rawmakase_protocol::Target::from(p.target)});
-        if let Some(edge) = p.max_edge {
-            request["max_edge"] = edge.into();
-        }
-        self.send(request).await
+        let request = Request::Export {
+            path: p.path.into(),
+            max_edge: p.max_edge,
+        };
+        self.send(request, Some(p.target)).await
     }
     #[tool(
         description = "Read an export job's progress and captured revision. Only completed confirms file publication; failed includes an error. Job IDs belong to the running app session.",
         annotations(read_only_hint = true)
     )]
     async fn get_job(&self, Parameters(p): Parameters<Job>) -> CallToolResult {
-        self.send(json!({"cmd":"job","job_id":p.job_id})).await
+        self.send(Request::Job { job_id: p.job_id }, None).await
     }
 }
 
@@ -407,10 +439,11 @@ fn preview(
         Err(e) => return error("preview_failed", e.to_string()),
     };
     let path = dir.path().join("preview.jpg");
-    let started = match ask(
-        c,
-        json!({"cmd":"preview","path":path,"max_edge":edge,"target":rawmakase_protocol::Target::from(target)}),
-    ) {
+    let request = Request::Preview {
+        path: path.clone(),
+        max_edge: Some(edge),
+    };
+    let started = match ask(c, &request, Some(target)) {
         Ok(r) => r,
         Err(e) => return e,
     };
@@ -425,8 +458,8 @@ fn preview(
                 "Stopped waiting; temporary preview output will be discarded",
             );
         }
-        wait_for(c, json!({"until":"job","job_id":id}));
-        let reply = match ask(c, json!({"cmd":"job","job_id":id})) {
+        wait_for(c, Until::Job { job_id: id });
+        let reply = match ask(c, &Request::Job { job_id: id }, None) {
             Ok(r) => r,
             Err(e) => return e,
         };
