@@ -423,6 +423,7 @@ mod tests {
         let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
         let id = |name: &str| {
             library
+                .session
                 .photos
                 .iter()
                 .find(|p| p.filename == name)
@@ -434,7 +435,7 @@ mod tests {
             exposure: 1.5,
             ..Default::default()
         };
-        library.catalog.save_edit(
+        library.session.catalog.save_edit(
             other,
             &photos.join("b.dng"),
             &edit,
@@ -510,7 +511,7 @@ mod tests {
             exposure: -1.,
             ..Default::default()
         };
-        library.catalog.save_edit(
+        library.session.catalog.save_edit(
             other,
             &path,
             &edit,

@@ -147,7 +147,7 @@ impl Editor {
         self.measure_raw_defaults();
     }
     fn measure_usage(&mut self) {
-        let catalog = self.library.as_ref().map(|l| &l.catalog);
+        let catalog = self.library.as_ref().map(|l| &l.session.catalog);
         self.preferences.usage = Usage {
             camera_profiles: files(&camera_profiles_dir(), &["dcp", "xmp"]).0,
             lens_profiles: files(&lens_profiles_dir(), &["lcp"]).0,
@@ -374,7 +374,7 @@ impl Editor {
         let ctx = ui.ctx().clone();
         let usage = &self.preferences.usage;
         if let Some(library) = &self.library {
-            let path = library.catalog.path.clone();
+            let path = library.session.catalog.path.clone();
             group(ui, "Current catalog");
             form_row(ui, "Name", |ui| {
                 value(ui, &path.file_stem().unwrap_or_default().to_string_lossy());
@@ -382,7 +382,7 @@ impl Editor {
             form_row(ui, "Location", |ui| path_value(ui, &path));
             form_row(ui, "", |ui| reveal_button(ui, &path));
             form_row(ui, "Photos", |ui| {
-                value(ui, &library.photos.len().to_string());
+                value(ui, &library.session.photos.len().to_string());
             });
             form_row(ui, "Folders", |ui| {
                 value(ui, &usage.folders.map_or("–".into(), |n| n.to_string()));
