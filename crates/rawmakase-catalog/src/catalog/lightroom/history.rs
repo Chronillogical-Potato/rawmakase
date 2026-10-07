@@ -1,20 +1,22 @@
 //! Lightroom's develop history, imported with the catalog and shown under
 //! "From Lightroom" in the History panel, and the stored Lightroom develop
 //! settings a photo opens with.
+use crate::catalog::db::{LightroomWrite, Reads, SqliteSql, sql, sqlite_sql};
+use crate::catalog::value::{TextOrBlob, row};
 use crate::catalog::{Catalog, PhotoId};
 use anyhow::Result;
-use rusqlite::Connection;
 
 /// Set in `meta` once Lightroom history has been recovered from the stored catalog.
 const HISTORY_BACKFILLED: &str = "lightroom_history_backfilled";
 /// Copies history steps from an attached Lightroom catalog named `lr`.
-pub(super) const COPY_LIGHTROOM_HISTORY: &str =
+pub(super) const COPY_LIGHTROOM_HISTORY: SqliteSql = sqlite_sql!(
     "INSERT INTO lightroom_history(photo,position,name,created,text)
     SELECT image, row_number() OVER (PARTITION BY image ORDER BY dateCreated, id_local),
            COALESCE(name,''), dateCreated, text
     FROM lr.Adobe_libraryImageDevelopHistoryStep
     WHERE text IS NOT NULL AND image IN (SELECT id FROM photos)
-    ON CONFLICT DO NOTHING;";
+    ON CONFLICT DO NOTHING"
+);
 /// Largest history snapshot accepted. A step's text is a develop-settings string
 /// of a few kilobytes; the cap is far above that and only exists so a corrupt
 /// catalog cannot name a length the allocation would follow.
@@ -50,27 +52,27 @@ pub struct HistoryStep {
 impl Catalog {
     /// Lightroom's history for a photo, oldest step first.
     pub fn lightroom_history(&self, id: PhotoId) -> Result<Vec<HistoryStep>> {
-        let mut q = self.db.prepare(
-            "SELECT name, created, text FROM lightroom_history WHERE photo=? ORDER BY position",
+        row! {
+            struct Step {
+                name: String,
+                created: Option<f64>,
+                text: TextOrBlob,
+            }
+        }
+        let steps: Vec<Step> = self.db.read(
+            sql!(
+                "SELECT name, created, text FROM lightroom_history WHERE photo=? ORDER BY position"
+            ),
+            &[&id],
         )?;
-        let rows = q
-            .query_map([id], |r| {
-                let text = match r.get_ref(2)? {
-                    rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
-                        t.to_vec()
-                    }
-                    _ => Vec::new(),
-                };
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<f64>>(1)?, text))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows
+        Ok(steps
             .into_iter()
-            .filter_map(|(name, created, bytes)| {
+            .filter_map(|step| {
                 Some(HistoryStep {
-                    name,
-                    created,
-                    text: decode_history_text(&bytes)?,
+                    name: step.name,
+                    created: step.created,
+                    // A step of any other class is read as empty text.
+                    text: decode_history_text(&step.text.0.unwrap_or_default())?,
                 })
             })
             .collect())
@@ -89,23 +91,22 @@ impl Catalog {
     fn has_lightroom_history(&self) -> Result<bool> {
         let have: i64 = self
             .db
-            .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
+            .read_one(sql!("SELECT count(*) FROM lightroom_history"), &[])?;
         Ok(have > 0)
     }
     #[cfg(test)]
     pub fn lightroom_develop(&self, id: PhotoId) -> Result<Option<String>> {
-        Ok(self.db.query_row(
-            "SELECT lightroom_develop FROM photos WHERE id=?",
-            [id],
-            |r| r.get(0),
-        )?)
+        self.db.read_one(
+            sql!("SELECT lightroom_develop FROM photos WHERE id=?"),
+            &[&id],
+        )
     }
 }
 
 /// Copies history steps from a Lightroom catalog attached as `lr` that has them.
-fn copy_history(db: &Connection) -> Result<usize> {
-    if !super::has_table(db, "lr", "Adobe_libraryImageDevelopHistoryStep")? {
+fn copy_history(lr: &mut LightroomWrite<'_>) -> Result<usize> {
+    if !lr.has_table("Adobe_libraryImageDevelopHistoryStep")? {
         return Ok(0);
     }
-    Ok(db.execute(COPY_LIGHTROOM_HISTORY, [])?)
+    lr.execute_sqlite(COPY_LIGHTROOM_HISTORY, &[])
 }

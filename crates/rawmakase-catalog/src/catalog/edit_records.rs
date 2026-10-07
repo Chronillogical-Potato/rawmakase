@@ -1,5 +1,7 @@
 //! Reading the edits that `crate::edits` resolves: one photo's, or many photos'
 //! in one transaction.
+use super::db::{Reads, sql};
+use super::value::row;
 use super::{Catalog, PhotoId};
 use crate::edits::{EditRecord, PhotoRecord};
 use anyhow::Result;
@@ -7,47 +9,60 @@ use anyhow::Result;
 impl Catalog {
     /// Photo `id`'s edit as stored.
     pub fn edit_record(&self, id: PhotoId) -> Result<EditRecord> {
-        let (recipe, export, identity, lightroom) = self.db.query_row(
-            "SELECT recipe,export_options,identity,lightroom_develop FROM photos WHERE id=?",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?;
-        Ok(EditRecord {
-            recipe,
-            export,
-            identity,
-            local: self.local_text(id)?,
-            lightroom,
+        edit_record(&self.db, id)
+    }
+    /// The records of `ids`, in order, read in one transaction: one consistent
+    /// state of the catalog however many photos there are.
+    pub fn photo_records(&self, ids: &[PhotoId]) -> Result<Vec<PhotoRecord>> {
+        row! {
+            struct Rated {
+                rating: i32,
+                label: String,
+                captured: String,
+            }
+        }
+        self.db.snapshot(|snapshot| {
+            ids.iter()
+                .map(|&id| {
+                    let rated: Rated = snapshot.read_one(
+                        sql!("SELECT rating,label,captured FROM photos WHERE id=?"),
+                        &[&id],
+                    )?;
+                    Ok(PhotoRecord {
+                        edit: edit_record(snapshot, id)?,
+                        descriptive: super::descriptive::read(snapshot, id)?,
+                        keywords: super::descriptive::keywords(snapshot, id)?,
+                        rating: rated.rating,
+                        label: rated.label,
+                        captured: rated.captured,
+                    })
+                })
+                .collect()
         })
     }
 }
 
-impl Catalog {
-    /// The records of `ids`, in order, read in one transaction: one consistent
-    /// state of the catalog however many photos there are.
-    pub fn photo_records(&self, ids: &[PhotoId]) -> Result<Vec<PhotoRecord>> {
-        let tx = self.db.unchecked_transaction()?;
-        let records = ids
-            .iter()
-            .map(|&id| {
-                let (rating, label, captured) = self.db.query_row(
-                    "SELECT rating,label,captured FROM photos WHERE id=?",
-                    [id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )?;
-                Ok(PhotoRecord {
-                    edit: self.edit_record(id)?,
-                    descriptive: self.descriptive(id)?,
-                    keywords: self.keywords(id)?,
-                    rating,
-                    label,
-                    captured,
-                })
-            })
-            .collect::<Result<_>>()?;
-        tx.commit()?;
-        Ok(records)
+/// Photo `id`'s edit as stored.
+fn edit_record(db: &impl Reads, id: PhotoId) -> Result<EditRecord> {
+    row! {
+        struct Columns {
+            recipe: Option<String>,
+            export: Option<String>,
+            identity: Option<String>,
+            lightroom: Option<String>,
+        }
     }
+    let columns: Columns = db.read_one(
+        sql!("SELECT recipe,export_options,identity,lightroom_develop FROM photos WHERE id=?"),
+        &[&id],
+    )?;
+    Ok(EditRecord {
+        recipe: columns.recipe,
+        export: columns.export,
+        identity: columns.identity,
+        local: super::edits::local_text(db, id)?,
+        lightroom: columns.lightroom,
+    })
 }
 
 #[cfg(test)]
@@ -93,20 +108,20 @@ mod tests {
         }
     }
     fn set_lightroom(c: &Catalog, id: PhotoId, text: &str) -> Result<()> {
-        c.db.execute(
+        c.db_for_tests().execute(
             "UPDATE photos SET lightroom_develop=? WHERE id=?",
-            rusqlite::params![text, id],
+            rusqlite::params![text, id.0],
         )?;
         Ok(())
     }
 
     #[test]
     fn a_saved_edit_comes_first_then_lightroom_then_the_defaults() -> Result<()> {
-        let (_d, c, photos) = catalog()?;
+        let (_d, mut c, photos) = catalog()?;
         let metadata = chart_metadata();
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = crate::raw_defaults::brighter_defaults();
-        let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {
+        let resolve_photo = |c: &Catalog, (id, path): &(PhotoId, std::path::PathBuf)| {
             resolve(&c.edit_record(*id)?, path, &metadata, &profiles, &defaults)
         };
         // Saved, masks included: they are stored apart from the recipe.
@@ -141,7 +156,7 @@ mod tests {
         )?;
         // A Lightroom edit under it changes nothing.
         set_lightroom(&c, a.0, "s = { Exposure2012 = 0.25 }")?;
-        let resolved = resolve_photo(a)?;
+        let resolved = resolve_photo(&c, a)?;
         assert_eq!(resolved.origin, Origin::Saved);
         assert_eq!(resolved.recipe, saved);
         assert_eq!(resolved.export.quality, 80);
@@ -149,7 +164,7 @@ mod tests {
 
         let text = "s = { Exposure2012 = 0.25 }";
         set_lightroom(&c, b.0, text)?;
-        let resolved = resolve_photo(b)?;
+        let resolved = resolve_photo(&c, b)?;
         assert_eq!(resolved.origin, Origin::Lightroom);
         // From Adobe Default, as Lightroom stores it, whatever the raw defaults.
         assert_eq!(
@@ -158,7 +173,7 @@ mod tests {
         );
         assert_eq!(resolved.recipe.exposure, 0.25);
 
-        let resolved = resolve_photo(unedited)?;
+        let resolved = resolve_photo(&c, unedited)?;
         assert_eq!(resolved.origin, Origin::Defaults);
         assert_eq!(
             resolved.recipe,
@@ -167,17 +182,17 @@ mod tests {
         assert_eq!(resolved.recipe.exposure, 0.7);
         // Empty Lightroom settings are none.
         set_lightroom(&c, unedited.0, "")?;
-        assert_eq!(resolve_photo(unedited)?.origin, Origin::Defaults);
+        assert_eq!(resolve_photo(&c, unedited)?.origin, Origin::Defaults);
         Ok(())
     }
 
     #[test]
     fn an_edit_that_cant_be_used_is_an_error_never_the_defaults() -> Result<()> {
-        let (_d, c, photos) = catalog()?;
+        let (_d, mut c, photos) = catalog()?;
         let metadata = chart_metadata();
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = DevelopDefaults::default();
-        let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {
+        let resolve_photo = |c: &Catalog, (id, path): &(PhotoId, std::path::PathBuf)| {
             c.edit_record(*id)
                 .and_then(|record| resolve(&record, path, &metadata, &profiles, &defaults))
                 .map(|r| r.origin)
@@ -196,7 +211,7 @@ mod tests {
         let mut bytes = std::fs::read(&changed.1)?;
         bytes.extend_from_slice(b"changed");
         std::fs::write(&changed.1, bytes)?;
-        let error = resolve_photo(changed).unwrap_err();
+        let error = resolve_photo(&c, changed).unwrap_err();
         assert!(error.contains("protected"), "{error}");
 
         c.save_edit(
@@ -206,12 +221,13 @@ mod tests {
             &ExportOptions::default(),
             super::super::HistoryUpdate::Keep,
         )?;
-        c.db.execute("UPDATE photos SET recipe='{' WHERE id=?", [unreadable.0])?;
-        assert!(resolve_photo(unreadable).is_err());
+        c.db_for_tests()
+            .execute("UPDATE photos SET recipe='{' WHERE id=?", [unreadable.0.0])?;
+        assert!(resolve_photo(&c, unreadable).is_err());
 
         // Settings cut off mid-value.
         set_lightroom(&c, lightroom.0, "s = { Exposure2012 = ")?;
-        let error = resolve_photo(lightroom).unwrap_err();
+        let error = resolve_photo(&c, lightroom).unwrap_err();
         assert!(error.contains("Lightroom edit can't be read"), "{error}");
         Ok(())
     }

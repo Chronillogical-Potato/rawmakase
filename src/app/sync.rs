@@ -123,7 +123,7 @@ pub(super) enum SyncSide {
 /// A photo that cannot be prepared (offline, changed since its edit was saved) is
 /// reported and left out; if saving fails, nothing is saved.
 pub(super) fn synchronize(
-    catalog: &Catalog,
+    catalog: &mut Catalog,
     source: &Settings,
     change: &BatchChange,
     targets: &[SyncTarget],
@@ -328,7 +328,7 @@ fn matched_exposure(source: &Settings, target: &crate::camera_data::Metadata) ->
 /// goes back to having none. `path` gives each photo's current location, which a
 /// relink may have changed since.
 pub(super) fn restore(
-    catalog: &Catalog,
+    catalog: &mut Catalog,
     edits: &[Synced],
     side: SyncSide,
     path: impl Fn(PhotoId) -> Option<PathBuf>,
@@ -484,8 +484,9 @@ impl Editor {
         std::thread::spawn(move || {
             // A panic (in Upright's analysis, say) still finishes the Sync.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Catalog::open(&catalog)
-                    .map(|c| synchronize(&c, &source, &change, &targets, &defaults, demosaic))
+                Catalog::open(&catalog).map(|mut c| {
+                    synchronize(&mut c, &source, &change, &targets, &defaults, demosaic)
+                })
             }))
             .unwrap_or_else(|_| Err(anyhow::anyhow!("the Sync failed unexpectedly")))
             .unwrap_or_else(|e| SyncResult {
@@ -583,7 +584,7 @@ mod tests {
     fn sync_saves_every_photo_it_can_with_a_history_step_and_undoes_together() -> Result<()> {
         let Fixture {
             _dir,
-            catalog: c,
+            catalog: mut c,
             photos,
         } = catalog()?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
@@ -597,7 +598,7 @@ mod tests {
         };
         let targets: Vec<_> = photos[1..].iter().map(|(id, p)| target(*id, p)).collect();
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
@@ -621,18 +622,18 @@ mod tests {
                 .map(|(_, path)| path.clone())
         };
         // One Undo restores every photo; these had no edit, and have none again.
-        restore(&c, &result.synced, SyncSide::Before, path)?;
+        restore(&mut c, &result.synced, SyncSide::Before, path)?;
         for (id, path) in &photos[1..3] {
             assert!(c.load_edit(*id, path)?.is_none());
             assert!(c.load_history(*id)?.is_none());
         }
         // Redo brings the edit back with its History step.
-        restore(&c, &result.synced, SyncSide::After, path)?;
+        restore(&mut c, &result.synced, SyncSide::After, path)?;
         let history = c.load_history(photos[1].0)?.unwrap();
         assert_eq!(history.steps.last().unwrap().name, "Synchronize Settings");
         // A photo removed since makes the command unusable rather than wrong.
         assert!(matches!(
-            restore(&c, &result.synced, SyncSide::Before, |_| None),
+            restore(&mut c, &result.synced, SyncSide::Before, |_| None),
             Err(SyncRestoreError::PhotoRemoved)
         ));
         assert_eq!(
@@ -663,7 +664,7 @@ mod tests {
             HistoryUpdate::Replace(&earlier),
         )?;
         let again = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..1],
@@ -671,13 +672,13 @@ mod tests {
             crate::camera_data::Demosaic::default(),
         );
         assert_eq!(again.synced.len(), 1);
-        restore(&c, &again.synced, SyncSide::Before, path)?;
+        restore(&mut c, &again.synced, SyncSide::Before, path)?;
         assert_eq!(c.load_history(id)?, Some(earlier));
         assert_eq!(c.load_edit(id, &path0)?.unwrap().recipe.exposure, -0.3);
-        restore(&c, &again.synced, SyncSide::After, path)?;
+        restore(&mut c, &again.synced, SyncSide::After, path)?;
         // Settings the photos already have change nothing.
         let again = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..2],
@@ -686,12 +687,12 @@ mod tests {
         );
         assert!(again.synced.is_empty() && again.failed.is_empty());
         // A file changed while it had no edit is not given the old settings again.
-        restore(&c, &result.synced, SyncSide::Before, path)?;
+        restore(&mut c, &result.synced, SyncSide::Before, path)?;
         let changed = &photos[1].1;
         let mut bytes = std::fs::read(changed)?;
         bytes.extend_from_slice(b"changed");
         std::fs::write(changed, bytes)?;
-        assert!(restore(&c, &result.synced, SyncSide::After, path).is_err());
+        assert!(restore(&mut c, &result.synced, SyncSide::After, path).is_err());
         assert!(c.load_edit(photos[2].0, &photos[2].1)?.is_none());
         Ok(())
     }
@@ -727,11 +728,11 @@ mod tests {
         // On photos without those settings it says so and leaves them alone.
         let Fixture {
             _dir,
-            catalog: c,
+            catalog: mut c,
             photos,
         } = catalog()?;
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::MatchTotalExposures,
             &[target(photos[1].0, &photos[1].1)],
@@ -751,7 +752,7 @@ mod tests {
     fn a_history_from_a_newer_release_is_not_replaced() -> Result<()> {
         let Fixture {
             _dir,
-            catalog: c,
+            catalog: mut c,
             photos,
         } = catalog()?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
@@ -779,10 +780,10 @@ mod tests {
         };
         c.db_for_tests().execute(
             "INSERT INTO develop_history(photo, data) VALUES (?, ?)",
-            rusqlite::params![id, newer],
+            rusqlite::params![id.0, newer],
         )?;
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
@@ -798,7 +799,7 @@ mod tests {
     fn a_lightroom_edit_that_cant_be_read_fails_its_photo_and_notes_are_reported() -> Result<()> {
         let Fixture {
             _dir,
-            catalog: c,
+            catalog: mut c,
             photos,
         } = catalog()?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
@@ -809,14 +810,14 @@ mod tests {
         // Settings cut off mid-value.
         rusqlite::Connection::open(&c.path)?.execute(
             "UPDATE photos SET lightroom_develop='s = { Exposure2012 = ' WHERE id=?",
-            [photos[1].0],
+            [photos[1].0.0],
         )?;
         let targets = [
             target(photos[1].0, &photos[1].1),
             target(photos[2].0, &photos[2].1),
         ];
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
@@ -841,13 +842,13 @@ mod tests {
     -> Result<()> {
         let Fixture {
             _dir,
-            catalog: c,
+            catalog: mut c,
             photos,
         } = catalog()?;
         let lightroom_text = "s = { Exposure2012 = 0.25 }";
         rusqlite::Connection::open(&c.path)?.execute(
             "UPDATE photos SET lightroom_develop=? WHERE id=?",
-            rusqlite::params![lightroom_text, photos[1].0],
+            rusqlite::params![lightroom_text, photos[1].0.0],
         )?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
@@ -868,7 +869,7 @@ mod tests {
         );
         let defaults = crate::raw_defaults::brighter_defaults();
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(clarity),
             &targets,
@@ -905,7 +906,7 @@ mod tests {
             |_| None,
         );
         let result = synchronize(
-            &c,
+            &mut c,
             &source,
             &BatchChange::Settings(GroupSelection::default()),
             &[target(photos[0].0, &photos[0].1)],

@@ -4,6 +4,7 @@
 use super::locations::Computer;
 use super::*;
 use crate::{export_settings::ExportOptions, model::recipe::Recipe};
+use rusqlite::params;
 
 /// A catalog with `n` photos added from a folder, their ids and the folder.
 fn catalog(n: usize) -> Result<(tempfile::TempDir, Catalog, Vec<PhotoId>, PathBuf)> {
@@ -38,13 +39,13 @@ fn no_table_an_upsert_replaces_rows_of_has_rows_depending_on_it() -> Result<()> 
         "photo_text",
     ];
     let tables: Vec<String> = cat
-        .db
+        .db_for_tests()
         .prepare("SELECT name FROM sqlite_master WHERE type='table'")?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     for table in &tables {
         let targets: Vec<String> = cat
-            .db
+            .db_for_tests()
             .prepare("SELECT \"table\" FROM pragma_foreign_key_list(?)")?
             .query_map([table], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
@@ -86,7 +87,7 @@ fn upserts_replace_every_column_they_write() -> Result<()> {
 
 #[test]
 fn locating_a_root_or_folder_again_moves_it() -> Result<()> {
-    let (dir, cat, _, _) = catalog(1)?;
+    let (dir, mut cat, _, _) = catalog(1)?;
     let root = cat.roots()?[0].0;
     let (first, second) = (dir.path().join("first"), dir.path().join("second"));
     for place in [&first, &second] {
@@ -103,9 +104,9 @@ fn locating_a_root_or_folder_again_moves_it() -> Result<()> {
     let own: Vec<_> = rows.iter().filter(|(r, _)| *r == folder.relative).collect();
     assert_eq!(own, [&(folder.relative.clone(), second.join("sub"))]);
     assert_eq!(cat.folders()?[0].path, second.join("sub"));
-    let mappings: i64 = cat
-        .db
-        .query_row("SELECT count(*) FROM folder_mappings", [], |r| r.get(0))?;
+    let mappings: i64 =
+        cat.db_for_tests()
+            .query_row("SELECT count(*) FROM folder_mappings", [], |r| r.get(0))?;
     assert_eq!(mappings, 1);
     Ok(())
 }
@@ -122,17 +123,17 @@ fn adopting_legacy_mappings_of_duplicate_folders_keeps_the_last_added() -> Resul
         "INSERT INTO folders(root, relative_path) SELECT root, relative_path FROM folders",
         [],
     )?;
-    let duplicate: FolderId = db.query_row("SELECT max(id) FROM folders", [], |r| r.get(0))?;
+    let duplicate = FolderId(db.query_row("SELECT max(id) FROM folders", [], |r| r.get(0))?);
     db.execute(
         "INSERT INTO folder_paths(folder, path) VALUES (?, ?)",
-        params![duplicate, folder.relative],
+        params![duplicate.0, folder.relative],
     )?;
     let (older, newer) = (dir.path().join("older"), dir.path().join("newer"));
     // Mapped newest folder first, so row order can't decide.
     for (id, place) in [(duplicate, &newer), (folder.id, &older)] {
         db.execute(
             "INSERT INTO folder_mappings(folder, path) VALUES (?, ?)",
-            params![id, place.to_string_lossy()],
+            params![id.0, place.to_string_lossy()],
         )?;
     }
     drop(db);
@@ -163,7 +164,7 @@ fn keywords_are_found_at_the_top_and_nested() -> Result<()> {
     assert_eq!(cat.keyword_at(&path(&["Places", "City"]))?, nested);
     assert_eq!(cat.keyword_at(&path(&["City"]))?, city);
     let count: i64 = cat
-        .db
+        .db_for_tests()
         .query_row("SELECT count(*) FROM keywords", [], |r| r.get(0))?;
     assert_eq!(count, 3);
     Ok(())
@@ -190,7 +191,7 @@ fn reused_numbered_parameters_bind_one_value() -> Result<()> {
 
 #[test]
 fn edit_times_keep_their_text_form() -> Result<()> {
-    let (_dir, cat, ids, folder) = catalog(2)?;
+    let (_dir, mut cat, ids, folder) = catalog(2)?;
     let before = rawmakase_model::time::now_text();
     cat.save_edit(
         ids[0],
@@ -201,9 +202,9 @@ fn edit_times_keep_their_text_form() -> Result<()> {
     )?;
     let after = rawmakase_model::time::now_text();
     // Lightroom counts seconds from 2001, with fractions.
-    cat.db.execute(
+    cat.db_for_tests().execute(
         "INSERT INTO lightroom_history(photo, position, created, text) VALUES (?, 1, ?, '')",
-        params![ids[1], 491_026_045.75],
+        params![ids[1].0, 491_026_045.75],
     )?;
     let times = cat.edit_times()?;
     let saved = &times[&ids[0]];
@@ -212,9 +213,9 @@ fn edit_times_keep_their_text_form() -> Result<()> {
     assert_eq!(saved.len(), "2016-07-24 04:07:25".len());
     assert_eq!(times[&ids[1]], "2016-07-24 04:07:25");
     // The adoption time of this computer has the same form.
-    let adopted: String = cat
-        .db
-        .query_row("SELECT adopted_at FROM computers", [], |r| r.get(0))?;
+    let adopted: String =
+        cat.db_for_tests()
+            .query_row("SELECT adopted_at FROM computers", [], |r| r.get(0))?;
     assert_eq!(adopted.len(), saved.len());
     assert_eq!(&adopted[10..11], " ");
     Ok(())
@@ -277,13 +278,13 @@ fn cameras_sort_ignoring_ascii_case_only() -> Result<()> {
         "",
     ];
     for (i, name) in names.into_iter().enumerate() {
-        cat.db.execute(
+        cat.db_for_tests().execute(
             "INSERT INTO photo_info(photo, camera) VALUES (?, ?)",
             params![i as i64 + 1, name],
         )?;
     }
     let nocase: Vec<String> = cat
-        .db
+        .db_for_tests()
         .prepare(
             "SELECT DISTINCT camera FROM photo_info
              WHERE camera IS NOT NULL AND camera != ''

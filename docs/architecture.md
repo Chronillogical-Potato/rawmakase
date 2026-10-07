@@ -51,6 +51,7 @@ files should preserve.
 | `edit_session` | The edit of the photo open in Develop apart from the window: its bounded History (named steps, one per gesture, saved with the edit) and save state; no egui | `history.rs`, `save_state.rs` |
 | `edits` | Which edit a photo develops with (saved, Lightroom or raw defaults), shared by Develop, Sync and Export; the catalog only reads the stored records | `edits.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
+| `catalog::db` | The catalog's one connection boundary: an opaque `Db` with checked reads, `snapshot` for consistent reads, `write` as the only way to write, and `with_lightroom` for import; statements are `Sql` (portable) or `SqliteSql` (Lightroom), shape-checked at compile time; values go through the catalog's own `ToValue`/`FromRow` (`catalog::value`) | `mod.rs`, `sql.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
 | `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), and the background reads that fill in capture times and photo info for photos added from folders. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
@@ -109,10 +110,14 @@ inject a temporary file, without changing the process-wide environment.
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate
   headless build feature.
-- The catalog owns its connection. Lightroom import is a child adapter with
-  access to that connection for its import transaction; do not expose the
-  connection publicly or put Lightroom-specific queries back into general
-  catalog operations.
+- The catalog owns its connection, and only `catalog::db` sees it (issue #341).
+  Catalog code reads through `Reads` and writes inside `Db::write` in portable
+  SQL (`sql!`), with values in the catalog's own types, so a second backend
+  could be added behind `Db` without touching domain code; a test fails on
+  `rusqlite` anywhere else but the preview cache and the check of a Lightroom
+  file before import. Lightroom import runs inside `Db::with_lightroom`, the
+  only place `SqliteSql` runs; do not expose the connection publicly or put
+  Lightroom-specific queries back into general catalog operations.
 - Parsing XMP produces settings, while application validates and resolves a
   recipe. Collection discovery and favorites belong in `presets`.
 - Validate recipe changes at domain boundaries. Saved format versions and

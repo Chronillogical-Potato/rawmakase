@@ -17,7 +17,7 @@ rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0" }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0" }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0" }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0" }
-rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["sql"] }
+rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0" }
 rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0" }
 rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
 rawmakase-ctl = { path = "tools/rawmakase-ctl", version = "0.1.0" }
@@ -29,7 +29,6 @@ getrandom = "0.4"
 anyhow = "1"
 flate2 = "1"
 roxmltree = "0.21.1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 # The camera table (data/cameras.toml), parsed once at startup.
@@ -96,8 +95,11 @@ rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0", feat
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0", features = ["test-support"] }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0", features = ["test-support"] }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0", features = ["test-support"] }
-rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["sql", "test-support"] }
+rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["test-support"] }
 rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0", features = ["test-support"] }
+# Tests set up and inspect catalog files directly; the app itself reaches
+# the catalog's database only through rawmakase-catalog.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # The icon and version information Windows shows for the executable.
 [target.'cfg(windows)'.build-dependencies]

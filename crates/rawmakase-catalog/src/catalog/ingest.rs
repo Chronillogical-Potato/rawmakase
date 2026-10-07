@@ -1,9 +1,9 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
+use super::db::{Reads, sql};
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
 use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
-use rusqlite::{OptionalExtension, params};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -158,93 +158,92 @@ impl Catalog {
                 .collect();
             return Ok(result);
         }
-        let tx = self.db.transaction()?;
-        let mut new_root = None;
-        let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
-        let mut added = Vec::new();
-        for file in files {
-            let Some(place) = file.parent().and_then(|d| places.get(d)) else {
-                continue;
-            };
-            let (root, logical) = match place {
-                Place::Folder(root, logical) => (*root, logical.clone()),
-                Place::New(logical) => {
-                    let root = match new_root {
-                        Some(root) => root,
-                        None => *new_root.insert(tx.query_row(
-                            "INSERT INTO roots(original_path) VALUES(?) RETURNING id",
-                            [folder.to_string_lossy()],
-                            |r| r.get(0),
-                        )?),
-                    };
-                    (root, logical.clone())
+        let added = self.db.write(|w| {
+            let mut new_root = None;
+            let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
+            let mut added = Vec::new();
+            for file in files {
+                let Some(place) = file.parent().and_then(|d| places.get(d)) else {
+                    continue;
+                };
+                let (root, logical) = match place {
+                    Place::Folder(root, logical) => (*root, logical.clone()),
+                    Place::New(logical) => {
+                        let root = match new_root {
+                            Some(root) => root,
+                            None => *new_root.insert(w.insert_returning_id(
+                                sql!("INSERT INTO roots(original_path) VALUES(?) RETURNING id"),
+                                &[&folder.to_string_lossy()],
+                            )?),
+                        };
+                        (root, logical.clone())
+                    }
+                };
+                let filename = file.file_name().unwrap().to_string_lossy();
+                // A photo is the same one by root, folder and name; its virtual
+                // copies share them and stay as they are.
+                let known: Option<i64> = w.read_optional(
+                    sql!(
+                        "SELECT 1 FROM photos WHERE filename=? AND folder IN
+                         (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
+                          WHERE f.root=? AND p.path=?)"
+                    ),
+                    &[&filename, &root, &logical],
+                )?;
+                if known.is_some() {
+                    continue;
                 }
-            };
-            let filename = file.file_name().unwrap().to_string_lossy();
-            // A photo is the same one by root, folder and name; its virtual
-            // copies share them and stay as they are.
-            if tx
-                .query_row(
-                    "SELECT 1 FROM photos WHERE filename=? AND folder IN
-                     (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
-                      WHERE f.root=? AND p.path=?)",
-                    params![filename, root, logical],
-                    |r| r.get::<_, i32>(0),
-                )
-                .optional()?
-                .is_some()
-            {
-                continue;
+                let key = (root, logical);
+                let fid = match folders.get(&key) {
+                    Some(id) => *id,
+                    None => {
+                        let (root, logical) = &key;
+                        let existing: Option<FolderId> = w.read_one(
+                            sql!(
+                                "SELECT min(f.id) FROM folders f JOIN folder_paths p ON p.folder=f.id
+                                 WHERE f.root=? AND p.path=?"
+                            ),
+                            &[root, logical],
+                        )?;
+                        let id = match existing {
+                            Some(id) => id,
+                            None => {
+                                // Older releases read the folder in this system's form.
+                                let native: PathBuf = super::locations::names(logical).collect();
+                                let id: FolderId = w.insert_returning_id(
+                                    sql!(
+                                        "INSERT INTO folders(root,relative_path) VALUES(?,?)
+                                         RETURNING id"
+                                    ),
+                                    &[root, &native.to_string_lossy()],
+                                )?;
+                                w.execute(
+                                    sql!("INSERT INTO folder_paths(folder,path) VALUES(?,?)"),
+                                    &[&id, logical],
+                                )?;
+                                id
+                            }
+                        };
+                        folders.insert(key, id);
+                        id
+                    }
+                };
+                let format = file
+                    .extension()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_uppercase();
+                let id: PhotoId = w.insert_returning_id(
+                    sql!(
+                        "INSERT INTO photos(folder,filename,original_path,format) VALUES(?,?,?,?)
+                         RETURNING id"
+                    ),
+                    &[&fid, &filename, &file.to_string_lossy(), &format],
+                )?;
+                added.push((id, file));
             }
-            let key = (root, logical);
-            let fid = match folders.get(&key) {
-                Some(id) => *id,
-                None => {
-                    let (root, logical) = &key;
-                    let existing = tx.query_row(
-                        "SELECT min(f.id) FROM folders f JOIN folder_paths p ON p.folder=f.id
-                             WHERE f.root=? AND p.path=?",
-                        params![root, logical],
-                        |r| r.get::<_, Option<FolderId>>(0),
-                    )?;
-                    let id = match existing {
-                        Some(id) => id,
-                        None => {
-                            // Older releases read the folder in this system's form.
-                            let native: PathBuf = super::locations::names(logical).collect();
-                            let id: FolderId = tx.query_row(
-                                "INSERT INTO folders(root,relative_path) VALUES(?,?) RETURNING id",
-                                params![root, native.to_string_lossy()],
-                                |r| r.get(0),
-                            )?;
-                            tx.execute(
-                                "INSERT INTO folder_paths(folder,path) VALUES(?,?)",
-                                params![id, logical],
-                            )?;
-                            id
-                        }
-                    };
-                    folders.insert(key, id);
-                    id
-                }
-            };
-            let id: PhotoId = tx.query_row(
-                "INSERT INTO photos(folder,filename,original_path,format) VALUES(?,?,?,?)
-                 RETURNING id",
-                params![
-                    fid,
-                    filename,
-                    file.to_string_lossy(),
-                    file.extension()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_ascii_uppercase()
-                ],
-                |r| r.get(0),
-            )?;
-            added.push((id, file));
-        }
-        tx.commit()?;
+            Ok(added)
+        })?;
         for (id, file) in &added {
             if crate::storage::is_raw(file) {
                 // A sidecar that no longer matches its photo stays unused on disk.
@@ -274,24 +273,24 @@ impl Catalog {
     /// Only empty dates are filled, never one Lightroom or the user set, and a
     /// photo's virtual copies get its date too.
     pub fn fill_capture_times(&mut self, times: &[(PhotoId, String)]) -> Result<()> {
-        let tx = self.db.transaction()?;
-        {
+        self.db.write(|w| {
             // Two statements, each on an index, rather than one OR that scans.
-            let mut photo =
-                tx.prepare("UPDATE photos SET captured=?1 WHERE id=?2 AND captured=''")?;
-            let mut copies =
-                tx.prepare("UPDATE photos SET captured=?1 WHERE master_id=?2 AND captured=''")?;
             for (id, captured) in times {
-                photo.execute(params![captured, id])?;
-                copies.execute(params![captured, id])?;
+                w.execute(
+                    sql!("UPDATE photos SET captured=?1 WHERE id=?2 AND captured=''"),
+                    &[captured, id],
+                )?;
+                w.execute(
+                    sql!("UPDATE photos SET captured=?1 WHERE master_id=?2 AND captured=''"),
+                    &[captured, id],
+                )?;
             }
-        }
-        tx.commit()?;
-        Ok(())
+            Ok(())
+        })
     }
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
-    fn import_sidecar(&self, id: PhotoId, file: &Path) -> Result<()> {
+    fn import_sidecar(&mut self, id: PhotoId, file: &Path) -> Result<()> {
         let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
             return Ok(());
         };

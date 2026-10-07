@@ -2,12 +2,13 @@
 //! and TIFF files: when a folder is added, for its new photos, and on Read
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
+use super::db::{LightroomWrite, Write, sql, sqlite_sql};
+use super::value::{TextOrBlob, row};
 use super::{Catalog, PhotoId};
 use crate::jpeg::{APP1, Segments};
 use crate::xml::ns::JPEG_HEADER;
 use crate::xmp::descriptive::{self, Read};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 
 /// What reading sidecars found besides the metadata.
@@ -199,11 +200,11 @@ pub enum Merge {
     Overwrite,
 }
 
-/// Writes what was read into photo `id`'s rows, in `db`'s transaction, as
+/// Writes what was read into photo `id`'s rows, in `w`'s transaction, as
 /// `merge` says. Rating, label and flag are set where the file has them.
-pub(super) fn apply(db: &Connection, id: PhotoId, read: &Read, merge: Merge) -> Result<()> {
+pub(super) fn apply(w: &mut Write<'_>, id: PhotoId, read: &Read, merge: Merge) -> Result<()> {
     let overwrite = merge == Merge::Overwrite;
-    let mut d = super::descriptive::read(db, id)?;
+    let mut d = super::descriptive::read(w, id)?;
     fn put<T: Clone>(slot: &mut Option<T>, value: &Option<T>, overwrite: bool) {
         if value.is_some() && (overwrite || slot.is_none()) {
             slot.clone_from(value);
@@ -215,24 +216,27 @@ pub(super) fn apply(db: &Connection, id: PhotoId, read: &Read, merge: Merge) -> 
     put(&mut d.creator, &read.creator, overwrite);
     put(&mut d.capture, &read.capture, overwrite);
     put(&mut d.location, &read.location, overwrite);
-    super::descriptive::write(db, id, &d)?;
+    super::descriptive::write(w, id, &d)?;
     if let Some(paths) = &read.keywords {
         if overwrite {
-            db.execute("DELETE FROM photo_keywords WHERE photo=?", [id])?;
+            w.execute(sql!("DELETE FROM photo_keywords WHERE photo=?"), &[&id])?;
         }
         for path in paths {
-            let keyword = super::descriptive::keyword_at(db, path)?;
-            super::descriptive::tag_photo(db, id, keyword)?;
+            let keyword = super::descriptive::keyword_at(w, path)?;
+            super::descriptive::tag_photo(w, id, keyword)?;
         }
     }
     if let Some(rating) = read.rating {
-        db.execute("UPDATE photos SET rating=? WHERE id=?", params![rating, id])?;
+        w.execute(
+            sql!("UPDATE photos SET rating=? WHERE id=?"),
+            &[&rating, &id],
+        )?;
     }
     if let Some(label) = &read.label {
-        db.execute("UPDATE photos SET label=? WHERE id=?", params![label, id])?;
+        w.execute(sql!("UPDATE photos SET label=? WHERE id=?"), &[label, &id])?;
     }
     if let Some(flag) = read.flag {
-        db.execute("UPDATE photos SET flag=? WHERE id=?", params![flag, id])?;
+        w.execute(sql!("UPDATE photos SET flag=? WHERE id=?"), &[&flag, &id])?;
     }
     Ok(())
 }
@@ -260,17 +264,16 @@ impl Catalog {
         reads: &[(PhotoId, PathBuf, Read)],
         merge: Merge,
     ) -> Result<SidecarReport> {
-        let mut report = SidecarReport::default();
-        let mut tx = self.db.transaction()?;
-        for (id, path, read) in reads {
-            let sp = tx.savepoint()?;
-            match apply(&sp, *id, read, merge) {
-                Ok(()) => sp.commit()?,
-                Err(e) => report.unreadable.push((path.clone(), format!("{e:#}"))),
+        self.db.write(|w| {
+            let mut report = SidecarReport::default();
+            for (id, path, read) in reads {
+                // One photo that can't be written leaves the others saved.
+                if let Err(e) = w.savepoint(|w| apply(w, *id, read, merge)) {
+                    report.unreadable.push((path.clone(), format!("{e:#}")));
+                }
             }
-        }
-        tx.commit()?;
-        Ok(report)
+            Ok(report)
+        })
     }
     /// Reads the metadata of photos just added from a folder.
     pub(super) fn import_file_metadata(
@@ -303,12 +306,18 @@ impl Catalog {
 /// a Lightroom catalog keeps per photo (attached as `lr`), for the photos
 /// that have no row yet. Keywords, rating, label and flag come from
 /// Lightroom's own tables. Returns the photos read.
-pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
-    if !super::lightroom::has_table(db, "lr", "Adobe_AdditionalMetadata")? {
+pub(super) fn copy_lightroom_metadata(lr: &mut LightroomWrite<'_>) -> Result<usize> {
+    if !lr.has_table("Adobe_AdditionalMetadata")? {
         return Ok(0);
     }
-    let rows: Vec<(PhotoId, String)> = db
-        .prepare(&format!(
+    row! {
+        struct Packet {
+            id: PhotoId,
+            xmp: TextOrBlob,
+        }
+    }
+    let rows: Vec<Packet> = lr.read_sqlite(
+        sqlite_sql!(concat!(
             // Only photos that are still that Lightroom image: a photo
             // added since may have taken a removed copy's id.
             "SELECT m.image, m.xmp FROM lr.Adobe_AdditionalMetadata m
@@ -317,22 +326,18 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
              JOIN lr.AgLibraryFile f ON f.id_local = i.rootFile
              JOIN lr.AgLibraryFolder d ON d.id_local = f.folder
              JOIN lr.AgLibraryRootFolder r ON r.id_local = d.rootFolder
-             WHERE p.original_path = r.absolutePath || d.pathFromRoot || {}",
-            super::lightroom::LIGHTROOM_FILENAME
-        ))?
-        .query_map([], |r| {
-            let xmp = match r.get_ref(1)? {
-                rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
-                    // Invalid text is left out rather than imported mangled.
-                    String::from_utf8(t.to_vec()).unwrap_or_default()
-                }
-                _ => String::new(),
-            };
-            Ok((r.get(0)?, xmp))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
+             WHERE p.original_path = r.absolutePath || d.pathFromRoot || ",
+            super::lightroom::lightroom_filename!()
+        )),
+        &[],
+    )?;
     let mut read = 0;
-    for (id, xmp) in rows {
+    for Packet { id, xmp } in rows {
+        // Invalid text is left out rather than imported mangled.
+        let xmp = xmp
+            .0
+            .and_then(|t| String::from_utf8(t).ok())
+            .unwrap_or_default();
         // A packet that can't be read is left out, as Lightroom's own data.
         let Ok(found) = descriptive::read(&xmp) else {
             continue;
@@ -344,7 +349,7 @@ pub(super) fn copy_lightroom_metadata(db: &Connection) -> Result<usize> {
             flag: None,
             ..found
         };
-        apply(db, id, &descriptive_only, Merge::FillEmpty)?;
+        apply(lr.write(), id, &descriptive_only, Merge::FillEmpty)?;
         read += 1;
     }
     Ok(read)

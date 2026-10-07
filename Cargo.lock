@@ -3313,7 +3313,6 @@ dependencies = [
  "rawmakase-protocol",
  "rayon",
  "roxmltree 0.21.1",
- "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

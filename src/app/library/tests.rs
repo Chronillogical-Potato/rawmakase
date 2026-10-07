@@ -312,7 +312,7 @@ fn root_mapping_survives_reopen() -> Result<()> {
     drop(c);
     std::fs::rename(&old, &new)?;
     let ctx = egui::Context::default();
-    let l = Library::load(&db, ctx.clone())?;
+    let mut l = Library::load(&db, ctx.clone())?;
     l.session.catalog.relink_root(root, &new)?;
     drop(l);
     let mut l = Library::load(&db, ctx)?;
@@ -838,8 +838,8 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
                 (14,'Archive',NULL,'com.adobe.ag.library.collection');",
         )?;
         for photo in &ids[..2] {
-            db.execute("INSERT INTO collection_photos VALUES(11,?,NULL)", [photo])?;
-            db.execute("INSERT INTO collection_photos VALUES(2,?,NULL)", [photo])?;
+            db.execute("INSERT INTO collection_photos VALUES(11,?,NULL)", [photo.0])?;
+            db.execute("INSERT INTO collection_photos VALUES(2,?,NULL)", [photo.0])?;
         }
     }
     let mut library = Library::load(&path, egui::Context::default())?;

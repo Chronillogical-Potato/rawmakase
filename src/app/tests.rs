@@ -4293,7 +4293,7 @@ fn develop_opens_photos_with_the_edit_the_catalog_resolves() -> anyhow::Result<(
     )?;
     rusqlite::Connection::open(&catalog)?.execute(
         "UPDATE photos SET lightroom_develop='s = { Exposure2012 = 0.25, Contrast2012 = 10 }' WHERE id=?",
-        [ids[1].0],
+        [ids[1].0.0],
     )?;
     drop(c);
     let ctx = egui::Context::default();
@@ -4377,16 +4377,17 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
     let metadata = crate::photo::open(&ids[0].1)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let base = Recipe::with_profiles(&metadata, &profiles);
-    let save =
-        |c: &crate::catalog::Catalog, (id, path): &(PhotoId, std::path::PathBuf), r: &Recipe| {
-            c.save_edit(
-                *id,
-                path,
-                r,
-                &Default::default(),
-                crate::catalog::HistoryUpdate::Keep,
-            )
-        };
+    let save = |c: &mut crate::catalog::Catalog,
+                (id, path): &(PhotoId, std::path::PathBuf),
+                r: &Recipe| {
+        c.save_edit(
+            *id,
+            path,
+            r,
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )
+    };
     // a: a mask and a spot.
     let mut local = base.clone();
     local.exposure = 0.3;
@@ -4415,16 +4416,16 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
         opacity: 1.,
         offset: [0.1, 0.],
     }];
-    save(&c, &ids[0], &local)?;
+    save(&mut c, &ids[0], &local)?;
     // b: Lightroom's settings only, with Auto Tone and Auto white balance to compute.
     c.db_for_tests().execute(
         "UPDATE photos SET lightroom_develop='s = { AutoTone = true, WhiteBalance = \"Auto\", Contrast2012 = 20 }' WHERE id=?",
-        [ids[1].0],
+        [ids[1].0.0],
     )?;
     // c: nothing. d: Upright Auto, e: Guided, neither analysed.
     let mut auto = base.clone();
     auto.upright.mode = crate::model::transform::UprightMode::Auto;
-    save(&c, &ids[3], &auto)?;
+    save(&mut c, &ids[3], &auto)?;
     let mut guided = base.clone();
     guided.upright.mode = crate::model::transform::UprightMode::Guided;
     guided.upright.guides = vec![
@@ -4437,13 +4438,13 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
             b: [0.75, 0.9],
         },
     ];
-    save(&c, &ids[4], &guided)?;
+    save(&mut c, &ids[4], &guided)?;
     // A virtual copy of f, with an edit of its own.
     let copy = c.create_virtual_copy(ids[5].0)?;
     let mut copied = base;
     copied.contrast = 0.4;
     ids.push((copy, ids[5].1.clone()));
-    save(&c, &ids[6], &copied)?;
+    save(&mut c, &ids[6], &copied)?;
     // Taken before any photo is opened: the batch works each edit out itself.
     let records = c.photo_records(&ids.iter().map(|(id, _)| *id).collect::<Vec<_>>())?;
     drop(c);

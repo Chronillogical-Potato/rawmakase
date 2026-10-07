@@ -2,11 +2,11 @@
 //! restarting. Stored zlib-compressed in `develop_history`; each step holds the full
 //! state it leaves, with large settings (camera profile, masks, spots, curves) stored
 //! once per History and referred to from every step that has them.
+use super::db::{Reads, Write, sql};
 use super::{Catalog, PhotoId};
 use crate::model::recipe::Recipe;
 use anyhow::{Context, Result, ensure};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::io::Read;
@@ -181,29 +181,22 @@ impl Catalog {
     /// The photo's saved Develop History. `None` without one, or when it cannot be
     /// read (from a newer release, or damaged): the edit itself stays usable.
     pub fn load_history(&self, id: PhotoId) -> Result<Option<SavedHistory>> {
-        let data: Option<Vec<u8>> = self
-            .db
-            .query_row(
-                "SELECT data FROM develop_history WHERE photo=?",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
+        let data: Option<Vec<u8>> = self.db.read_optional(
+            sql!("SELECT data FROM develop_history WHERE photo=?"),
+            &[&id],
+        )?;
         Ok(data.and_then(|d| decode(&d).ok().flatten()))
     }
     /// Whether the photo has a stored History, readable here or not.
     pub fn has_history(&self, id: PhotoId) -> Result<bool> {
         Ok(self
             .db
-            .query_row("SELECT 1 FROM develop_history WHERE photo=?", [id], |_| {
-                Ok(())
-            })
-            .optional()?
+            .read_optional::<i64>(sql!("SELECT 1 FROM develop_history WHERE photo=?"), &[&id])?
             .is_some())
     }
     /// Stores `history` for the photo inside the transaction saving its edit.
     pub(super) fn put_history(
-        tx: &rusqlite::Transaction<'_>,
+        w: &mut Write<'_>,
         id: PhotoId,
         history: HistoryUpdate<'_>,
     ) -> Result<()> {
@@ -211,13 +204,15 @@ impl Catalog {
             HistoryUpdate::Keep => {}
             // An empty History stores as none (Sync's Undo on a photo that had none).
             HistoryUpdate::Replace(h) if h.steps.is_empty() => {
-                tx.execute("DELETE FROM develop_history WHERE photo=?", [id])?;
+                w.execute(sql!("DELETE FROM develop_history WHERE photo=?"), &[&id])?;
             }
             HistoryUpdate::Replace(h) => {
-                tx.execute(
-                    "INSERT INTO develop_history(photo, data) VALUES (?, ?)
-                     ON CONFLICT(photo) DO UPDATE SET data=excluded.data",
-                    params![id, encode(h)?],
+                w.execute(
+                    sql!(
+                        "INSERT INTO develop_history(photo, data) VALUES (?, ?)
+                         ON CONFLICT(photo) DO UPDATE SET data=excluded.data"
+                    ),
+                    &[&id, &encode(h)?],
                 )?;
             }
         }

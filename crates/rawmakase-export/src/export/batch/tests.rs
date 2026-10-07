@@ -253,7 +253,7 @@ fn listing(dir: &Path) -> Vec<String> {
 
 #[test]
 fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
-    let f = fixture(&["a.dng", "b.dng", "c.dng", "d.dng", "e.dng"])?;
+    let mut f = fixture(&["a.dng", "b.dng", "c.dng", "d.dng", "e.dng"])?;
     let [(a, a_path), (b, b_path), _, (d, d_path), (_, e_path)] = &f.photos[..] else {
         panic!("five photos");
     };
@@ -261,7 +261,7 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
     let (profiles, _) = crate::camera_profiles::installed(&m);
     let mut brighter = Recipe::with_profiles(&m, &profiles);
     brighter.exposure = 1.;
-    let save = |id: PhotoId, path: &Path| {
+    let mut save = |id: PhotoId, path: &Path| {
         f.catalog.save_edit(
             id,
             path,
@@ -274,7 +274,7 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
     save(*d, d_path)?;
     f.catalog.db_for_tests().execute(
         "UPDATE photos SET lightroom_develop='s = { Exposure2012 = 0.5 }' WHERE id=?",
-        [b],
+        [b.0],
     )?;
     let photos = f.batch_photos()?;
     // Its file changed since the edit was saved: protected, not exported unedited.
@@ -412,7 +412,7 @@ fn cancel_before_a_commit_leaves_nothing_and_after_it_counts_as_exported() -> Re
 
 #[test]
 fn a_batch_exports_the_edits_as_they_were_when_export_was_pressed() -> Result<()> {
-    let f = fixture(&["a.dng"])?;
+    let mut f = fixture(&["a.dng"])?;
     let (id, path) = &f.photos[0];
     let m = crate::photo::open(path)?.metadata;
     let (profiles, _) = crate::camera_profiles::installed(&m);

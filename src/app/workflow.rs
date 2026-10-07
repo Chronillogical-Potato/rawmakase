@@ -141,7 +141,7 @@ impl Editor {
         }
         if let (Some(path), Some(l), Some(id)) = (
             &self.document.path,
-            &self.library,
+            &mut self.library,
             self.document.catalog_photo,
         ) {
             let history = self
