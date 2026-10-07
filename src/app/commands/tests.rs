@@ -757,3 +757,33 @@ fn the_protocol_states_the_curve_limits_the_app_enforces() {
     assert_eq!(POINT_COUNT, [2, MAX_POINTS]);
     assert_eq!(MINIMUM_INPUT_SPACING, MIN_INPUT_SPACING);
 }
+#[test]
+fn panel_actions_hide_the_open_modules_panels_and_state_reports_them() {
+    let (mut e, ctx) = editor();
+    let run = |e: &mut Editor, name: &str| {
+        e.execute_command(
+            Command::new(Operation::Action(Action::parse(name).unwrap())),
+            &ctx,
+        )
+        .unwrap();
+    };
+    run(&mut e, "panels:sides");
+    let state = json(e.command_state());
+    assert_eq!(state["panels"]["left"], "hidden");
+    assert_eq!(state["panels"]["right"], "hidden");
+    assert_eq!(state["panels"]["filmstrip"], "shown");
+    run(&mut e, "panels:filmstrip");
+    run(&mut e, "panels:left");
+    assert_eq!(json(e.command_state())["panels"]["left"], "shown");
+    run(&mut e, "panels:all");
+    let state = json(e.command_state());
+    assert!(
+        ["left", "right", "filmstrip"]
+            .iter()
+            .all(|p| state["panels"][p] == "hidden")
+    );
+    // The Library's are its own.
+    e.module = Module::Library;
+    assert_eq!(json(e.command_state())["panels"]["right"], "shown");
+    assert!(Action::names().contains(&"panels:right"));
+}

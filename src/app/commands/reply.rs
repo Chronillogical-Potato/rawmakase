@@ -29,6 +29,9 @@ pub(in crate::app) struct State {
     pub auto_running: bool,
     pub treatment_pending: bool,
     pub save_state: &'static str,
+    /// Which of the open module's panels show: `left`, `right` and `filmstrip`,
+    /// each `shown` or `hidden`.
+    pub panels: crate::app::panels::PanelLayout,
 }
 #[derive(Debug, Serialize)]
 pub(in crate::app) struct MaskState {
