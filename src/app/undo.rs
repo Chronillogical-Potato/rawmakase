@@ -277,7 +277,7 @@ impl Editor {
                 if !self.flush() {
                     return false;
                 }
-                let Some(library) = &self.library else {
+                let Some(library) = &mut self.library else {
                     return false;
                 };
                 let side = match direction {
@@ -285,8 +285,13 @@ impl Editor {
                     Direction::Redo => super::sync::SyncSide::After,
                 };
                 // Each photo where it is now, after any relink since the Sync.
-                let path = |id: PhotoId| library.photo(id).map(|p| p.path.clone());
-                match super::sync::restore(&library.session.catalog, &sync.edits, side, path) {
+                let paths: std::collections::HashMap<PhotoId, std::path::PathBuf> = sync
+                    .edits
+                    .iter()
+                    .filter_map(|e| Some((e.id, library.photo(e.id)?.path.clone())))
+                    .collect();
+                let path = |id: PhotoId| paths.get(&id).cloned();
+                match super::sync::restore(&mut library.session.catalog, &sync.edits, side, path) {
                     Ok(()) => {}
                     // Nothing to return to: the command is used up, not retried.
                     Err(e @ super::sync::SyncRestoreError::PhotoRemoved) => {
@@ -358,7 +363,7 @@ impl Editor {
                 if !self.flush() {
                     return false;
                 }
-                let Some(library) = &self.library else {
+                let Some(library) = &mut self.library else {
                     return false;
                 };
                 let Some(path) = library.photo(id).map(|p| p.path.clone()) else {

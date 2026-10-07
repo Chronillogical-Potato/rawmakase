@@ -124,10 +124,10 @@ impl Editor {
         }
     }
     fn snapshot_action(&mut self, action: SnapshotAction) {
-        let (Some(library), Some(photo)) = (&self.library, self.document.catalog_photo) else {
+        let (Some(library), Some(photo)) = (&mut self.library, self.document.catalog_photo) else {
             return;
         };
-        let catalog = &library.session.catalog;
+        let catalog = &mut library.session.catalog;
         let recipe = self.document.edit.recipe();
         let result = match &action {
             SnapshotAction::New => {

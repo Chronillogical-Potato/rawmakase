@@ -499,7 +499,7 @@ mod tests {
         drop(catalog);
         rusqlite::Connection::open(&path)?.execute(
             "UPDATE photos SET lightroom_develop='s = { Exposure2012 = ' WHERE id=?",
-            [id],
+            [id.0],
         )?;
         let ctx = egui::Context::default();
         let m = x100f();

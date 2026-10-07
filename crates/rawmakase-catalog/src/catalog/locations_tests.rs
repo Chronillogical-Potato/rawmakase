@@ -2,6 +2,7 @@
 //! locations (issue #187).
 use super::locations::{Computer, Overrides, resolve_in};
 use super::*;
+use rusqlite::params;
 
 fn computer(id: &str) -> Computer {
     Computer {
@@ -54,7 +55,7 @@ fn folder_id(catalog: &Path, relative: &str) -> Result<FolderId> {
         "SELECT f.id FROM folders f LEFT JOIN folder_paths p ON p.folder=f.id
          WHERE COALESCE(p.path, f.relative_path)=?",
         [relative],
-        |r| r.get(0),
+        |r| r.get(0).map(FolderId),
     )?)
 }
 fn count(catalog: &Path, table: &str) -> Result<i64> {
@@ -86,7 +87,7 @@ fn mac_linux_mac_keeps_both_locations() -> Result<()> {
     assert_eq!(path_of(&catalog, &linux(), "DSC_1234.NEF")?, linux_photo);
     // An older release still sees the last change anywhere.
     let mapped: Option<String> =
-        legacy(&catalog)?.query_row("SELECT mapped_path FROM roots WHERE id=?", [root], |r| {
+        legacy(&catalog)?.query_row("SELECT mapped_path FROM roots WHERE id=?", [root.0], |r| {
             r.get(0)
         })?;
     assert_eq!(mapped.map(PathBuf::from), Some(on_linux));
@@ -165,7 +166,7 @@ fn changing_a_root_keeps_or_clears_an_adopted_override() -> Result<()> {
     // An older release on the Mac moved Trip to the archive.
     legacy(&catalog)?.execute(
         "INSERT INTO folder_mappings(folder,path) VALUES(?,?)",
-        params![trip, mac_archive.to_string_lossy()],
+        params![trip.0, mac_archive.to_string_lossy()],
     )?;
     let root = Catalog::open_as(&catalog, &linux())?.roots()?[0].0;
 
@@ -215,7 +216,7 @@ fn clearing_falls_back_to_the_nearest_remaining_location() -> Result<()> {
     // The parent folder needs a row of its own to be relinked.
     legacy(&catalog)?.execute(
         "INSERT INTO folders(root,relative_path) VALUES(?, '2026')",
-        [root],
+        [root.0],
     )?;
     let year = folder_id(&catalog, "2026")?;
     let trip = folder_id(&catalog, "2026/Trip")?;
@@ -236,7 +237,7 @@ fn clearing_falls_back_to_the_nearest_remaining_location() -> Result<()> {
     );
     let legacy_rows: Vec<FolderId> = legacy(&catalog)?
         .prepare("SELECT folder FROM folder_mappings")?
-        .query_map([], |r| r.get(0))?
+        .query_map([], |r| r.get(0).map(FolderId))?
         .collect::<rusqlite::Result<_>>()?;
     assert_eq!(legacy_rows, [year]);
 
@@ -256,7 +257,7 @@ fn clearing_falls_back_to_the_nearest_remaining_location() -> Result<()> {
     );
     assert_eq!(cat.root_overrides(root)?.len(), 1);
     let mapped: Option<String> =
-        legacy(&catalog)?.query_row("SELECT mapped_path FROM roots WHERE id=?", [root], |r| {
+        legacy(&catalog)?.query_row("SELECT mapped_path FROM roots WHERE id=?", [root.0], |r| {
             r.get(0)
         })?;
     assert_eq!(mapped, None);
@@ -630,7 +631,7 @@ fn folder_locations_list_every_root_and_other_computers() -> Result<()> {
     let roots = cat.roots()?;
     drop(cat);
     Catalog::open_as(&catalog, &mac())?.relink_root(roots[1].0, &mac_b)?;
-    let cat = Catalog::open_as(&catalog, &linux())?;
+    let mut cat = Catalog::open_as(&catalog, &linux())?;
     let trip = folder_id(&catalog, "Trip")?;
     cat.relink_folder(trip, &b.join("Trip"))?;
     let listed = cat.folder_locations()?;

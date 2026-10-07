@@ -420,7 +420,7 @@ mod tests {
         c.add_folder(&photos)?;
         drop(c);
         let ctx = egui::Context::default();
-        let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
+        let mut library = crate::app::library::Library::load(&catalog, ctx.clone())?;
         let id = |name: &str| {
             library
                 .session
@@ -505,7 +505,7 @@ mod tests {
         editor.document.reset(Some(open));
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
         // An edit saved to it since develops it again.
-        let library = editor.library.as_ref().unwrap();
+        let library = editor.library.as_mut().unwrap();
         let path = library.photo(other).unwrap().path.clone();
         let edit = Recipe {
             exposure: -1.,

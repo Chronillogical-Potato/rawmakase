@@ -3,6 +3,7 @@ use super::*;
 use crate::lr_develop::{convert_develop, develop_fields};
 use crate::storage::Identity;
 use anyhow::Context;
+use rusqlite::{Connection, OpenFlags};
 #[test]
 #[ignore = "Requires private Lightroom catalog; set RAWMAKASE_LRCAT"]
 fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {
@@ -17,7 +18,8 @@ fn supplied_catalog_is_preserved_and_all_images_import() -> Result<()> {
     assert_eq!(c.folders()?.len(), 275);
     assert_eq!(c.collections()?.len(), 13);
     let archive: Vec<u8> =
-        c.db.query_row("SELECT original_catalog FROM sources", [], |r| r.get(0))?;
+        c.db_for_tests()
+            .query_row("SELECT original_catalog FROM sources", [], |r| r.get(0))?;
     assert_eq!(archive, std::fs::read(&source)?);
     assert_eq!(before, Identity::read(&source)?);
     for (id, make, model) in [

@@ -2,9 +2,10 @@
 //! `lr_develop`.
 pub(super) mod history;
 use super::Catalog;
+use crate::catalog::db::{LightroomWrite, Reads, sql, sqlite_sql};
 use anyhow::{Context, Result, ensure};
 pub use history::HistoryStep;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::{Path, PathBuf};
 
 /// Set in `meta` once keyword export options have been copied from the
@@ -12,9 +13,13 @@ use std::path::{Path, PathBuf};
 const KEYWORD_EXPORT_BACKFILLED: &str = "lightroom_keyword_export_backfilled";
 
 /// A photo's filename in a Lightroom catalog, from its `AgLibraryFile` row
-/// named `f`.
-pub(super) const LIGHTROOM_FILENAME: &str =
-    "CASE WHEN f.idx_filename<>'' THEN f.idx_filename ELSE f.baseName||'.'||f.extension END";
+/// named `f`: SQL to `concat!` into a statement.
+macro_rules! lightroom_filename {
+    () => {
+        "CASE WHEN f.idx_filename<>'' THEN f.idx_filename ELSE f.baseName||'.'||f.extension END"
+    };
+}
+pub(in crate::catalog) use lightroom_filename;
 
 impl Catalog {
     /// Catalogs imported before keyword export options were kept still hold
@@ -29,84 +34,51 @@ impl Catalog {
     pub(in crate::catalog) fn backfill_once(
         &mut self,
         key: &str,
-        copy: fn(&Connection) -> Result<usize>,
+        copy: fn(&mut LightroomWrite<'_>) -> Result<usize>,
     ) -> Result<usize> {
         if self.meta(key)?.is_some() {
             return Ok(0);
         }
-        // One transaction: a row at a time would flush the journal for each.
-        let copied = self
-            .with_stored_lightroom(|db| {
-                let tx = db.unchecked_transaction()?;
-                let copied = copy(&tx)?;
-                tx.commit()?;
-                Ok(copied)
-            })?
-            .unwrap_or(0);
+        let original: Option<Vec<u8>> = self.db.read_optional(
+            sql!("SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1"),
+            &[],
+        )?;
+        let copied = match original {
+            Some(original) => {
+                let snapshot = tempfile::NamedTempFile::new()?;
+                std::fs::write(snapshot.path(), original)?;
+                // One transaction: a row at a time would flush the journal for each.
+                self.db.with_lightroom(snapshot.path(), copy)?
+            }
+            None => 0,
+        };
         self.set_meta(key, "1")?;
         Ok(copied)
     }
-    /// Runs `f` with the Lightroom catalog this one was imported from
-    /// attached as `lr`; `None` for a catalog that was not imported.
-    fn with_stored_lightroom<T>(
-        &mut self,
-        f: impl FnOnce(&Connection) -> Result<T>,
-    ) -> Result<Option<T>> {
-        let original: Option<Vec<u8>> = self
-            .db
-            .query_row(
-                "SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(original) = original else {
-            return Ok(None);
-        };
-        let snapshot = tempfile::NamedTempFile::new()?;
-        std::fs::write(snapshot.path(), original)?;
-        self.db.execute(
-            "ATTACH DATABASE ? AS lr",
-            [snapshot.path().to_string_lossy()],
-        )?;
-        let result = f(&self.db);
-        self.db.execute_batch("DETACH DATABASE lr")?;
-        result.map(Some)
-    }
-}
-
-/// Whether the database attached as `schema` has table `name`.
-pub(super) fn has_table(db: &Connection, schema: &str, name: &str) -> Result<bool> {
-    Ok(db
-        .query_row(
-            &format!("SELECT 1 FROM {schema}.sqlite_master WHERE type='table' AND name=?"),
-            [name],
-            |r| r.get::<_, i32>(0),
-        )
-        .optional()?
-        .is_some())
 }
 
 /// Copies Lightroom's Include on Export and Export Containing Keywords of
 /// the keywords that have either off, from a catalog attached as `lr`.
-pub(super) fn copy_keyword_export(db: &Connection) -> Result<usize> {
-    let columns: Vec<String> = db
-        .prepare("SELECT name FROM pragma_table_info('AgLibraryKeyword', 'lr')")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
+pub(super) fn copy_keyword_export(lr: &mut LightroomWrite<'_>) -> Result<usize> {
+    let columns: Vec<String> = lr.read_sqlite(
+        sqlite_sql!("SELECT name FROM pragma_table_info('AgLibraryKeyword', 'lr')"),
+        &[],
+    )?;
     let has = |c: &str| columns.iter().any(|n| n == c);
     if !has("includeOnExport") || !has("includeParents") {
         return Ok(0);
     }
-    Ok(db.execute(
-        "INSERT INTO keyword_export(keyword, include, parents)
-         SELECT id_local, COALESCE(includeOnExport, 1) <> 0, COALESCE(includeParents, 1) <> 0
-         FROM lr.AgLibraryKeyword
-         WHERE (includeOnExport = 0 OR includeParents = 0)
-           AND id_local IN (SELECT id FROM keywords)
-         ON CONFLICT(keyword) DO UPDATE SET include=excluded.include, parents=excluded.parents",
-        [],
-    )?)
+    lr.execute_sqlite(
+        sqlite_sql!(
+            "INSERT INTO keyword_export(keyword, include, parents)
+             SELECT id_local, COALESCE(includeOnExport, 1) <> 0, COALESCE(includeParents, 1) <> 0
+             FROM lr.AgLibraryKeyword
+             WHERE (includeOnExport = 0 OR includeParents = 0)
+               AND id_local IN (SELECT id FROM keywords)
+             ON CONFLICT(keyword) DO UPDATE SET include=excluded.include, parents=excluded.parents"
+        ),
+        &[],
+    )
 }
 
 /// Import a closed/exported Lightroom catalog into a new, atomically published file.
@@ -127,27 +99,16 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     let tmpdir = tempfile::tempdir_in(parent)?;
     let working = tmpdir.path().join("import.rawmakase");
     let mut catalog = Catalog::create(&working)?;
-    catalog.db.execute(
-        "ATTACH DATABASE ? AS lr",
-        [snapshot.path().to_string_lossy()],
-    )?;
-    let tx = catalog.db.transaction()?;
-    tx.execute(
-        "INSERT INTO sources(path,original_size,original_catalog) VALUES(?,?,?)",
-        params![
-            source.to_string_lossy(),
-            size as i64,
-            std::fs::read(snapshot.path())?
-        ],
-    )?;
-    copy_tables(&tx)?;
-    tx.commit()?;
-    catalog.db.execute_batch("DETACH DATABASE lr")?;
+    let original = std::fs::read(snapshot.path())?;
+    catalog.db.with_lightroom(snapshot.path(), |lr| {
+        lr.write().execute(
+            sql!("INSERT INTO sources(path,original_size,original_catalog) VALUES(?,?,?)"),
+            &[&source.to_string_lossy(), &(size as i64), &original],
+        )?;
+        copy_tables(lr)
+    })?;
     ensure!(
-        catalog
-            .db
-            .query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))?
-            == "ok",
+        catalog.db.is_intact()?,
         "Imported catalog failed integrity check"
     );
     drop(catalog);
@@ -188,6 +149,18 @@ fn take_snapshot(source: &Path) -> Result<(tempfile::NamedTempFile, u64)> {
     Ok((snapshot, before.len()))
 }
 
+/// Whether the Lightroom catalog open as `db` has table `name`.
+fn has_table(db: &Connection, name: &str) -> Result<bool> {
+    Ok(db
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            [name],
+            |r| r.get::<_, i32>(0),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// Checks the snapshot is an intact Lightroom catalog with the tables an
 /// import needs.
 fn verify_snapshot(snapshot: &Path) -> Result<()> {
@@ -203,7 +176,7 @@ fn verify_snapshot(snapshot: &Path) -> Result<()> {
         "AgLibraryRootFolder",
     ] {
         ensure!(
-            has_table(&db, "main", table)?,
+            has_table(&db, table)?,
             "Not a supported Lightroom catalog: missing {table}"
         );
     }
@@ -213,36 +186,75 @@ fn verify_snapshot(snapshot: &Path) -> Result<()> {
 /// Copies photos, folders, history, collections, keywords, info and
 /// descriptive metadata from the Lightroom catalog attached as `lr`, in the
 /// caller's transaction. Fails if any image was left out.
-fn copy_tables(tx: &Connection) -> Result<()> {
-    tx.execute_batch(&format!("INSERT INTO roots(id,original_path) SELECT id_local,absolutePath FROM lr.AgLibraryRootFolder;
-    INSERT INTO folders(id,root,relative_path) SELECT id_local,rootFolder,pathFromRoot FROM lr.AgLibraryFolder;
-    INSERT INTO photos(id,folder,filename,original_path,captured,rating,flag,label,format,copy_name,master_id,orientation)
-    SELECT i.id_local,f.folder,{LIGHTROOM_FILENAME},
-    r.absolutePath||d.pathFromRoot||{LIGHTROOM_FILENAME},
-    COALESCE(i.captureTime,''),COALESCE(i.rating,0),COALESCE(i.pick,0),COALESCE(i.colorLabels,''),COALESCE(i.fileFormat,''),COALESCE(i.copyName,''),i.masterImage,i.orientation
-    FROM lr.Adobe_images i JOIN lr.AgLibraryFile f ON f.id_local=i.rootFile JOIN lr.AgLibraryFolder d ON d.id_local=f.folder JOIN lr.AgLibraryRootFolder r ON r.id_local=d.rootFolder;"))?;
-    let has = |name: &str| has_table(tx, "lr", name);
-    if has("Adobe_imageDevelopSettings")? {
-        tx.execute_batch("UPDATE photos SET lightroom_develop=(SELECT text FROM lr.Adobe_imageDevelopSettings WHERE image=photos.id LIMIT 1);")?;
+fn copy_tables(lr: &mut LightroomWrite<'_>) -> Result<()> {
+    for statement in [
+        sqlite_sql!(
+            "INSERT INTO roots(id,original_path)
+             SELECT id_local,absolutePath FROM lr.AgLibraryRootFolder"
+        ),
+        sqlite_sql!(
+            "INSERT INTO folders(id,root,relative_path)
+             SELECT id_local,rootFolder,pathFromRoot FROM lr.AgLibraryFolder"
+        ),
+        sqlite_sql!(concat!(
+            "INSERT INTO photos(id,folder,filename,original_path,captured,rating,flag,label,format,copy_name,master_id,orientation)
+             SELECT i.id_local,f.folder,",
+            lightroom_filename!(),
+            ",r.absolutePath||d.pathFromRoot||",
+            lightroom_filename!(),
+            ",COALESCE(i.captureTime,''),COALESCE(i.rating,0),COALESCE(i.pick,0),COALESCE(i.colorLabels,''),COALESCE(i.fileFormat,''),COALESCE(i.copyName,''),i.masterImage,i.orientation
+             FROM lr.Adobe_images i JOIN lr.AgLibraryFile f ON f.id_local=i.rootFile JOIN lr.AgLibraryFolder d ON d.id_local=f.folder JOIN lr.AgLibraryRootFolder r ON r.id_local=d.rootFolder"
+        )),
+    ] {
+        lr.execute_sqlite(statement, &[])?;
     }
-    if has("Adobe_libraryImageDevelopHistoryStep")? {
-        tx.execute_batch(history::COPY_LIGHTROOM_HISTORY)?;
+    if lr.has_table("Adobe_imageDevelopSettings")? {
+        lr.execute_sqlite(
+            sqlite_sql!(
+                "UPDATE photos SET lightroom_develop=(SELECT text FROM lr.Adobe_imageDevelopSettings
+                 WHERE image=photos.id LIMIT 1)"
+            ),
+            &[],
+        )?;
     }
-    if has("Adobe_libraryImageDevelopSnapshot")? {
-        tx.execute_batch(crate::catalog::snapshots::COPY_LIGHTROOM_SNAPSHOTS)?;
+    if lr.has_table("Adobe_libraryImageDevelopHistoryStep")? {
+        lr.execute_sqlite(history::COPY_LIGHTROOM_HISTORY, &[])?;
     }
-    if has("AgLibraryCollection")? {
-        tx.execute_batch("INSERT INTO collections SELECT id_local,name,parent,creationId FROM lr.AgLibraryCollection;")?;
+    if lr.has_table("Adobe_libraryImageDevelopSnapshot")? {
+        lr.execute_sqlite(crate::catalog::snapshots::COPY_LIGHTROOM_SNAPSHOTS, &[])?;
     }
-    if has("AgLibraryCollectionImage")? {
-        tx.execute_batch("INSERT INTO collection_photos SELECT collection,image,positionInCollection FROM lr.AgLibraryCollectionImage WHERE collection IN(SELECT id FROM collections) AND image IN(SELECT id FROM photos) ON CONFLICT DO NOTHING;")?;
+    if lr.has_table("AgLibraryCollection")? {
+        lr.execute_sqlite(
+            sqlite_sql!(
+                "INSERT INTO collections SELECT id_local,name,parent,creationId
+                 FROM lr.AgLibraryCollection"
+            ),
+            &[],
+        )?;
     }
-    if has("AgLibraryKeyword")? {
-        tx.execute_batch("INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent FROM lr.AgLibraryKeyword;")?;
-        copy_keyword_export(tx)?;
+    if lr.has_table("AgLibraryCollectionImage")? {
+        lr.execute_sqlite(
+            sqlite_sql!(
+                "INSERT INTO collection_photos SELECT collection,image,positionInCollection
+                 FROM lr.AgLibraryCollectionImage
+                 WHERE collection IN(SELECT id FROM collections) AND image IN(SELECT id FROM photos)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )?;
     }
-    super::info::copy_lightroom_info(tx)?;
-    super::sidecar::copy_lightroom_metadata(tx)?;
+    if lr.has_table("AgLibraryKeyword")? {
+        lr.execute_sqlite(
+            sqlite_sql!(
+                "INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent
+                 FROM lr.AgLibraryKeyword"
+            ),
+            &[],
+        )?;
+        copy_keyword_export(lr)?;
+    }
+    super::info::copy_lightroom_info(lr)?;
+    super::sidecar::copy_lightroom_metadata(lr)?;
     // Copied here, so opening the new catalog has nothing to backfill.
     for key in [
         super::info::INFO_BACKFILLED,
@@ -250,13 +262,25 @@ fn copy_tables(tx: &Connection) -> Result<()> {
         KEYWORD_EXPORT_BACKFILLED,
         super::snapshots::SNAPSHOTS_BACKFILLED,
     ] {
-        super::set_meta(tx, key, "1")?;
+        super::set_meta(lr.write(), key, "1")?;
     }
-    if has("AgLibraryKeywordImage")? {
-        tx.execute_batch("INSERT INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords) ON CONFLICT DO NOTHING;")?;
+    if lr.has_table("AgLibraryKeywordImage")? {
+        lr.execute_sqlite(
+            sqlite_sql!(
+                "INSERT INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage
+                 WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )?;
     }
-    let imported: i64 = tx.query_row("SELECT count(*) FROM photos", [], |r| r.get(0))?;
-    let expected: i64 = tx.query_row("SELECT count(*) FROM lr.Adobe_images", [], |r| r.get(0))?;
+    let imported: i64 = lr
+        .write()
+        .read_one(sql!("SELECT count(*) FROM photos"), &[])?;
+    let expected: i64 = lr
+        .read_sqlite(sqlite_sql!("SELECT count(*) FROM lr.Adobe_images"), &[])?
+        .pop()
+        .unwrap_or_default();
     ensure!(
         imported == expected,
         "Catalog has orphaned image records ({imported}/{expected}); import rolled back"

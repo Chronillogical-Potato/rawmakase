@@ -140,7 +140,7 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     let corrupt_options = r#"{"quality":0,"max_edge":0}"#;
     db.execute(
         "UPDATE photos SET export_options=? WHERE id=?",
-        rusqlite::params![corrupt_options, id],
+        rusqlite::params![corrupt_options, id.0],
     )?;
     assert!(catalog.load_edit(id, &raw).is_err());
     assert!(
@@ -156,7 +156,7 @@ fn invalid_export_defaults_never_replace_saved_edits() -> Result<()> {
     );
     let preserved: String = db.query_row(
         "SELECT export_options FROM photos WHERE id=?",
-        [id],
+        [id.0],
         |row| row.get(0),
     )?;
     assert_eq!(preserved, corrupt_options);

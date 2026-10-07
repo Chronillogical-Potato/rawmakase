@@ -3,12 +3,13 @@
 //! photo, a virtual copy's apart from its master's. A field with no row is the
 //! file's own (its EXIF, at export); a cleared one is empty whatever the file
 //! says.
+use super::db::{Reads, Sql, Write, sql};
+use super::value::row;
 use super::{Catalog, PhotoId};
 use crate::metadata::{
     Capture, DEFAULT_LANG, Descriptive, Keyword, LangAlt, Location, TextField, Value, keyword_name,
 };
 use anyhow::{Context, Result, ensure};
-use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 
 /// The column value a text field is stored under.
@@ -107,15 +108,15 @@ impl Catalog {
         ids: &[PhotoId],
         mut f: impl FnMut(PhotoId, &mut Descriptive) -> bool,
     ) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for &id in ids {
-            let mut d = read(&tx, id)?;
-            if f(id, &mut d) {
-                write(&tx, id, &d)?;
+        self.db.write(|w| {
+            for &id in ids {
+                let mut d = read(w, id)?;
+                if f(id, &mut d) {
+                    write(w, id, &d)?;
+                }
             }
-        }
-        tx.commit()?;
-        Ok(())
+            Ok(())
+        })
     }
     /// What `restore_metadata` needs to put these photos back as they are.
     pub fn metadata_snapshot(&self, ids: &[PhotoId]) -> Result<Vec<MetadataSnapshot>> {
@@ -124,16 +125,13 @@ impl Catalog {
                 Ok(MetadataSnapshot {
                     photo: *id,
                     descriptive: read(&self.db, *id)?,
-                    keywords: self
-                        .db
-                        .prepare_cached("SELECT keyword FROM photo_keywords WHERE photo=?")?
-                        .query_map([id], |r| r.get(0))?
-                        .collect::<rusqlite::Result<_>>()?,
+                    keywords: self.db.read(
+                        sql!("SELECT keyword FROM photo_keywords WHERE photo=?"),
+                        &[id],
+                    )?,
                     captured: self
                         .db
-                        .prepare_cached("SELECT captured FROM photos WHERE id=?")?
-                        .query_row([id], |r| r.get(0))
-                        .optional()?
+                        .read_optional(sql!("SELECT captured FROM photos WHERE id=?"), &[id])?
                         .context("Unknown photo")?,
                 })
             })
@@ -142,127 +140,142 @@ impl Catalog {
     /// Puts photos' descriptive metadata and keywords back as snapshotted,
     /// rows that were absent included, in one transaction.
     pub fn restore_metadata(&mut self, snapshots: &[MetadataSnapshot]) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for s in snapshots {
-            // The time it sorts by goes back only with its capture override:
-            // one filled in from the file since stays.
-            let capture_changed = read(&tx, s.photo)?.capture != s.descriptive.capture;
-            write(&tx, s.photo, &s.descriptive)?;
-            if capture_changed {
-                tx.execute(
-                    "UPDATE photos SET captured=? WHERE id=?",
-                    params![s.captured, s.photo],
+        self.db.write(|w| {
+            for s in snapshots {
+                // The time it sorts by goes back only with its capture override:
+                // one filled in from the file since stays.
+                let capture_changed = read(w, s.photo)?.capture != s.descriptive.capture;
+                write(w, s.photo, &s.descriptive)?;
+                if capture_changed {
+                    w.execute(
+                        sql!("UPDATE photos SET captured=? WHERE id=?"),
+                        &[&s.captured, &s.photo],
+                    )?;
+                }
+                w.execute(
+                    sql!("DELETE FROM photo_keywords WHERE photo=?"),
+                    &[&s.photo],
                 )?;
+                for keyword in &s.keywords {
+                    tag_photo(w, s.photo, *keyword)?;
+                }
             }
-            tx.execute("DELETE FROM photo_keywords WHERE photo=?", [s.photo])?;
-            for keyword in &s.keywords {
-                tag_photo(&tx, s.photo, *keyword)?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
+            Ok(())
+        })
     }
     /// A photo's keywords, each with its path from the top, by path.
     pub fn keywords(&self, id: PhotoId) -> Result<Vec<Keyword>> {
-        let ids: Vec<i64> = self
-            .db
-            .prepare_cached("SELECT keyword FROM photo_keywords WHERE photo=?")?
-            .query_map([id], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let mut keywords = ids
-            .into_iter()
-            .map(|k| keyword(&self.db, k))
-            .collect::<Result<Vec<_>>>()?;
-        keywords.sort_by(|a, b| a.path.cmp(&b.path).then(a.id.cmp(&b.id)));
-        Ok(keywords)
+        keywords(&self.db, id)
     }
     /// The keyword at `path` (top first), made where it or its parents are
     /// missing. Names are compared in NFC, case kept.
     #[cfg(any(test, feature = "test-support"))]
     pub fn keyword_at(&mut self, path: &[String]) -> Result<i64> {
         ensure!(!path.is_empty(), "A keyword needs a name");
-        let tx = self.db.transaction()?;
-        let id = keyword_at(&tx, path)?;
-        tx.commit()?;
-        Ok(id)
+        self.db.write(|w| keyword_at(w, path))
     }
     /// Adds keywords, by path (top first), to every photo given, making
     /// them where missing; one transaction.
     pub fn add_keywords(&mut self, ids: &[PhotoId], paths: &[Vec<String>]) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for path in paths {
-            ensure!(!path.is_empty(), "A keyword needs a name");
-            let keyword = keyword_at(&tx, path)?;
-            for id in ids {
-                tag_photo(&tx, *id, keyword)?;
+        self.db.write(|w| {
+            for path in paths {
+                ensure!(!path.is_empty(), "A keyword needs a name");
+                let keyword = keyword_at(w, path)?;
+                for id in ids {
+                    tag_photo(w, *id, keyword)?;
+                }
             }
-        }
-        tx.commit()?;
-        Ok(())
+            Ok(())
+        })
     }
     /// Adds a keyword to every photo given.
     #[cfg(any(test, feature = "test-support"))]
     pub fn add_keyword(&mut self, ids: &[PhotoId], keyword: i64) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for id in ids {
-            tag_photo(&tx, *id, keyword)?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.db.write(|w| {
+            for id in ids {
+                tag_photo(w, *id, keyword)?;
+            }
+            Ok(())
+        })
     }
     /// Removes a keyword from every photo given that has it.
     pub fn remove_keyword(&mut self, ids: &[PhotoId], keyword: i64) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for id in ids {
-            tx.execute(
-                "DELETE FROM photo_keywords WHERE photo=? AND keyword=?",
-                params![id, keyword],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.db.write(|w| {
+            for id in ids {
+                w.execute(
+                    sql!("DELETE FROM photo_keywords WHERE photo=? AND keyword=?"),
+                    &[id, &keyword],
+                )?;
+            }
+            Ok(())
+        })
     }
 }
 
+/// A photo's keywords, each with its path from the top, by path.
+pub(super) fn keywords(db: &impl Reads, id: PhotoId) -> Result<Vec<Keyword>> {
+    let ids: Vec<i64> = db.read(
+        sql!("SELECT keyword FROM photo_keywords WHERE photo=?"),
+        &[&id],
+    )?;
+    let mut keywords = ids
+        .into_iter()
+        .map(|k| keyword(db, k))
+        .collect::<Result<Vec<_>>>()?;
+    keywords.sort_by(|a, b| a.path.cmp(&b.path).then(a.id.cmp(&b.id)));
+    Ok(keywords)
+}
+
 /// Gives `photo` `keyword`, unless it has it already.
-pub(super) fn tag_photo(db: &Connection, photo: PhotoId, keyword: i64) -> Result<()> {
-    db.execute(
-        "INSERT INTO photo_keywords(photo, keyword) VALUES (?, ?) ON CONFLICT DO NOTHING",
-        params![photo, keyword],
+pub(super) fn tag_photo(w: &mut Write<'_>, photo: PhotoId, keyword: i64) -> Result<()> {
+    w.execute(
+        sql!("INSERT INTO photo_keywords(photo, keyword) VALUES (?, ?) ON CONFLICT DO NOTHING"),
+        &[&photo, &keyword],
     )?;
     Ok(())
 }
 
 /// The keyword at `path`, made where missing.
-pub(super) fn keyword_at(db: &Connection, path: &[String]) -> Result<i64> {
+pub(super) fn keyword_at(w: &mut Write<'_>, path: &[String]) -> Result<i64> {
+    row! {
+        struct Named {
+            id: i64,
+            name: String,
+        }
+    }
     let mut parent: Option<i64> = None;
     for name in path {
         let name = keyword_name(name);
         ensure!(!name.is_empty(), "A keyword needs a name");
         // Not unique: the first of any duplicates Lightroom left.
-        let candidates: Vec<(i64, String)> = db
-            .prepare_cached(
-                "SELECT id, name FROM keywords WHERE parent IS NOT DISTINCT FROM ? ORDER BY id",
-            )?
-            .query_map([parent], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
+        let candidates: Vec<Named> = w.read(
+            sql!("SELECT id, name FROM keywords WHERE parent IS NOT DISTINCT FROM ? ORDER BY id"),
+            &[&parent],
+        )?;
         let found = candidates
             .into_iter()
-            .find(|(_, n)| keyword_name(n) == name)
-            .map(|(id, _)| id);
+            .find(|k| keyword_name(&k.name) == name)
+            .map(|k| k.id);
         parent = Some(match found {
             Some(id) => id,
-            None => db.query_row(
-                "INSERT INTO keywords(name, parent) VALUES (?, ?) RETURNING id",
-                params![name, parent],
-                |r| r.get(0),
+            None => w.insert_returning_id(
+                sql!("INSERT INTO keywords(name, parent) VALUES (?, ?) RETURNING id"),
+                &[&name, &parent],
             )?,
         });
     }
     Ok(parent.unwrap())
 }
 
-fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
+fn keyword(db: &impl Reads, id: i64) -> Result<Keyword> {
+    row! {
+        struct Step {
+            name: String,
+            parent: Option<i64>,
+            included: bool,
+            with_parents: bool,
+        }
+    }
     let mut path = Vec::new();
     // Include on Export of each, from the keyword up.
     let mut include = Vec::new();
@@ -271,20 +284,21 @@ fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
     while let Some(k) = next {
         // A cycle in a damaged catalog would never end.
         ensure!(path.len() < 256, "Keyword hierarchy too deep");
-        let (name, parent, included, with_parents): (String, Option<i64>, bool, bool) = db
-            .prepare_cached(
-                "SELECT k.name, k.parent, COALESCE(e.include, 1), COALESCE(e.parents, 1)
-                 FROM keywords k LEFT JOIN keyword_export e ON e.keyword = k.id WHERE k.id=?",
+        let step: Step = db
+            .read_optional(
+                sql!(
+                    "SELECT k.name, k.parent, COALESCE(e.include, 1), COALESCE(e.parents, 1)
+                     FROM keywords k LEFT JOIN keyword_export e ON e.keyword = k.id WHERE k.id=?"
+                ),
+                &[&k],
             )?
-            .query_row([k], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-            .optional()?
             .context("Unknown keyword")?;
         if path.is_empty() {
-            parents = with_parents;
+            parents = step.with_parents;
         }
-        path.push(name);
-        include.push(included);
-        next = parent;
+        path.push(step.name);
+        include.push(step.included);
+        next = step.parent;
     }
     let own = include[0];
     let mut exported: Vec<bool> = include
@@ -302,86 +316,121 @@ fn keyword(db: &Connection, id: i64) -> Result<Keyword> {
     })
 }
 
-pub(super) fn read(db: &Connection, id: PhotoId) -> Result<Descriptive> {
+pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<Descriptive> {
+    row! {
+        struct State {
+            field: String,
+            state: String,
+        }
+    }
+    row! {
+        struct Lang {
+            lang: String,
+            value: String,
+        }
+    }
     let states: HashMap<String, String> = db
-        .prepare_cached("SELECT field, state FROM photo_fields WHERE photo=?")?
-        .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
+        .read::<State>(
+            sql!("SELECT field, state FROM photo_fields WHERE photo=?"),
+            &[&id],
+        )?
+        .into_iter()
+        .map(|s| (s.field, s.state))
+        .collect();
     let mut d = Descriptive::default();
     for field in TextField::ALL {
         *d.text_mut(field) = match states.get(key(field)).map(String::as_str) {
             Some("set") => {
-                let langs: Vec<(String, String)> = db
-                    .prepare_cached(
-                        "SELECT lang, value FROM photo_text WHERE photo=? AND field=? ORDER BY position",
-                    )?
-                    .query_map(params![id, key(field)], |r| Ok((r.get(0)?, r.get(1)?)))?
-                    .collect::<rusqlite::Result<_>>()?;
-                Some(Value::Set(LangAlt(langs)))
+                let langs: Vec<Lang> = db.read(
+                    sql!(
+                        "SELECT lang, value FROM photo_text WHERE photo=? AND field=? ORDER BY position"
+                    ),
+                    &[&id, &key(field)],
+                )?;
+                Some(Value::Set(LangAlt(
+                    langs.into_iter().map(|l| (l.lang, l.value)).collect(),
+                )))
             }
             Some(_) => Some(Value::Cleared),
             None => None,
         };
     }
     d.creator = match states.get(CREATOR).map(String::as_str) {
-        Some("set") => Some(Value::Set(
-            db.prepare_cached("SELECT name FROM photo_creators WHERE photo=? ORDER BY position")?
-                .query_map([id], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?,
-        )),
+        Some("set") => Some(Value::Set(db.read(
+            sql!("SELECT name FROM photo_creators WHERE photo=? ORDER BY position"),
+            &[&id],
+        )?)),
         Some(_) => Some(Value::Cleared),
         None => None,
     };
+    row! {
+        struct CaptureRow {
+            captured: String,
+            subsec: Option<String>,
+            offset: Option<String>,
+        }
+    }
     d.capture = db
-        .prepare_cached(r#"SELECT captured, subsec, "offset" FROM photo_capture WHERE photo=?"#)?
-        .query_row([id], |r| {
-            Ok(Capture {
-                captured: r.get(0)?,
-                subsec: r.get(1)?,
-                offset: r.get(2)?,
-            })
-        })
-        .optional()?;
+        .read_optional::<CaptureRow>(
+            sql!(r#"SELECT captured, subsec, "offset" FROM photo_capture WHERE photo=?"#),
+            &[&id],
+        )?
+        .map(|c| Capture {
+            captured: c.captured,
+            subsec: c.subsec,
+            offset: c.offset,
+        });
+    row! {
+        struct LocationRow {
+            lat: Option<f64>,
+            lon: Option<f64>,
+            alt: Option<f64>,
+            cleared: bool,
+        }
+    }
     d.location = db
-        .prepare_cached("SELECT lat, lon, alt, cleared FROM photo_location WHERE photo=?")?
-        .query_row([id], |r| {
-            let at: (Option<f64>, Option<f64>, Option<f64>, bool) =
-                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
-            Ok(at)
-        })
-        .optional()?
-        .map(|(lat, lon, alt, cleared)| match (lat, lon) {
-            (Some(lat), Some(lon)) if !cleared => Location::At { lat, lon, alt },
+        .read_optional::<LocationRow>(
+            sql!("SELECT lat, lon, alt, cleared FROM photo_location WHERE photo=?"),
+            &[&id],
+        )?
+        .map(|l| match (l.lat, l.lon) {
+            (Some(lat), Some(lon)) if !l.cleared => Location::At {
+                lat,
+                lon,
+                alt: l.alt,
+            },
             _ => Location::Cleared,
         });
     Ok(d)
 }
 
 /// Replaces every descriptive row of a photo with `d`.
-pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()> {
-    for table in TABLES {
-        db.execute(&format!("DELETE FROM {table} WHERE photo=?"), [id])?;
+pub(super) fn write(w: &mut Write<'_>, id: PhotoId, d: &Descriptive) -> Result<()> {
+    for delete in DELETE_ROWS {
+        w.execute(delete, &[&id])?;
     }
-    let state = |db: &Connection, field: &str, set: bool| -> Result<()> {
-        db.execute(
-            "INSERT INTO photo_fields(photo, field, state) VALUES (?, ?, ?)",
-            params![id, field, if set { "set" } else { "cleared" }],
+    let state = |w: &mut Write<'_>, field: &str, set: bool| -> Result<()> {
+        w.execute(
+            sql!("INSERT INTO photo_fields(photo, field, state) VALUES (?, ?, ?)"),
+            &[&id, &field, &if set { "set" } else { "cleared" }],
         )?;
         Ok(())
     };
     for field in TextField::ALL {
         match d.text(field) {
             None => {}
-            Some(Value::Cleared) => state(db, key(field), false)?,
+            Some(Value::Cleared) => state(w, key(field), false)?,
             Some(Value::Set(langs)) => {
-                state(db, key(field), true)?;
+                state(w, key(field), true)?;
                 for (position, (lang, value)) in langs.0.iter().enumerate() {
-                    db.execute(
-                        "INSERT INTO photo_text(photo, field, lang, position, value)
-                         VALUES (?, ?, ?, ?, ?)
-                         ON CONFLICT(photo, field, lang)
-                         DO UPDATE SET position=excluded.position, value=excluded.value",
-                        params![id, key(field), lang, position as i64, value],
+                    w.execute(
+                        sql!(
+                            "INSERT INTO photo_text(photo, field, lang, position, value)
+                             VALUES (?, ?, ?, ?, ?)
+                             ON CONFLICT(photo, field, lang)
+                             DO UPDATE SET position=excluded.position, value=excluded.value"
+                        ),
+                        &[&id, &key(field), lang, &(position as i64), value],
                     )?;
                 }
             }
@@ -389,38 +438,43 @@ pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()>
     }
     match &d.creator {
         None => {}
-        Some(Value::Cleared) => state(db, CREATOR, false)?,
+        Some(Value::Cleared) => state(w, CREATOR, false)?,
         Some(Value::Set(names)) => {
-            state(db, CREATOR, true)?;
+            state(w, CREATOR, true)?;
             for (position, name) in names.iter().enumerate() {
-                db.execute(
-                    "INSERT INTO photo_creators(photo, position, name) VALUES (?, ?, ?)",
-                    params![id, position as i64, name],
+                w.execute(
+                    sql!("INSERT INTO photo_creators(photo, position, name) VALUES (?, ?, ?)"),
+                    &[&id, &(position as i64), name],
                 )?;
             }
         }
     }
     if let Some(c) = &d.capture {
-        db.execute(
-            r#"INSERT INTO photo_capture(photo, captured, subsec, "offset") VALUES (?, ?, ?, ?)"#,
-            params![id, c.captured, c.subsec, c.offset],
+        w.execute(
+            sql!(r#"INSERT INTO photo_capture(photo, captured, subsec, "offset") VALUES (?, ?, ?, ?)"#),
+            &[&id, &c.captured, &c.subsec, &c.offset],
         )?;
         let sort = crate::exif::lightroom_time(&c.captured, c.subsec.as_deref())
             .context("Invalid capture time")?;
-        db.execute("UPDATE photos SET captured=? WHERE id=?", params![sort, id])?;
+        w.execute(
+            sql!("UPDATE photos SET captured=? WHERE id=?"),
+            &[&sort, &id],
+        )?;
     }
     match &d.location {
         None => {}
         Some(Location::Cleared) => {
-            db.execute(
-                "INSERT INTO photo_location(photo, cleared) VALUES (?, 1)",
-                [id],
+            w.execute(
+                sql!("INSERT INTO photo_location(photo, cleared) VALUES (?, 1)"),
+                &[&id],
             )?;
         }
         Some(Location::At { lat, lon, alt }) => {
-            db.execute(
-                "INSERT INTO photo_location(photo, lat, lon, alt, cleared) VALUES (?, ?, ?, ?, 0)",
-                params![id, lat, lon, alt],
+            w.execute(
+                sql!(
+                    "INSERT INTO photo_location(photo, lat, lon, alt, cleared) VALUES (?, ?, ?, ?, 0)"
+                ),
+                &[&id, lat, lon, alt],
             )?;
         }
     }
@@ -428,25 +482,45 @@ pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()>
 }
 
 /// Gives `copy` its own copies of `photo`'s descriptive rows.
-pub(super) fn copy_rows(db: &Connection, photo: PhotoId, copy: PhotoId) -> Result<()> {
-    for (table, columns) in [
-        ("photo_fields", "field, state"),
-        ("photo_text", "field, lang, position, value"),
-        ("photo_creators", "position, name"),
-        ("photo_capture", r#"captured, subsec, "offset""#),
-        ("photo_location", "lat, lon, alt, cleared"),
+pub(super) fn copy_rows(w: &mut Write<'_>, photo: PhotoId, copy: PhotoId) -> Result<()> {
+    for statement in [
+        sql!(
+            "INSERT INTO photo_fields(photo, field, state)
+             SELECT ?, field, state FROM photo_fields WHERE photo=?"
+        ),
+        sql!(
+            "INSERT INTO photo_text(photo, field, lang, position, value)
+             SELECT ?, field, lang, position, value FROM photo_text WHERE photo=?"
+        ),
+        sql!(
+            "INSERT INTO photo_creators(photo, position, name)
+             SELECT ?, position, name FROM photo_creators WHERE photo=?"
+        ),
+        sql!(
+            r#"INSERT INTO photo_capture(photo, captured, subsec, "offset")
+               SELECT ?, captured, subsec, "offset" FROM photo_capture WHERE photo=?"#
+        ),
+        sql!(
+            "INSERT INTO photo_location(photo, lat, lon, alt, cleared)
+             SELECT ?, lat, lon, alt, cleared FROM photo_location WHERE photo=?"
+        ),
     ] {
-        db.execute(
-            &format!(
-                "INSERT INTO {table}(photo, {columns}) SELECT ?, {columns} FROM {table} WHERE photo=?"
-            ),
-            [copy, photo],
-        )?;
+        w.execute(statement, &[&copy, &photo])?;
     }
     Ok(())
 }
 
-/// The descriptive tables, for removing a photo's rows.
+/// Removes every descriptive row of a photo, one statement per table.
+pub(super) const DELETE_ROWS: [Sql; 5] = [
+    sql!("DELETE FROM photo_fields WHERE photo=?"),
+    sql!("DELETE FROM photo_text WHERE photo=?"),
+    sql!("DELETE FROM photo_creators WHERE photo=?"),
+    sql!("DELETE FROM photo_capture WHERE photo=?"),
+    sql!("DELETE FROM photo_location WHERE photo=?"),
+];
+
+/// The descriptive tables.
+#[cfg(test)]
 pub(super) const TABLES: [&str; 5] = [
     "photo_fields",
     "photo_text",

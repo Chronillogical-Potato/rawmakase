@@ -181,7 +181,7 @@ fn save(catalog: &mut Option<Catalog>, job: &Job) -> anyhow::Result<PathBuf> {
         *catalog = None;
         *catalog = Some(Catalog::open(path)?);
     }
-    let c = catalog.as_ref().expect("opened above");
+    let c = catalog.as_mut().expect("opened above");
     c.save_edit(
         job.photo,
         &job.raw,
