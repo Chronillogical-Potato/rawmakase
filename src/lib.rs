@@ -14,9 +14,7 @@
 //! RAWmakase binary, its examples and its tests; it is not a stable public API.
 // The values a photo's edit is made of, built on their own (crates/rawmakase-model).
 // File formats and presets over the model (crates/rawmakase-interop).
-pub use rawmakase_interop::{
-    exif, export_settings, jpeg, lr_develop, presets, raw_defaults, watermark, xmp,
-};
+pub use rawmakase_interop::{exif, export_settings, jpeg, lr_develop, presets, raw_defaults, xmp};
 pub use rawmakase_model::{
     camera_data, camera_profiles, cameras, color, dng, ids, lens, metadata, model, optics,
     rendered, storage, tiff, xml,
@@ -40,3 +38,4 @@ pub mod raw;
 pub mod stats;
 pub mod time;
 pub mod updates;
+pub mod watermark;

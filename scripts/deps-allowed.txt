@@ -15,6 +15,7 @@ app -> raw
 app -> stats
 app -> time
 app -> updates
+app -> watermark
 catalog -> edits
 catalog_session -> catalog
 catalog_session -> platform
@@ -31,6 +32,7 @@ export -> edits
 export -> photo
 export -> raw
 export -> time
+export -> watermark
 photo -> raw
 raw -> demosaic
 stats -> time
