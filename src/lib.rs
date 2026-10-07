@@ -29,6 +29,7 @@ pub mod edits;
 pub mod exif;
 pub mod export;
 pub mod export_settings;
+pub mod ids;
 mod jpeg;
 pub mod lens;
 pub mod lr_develop;

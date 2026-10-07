@@ -8,7 +8,6 @@ use std::sync::Mutex;
 /// A photo of a batch at `source`, without an edit.
 fn photo(source: &Path) -> BatchPhoto {
     BatchPhoto {
-        id: 0,
         source: source.to_path_buf(),
         name: source.file_name().unwrap().to_string_lossy().into(),
         edit: Edit::Catalog(Default::default()),
