@@ -90,8 +90,8 @@ impl Catalog {
         })
     }
     /// The connection, for tests that set up stored state directly.
-    #[cfg(test)]
-    pub(crate) fn db_for_tests(&self) -> &Connection {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn db_for_tests(&self) -> &Connection {
         &self.db
     }
     pub fn photos(&self) -> Result<Vec<Photo>> {
@@ -248,8 +248,8 @@ impl Catalog {
         Ok(members)
     }
     /// Makes every write of descriptive metadata fail, as on a full disk.
-    #[cfg(test)]
-    pub(crate) fn fail_metadata_writes(&self) -> Result<()> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_metadata_writes(&self) -> Result<()> {
         self.db.execute_batch(
             "CREATE TEMP TRIGGER fail_metadata BEFORE INSERT ON photo_fields
              BEGIN SELECT RAISE(FAIL, 'disk full'); END;",
@@ -291,7 +291,7 @@ impl Catalog {
     fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         set_meta(&self.db, key, value)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_metadata(&mut self, id: PhotoId, rating: i32, flag: i32, label: &str) -> Result<()> {
         self.set_metadata_of(&[(id, rating, flag, label.into())])
     }

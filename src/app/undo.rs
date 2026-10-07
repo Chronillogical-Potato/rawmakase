@@ -127,11 +127,11 @@ impl Editor {
     /// they were made.
     pub(super) fn sync_undo(&mut self) {
         let photo = self.document.catalog_photo;
-        let history = self.document.edit.history.id();
+        let history = self.document.edit.history().id();
         let mut commands: Vec<(u64, Command)> = self
             .document
             .edit
-            .history
+            .history_mut()
             .take_recorded()
             .into_iter()
             .map(|change| {
@@ -181,10 +181,7 @@ impl Editor {
     /// Records a drag still in progress as a step, in the log, so it is undone in
     /// its place; the rest of the drag becomes a step of its own.
     pub(super) fn finish_gesture(&mut self) {
-        self.document
-            .edit
-            .history
-            .finish_gesture(&self.document.edit.recipe);
+        self.document.edit.finish_gesture();
         self.sync_undo();
     }
     /// Waits while Sync writes edits, which Undo could otherwise race.
@@ -306,7 +303,7 @@ impl Editor {
                     && sync.edits.iter().any(|e| e.id == open)
                     && let Some(path) = self.document.path.clone()
                 {
-                    self.document.edit.save.saved();
+                    self.document.edit.save_state_mut().saved();
                     self.load_raw(path, Some(open));
                 }
                 self.status = format!(
@@ -327,22 +324,21 @@ impl Editor {
                 };
                 // The History that recorded it goes back to the exact state;
                 // the same photo opened again since gets the recipe as a step.
-                let same_history = self.document.edit.history.id() == *history;
+                let same_history = self.document.edit.history().id() == *history;
                 let reopened = photo.is_some()
                     && self.document.catalog_photo == *photo
                     && self.document.path.is_some();
                 if same_history || reopened {
                     self.module = Module::Develop;
                     let step = Step::new(verb, "");
-                    let history = &mut self.document.edit.history;
                     if same_history {
-                        history.restore(at, target, &mut self.document.edit.recipe, step);
+                        self.document.edit.restore(at, target, step);
                     } else {
-                        history.set(target, &mut self.document.edit.recipe, step);
+                        self.document.edit.set(target, step);
                     }
                     // Not a change of its own for the log.
-                    self.document.edit.history.take_recorded();
-                    self.document.edit.save.mark_changed();
+                    self.document.edit.history_mut().take_recorded();
+                    self.document.edit.save_state_mut().mark_changed();
                     self.ensure_upright();
                     self.schedule();
                     self.status = format!("{verb} in Develop");

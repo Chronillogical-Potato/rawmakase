@@ -53,8 +53,8 @@ impl Editor {
     }
     /// Carries out a choice from the Point Curve menu.
     pub(super) fn choose_point_curve(&mut self, choice: CurveChoice) {
-        let before = self.document.edit.recipe.clone();
-        let r = &mut self.document.edit.recipe;
+        let before = self.document.edit.recipe().clone();
+        let r = self.document.edit.recipe_mut();
         let name = match choice {
             CurveChoice::Builtin(curve) => {
                 curve.apply(r);
@@ -155,7 +155,7 @@ impl Editor {
     }
     /// Saves the photo's point curve as `name` in `store`, and lists it.
     fn save_point_curve(&mut self, store: &SavedCurves, name: &str) {
-        let curve = PointCurve::of(&self.document.edit.recipe);
+        let curve = PointCurve::of(self.document.edit.recipe());
         match store.save(name, &curve) {
             Ok(_) => {
                 let saved = format!("Point curve {} saved", name.trim());
@@ -183,49 +183,49 @@ mod tests {
         let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.document
             .edit
-            .recipe
+            .recipe_mut()
             .panels
             .set(Panel::ToneCurve, PanelState::Off);
-        let before = e.document.edit.recipe.clone();
+        let before = e.document.edit.recipe().clone();
         let frame = e.begin_edit_frame();
         e.choose_point_curve(CurveChoice::Builtin(BuiltinCurve::MediumContrast));
         e.finish_edit_frame(frame, &ctx);
-        let r = &e.document.edit.recipe;
+        let r = e.document.edit.recipe();
         assert_eq!(r.curve, BuiltinCurve::MediumContrast.curve());
         assert_eq!(r.panels.state(Panel::ToneCurve), PanelState::On);
-        let (steps, applied) = e.document.edit.history.steps();
+        let (steps, applied) = e.document.edit.history().steps();
         assert_eq!(applied, 1);
         assert_eq!(
             (steps[0].name.as_str(), steps[0].value.as_str()),
             ("Point Curve", "Medium Contrast")
         );
         e.undo();
-        assert_eq!(e.document.edit.recipe, before);
+        assert_eq!(*e.document.edit.recipe(), before);
 
         // The same curve again, with the panel off: it turns on, as one step.
-        e.document.edit.recipe.curve = BuiltinCurve::MediumContrast.curve();
+        e.document.edit.recipe_mut().curve = BuiltinCurve::MediumContrast.curve();
         e.document
             .edit
-            .recipe
+            .recipe_mut()
             .panels
             .set(Panel::ToneCurve, PanelState::Off);
         let frame = e.begin_edit_frame();
         e.choose_point_curve(CurveChoice::Builtin(BuiltinCurve::MediumContrast));
         e.finish_edit_frame(frame, &ctx);
-        let r = &e.document.edit.recipe;
+        let r = e.document.edit.recipe();
         assert_eq!(r.panels.state(Panel::ToneCurve), PanelState::On);
-        let (steps, applied) = e.document.edit.history.steps();
+        let (steps, applied) = e.document.edit.history().steps();
         assert_eq!((applied, steps[0].name.as_str()), (1, "Point Curve"));
         // Once more, with nothing to change: no step, and the next edit keeps its
         // own name.
         let frame = e.begin_edit_frame();
         e.choose_point_curve(CurveChoice::Builtin(BuiltinCurve::MediumContrast));
         e.finish_edit_frame(frame, &ctx);
-        assert_eq!(e.document.edit.history.steps().1, 1);
+        assert_eq!(e.document.edit.history().steps().1, 1);
         let frame = e.begin_edit_frame();
-        e.document.edit.recipe.exposure = 0.5;
+        e.document.edit.recipe_mut().exposure = 0.5;
         e.finish_edit_frame(frame, &ctx);
-        let (steps, applied) = e.document.edit.history.steps();
+        let (steps, applied) = e.document.edit.history().steps();
         assert_eq!(applied, 2);
         assert_ne!(steps[1].name, "Point Curve");
     }
@@ -239,11 +239,11 @@ mod tests {
             dir: d.path().join("Curves"),
         };
         e.curves.saved = Some(Vec::new());
-        e.document.edit.recipe.curve = BuiltinCurve::StrongContrast.curve();
+        e.document.edit.recipe_mut().curve = BuiltinCurve::StrongContrast.curve();
         // Points on Lightroom's 0–255 steps, as saved curves keep them.
-        e.document.edit.recipe.effects.channels[1].points =
+        e.document.edit.recipe_mut().effects.channels[1].points =
             vec![[0., 0.], [128. / 255., 153. / 255.], [1., 1.]];
-        let saved_recipe = e.document.edit.recipe.clone();
+        let saved_recipe = e.document.edit.recipe().clone();
         e.save_point_curve(&store, "Green Lift");
         assert_eq!(e.status, "Point curve Green Lift saved");
         let saved = e.saved_curves();
@@ -263,14 +263,16 @@ mod tests {
         e.save_point_curve(&store, "Green Lift");
         assert!(e.status.contains("already saved"), "{}", e.status);
 
-        e.document.edit.recipe = crate::model::recipe::Recipe::default();
+        e.document
+            .edit
+            .replace(crate::model::recipe::Recipe::default());
         let frame = e.begin_edit_frame();
         e.choose_point_curve(CurveChoice::Saved(saved[0].clone()));
         e.finish_edit_frame(frame, &ctx);
-        let r = &e.document.edit.recipe;
+        let r = e.document.edit.recipe();
         assert_eq!(r.curve, saved_recipe.curve);
         assert_eq!(r.effects.channels, saved_recipe.effects.channels);
-        let (steps, applied) = e.document.edit.history.steps();
+        let (steps, applied) = e.document.edit.history().steps();
         assert_eq!(applied, 1);
         assert_eq!(steps[0].value, "Green Lift");
         assert_eq!(crate::presets::curves::shown_name(r, &saved), "Green Lift");

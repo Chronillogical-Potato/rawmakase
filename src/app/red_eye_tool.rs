@@ -117,7 +117,7 @@ impl Editor {
                 (p.y - rect.top()) / rect.height(),
             )
         };
-        let ops = self.document.edit.recipe.red_eye.clone();
+        let ops = self.document.edit.recipe().red_eye.clone();
         let hit = |pos: Pos2| {
             let at = to_image(pos);
             (0..ops.len()).rev().find(|i| ops[*i].contains(at, aspect))
@@ -150,21 +150,21 @@ impl Editor {
             && let Some(pos) = response.interact_pointer_pos()
             && let Drag::Move(start, original) = &self.view.red_eye.drag
             && let Some(i) = self.view.red_eye.selected
-            && i < self.document.edit.recipe.red_eye.len()
+            && i < self.document.edit.recipe().red_eye.len()
         {
             let at = to_image(pos);
             let mut op = original.clone();
             op.translate([at[0] - start[0], at[1] - start[1]]);
-            self.document.edit.recipe.red_eye[i] = op;
+            self.document.edit.recipe_mut().red_eye[i] = op;
             self.show_red_eye();
         }
         if response.dragged()
             && let Some(pos) = response.interact_pointer_pos()
             && let Drag::Catchlight = self.view.red_eye.drag
             && let Some(i) = self.view.red_eye.selected
-            && i < self.document.edit.recipe.red_eye.len()
+            && i < self.document.edit.recipe().red_eye.len()
         {
-            self.document.edit.recipe.red_eye[i].set_catchlight(to_image(pos), aspect);
+            self.document.edit.recipe_mut().red_eye[i].set_catchlight(to_image(pos), aspect);
             self.show_red_eye();
         }
         // As in Lightroom, the size comes from the wheel or `[` `]`, not the drag: a
@@ -192,7 +192,7 @@ impl Editor {
         // Drawing.
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         let tool = &self.view.red_eye;
-        for (i, op) in self.document.edit.recipe.red_eye.iter().enumerate() {
+        for (i, op) in self.document.edit.recipe().red_eye.iter().enumerate() {
             let selected = tool.selected == Some(i);
             let points: Vec<Pos2> = op.outline(aspect, 72).into_iter().map(to_screen).collect();
             let width = if selected || hovered == Some(i) {
@@ -230,7 +230,7 @@ impl Editor {
     /// Corrects the pupil (red, or glowing for Pet Eye) found within `size` (long-edge
     /// fraction) of image position `center`, or says none was found.
     pub(super) fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
-        if self.document.edit.recipe.red_eye.len() >= crate::model::red_eye::MAX_OPS {
+        if self.document.edit.recipe().red_eye.len() >= crate::model::red_eye::MAX_OPS {
             self.status = "Too many red eye corrections on this photo".into();
             return;
         }
@@ -242,7 +242,7 @@ impl Editor {
             .view
             .red_eye
             .selected
-            .and_then(|i| self.document.edit.recipe.red_eye.get(i))
+            .and_then(|i| self.document.edit.recipe().red_eye.get(i))
             .map_or(self.view.red_eye.pet, |op| PupilType::of(op.kind));
         let kind = pet.kind();
         match red_eye::find_pupil(
@@ -256,7 +256,7 @@ impl Editor {
                     .view
                     .red_eye
                     .selected
-                    .and_then(|i| self.document.edit.recipe.red_eye.get(i))
+                    .and_then(|i| self.document.edit.recipe().red_eye.get(i))
                     .map_or(
                         (
                             crate::model::red_eye::DEFAULT_PUPIL_SIZE,
@@ -277,9 +277,9 @@ impl Editor {
                     self.status = e.to_string();
                     return;
                 }
-                self.document.edit.recipe.red_eye.push(op);
+                self.document.edit.recipe_mut().red_eye.push(op);
                 self.show_red_eye();
-                self.select_red_eye(Some(self.document.edit.recipe.red_eye.len() - 1));
+                self.select_red_eye(Some(self.document.edit.recipe().red_eye.len() - 1));
             }
             // Lightroom's warning.
             Err(_) => {
@@ -294,7 +294,7 @@ impl Editor {
     /// Type menu shows it.
     pub(super) fn select_red_eye(&mut self, i: Option<usize>) {
         self.view.red_eye.selected = i;
-        if let Some(op) = i.and_then(|i| self.document.edit.recipe.red_eye.get(i)) {
+        if let Some(op) = i.and_then(|i| self.document.edit.recipe().red_eye.get(i)) {
             self.view.red_eye.pet = PupilType::of(op.kind);
         }
     }
@@ -304,7 +304,7 @@ impl Editor {
         use crate::model::panels::{Panel, PanelState};
         self.document
             .edit
-            .recipe
+            .recipe_mut()
             .panels
             .set(Panel::RedEye, PanelState::On);
     }
@@ -329,9 +329,9 @@ impl Editor {
     }
     pub(super) fn delete_red_eye(&mut self) {
         if let Some(i) = self.view.red_eye.selected.take()
-            && i < self.document.edit.recipe.red_eye.len()
+            && i < self.document.edit.recipe().red_eye.len()
         {
-            self.document.edit.recipe.red_eye.remove(i);
+            self.document.edit.recipe_mut().red_eye.remove(i);
         }
     }
     /// The Red Eye drawer below the tool strip.
@@ -342,10 +342,10 @@ impl Editor {
             .view
             .red_eye
             .selected
-            .filter(|i| *i < self.document.edit.recipe.red_eye.len());
+            .filter(|i| *i < self.document.edit.recipe().red_eye.len());
         super::retouch_tool::control_label(ui, "Type", |ui| {
             let mut pet = selected.map_or(self.view.red_eye.pet, |i| {
-                PupilType::of(self.document.edit.recipe.red_eye[i].kind)
+                PupilType::of(self.document.edit.recipe().red_eye[i].kind)
             });
             let w = ui.available_width();
             if segmented(
@@ -356,7 +356,7 @@ impl Editor {
             ) {
                 self.view.red_eye.pet = pet;
                 if let Some(i) = selected {
-                    let op = &mut self.document.edit.recipe.red_eye[i];
+                    let op = &mut self.document.edit.recipe_mut().red_eye[i];
                     op.kind = pet.kind();
                     op.fit_catchlight();
                     self.show_red_eye();
@@ -365,7 +365,7 @@ impl Editor {
         });
         match selected {
             Some(i) => {
-                let op = &mut self.document.edit.recipe.red_eye[i];
+                let op = &mut self.document.edit.recipe_mut().red_eye[i];
                 let before = op.clone();
                 slider_with(
                     ui,
@@ -418,13 +418,13 @@ impl Editor {
         ui.add_space(4.);
         indented(ui, |ui| {
             let w = (ui.available_width() - 4.) / 2.;
-            let any = !self.document.edit.recipe.red_eye.is_empty();
+            let any = !self.document.edit.recipe().red_eye.is_empty();
             if ui
                 .add_enabled(any, egui::Button::new("Reset").min_size(Vec2::new(w, 22.)))
                 .on_hover_text("Remove every red eye correction")
                 .clicked()
             {
-                self.document.edit.recipe.red_eye.clear();
+                self.document.edit.recipe_mut().red_eye.clear();
                 self.view.red_eye.selected = None;
             }
             if ui

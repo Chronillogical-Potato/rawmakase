@@ -336,7 +336,7 @@ impl Editor {
                     .is_some_and(|(_, t)| t.elapsed() > HOVER_PREVIEW)
                 && let Some(m) = &self.document.metadata
                 && let Ok((mut r, _)) = library.presets[i].apply_lenient(
-                    &self.document.edit.recipe,
+                    self.document.edit.recipe(),
                     m,
                     &self.document.profiles,
                     self.document
@@ -345,7 +345,7 @@ impl Editor {
                         .map(|m| m as &dyn crate::xmp::PhotoMeasures),
                 )
             {
-                this_photos_upright(&mut r, &self.document.edit.recipe);
+                this_photos_upright(&mut r, self.document.edit.recipe());
                 self.presets.preview = Some(r);
                 self.schedule();
             }
@@ -447,7 +447,7 @@ impl Editor {
             .as_ref()
             .context("Open a photo in Develop first")?;
         let (mut r, skipped) = preset.apply_lenient(
-            &self.document.edit.recipe,
+            self.document.edit.recipe(),
             m,
             &self.document.profiles,
             self.document
@@ -458,12 +458,12 @@ impl Editor {
         let substitute = preset
             .profile_substitute(m, &self.document.profiles)
             .map(|(_, used)| used);
-        this_photos_upright(&mut r, &self.document.edit.recipe);
-        let before = std::mem::replace(&mut self.document.edit.recipe, r);
+        this_photos_upright(&mut r, self.document.edit.recipe());
+        let before = self.document.edit.replace(r);
         self.ensure_upright();
         // The settings before it are kept once, and every Amount is computed
         // from them again, so dragging never drifts.
-        let full = self.document.edit.recipe.clone();
+        let full = self.document.edit.recipe().clone();
         self.presets.amount =
             crate::presets::amount::PresetAmount::new(preset, before, full.clone())
                 .ok()
@@ -493,20 +493,23 @@ impl Editor {
             .shown
             .upright
             .corrections
-            .clone_from(&self.document.edit.recipe.upright.corrections);
+            .clone_from(&self.document.edit.recipe().upright.corrections);
         // Named only when it changes the photo: a label left over would name the
         // next edit.
-        if session.shown == self.document.edit.recipe {
+        if session.shown == *self.document.edit.recipe() {
             // The slider named a step; with nothing changed it would name the next edit.
             self.context
                 .data_mut(|d| d.remove_temp::<(String, String)>(super::widgets::history_step_id()));
             return AmountChange::Same;
         }
-        self.document.edit.recipe = session.shown.clone();
-        self.document.edit.history.label(super::history::Step::new(
-            "Preset Amount",
-            format!("{:.0}", amount * 100.),
-        ));
+        self.document.edit.replace(session.shown.clone());
+        self.document
+            .edit
+            .history_mut()
+            .label(super::history::Step::new(
+                "Preset Amount",
+                format!("{:.0}", amount * 100.),
+            ));
         AmountChange::Changed
     }
     /// Ends the Amount once anything else has changed the photo, as Lightroom hides it.
@@ -515,7 +518,7 @@ impl Editor {
             .presets
             .amount
             .as_ref()
-            .is_some_and(|s| !s.still_shown(&self.document.edit.recipe))
+            .is_some_and(|s| !s.still_shown(self.document.edit.recipe()))
         {
             self.presets.amount = None;
         }
@@ -764,7 +767,7 @@ impl Editor {
         let mut go_to = None;
         let mut to_before = None;
         let mut lightroom = None;
-        let (steps, applied) = self.document.edit.history.steps();
+        let (steps, applied) = self.document.edit.history().steps();
         // A click goes to the step; its menu copies it to Before, as in Lightroom.
         let mut row = |ui: &mut egui::Ui, n: usize, name: &str, value: &str| {
             let response = history_row(ui, name, value, n == applied, n > applied);
@@ -843,8 +846,7 @@ impl Editor {
         if let Some(n) = go_to {
             // A resize still being grouped is a step before the jump, so it isn't lost.
             self.finish_wheel_gesture();
-            let current = &mut self.document.edit.recipe;
-            if self.document.edit.history.jump(n, current) {
+            if self.document.edit.jump(n) {
                 self.ensure_upright();
             }
         }
@@ -876,9 +878,9 @@ impl Editor {
                     };
                     self.document
                         .edit
-                        .history
+                        .history_mut()
                         .label(super::history::Step::new(name, ""));
-                    self.document.edit.recipe = recipe;
+                    self.document.edit.replace(recipe);
                 }
                 Err(e) => self.status = format!("History step not applied: {e:#}"),
             }

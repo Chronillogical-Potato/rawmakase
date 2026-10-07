@@ -133,7 +133,7 @@ impl Editor {
         self.view
             .masking
             .selected
-            .filter(|i| *i < self.document.edit.recipe.masks.len())
+            .filter(|i| *i < self.document.edit.recipe().masks.len())
     }
     /// Whether the brush is in use: a brush component is selected and no new shape is
     /// waiting to be drawn. Only then does the cursor show it, and the wheel size it.
@@ -141,7 +141,7 @@ impl Editor {
         self.view.masking.pending.is_none()
             && self.selected_component().is_some_and(|(m, c)| {
                 matches!(
-                    self.document.edit.recipe.masks[m].components[c].shape,
+                    self.document.edit.recipe().masks[m].components[c].shape,
                     MaskShape::Brush { .. }
                 )
             })
@@ -152,7 +152,7 @@ impl Editor {
             .view
             .masking
             .component
-            .filter(|c| *c < self.document.edit.recipe.masks[m].components.len())?;
+            .filter(|c| *c < self.document.edit.recipe().masks[m].components.len())?;
         Some((m, c))
     }
     /// Starts a new mask of `kind` (the Create buttons and K, M, Shift+M, Shift+J), or
@@ -182,7 +182,7 @@ impl Editor {
     }
     /// Adds `component` to the selected mask with `op`, or as a new mask without one.
     fn add_component(&mut self, mut component: MaskComponent, op: Option<MaskOp>) {
-        let masks = &mut self.document.edit.recipe.masks;
+        let masks = &mut self.document.edit.recipe_mut().masks;
         match (op, self.view.masking.selected.filter(|i| *i < masks.len())) {
             (Some(op), Some(m)) if masks[m].components.len() < MAX_COMPONENTS => {
                 component.op = op;
@@ -234,7 +234,7 @@ impl Editor {
         if pressed(&[Key::Delete, Key::Backspace])
             && let Some(m) = self.selected_mask()
         {
-            self.document.edit.recipe.masks.remove(m);
+            self.document.edit.recipe_mut().masks.remove(m);
             self.view.masking.select(None, None);
         }
     }
@@ -271,7 +271,7 @@ impl Editor {
         };
         let selected = self.selected_component();
         let shape = selected.map(|(m, c)| {
-            self.document.edit.recipe.masks[m].components[c]
+            self.document.edit.recipe().masks[m].components[c]
                 .shape
                 .clone()
         });
@@ -284,7 +284,7 @@ impl Editor {
         let pins: Vec<(usize, Pos2)> = self
             .document
             .edit
-            .recipe
+            .recipe()
             .masks
             .iter()
             .enumerate()
@@ -337,7 +337,7 @@ impl Editor {
                 Drag::Handle(h, start, original) => {
                     let moved = move_handle(original, *h, space, *start, at);
                     if let Some((m, c)) = selected {
-                        self.document.edit.recipe.masks[m].components[c].shape = moved;
+                        self.document.edit.recipe_mut().masks[m].components[c].shape = moved;
                     }
                 }
                 _ => {}
@@ -457,7 +457,7 @@ impl Editor {
         };
         let erase = alt || self.view.masking.brush == 2;
         match (
-            &mut self.document.edit.recipe.masks[m].components[c].shape,
+            &mut self.document.edit.recipe_mut().masks[m].components[c].shape,
             lab,
         ) {
             (MaskShape::ColorRange { samples, .. }, Some(lab)) => {
@@ -482,7 +482,7 @@ impl Editor {
         let t = &self.view.masking;
         let b = t.brushes[if erase { 2 } else { t.brush }];
         if let MaskShape::Brush { strokes } =
-            &mut self.document.edit.recipe.masks[m].components[c].shape
+            &mut self.document.edit.recipe_mut().masks[m].components[c].shape
             && strokes.len() < MAX_STROKES
         {
             strokes.push(BrushStroke {
@@ -596,7 +596,7 @@ impl Editor {
         let selected = self.selected_mask();
         let mut select = None;
         let mut select_component = None;
-        let masks = self.document.edit.recipe.masks.clone();
+        let masks = self.document.edit.recipe().masks.clone();
         for (i, mask) in masks.iter().enumerate() {
             indented(ui, |ui| {
                 let width = ui.available_width();
@@ -628,7 +628,7 @@ impl Editor {
                     edit.request_focus();
                     if edit.lost_focus() {
                         let name: String = text.trim().chars().take(64).collect();
-                        if let Some(m) = self.document.edit.recipe.masks.get_mut(i) {
+                        if let Some(m) = &mut self.document.edit.recipe_mut().masks.get_mut(i) {
                             m.name = name;
                         }
                         self.view.masking.renaming = None;
@@ -665,7 +665,7 @@ impl Editor {
                     .on_hover_text("Show or hide this mask's effect")
                     .clicked()
                 {
-                    self.document.edit.recipe.masks[i].hidden ^= true;
+                    self.document.edit.recipe_mut().masks[i].hidden ^= true;
                 } else if response.double_clicked() {
                     self.view.masking.renaming = Some((i, mask.name.clone()));
                 } else if response
@@ -750,18 +750,21 @@ impl Editor {
         });
         indented(ui, |ui| {
             ui.add_space(14.);
-            ui.checkbox(&mut self.document.edit.recipe.masks[i].invert, "Invert")
-                .on_hover_text("Apply the adjustment outside the mask");
-            let full = self.document.edit.recipe.masks.len() >= MAX_GROUPS;
+            ui.checkbox(
+                &mut self.document.edit.recipe_mut().masks[i].invert,
+                "Invert",
+            )
+            .on_hover_text("Apply the adjustment outside the mask");
+            let full = self.document.edit.recipe().masks.len() >= MAX_GROUPS;
             if ui
                 .add_enabled(!full, egui::Button::new("Duplicate"))
                 .clicked()
             {
-                let mut copy = self.document.edit.recipe.masks[i].clone();
+                let mut copy = self.document.edit.recipe().masks[i].clone();
                 if !copy.name.is_empty() {
                     copy.name.push_str(" copy");
                 }
-                self.document.edit.recipe.masks.insert(i + 1, copy);
+                self.document.edit.recipe_mut().masks.insert(i + 1, copy);
                 self.view.masking.select(Some(i + 1), Some(0));
             }
             if ui
@@ -769,7 +772,7 @@ impl Editor {
                 .on_hover_text("Delete this mask · Delete")
                 .clicked()
             {
-                self.document.edit.recipe.masks.remove(i);
+                self.document.edit.recipe_mut().masks.remove(i);
                 self.view.masking.select(None, None);
             }
         });
@@ -779,10 +782,10 @@ impl Editor {
         let Some((_, c)) = self.selected_component() else {
             return;
         };
-        let context = format!("{}:", mask_name(&self.document.edit.recipe.masks[m], m));
+        let context = format!("{}:", mask_name(&self.document.edit.recipe().masks[m], m));
         set_edit_context(ui, &context);
         let is_brush = matches!(
-            self.document.edit.recipe.masks[m].components[c].shape,
+            self.document.edit.recipe().masks[m].components[c].shape,
             MaskShape::Brush { .. }
         );
         if is_brush {
@@ -815,7 +818,7 @@ impl Editor {
             );
         }
         let percent = Some((100., 0));
-        let component = &mut self.document.edit.recipe.masks[m].components[c];
+        let component = &mut self.document.edit.recipe_mut().masks[m].components[c];
         match &mut component.shape {
             MaskShape::Radial { feather, .. } => {
                 slider_with(ui, "Feather", feather, 0. ..=1., 0.5, percent, None);
@@ -873,10 +876,10 @@ impl Editor {
                 .clicked();
         });
         if remove {
-            let mask = &mut self.document.edit.recipe.masks[m];
+            let mask = &mut self.document.edit.recipe_mut().masks[m];
             mask.components.remove(c);
             if mask.components.is_empty() {
-                self.document.edit.recipe.masks.remove(m);
+                self.document.edit.recipe_mut().masks.remove(m);
                 self.view.masking.select(None, None);
             } else {
                 self.view.masking.component = Some(0);
@@ -885,7 +888,7 @@ impl Editor {
     }
     /// Amount and the local adjustment sliders, in Lightroom's order.
     fn adjustment_sliders(&mut self, ui: &mut egui::Ui, m: usize) {
-        let Some(mask) = self.document.edit.recipe.masks.get_mut(m) else {
+        let Some(mask) = &mut self.document.edit.recipe_mut().masks.get_mut(m) else {
             return;
         };
         set_edit_context(ui, &format!("{}:", mask_name(mask, m)));

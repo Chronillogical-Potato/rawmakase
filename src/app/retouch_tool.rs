@@ -113,7 +113,7 @@ impl Editor {
             Vec2::new(rx * rect.width(), ry * rect.height())
         };
         let source_of = |op: &RetouchOp, p: [f32; 2]| [p[0] + op.offset[0], p[1] + op.offset[1]];
-        let ops = self.document.edit.recipe.retouch.clone();
+        let ops = self.document.edit.recipe().retouch.clone();
         let selected = self.view.retouch.selected.filter(|i| *i < ops.len());
         let hit = |pos: Pos2| -> Option<Hit> {
             // The selected spot's source first, then pins and shapes, newest on top.
@@ -185,7 +185,7 @@ impl Editor {
                     None
                 }
                 Drag::Manual => selected
-                    .and_then(|i| self.document.edit.recipe.retouch.get(i))
+                    .and_then(|i| self.document.edit.recipe().retouch.get(i))
                     .map(|op| {
                         let pin = op.pin();
                         RetouchOp {
@@ -196,9 +196,9 @@ impl Editor {
                 Drag::None => None,
             };
             if let (Some(op), Some(i)) = (moved, selected)
-                && i < self.document.edit.recipe.retouch.len()
+                && i < self.document.edit.recipe().retouch.len()
             {
-                self.document.edit.recipe.retouch[i] = op;
+                self.document.edit.recipe_mut().retouch[i] = op;
             }
         }
         if response.drag_stopped() {
@@ -219,7 +219,7 @@ impl Editor {
         // Drawing.
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         let tool = &self.view.retouch;
-        for (i, op) in self.document.edit.recipe.retouch.iter().enumerate() {
+        for (i, op) in self.document.edit.recipe().retouch.iter().enumerate() {
             let selected = tool.selected == Some(i);
             if selected || hovered == Some(Hit::Dest(i)) {
                 draw_shape(&painter, op, to_screen, &radius_on_screen, true);
@@ -286,7 +286,7 @@ impl Editor {
         self.push_op(op);
     }
     fn push_op(&mut self, mut op: RetouchOp) {
-        if self.document.edit.recipe.retouch.len() >= crate::model::retouch::MAX_OPS {
+        if self.document.edit.recipe().retouch.len() >= crate::model::retouch::MAX_OPS {
             self.status = "Too many spots on this photo".into();
             return;
         }
@@ -295,13 +295,13 @@ impl Editor {
                 .automatic_source(&op, &[])
                 .unwrap_or([op.radius() * 3., 0.]);
         }
-        self.document.edit.recipe.add_retouch(op);
-        let i = self.document.edit.recipe.retouch.len() - 1;
+        self.document.edit.recipe_mut().add_retouch(op);
+        let i = self.document.edit.recipe().retouch.len() - 1;
         self.view.retouch.select(Some(i));
     }
     fn automatic_source(&self, op: &RetouchOp, avoid: &[[f32; 2]]) -> Option<[f32; 2]> {
         let im = self.document.full()?;
-        retouch::find_source(im, op, &self.document.edit.recipe.retouch, avoid)
+        retouch::find_source(im, op, &self.document.edit.recipe().retouch, avoid)
     }
     /// The Remove tool's keys: `[` `]` size, with Shift feather, `/` next source,
     /// Delete, H pins and A Visualize Spots.
@@ -336,7 +336,7 @@ impl Editor {
         let Some(i) = self.view.retouch.selected else {
             return;
         };
-        let Some(op) = self.document.edit.recipe.retouch.get(i).cloned() else {
+        let Some(op) = self.document.edit.recipe().retouch.get(i).cloned() else {
             return;
         };
         let tool = &mut self.view.retouch;
@@ -345,14 +345,14 @@ impl Editor {
         }
         let avoid = self.view.retouch.tried.clone();
         if let Some(offset) = self.automatic_source(&op, &avoid) {
-            self.document.edit.recipe.retouch[i].offset = offset;
+            self.document.edit.recipe_mut().retouch[i].offset = offset;
         }
     }
     pub(super) fn delete_spot(&mut self) {
         if let Some(i) = self.view.retouch.selected.take()
-            && i < self.document.edit.recipe.retouch.len()
+            && i < self.document.edit.recipe().retouch.len()
         {
-            self.document.edit.recipe.retouch.remove(i);
+            self.document.edit.recipe_mut().retouch.remove(i);
         }
     }
     /// `[` and `]`: brush size, or the selected spot's; with Shift, feather.
@@ -360,7 +360,7 @@ impl Editor {
         let tool = &mut self.view.retouch;
         let op = tool
             .selected
-            .and_then(|i| self.document.edit.recipe.retouch.get_mut(i));
+            .and_then(|i| self.document.edit.recipe_mut().retouch.get_mut(i));
         if feather {
             let step = if grow { 0.1 } else { -0.1 };
             tool.feather = (tool.feather + step).clamp(0., 1.);
@@ -385,11 +385,11 @@ impl Editor {
             .view
             .retouch
             .selected
-            .filter(|i| *i < self.document.edit.recipe.retouch.len());
+            .filter(|i| *i < self.document.edit.recipe().retouch.len());
         super::widgets::set_edit_context(ui, "Spot");
         control_label(ui, "Mode", |ui| {
             let mut mode = selected.map_or(self.view.retouch.mode, |i| {
-                self.document.edit.recipe.retouch[i].mode
+                self.document.edit.recipe().retouch[i].mode
             });
             let w = ui.available_width();
             if segmented(
@@ -400,14 +400,14 @@ impl Editor {
             ) {
                 self.view.retouch.mode = mode;
                 if let Some(i) = selected {
-                    self.document.edit.recipe.retouch[i].mode = mode;
+                    self.document.edit.recipe_mut().retouch[i].mode = mode;
                 }
             }
         });
         ui.add_space(4.);
         let (mut size, mut feather, mut opacity) = match selected {
             Some(i) => {
-                let op = &self.document.edit.recipe.retouch[i];
+                let op = &self.document.edit.recipe().retouch[i];
                 (op.radius(), op.feather, op.opacity)
             }
             None => {
@@ -445,7 +445,7 @@ impl Editor {
         let t = &mut self.view.retouch;
         (t.size, t.feather, t.opacity) = (size, feather, opacity);
         if let Some(i) = selected {
-            let op = &mut self.document.edit.recipe.retouch[i];
+            let op = &mut self.document.edit.recipe_mut().retouch[i];
             op.set_radius(size);
             (op.feather, op.opacity) = (feather, opacity);
         }
@@ -481,13 +481,13 @@ impl Editor {
         ui.add_space(4.);
         indented(ui, |ui| {
             let w = (ui.available_width() - 4.) / 2.;
-            let any = !self.document.edit.recipe.retouch.is_empty();
+            let any = !self.document.edit.recipe().retouch.is_empty();
             if ui
                 .add_enabled(any, egui::Button::new("Reset").min_size(Vec2::new(w, 22.)))
                 .on_hover_text("Remove every spot")
                 .clicked()
             {
-                self.document.edit.recipe.retouch.clear();
+                self.document.edit.recipe_mut().retouch.clear();
                 self.view.retouch.select(None);
             }
             if ui

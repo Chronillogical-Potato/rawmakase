@@ -908,6 +908,10 @@ pub(super) struct SliderStyle {
     pub drag_step: Option<f32>,
     /// A hue wheel of 0–360° as the rail.
     pub hue_rail: bool,
+    /// What a typed value may be, `(low, high)`, when wider than the rail: a
+    /// descriptor's valid range, as Exposure's ±8 EV beside its ±5 rail. `None`
+    /// keeps typing to the rail's range.
+    pub typed: Option<(f32, f32)>,
 }
 /// The Temp slider's rail, blue to yellow.
 pub(super) const TEMPERATURE_GRADIENT: (Color32, Color32) = (
@@ -960,8 +964,32 @@ fn descriptor_slider<Id>(
         reciprocal: matches!(d.tick, params::Tick::Mireds(_)),
         drag_step: d.drag_step,
         hue_rail: false,
+        typed: Some((*d.valid.start(), *d.valid.end())),
     };
     slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
+}
+/// How a slider's number field was changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NumberInput {
+    /// Typed and entered: any value the setting may hold.
+    Typed,
+    /// Dragged, or stepped with the arrow keys: relative to the value before.
+    Relative,
+}
+/// The value a number field entry gives, from `before`: a typed value within
+/// `typed`; a relative one as dials and arrow keys move it, within `rail` and never
+/// further out than it was.
+fn number_input(
+    input: NumberInput,
+    before: f32,
+    entered: f32,
+    rail: std::ops::RangeInclusive<f32>,
+    (typed_low, typed_high): (f32, f32),
+) -> f32 {
+    match input {
+        NumberInput::Typed => entered.clamp(typed_low, typed_high),
+        NumberInput::Relative => params::nudged(before, entered - before, rail),
+    }
 }
 pub(super) fn slider_styled(
     ui: &mut egui::Ui,
@@ -978,11 +1006,15 @@ pub(super) fn slider_styled(
         reciprocal,
         drag_step: step,
         hue_rail,
+        typed,
     } = style;
     let mut event = SliderEvent::None;
     let start = *range.start();
     let end = *range.end();
     let span = end - start;
+    // Typing takes any value the setting may hold; the rail and dragging the number
+    // stay within the rail.
+    let (typed_low, typed_high) = typed.unwrap_or((start, end));
     let (scale, decimals) = display.unwrap_or(if start >= -1. && end <= 1. {
         (100., 0)
     } else if span >= 100. {
@@ -1029,6 +1061,31 @@ pub(super) fn slider_styled(
             row.max,
         );
         let mut displayed = *value * scale;
+        // The arrow keys step a focused number; egui's DragValue consumes them while
+        // it draws, so they are read before. A screen reader steps it with
+        // accessibility actions instead, which reach it without focus.
+        let arrows = ui.input(|i| {
+            [
+                egui::Key::ArrowUp,
+                egui::Key::ArrowDown,
+                egui::Key::ArrowLeft,
+                egui::Key::ArrowRight,
+            ]
+            .into_iter()
+            .any(|key| i.key_pressed(key))
+        });
+        let assistive_step = ui.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::AccessKitActionRequest(request)
+                        if matches!(
+                            request.action,
+                            egui::accesskit::Action::Increment | egui::accesskit::Action::Decrement
+                        )
+                )
+            })
+        });
         // A fixed field that fits the widest value ("50000", "+5.00"): typing or
         // dragging never widens it over the rail.
         let value_response = ui
@@ -1042,7 +1099,7 @@ pub(super) fn slider_styled(
                     // An imported value beyond the range shows as it is, rather
                     // than being clamped by drawing it.
                     egui::DragValue::new(&mut displayed)
-                        .range(start * scale..=end * scale)
+                        .range(typed_low * scale..=typed_high * scale)
                         .clamp_existing_to_range(false)
                         .speed(span * scale / 500.)
                         .custom_formatter(move |v, _| format_value(v, decimals, signed))
@@ -1051,7 +1108,22 @@ pub(super) fn slider_styled(
             })
             .inner;
         if value_response.changed() {
-            *value = (displayed / scale).clamp(start, end);
+            // Dragging the number, the arrow keys stepping it while it has focus, or a
+            // screen reader stepping it, move it relative to where it was; anything
+            // else was typed.
+            let stepped = (value_response.has_focus() && arrows) || assistive_step;
+            let input = if value_response.dragged() || stepped {
+                NumberInput::Relative
+            } else {
+                NumberInput::Typed
+            };
+            *value = number_input(
+                input,
+                before,
+                displayed / scale,
+                start..=end,
+                (typed_low, typed_high),
+            );
         }
         let area = Rect::from_min_max(
             Pos2::new(label_rect.right(), row.top()),
@@ -1750,5 +1822,237 @@ mod slider_tests {
                 tick: Tick::Shown
             }
         );
+    }
+
+    /// Frames of Exposure's slider in a 400 × 40 panel: a click on its number
+    /// field, then `typed` and Return. Returns the value after.
+    fn type_into_exposure(start: f32, typed: &str) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let field = Pos2::new(400. - SLIDER_VALUE_WIDTH / 2., 12.);
+        let frames = [
+            vec![egui::Event::PointerMoved(field)],
+            vec![egui::Event::PointerButton {
+                pos: field,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            }],
+            vec![egui::Event::PointerButton {
+                pos: field,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+            vec![egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }],
+            vec![egui::Event::Text(typed.into())],
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+            vec![],
+        ];
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    #[test]
+    fn typed_values_take_the_settings_valid_range_beyond_the_rail() {
+        // Exposure's rail spans ±5 EV; a recipe may hold ±8.
+        assert_eq!(type_into_exposure(0., "6"), 6.);
+        assert_eq!(type_into_exposure(0., "-7.5"), -7.5);
+        assert_eq!(type_into_exposure(0., "9"), 8.);
+        assert_eq!(type_into_exposure(0., "1.25"), 1.25);
+    }
+
+    /// Exposure's number field dragged by `dx` points from `start`.
+    fn drag_exposure(start: f32, dx: f32) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let field = Pos2::new(400. - SLIDER_VALUE_WIDTH / 2., 12.);
+        let to = field + Vec2::new(dx, 0.);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let mut frames = vec![
+            vec![egui::Event::PointerMoved(field)],
+            vec![button(field, true)],
+        ];
+        for step in 1..=10 {
+            frames.push(vec![egui::Event::PointerMoved(
+                field + (to - field) * step as f32 / 10.,
+            )]);
+        }
+        frames.push(vec![button(to, false)]);
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    #[test]
+    fn dragging_the_number_stays_on_the_rail_and_never_pushes_further_out() {
+        assert_eq!(drag_exposure(0., 3000.), 5.);
+        assert_eq!(drag_exposure(0., -3000.), -5.);
+        // An imported 6.5 EV: dragging further out leaves it; back in moves it.
+        assert_eq!(drag_exposure(6.5, 300.), 6.5);
+        let back = drag_exposure(6.5, -30.);
+        assert!(back < 6.5 && back > 5., "{back}");
+    }
+
+    #[test]
+    fn stepping_the_number_is_relative_input_typing_is_not() {
+        let (rail, typed) = (-5. ..=5., (-8., 8.));
+        let relative = |before, entered| {
+            number_input(NumberInput::Relative, before, entered, rail.clone(), typed)
+        };
+        // An arrow key at the rail's end, or on an imported value beyond it, never
+        // pushes further out; stepping back in moves it.
+        assert_eq!(relative(5., 5.1), 5.);
+        assert_eq!(relative(6.5, 6.6), 6.5);
+        assert_eq!(relative(6.5, 6.4), 6.4);
+        assert_eq!(
+            number_input(NumberInput::Typed, 0., 6., rail.clone(), typed),
+            6.
+        );
+        assert_eq!(number_input(NumberInput::Typed, 0., 9., rail, typed), 8.);
+    }
+
+    /// Exposure's slider from `start`, with `tabs` Tab presses to move the focus,
+    /// then Up pressed `ups` times.
+    fn step_exposure(start: f32, tabs: usize, ups: usize) -> f32 {
+        let ctx = egui::Context::default();
+        let mut value = start;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let mut frames = vec![vec![]];
+        frames.extend((0..tabs).map(|_| vec![key(egui::Key::Tab)]));
+        frames.extend((0..ups).map(|_| vec![key(egui::Key::ArrowUp)]));
+        frames.push(vec![]);
+        for events in frames {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        value
+    }
+
+    /// Exposure's slider from `start`, stepped up `steps` times by a screen reader's
+    /// Increment action on its number.
+    fn increment_exposure_assistively(start: f32, steps: usize) -> f32 {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut value = start;
+        let input = |events| egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+            events,
+            ..Default::default()
+        };
+        let mut run = |events| {
+            let mut output = ctx.run_ui(input(events), |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                    });
+            });
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update
+        };
+        let update = run(vec![]).expect("accessibility is on");
+        let (number, _) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::SpinButton)
+            .expect("the number is a spin button");
+        let number = *number;
+        for _ in 0..steps {
+            run(vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Increment,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: number,
+                    data: None,
+                },
+            )]);
+        }
+        run(vec![]);
+        value
+    }
+
+    #[test]
+    fn a_screen_reader_steps_the_number_within_the_rail() {
+        assert!(increment_exposure_assistively(0., 1) > 0.);
+        assert_eq!(increment_exposure_assistively(5., 3), 5.);
+        assert_eq!(increment_exposure_assistively(6.5, 3), 6.5);
+    }
+
+    #[test]
+    fn arrow_keys_on_the_focused_number_step_it_within_the_rail() {
+        // Find the Tab press that focuses the number: Up then moves 0 up.
+        let tabs = (1..6)
+            .find(|&tabs| step_exposure(0., tabs, 1) > 0.)
+            .expect("Tab reaches the number field");
+        assert_eq!(step_exposure(5., tabs, 3), 5.);
+        assert_eq!(step_exposure(6.5, tabs, 3), 6.5);
     }
 }

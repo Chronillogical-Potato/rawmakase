@@ -67,8 +67,8 @@ mod tests {
         let d = tempfile::tempdir()?;
         let photos = d.path().join("photos");
         std::fs::create_dir(&photos)?;
-        let chart =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/charts/synthetic-d65.dng");
+        let chart = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/charts/synthetic-d65.dng");
         for name in ["a.dng", "b.dng", "c.dng"] {
             std::fs::copy(&chart, photos.join(name))?;
         }
@@ -76,6 +76,21 @@ mod tests {
         c.add_folder(&photos)?;
         let photos = c.photos()?.into_iter().map(|p| (p.id, p.path)).collect();
         Ok((d, c, photos))
+    }
+    /// The chart's metadata as the decoder reports it, enough to resolve its edits;
+    /// the catalog crate does not decode photos.
+    fn chart_metadata() -> crate::camera_data::Metadata {
+        crate::camera_data::Metadata {
+            make: "RAWmakase".into(),
+            model: "Synthetic D65".into(),
+            width: 64,
+            height: 64,
+            wb: [2., 1., 1.5],
+            daylight_wb: [2., 1., 1.5],
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        }
     }
     fn set_lightroom(c: &Catalog, id: PhotoId, text: &str) -> Result<()> {
         c.db.execute(
@@ -88,7 +103,7 @@ mod tests {
     #[test]
     fn a_saved_edit_comes_first_then_lightroom_then_the_defaults() -> Result<()> {
         let (_d, c, photos) = catalog()?;
-        let metadata = crate::photo::open(&photos[0].1)?.metadata;
+        let metadata = chart_metadata();
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = crate::raw_defaults::brighter_defaults();
         let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {
@@ -159,7 +174,7 @@ mod tests {
     #[test]
     fn an_edit_that_cant_be_used_is_an_error_never_the_defaults() -> Result<()> {
         let (_d, c, photos) = catalog()?;
-        let metadata = crate::photo::open(&photos[0].1)?.metadata;
+        let metadata = chart_metadata();
         let (profiles, _) = crate::camera_profiles::installed(&metadata);
         let defaults = DevelopDefaults::default();
         let resolve_photo = |(id, path): &(PhotoId, std::path::PathBuf)| {

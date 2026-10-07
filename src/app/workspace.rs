@@ -1020,7 +1020,11 @@ impl Editor {
                 };
                 status_text(
                     ui,
-                    self.document.edit.save.message().unwrap_or(&self.status),
+                    self.document
+                        .edit
+                        .save_state()
+                        .message()
+                        .unwrap_or(&self.status),
                     self.message_detail(&self.status),
                     Some(display),
                 );
@@ -1042,7 +1046,7 @@ impl Editor {
                     )
                     .on_hover_text(&self.document.lightroom_notice);
                 }
-                if self.document.edit.save.is_protected() {
+                if self.document.edit.save_state().is_protected() {
                     ui.separator();
                     ui.colored_label(
                         Color32::YELLOW,
@@ -1140,14 +1144,14 @@ impl Editor {
     pub(super) fn quitting_would_cut_off_work(&self) -> bool {
         self.exporting()
             || self.activity.is_syncing()
-            || self.document.edit.save.needs_save()
+            || self.document.edit.save_state().needs_save()
             || self.library.as_ref().is_some_and(|l| l.has_drafts())
     }
     pub(super) fn pending_work(&mut self, ctx: &egui::Context) {
         self.autosave(ctx);
         // For a quit the close guard doesn't see (the Dock, logging out).
         crate::platform::quit::set_work_pending(self.quitting_would_cut_off_work());
-        if let Some(due) = self.document.edit.save.due_in() {
+        if let Some(due) = self.document.edit.save_state().due_in() {
             // Just after it is due, so the frame finds it ready.
             ctx.request_repaint_after(due + Duration::from_millis(10));
         }
@@ -1173,7 +1177,7 @@ impl Editor {
                     && !self.activity.is_syncing()
                     && ui.button("Close without saving").clicked()
                 {
-                    self.document.edit.save.saved();
+                    self.document.edit.save_state_mut().saved();
                     if let Some(library) = &mut self.library {
                         library.discard_drafts();
                     }
@@ -1301,14 +1305,18 @@ mod tests {
         );
         assert!(!editor.quitting_would_cut_off_work());
         // Not saved yet: its first save may fail, so the close guard saves it.
-        editor.document.edit.save.mark_changed();
+        editor.document.edit.save_state_mut().mark_changed();
         assert!(editor.quitting_would_cut_off_work());
         // Being saved in the background: the guard waits for the result.
-        editor.document.edit.save.saving();
+        editor.document.edit.save_state_mut().saving();
         assert!(editor.quitting_would_cut_off_work());
-        editor.document.edit.save.failed("disk full".into());
+        editor
+            .document
+            .edit
+            .save_state_mut()
+            .failed("disk full".into());
         assert!(editor.quitting_would_cut_off_work());
-        editor.document.edit.save.saved();
+        editor.document.edit.save_state_mut().saved();
         assert!(!editor.quitting_would_cut_off_work());
     }
 }

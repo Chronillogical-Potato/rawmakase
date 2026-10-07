@@ -6,8 +6,10 @@ camera and lens profiles, colour primitives, DNG hints, output buffers, storage 
 Cargo builds without LibRaw, the renderer, wgpu or the GUI, and
 `crates/rawmakase-interop`: the file formats and presets over it (XMP, Lightroom's
 Develop settings, presets, raw defaults, EXIF and JPEG, export settings),
-built the same way. The app crate re-exports both crates' modules at its root
-(`crate::model`, `crate::xmp`…), so paths read the same on either side. The desktop app and CLI compose these APIs;
+built the same way, and `crates/rawmakase-catalog`: the SQLite catalog, Lightroom
+catalog import and which edit a photo develops with. The app crate re-exports these
+crates' modules at its root (`crate::model`, `crate::xmp`, `crate::catalog`…), so
+paths read the same on either side. The desktop app and CLI compose these APIs;
 parsing, persistence and rendering implementations do not import the desktop UI.
 Use the domain paths below for new work.
 
@@ -44,6 +46,7 @@ files should preserve.
 | `edits` | Which edit a photo develops with (saved, Lightroom or raw defaults), shared by Develop, Sync and Export; the catalog only reads the stored records | `edits.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
+| `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, the Quick Collection), and the background reads that fill in capture times and photo info for photos added from folders. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
 | `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager and the browser | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs` |
