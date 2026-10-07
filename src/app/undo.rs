@@ -6,6 +6,7 @@
 use super::Editor;
 use super::history::{Recorded, Step};
 use super::library::{CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place};
+use crate::app::Module;
 use anyhow::Result;
 use std::collections::VecDeque;
 
@@ -104,7 +105,11 @@ impl Editor {
             })
             .collect();
         if let Some(library) = &mut self.library {
-            let develop = if self.library_mode { None } else { photo };
+            let develop = if self.module == Module::Library {
+                None
+            } else {
+                photo
+            };
             commands.extend(library.take_done().into_iter().map(|change| {
                 (
                     change.sequence,
@@ -286,7 +291,7 @@ impl Editor {
                     && self.document.catalog_photo == *photo
                     && self.document.path.is_some();
                 if same_history || reopened {
-                    self.library_mode = false;
+                    self.module = Module::Develop;
                     let step = Step::new(verb, "");
                     let history = &mut self.document.edit.history;
                     if same_history {
@@ -364,7 +369,7 @@ impl Editor {
         match develop {
             Some(photo) => self.show_in_develop(photo),
             None => {
-                self.library_mode = true;
+                self.module = Module::Library;
                 if let Some(library) = &mut self.library {
                     library.go_to_place(place);
                 }
@@ -380,7 +385,7 @@ impl Editor {
     /// Shows `photo` in Develop, keeping its edit when it is already open.
     fn show_in_develop(&mut self, photo: i64) {
         if self.document.catalog_photo == Some(photo) && self.document.path.is_some() {
-            self.library_mode = false;
+            self.module = Module::Develop;
             if let Some(library) = &mut self.library {
                 library.make_active(photo);
             }

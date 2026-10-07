@@ -4,6 +4,7 @@
 use super::state::{PointColorView, Tool, ViewState};
 use super::theme;
 use super::widgets::{name_history_step, set_edit_context, slider_with};
+use crate::app::Module;
 use crate::develop::point_color::{MAX_SWATCHES, PointColor, PointColors, add_sample};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -31,7 +32,7 @@ impl super::Editor {
     /// tab.
     pub(super) fn point_color_tab_shown(&self) -> bool {
         let r = &self.document.edit.recipe;
-        !self.library_mode
+        self.module == Module::Develop
             && !self.view.compare.before_only()
             && self.view.mixer_tab == super::state::MixerTab::PointColor
             && r.treatment() == crate::develop::Treatment::Color

@@ -25,13 +25,13 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
     }
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| editor.draw(ui));
     output.textures_delta.clear();
     let library = editor.library.as_ref().unwrap();
     assert!(library.cache.pending.is_empty());
     assert_eq!(library.cache.thumbs.len(), 24);
-    assert!(!editor.library_mode);
+    assert!(editor.module == Module::Develop);
     Ok(())
 }
 
@@ -54,9 +54,9 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     assert_eq!(Refusal::NotRaw("JPG".into()).label(), "JPG file");
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
-    editor.library_mode = true;
+    editor.module = Module::Library;
     editor.develop_catalog_photo(photo.id);
-    assert!(editor.library_mode);
+    assert!(editor.module == Module::Library);
     let (title, reason) = editor.not_editable.clone().unwrap();
     assert_eq!(title, "a.jpg can't be opened in Develop");
     assert!(reason.contains("camera RAW"));

@@ -104,7 +104,7 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
             .exposure,
         1.2
     );
-    editor.library_mode = true;
+    editor.module = Module::Library;
     for _ in 0..2 {
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -115,7 +115,7 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
         );
         output.textures_delta.clear();
     }
-    assert!(editor.library_mode);
+    assert!(editor.module == Module::Library);
     Ok(())
 }
 #[test]
@@ -186,7 +186,11 @@ fn catalog_metadata_keys_work_in_both_modules_without_zoom_or_dialog_edits() -> 
         (false, egui::Key::U, 1, 0),
         (false, egui::Key::Num0, 0, 0),
     ] {
-        e.library_mode = library_mode;
+        e.module = if library_mode {
+            Module::Library
+        } else {
+            Module::Develop
+        };
         e.document.catalog_photo = Some(ids[1]);
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -1438,7 +1442,7 @@ fn a_photo_from_outside_the_library_is_added_and_opened() -> anyhow::Result<()> 
         .map(|p| p.id);
     assert!(id.is_some(), "the photo's folder was added to the catalog");
     assert_eq!(editor.document.catalog_photo, id);
-    assert!(!editor.library_mode);
+    assert!(editor.module == Module::Develop);
     Ok(())
 }
 
@@ -1931,7 +1935,7 @@ fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo.clone());
     editor.document.edit.recipe.exposure = 0.7;
@@ -1965,7 +1969,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     editor.library = Some(Box::new(l));
     // The copy was last open in Develop; the user is back in the Library.
     editor.document.catalog_photo = Some(copy);
-    editor.library_mode = true;
+    editor.module = Module::Library;
     editor.remove_copy = Some(copy);
     // Return alone never confirms the dialog.
     let input = egui::RawInput {
@@ -1984,7 +1988,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     assert!(editor.library.as_ref().unwrap().photo(copy).is_some());
     editor.remove_copy = None;
     editor.remove_virtual_copy(copy);
-    assert!(editor.library_mode);
+    assert!(editor.module == Module::Library);
     assert_eq!(editor.document.catalog_photo, None);
     let library = editor.library.as_ref().unwrap();
     assert!(library.photo(copy).is_none());
@@ -2052,7 +2056,7 @@ fn editor_with_catalog(names: &[&str]) -> anyhow::Result<(tempfile::TempDir, Edi
     let library = crate::app::library::Library::load(&path, ctx)?;
     let ids = library.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
-    e.library_mode = true;
+    e.module = Module::Library;
     Ok((d, e, ids))
 }
 #[test]
@@ -2087,7 +2091,7 @@ fn undo_brings_back_a_range_rejected_under_the_unflagged_filter() -> anyhow::Res
 fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()> {
     use crate::app::photo_metadata::Edit;
     let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(d.path().join("photos/a.RAF"));
     let original = e.document.edit.recipe.clone();
@@ -2100,7 +2104,7 @@ fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()>
     e.undo();
     assert_eq!(e.library.as_ref().unwrap().photo(ids[0]).unwrap().flag, 0);
     assert_eq!(e.document.edit.recipe.exposure, 1.);
-    assert!(!e.library_mode);
+    assert!(e.module == Module::Develop);
     e.undo();
     assert_eq!(e.document.edit.recipe, original);
     e.redo();
@@ -2138,12 +2142,12 @@ fn a_library_change_is_undone_in_the_library() -> anyhow::Result<()> {
     library.edit_selection(Edit::Rating(4), false)?;
     e.sync_undo();
     // Off to Develop on the other photo.
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(d.path().join("photos/a.RAF"));
     e.library.as_mut().unwrap().select(Some(ids[0]));
     e.undo();
-    assert!(e.library_mode);
+    assert!(e.module == Module::Library);
     let library = e.library.as_ref().unwrap();
     assert_eq!(library.photo(ids[1]).unwrap().rating, 0);
     assert_eq!(library.selected(), Some(ids[1]));
@@ -2605,7 +2609,7 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
     let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
     let session = d.path().join("session.json");
     e.session_file = Some(session.clone());
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.document.catalog_photo = Some(ids[0]);
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
@@ -2892,7 +2896,7 @@ fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     let edit = |editor: &mut Editor, exposure: f32, held: bool| {
         let before = editor.document.edit.recipe.clone();
         editor.document.edit.recipe.exposure = exposure;
@@ -2920,7 +2924,7 @@ fn guided_upright_gestures_are_one_history_step_each() {
     use crate::develop::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.document.set_image(Arc::new(CameraImage {
         recovered: Default::default(),
         width: 300,
@@ -3048,7 +3052,7 @@ fn editor_with_blue_photo(
     decoded: bool,
 ) -> (Editor, Arc<CameraImage>) {
     let mut editor = Editor::with_context(ctx, None, session, None);
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     let (width, height) = (32u32, 24u32);
     let metadata = Metadata {
         width,
@@ -3546,7 +3550,7 @@ fn brackets_size_the_red_eye_circle_without_rating_the_photo() -> anyhow::Result
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     editor.document.catalog_photo = Some(id);
     editor.view.tool = state::Tool::RedEye;
     let mut output = ctx.run_ui(
@@ -3820,7 +3824,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.view.toggle(state::Tool::PointColor);
     // Nor when the Library or Before opens meanwhile: the sample stops at once.
     for leave in [
-        (|e: &mut Editor| e.library_mode = true) as fn(&mut Editor),
+        (|e: &mut Editor| e.module = Module::Library) as fn(&mut Editor),
         |e: &mut Editor| e.view.compare = before_after::Compare::BeforeOnly,
     ] {
         in_edit_frame(&ctx, &mut editor, |e| e.start_point_color_sample(0.2, 0.5));
@@ -3830,7 +3834,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
         std::thread::sleep(std::time::Duration::from_millis(200));
         editor.events(&ctx);
         assert_eq!(editor.document.edit.recipe.point_colors.len(), 1);
-        editor.library_mode = false;
+        editor.module = Module::Develop;
         editor.view.compare = before_after::Compare::Off;
         editor.view.tool = state::Tool::PointColor;
     }
@@ -3885,9 +3889,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     assert_eq!(editor.view.tool, state::Tool::None);
     editor.view.mixer_tab = state::MixerTab::PointColor;
     // Nor in the Library, or with an older process, which doesn't render it.
-    editor.library_mode = true;
+    editor.module = Module::Library;
     assert_eq!(editor.visualized_swatch(), None);
-    editor.library_mode = false;
+    editor.module = Module::Develop;
     editor.document.edit.recipe.reference_curves = false;
     assert_eq!(editor.visualized_swatch(), None);
     editor.document.edit.recipe.reference_curves = true;
@@ -4592,7 +4596,7 @@ fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
     // exit hook sees it; the close guard's flush never runs.
     let (d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
     let path = d.path().join("photos/a.RAF");
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(path.clone());
     let before = e.document.edit.recipe.clone();

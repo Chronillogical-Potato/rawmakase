@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::Module;
 use crate::export_settings::{Destination, Format};
 
 /// An editor on a catalog of two copies of the synthetic chart DNG and a JPEG.
@@ -23,7 +24,7 @@ fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<i64>, egui::Contex
     let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
     let ids = library.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
-    e.library_mode = true;
+    e.module = Module::Library;
     Ok((dir, e, ids, ctx))
 }
 /// Small TIFFs in `folder`.
@@ -142,7 +143,7 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
         scale_clipped: 0,
     }));
     e.document.pending_lightroom = Some("s = {}".into());
-    e.library_mode = false;
+    e.module = Module::Develop;
     let library = e.library.as_mut().unwrap();
     library.select(Some(ids[0]));
     assert!(e.export_scope().is_none());
@@ -152,14 +153,14 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
         e.status
     );
     // A Library selection without it goes ahead.
-    e.library_mode = true;
+    e.module = Module::Library;
     e.library.as_mut().unwrap().select(Some(ids[1]));
     let scope = e.export_scope().expect("the other photo");
     assert_eq!(scope.photos.len(), 1);
     assert!(!scope.photos[0].open);
     // Once final, the open photo is exported as shown.
     e.document.pending_lightroom = None;
-    e.library_mode = false;
+    e.module = Module::Develop;
     e.library.as_mut().unwrap().select(Some(ids[0]));
     let scope = e.export_scope().expect("the open photo");
     assert!(scope.photos[0].open);

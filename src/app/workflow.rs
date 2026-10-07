@@ -1,6 +1,7 @@
 use super::Editor;
 use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
+use crate::app::Module;
 use crate::develop::{Geometry, Recipe};
 use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
@@ -24,12 +25,12 @@ impl Editor {
             self.status =
                 "Use Library → Import Lightroom catalog to select a new RAWmakase catalog destination"
                     .into();
-            self.library_mode = true;
+            self.module = Module::Library;
         }
     }
     pub(super) fn open_raw(&mut self, path: PathBuf, photo: Option<i64>) {
         if self.load_raw(path, photo) {
-            self.library_mode = false;
+            self.module = Module::Develop;
         }
     }
     /// Starts loading a RAW as the document, staying in the module shown:

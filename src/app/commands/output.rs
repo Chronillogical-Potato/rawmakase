@@ -46,6 +46,16 @@ impl Drop for Outputs {
     }
 }
 impl Outputs {
+    /// Whether job `id` has finished: completed, failed, or unknown.
+    pub fn finished(&self, id: u64) -> bool {
+        self.jobs.get(&id).is_none_or(|j| {
+            j.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .status
+                != Status::Running
+        })
+    }
     /// Cancels every job still running, after the stage it is in.
     pub fn cancel_all(&self) {
         for job in self.jobs.values() {

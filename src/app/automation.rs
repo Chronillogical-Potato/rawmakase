@@ -9,6 +9,7 @@ mod settings;
 mod socket;
 use super::Editor;
 use super::commands::{self, Command, Param};
+use crate::app::Module;
 use config::{Config, DeviceConfig, Encoder, Settings};
 use device::Device;
 use mapping::*;
@@ -50,6 +51,14 @@ pub(super) struct Hub {
     load_error: Option<String>,
     ports: Vec<midi::Port>,
     ports_scanned: bool,
+    /// Control requests waiting for a photo to load or an output to finish.
+    waits: Vec<Waiting>,
+}
+/// A `wait` request, answered once its condition holds or its time is up.
+struct Waiting {
+    until: commands::Until,
+    reply: mpsc::SyncSender<commands::Result<commands::Reply>>,
+    deadline: Instant,
 }
 impl Hub {
     pub fn inactive() -> Self {
@@ -70,6 +79,7 @@ impl Hub {
             load_error: None,
             ports: Vec::new(),
             ports_scanned: false,
+            waits: Vec::new(),
         }
     }
     pub fn start(ctx: &egui::Context) -> Self {
@@ -135,6 +145,20 @@ impl Editor {
                     if !request.begin() {
                         continue;
                     }
+                    if let [
+                        Msg::Command(Command {
+                            operation: commands::Operation::Wait(until, time),
+                            ..
+                        }),
+                    ] = request.messages[..]
+                    {
+                        self.controls.waits.push(Waiting {
+                            until,
+                            reply: request.reply,
+                            deadline: Instant::now() + time,
+                        });
+                        continue;
+                    }
                     let result = self.control_messages(request.messages, ctx);
                     let state = self.command_state();
                     let _ = request.reply.send(result.map(|result| commands::Reply {
@@ -152,6 +176,44 @@ impl Editor {
         }
         if full {
             ctx.request_repaint();
+        }
+        self.answer_waits(ctx);
+    }
+    /// Answers each waiting request whose condition now holds, or whose time is up
+    /// ("timed_out", with the state as it is). Loading a photo and finishing an
+    /// output both wake the interface, so a wait is answered in the frame it holds.
+    fn answer_waits(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        let mut waiting = Vec::new();
+        for wait in std::mem::take(&mut self.controls.waits) {
+            let holds = self.holds(wait.until);
+            if holds || now >= wait.deadline {
+                let state = self.command_state();
+                let _ = wait.reply.send(Ok(commands::Reply {
+                    state,
+                    result: commands::Outcome::Empty,
+                    status: if holds { "applied" } else { "timed_out" },
+                }));
+            } else {
+                waiting.push(wait);
+            }
+        }
+        if let Some(next) = waiting.iter().map(|w| w.deadline).min() {
+            ctx.request_repaint_after(next.saturating_duration_since(now));
+        }
+        self.controls.waits = waiting;
+    }
+    fn holds(&self, until: commands::Until) -> bool {
+        match until {
+            commands::Until::Loaded(id) => {
+                let develop = self.module == Module::Develop && self.document.metadata.is_some();
+                let photo = develop.then_some(self.document.catalog_photo).flatten();
+                let loaded = develop && self.document.full().is_some() && !self.load.is_running();
+                // Another photo replacing it ends the wait too: the client reads
+                // the state and sees it is stale.
+                photo.is_some_and(|p| p != id) || (loaded && photo == Some(id))
+            }
+            commands::Until::Job(id) => self.automation.job_finished(id),
         }
     }
     fn control_messages(
@@ -190,7 +252,7 @@ impl Editor {
                 None => &mut self.controls.legacy,
             };
             if matches!(msg, Msg::Cc(cc, _) if controller.binding.mapping.photo_dial == Some(cc))
-                && self.library_mode
+                && self.module == Module::Library
                 && !self.library.as_ref().is_some_and(|l| l.loupe_open())
             {
                 continue;
