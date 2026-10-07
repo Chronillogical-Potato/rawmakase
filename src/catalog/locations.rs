@@ -270,7 +270,7 @@ pub(super) fn prepare(db: &mut Connection, computer: &Computer) -> Result<()> {
         "INSERT OR IGNORE INTO computers(id, name) VALUES (?, ?)",
         params![computer.id, computer.name],
     )?;
-    let legacy: Vec<(i64, String, String)> = tx
+    let legacy: Vec<(FolderId, String, String)> = tx
         .prepare(&format!(
             "SELECT f.id, r.original_path, f.relative_path {UNMAPPED}"
         ))?
