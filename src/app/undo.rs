@@ -7,6 +7,7 @@ use super::Editor;
 use super::history::{Recorded, Step};
 use super::library::{CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place};
 use crate::app::Module;
+use crate::catalog::PhotoId;
 use anyhow::Result;
 use std::collections::VecDeque;
 
@@ -19,7 +20,7 @@ pub(super) enum Command {
     /// open in Develop when it was made there; it is undone there.
     Metadata {
         change: Box<MetadataCommand>,
-        develop: Option<i64>,
+        develop: Option<PhotoId>,
     },
     /// Photos added to or taken out of a collection, e.g. the Quick
     /// Collection; undone in the Library.
@@ -30,7 +31,7 @@ pub(super) enum Command {
     /// A Develop step or History click on `photo` (`None`: a file outside
     /// the catalog), in the History identified by `history`.
     Develop {
-        photo: Option<i64>,
+        photo: Option<PhotoId>,
         history: u64,
         change: Box<Recorded>,
     },
@@ -53,7 +54,7 @@ impl UndoLog {
     }
     /// Drops commands that wrote a photo now removed, so its id, if a new photo gets
     /// it, is never written by them.
-    pub(super) fn forget_photo(&mut self, id: i64) {
+    pub(super) fn forget_photo(&mut self, id: PhotoId) {
         let touches =
             |c: &Command| matches!(c, Command::Sync(s) if s.edits.iter().any(|e| e.id == id));
         self.undo.retain(|c| !touches(c));
@@ -243,7 +244,7 @@ impl Editor {
                     Direction::Redo => super::sync::SyncSide::After,
                 };
                 // Each photo where it is now, after any relink since the Sync.
-                let path = |id: i64| library.photo(id).map(|p| p.path.clone());
+                let path = |id: PhotoId| library.photo(id).map(|p| p.path.clone());
                 match super::sync::restore(&library.catalog, &sync.edits, side, path) {
                     Ok(()) => {}
                     // Nothing to return to: the command is used up, not retried.
@@ -351,7 +352,7 @@ impl Editor {
         verb: &str,
         summary: &str,
         place: &Place,
-        develop: Option<i64>,
+        develop: Option<PhotoId>,
         write: impl FnOnce(&mut Library) -> Result<()>,
     ) -> bool {
         // Leaving the open photo saves it first; if that fails, the command
@@ -383,7 +384,7 @@ impl Editor {
         true
     }
     /// Shows `photo` in Develop, keeping its edit when it is already open.
-    fn show_in_develop(&mut self, photo: i64) {
+    fn show_in_develop(&mut self, photo: PhotoId) {
         if self.document.catalog_photo == Some(photo) && self.document.path.is_some() {
             self.module = Module::Develop;
             if let Some(library) = &mut self.library {

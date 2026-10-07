@@ -6,7 +6,7 @@ use super::previews::EditSource;
 use super::screen::Shown;
 use crate::app::photo_metadata::{flag_icon, label_color};
 use crate::app::theme;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Color32, Rect, Vec2};
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ const STAMP_AGE: f64 = 0.5;
 
 /// Edit stamps by photo, with when each was read.
 #[derive(Debug, Default)]
-pub(super) struct Stamps(HashMap<i64, (u64, f64)>);
+pub(super) struct Stamps(HashMap<PhotoId, (u64, f64)>);
 
 impl Library {
     /// Draws `photo` fitted to `rect`, outlined when `active`, with its
@@ -114,7 +114,7 @@ impl Library {
     /// The photo's edit stamp (see `Catalog::edit_stamp`), read again at
     /// most every `STAMP_AGE` seconds, so an edit saved elsewhere shows soon
     /// without reading the edit every frame.
-    fn edit_stamp(&mut self, ctx: &egui::Context, id: i64) -> u64 {
+    fn edit_stamp(&mut self, ctx: &egui::Context, id: PhotoId) -> u64 {
         let now = ctx.input(|i| i.time);
         let stamps = &mut self.stamps.0;
         match stamps.get(&id) {

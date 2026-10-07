@@ -4,6 +4,7 @@ use super::folder_locations::{FolderQuestion, folder_added, reopened};
 use super::widgets::confirm_modal;
 use super::worker::Event;
 use crate::app::Module;
+use crate::catalog::PhotoId;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -252,7 +253,7 @@ impl Editor {
     }
     /// The catalog photo stored at `path`, if any: its master rather than
     /// a virtual copy.
-    pub(super) fn catalog_photo_at(&self, path: &std::path::Path) -> Option<i64> {
+    pub(super) fn catalog_photo_at(&self, path: &std::path::Path) -> Option<PhotoId> {
         self.library
             .as_ref()?
             .photos
@@ -288,7 +289,7 @@ impl Editor {
             };
         }
     }
-    pub(super) fn develop_catalog_photo(&mut self, id: i64) {
+    pub(super) fn develop_catalog_photo(&mut self, id: PhotoId) {
         let Some(p) = self.library.as_ref().and_then(|l| l.photo(id)).cloned() else {
             return;
         };
@@ -466,7 +467,7 @@ impl Editor {
         self.status = library.message.clone();
     }
     /// Removes virtual copy `id` once confirmed.
-    pub(super) fn remove_virtual_copy(&mut self, id: i64) {
+    pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) {
         if !self.ready_for_catalog() {
             return;
         }

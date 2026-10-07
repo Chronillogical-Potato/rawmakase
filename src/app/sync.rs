@@ -8,7 +8,7 @@ use super::{
     worker::Event,
 };
 use crate::{
-    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, SavedHistory},
+    catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory},
     develop::{
         Recipe,
         settings_groups::{self, GroupSelection, Source, Target},
@@ -23,7 +23,7 @@ use std::path::PathBuf;
 /// A photo settings are synchronized to.
 #[derive(Clone, Debug)]
 pub(super) struct SyncTarget {
-    pub id: i64,
+    pub id: PhotoId,
     pub path: PathBuf,
     pub name: String,
 }
@@ -31,7 +31,7 @@ pub(super) struct SyncTarget {
 /// One photo's edit before and after a Sync.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Synced {
-    pub id: i64,
+    pub id: PhotoId,
     pub path: PathBuf,
     /// The edit before, or none when the photo had no RAWmakase edit yet.
     pub before: EditBefore,
@@ -333,7 +333,7 @@ pub(super) fn restore(
     catalog: &Catalog,
     edits: &[Synced],
     side: SyncSide,
-    path: impl Fn(i64) -> Option<PathBuf>,
+    path: impl Fn(PhotoId) -> Option<PathBuf>,
 ) -> std::result::Result<(), SyncRestoreError> {
     // A photo removed since can't be restored; the caller drops the command.
     let paths = edits
@@ -558,7 +558,7 @@ mod tests {
     struct Fixture {
         _dir: tempfile::TempDir,
         catalog: Catalog,
-        photos: Vec<(i64, PathBuf)>,
+        photos: Vec<(PhotoId, PathBuf)>,
     }
     fn catalog() -> Result<Fixture> {
         let d = tempfile::tempdir()?;
@@ -579,7 +579,7 @@ mod tests {
             photos,
         })
     }
-    fn target(id: i64, path: &Path) -> SyncTarget {
+    fn target(id: PhotoId, path: &Path) -> SyncTarget {
         SyncTarget {
             id,
             path: path.to_path_buf(),
@@ -622,7 +622,7 @@ mod tests {
             let history = c.load_history(*id)?.unwrap();
             assert_eq!(history.steps.last().unwrap().name, "Synchronize Settings");
         }
-        let path = |id: i64| {
+        let path = |id: PhotoId| {
             photos
                 .iter()
                 .find(|(p, _)| *p == id)
@@ -884,10 +884,11 @@ mod tests {
             crate::raw::Demosaic::default(),
         );
         assert!(result.failed.is_empty(), "{:?}", result.failed);
-        let starting = |id: i64| match &result.synced.iter().find(|s| s.id == id).unwrap().before {
-            EditBefore::None { starting } => (**starting).clone(),
-            EditBefore::Saved(_) => panic!("photo {id} had no edit"),
-        };
+        let starting =
+            |id: PhotoId| match &result.synced.iter().find(|s| s.id == id).unwrap().before {
+                EditBefore::None { starting } => (**starting).clone(),
+                EditBefore::Saved(_) => panic!("photo {id} had no edit"),
+            };
         // The Lightroom edit is relative to Adobe Default, whatever the raw defaults.
         let converted =
             crate::lr_develop::convert_develop(lightroom_text, &metadata, &profiles, None)?.0;

@@ -1,6 +1,6 @@
 //! Lightroom's virtual copies: photos of the same file with their own edit,
 //! metadata and name.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{OptionalExtension, params};
 
@@ -8,8 +8,8 @@ impl Catalog {
     /// Lightroom's Create Virtual Copy: a new photo of the same file with the
     /// edit, rating, flag, label, keywords and descriptive metadata of `id`, named "Copy N" after
     /// its master's other copies. Returns the copy's id.
-    pub fn create_virtual_copy(&mut self, id: i64) -> Result<i64> {
-        let master: i64 = self
+    pub fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
+        let master: PhotoId = self
             .db
             .query_row(
                 "SELECT COALESCE(master_id, id) FROM photos WHERE id=?",
@@ -28,7 +28,7 @@ impl Catalog {
              FROM photos WHERE id=?",
             params![name, master, id],
         )?;
-        let copy = tx.last_insert_rowid();
+        let copy = PhotoId(tx.last_insert_rowid());
         tx.execute(
             "INSERT INTO local_edits(photo,data) SELECT ?,data FROM local_edits WHERE photo=?",
             [copy, id],
@@ -47,7 +47,7 @@ impl Catalog {
         Ok(copy)
     }
     /// The first "Copy N" none of `master`'s copies is named.
-    fn unused_copy_name(&self, master: i64) -> Result<String> {
+    fn unused_copy_name(&self, master: PhotoId) -> Result<String> {
         let names: std::collections::HashSet<String> = self
             .db
             .prepare("SELECT copy_name FROM photos WHERE master_id=?")?
@@ -58,7 +58,7 @@ impl Catalog {
             .find(|name| !names.contains(name))
             .unwrap())
     }
-    fn master_of(&self, id: i64) -> Result<Option<i64>> {
+    fn master_of(&self, id: PhotoId) -> Result<Option<PhotoId>> {
         self.db
             .query_row("SELECT master_id FROM photos WHERE id=?", [id], |r| {
                 r.get(0)
@@ -68,7 +68,7 @@ impl Catalog {
     }
     /// Lightroom's Set Copy as Master: the copy becomes the master, and the
     /// former master and the other copies become its copies.
-    pub fn set_copy_as_master(&mut self, id: i64) -> Result<()> {
+    pub fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
         let master = self
             .master_of(id)?
             .context("This photo is already the master")?;
@@ -105,7 +105,7 @@ impl Catalog {
         tx.commit()?;
         Ok(())
     }
-    pub fn set_copy_name(&self, id: i64, name: &str) -> Result<()> {
+    pub fn set_copy_name(&self, id: PhotoId, name: &str) -> Result<()> {
         ensure!(
             self.master_of(id)?.is_some(),
             "Only virtual copies have a copy name"
@@ -118,7 +118,7 @@ impl Catalog {
     }
     /// Removes a virtual copy, with its edit and metadata, from the catalog.
     /// The file and the other photos of it are untouched.
-    pub fn remove_virtual_copy(&mut self, id: i64) -> Result<()> {
+    pub fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<()> {
         ensure!(
             self.master_of(id)?.is_some(),
             "Only virtual copies can be removed"

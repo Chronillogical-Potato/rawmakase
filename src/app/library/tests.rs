@@ -2,6 +2,7 @@ use super::cell::photo_cell;
 use super::filter::{Kind, Label, RatingOp};
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::*;
+use crate::catalog::PhotoId;
 use eframe::egui::{Color32, Vec2};
 use std::{collections::HashMap, path::PathBuf};
 #[test]
@@ -97,7 +98,7 @@ fn a_file_found_again_is_checked_back_online() -> Result<()> {
 fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
     let ctx = egui::Context::default();
     let photo = Photo {
-        id: 1,
+        id: PhotoId(1),
         folder: FolderId(1),
         path: "photo.RAF".into(),
         filename: "photo.RAF".into(),
@@ -624,7 +625,7 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     assert_eq!(library.navigate(a, -1), Some(a));
     assert_eq!(library.navigate(a, 2), Some(c));
     assert_eq!(library.navigate(c, 5), Some(c));
-    assert_eq!(library.navigate(999, 1), None);
+    assert_eq!(library.navigate(PhotoId(999), 1), None);
     Ok(())
 }
 #[test]
@@ -756,16 +757,16 @@ fn preview_textures_keep_the_newest_192() -> Result<()> {
         library
             .cache
             .insert_thumb(&ctx, PathBuf::from(format!("{n}.RAF")), &image);
-        library.cache.edited_requested.insert(n, 1);
-        library.cache.insert_edited(&ctx, n, &image);
+        library.cache.edited_requested.insert(PhotoId(n), 1);
+        library.cache.insert_edited(&ctx, PhotoId(n), &image);
     }
     assert_eq!(library.cache.thumbs.len(), 192);
     assert!(!library.cache.thumbs.contains_key(&PathBuf::from("0.RAF")));
     assert!(library.cache.thumbs.contains_key(&PathBuf::from("192.RAF")));
     assert_eq!(library.cache.edited.len(), 192);
-    assert!(!library.has_edited_thumbnail(0));
-    assert!(!library.cache.edited_requested.contains_key(&0));
-    assert!(library.has_edited_thumbnail(192));
+    assert!(!library.has_edited_thumbnail(PhotoId(0)));
+    assert!(!library.cache.edited_requested.contains_key(&PhotoId(0)));
+    assert!(library.has_edited_thumbnail(PhotoId(192)));
     // Replacing a texture does not count as a new one.
     library
         .cache
@@ -816,7 +817,7 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
 fn collections_panel_shows_imported_collections_and_filters_through_them() -> Result<()> {
     let (directory, library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     let path = library.catalog.path.clone();
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     drop(library);
     {
         let db = rusqlite::Connection::open(&path)?;
@@ -936,7 +937,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
     assert!(library.capture.is_none());
     Ok(())
 }
-fn ids_of(library: &Library) -> Vec<i64> {
+fn ids_of(library: &Library) -> Vec<PhotoId> {
     library
         .visible
         .iter()
@@ -1034,7 +1035,10 @@ fn a_rejected_range_leaves_the_unflagged_view_in_one_write() -> Result<()> {
     assert!(
         library
             .catalog
-            .set_metadata_of(&[(ids[0], 5, 0, String::new()), (9999, 5, 0, String::new())])
+            .set_metadata_of(&[
+                (ids[0], 5, 0, String::new()),
+                (PhotoId(9999), 5, 0, String::new())
+            ])
             .is_err()
     );
     assert!(library.catalog.photos()?.iter().all(|p| p.rating == 0));
@@ -1106,7 +1110,7 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
     // finishes.
     let mut time = 0.;
     let strip = std::cell::Cell::new(None);
-    let mut frames = |library: &mut Library, current: Option<i64>, module: Module| {
+    let mut frames = |library: &mut Library, current: Option<PhotoId>, module: Module| {
         for _ in 0..3 {
             time += 1.;
             let mut output = ctx.run_ui(
@@ -1200,12 +1204,18 @@ fn a_strip_scrolled_past_a_shorter_list_draws_again() {
 #[test]
 fn a_panel_with_nothing_to_do_keeps_an_earlier_panels_action() {
     // The strip's Open in Develop survives the sidebar drawn after it.
-    assert_eq!(Action::Develop(1).then(Action::None), Action::Develop(1));
     assert_eq!(
-        Action::Develop(1).then(Action::AddFolder),
+        Action::Develop(PhotoId(1)).then(Action::None),
+        Action::Develop(PhotoId(1))
+    );
+    assert_eq!(
+        Action::Develop(PhotoId(1)).then(Action::AddFolder),
         Action::AddFolder
     );
-    assert_eq!(Action::None.then(Action::Develop(2)), Action::Develop(2));
+    assert_eq!(
+        Action::None.then(Action::Develop(PhotoId(2))),
+        Action::Develop(PhotoId(2))
+    );
 }
 #[test]
 fn a_filmstrip_click_does_what_the_view_shown_does() -> Result<()> {
@@ -1296,7 +1306,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
 fn flag_steps_up_and_down_and_stops_at_the_ends() {
     use crate::app::photo_metadata::Edit;
     let photo = |flag| Photo {
-        id: 1,
+        id: PhotoId(1),
         folder: FolderId(1),
         path: "a.RAF".into(),
         filename: "a.RAF".into(),
@@ -1869,7 +1879,7 @@ fn typed_keywords_follow_lightroom_and_refuse_the_separator() -> Result<()> {
 fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> Result<()> {
     use crate::metadata::{LangAlt, TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library
         .catalog
         .set_text(&ids[..1], TextField::Title, "Only a")?;
@@ -1901,7 +1911,7 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     use super::descriptive::DescriptiveEdit;
     use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library
         .catalog
         .set_text(&ids[1..], TextField::Copyright, "")?;
@@ -1936,7 +1946,7 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
 #[test]
 fn a_draft_that_fails_to_save_stays_with_its_photos() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library.selection.selected = [ids[0]].into();
     library.selection.active = Some(ids[0]);
     library.sync_fields();
@@ -1953,7 +1963,7 @@ fn a_draft_that_fails_to_save_stays_with_its_photos() -> Result<()> {
 #[test]
 fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library.selection.selected = [ids[0]].into();
     library.selection.active = Some(ids[0]);
     library.sync_fields();
@@ -2013,7 +2023,7 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
 fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> {
     use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library
         .catalog
         .set_text(&ids[..1], TextField::Title, "Only a")?;
@@ -2035,7 +2045,7 @@ fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> 
 #[test]
 fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<i64> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
     library.selection.selected = ids.iter().copied().collect();
     library.selection.active = Some(ids[0]);
     library.sync_fields();

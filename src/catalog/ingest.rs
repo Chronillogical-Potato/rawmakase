@@ -1,7 +1,7 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
-use super::{Catalog, FolderId, RootId};
+use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -242,7 +242,7 @@ impl Catalog {
                         .to_ascii_uppercase()
                 ],
             )?;
-            added.push((tx.last_insert_rowid(), file));
+            added.push((PhotoId(tx.last_insert_rowid()), file));
         }
         tx.commit()?;
         for (id, file) in &added {
@@ -254,7 +254,7 @@ impl Catalog {
         let report = self.import_file_metadata(&added)?;
         // A photo whose metadata couldn't be read may have its own: no
         // default goes in its place.
-        let read: Vec<(i64, PathBuf)> = added
+        let read: Vec<(PhotoId, PathBuf)> = added
             .iter()
             .filter(|(_, file)| {
                 let own = super::sidecars(file);
@@ -273,7 +273,7 @@ impl Catalog {
     /// Records capture times read from the photos' files, in one transaction.
     /// Only empty dates are filled, never one Lightroom or the user set, and a
     /// photo's virtual copies get its date too.
-    pub fn fill_capture_times(&mut self, times: &[(i64, String)]) -> Result<()> {
+    pub fn fill_capture_times(&mut self, times: &[(PhotoId, String)]) -> Result<()> {
         let tx = self.db.transaction()?;
         {
             // Two statements, each on an index, rather than one OR that scans.
@@ -291,7 +291,7 @@ impl Catalog {
     }
     /// Carries the edit a photo got outside any catalog, in its
     /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
-    fn import_sidecar(&self, id: i64, file: &Path) -> Result<()> {
+    fn import_sidecar(&self, id: PhotoId, file: &Path) -> Result<()> {
         let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
             return Ok(());
         };

@@ -9,7 +9,7 @@ use super::{Action, Library, thumbnails};
 use crate::app::navigator::Zoom;
 use crate::app::theme;
 use crate::app::worker::Latest;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Color32, Vec2};
 use std::path::PathBuf;
 use std::sync::{
@@ -25,7 +25,7 @@ const EDGE_STEP: u32 = 512;
 const PREFETCHED_BYTES: usize = 64 << 20;
 
 /// A preview as asked for: photo, file (photo ids can be reused) and edge.
-type Key = (i64, PathBuf, u32);
+type Key = (PhotoId, PathBuf, u32);
 
 struct Job {
     ticket: u64,
@@ -75,7 +75,7 @@ pub(super) struct Loupe {
     view: Vec2,
     /// The zoom before the last click toggled it, and when, for a
     /// double-click to undo.
-    before_click: Option<(bool, f64, Option<i64>)>,
+    before_click: Option<(bool, f64, Option<PhotoId>)>,
     pub state: State,
 }
 impl Loupe {
@@ -289,7 +289,7 @@ impl Library {
     /// The RAW the Loupe shows through Develop's pipeline: the active photo,
     /// when it is a RAW and online. JPEG, TIFF, PNG and offline photos are
     /// shown by the Loupe's own preview instead.
-    pub fn loupe_develops(&self) -> Option<i64> {
+    pub fn loupe_develops(&self) -> Option<PhotoId> {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
             .then_some(photo.id)

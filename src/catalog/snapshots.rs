@@ -2,7 +2,7 @@
 //! keeps them. Each photo and virtual copy has its own, as in Lightroom's catalog,
 //! where snapshots belong to one image. Snapshots imported from Lightroom keep
 //! Lightroom's settings text and are converted when applied.
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::develop::Recipe;
 use anyhow::{Context, Result, ensure};
 use rusqlite::params;
@@ -49,7 +49,7 @@ impl Catalog {
     }
     /// The photo's snapshots, alphabetically as Lightroom lists them. A snapshot
     /// that cannot be read (from a newer release) is left out.
-    pub fn snapshots(&self, photo: i64) -> Result<Vec<Snapshot>> {
+    pub fn snapshots(&self, photo: PhotoId) -> Result<Vec<Snapshot>> {
         let mut q = self
             .db
             .prepare("SELECT id, name, recipe, lightroom FROM develop_snapshots WHERE photo=?")?;
@@ -90,7 +90,7 @@ impl Catalog {
         Ok(snapshots)
     }
     /// Saves `recipe` as a new snapshot of the photo named `name`; returns its id.
-    pub fn add_snapshot(&self, photo: i64, name: &str, recipe: &Recipe) -> Result<i64> {
+    pub fn add_snapshot(&self, photo: PhotoId, name: &str, recipe: &Recipe) -> Result<i64> {
         recipe.validate()?;
         self.db.execute(
             "INSERT INTO develop_snapshots(photo, name, recipe) VALUES (?, ?, ?)",

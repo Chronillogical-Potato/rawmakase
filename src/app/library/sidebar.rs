@@ -4,7 +4,7 @@ use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
 use crate::app::theme;
 use crate::app::widgets::section;
-use crate::catalog::{CollectionKind, FolderId, RootId};
+use crate::catalog::{CollectionKind, FolderId, PhotoId, RootId};
 use eframe::egui::{self, Vec2};
 use std::collections::HashSet;
 
@@ -230,7 +230,7 @@ impl Library {
             .collect();
         (!ids.is_empty()).then_some(ids)
     }
-    pub(in crate::app) fn restore_source(&mut self, key: &str, photo: Option<i64>) {
+    pub(in crate::app) fn restore_source(&mut self, key: &str, photo: Option<PhotoId>) {
         if let Some(id) = key
             .strip_prefix("collection:")
             .and_then(|id| id.parse::<i64>().ok())

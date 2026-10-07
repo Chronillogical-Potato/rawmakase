@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
-    pub id: i64,
+    pub id: super::PhotoId,
     pub folder: super::FolderId,
     pub path: PathBuf,
     pub filename: String,
@@ -12,7 +12,7 @@ pub struct Photo {
     pub format: String,
     pub copy_name: String,
     /// The photo this one is a virtual copy of; `None` for a master.
-    pub master: Option<i64>,
+    pub master: Option<super::PhotoId>,
     pub keywords: String,
     pub has_lightroom_edits: bool,
 }

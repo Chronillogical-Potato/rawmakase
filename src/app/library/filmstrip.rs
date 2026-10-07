@@ -7,7 +7,7 @@ use super::selection::{Mark, Selection};
 use super::views::View;
 use super::{Action, Library, cell};
 use crate::app::theme;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Color32, Vec2};
 
 /// The strip's height, the same in every view.
@@ -37,7 +37,7 @@ pub struct Outcome {
 pub(super) struct State {
     /// The photo last brought into view, and where it was then in
     /// `visible`: the strip scrolls again only when either changes.
-    revealed: Option<(i64, usize)>,
+    revealed: Option<(PhotoId, usize)>,
     /// The selection and `shown_version` the strip was last drawn with, to
     /// notice a view drawn after it changing either.
     drawn: (Selection, u64),
@@ -68,14 +68,14 @@ pub(super) fn in_view(
 /// A photo chosen in the filmstrip: clicked, or opened from its menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pick {
-    Show(i64),
-    Develop(i64),
+    Show(PhotoId),
+    Develop(PhotoId),
     /// Develop's Set as Reference Photo.
-    Reference(i64),
+    Reference(PhotoId),
 }
 /// A catalog photo dragged from Develop's filmstrip, e.g. onto Reference View.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DraggedPhoto(pub i64);
+pub struct DraggedPhoto(pub PhotoId);
 
 impl Library {
     /// The Library's strip: brings the views up to date, draws the strip
@@ -96,7 +96,7 @@ impl Library {
     pub fn filmstrip_panel(
         &mut self,
         ui: &mut egui::Ui,
-        current: Option<i64>,
+        current: Option<PhotoId>,
         module: Module,
     ) -> Outcome {
         egui::Panel::bottom(ID)
@@ -116,8 +116,8 @@ impl Library {
     /// Returns whether it was taken here; a plain click opens the photo instead.
     pub fn develop_select(
         &mut self,
-        id: i64,
-        open: Option<i64>,
+        id: PhotoId,
+        open: Option<PhotoId>,
         modifiers: egui::Modifiers,
     ) -> bool {
         if !modifiers.command && !modifiers.shift {
@@ -164,7 +164,7 @@ impl Library {
     pub(super) fn filmstrip(
         &mut self,
         ui: &mut egui::Ui,
-        current: Option<i64>,
+        current: Option<PhotoId>,
         module: Module,
     ) -> Outcome {
         let mut target = None;

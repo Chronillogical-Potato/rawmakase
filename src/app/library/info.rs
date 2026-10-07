@@ -3,7 +3,7 @@ use super::rows::{ROW, caption_at, paint_truncated, value_at};
 use super::{Action, Library};
 use crate::app::theme;
 use crate::app::widgets::section;
-use crate::catalog::Photo;
+use crate::catalog::{Photo, PhotoId};
 use crate::metadata::PhotoInfo;
 use eframe::egui::{self, Vec2};
 
@@ -132,7 +132,12 @@ impl Library {
     }
     /// Rating, flag and label of `id`; a change applies to the whole
     /// selection when `whole_selection` (the Grid) and `id` is in it.
-    pub fn metadata_controls(&mut self, ui: &mut egui::Ui, id: i64, whole_selection: bool) -> bool {
+    pub fn metadata_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: PhotoId,
+        whole_selection: bool,
+    ) -> bool {
         if let Some(photo) = self.photo(id).cloned()
             && let Some(edit) = crate::app::photo_metadata::controls(ui, &photo, &self.labels())
         {

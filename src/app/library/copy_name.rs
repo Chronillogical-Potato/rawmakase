@@ -3,14 +3,14 @@
 //! selection moves or the save fails.
 use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, font, panel_edit};
 use crate::app::theme;
-use crate::catalog::{Catalog, Photo};
+use crate::catalog::{Catalog, Photo, PhotoId};
 use anyhow::Result;
 use eframe::egui::{self, Vec2};
 
 #[derive(Default)]
 pub(super) struct CopyNames {
     /// The name being typed, for the photo it belongs to.
-    pub(super) draft: Option<(i64, String)>,
+    pub(super) draft: Option<(PhotoId, String)>,
     /// Saving `draft` failed; it waits for the next commit rather than
     /// being retried, and discarded, as the selection moves.
     pub(super) failed: bool,
@@ -89,7 +89,7 @@ impl CopyNames {
     }
 }
 /// Renames copy `id` in the catalog and in `photos`.
-fn rename(catalog: &Catalog, photos: &mut [Photo], id: i64, name: &str) -> Result<()> {
+fn rename(catalog: &Catalog, photos: &mut [Photo], id: PhotoId, name: &str) -> Result<()> {
     catalog.set_copy_name(id, name)?;
     if let Some(p) = photos.iter_mut().find(|p| p.id == id) {
         p.copy_name = name.trim().to_string();

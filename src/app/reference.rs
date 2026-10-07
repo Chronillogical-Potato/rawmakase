@@ -14,6 +14,7 @@ use super::navigator::Zoom;
 use super::worker::{ReferenceImage, ReferenceJob, Resolution};
 use crate::app::library::DraggedPhoto;
 use crate::app::theme;
+use crate::catalog::PhotoId;
 use crate::{
     develop::{Geometry, Recipe},
     raw::CameraImage,
@@ -25,7 +26,7 @@ use std::sync::Arc;
 /// photo as last developed.
 pub(super) struct ReferenceView {
     /// The catalog photo shown as the reference.
-    pub(super) photo: Option<i64>,
+    pub(super) photo: Option<PhotoId>,
     /// Kept when leaving Develop, as Lightroom's lock in the toolbar.
     pub(super) locked: bool,
     /// Where the reference sits: left or on top. Shift+R shows the last one used.
@@ -35,7 +36,7 @@ pub(super) struct ReferenceView {
     /// The reference as developed, once it is.
     loaded: Option<Loaded>,
     /// The photo and edit being developed.
-    pending: Option<(i64, String)>,
+    pending: Option<(PhotoId, String)>,
     load: super::task::Task,
     /// Why the reference could not be shown.
     pub(super) error: Option<String>,
@@ -56,7 +57,7 @@ impl Default for ReferenceView {
 }
 /// The reference photo as developed.
 struct Loaded {
-    photo: i64,
+    photo: PhotoId,
     /// Its edit's tag then: another edit, or other defaults, develop it again.
     tag: String,
     image: Arc<CameraImage>,
@@ -108,7 +109,7 @@ impl Editor {
     }
     /// Makes catalog photo `id` the reference and shows Reference View, as dropping
     /// it on the Reference side or Set as Reference Photo does.
-    pub(super) fn set_reference(&mut self, id: i64) {
+    pub(super) fn set_reference(&mut self, id: PhotoId) {
         let source = self
             .library
             .as_ref()
@@ -313,7 +314,7 @@ impl Editor {
         Some((self.reference.zoom.photo_rect(pane.area, size, ppp), g))
     }
     /// The reference's Library preview, fitted, while it is developed.
-    fn reference_stand_in(&self, ui: &egui::Ui, pane: Pane, id: i64) {
+    fn reference_stand_in(&self, ui: &egui::Ui, pane: Pane, id: PhotoId) {
         let texture = self.library.as_ref().and_then(|l| l.thumbnail(id));
         if let Some(texture) = texture {
             let size = texture.size_vec2();
@@ -401,8 +402,8 @@ mod tests {
     struct Fixture {
         _dir: tempfile::TempDir,
         editor: Editor,
-        open: i64,
-        other: i64,
+        open: PhotoId,
+        other: PhotoId,
     }
     fn fixture() -> anyhow::Result<Fixture> {
         let dir = tempfile::tempdir()?;

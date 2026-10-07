@@ -7,6 +7,7 @@ mod dialog;
 mod watermark_editor;
 
 use crate::app::Module;
+use crate::catalog::PhotoId;
 
 use super::{Editor, worker::Event};
 use crate::app::theme;
@@ -29,7 +30,7 @@ use std::{
 #[derive(Clone, Debug)]
 struct Chosen {
     /// Its catalog id; `None` for a photo opened without a catalog.
-    id: Option<i64>,
+    id: Option<PhotoId>,
     source: PathBuf,
     name: String,
     /// The photo open in Develop: exported with its edit as shown.
@@ -365,7 +366,7 @@ impl Editor {
 
     /// The scope's photos as the catalog has them now, read in one transaction.
     fn batch_photos(&self, scope: &Scope, unsaved: bool) -> anyhow::Result<Vec<BatchPhoto>> {
-        let ids: Vec<i64> = scope.photos.iter().filter_map(|p| p.id).collect();
+        let ids: Vec<PhotoId> = scope.photos.iter().filter_map(|p| p.id).collect();
         let mut records = match &self.library {
             Some(l) if !ids.is_empty() => l.catalog.photo_records(&ids)?.into_iter(),
             _ => Vec::new().into_iter(),

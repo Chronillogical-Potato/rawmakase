@@ -4,7 +4,7 @@
 //! change is one undoable command.
 use super::{Library, Place};
 use crate::app::widgets::plural;
-use crate::catalog::{CollectionKind, QUICK_COLLECTION};
+use crate::catalog::{CollectionKind, PhotoId, QUICK_COLLECTION};
 use anyhow::Result;
 
 /// A change to a collection's photos, for the shared undo log.
@@ -13,8 +13,8 @@ pub struct CollectionCommand {
     /// Orders it among other changes made in the same frame.
     pub sequence: u64,
     pub collection: crate::catalog::CollectionId,
-    pub added: Vec<i64>,
-    pub removed: Vec<i64>,
+    pub added: Vec<PhotoId>,
+    pub removed: Vec<PhotoId>,
     pub place_before: Place,
     pub place_after: Place,
     /// What changed, as the status line said it.
@@ -41,7 +41,7 @@ impl Library {
         self.collection_photos.entry(id).or_default();
         Ok(id)
     }
-    pub(super) fn in_quick(&self, id: i64) -> bool {
+    pub(super) fn in_quick(&self, id: PhotoId) -> bool {
         self.quick()
             .and_then(|q| self.collection_photos.get(&q))
             .is_some_and(|members| members.contains(&id))
@@ -57,7 +57,7 @@ impl Library {
     }
     /// B: adds `ids` to the Quick Collection, or takes them out when they are
     /// all in it already.
-    pub(in crate::app) fn toggle_quick(&mut self, ids: &[i64]) -> Result<()> {
+    pub(in crate::app) fn toggle_quick(&mut self, ids: &[PhotoId]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -66,7 +66,7 @@ impl Library {
         let (added, removed, verb) = if all_in {
             (Vec::new(), ids.to_vec(), "Removed from")
         } else {
-            let added: Vec<i64> = ids
+            let added: Vec<PhotoId> = ids
                 .iter()
                 .copied()
                 .filter(|id| !self.in_quick(*id))
@@ -85,7 +85,7 @@ impl Library {
         let Some(quick) = self.quick() else {
             return Ok(());
         };
-        let removed: Vec<i64> = self
+        let removed: Vec<PhotoId> = self
             .collection_photos
             .get(&quick)
             .map(|m| m.iter().copied().collect())
@@ -107,7 +107,7 @@ impl Library {
         Ok(())
     }
     /// B, Cmd+B and Cmd+Shift+B, for `ids`.
-    pub(super) fn quick_key(&mut self, modifiers: eframe::egui::Modifiers, ids: Vec<i64>) {
+    pub(super) fn quick_key(&mut self, modifiers: eframe::egui::Modifiers, ids: Vec<PhotoId>) {
         // Option, and Control on a Mac, make other keys.
         if modifiers.alt || (modifiers.ctrl && (modifiers.mac_cmd || !modifiers.command)) {
             return;
@@ -126,8 +126,8 @@ impl Library {
     fn record_collection(
         &mut self,
         collection: crate::catalog::CollectionId,
-        added: Vec<i64>,
-        removed: Vec<i64>,
+        added: Vec<PhotoId>,
+        removed: Vec<PhotoId>,
         summary: String,
     ) -> Result<()> {
         let place_before = self.place();
@@ -149,11 +149,11 @@ impl Library {
     pub(in crate::app) fn change_collection(
         &mut self,
         collection: crate::catalog::CollectionId,
-        add: &[i64],
-        remove: &[i64],
+        add: &[PhotoId],
+        remove: &[PhotoId],
     ) -> Result<()> {
         // A photo removed since (a virtual copy) is left out.
-        let add: Vec<i64> = add
+        let add: Vec<PhotoId> = add
             .iter()
             .copied()
             .filter(|id| self.photo(*id).is_some())

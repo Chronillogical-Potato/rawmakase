@@ -1,7 +1,7 @@
 //! Photo info: camera settings and size, copied from the Lightroom catalog a
 //! photo was imported from, or read from the file for photos added from
 //! folders (`fill_photo_info`).
-use super::Catalog;
+use super::{Catalog, PhotoId};
 use crate::metadata::PhotoInfo;
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -12,7 +12,7 @@ pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 impl Catalog {
     /// Each photo's width over height, as shown, where it is known; a
     /// virtual copy has its master's.
-    pub fn aspect_ratios(&self) -> Result<std::collections::HashMap<i64, f32>> {
+    pub fn aspect_ratios(&self) -> Result<std::collections::HashMap<PhotoId, f32>> {
         let mut query = self.db.prepare(
             "SELECT p.id, i.width, i.height FROM photos p
              JOIN photo_info i ON i.photo = COALESCE(p.master_id, p.id)
@@ -25,7 +25,7 @@ impl Catalog {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
     /// A photo's info; a virtual copy has its master's.
-    pub fn photo_info(&self, id: i64) -> Result<Option<PhotoInfo>> {
+    pub fn photo_info(&self, id: PhotoId) -> Result<Option<PhotoInfo>> {
         Ok(self
             .db
             .query_row(
@@ -79,7 +79,7 @@ impl Catalog {
         Ok(cameras.into_iter().collect())
     }
     /// Masters with no info yet, whose files may have it.
-    pub fn photos_without_info(&self) -> Result<Vec<i64>> {
+    pub fn photos_without_info(&self) -> Result<Vec<PhotoId>> {
         Ok(self
             .db
             .prepare(
@@ -91,13 +91,13 @@ impl Catalog {
     }
     /// Records info read from files, in one transaction; `None` records that
     /// a file had none, so it is not read again.
-    pub fn fill_photo_info(&mut self, infos: &[(i64, Option<PhotoInfo>)]) -> Result<()> {
+    pub fn fill_photo_info(&mut self, infos: &[(PhotoId, Option<PhotoInfo>)]) -> Result<()> {
         let tx = self.db.transaction()?;
         for (id, info) in infos {
             // Under the photo's master now, in case it became a copy while
             // being read.
             // A photo removed meanwhile has nothing to keep.
-            let master: Option<i64> = tx
+            let master: Option<PhotoId> = tx
                 .query_row(
                     "SELECT COALESCE(master_id, id) FROM photos WHERE id = ?",
                     [id],
@@ -118,7 +118,7 @@ impl Catalog {
     }
 }
 
-fn insert(db: &Connection, id: i64, info: &PhotoInfo) -> Result<()> {
+fn insert(db: &Connection, id: PhotoId, info: &PhotoInfo) -> Result<()> {
     db.execute(
         "INSERT OR REPLACE INTO photo_info
          (photo, camera, lens, focal, aperture, exposure, iso, width, height)
@@ -147,7 +147,7 @@ pub(super) fn copy_lightroom_info(db: &Connection) -> Result<usize> {
     if !has("AgHarvestedExifMetadata")? || !interned {
         return Ok(0);
     }
-    let rows: Vec<(i64, PhotoInfo)> = db
+    let rows: Vec<(PhotoId, PhotoInfo)> = db
         .prepare(
             "SELECT i.id_local, c.value, l.value, e.focalLength, e.aperture, e.shutterSpeed,
                     e.isoSpeedRating, i.fileWidth, i.fileHeight, i.orientation

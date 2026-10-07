@@ -1,7 +1,7 @@
 //! Lightroom's develop history, imported with the catalog and shown under
 //! "From Lightroom" in the History panel, and the stored Lightroom develop
 //! settings a photo opens with.
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, PhotoId};
 use anyhow::Result;
 use rusqlite::Connection;
 
@@ -48,7 +48,7 @@ pub struct HistoryStep {
 }
 impl Catalog {
     /// Lightroom's history for a photo, oldest step first.
-    pub fn lightroom_history(&self, id: i64) -> Result<Vec<HistoryStep>> {
+    pub fn lightroom_history(&self, id: PhotoId) -> Result<Vec<HistoryStep>> {
         let mut q = self.db.prepare(
             "SELECT name, created, text FROM lightroom_history WHERE photo=? ORDER BY position",
         )?;
@@ -91,7 +91,7 @@ impl Catalog {
             .query_row("SELECT count(*) FROM lightroom_history", [], |r| r.get(0))?;
         Ok(have > 0)
     }
-    pub fn lightroom_develop(&self, id: i64) -> Result<Option<String>> {
+    pub fn lightroom_develop(&self, id: PhotoId) -> Result<Option<String>> {
         Ok(self.db.query_row(
             "SELECT lightroom_develop FROM photos WHERE id=?",
             [id],

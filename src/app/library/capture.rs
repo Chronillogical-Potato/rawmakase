@@ -3,6 +3,7 @@
 //! background, a batch at a time. Photos imported from Lightroom already have
 //! theirs.
 use super::Library;
+use crate::catalog::PhotoId;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -70,7 +71,7 @@ impl Library {
         if done {
             self.capture = None;
         }
-        let dated: Vec<(i64, String)> = read
+        let dated: Vec<(PhotoId, String)> = read
             .into_iter()
             .filter_map(|(id, read)| match read {
                 Read::Dated(time) => Some((id, time)),
@@ -92,8 +93,8 @@ impl Library {
     }
     /// Re-sorts after capture times were filled in, as the catalog orders
     /// photos, keeping the selected photo selected and where it was on screen.
-    pub(super) fn apply_capture_times(&mut self, times: &[(i64, String)]) {
-        let times: HashMap<i64, &String> = times.iter().map(|(id, t)| (*id, t)).collect();
+    pub(super) fn apply_capture_times(&mut self, times: &[(PhotoId, String)]) {
+        let times: HashMap<PhotoId, &String> = times.iter().map(|(id, t)| (*id, t)).collect();
         for photo in &mut self.photos {
             if photo.captured.is_empty()
                 && let Some(time) = times

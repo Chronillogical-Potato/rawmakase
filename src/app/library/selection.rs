@@ -1,15 +1,16 @@
 //! Lightroom's Grid selection: an active photo, the photos selected with it,
 //! and the anchor a Shift range starts from.
 use super::Library;
+use crate::catalog::PhotoId;
 use eframe::egui::{self, Key};
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Selection {
     /// The photo the panels show and the keys move from; always selected.
-    pub active: Option<i64>,
-    pub selected: HashSet<i64>,
-    pub anchor: Option<i64>,
+    pub active: Option<PhotoId>,
+    pub selected: HashSet<PhotoId>,
+    pub anchor: Option<PhotoId>,
 }
 
 /// How a grid cell is drawn.
@@ -31,11 +32,11 @@ pub(super) enum Step {
 
 impl Library {
     /// The active photo.
-    pub fn selected(&self) -> Option<i64> {
+    pub fn selected(&self) -> Option<PhotoId> {
         self.selection.active
     }
     /// Selects only `id`, or nothing.
-    pub fn select(&mut self, id: Option<i64>) {
+    pub fn select(&mut self, id: Option<PhotoId>) {
         self.selection = Selection {
             active: id,
             selected: id.into_iter().collect(),
@@ -44,7 +45,7 @@ impl Library {
     }
     /// Makes `id` active and in view: kept in the selection when it is shown,
     /// else selected alone with the filters that hide it cleared.
-    pub fn reveal(&mut self, id: i64) {
+    pub fn reveal(&mut self, id: PhotoId) {
         if self.visible.iter().any(|i| self.photos[*i].id == id) {
             self.make_active(id);
         } else {
@@ -52,7 +53,7 @@ impl Library {
         }
     }
     /// Makes `id` active, keeping the selection when it is part of it.
-    pub fn make_active(&mut self, id: i64) {
+    pub fn make_active(&mut self, id: PhotoId) {
         if self.selection.selected.contains(&id) {
             self.selection.active = Some(id);
             self.selection.anchor = Some(id);
@@ -62,8 +63,8 @@ impl Library {
     }
     /// The selected photos in display order; the active one alone if somehow
     /// nothing else is selected.
-    pub(super) fn selected_ids(&self) -> Vec<i64> {
-        let ids: Vec<i64> = self
+    pub(super) fn selected_ids(&self) -> Vec<PhotoId> {
+        let ids: Vec<PhotoId> = self
             .visible
             .iter()
             .map(|i| self.photos[*i].id)
@@ -75,7 +76,7 @@ impl Library {
             ids
         }
     }
-    pub(super) fn mark(&self, id: i64) -> Mark {
+    pub(super) fn mark(&self, id: PhotoId) -> Mark {
         if self.selection.active == Some(id) {
             Mark::Active
         } else if self.selection.selected.contains(&id) {
@@ -84,11 +85,11 @@ impl Library {
             Mark::None
         }
     }
-    fn position(&self, id: i64) -> Option<usize> {
+    fn position(&self, id: PhotoId) -> Option<usize> {
         self.visible.iter().position(|i| self.photos[*i].id == id)
     }
     /// The shown photos from `a` to `b`, either way round.
-    fn range(&self, a: i64, b: i64) -> Vec<i64> {
+    fn range(&self, a: PhotoId, b: PhotoId) -> Vec<PhotoId> {
         let (Some(a), Some(b)) = (self.position(a), self.position(b)) else {
             return vec![b];
         };
@@ -100,7 +101,7 @@ impl Library {
     /// A click on a thumbnail: Cmd toggles it, Shift selects the range from
     /// the anchor (Cmd+Shift adds the range), and a plain click selects it
     /// alone, unless it is already selected, when it only becomes active.
-    pub(super) fn click(&mut self, id: i64, modifiers: egui::Modifiers) {
+    pub(super) fn click(&mut self, id: PhotoId, modifiers: egui::Modifiers) {
         let anchor = self.selection.anchor.or(self.selection.active);
         if modifiers.shift
             && let Some(anchor) = anchor
@@ -129,7 +130,7 @@ impl Library {
         }
     }
     /// The selected photo shown nearest after `id`, else before it.
-    fn nearest_selected(&self, id: i64) -> Option<i64> {
+    fn nearest_selected(&self, id: PhotoId) -> Option<PhotoId> {
         let at = self.position(id)?;
         let selected = |i: &usize| self.selection.selected.contains(&self.photos[*i].id);
         self.visible[at + 1..]
@@ -188,7 +189,7 @@ impl Library {
     }
     /// After filtering: drops photos no longer shown from the selection.
     pub(super) fn keep_shown_selected(&mut self) {
-        let shown: HashSet<i64> = self.visible.iter().map(|i| self.photos[*i].id).collect();
+        let shown: HashSet<PhotoId> = self.visible.iter().map(|i| self.photos[*i].id).collect();
         self.selection.selected.retain(|id| shown.contains(id));
         // The first photo still selected takes over from a hidden active one.
         if self.selection.active.is_some_and(|id| !shown.contains(&id)) {
