@@ -3178,7 +3178,6 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bytemuck",
- "cc",
  "clap",
  "eframe",
  "egui_extras",
@@ -3197,12 +3196,14 @@ dependencies = [
  "midir",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
- "pkg-config",
  "pollster 1.0.1",
  "rawmakase-catalog",
  "rawmakase-ctl",
+ "rawmakase-engine",
+ "rawmakase-export",
  "rawmakase-interop",
  "rawmakase-model",
+ "rawmakase-native",
  "rawmakase-protocol",
  "rayon",
  "rfd",
@@ -3250,6 +3251,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "rawmakase-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "image",
+ "pollster 1.0.1",
+ "rawmakase-interop",
+ "rawmakase-model",
+ "rayon",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "rawmakase-export"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fastframe-fonts",
+ "image",
+ "md-5",
+ "memmap2",
+ "rawmakase-catalog",
+ "rawmakase-engine",
+ "rawmakase-interop",
+ "rawmakase-model",
+ "rawmakase-native",
+ "roxmltree 0.21.1",
+ "serde",
+ "serde_json",
+ "skrifa 0.47.0",
+ "tempfile",
+ "tiff",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "rawmakase-interop"
 version = "0.1.0"
 dependencies = [
@@ -3279,6 +3319,23 @@ dependencies = [
  "tempfile",
  "toml",
  "unicode-normalization",
+]
+
+[[package]]
+name = "rawmakase-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cc",
+ "image",
+ "pkg-config",
+ "rawmakase-engine",
+ "rawmakase-model",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

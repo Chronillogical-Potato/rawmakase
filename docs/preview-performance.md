@@ -66,7 +66,7 @@ region) still recompute Clarity over the full image on every change.
 ## Stage caching
 
 The desktop renderer keeps the results of the stages before the per-pixel color
-pipeline (`src/develop/stage_cache.rs`), each keyed by the recipe fields it reads:
+pipeline (`crates/rawmakase-engine/src/develop/stage_cache.rs`), each keyed by the recipe fields it reads:
 
 - local-tone blurs: log luminance and its box blurs, which depend on white balance,
   profile and lens vignetting but not on exposure (exposure shifts all of them
@@ -143,7 +143,7 @@ change the first update was the 50 ms legacy draft, and the real rendering came
 
 ## GPU develop stage
 
-`src/develop/gpu/develop.wgsl` ports the per-pixel stage (`process_pixel`) of the
+`crates/rawmakase-engine/src/develop/gpu/develop.wgsl` ports the per-pixel stage (`process_pixel`) of the
 current engine: white balance, camera matrix, DCP HueSatMap (with its two-illuminant
 blend), calibration, exposure and the DNG exposure ramp, LookTable, enhanced-look
 table and curve, the profile tone curve, the engine 4 Shadows/Highlights map,
@@ -333,7 +333,7 @@ Clarity drags.
 ## Decode cache and prefetch
 
 Opening a photo stores the developed camera image, exactly as decoded, in a disk
-cache (`src/decode_cache.rs`), together with the pixels highlight recovery changed
+cache (`crates/rawmakase-native/src/decode_cache.rs`), together with the pixels highlight recovery changed
 (0.7% of pixels on DSCF7853, 46 pixels on the A7CR file), so the recovered image is
 restored without recomputing it. The loader recovers highlights itself before
 announcing the full image, which the first render would otherwise do. A later open
@@ -409,7 +409,7 @@ discarded. The interactive draft remains an approximation of the final render.
 Standard tests do not require a GPU. Run hardware checks explicitly:
 
 ```sh
-cargo test --locked develop::gpu::tests -- --ignored --nocapture
+cargo test --locked -p rawmakase-engine develop::gpu::tests -- --ignored --nocapture
 cargo run --release --locked --example preview_benchmark -- /path/to/photo.RAF 3
 ```
 

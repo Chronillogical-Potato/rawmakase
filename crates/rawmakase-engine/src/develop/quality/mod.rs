@@ -49,7 +49,7 @@ pub enum Output {
 }
 impl Output {
     /// The pixels of a render made without a display, which is never a frame.
-    pub(crate) fn pixels(self) -> Rendered {
+    pub fn pixels(self) -> Rendered {
         match self {
             Output::Pixels(pixels) => pixels,
             Output::Frame(_) => unreachable!("Frames are only presented to a display"),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Measure Camera Raw's Color Grading on the synthetic chart and write
-src/develop/color_grade_curves.bin.
+crates/rawmakase-engine/src/develop/color_grade_curves.bin.
 
 `render` has Photoshop 2026 (Camera Raw) render synthetic-d65.dng with each fitting
 case (about 750: every region at twelve hues and four saturations, Shadows, Midtones
@@ -210,7 +210,7 @@ def fit_tables(data):
     return {'grid': grid, 'global': globals_, 'coef': coef, 'lum': lum}, gain
 
 
-# The operator, as src/develop/color_grade.rs renders it, for checking the fit.
+# The operator, as crates/rawmakase-engine/src/develop/color_grade.rs renders it, for checking the fit.
 def _interp(xs, x):
     x = min(max(x, xs[0]), xs[-1])
     i = min(int(np.searchsorted(xs, x, 'right')) - 1, len(xs) - 2)
@@ -348,7 +348,7 @@ def fit(refs):
     data = json.loads(refs.read_text())
     t, _ = fit_tables(data)
     out = np.concatenate([t[k].astype('<f4').ravel() for k in ('grid', 'global', 'coef', 'lum')])
-    path = ROOT / 'src/develop/color_grade_curves.bin'
+    path = ROOT / 'crates/rawmakase-engine/src/develop/color_grade_curves.bin'
     path.write_bytes(out.tobytes())
     print(f'{path.relative_to(ROOT)}: {out.size} values')
     report(t, data)

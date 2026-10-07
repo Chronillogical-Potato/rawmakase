@@ -4,8 +4,10 @@ Use this page to find an implementation or decide where a change belongs. Read
 [architecture.md](architecture.md) for ownership rules, concurrency invariants and
 compatibility constraints. Paths below are relative to this document and clickable.
 Module roots (`mod.rs`) define their public API; implementation helpers generally
-remain private to their domain. The workspace has three packages: the app
-(`src/`), [`crates/rawmakase-protocol`](../crates/rawmakase-protocol/src/lib.rs)
+remain private to their domain. Besides the app (`src/`) and the domain crates
+described in [architecture.md](architecture.md) (model, interop, catalog, engine,
+native and export, under `crates/`), the workspace has
+[`crates/rawmakase-protocol`](../crates/rawmakase-protocol/src/lib.rs)
 (what the app and its control clients agree on: protocol version, `control.json`
 endpoint, data folder) and [`tools/rawmakase-ctl`](../tools/rawmakase-ctl/src/lib.rs)
 (the control client, used by `rawmakase control`, `rawmakase mcp` and the
@@ -15,12 +17,12 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | Work | Start here | Related work |
 | --- | --- | --- |
-| Add a develop adjustment | [Recipe](../crates/rawmakase-model/src/model/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
-| Change preview quality or detail | [Quality rendering](../src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
+| Add a develop adjustment | [Recipe](../crates/rawmakase-model/src/model/recipe.rs), [pipeline](../crates/rawmakase-engine/src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
+| Change preview quality or detail | [Quality rendering](../crates/rawmakase-engine/src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
 | Support another XMP setting | [Parser](../crates/rawmakase-interop/src/xmp/parse.rs), [application stages](../crates/rawmakase-interop/src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../crates/rawmakase-interop/src/presets/library.rs) | Preset browser UI and shared asset paths |
 | Add DCP support | [DCP reader](../crates/rawmakase-model/src/camera_profiles/dcp.rs), [profile model](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
-| Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
+| Change JPEG/TIFF output | [Export](../crates/rawmakase-export/src/export/mod.rs), [metadata](../crates/rawmakase-export/src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../crates/rawmakase-catalog/src/catalog/mod.rs), [schema](../crates/rawmakase-catalog/src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs), [Develop translation](../crates/rawmakase-interop/src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
 | Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../crates/rawmakase-catalog/src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
@@ -33,11 +35,11 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | --- | --- |
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
 | [src/lib.rs](../src/lib.rs) | The module list. The library serves the binary, examples and tests; it is not a stable public API. |
-| [src/photo.rs](../src/photo.rs) | Opens a photo for developing: `Raw::open_file`'s facts, then embedded lens tables, a DNG's profile, baseline exposure, colour matrix and crop, and the imported lens profiles that fit. |
+| [crates/rawmakase-native/src/photo.rs](../crates/rawmakase-native/src/photo.rs) | Opens a photo for developing: `Raw::open_file`'s facts, then embedded lens tables, a DNG's profile, baseline exposure, colour matrix and crop, and the imported lens profiles that fit. |
 | [crates/rawmakase-model/src/ids.rs](../crates/rawmakase-model/src/ids.rs) | Typed catalog row ids: photo, folder, root and collection, each stored and serialized as its integer. |
 | [crates/rawmakase-catalog/src/edits.rs](../crates/rawmakase-catalog/src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../crates/rawmakase-catalog/src/catalog/edit_records.rs) reads the stored records. |
-| [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
-| [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
+| [crates/rawmakase-native/src/decode.rs](../crates/rawmakase-native/src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
+| [crates/rawmakase-native/src/decode_cache.rs](../crates/rawmakase-native/src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
 | [crates/rawmakase-model/src/model/recipe.rs](../crates/rawmakase-model/src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../crates/rawmakase-model/src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../crates/rawmakase-model/src/model/panels.rs) the per-panel switches. |
 | [crates/rawmakase-model/src/model/params.rs](../crates/rawmakase-model/src/model/params.rs), [edit.rs](../crates/rawmakase-model/src/model/edit.rs), [settings_groups.rs](../crates/rawmakase-model/src/model/settings_groups.rs) | The sliders as parameters (ids, ranges, formatting), the rules an edit follows (which operator a changed setting takes, which panel it turns on), and the setting groups Copy Settings, Sync and presets move between photos. |
 | [crates/rawmakase-model/src/model/effects.rs](../crates/rawmakase-model/src/model/effects.rs) | The Effects, Detail and Calibration settings a recipe keeps (curves, grading, grain, vignettes, Defringe, noise reduction), their defaults, validation and the Effects panel's reset. Rendering them is in `develop/effects.rs`. |
@@ -50,19 +52,19 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [crates/rawmakase-model/src/model/white_balance.rs](../crates/rawmakase-model/src/model/white_balance.rs) | Fallback illuminant and as-shot temperature estimation from a RAW's metadata, and Lightroom's named white balance presets. |
 | [crates/rawmakase-model/src/model/operators.rs](../crates/rawmakase-model/src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did, and the Sharpening sliders' defaults for each. The renderer picks its operator from them. |
 | [crates/rawmakase-model/src/camera_data.rs](../crates/rawmakase-model/src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
-| [src/raw/mod.rs](../src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
-| [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
-| [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
+| [crates/rawmakase-native/src/raw/mod.rs](../crates/rawmakase-native/src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
+| [crates/rawmakase-native/src/raw/ffi.rs](../crates/rawmakase-native/src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
+| [crates/rawmakase-native/native/raw.cpp](../crates/rawmakase-native/native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
 | [crates/rawmakase-model/src/color/mod.rs](../crates/rawmakase-model/src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
-| [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
+| [crates/rawmakase-native/src/demosaic.rs](../crates/rawmakase-native/src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
 | [crates/rawmakase-model/src/cameras.rs](../crates/rawmakase-model/src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
 | [crates/rawmakase-model/src/tiff.rs](../crates/rawmakase-model/src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
 | [crates/rawmakase-interop/src/jpeg.rs](../crates/rawmakase-interop/src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
 | [crates/rawmakase-interop/src/exif.rs](../crates/rawmakase-interop/src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
-| [src/time.rs](../src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
+| [crates/rawmakase-model/src/time.rs](../crates/rawmakase-model/src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
 | [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs), [volume.rs](../src/platform/volume.rs), [reveal.rs](../src/platform/reveal.rs), [web.rs](../src/platform/web.rs) | OS integration: Linux GVFS/FUSE path bridge, which drive a path is on, showing a file in the file manager, opening web pages. |
 
@@ -70,55 +72,55 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | File | Responsibility |
 | --- | --- |
-| [develop/mod.rs](../src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
-| [recipe.rs](../src/develop/recipe.rs) | What rendering makes of a recipe: the measured manual Vignetting and Color noise reduction run on the camera image. |
+| [develop/mod.rs](../crates/rawmakase-engine/src/develop/mod.rs) | Public rendering API and exports of `Recipe`, `Geometry` and `Rendered`. |
+| [recipe.rs](../crates/rawmakase-engine/src/develop/recipe.rs) | What rendering makes of a recipe: the measured manual Vignetting and Color noise reduction run on the camera image. |
 | [raw_defaults.rs](../crates/rawmakase-interop/src/raw_defaults.rs) | Raw defaults: the master and per-camera choices (Adobe Default, Camera Settings, RAWmakase Default or a preset), and resolving a photo's starting settings with a fallback note. See [raw defaults](xmp-presets.md#raw-defaults). |
-| [geometry.rs](../src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
-| [orientation.rs](../src/develop/orientation.rs) | Rotate and Flip on the photo as shown, keeping the crop and straightening on the same part of the photo. |
-| [image_space.rs](../src/develop/image_space.rs) | Image space's mapping to and from the view, including the lens distortion inverse. The frame itself is `model/image_frame.rs`. |
-| [retouch/mod.rs](../src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
-| [retouch/heal.rs](../src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
-| [retouch/layer.rs](../src/develop/retouch/layer.rs) | The retouched image (red eye corrections, then Heal and Clone): built at once for exports, updated in dirty 256-pixel tiles for previews. |
-| [red_eye/mod.rs](../src/develop/red_eye/mod.rs) | Red eye corrections (Lightroom's ellipse with semi-axes and correlation), validation, and reading saved ones leniently. |
-| [red_eye/detect.rs](../src/develop/red_eye/detect.rs) | Finding the red (or, for Pet Eye, glowing) pupil inside the circle dragged over an eye. |
-| [red_eye/render.rs](../src/develop/red_eye/render.rs) | Rendering one correction on linear camera pixels (Red Eye's dark neutral, Pet Eye's black and catchlight), fitted to Camera Raw 18.7. |
-| [retouch/search.rs](../src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
-| [masks/mod.rs](../src/develop/masks/mod.rs) | Mask groups, components (brush, gradients, ranges), local adjustments, validation and the overlay weights. |
-| [masks/eval.rs](../src/develop/masks/eval.rs) | Mask weights for a rendered region: tracing pixels to image space, combining components, caching brush rasters. |
-| [masks/brush.rs](../src/develop/masks/brush.rs) | Brush strokes rasterised in image space (flow, density, erase, Auto Mask). |
-| [masks/range.rs](../src/develop/masks/range.rs) | Color Range and Luminance Range weights from developed Oklab colours. |
-| [masks/local.rs](../src/develop/masks/local.rs) | A mask's sliders as per-pixel deltas, and where each acts in the pipeline. |
-| [pipeline/](../src/develop/pipeline/mod.rs) | The CPU pipeline, one module per seam: [colour conversions](../src/develop/pipeline/color.rs), [per-pixel stages](../src/develop/pipeline/pixel.rs), [tone preparation](../src/develop/pipeline/tone.rs), [sampling](../src/develop/pipeline/sampling.rs), [the fringe and neutral pickers](../src/develop/pipeline/pickers.rs), [image fields](../src/develop/pipeline/fields.rs) (exposure ramp, vignetting, lens warp), [GPU parameters](../src/develop/pipeline/gpu_params.rs), [render entry points](../src/develop/pipeline/render.rs) and [legacy engines](../src/develop/pipeline/legacy.rs). |
-| [basic_tone.rs](../src/develop/basic_tone.rs), [basic_tone_data.rs](../src/develop/basic_tone_data.rs) | Engine 4 Contrast, Whites, Blacks and Dehaze as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md). |
-| [parametric.rs](../src/develop/parametric.rs), [parametric.bin](../src/develop/parametric.bin) | Engine 4 parametric tone curve (Shadows, Darks, Lights, Highlights and the splits) as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md#parametric-curve). |
-| [local_tone.rs](../src/develop/local_tone.rs), [local_tone_data.rs](../src/develop/local_tone_data.rs) | Engine 4 Shadows and Highlights: an edge-aware local operator fitted to Camera Raw, and its tables. |
-| [color_mixer.rs](../src/develop/color_mixer.rs), [color_mixer.bin](../src/develop/color_mixer.bin) | Engine 4 HSL mixer, Saturation and Vibrance as measured hue/saturation/value lookups. See [color mixer](color-mixer.md). |
-| [point_color.rs](../src/develop/point_color.rs) | Point Color swatches as Camera Raw stores them, their validation and text form for XMP and catalogs, and the fitted operator in HSV of linear ProPhoto RGB (`develop.wgsl`'s `point_colors` on the GPU). See [color mixer](color-mixer.md#point-color). |
-| [color_grade.rs](../src/develop/color_grade.rs), [color_grade_curves.rs](../src/develop/color_grade_curves.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading: Camera Raw 18.7's per-channel curves (`color_grade_curves.bin`) for current recipes, and the earlier per-luminance gains that older recipes keep. |
-| [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
-| [guided.rs](../src/develop/guided.rs) | Guided Upright: solving two to four guides into a correction, and what to say when they can't. See [transform](transform.md#guided-upright). |
-| [quality/](../src/develop/quality/mod.rs) | Full-quality rendering, one module per seam: sizing and resizing (`mod.rs`), [detail](../src/develop/quality/detail.rs) (sharpening, mask noise), [highlight recovery](../src/develop/quality/highlights.rs), [local tone](../src/develop/quality/local.rs) (the blurs and gain behind Clarity, Texture and Dehaze), [samples](../src/develop/quality/samples.rs) (Point Color, Targeted Adjustment, retouching) and the cancellable fit/region/export [render](../src/develop/quality/render.rs). |
-| [targeted.rs](../src/develop/targeted.rs) | The Targeted Adjustment Tool's targets, and how a drag is shared among the sliders for a sampled color. |
-| [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
-| [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
-| [stage_cache.rs](../src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images, geometry samples, mask weights and brush rasters, keyed by the recipe fields each stage reads. |
-| [gpu/mod.rs](../src/develop/gpu/mod.rs) | Optional compute device, bounded/reused buffers, command submission and readback for preview finishing. |
-| [gpu/finish.wgsl](../src/develop/gpu/finish.wgsl) | Portable sharpening and separable Lanczos resize compute kernels. |
-| [gpu/develop.rs](../src/develop/gpu/develop.rs) | GPU per-pixel color and tone stage: sample buffers kept per stage-cache entry, dispatch and readback. |
-| [gpu/develop.wgsl](../src/develop/gpu/develop.wgsl) | WGSL port of the engine 4 per-pixel pipeline (profile tables, tone, curves, mixer, grading). |
-| [pipeline/pixel_params.rs](../src/develop/pipeline/pixel_params.rs) | Which recipes the GPU stage covers, and its parameters and tables. |
-| [gpu/resident.rs](../src/develop/gpu/resident.rs), [gpu/logs.wgsl](../src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
-| [gpu/sampling.rs](../src/develop/gpu/sampling.rs) | The sampling pass's parameter header: named slots for the Rust side and the `S_*` offsets generated for `local.wgsl`. |
-| [gpu/uniforms.rs](../src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
-| [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
-| [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
+| [geometry.rs](../crates/rawmakase-engine/src/develop/geometry.rs) | Crop, orientation, rotation, flips, straighten, output sizing and coordinate mapping. |
+| [orientation.rs](../crates/rawmakase-engine/src/develop/orientation.rs) | Rotate and Flip on the photo as shown, keeping the crop and straightening on the same part of the photo. |
+| [image_space.rs](../crates/rawmakase-engine/src/develop/image_space.rs) | Image space's mapping to and from the view, including the lens distortion inverse. The frame itself is `model/image_frame.rs`. |
+| [retouch/mod.rs](../crates/rawmakase-engine/src/develop/retouch/mod.rs) | Heal and Clone operations (spots and brushed areas), validation and Visualize Spots. |
+| [retouch/heal.rs](../crates/rawmakase-engine/src/develop/retouch/heal.rs) | Rendering one operation on linear camera pixels: feathered coverage, Clone, and Heal's multigrid membrane solve in log values. |
+| [retouch/layer.rs](../crates/rawmakase-engine/src/develop/retouch/layer.rs) | The retouched image (red eye corrections, then Heal and Clone): built at once for exports, updated in dirty 256-pixel tiles for previews. |
+| [red_eye/mod.rs](../crates/rawmakase-engine/src/develop/red_eye/mod.rs) | Red eye corrections (Lightroom's ellipse with semi-axes and correlation), validation, and reading saved ones leniently. |
+| [red_eye/detect.rs](../crates/rawmakase-engine/src/develop/red_eye/detect.rs) | Finding the red (or, for Pet Eye, glowing) pupil inside the circle dragged over an eye. |
+| [red_eye/render.rs](../crates/rawmakase-engine/src/develop/red_eye/render.rs) | Rendering one correction on linear camera pixels (Red Eye's dark neutral, Pet Eye's black and catchlight), fitted to Camera Raw 18.7. |
+| [retouch/search.rs](../crates/rawmakase-engine/src/develop/retouch/search.rs) | Automatic source selection on a reduced neighbourhood: border match, texture, clipping and overlap scores. |
+| [masks/mod.rs](../crates/rawmakase-engine/src/develop/masks/mod.rs) | Mask groups, components (brush, gradients, ranges), local adjustments, validation and the overlay weights. |
+| [masks/eval.rs](../crates/rawmakase-engine/src/develop/masks/eval.rs) | Mask weights for a rendered region: tracing pixels to image space, combining components, caching brush rasters. |
+| [masks/brush.rs](../crates/rawmakase-engine/src/develop/masks/brush.rs) | Brush strokes rasterised in image space (flow, density, erase, Auto Mask). |
+| [masks/range.rs](../crates/rawmakase-engine/src/develop/masks/range.rs) | Color Range and Luminance Range weights from developed Oklab colours. |
+| [masks/local.rs](../crates/rawmakase-engine/src/develop/masks/local.rs) | A mask's sliders as per-pixel deltas, and where each acts in the pipeline. |
+| [pipeline/](../crates/rawmakase-engine/src/develop/pipeline/mod.rs) | The CPU pipeline, one module per seam: [colour conversions](../crates/rawmakase-engine/src/develop/pipeline/color.rs), [per-pixel stages](../crates/rawmakase-engine/src/develop/pipeline/pixel.rs), [tone preparation](../crates/rawmakase-engine/src/develop/pipeline/tone.rs), [sampling](../crates/rawmakase-engine/src/develop/pipeline/sampling.rs), [the fringe and neutral pickers](../crates/rawmakase-engine/src/develop/pipeline/pickers.rs), [image fields](../crates/rawmakase-engine/src/develop/pipeline/fields.rs) (exposure ramp, vignetting, lens warp), [GPU parameters](../crates/rawmakase-engine/src/develop/pipeline/gpu_params.rs), [render entry points](../crates/rawmakase-engine/src/develop/pipeline/render.rs) and [legacy engines](../crates/rawmakase-engine/src/develop/pipeline/legacy.rs). |
+| [basic_tone.rs](../crates/rawmakase-engine/src/develop/basic_tone.rs), [basic_tone_data.rs](../crates/rawmakase-engine/src/develop/basic_tone_data.rs) | Engine 4 Contrast, Whites, Blacks and Dehaze as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md). |
+| [parametric.rs](../crates/rawmakase-engine/src/develop/parametric.rs), [parametric.bin](../crates/rawmakase-engine/src/develop/parametric.bin) | Engine 4 parametric tone curve (Shadows, Darks, Lights, Highlights and the splits) as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md#parametric-curve). |
+| [local_tone.rs](../crates/rawmakase-engine/src/develop/local_tone.rs), [local_tone_data.rs](../crates/rawmakase-engine/src/develop/local_tone_data.rs) | Engine 4 Shadows and Highlights: an edge-aware local operator fitted to Camera Raw, and its tables. |
+| [color_mixer.rs](../crates/rawmakase-engine/src/develop/color_mixer.rs), [color_mixer.bin](../crates/rawmakase-engine/src/develop/color_mixer.bin) | Engine 4 HSL mixer, Saturation and Vibrance as measured hue/saturation/value lookups. See [color mixer](color-mixer.md). |
+| [point_color.rs](../crates/rawmakase-engine/src/develop/point_color.rs) | Point Color swatches as Camera Raw stores them, their validation and text form for XMP and catalogs, and the fitted operator in HSV of linear ProPhoto RGB (`develop.wgsl`'s `point_colors` on the GPU). See [color mixer](color-mixer.md#point-color). |
+| [color_grade.rs](../crates/rawmakase-engine/src/develop/color_grade.rs), [color_grade_curves.rs](../crates/rawmakase-engine/src/develop/color_grade_curves.rs), [color_grade_data.rs](../crates/rawmakase-engine/src/develop/color_grade_data.rs) | Engine 4 color grading: Camera Raw 18.7's per-channel curves (`color_grade_curves.bin`) for current recipes, and the earlier per-luminance gains that older recipes keep. |
+| [upright.rs](../crates/rawmakase-engine/src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
+| [guided.rs](../crates/rawmakase-engine/src/develop/guided.rs) | Guided Upright: solving two to four guides into a correction, and what to say when they can't. See [transform](transform.md#guided-upright). |
+| [quality/](../crates/rawmakase-engine/src/develop/quality/mod.rs) | Full-quality rendering, one module per seam: sizing and resizing (`mod.rs`), [detail](../crates/rawmakase-engine/src/develop/quality/detail.rs) (sharpening, mask noise), [highlight recovery](../crates/rawmakase-engine/src/develop/quality/highlights.rs), [local tone](../crates/rawmakase-engine/src/develop/quality/local.rs) (the blurs and gain behind Clarity, Texture and Dehaze), [samples](../crates/rawmakase-engine/src/develop/quality/samples.rs) (Point Color, Targeted Adjustment, retouching) and the cancellable fit/region/export [render](../crates/rawmakase-engine/src/develop/quality/render.rs). |
+| [targeted.rs](../crates/rawmakase-engine/src/develop/targeted.rs) | The Targeted Adjustment Tool's targets, and how a drag is shared among the sliders for a sampled color. |
+| [preview_renderer.rs](../crates/rawmakase-engine/src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
+| [pyramid.rs](../crates/rawmakase-engine/src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
+| [stage_cache.rs](../crates/rawmakase-engine/src/develop/stage_cache.rs) | Preview cache of local-tone blurs, local-tone images, geometry samples, mask weights and brush rasters, keyed by the recipe fields each stage reads. |
+| [gpu/mod.rs](../crates/rawmakase-engine/src/develop/gpu/mod.rs) | Optional compute device, bounded/reused buffers, command submission and readback for preview finishing. |
+| [gpu/finish.wgsl](../crates/rawmakase-engine/src/develop/gpu/finish.wgsl) | Portable sharpening and separable Lanczos resize compute kernels. |
+| [gpu/develop.rs](../crates/rawmakase-engine/src/develop/gpu/develop.rs) | GPU per-pixel color and tone stage: sample buffers kept per stage-cache entry, dispatch and readback. |
+| [gpu/develop.wgsl](../crates/rawmakase-engine/src/develop/gpu/develop.wgsl) | WGSL port of the engine 4 per-pixel pipeline (profile tables, tone, curves, mixer, grading). |
+| [pipeline/pixel_params.rs](../crates/rawmakase-engine/src/develop/pipeline/pixel_params.rs) | Which recipes the GPU stage covers, and its parameters and tables. |
+| [gpu/resident.rs](../crates/rawmakase-engine/src/develop/gpu/resident.rs), [gpu/logs.wgsl](../crates/rawmakase-engine/src/develop/gpu/logs.wgsl), [gpu/local.wgsl](../crates/rawmakase-engine/src/develop/gpu/local.wgsl) | The stages before the per-pixel stage on the device: the photo kept there, local-tone blurs and gain, region sampling through geometry, lens correction and noise reduction. |
+| [gpu/sampling.rs](../crates/rawmakase-engine/src/develop/gpu/sampling.rs) | The sampling pass's parameter header: named slots for the Rust side and the `S_*` offsets generated for `local.wgsl`. |
+| [gpu/uniforms.rs](../crates/rawmakase-engine/src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
+| [gpu/present.rs](../crates/rawmakase-engine/src/develop/gpu/present.rs), [gpu/present.wgsl](../crates/rawmakase-engine/src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../crates/rawmakase-engine/src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
+| [gpu/weights.rs](../crates/rawmakase-engine/src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
 | [rendered.rs](../crates/rawmakase-model/src/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
 | [color/curve.rs](../crates/rawmakase-model/src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
-| [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
-| [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
-| [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
-| [black_white.rs](../src/develop/black_white.rs) | Treatment (Color or Black & White, kept with black & white profiles) and the Auto black & white mix, fitted to Camera Raw's Auto. See [color mixer](color-mixer.md#black--white). |
-| [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders, Vibrance and Saturation predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
+| [effects.rs](../crates/rawmakase-engine/src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
+| [color.rs](../crates/rawmakase-engine/src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
+| [calibration.rs](../crates/rawmakase-engine/src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
+| [black_white.rs](../crates/rawmakase-engine/src/develop/black_white.rs) | Treatment (Color or Black & White, kept with black & white profiles) and the Auto black & white mix, fitted to Camera Raw's Auto. See [color mixer](color-mixer.md#black--white). |
+| [auto.rs](../crates/rawmakase-engine/src/develop/auto.rs) | Auto: the Basic tone sliders, Vibrance and Saturation predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
 
 ## Camera profiles
 
@@ -194,10 +196,10 @@ recipes and the installed preset collection; they do not own the renderer.
 | [lightroom/mod.rs](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
 | [lr_develop.rs](../crates/rawmakase-interop/src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
 | [lightroom/history.rs](../crates/rawmakase-catalog/src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
-| [export/mod.rs](../src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
-| [export/encode.rs](../src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
-| [export/metadata.rs](../src/export/metadata.rs), [export/exif.rs](../src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
-| [export/job.rs](../src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
+| [export/mod.rs](../crates/rawmakase-export/src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
+| [export/encode.rs](../crates/rawmakase-export/src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
+| [export/metadata.rs](../crates/rawmakase-export/src/export/metadata.rs), [export/exif.rs](../crates/rawmakase-export/src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
+| [export/job.rs](../crates/rawmakase-export/src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
 | [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
 
 ## Desktop application
@@ -350,14 +352,14 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | Location | Coverage / use |
 | --- | --- |
 | [app/tests.rs](../src/app/tests.rs), [library/tests.rs](../src/app/library/tests.rs) | Editor interactions, state transitions, worker results, navigation, library trees and metadata. Small state owners also contain inline tests. |
-| [develop/pipeline/tests.rs](../src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
+| [develop/pipeline/tests.rs](../crates/rawmakase-engine/src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
 | [camera_profiles/tests.rs](../crates/rawmakase-model/src/camera_profiles/tests.rs) | Profile parsing and validation. |
 | [xmp/tests.rs](../crates/rawmakase-interop/src/xmp/tests.rs), [presets/tests.rs](../crates/rawmakase-interop/src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
 | [catalog/legacy_sidecar/tests.rs](../crates/rawmakase-catalog/src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../crates/rawmakase-catalog/src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [catalog/locations_tests.rs](../crates/rawmakase-catalog/src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
-| [export/tests.rs](../src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
-| [develop/gpu/tests.rs](../src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
+| [export/tests.rs](../crates/rawmakase-export/src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
+| [develop/gpu/tests.rs](../crates/rawmakase-engine/src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
 | [tests/color/](../tests/color/main.rs), [tests/corpus/README.md](../tests/corpus/README.md) | The color corpus: synthetic chart DNGs rendered and compared with committed snapshots and Camera Raw renders on every `cargo test`; private photo and Adobe-profile tiers behind `RAWMAKASE_CORPUS`. |
 | [examples/preview_benchmark.rs](../examples/preview_benchmark.rs) | Read-only release benchmark of first Fit, slider Fit, 100% region and export renders on a supplied RAW; checks Fit against the resized export. |
 | [tests/persistence.rs](../tests/persistence.rs) | Public API regressions for relative paths, malformed legacy recipes and invalid export defaults; isolates process-wide path settings in a child process. |

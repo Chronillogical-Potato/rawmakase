@@ -15,27 +15,38 @@
 // The values a photo's edit is made of, built on their own (crates/rawmakase-model).
 // The catalog and which edit a photo develops with (crates/rawmakase-catalog).
 pub use rawmakase_catalog::{catalog, edits};
+// Rendering (crates/rawmakase-engine).
+pub use rawmakase_engine::develop;
+// Developing and writing exports, with their watermarks (crates/rawmakase-export).
+pub use rawmakase_export::{export, watermark};
+// LibRaw and Little CMS, demosaicing, opening and decoding a photo
+// (crates/rawmakase-native).
+pub(crate) use rawmakase_native::decode;
+pub use rawmakase_native::{decode_cache, photo, raw};
 // File formats and presets over the model (crates/rawmakase-interop).
 pub use rawmakase_interop::{exif, export_settings, jpeg, lr_develop, presets, raw_defaults, xmp};
+pub(crate) use rawmakase_model::time;
 pub use rawmakase_model::{
     camera_data, camera_profiles, cameras, color, dng, ids, lens, metadata, model, optics,
     rendered, storage, tiff, xml,
 };
 pub mod app;
-mod build_info;
 pub(crate) mod catalog_session;
 pub mod comparison;
-pub(crate) mod decode;
-pub mod decode_cache;
-pub(crate) mod demosaic;
-pub mod develop;
 pub(crate) mod edit_session;
-pub mod export;
-pub mod photo;
 pub(crate) mod platform;
-pub mod raw;
 #[cfg(feature = "telemetry")]
 pub(crate) mod stats;
-pub(crate) mod time;
 pub mod updates;
-pub mod watermark;
+
+#[cfg(test)]
+mod tests {
+    /// Exports name the app's release, though the export crate has its own version.
+    #[test]
+    fn exports_name_this_release() {
+        assert_eq!(
+            rawmakase_export::build_info::SOFTWARE,
+            concat!("RAWmakase ", env!("CARGO_PKG_VERSION"))
+        );
+    }
+}

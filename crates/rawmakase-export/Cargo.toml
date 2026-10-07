@@ -1,0 +1,41 @@
+[package]
+name = "rawmakase-export"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "RAWmakase's export: developing photos with the renderer and writing JPEG and TIFF files with their metadata and watermarks, without the GUI"
+license = "MIT"
+publish = false
+
+[features]
+# Helpers the app's own tests build on.
+test-support = ["rawmakase-model/test-support", "rawmakase-interop/test-support", "rawmakase-catalog/test-support", "rawmakase-engine/test-support", "rawmakase-native/test-support"]
+
+[dependencies]
+rawmakase-catalog = { path = "../rawmakase-catalog", version = "0.1.0" }
+rawmakase-engine = { path = "../rawmakase-engine", version = "0.1.0" }
+rawmakase-interop = { path = "../rawmakase-interop", version = "0.1.0" }
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
+rawmakase-native = { path = "../rawmakase-native", version = "0.1.0" }
+anyhow = "1"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+# The GUID of ExtendedXMP in JPEG exports is an MD5.
+md-5 = "0.11"
+# Installed fonts for text watermarks are mapped, not read whole.
+memmap2 = "0.9"
+roxmltree = "0.21.1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+# Glyph outlines for text watermarks.
+skrifa = "0.47"
+tempfile = "3"
+tiff = "0.11.3"
+unicode-normalization = "0.1"
+# Inter and the installed-font directories for text watermarks. It is built for
+# egui and brings egui along, though nothing here draws with it.
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+
+[dev-dependencies]
+rawmakase-catalog = { path = "../rawmakase-catalog", version = "0.1.0", features = ["test-support"] }
+rawmakase-interop = { path = "../rawmakase-interop", version = "0.1.0", features = ["test-support"] }
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0", features = ["test-support"] }

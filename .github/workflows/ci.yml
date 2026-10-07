@@ -86,21 +86,22 @@ jobs:
           cargo +"$msrv" check --locked --all-targets
       - run: cargo fmt --check
       # The model, file formats, the catalog, the protocol crate and the standalone
-      # client build without the app's native libraries, wgpu or GUI; fmt above
-      # covers the whole workspace.
-      - name: Check the model, file formats, catalog, control protocol and client
+      # client build without the app's native libraries, wgpu or GUI, and the
+      # renderer without the native libraries or GUI; fmt above covers the whole
+      # workspace.
+      - name: Check the model, file formats, catalog, renderer, control protocol and client
         run: |
-          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
           cargo test --locked -p rawmakase-model --all-features
-          cargo test --locked -p rawmakase-interop -p rawmakase-catalog
+          cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine
           cargo test --locked -p rawmakase-protocol -p rawmakase-ctl
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
       - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       # exiftool reads exported metadata back as an independent reader; Arch
       # installs it in vendor_perl, outside PATH.
-      - run: PATH="/usr/bin/vendor_perl:$PATH" cargo test --locked
+      - run: PATH="/usr/bin/vendor_perl:$PATH" cargo test --locked -p rawmakase -p rawmakase-native -p rawmakase-export
         env:
           RAWMAKASE_REQUIRE_EXIFTOOL: "1"
       - name: Validate desktop entry
@@ -131,7 +132,7 @@ jobs:
           export PKG_CONFIG_PATH="$RUNNER_TEMP/native/lib/pkgconfig"
           export LD_LIBRARY_PATH="$RUNNER_TEMP/native/lib"
           export CXXFLAGS="-DCMS_NO_REGISTER_KEYWORD"
-          cargo test --locked
+          cargo test --locked --workspace
 
   check-windows:
     name: Test on Windows
@@ -175,10 +176,10 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - if: steps.source.outputs.windows == 'true'
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       - if: steps.source.outputs.windows == 'true'
-        run: cargo test --locked
+        run: cargo test --locked --workspace
 
   # Without this job the macOS-only code is compiled for the first time by
   # release.yml, after the release commit is already on main, so a macOS-only
@@ -221,9 +222,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
-      - run: cargo test --locked
+      - run: cargo test --locked --workspace
 
   package:
     name: Build, install and run Arch package
@@ -280,9 +281,10 @@ jobs:
   crates:
     name: Crates without native libraries
     # The model, file formats, catalog and control protocol depend on no app,
-    # GPU, GUI or native imaging crate (scripts/crate-closures.sh), and build
-    # and test on a machine with no LibRaw or Little CMS installed. The
-    # catalog's bundled SQLite is the one C library they build.
+    # GPU, GUI or native imaging crate, and the renderer on no app, GUI or
+    # native imaging crate (scripts/crate-closures.sh); they build and test on
+    # a machine with no LibRaw or Little CMS installed. The catalog's bundled
+    # SQLite is the one C library they build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -301,7 +303,7 @@ jobs:
           rustup default stable
       - run: scripts/crate-closures.sh
       - run: cargo test --locked -p rawmakase-model --all-features
-      - run: cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-protocol
+      - run: cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol
 
   audit:
     name: Dependency licenses and advisories

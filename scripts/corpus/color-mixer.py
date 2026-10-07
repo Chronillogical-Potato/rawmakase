@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Measure Camera Raw's color mixer on a dense synthetic chart and write
-src/develop/color_mixer_chart.bin.
+crates/rawmakase-engine/src/develop/color_mixer_chart.bin.
 
 `chart` writes the fitting chart (1,728 colors: 72 hues every 5° in Oklab, at six
 lightnesses and four fractions of the most chroma sRGB holds there, plus a gray
@@ -30,10 +30,10 @@ What the renders show (see docs/color-mixer.md#chart-tables):
   third of −100's log value change and +50 about 58% of +100's, so the chart tables
   scale it by the slider position to the power 1.6 (darkening) or 0.79.
 
-`fit-vibrance` writes src/develop/vibrance_chart.bin from the same renders: the
+`fit-vibrance` writes crates/rawmakase-engine/src/develop/vibrance_chart.bin from the same renders: the
 photo tables up to ±50 and a grid fitted per position at ±75 and ±100
 (docs/color-mixer.md#vibrance).
-`fit-black-white` writes src/develop/black_white_chart.bin from the renders with
+`fit-black-white` writes crates/rawmakase-engine/src/develop/black_white_chart.bin from the renders with
 ConvertToGrayscale: the gray's luminance against the color's at a zero mix, and
 each band's change at ±50 and ±100 (docs/color-mixer.md#chart-gray).
 
@@ -69,12 +69,12 @@ HUES, SATS, VALS = 36, 6, 6
 CELLS = HUES * SATS * VALS
 TABLES = 52
 SCALE = 8000
-ORIGINAL = ROOT / 'src/develop/color_mixer.bin'
-OUTPUT = ROOT / 'src/develop/color_mixer_chart.bin'
-VIBRANCE_OUTPUT = ROOT / 'src/develop/vibrance_chart.bin'
+ORIGINAL = ROOT / 'crates/rawmakase-engine/src/develop/color_mixer.bin'
+OUTPUT = ROOT / 'crates/rawmakase-engine/src/develop/color_mixer_chart.bin'
+VIBRANCE_OUTPUT = ROOT / 'crates/rawmakase-engine/src/develop/vibrance_chart.bin'
 # Vibrance's rendered positions, in the order of vibrance_chart.bin's grids.
 VIBRANCE_POSITIONS = [-100, -75, -50, -25, 25, 50, 75, 100]
-BLACK_WHITE_OUTPUT = ROOT / 'src/develop/black_white_chart.bin'
+BLACK_WHITE_OUTPUT = ROOT / 'crates/rawmakase-engine/src/develop/black_white_chart.bin'
 # The black & white mix's rendered positions, in the order of black_white_chart.bin.
 GRAY_MIX_POSITIONS = [-100, -50, 50, 100]
 GRAY_SCALE = 4000

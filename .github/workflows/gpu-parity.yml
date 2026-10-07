@@ -48,4 +48,4 @@ jobs:
       # Only the GPU tests: the other ignored tests need private RAW files,
       # catalogs or camera profiles.
       - name: GPU tests
-        run: cargo test --locked --lib 'develop::gpu::' -- --ignored --test-threads=1
+        run: cargo test --locked -p rawmakase-engine --lib 'develop::gpu::' -- --ignored --test-threads=1

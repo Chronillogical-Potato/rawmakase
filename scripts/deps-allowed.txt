@@ -2,34 +2,9 @@
 # Delete a line when the code stops needing it. A new line needs a reason that
 # fits the layering in docs/architecture.md.
 app -> catalog_session
-app -> decode
-app -> decode_cache
-app -> develop
 app -> edit_session
-app -> export
-app -> photo
 app -> platform
-app -> raw
 app -> stats
-app -> time
 app -> updates
-app -> watermark
-catalog_session -> photo
 catalog_session -> platform
-catalog_session -> raw
-comparison -> develop
-comparison -> photo
-decode -> decode_cache
-decode -> develop
-decode -> raw
-export -> build_info
-export -> decode
-export -> develop
-export -> photo
-export -> raw
-export -> time
-export -> watermark
-photo -> raw
-raw -> demosaic
-stats -> time
 stats -> updates

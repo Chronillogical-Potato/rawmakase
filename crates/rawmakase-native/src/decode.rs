@@ -16,7 +16,7 @@ use std::{
 
 /// What a full-size decode does beyond decoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DecodePolicy {
+pub enum DecodePolicy {
     /// A photo shown in Develop or Reference View: highlights recovered (so the
     /// first render does not wait for them) and the result stored.
     Show,
@@ -29,7 +29,7 @@ pub(crate) enum DecodePolicy {
 }
 
 /// One photo's full-size image with one demosaic, and its decode cache entry.
-pub(crate) struct FullSize {
+pub struct FullSize {
     demosaic: Demosaic,
     cache: DecodeCache,
     /// `None` when the file's identity cannot be read: nothing is cached then.
@@ -38,10 +38,10 @@ pub(crate) struct FullSize {
 
 impl FullSize {
     /// The photo at `path`, with `demosaic` unless the environment forces LibRaw.
-    pub(crate) fn new(path: &Path, demosaic: Demosaic) -> Self {
+    pub fn new(path: &Path, demosaic: Demosaic) -> Self {
         Self::with_cache(path, demosaic, DecodeCache::default())
     }
-    pub(crate) fn with_cache(path: &Path, demosaic: Demosaic, cache: DecodeCache) -> Self {
+    pub fn with_cache(path: &Path, demosaic: Demosaic, cache: DecodeCache) -> Self {
         let demosaic = demosaic.effective();
         Self {
             demosaic,
@@ -51,13 +51,13 @@ impl FullSize {
     }
     /// The cache's copy, with its recovered highlights; `metadata` is the opened
     /// photo's.
-    pub(crate) fn cached(&self, metadata: &Metadata) -> Option<CameraImage> {
+    pub fn cached(&self, metadata: &Metadata) -> Option<CameraImage> {
         self.key
             .as_ref()
             .and_then(|key| self.cache.load(key, metadata))
     }
     /// Whether the cache has this photo, without reading it.
-    pub(crate) fn is_cached(&self) -> bool {
+    pub fn is_cached(&self) -> bool {
         self.key
             .as_ref()
             .is_some_and(|key| self.cache.contains(key))
@@ -65,7 +65,7 @@ impl FullSize {
     /// Decodes `raw` (this photo, opened). Highlights are recovered, so the first
     /// render does not wait for them and the cache holds them, unless `policy` is
     /// [`Export`](DecodePolicy::Export), which renders once.
-    pub(crate) fn decode(
+    pub fn decode(
         &self,
         raw: Raw,
         policy: DecodePolicy,
@@ -80,7 +80,7 @@ impl FullSize {
     /// Keeps `image`, decoded by [`decode`](Self::decode), for next time. Develop
     /// stores after showing the image, so writing it never delays the photo; a
     /// cancelled decode, or a cache that cannot be written, stores nothing.
-    pub(crate) fn store(&self, image: &CameraImage, cancel: &AtomicBool) {
+    pub fn store(&self, image: &CameraImage, cancel: &AtomicBool) {
         if !cancel.load(Ordering::Relaxed)
             && let Some(key) = &self.key
         {
@@ -90,7 +90,7 @@ impl FullSize {
     /// The image as `policy` gets it in one step: the cache's copy, else opened
     /// with `open`, decoded and, unless exporting, stored. `None` for a prefetch the
     /// cache already has.
-    pub(crate) fn get(
+    pub fn get(
         &self,
         open: impl FnOnce() -> Result<Raw>,
         policy: DecodePolicy,
@@ -118,7 +118,7 @@ mod tests {
     use super::*;
 
     fn chart() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/charts/synthetic-d65.dng")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/charts/synthetic-d65.dng")
     }
 
     #[test]

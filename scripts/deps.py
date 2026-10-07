@@ -135,6 +135,17 @@ def top_level_modules():
     return sorted(re.findall(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", code, re.M))
 
 
+def crate_modules():
+    """Modules src/lib.rs re-exports from the workspace's crates (`pub use
+    rawmakase_engine::develop;`). Cargo builds those crates on their own, so they are
+    no nodes of the allow-listed graph, but closure rules may still forbid them."""
+    code = strip_comments_and_literals((SRC / "lib.rs").read_text(encoding="utf-8"))
+    names = []
+    for m in re.finditer(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+rawmakase_\w+\s*::\s*(\{[^}]*\}|\w+)\s*;", code, re.M):
+        names += re.findall(r"\w+", m.group(1))
+    return sorted(set(names) - {"self"})
+
+
 def inline_module_depth(code):
     """For each position, how many inline `mod name { ... }` blocks enclose it."""
     opens = {m.end() - 1 for m in re.finditer(r"\bmod\s+\w+\s*\{", code)}
@@ -178,9 +189,11 @@ ROOT_PATH = re.compile(r"(?<![\w$])crate\s*::\s*(?:(?P<group>\{)|(?P<name>\w+))"
 SUPER_PATH = re.compile(r"(?<![\w:])(?P<supers>(?:super\s*::\s*)+)(?:(?P<group>\{)|(?P<name>\w+))")
 
 
-def production_edges():
-    """{(from, to): [site, ...]} for every production use of another module."""
+def production_edges(with_crates=False):
+    """{(from, to): [site, ...]} for every production use of another module, and
+    with `with_crates` of a module re-exported from a workspace crate."""
     modules = set(top_level_modules())
+    targets = modules | set(crate_modules()) if with_crates else modules
     test_paths = test_module_files()
     edges = defaultdict(list)
     for path in sorted(SRC.rglob("*.rs")):
@@ -200,7 +213,7 @@ def production_edges():
             if m.group("supers").count("super") == len(parts) + depths[m.start()]:
                 hits += [(m.start(), head) for head in heads_after(code, m)]
         for position, target in hits:
-            if target == source or target not in modules:
+            if target == source or target not in targets:
                 continue
             if any(start <= position < end for start, end in excluded):
                 continue
@@ -297,7 +310,7 @@ def path_to(edges, source, target):
 
 def check_closures(edges):
     broken = 0
-    known = set(top_level_modules())
+    known = set(top_level_modules()) | set(crate_modules())
     for module, forbidden in read_closures():
         for name in [module, *forbidden]:
             if name not in known:
@@ -329,7 +342,7 @@ def check(edges):
     found = cycles(edges)
     for component in found:
         print("Cycle between " + ", ".join(component))
-    broken = check_closures(edges)
+    broken = check_closures(production_edges(with_crates=True))
     if not new and not stale and not found and not broken:
         rules = len(read_closures())
         print(f"{len(edges)} module dependencies, all allowed; no cycles; {rules} closure rules hold.")
