@@ -1,8 +1,13 @@
 # Architecture
 
-RAWmakase remains a single Rust crate with explicit domain modules. The desktop app
-and CLI compose these APIs; parsing, persistence and rendering implementations do
-not import the desktop UI. Use the domain paths below for new work.
+RAWmakase is the app crate with explicit domain modules, on top of
+`crates/rawmakase-model`: what an edit is, as values (the recipe and its settings,
+camera and lens profiles, colour primitives, DNG hints, output buffers, storage helpers), which
+Cargo builds without LibRaw, the renderer, wgpu or the GUI. The app crate re-exports
+the model's modules at its root (`crate::model`, `crate::camera_profiles`…), so
+paths read the same on either side. The desktop app and CLI compose these APIs;
+parsing, persistence and rendering implementations do not import the desktop UI.
+Use the domain paths below for new work.
 
 For file-by-file navigation, runtime flows, storage locations and feature entry
 points, see the [code map](code-map.md). This guide describes the boundaries those

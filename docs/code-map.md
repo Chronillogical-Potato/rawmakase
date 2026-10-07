@@ -15,15 +15,15 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | Work | Start here | Related work |
 | --- | --- | --- |
-| Add a develop adjustment | [Recipe](../src/model/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
+| Add a develop adjustment | [Recipe](../crates/rawmakase-model/src/model/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
 | Change preview quality or detail | [Quality rendering](../src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
 | Support another XMP setting | [Parser](../src/xmp/parse.rs), [application stages](../src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../src/presets/library.rs) | Preset browser UI and shared asset paths |
-| Add DCP support | [DCP reader](../src/camera_profiles/dcp.rs), [profile model](../src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
+| Add DCP support | [DCP reader](../crates/rawmakase-model/src/camera_profiles/dcp.rs), [profile model](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
 | Change JPEG/TIFF output | [Export](../src/export/mod.rs), [metadata](../src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../src/catalog/mod.rs), [schema](../src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../src/catalog/lightroom/mod.rs), [Develop translation](../src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
-| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
+| Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
 | Change navigation or async behavior | [Workflow](../src/app/workflow.rs), [events](../src/app/events.rs), [task lifecycle](../src/app/task.rs) | History, state reset and app regression tests |
 | Add a command-line operation | [CLI](../src/main.rs) | Call domain APIs directly; keep the operation usable without an editor |
 
@@ -34,31 +34,31 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/main.rs](../src/main.rs) | CLI argument parsing and command dispatch; starts the desktop application when no subcommand is selected. |
 | [src/lib.rs](../src/lib.rs) | The module list. The library serves the binary, examples and tests; it is not a stable public API. |
 | [src/photo.rs](../src/photo.rs) | Opens a photo for developing: `Raw::open_file`'s facts, then embedded lens tables, a DNG's profile, baseline exposure, colour matrix and crop, and the imported lens profiles that fit. |
-| [src/ids.rs](../src/ids.rs) | Typed catalog row ids: photo, folder, root and collection, each stored and serialized as its integer. |
+| [crates/rawmakase-model/src/ids.rs](../crates/rawmakase-model/src/ids.rs) | Typed catalog row ids: photo, folder, root and collection, each stored and serialized as its integer. |
 | [src/edits.rs](../src/edits.rs) | The edit a photo develops with: its saved edit, else its Lightroom edit, else the raw defaults. Develop, Sync and Export resolve through it; [catalog/edit_records.rs](../src/catalog/edit_records.rs) reads the stored records. |
 | [src/decode.rs](../src/decode.rs) | A photo's full-size image: the decode cache's copy, else a decode with highlights recovered and stored; Develop, prefetch, Reference View and export differ only in their `DecodePolicy`. |
 | [src/decode_cache.rs](../src/decode_cache.rs) | Disk cache of developed camera images and their highlight recovery, keyed by file identity, demosaic setting and build. |
-| [src/model/recipe.rs](../src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../src/model/panels.rs) the per-panel switches. |
-| [src/model/params.rs](../src/model/params.rs), [edit.rs](../src/model/edit.rs), [settings_groups.rs](../src/model/settings_groups.rs) | The sliders as parameters (ids, ranges, formatting), the rules an edit follows (which operator a changed setting takes, which panel it turns on), and the setting groups Copy Settings, Sync and presets move between photos. |
-| [src/model/effects.rs](../src/model/effects.rs) | The Effects, Detail and Calibration settings a recipe keeps (curves, grading, grain, vignettes, Defringe, noise reduction), their defaults, validation and the Effects panel's reset. Rendering them is in `develop/effects.rs`. |
-| [src/model/point_color.rs](../src/model/point_color.rs) | Point Color swatches as a recipe stores them, in Camera Raw's units: the sampled color, shifts, Variance and ranges, which swatches Camera Raw accepts, and their `crs:PointColors` text form. Selecting and changing colors, and the dropper, are in `develop/point_color.rs`. |
-| [src/model/red_eye.rs](../src/model/red_eye.rs) | Red Eye and Pet Eye corrections as a recipe stores them: the ellipse, Pupil Size, Darken and the catchlight, with their limits, the ellipse geometry the tool draws and edits, and the list that keeps corrections from a later release in place. Rendering and pupil detection are in `develop/red_eye/`. |
-| [src/model/retouch.rs](../src/model/retouch.rs) | Heal and Clone operations as a recipe stores them: mode, spot or brushed shape, feather, opacity and source offset, with their limits and edits (move, resize). Rendering and source search are in `develop/retouch/`. |
-| [src/model/image_frame.rs](../src/model/image_frame.rs) | Image space: positions normalised to the oriented photo before lens correction, Transform and crop, where masks, spots and red eye corrections are kept, and how they map to decoded pixels. |
-| [src/model/masks.rs](../src/model/masks.rs) | Masks as a recipe stores them: groups of brush, gradient and range components with their local adjustment, Amount and visibility, and their limits. Rendering their weights is in `develop/masks/`. |
-| [src/model/transform.rs](../src/model/transform.rs) | The Transform panel's settings as a recipe stores them: the manual sliders, Upright's mode with its analysed corrections and Guided guides, and Lightroom's guides read from older edits. Rendering, analysis and solving are in `develop/geometry.rs`, `upright.rs` and `guided.rs`. |
-| [src/model/white_balance.rs](../src/model/white_balance.rs) | Fallback illuminant and as-shot temperature estimation from a RAW's metadata, and Lightroom's named white balance presets. |
-| [src/model/operators.rs](../src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did, and the Sharpening sliders' defaults for each. The renderer picks its operator from them. |
-| [src/camera_data.rs](../src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
+| [crates/rawmakase-model/src/model/recipe.rs](../crates/rawmakase-model/src/model/recipe.rs) | A photo's develop settings as saved: defaults, validation, rendering-engine compatibility, profile selection and white balance controls, and the local edits saved beside them. [valid.rs](../crates/rawmakase-model/src/model/valid.rs) is a recipe known to be valid, which render entry points take; [panels.rs](../crates/rawmakase-model/src/model/panels.rs) the per-panel switches. |
+| [crates/rawmakase-model/src/model/params.rs](../crates/rawmakase-model/src/model/params.rs), [edit.rs](../crates/rawmakase-model/src/model/edit.rs), [settings_groups.rs](../crates/rawmakase-model/src/model/settings_groups.rs) | The sliders as parameters (ids, ranges, formatting), the rules an edit follows (which operator a changed setting takes, which panel it turns on), and the setting groups Copy Settings, Sync and presets move between photos. |
+| [crates/rawmakase-model/src/model/effects.rs](../crates/rawmakase-model/src/model/effects.rs) | The Effects, Detail and Calibration settings a recipe keeps (curves, grading, grain, vignettes, Defringe, noise reduction), their defaults, validation and the Effects panel's reset. Rendering them is in `develop/effects.rs`. |
+| [crates/rawmakase-model/src/model/point_color.rs](../crates/rawmakase-model/src/model/point_color.rs) | Point Color swatches as a recipe stores them, in Camera Raw's units: the sampled color, shifts, Variance and ranges, which swatches Camera Raw accepts, and their `crs:PointColors` text form. Selecting and changing colors, and the dropper, are in `develop/point_color.rs`. |
+| [crates/rawmakase-model/src/model/red_eye.rs](../crates/rawmakase-model/src/model/red_eye.rs) | Red Eye and Pet Eye corrections as a recipe stores them: the ellipse, Pupil Size, Darken and the catchlight, with their limits, the ellipse geometry the tool draws and edits, and the list that keeps corrections from a later release in place. Rendering and pupil detection are in `develop/red_eye/`. |
+| [crates/rawmakase-model/src/model/retouch.rs](../crates/rawmakase-model/src/model/retouch.rs) | Heal and Clone operations as a recipe stores them: mode, spot or brushed shape, feather, opacity and source offset, with their limits and edits (move, resize). Rendering and source search are in `develop/retouch/`. |
+| [crates/rawmakase-model/src/model/image_frame.rs](../crates/rawmakase-model/src/model/image_frame.rs) | Image space: positions normalised to the oriented photo before lens correction, Transform and crop, where masks, spots and red eye corrections are kept, and how they map to decoded pixels. |
+| [crates/rawmakase-model/src/model/masks.rs](../crates/rawmakase-model/src/model/masks.rs) | Masks as a recipe stores them: groups of brush, gradient and range components with their local adjustment, Amount and visibility, and their limits. Rendering their weights is in `develop/masks/`. |
+| [crates/rawmakase-model/src/model/transform.rs](../crates/rawmakase-model/src/model/transform.rs) | The Transform panel's settings as a recipe stores them: the manual sliders, Upright's mode with its analysed corrections and Guided guides, and Lightroom's guides read from older edits. Rendering, analysis and solving are in `develop/geometry.rs`, `upright.rs` and `guided.rs`. |
+| [crates/rawmakase-model/src/model/white_balance.rs](../crates/rawmakase-model/src/model/white_balance.rs) | Fallback illuminant and as-shot temperature estimation from a RAW's metadata, and Lightroom's named white balance presets. |
+| [crates/rawmakase-model/src/model/operators.rs](../crates/rawmakase-model/src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did, and the Sharpening sliders' defaults for each. The renderer picks its operator from them. |
+| [crates/rawmakase-model/src/camera_data.rs](../crates/rawmakase-model/src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
 | [native/raw.cpp](../native/raw.cpp) | C ABI bridge to LibRaw and Little CMS, including native image development and color management. |
-| [src/color/mod.rs](../src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |
+| [crates/rawmakase-model/src/color/mod.rs](../crates/rawmakase-model/src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
 | [src/demosaic.rs](../src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
-| [src/cameras.rs](../src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
+| [crates/rawmakase-model/src/cameras.rs](../crates/rawmakase-model/src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
-| [src/tiff.rs](../src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
+| [crates/rawmakase-model/src/tiff.rs](../crates/rawmakase-model/src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
 | [src/jpeg.rs](../src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
 | [src/exif.rs](../src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
@@ -112,8 +112,8 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [gpu/uniforms.rs](../src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
-| [rendered.rs](../src/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
-| [color/curve.rs](../src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
+| [rendered.rs](../crates/rawmakase-model/src/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
+| [color/curve.rs](../crates/rawmakase-model/src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
@@ -124,27 +124,27 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | File | Responsibility |
 | --- | --- |
-| [camera_profiles/mod.rs](../src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
-| [dcp.rs](../src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
-| [library.rs](../src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
-| [enhanced.rs](../src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments; camera and creative look files (`LookFile`) and Profile Amount (`Enhanced::at_amount`). |
-| [look_settings.rs](../src/camera_profiles/look_settings.rs) | Exposure, Saturation, colour mixer, parametric curve, split toning and vignette settings inside looks; `Recipe::with_profile_adjustments` renders them with the user's. |
-| [rgb_table.rs](../src/camera_profiles/rgb_table.rs) | Adobe RGB tables (1D and 3D, in their own primaries and encoding) of creative and camera-matching looks, with tetrahedral interpolation; the colour stage applies them after the colour mixer (`develop.wgsl`'s `rgb_table` on the GPU). |
-| [temperature.rs](../src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
-| [reference.rs](../src/camera_profiles/reference.rs) | A photo's baseline exposure (DNG tag or camera table) and verified neutral calibration data. |
-| [dng_tone.rs](../src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |
-| [open.rs](../src/camera_profiles/open.rs) | RAWmakase Standard and Color, our own profiles for every camera with a colour matrix. |
+| [camera_profiles/mod.rs](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
+| [dcp.rs](../crates/rawmakase-model/src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
+| [library.rs](../crates/rawmakase-model/src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
+| [enhanced.rs](../crates/rawmakase-model/src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments; camera and creative look files (`LookFile`) and Profile Amount (`Enhanced::at_amount`). |
+| [look_settings.rs](../crates/rawmakase-model/src/camera_profiles/look_settings.rs) | Exposure, Saturation, colour mixer, parametric curve, split toning and vignette settings inside looks; `Recipe::with_profile_adjustments` renders them with the user's. |
+| [rgb_table.rs](../crates/rawmakase-model/src/camera_profiles/rgb_table.rs) | Adobe RGB tables (1D and 3D, in their own primaries and encoding) of creative and camera-matching looks, with tetrahedral interpolation; the colour stage applies them after the colour mixer (`develop.wgsl`'s `rgb_table` on the GPU). |
+| [temperature.rs](../crates/rawmakase-model/src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
+| [reference.rs](../crates/rawmakase-model/src/camera_profiles/reference.rs) | A photo's baseline exposure (DNG tag or camera table) and verified neutral calibration data. |
+| [dng_tone.rs](../crates/rawmakase-model/src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |
+| [open.rs](../crates/rawmakase-model/src/camera_profiles/open.rs) | RAWmakase Standard and Color, our own profiles for every camera with a colour matrix. |
 
 ## Lens corrections
 
 | File | Responsibility |
 | --- | --- |
-| [optics/mod.rs](../src/optics/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. Shared by the lens readers, DNG and the renderer. |
-| [optics/lcp.rs](../src/optics/lcp.rs) | Adobe lens profiles as data: parsed LCP entries, an imported profile, and the profiles a photo can choose from. |
-| [lens/auto_ca.rs](../src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
-| [lens/embedded.rs](../src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
-| [lens/lcp.rs](../src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles`, cached, listed for the photo's camera and matched to its lens; their data is in `optics::lcp`. |
-| [lens/choice.rs](../src/lens/choice.rs) | Lightroom's lens profile Setup (Default, Auto, Custom), the profile an edit names, which one renders, and the Make/Model/Profile menus. |
+| [optics/mod.rs](../crates/rawmakase-model/src/optics/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. Shared by the lens readers, DNG and the renderer. |
+| [optics/lcp.rs](../crates/rawmakase-model/src/optics/lcp.rs) | Adobe lens profiles as data: parsed LCP entries, an imported profile, and the profiles a photo can choose from. |
+| [lens/auto_ca.rs](../crates/rawmakase-model/src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
+| [lens/embedded.rs](../crates/rawmakase-model/src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
+| [lens/lcp.rs](../crates/rawmakase-model/src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles`, cached, listed for the photo's camera and matched to its lens; their data is in `optics::lcp`. |
+| [lens/choice.rs](../crates/rawmakase-model/src/lens/choice.rs) | Lightroom's lens profile Setup (Default, Auto, Custom), the profile an edit names, which one renders, and the Make/Model/Profile menus. |
 
 ## XMP and presets
 
@@ -157,7 +157,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [parse.rs](../src/xmp/parse.rs) | Namespace-aware XML parsing, curves, provenance and unsupported-setting notes. |
 | [apply.rs](../src/xmp/apply.rs) | Named application stages for profiles, basic controls, WB, color, curves, grading, effects and crop; checks consumed settings and validates before returning a recipe. |
 | [write.rs](../src/xmp/write.rs) | Writes the Camera Raw-compatible subset of a recipe as `crs:` settings, the XMP packet exports embed; the keys mirror `apply`. Not a round trip: spots and masks, Levels, quarter-turn rotation and flips, and built-in lens corrections are not written. |
-| [xml/ns.rs](../src/xml/ns.rs), [xml/mod.rs](../src/xml/mod.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
+| [xml/ns.rs](../crates/rawmakase-model/src/xml/ns.rs), [xml/mod.rs](../crates/rawmakase-model/src/xml/mod.rs) | XMP namespace URIs and JPEG XMP headers; XML escaping and the packet wrapper RAWmakase writes. |
 | [local.rs](../src/xmp/local.rs) | Lightroom's spot removal, red eye and masks (`RetouchAreas`, legacy `RetouchInfo`, `RedEyeInfo`, mask correction lists) from XMP or a catalog, as retouch operations, red eye corrections and masks; import only. |
 | [presets/mod.rs](../src/presets/mod.rs) | Public preset API. |
 | [native.rs](../src/presets/native.rs) | Native JSON recipe preset load/save and shared migration handling. |
@@ -170,11 +170,11 @@ recipes and the installed preset collection; they do not own the renderer.
 
 | File | Responsibility |
 | --- | --- |
-| [storage/mod.rs](../src/storage/mod.rs) | Shared persistence and path API. |
-| [files.rs](../src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
-| [model/saved_format.rs](../src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
-| [bitmaps.rs](../src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
-| [identity.rs](../src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
+| [storage/mod.rs](../crates/rawmakase-model/src/storage/mod.rs) | Shared persistence and path API. |
+| [files.rs](../crates/rawmakase-model/src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
+| [model/saved_format.rs](../crates/rawmakase-model/src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration. Recipes keep unknown fields from newer releases. |
+| [bitmaps.rs](../crates/rawmakase-model/src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
+| [identity.rs](../crates/rawmakase-model/src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
 | [catalog/legacy_sidecar.rs](../src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
 | [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults and other preferences. |
 | [catalog/mod.rs](../src/catalog/mod.rs) | Owns the SQLite connection: catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
@@ -183,7 +183,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog/copies.rs](../src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
 | [catalog/locations.rs](../src/catalog/locations.rs) | Folder locations per computer: the computer id, logical folder paths, adopting legacy mappings on open, resolving, relinking and clearing. |
-| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../src/metadata.rs). |
+| [models.rs](../src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../crates/rawmakase-model/src/metadata.rs). |
 | [schema.sql](../src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
 | [preview_cache.rs](../src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
 | [lightroom/mod.rs](../src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
@@ -346,7 +346,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | --- | --- |
 | [app/tests.rs](../src/app/tests.rs), [library/tests.rs](../src/app/library/tests.rs) | Editor interactions, state transitions, worker results, navigation, library trees and metadata. Small state owners also contain inline tests. |
 | [develop/pipeline/tests.rs](../src/develop/pipeline/tests.rs) | Rendering, geometry and reference regressions; numeric helpers also have inline tests. |
-| [camera_profiles/tests.rs](../src/camera_profiles/tests.rs) | Profile parsing and validation. |
+| [camera_profiles/tests.rs](../crates/rawmakase-model/src/camera_profiles/tests.rs) | Profile parsing and validation. |
 | [xmp/tests.rs](../src/xmp/tests.rs), [presets/tests.rs](../src/presets/tests.rs) | Settings parsing/application and native preset compatibility. |
 | [catalog/legacy_sidecar/tests.rs](../src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |

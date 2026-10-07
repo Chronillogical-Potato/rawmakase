@@ -15,7 +15,8 @@ check:
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --all-targets --no-default-features -- -D warnings
 	cargo test --locked
-	cargo clippy --locked --all-targets -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+	cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+	cargo test --locked -p rawmakase-model --all-features
 	cargo test --locked -p rawmakase-protocol -p rawmakase-ctl
 
 # Install does not rebuild, so `make && sudo make install PREFIX=/usr` never compiles as root.

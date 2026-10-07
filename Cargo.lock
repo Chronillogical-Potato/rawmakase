@@ -3200,6 +3200,7 @@ dependencies = [
  "pkg-config",
  "pollster 1.0.1",
  "rawmakase-ctl",
+ "rawmakase-model",
  "rawmakase-protocol",
  "rayon",
  "rfd",
@@ -3228,6 +3229,23 @@ dependencies = [
  "clap",
  "rawmakase-protocol",
  "serde_json",
+]
+
+[[package]]
+name = "rawmakase-model"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "rawmakase-protocol",
+ "rayon",
+ "roxmltree 0.21.1",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -1,15 +1,14 @@
 # Modules that must never be reached from a module, directly or through others,
 # checked by scripts/deps.py. One rule per line: `module never other...`.
-# The values a photo's edit is made of build without LibRaw, the renderer or wgpu.
-model never raw demosaic dng photo develop decode decode_cache app
-rendered never raw develop app
+# The values a photo's edit is made of are crates/rawmakase-model, which Cargo
+# builds without LibRaw, the renderer, wgpu or the app.
 # File formats and the catalog read and write edits without decoding or rendering.
-xmp never raw demosaic dng photo develop decode decode_cache app
-lr_develop never raw demosaic dng photo develop decode decode_cache app
-presets never raw demosaic dng photo develop decode decode_cache app
-raw_defaults never raw demosaic dng photo develop decode decode_cache app
-edits never raw demosaic dng photo develop decode decode_cache app
-catalog never raw demosaic dng photo develop decode decode_cache export app
-edit_session never raw demosaic dng photo develop decode decode_cache app
+xmp never raw demosaic photo develop decode decode_cache app
+lr_develop never raw demosaic photo develop decode decode_cache app
+presets never raw demosaic photo develop decode decode_cache app
+raw_defaults never raw demosaic photo develop decode decode_cache app
+edits never raw demosaic photo develop decode decode_cache app
+catalog never raw demosaic photo develop decode decode_cache export app
+edit_session never raw demosaic photo develop decode decode_cache app
 # Rendering never reaches the desktop app or export.
 develop never app export catalog
