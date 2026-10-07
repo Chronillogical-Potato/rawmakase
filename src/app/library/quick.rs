@@ -149,18 +149,7 @@ impl Library {
             .filter(|id| self.photo(*id).is_some())
             .collect();
         let add = add.as_slice();
-        self.session
-            .catalog
-            .change_collection(collection, add, remove)?;
-        let members = self
-            .session
-            .collection_photos
-            .entry(collection)
-            .or_default();
-        members.extend(add);
-        for id in remove {
-            members.remove(id);
-        }
+        let members = self.session.change_collection(collection, add, remove)?;
         if self.filters.collection == Some(collection) {
             self.filters.members = members.clone();
             self.filter();

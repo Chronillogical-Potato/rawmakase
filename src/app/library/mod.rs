@@ -689,10 +689,7 @@ impl Library {
     /// Library panel goes away before the field loses focus. On failure it
     /// stays pending, to be saved again or discarded.
     pub(super) fn commit_drafts(&mut self) -> Result<()> {
-        if self
-            .copy_names
-            .commit(&self.session.catalog, &mut self.session.photos)?
-        {
+        if self.copy_names.commit(&mut self.session)? {
             self.filter();
         }
         self.commit_fields()

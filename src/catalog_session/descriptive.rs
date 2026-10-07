@@ -1,5 +1,6 @@
-//! Title, caption, creator, copyright, location and keywords, and virtual
-//! copies: changes to the catalog that the session's lists must follow.
+//! Title, caption, creator, copyright, location and keywords, collection
+//! membership and virtual copies with their Copy Names: changes to the catalog
+//! that the session's lists must follow.
 use super::CatalogSession;
 use crate::catalog::{FileMetadata, Merge, MetadataSnapshot, PhotoId, SidecarReport};
 use crate::metadata::TextField;
@@ -87,6 +88,30 @@ impl CatalogSession {
         let written = self.catalog.apply_file_metadata(read, Merge::Overwrite)?;
         self.refresh_photos(ids)?;
         Ok(written)
+    }
+    /// Names virtual copy `id` `name`, trimmed, in the catalog and the lists.
+    pub(crate) fn rename_copy(&mut self, id: PhotoId, name: &str) -> Result<()> {
+        self.catalog.set_copy_name(id, name)?;
+        if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
+            p.copy_name = name.trim().to_string();
+        }
+        Ok(())
+    }
+    /// Adds `add` to `collection` and takes `remove` out of it, in the catalog
+    /// and the lists. Returns the collection's photos as they now are.
+    pub(crate) fn change_collection(
+        &mut self,
+        collection: crate::catalog::CollectionId,
+        add: &[PhotoId],
+        remove: &[PhotoId],
+    ) -> Result<&std::collections::HashSet<PhotoId>> {
+        self.catalog.change_collection(collection, add, remove)?;
+        let members = self.collection_photos.entry(collection).or_default();
+        members.extend(add);
+        for id in remove {
+            members.remove(id);
+        }
+        Ok(members)
     }
     /// Makes a virtual copy of `id` and reads the lists again. An error means
     /// no copy was made.

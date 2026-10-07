@@ -501,12 +501,7 @@ fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
     // reports losing focus.
     let photo = library.photo(second).unwrap().clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let _ = library.copy_names.row(
-            ui,
-            &photo,
-            &library.session.catalog,
-            &mut library.session.photos,
-        );
+        let _ = library.copy_names.row(ui, &photo, &mut library.session);
     });
     output.textures_delta.clear();
     assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
@@ -532,12 +527,7 @@ fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()
     let photo = library.photo(second).unwrap().clone();
     for _ in 0..2 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            let _ = library.copy_names.row(
-                ui,
-                &photo,
-                &library.session.catalog,
-                &mut library.session.photos,
-            );
+            let _ = library.copy_names.row(ui, &photo, &mut library.session);
         });
         output.textures_delta.clear();
     }

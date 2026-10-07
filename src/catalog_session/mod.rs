@@ -303,6 +303,24 @@ mod tests {
         assert_eq!(session.quick_collection(), Some(quick));
         assert_eq!(session.ensure_quick_collection()?, quick);
         assert!(session.collection_photos[&quick].is_empty());
+        let members = session.change_collection(quick, &[a], &[])?;
+        assert!(members.contains(&a));
+        assert!(session.catalog.collection_photos()?[&quick].contains(&a));
+        session.change_collection(quick, &[], &[a])?;
+        assert!(session.collection_photos[&quick].is_empty());
+
+        let copy = session.create_virtual_copy(a)?.value;
+        session.rename_copy(copy, " B&W ")?;
+        let named = |photos: &[Photo]| {
+            photos
+                .iter()
+                .find(|p| p.id == copy)
+                .unwrap()
+                .copy_name
+                .clone()
+        };
+        assert_eq!(named(&session.photos), "B&W");
+        assert_eq!(named(&session.catalog.photos()?), "B&W");
         Ok(())
     }
 
