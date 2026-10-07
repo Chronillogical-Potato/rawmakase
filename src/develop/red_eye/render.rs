@@ -5,7 +5,7 @@
 //! the red cast leaves no trace, then Darken scales it. Pupil Size scales the ellipse.
 //! The constants are fitted to Camera Raw 18.7 renders of synthetic pupils (see
 //! docs/retouching.md).
-use super::{EyeKind, RedEyeOp};
+use crate::model::red_eye::{EyeKind, RedEyeOp, half, mahalanobis2};
 use crate::{
     camera_data::CameraImage,
     develop::{ImageFrame, retouch::profile},
@@ -14,12 +14,6 @@ use crate::{
 /// A rectangle of decoded pixels, `[x0, y0, x1, y1)`.
 type PixelRect = [i32; 4];
 
-/// Where the correction is half applied, in units of the ellipse, at Pupil Size 0 and
-/// its growth to Pupil Size 1 (measured: 0.59 and 1.56).
-const HALF_AT: f32 = 0.585;
-const HALF_GROWTH: f32 = 0.975;
-/// Pet Eye's half-way distance relative to Red Eye's (measured: 102 against 107 pixels).
-const PET_HALF: f32 = 0.953;
 /// The catchlight: full up to `CATCHLIGHT_INNER` times the half-way distance from its
 /// centre, none beyond `CATCHLIGHT_OUTER` (measured: half at 0.094), and its value.
 const CATCHLIGHT_INNER: f32 = 0.06;
@@ -47,21 +41,6 @@ pub(crate) const MODEL: Model = Model {
     gain: [1.28, 0.9, 0.39],
     keep: 0.022,
 };
-
-/// The half-way distance of `op`'s falloff, in units of its ellipse.
-pub(crate) fn half(op: &RedEyeOp) -> f32 {
-    let half = HALF_AT + HALF_GROWTH * op.pupil_size;
-    match op.kind {
-        EyeKind::Red => half,
-        EyeKind::Pet { .. } => half * PET_HALF,
-    }
-}
-/// `d`'s squared distance from the centre of the ellipse with semi-axes `radius` and
-/// `correlation`, in units of the ellipse.
-pub(crate) fn mahalanobis2(radius: [f32; 2], correlation: f32, d: [f32; 2]) -> f32 {
-    let (x, y) = (d[0] / radius[0], d[1] / radius[1]);
-    (x * x - 2. * correlation * x * y + y * y) / (1. - correlation * correlation)
-}
 
 /// A correction placed on one decoded image.
 #[derive(Clone, Debug)]

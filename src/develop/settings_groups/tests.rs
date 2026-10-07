@@ -118,7 +118,7 @@ fn everything_changed() -> Recipe {
         opacity: 1.,
         offset: [0.02, 0.],
     });
-    r.red_eye.push(crate::develop::red_eye::RedEyeOp {
+    r.red_eye.push(crate::model::red_eye::RedEyeOp {
         kind: Default::default(),
         center: [0.4, 0.4],
         radius: [0.01; 2],

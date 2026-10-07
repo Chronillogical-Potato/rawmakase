@@ -1,8 +1,8 @@
 use super::heal::{self, Placed};
 use super::*;
 use crate::camera_data::CameraImage;
-use crate::develop::red_eye::RedEyeOp;
 use crate::model::operators::RetouchModel;
+use crate::model::red_eye::RedEyeOp;
 use crate::model::retouch::{RetouchMode, RetouchShape};
 use std::sync::atomic::AtomicBool;
 

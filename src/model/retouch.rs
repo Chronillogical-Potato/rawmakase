@@ -96,6 +96,14 @@ impl RetouchOp {
         self.offset = [self.offset[0] - delta[0], self.offset[1] - delta[1]];
     }
 }
+/// A long-edge fraction as normalised x and y radii.
+pub fn radii(r: f32, aspect: f32) -> (f32, f32) {
+    if aspect >= 1. {
+        (r, r * aspect)
+    } else {
+        (r / aspect, r)
+    }
+}
 pub fn validate(ops: &[RetouchOp]) -> Result<()> {
     ensure!(ops.len() <= MAX_OPS, "Too many spot removals");
     ops.iter().try_for_each(RetouchOp::validate)

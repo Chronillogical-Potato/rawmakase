@@ -600,7 +600,8 @@ mod tests {
     /// flips, and renders the same in Fit, regions and exports.
     #[test]
     fn red_eye_follows_geometry_and_agrees_between_previews_and_export() {
-        use crate::develop::{ViewMapping, red_eye::RedEyeOp};
+        use crate::develop::ViewMapping;
+        use crate::model::red_eye::RedEyeOp;
         let (w, h) = (480, 320);
         let mut im = image(w, h, 0.);
         let eye = [300., 120.];

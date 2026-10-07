@@ -6,14 +6,11 @@ use super::{
     RetouchOp,
     heal::{self, PixelRect},
 };
-use crate::model::operators::RetouchModel;
+use crate::model::red_eye::RedEyeOp;
 use crate::{
     camera_data::CameraImage,
-    develop::{
-        ImageFrame,
-        color_noise::ChromaDenoise,
-        red_eye::{self, RedEyeOp},
-    },
+    develop::{ImageFrame, color_noise::ChromaDenoise, red_eye},
+    model::operators::RetouchModel,
 };
 use anyhow::{Result, ensure};
 use std::{
