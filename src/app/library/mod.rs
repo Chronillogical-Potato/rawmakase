@@ -528,9 +528,11 @@ impl Library {
     /// Removes virtual copy `id`; returns its master, which is selected.
     pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<Option<PhotoId>> {
         let photo = self.photo(id).cloned();
-        self.session.remove_virtual_copy(id)?;
+        // Forgotten first: once the copy is removed its id can be reused, so its
+        // previews must go even if reading the catalog again fails.
         self.cache.forget(id);
         self.screen.forget(id);
+        self.session.remove_virtual_copy(id)?;
         self.reloaded();
         let master = photo.as_ref().and_then(|p| p.master);
         if let Some(master) = master {
