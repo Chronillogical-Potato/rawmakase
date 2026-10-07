@@ -60,6 +60,8 @@ pub use crate::storage::Stamp;
 pub struct PreviewCache {
     db: Connection,
     writes: u32,
+    /// Built previews stored, counted apart so thumbnails never delay their pruning.
+    sized_writes: u32,
 }
 fn now() -> i64 {
     SystemTime::now()
@@ -121,7 +123,11 @@ impl PreviewCache {
         }
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         db.execute_batch(SIZED_SCHEMA)?;
-        let mut cache = Self { db, writes: 0 };
+        let mut cache = Self {
+            db,
+            writes: 0,
+            sized_writes: 0,
+        };
         cache.prune(LIMIT)?;
         for kind in PreviewKind::ALL {
             cache.prune_sized(kind, kind.budget())?;
@@ -339,9 +345,11 @@ impl PreviewCache {
                 now()
             ],
         )?;
-        self.writes += 1;
-        if self.writes.is_multiple_of(8) {
-            self.prune_sized(kind, kind.budget())?;
+        self.sized_writes += 1;
+        if self.sized_writes.is_multiple_of(8) {
+            for kind in PreviewKind::ALL {
+                self.prune_sized(kind, kind.budget())?;
+            }
         }
         Ok(())
     }
