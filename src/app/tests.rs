@@ -5214,3 +5214,33 @@ fn the_library_info_panel_stays_while_a_field_in_it_cannot_be_saved() -> anyhow:
     assert!(!e.panel_shown(WorkspacePanel::Right));
     Ok(())
 }
+#[test]
+fn a_click_on_a_window_edge_hides_and_shows_its_panel() {
+    use super::panels::WorkspacePanel;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let click = |e: &mut Editor, at: Pos2| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        panel_frame(e, vec![egui::Event::PointerMoved(at)], FocusedButton::No);
+        panel_frame(e, vec![button(true)], FocusedButton::No);
+        panel_frame(e, vec![button(false)], FocusedButton::No);
+    };
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    let left = Pos2::new(4., 400.);
+    click(&mut e, left);
+    assert!(!e.panel_shown(WorkspacePanel::Left));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    click(&mut e, left);
+    assert!(e.panel_shown(WorkspacePanel::Left));
+    click(&mut e, Pos2::new(1196., 400.));
+    assert!(!e.panel_shown(WorkspacePanel::Right));
+    click(&mut e, Pos2::new(600., 796.));
+    assert!(!e.panel_shown(WorkspacePanel::Filmstrip));
+}
