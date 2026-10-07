@@ -100,7 +100,7 @@ pub struct Enhanced {
     /// applies after the colour mixer (see `develop::pipeline`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) rgb: Option<RgbLook>,
-    pub(super) curve: Vec<f32>,
+    pub(super) curve: Box<CurveLut>,
     /// Exposure, Saturation, colour mixer, parametric curve, split toning and
     /// vignette settings the look carries.
     #[serde(default, skip_serializing_if = "LookSettings::is_default")]
@@ -122,12 +122,10 @@ impl Enhanced {
             table: Some(table),
             rgb: None,
             settings: LookSettings::default(),
-            curve: (0..=4096)
-                .map(|i| {
-                    let x = i as f32 / 4096.;
-                    x * x * (3. - 2. * x)
-                })
-                .collect(),
+            curve: Box::new(CurveLut::from_fn(|i| {
+                let x = i as f32 / 4096.;
+                x * x * (3. - 2. * x)
+            })),
         }
     }
     pub(super) fn validate(&self) -> Result<()> {
@@ -174,11 +172,10 @@ impl Enhanced {
             "Invalid look amount bounds"
         );
         ensure!(
-            self.curve.len() == 4097
-                && self
-                    .curve
-                    .iter()
-                    .all(|v| v.is_finite() && (0. ..=1.).contains(v)),
+            self.curve
+                .values()
+                .iter()
+                .all(|v| v.is_finite() && (0. ..=1.).contains(v)),
             "Invalid look curve"
         );
         Ok(())
@@ -205,11 +202,7 @@ impl Enhanced {
         } else {
             amount
         };
-        let eval = |x: f32| {
-            let x = x.clamp(0., 1.) * 4096.;
-            let i = (x as usize).min(4095);
-            self.curve[i] + (self.curve[i + 1] - self.curve[i]) * (x - i as f32)
-        };
+        let curve = &self.curve;
         Self {
             highlights: self.highlights * adjustment,
             shadows: self.shadows * adjustment,
@@ -219,19 +212,15 @@ impl Enhanced {
             settings: self.settings.scaled(adjustment),
             table,
             rgb,
-            curve: self
-                .curve
-                .iter()
-                .enumerate()
-                .map(|(i, &y)| {
-                    if amount > 1. {
-                        y + (eval(y) - y) * (amount - 1.)
-                    } else {
-                        let x = i as f32 / 4096.;
-                        x + (y - x) * amount
-                    }
-                })
-                .collect(),
+            curve: Box::new(CurveLut::from_fn(|i| {
+                let y = curve.values()[i];
+                if amount > 1. {
+                    y + (curve.evaluate_as_look(y) - y) * (amount - 1.)
+                } else {
+                    let x = i as f32 / 4096.;
+                    x + (y - x) * amount
+                }
+            })),
             ..self.clone()
         }
     }
@@ -251,11 +240,7 @@ impl Enhanced {
     }
     pub(super) fn apply_curve(&self, rgb: [f32; 3]) -> [f32; 3] {
         let p = rgb.map(|v| srgb_encode(v.clamp(0., 1.)));
-        let eval = |v: f32| {
-            let x = v.clamp(0., 1.) * 4096.;
-            let i = (x as usize).min(4095);
-            self.curve[i] + (self.curve[i + 1] - self.curve[i]) * (x - i as f32)
-        };
+        let eval = |v: f32| self.curve.evaluate_as_look(v);
         let lo = p.into_iter().fold(f32::INFINITY, f32::min);
         let hi = p.into_iter().fold(0., f32::max);
         let a = eval(lo);
@@ -607,7 +592,7 @@ impl LookFile {
             amount,
             table,
             rgb,
-            curve: (0..=4096).map(|i| lut.evaluate(i as f32 / 4096.)).collect(),
+            curve: Box::new(lut),
             settings: LookSettings::parse(|key: &str| d.attribute((CRS, key)).unwrap_or(""))?,
         };
         look.validate_contents()?;
@@ -730,6 +715,7 @@ pub(super) mod tests {
         assert!(none.table.unwrap().data.iter().all(|d| *d == [0., 1., 1.]));
         assert!(
             none.curve
+                .values()
                 .iter()
                 .enumerate()
                 .all(|(i, y)| (y - i as f32 / 4096.).abs() < 1e-6)
@@ -744,12 +730,12 @@ pub(super) mod tests {
         assert_eq!(double.table.as_ref().unwrap().data[0], [240., 1., 1.]);
         assert!((double.shadows - 0.6).abs() < 1e-6);
         let mid = 2048;
-        let once = look.curve[mid];
-        let twice = look.curve[(once * 4096.).round() as usize];
+        let once = look.curve.values()[mid];
+        let twice = look.curve.values()[(once * 4096.).round() as usize];
         assert!(
-            (double.curve[mid] - twice).abs() < 1e-3,
+            (double.curve.values()[mid] - twice).abs() < 1e-3,
             "{}",
-            double.curve[mid]
+            double.curve.values()[mid]
         );
         // A version 1 table has no amount bounds: it stays at 100%.
         look.amount = Some(AmountRange {

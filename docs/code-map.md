@@ -16,7 +16,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Work | Start here | Related work |
 | --- | --- | --- |
 | Add a develop adjustment | [Recipe](../src/develop/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
-| Change preview quality or detail | [Quality rendering](../src/develop/quality.rs) | Worker renderer, region/fit/export consistency tests |
+| Change preview quality or detail | [Quality rendering](../src/develop/quality/mod.rs) | Worker renderer, region/fit/export consistency tests |
 | Support another XMP setting | [Parser](../src/xmp/parse.rs), [application stages](../src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../src/presets/library.rs) | Preset browser UI and shared asset paths |
 | Add DCP support | [DCP reader](../src/camera_profiles/dcp.rs), [profile model](../src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
@@ -85,7 +85,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [color_grade.rs](../src/develop/color_grade.rs), [color_grade_curves.rs](../src/develop/color_grade_curves.rs), [color_grade_data.rs](../src/develop/color_grade_data.rs) | Engine 4 color grading: Camera Raw 18.7's per-channel curves (`color_grade_curves.bin`) for current recipes, and the earlier per-luminance gains that older recipes keep. |
 | [upright.rs](../src/develop/upright.rs) | Upright analysis: vanishing points from straight lines, giving Level, Vertical, Full and Auto, and the Crop panel's Auto straighten angle. See [transform](transform.md). |
 | [guided.rs](../src/develop/guided.rs) | Guided Upright: solving two to four guides into a correction, and what to say when they can't. See [transform](transform.md#guided-upright). |
-| [quality.rs](../src/develop/quality.rs) | Full-quality detail/spatial processing, resizing and cancellable fit/region rendering; the Point Color and Targeted Adjustment samples. |
+| [quality/](../src/develop/quality/mod.rs) | Full-quality rendering, one module per seam: sizing and resizing (`mod.rs`), [detail](../src/develop/quality/detail.rs) (sharpening, mask noise), [highlight recovery](../src/develop/quality/highlights.rs), [local tone](../src/develop/quality/local.rs) (the blurs and gain behind Clarity, Texture and Dehaze), [samples](../src/develop/quality/samples.rs) (Point Color, Targeted Adjustment, retouching) and the cancellable fit/region/export [render](../src/develop/quality/render.rs). |
 | [targeted.rs](../src/develop/targeted.rs) | The Targeted Adjustment Tool's targets, and how a drag is shared among the sliders for a sampled color. |
 | [preview_renderer.rs](../src/develop/preview_renderer.rs) | Stateful preview backend selection, the photo's resolution pyramid, GPU diagnostics and CPU fallback. |
 | [pyramid.rs](../src/develop/pyramid.rs) | Resolution pyramid of the recovered (and retouched) camera image for Fit and zoomed-out previews; patched where spot removal changed. |
