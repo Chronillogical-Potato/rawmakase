@@ -51,10 +51,15 @@ impl<'de> Deserialize<'de> for ToneCurve {
         })
     }
 }
+/// The most points a curve has.
+pub const MAX_POINTS: usize = 32;
+/// How far apart consecutive inputs must be.
+pub const MIN_INPUT_SPACING: f32 = 0.00049;
+
 impl ToneCurve {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            (2..=32).contains(&self.points.len()),
+            (2..=MAX_POINTS).contains(&self.points.len()),
             "Curve needs 2–32 points"
         );
         ensure!(
@@ -69,7 +74,9 @@ impl ToneCurve {
             "Curve endpoints must span 0–1"
         );
         ensure!(
-            self.points.windows(2).all(|p| p[1][0] - p[0][0] >= 0.00049),
+            self.points
+                .windows(2)
+                .all(|p| p[1][0] - p[0][0] >= MIN_INPUT_SPACING),
             "Curve points must have distinct increasing inputs"
         );
         Ok(())
@@ -81,8 +88,8 @@ impl ToneCurve {
             return i;
         }
         let i = self.points.partition_point(|q| q[0] < x);
-        if self.points.len() == 32 {
-            return i.min(31);
+        if self.points.len() == MAX_POINTS {
+            return i.min(MAX_POINTS - 1);
         }
         self.points.insert(i, [x, y]);
         self.smooth = true;

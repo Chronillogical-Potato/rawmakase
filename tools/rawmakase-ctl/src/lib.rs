@@ -6,7 +6,7 @@
 //! request; the app answers once a frame has handled it. The app's own
 //! `rawmakase control` and MCP server use this crate too.
 use clap::{Parser, Subcommand};
-use rawmakase_protocol::{Endpoint, PROTOCOL};
+use rawmakase_protocol::{Endpoint, PROTOCOL, Target};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -443,7 +443,12 @@ pub fn run(cli: Cli) -> Result<(), String> {
             || cli.revision.is_some()
             || cli.mask.is_some()
         {
-            request["target"] = json!({"photo_id":cli.photo_id,"generation":cli.generation,"revision":cli.revision,"mask":cli.mask});
+            request["target"] = json!(Target {
+                photo_id: cli.photo_id,
+                generation: cli.generation,
+                revision: cli.revision,
+                mask: cli.mask,
+            });
         }
         state = connection.ask(request)?;
         // A Library command that the app could not carry out.

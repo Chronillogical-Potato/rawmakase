@@ -54,12 +54,12 @@ impl Automation {
 use super::{Editor, state::Tool};
 use crate::catalog::{Photo, PhotoId};
 use eframe::egui;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub(super) use rawmakase_protocol::PROTOCOL;
 
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// A command's [`rawmakase_protocol::Target`], its photo id typed.
+#[derive(Clone, Debug, Default)]
 pub(super) struct Target {
     pub photo_id: Option<PhotoId>,
     pub generation: Option<u64>,
@@ -69,14 +69,17 @@ pub(super) struct Target {
     pub mask: Option<usize>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum CurveChannel {
-    Rgb,
-    Red,
-    Green,
-    Blue,
+impl From<rawmakase_protocol::Target> for Target {
+    fn from(t: rawmakase_protocol::Target) -> Self {
+        Self {
+            photo_id: t.photo_id.map(PhotoId),
+            generation: t.generation,
+            revision: t.revision,
+            mask: t.mask,
+        }
+    }
 }
+pub(super) use rawmakase_protocol::CurveChannel;
 
 #[derive(Clone, Debug)]
 pub(super) struct Command {
@@ -478,9 +481,9 @@ impl Editor {
                     ],
                     tone_curve: CurveCapabilities {
                         channels: ["rgb", "red", "green", "blue"],
-                        point_count: [2, 32],
+                        point_count: rawmakase_protocol::curve::POINT_COUNT,
                         coordinate_range: [0, 1],
-                        minimum_input_spacing: 0.00049,
+                        minimum_input_spacing: rawmakase_protocol::curve::MINIMUM_INPUT_SPACING,
                         interpolation: "natural_cubic",
                     },
                     target_fields: &["photo_id", "generation", "revision", "mask"],
