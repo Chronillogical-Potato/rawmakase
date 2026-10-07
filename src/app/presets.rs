@@ -503,13 +503,10 @@ impl Editor {
             return AmountChange::Same;
         }
         self.document.edit.replace(session.shown.clone());
-        self.document
-            .edit
-            .history_mut()
-            .label(super::history::Step::new(
-                "Preset Amount",
-                format!("{:.0}", amount * 100.),
-            ));
+        self.document.edit.name_next_step(super::history::Step::new(
+            "Preset Amount",
+            format!("{:.0}", amount * 100.),
+        ));
         AmountChange::Changed
     }
     /// Ends the Amount once anything else has changed the photo, as Lightroom hides it.
@@ -878,8 +875,7 @@ impl Editor {
                     };
                     self.document
                         .edit
-                        .history_mut()
-                        .label(super::history::Step::new(name, ""));
+                        .name_next_step(super::history::Step::new(name, ""));
                     self.document.edit.replace(recipe);
                 }
                 Err(e) => self.status = format!("History step not applied: {e:#}"),

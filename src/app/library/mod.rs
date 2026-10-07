@@ -1,6 +1,6 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
 use crate::catalog::{Catalog, FolderId, Photo, PhotoId, RootId};
-use crate::catalog_session::{CatalogSession, Opened};
+use crate::catalog_session::{CatalogSession, Committed, Opened};
 use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -510,41 +510,66 @@ impl Library {
         self.copy_request.take()
     }
     /// Creates a virtual copy of `id` and selects it.
-    pub(super) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
-        let copy = self.session.create_virtual_copy(id)?;
-        self.reloaded();
-        self.show(copy);
-        if let Some(p) = self.photo(copy) {
-            self.message = format!("Created {} of {}", p.copy_name, p.filename);
+    pub(super) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<Committed<PhotoId>> {
+        let made = self.session.create_virtual_copy(id)?;
+        if self.listed_after(&made.listed, "Copy made") {
+            self.show(made.value);
+            if let Some(p) = self.photo(made.value) {
+                self.message = format!("Created {} of {}", p.copy_name, p.filename);
+            }
         }
-        Ok(copy)
+        Ok(made)
     }
-    pub(super) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
-        self.session.set_copy_as_master(id)?;
-        self.reloaded();
-        self.show(id);
-        if let Some(p) = self.photo(id) {
-            self.message = format!("This copy is now the master of {}", p.filename);
+    pub(super) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<Committed<()>> {
+        let made = self.session.set_copy_as_master(id)?;
+        if self.listed_after(&made.listed, "Master changed") {
+            self.show(id);
+            if let Some(p) = self.photo(id) {
+                self.message = format!("This copy is now the master of {}", p.filename);
+            }
         }
-        Ok(())
+        Ok(made)
     }
-    /// Removes virtual copy `id`; returns its master, which is selected.
-    pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<Option<PhotoId>> {
+    /// Brings what is shown in step after a change to the catalog, and says
+    /// so when the catalog could not be read again after `done`. Returns
+    /// whether it was.
+    fn listed_after(&mut self, listed: &Result<()>, done: &str) -> bool {
+        match listed {
+            Ok(()) => {
+                self.reloaded();
+                true
+            }
+            Err(e) => {
+                self.message = format!("{done}, but the catalog could not be read again: {e:#}");
+                false
+            }
+        }
+    }
+    /// Removes virtual copy `id`; returns its master, which is selected. An
+    /// error means the copy is still there.
+    pub(super) fn remove_virtual_copy(
+        &mut self,
+        id: PhotoId,
+    ) -> Result<Committed<Option<PhotoId>>> {
         let photo = self.photo(id).cloned();
         // Forgotten first: once the copy is removed its id can be reused, so its
         // previews must go even if reading the catalog again fails.
         self.cache.forget(id);
         self.screen.forget(id);
-        self.session.remove_virtual_copy(id)?;
-        self.reloaded();
+        let removed = self.session.remove_virtual_copy(id)?;
         let master = photo.as_ref().and_then(|p| p.master);
-        if let Some(master) = master {
-            self.show(master);
+        if self.listed_after(&removed.listed, "Copy removed") {
+            if let Some(master) = master {
+                self.show(master);
+            }
+            if let Some(p) = photo {
+                self.message = format!("Removed {} of {}", p.copy_name, p.filename);
+            }
         }
-        if let Some(p) = photo {
-            self.message = format!("Removed {} of {}", p.copy_name, p.filename);
-        }
-        Ok(master)
+        Ok(Committed {
+            value: master,
+            listed: removed.listed,
+        })
     }
     /// Selects `id`, leaving filters that would hide it so it stays in view.
     fn show(&mut self, id: PhotoId) {
@@ -664,10 +689,7 @@ impl Library {
     /// Library panel goes away before the field loses focus. On failure it
     /// stays pending, to be saved again or discarded.
     pub(super) fn commit_drafts(&mut self) -> Result<()> {
-        if self
-            .copy_names
-            .commit(&self.session.catalog, &mut self.session.photos)?
-        {
+        if self.copy_names.commit(&mut self.session)? {
             self.filter();
         }
         self.commit_fields()

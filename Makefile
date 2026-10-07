@@ -11,6 +11,7 @@ build:
 
 check:
 	python3 scripts/deps.py check
+	scripts/crate-closures.sh
 	cargo fmt --check
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --all-targets --no-default-features -- -D warnings

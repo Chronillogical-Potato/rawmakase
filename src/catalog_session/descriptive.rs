@@ -1,5 +1,6 @@
-//! Title, caption, creator, copyright, location and keywords, and virtual
-//! copies: changes to the catalog that the session's lists must follow.
+//! Title, caption, creator, copyright, location and keywords, collection
+//! membership and virtual copies with their Copy Names: changes to the catalog
+//! that the session's lists must follow.
 use super::CatalogSession;
 use crate::catalog::{FileMetadata, Merge, MetadataSnapshot, PhotoId, SidecarReport};
 use crate::metadata::TextField;
@@ -17,6 +18,16 @@ pub(crate) enum DescriptiveEdit {
     /// Keywords by path, top first.
     AddKeywords(Vec<Vec<String>>),
     RemoveKeyword(i64),
+}
+
+/// A change saved in the catalog, and whether the lists could be read again
+/// after it. When they could not, they still show the catalog as it was before
+/// the change, which stands: what depends on it (Undo, the open photo) must
+/// follow the change anyway.
+#[derive(Debug)]
+pub(crate) struct Committed<T> {
+    pub(crate) value: T,
+    pub(crate) listed: Result<()>,
 }
 
 /// What a [`DescriptiveEdit`] changed.
@@ -78,20 +89,56 @@ impl CatalogSession {
         self.refresh_photos(ids)?;
         Ok(written)
     }
-    /// Makes a virtual copy of `id` and reads the lists again.
-    pub(crate) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
+    /// Names virtual copy `id` `name`, trimmed, in the catalog and the lists.
+    pub(crate) fn rename_copy(&mut self, id: PhotoId, name: &str) -> Result<()> {
+        self.catalog.set_copy_name(id, name)?;
+        if let Some(p) = self.photos.iter_mut().find(|p| p.id == id) {
+            p.copy_name = name.trim().to_string();
+        }
+        Ok(())
+    }
+    /// Adds `add` to `collection` and takes `remove` out of it, in the catalog
+    /// and the lists. Returns the collection's photos as they now are.
+    pub(crate) fn change_collection(
+        &mut self,
+        collection: crate::catalog::CollectionId,
+        add: &[PhotoId],
+        remove: &[PhotoId],
+    ) -> Result<&std::collections::HashSet<PhotoId>> {
+        self.catalog.change_collection(collection, add, remove)?;
+        let members = self.collection_photos.entry(collection).or_default();
+        members.extend(add);
+        for id in remove {
+            members.remove(id);
+        }
+        Ok(members)
+    }
+    /// Makes a virtual copy of `id` and reads the lists again. An error means
+    /// no copy was made.
+    pub(crate) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<Committed<PhotoId>> {
         let copy = self.catalog.create_virtual_copy(id)?;
-        self.reload()?;
-        Ok(copy)
+        Ok(Committed {
+            value: copy,
+            listed: self.reload(),
+        })
     }
-    /// Makes copy `id` its photo's master and reads the lists again.
-    pub(crate) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<()> {
+    /// Makes copy `id` its photo's master and reads the lists again. An error
+    /// means nothing changed.
+    pub(crate) fn set_copy_as_master(&mut self, id: PhotoId) -> Result<Committed<()>> {
         self.catalog.set_copy_as_master(id)?;
-        self.reload()
+        Ok(Committed {
+            value: (),
+            listed: self.reload(),
+        })
     }
-    /// Removes virtual copy `id` and reads the lists again.
-    pub(crate) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<()> {
+    /// Removes virtual copy `id` and reads the lists again. An error means the
+    /// copy is still there; once this returns, it is gone and its id may be
+    /// given to a new photo, even when reading the lists failed.
+    pub(crate) fn remove_virtual_copy(&mut self, id: PhotoId) -> Result<Committed<()>> {
         self.catalog.remove_virtual_copy(id)?;
-        self.reload()
+        Ok(Committed {
+            value: (),
+            listed: self.reload(),
+        })
     }
 }

@@ -7,7 +7,7 @@ mod descriptive;
 use crate::catalog::{Catalog, Collection, CollectionId, Folder, Photo, PhotoId, RootId};
 use anyhow::Result;
 pub(crate) use background::Wake;
-pub(crate) use descriptive::{DescriptiveChange, DescriptiveEdit};
+pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -303,6 +303,24 @@ mod tests {
         assert_eq!(session.quick_collection(), Some(quick));
         assert_eq!(session.ensure_quick_collection()?, quick);
         assert!(session.collection_photos[&quick].is_empty());
+        let members = session.change_collection(quick, &[a], &[])?;
+        assert!(members.contains(&a));
+        assert!(session.catalog.collection_photos()?[&quick].contains(&a));
+        session.change_collection(quick, &[], &[a])?;
+        assert!(session.collection_photos[&quick].is_empty());
+
+        let copy = session.create_virtual_copy(a)?.value;
+        session.rename_copy(copy, " B&W ")?;
+        let named = |photos: &[Photo]| {
+            photos
+                .iter()
+                .find(|p| p.id == copy)
+                .unwrap()
+                .copy_name
+                .clone()
+        };
+        assert_eq!(named(&session.photos), "B&W");
+        assert_eq!(named(&session.catalog.photos()?), "B&W");
         Ok(())
     }
 
@@ -331,7 +349,7 @@ mod tests {
         assert_eq!(session.catalog.photos()?[0].label, "Blue");
         assert_eq!(session.catalog.metadata_snapshot(&[a])?, change.before);
 
-        let copy = session.create_virtual_copy(a)?;
+        let copy = session.create_virtual_copy(a)?.value;
         assert!(session.photos.iter().any(|p| p.id == copy));
         session.set_copy_as_master(copy)?;
         assert_eq!(

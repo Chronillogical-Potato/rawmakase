@@ -760,17 +760,17 @@ impl Editor {
             param.local_set(&mut mask.adjust, value, ticks)?
         } else {
             let recipe = self.document.edit.recipe_mut();
-            let before = *param.value(recipe, channel);
-            let shown = if let Some(value) = value {
-                param.set(recipe, value, channel)
-            } else {
-                param.turn(recipe, ticks, channel)
+            let change = |recipe: &mut crate::model::recipe::Recipe| match value {
+                Some(value) => param.set(recipe, value, channel),
+                None => param.turn(recipe, ticks, channel),
             };
-            if let Param::Setting(id) = param {
-                let photo = self.document.metadata.as_ref();
-                crate::model::edit::setting_changed(recipe, id, before, photo);
+            match param {
+                Param::Setting(id) => {
+                    let photo = self.document.metadata.as_ref();
+                    crate::model::edit::change_setting(recipe, id, photo, change)
+                }
+                _ => change(recipe),
             }
-            shown
         };
         let label = if let Some(index) = target.mask {
             format!("Mask {} {}", index + 1, param.label(channel))

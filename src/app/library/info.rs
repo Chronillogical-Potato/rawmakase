@@ -83,20 +83,11 @@ impl Library {
                     let text = |f: fn(&PhotoInfo) -> Option<String>| f(&info).unwrap_or_default();
                     metadata_row(ui, "File Name", &field(|p| &p.filename));
                     match photo.as_ref().filter(|p| p.master.is_some()) {
-                        Some(p) => {
-                            match self.copy_names.row(
-                                ui,
-                                p,
-                                &self.session.catalog,
-                                &mut self.session.photos,
-                            ) {
-                                Ok(true) => self.filter(),
-                                Ok(false) => {}
-                                Err(e) => {
-                                    self.message = format!("Copy name could not be saved: {e}")
-                                }
-                            }
-                        }
+                        Some(p) => match self.copy_names.row(ui, p, &mut self.session) {
+                            Ok(true) => self.filter(),
+                            Ok(false) => {}
+                            Err(e) => self.message = format!("Copy name could not be saved: {e}"),
+                        },
                         None => {
                             metadata_row(ui, "Copy Name", "");
                         }

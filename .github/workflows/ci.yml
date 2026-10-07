@@ -277,6 +277,32 @@ jobs:
           ref: ${{ inputs.source-ref || github.sha }}
       - run: python3 scripts/deps.py check
 
+  crates:
+    name: Crates without native libraries
+    # The model, file formats, catalog and control protocol depend on no app,
+    # GPU, GUI or native imaging crate (scripts/crate-closures.sh), and build
+    # and test on a machine with no LibRaw or Little CMS installed. The
+    # catalog's bundled SQLite is the one C library they build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+      - name: No LibRaw or Little CMS here
+        run: |
+          if pkg-config --exists libraw || pkg-config --exists lcms2; then
+            echo "LibRaw or Little CMS is installed; this job must build without them"
+            exit 1
+          fi
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: scripts/crate-closures.sh
+      - run: cargo test --locked -p rawmakase-model --all-features
+      - run: cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-protocol
+
   audit:
     name: Dependency licenses and advisories
     runs-on: ubuntu-latest

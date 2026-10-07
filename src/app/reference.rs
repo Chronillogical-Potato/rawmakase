@@ -489,7 +489,7 @@ mod tests {
         let side = editor.reference_side().unwrap();
         assert_eq!(side.recipe.exposure, 1.5);
         // Editing changes the Active photo, never the reference.
-        editor.document.edit.recipe_mut().exposure = -0.5;
+        editor.document.edit.setup_mut().exposure = -0.5;
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
         // The reference renders in Before's lane, from its own photo.
         editor.schedule_before();
@@ -500,7 +500,7 @@ mod tests {
         editor.document.set_image(image);
         editor.load_reference();
         assert!(!editor.reference.loading());
-        editor.document.edit.recipe_mut().exposure = 0.25;
+        editor.document.edit.setup_mut().exposure = 0.25;
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 0.25);
         editor.document.reset(Some(open));
         assert_eq!(editor.reference_side().unwrap().recipe.exposure, 1.5);
@@ -610,7 +610,8 @@ mod tests {
             .library
             .as_mut()
             .unwrap()
-            .create_virtual_copy(other)?;
+            .create_virtual_copy(other)?
+            .value;
         editor.set_reference(copy);
         wait_for_reference(editor);
         editor.remove_virtual_copy(copy);

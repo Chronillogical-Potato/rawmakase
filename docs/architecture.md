@@ -46,7 +46,7 @@ files should preserve.
 | `edits` | Which edit a photo develops with (saved, Lightroom or raw defaults), shared by Develop, Sync and Export; the catalog only reads the stored records | `edits.rs` |
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `preview_cache.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
-| `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, the Quick Collection, virtual copies), and the background reads that fill in capture times and photo info for photos added from folders. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs` |
+| `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), and the background reads that fill in capture times and photo info for photos added from folders. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
 | `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager and the browser | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs` |
@@ -91,10 +91,14 @@ inject a temporary file, without changing the process-wide environment.
   `scripts/deps-allowed.txt`, and `scripts/deps.py check` (CI and `make check`)
   fails on a new one or on a cycle; add a line only when the new dependency
   points down the intended layering. `scripts/deps-closures.txt` lists what some
-  modules must never reach, even through others: the model, file formats, the
-  catalog and the edit session never reach LibRaw, the renderer or the app, and
-  the renderer never reaches the app, export or the catalog. The check prints the
-  chain that breaks a rule.
+  modules must never reach, even through others: the edit session never reaches
+  LibRaw, the renderer or the app, and the renderer never reaches the app or
+  export. The check prints the chain that breaks a rule.
+- The model, file formats, catalog and control protocol are crates, so Cargo
+  rules out a dependency back on the app. `scripts/crate-closures.sh` (CI and
+  `make check`) fails when one of them gains the app, a GPU or GUI crate, or a
+  LibRaw or Little CMS binding; CI also builds and tests them on a machine
+  without LibRaw or Little CMS. The catalog's bundled SQLite is intended.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate

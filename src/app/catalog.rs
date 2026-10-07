@@ -384,14 +384,14 @@ impl Editor {
                 return;
             }
             _ if !self.ready_for_catalog() => return,
-            CopyAction::Create(id) => self
-                .library
-                .as_mut()
-                .map(|l| l.create_virtual_copy(id).map(Some)),
+            CopyAction::Create(id) => self.library.as_mut().map(|l| {
+                l.create_virtual_copy(id)
+                    .map(|made| made.listed.is_ok().then_some(made.value))
+            }),
             CopyAction::SetMaster(id) => self
                 .library
                 .as_mut()
-                .map(|l| l.set_copy_as_master(id).map(|()| None)),
+                .map(|l| l.set_copy_as_master(id).map(|_| None)),
         };
         let (Some(result), Some(library)) = (result, &self.library) else {
             return;
@@ -399,6 +399,7 @@ impl Editor {
         match result {
             Ok(open) => {
                 self.status = library.message.clone();
+                // A copy the Library could not list yet is not opened.
                 if let Some(id) = open
                     && self.module == Module::Develop
                 {
@@ -491,7 +492,10 @@ impl Editor {
             return;
         };
         match library.remove_virtual_copy(id) {
-            Ok(master) => {
+            // Removed, even if the catalog could not be read again: its id may
+            // be given to the next new photo, so nothing may keep it.
+            Ok(removed) => {
+                let master = removed.value;
                 self.status = library.message.clone();
                 self.undo_log.forget_photo(id);
                 // The reference, when it was this copy, goes with it.

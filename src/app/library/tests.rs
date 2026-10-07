@@ -421,7 +421,7 @@ fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> 
     let master = library.session.photos[0].id;
     let (tx, rx) = std::sync::mpsc::channel();
     library.cache.edit_rx = rx;
-    let copy = library.create_virtual_copy(master)?;
+    let copy = library.create_virtual_copy(master)?.value;
     library.cache.edited_requested.insert(copy, 7);
     library.cache.edit_seen.insert(copy);
     // A result for an older request is dropped.
@@ -441,7 +441,7 @@ fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> 
     assert!(library.has_edited_thumbnail(copy));
     // Removing the copy forgets it, so a new copy given its id renders again,
     // and the removed copy's late result is dropped.
-    assert_eq!(library.remove_virtual_copy(copy)?, Some(master));
+    assert_eq!(library.remove_virtual_copy(copy)?.value, Some(master));
     assert!(!library.cache.edited_requested.contains_key(&copy));
     assert!(!library.cache.edited_order.contains(&copy));
     assert!(!library.cache.edit_seen.contains(&copy));
@@ -463,7 +463,9 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     let path = directory.path().join("names.rawmakase");
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
-    let copy = library.create_virtual_copy(library.session.photos[0].id)?;
+    let copy = library
+        .create_virtual_copy(library.session.photos[0].id)?
+        .value;
     library.copy_names.draft = Some((copy, " B&W ".into()));
     library.commit_drafts()?;
     let saved = library.session.catalog.photos()?;
@@ -474,7 +476,9 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     assert_eq!(library.photo(copy).unwrap().copy_name, "B&W");
     // A removed copy's draft never renames a new copy that reuses its id.
     library.remove_virtual_copy(copy)?;
-    let next = library.create_virtual_copy(library.session.photos[0].id)?;
+    let next = library
+        .create_virtual_copy(library.session.photos[0].id)?
+        .value;
     library.commit_drafts()?;
     assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
     Ok(())
@@ -490,19 +494,14 @@ fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
     let master = library.session.photos[0].id;
-    let first = library.create_virtual_copy(master)?;
-    let second = library.create_virtual_copy(master)?;
+    let first = library.create_virtual_copy(master)?.value;
+    let second = library.create_virtual_copy(master)?.value;
     library.copy_names.draft = Some((first, "B&W".into()));
     // The panel is drawn for the newly selected copy before the field
     // reports losing focus.
     let photo = library.photo(second).unwrap().clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let _ = library.copy_names.row(
-            ui,
-            &photo,
-            &library.session.catalog,
-            &mut library.session.photos,
-        );
+        let _ = library.copy_names.row(ui, &photo, &mut library.session);
     });
     output.textures_delta.clear();
     assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
@@ -520,20 +519,15 @@ fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
     let master = library.session.photos[0].id;
-    let first = library.create_virtual_copy(master)?;
-    let second = library.create_virtual_copy(master)?;
+    let first = library.create_virtual_copy(master)?.value;
+    let second = library.create_virtual_copy(master)?.value;
     // Renaming fails once the copy is gone from the catalog.
     library.session.catalog.remove_virtual_copy(first)?;
     library.copy_names.draft = Some((first, "B&W".into()));
     let photo = library.photo(second).unwrap().clone();
     for _ in 0..2 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            let _ = library.copy_names.row(
-                ui,
-                &photo,
-                &library.session.catalog,
-                &mut library.session.photos,
-            );
+            let _ = library.copy_names.row(ui, &photo, &mut library.session);
         });
         output.textures_delta.clear();
     }
@@ -647,7 +641,7 @@ fn attribute_filters_match_lightroom() -> Result<()> {
     library.session.catalog.set_metadata(ids[3], 1, 0, "Blue")?;
     library.refresh()?;
     library.wait_for_availability();
-    let copy = library.create_virtual_copy(ids[1])?;
+    let copy = library.create_virtual_copy(ids[1])?.value;
     library.filter();
     // Flags combine: everything but rejects.
     library.filters.flags = [1, 0].into();
@@ -1555,7 +1549,7 @@ fn compare_follows_edits_sources_and_other_commands() -> Result<()> {
     // A selection another command makes, such as a new virtual copy, is
     // followed beside the select.
     let select = library.keep_compared_shown();
-    let copy = library.create_virtual_copy(ids[1])?;
+    let copy = library.create_virtual_copy(ids[1])?.value;
     assert_eq!(library.keep_compared_shown(), select);
     assert_eq!(library.compare.candidate, Some(copy));
     assert_eq!(library.selected(), Some(copy));
@@ -1731,7 +1725,7 @@ fn compare_follows_a_restored_place_within_its_pair() -> Result<()> {
 fn compare_follows_the_master_after_removing_its_copy() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
     let ids = ids_of(&library);
-    let copy = library.create_virtual_copy(ids[0])?;
+    let copy = library.create_virtual_copy(ids[0])?.value;
     library.select(Some(ids[0]));
     library.open_compare();
     library.compare.candidate = Some(copy);

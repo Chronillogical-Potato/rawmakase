@@ -33,6 +33,15 @@ impl Editor {
             visualized: self.visualized_swatch(),
         }
     }
+    /// Starts `frame` again on the photo now open, when the frame so far opened
+    /// another (a shortcut or the filmstrip moved to the next photo): what is
+    /// drawn after edits the new photo, in a frame of its own. The old photo's
+    /// frame ends with its document.
+    pub(super) fn follow_edit_frame(&mut self, frame: &mut EditFrame) {
+        if frame.generation != self.load.id() {
+            *frame = self.begin_edit_frame();
+        }
+    }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
         self.sync_command_revision();
         // Before the frame looks at it, so reading it changes no crop.
@@ -71,26 +80,19 @@ impl Editor {
             super::brush_scroll::Edit::Changed
         };
         if self.view.wheel.ends_before(edit) {
-            self.document
-                .edit
-                .history_mut()
-                .finish_gesture(frame.edit.before());
+            self.document.edit.finish_gesture_before(&frame.edit);
         }
         if self.automation.has_turn()
             && !frame.command_adjust
             && (*self.document.edit.recipe() != *frame.edit.before() || clicked)
         {
             self.automation.end_turn();
-            self.document
-                .edit
-                .history_mut()
-                .finish_gesture(frame.edit.before());
+            self.document.edit.finish_gesture_before(&frame.edit);
         }
         if let Some((name, value)) = step {
             self.document
                 .edit
-                .history_mut()
-                .label(super::history::Step::new(name, value));
+                .name_next_step(super::history::Step::new(name, value));
         }
         self.leave_compare_for_tools();
         if frame.aspect != self.view.aspect {

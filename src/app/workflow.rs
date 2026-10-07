@@ -126,7 +126,7 @@ impl Editor {
             self.document.edit.save_state_mut().mark_changed();
         }
         if !self.document.edit.save_state().needs_save() {
-            self.finish_gesture();
+            self.finish_saved_gesture();
             return true;
         }
         if let (Some(path), Some(l), Some(id)) = (
@@ -162,7 +162,8 @@ impl Editor {
                 }
             }
         }
-        self.finish_gesture();
+        // Its state was just saved with History: nothing new to save.
+        self.finish_saved_gesture();
         true
     }
     /// Autosave: collects a finished background save and, once the edit

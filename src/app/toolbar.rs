@@ -301,8 +301,7 @@ impl Editor {
     pub(super) fn reset_settings(&mut self) {
         self.document
             .edit
-            .history_mut()
-            .label(super::history::Step::new("Reset Settings", ""));
+            .name_next_step(super::history::Step::new("Reset Settings", ""));
         let Some(defaults) = self.photo_defaults() else {
             self.document.edit.replace(Recipe::default());
             return;

@@ -89,7 +89,7 @@ impl Editor {
             Treatment::Color => "Convert to Color",
             Treatment::BlackWhite => "Convert to Black & White",
         };
-        self.document.edit.history_mut().label(Step::new(name, ""));
+        self.document.edit.name_next_step(Step::new(name, ""));
     }
 
     /// Converts as asked while the photo was decoding, once it is decoded. Called
@@ -149,8 +149,7 @@ impl Editor {
             self.document.edit.recipe_mut().effects.gray_mix = mix;
             self.document
                 .edit
-                .history_mut()
-                .label(Step::new("Black & White Mix", "Auto"));
+                .name_next_step(Step::new("Black & White Mix", "Auto"));
         }
     }
 }

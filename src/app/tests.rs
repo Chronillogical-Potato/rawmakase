@@ -28,12 +28,12 @@ fn autosave_writes_the_catalog_in_the_background() -> anyhow::Result<()> {
             std::time::Instant::now() - std::time::Duration::from_secs(1),
         )
     };
-    editor.document.edit.recipe_mut().exposure = 0.8;
+    editor.document.edit.setup_mut().exposure = 0.8;
     *editor.document.edit.save_state_mut() = settled();
     editor.autosave(&ctx);
     assert!(editor.autosave.busy());
     // Edited again while that save runs: still unsaved once it finishes.
-    editor.document.edit.recipe_mut().exposure = 1.1;
+    editor.document.edit.setup_mut().exposure = 1.1;
     editor.document.edit.save_state_mut().mark_changed();
     // On a slow machine the save can outlast the settle delay; keep the loop
     // below from starting the next save before this one is checked.
@@ -64,7 +64,7 @@ fn autosave_writes_the_catalog_in_the_background() -> anyhow::Result<()> {
     // A save before navigation waits for the one in flight, then saves.
     *editor.document.edit.save_state_mut() = settled();
     editor.autosave(&ctx);
-    editor.document.edit.recipe_mut().exposure = 1.4;
+    editor.document.edit.setup_mut().exposure = 1.4;
     editor.document.edit.save_state_mut().mark_changed();
     assert!(editor.flush());
     assert!(!editor.autosave.busy());
@@ -91,7 +91,7 @@ fn catalog_edits_save_to_database_and_library_renders() -> anyhow::Result<()> {
     editor.library = Some(Box::new(l));
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo.clone());
-    editor.document.edit.recipe_mut().exposure = 1.2;
+    editor.document.edit.setup_mut().exposure = 1.2;
     editor.document.edit.save_state_mut().mark_changed();
     assert!(editor.flush());
     assert!(!crate::catalog::legacy_sidecar::sidecar_path(&photo).exists());
@@ -357,8 +357,8 @@ fn compact_inspector_keeps_canvas_and_before_preserves_edits() {
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    editor.document.edit.recipe_mut().exposure = 1.25;
-    editor.document.edit.recipe_mut().crop = [0.1, 0.1, 0.9, 0.9];
+    editor.document.edit.setup_mut().exposure = 1.25;
+    editor.document.edit.setup_mut().crop = [0.1, 0.1, 0.9, 0.9];
     let saved = editor.document.edit.recipe().clone();
     for frame in 0..30 {
         let mut output = ctx.run_ui(
@@ -396,7 +396,7 @@ fn history_snapshot_undo_and_redo() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 2.;
+    e.document.edit.setup_mut().exposure = 2.;
     e.commit_edit(original.clone(), None);
     assert!(e.document.edit.history().can_undo());
     e.undo();
@@ -411,7 +411,7 @@ fn undo_and_redo_keys_work_while_a_button_has_focus() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 2.;
+    e.document.edit.setup_mut().exposure = 2.;
     e.commit_edit(original.clone(), None);
     // A clicked button or the tone curve keeps focus; that must not block shortcuts.
     let frame = |input, e: &mut Editor| {
@@ -739,7 +739,7 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     open(&mut editor);
     for exposure in [0.5, 1.] {
         let before = editor.document.edit.recipe().clone();
-        editor.document.edit.recipe_mut().exposure = exposure;
+        editor.document.edit.setup_mut().exposure = exposure;
         editor.commit_edit(before, None);
     }
     assert!(editor.flush());
@@ -760,7 +760,7 @@ fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    editor.document.edit.recipe_mut().exposure = 1.25;
+    editor.document.edit.setup_mut().exposure = 1.25;
     editor.presets.preview = Some(editor.document.edit.recipe().clone());
     editor.view.crop_drag = Some(([0., 0., 1., 1.], 0));
     let frame = editor.begin_edit_frame();
@@ -875,12 +875,14 @@ fn remove_tool_adds_spots_paints_brushes_and_edits_the_selection() {
                 ..Default::default()
             },
             |ui| {
+                let frame = editor.begin_edit_frame();
                 ctx.input(|i| {
                     if editor.view.is(state::Tool::Remove) {
                         editor.retouch_keys(i)
                     }
                 });
-                editor.viewport_ui(ui)
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
             },
         );
         output.textures_delta.clear();
@@ -1103,9 +1105,9 @@ fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
         scale_clipped: 0,
     });
     editor.document.set_image(image);
-    let panels = &mut editor.document.edit.recipe_mut().panels;
+    let panels = &mut editor.document.edit.setup_mut().panels;
     panels.set(Panel::RedEye, PanelState::Off);
-    editor.add_red_eye([0.5, 0.5], 0.1);
+    in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.1));
     assert_eq!(editor.document.edit.recipe().red_eye.len(), 1);
     assert_eq!(
         editor.document.edit.recipe().panels.state(Panel::RedEye),
@@ -1146,11 +1148,11 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
     });
     editor.document.set_image(image);
     // Red Eye finds nothing red there.
-    editor.add_red_eye([0.5, 0.5], 0.15);
+    in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.15));
     assert!(editor.document.edit.recipe().red_eye.is_empty());
     assert!(editor.status.contains("Unable to find red eye"));
     editor.view.red_eye.pet = red_eye_tool::PupilType::Pet;
-    editor.add_red_eye([0.5, 0.5], 0.15);
+    in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.15));
     let eyes = &editor.document.edit.recipe().red_eye;
     assert_eq!(eyes.len(), 1);
     assert_eq!(
@@ -1167,13 +1169,13 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
     // Even when the remembered type is stale (after an undo, say), a new correction
     // takes the selected one's type, as the Type menu shows.
     editor.view.red_eye.pet = red_eye_tool::PupilType::Red;
-    editor.add_red_eye([0.5, 0.5], 0.15);
+    in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.15));
     assert_eq!(editor.document.edit.recipe().red_eye.len(), 2);
-    editor.document.edit.recipe_mut().red_eye.pop();
+    editor.document.edit.setup_mut().red_eye.pop();
     editor.select_red_eye(Some(0));
     // A click on the catchlight's handle, even at the pupil's edge outside the
     // ellipse, is not a new search.
-    editor.document.edit.recipe_mut().red_eye[0].kind = EyeKind::Pet {
+    editor.document.edit.setup_mut().red_eye[0].kind = EyeKind::Pet {
         catchlight: Some([1., 0.]),
     };
     editor.preview.texture = Some(
@@ -1241,7 +1243,7 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
         scale_clipped: 0,
     });
     editor.document.set_image(image);
-    editor.add_red_eye([0.5, 0.5], 0.48);
+    in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.48));
     assert!(editor.document.edit.recipe().red_eye.is_empty());
     assert!(
         editor.status.contains("Unable to find red eye"),
@@ -1288,12 +1290,14 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
                 ..Default::default()
             },
             |ui| {
+                let frame = editor.begin_edit_frame();
                 ctx.input(|i| {
                     if editor.view.is(state::Tool::Mask) {
                         editor.mask_keys(i)
                     }
                 });
-                editor.viewport_ui(ui)
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
             },
         );
         output.textures_delta.clear();
@@ -1319,7 +1323,9 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     };
     frame(&mut editor, vec![]);
     // M, then a drag, draws a linear gradient as a new mask.
-    editor.create_mask(mask_tool::Kind::Linear, None);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(mask_tool::Kind::Linear, None)
+    });
     drag(
         &mut editor,
         &mut frame,
@@ -1354,7 +1360,9 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
         "{t2:?}"
     );
     // Shift+M makes a radial gradient; K a brush that paints.
-    editor.create_mask(mask_tool::Kind::Radial, None);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(mask_tool::Kind::Radial, None)
+    });
     drag(
         &mut editor,
         &mut frame,
@@ -1365,7 +1373,9 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
         editor.document.edit.recipe().masks[1].components[0].shape,
         MaskShape::Radial { radii, .. } if (radii[0] - 0.15).abs() < 0.02 && (radii[1] - 0.1).abs() < 0.02
     ));
-    editor.create_mask(mask_tool::Kind::Brush, None);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(mask_tool::Kind::Brush, None)
+    });
     drag(
         &mut editor,
         &mut frame,
@@ -1379,10 +1389,12 @@ fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     assert_eq!(strokes.len(), 1);
     assert!(strokes[0].points.len() > 3);
     // Add a subtracted brush to the brush mask, then delete the mask with Delete.
-    editor.create_mask(
-        mask_tool::Kind::Brush,
-        Some(crate::model::masks::MaskOp::Subtract),
-    );
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(
+            mask_tool::Kind::Brush,
+            Some(crate::model::masks::MaskOp::Subtract),
+        )
+    });
     assert_eq!(editor.document.edit.recipe().masks[2].components.len(), 2);
     frame(
         &mut editor,
@@ -1518,13 +1530,13 @@ fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
         scale_factor: 1.,
         scale_clipped: 0,
     }));
-    editor.document.edit.recipe_mut().saturation = 0.25;
+    editor.document.edit.setup_mut().saturation = 0.25;
     let before = editor.document.edit.recipe().clone();
     editor.start_auto(worker::AutoKind::Settings);
     assert!(editor.document.auto.is_running());
     // A second request while the first runs is ignored.
     editor.start_auto(worker::AutoKind::Settings);
-    editor.document.edit.recipe_mut().effects.clarity = 0.25;
+    editor.document.edit.setup_mut().effects.clarity = 0.25;
     let start = std::time::Instant::now();
     while editor.document.auto.is_running() {
         assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
@@ -1650,7 +1662,7 @@ fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     let start = editor.document.edit.recipe().clone();
     // A Shadows drag is under way when the estimate arrives. Auto sets Shadows too,
     // so the drag does not make the estimate stale.
-    editor.document.edit.recipe_mut().shadows = 0.1;
+    editor.document.edit.setup_mut().shadows = 0.1;
     let mid = editor.document.edit.recipe().clone();
     editor
         .document
@@ -1662,7 +1674,7 @@ fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
     let with_auto = editor.document.edit.recipe().clone();
     assert_eq!(with_auto.exposure, 1.);
-    editor.document.edit.recipe_mut().shadows = 0.2;
+    editor.document.edit.setup_mut().shadows = 0.2;
     let end = editor.document.edit.recipe().clone();
     editor
         .document
@@ -1713,7 +1725,7 @@ fn auto_runs_again_when_the_crop_changed_while_it_ran() {
     // An estimate for the uncropped photo arrives after the photo was cropped.
     let mut auto = editor.document.edit.recipe().clone();
     auto.exposure = 1.;
-    editor.document.edit.recipe_mut().crop = [0.1, 0.1, 0.9, 0.9];
+    editor.document.edit.setup_mut().crop = [0.1, 0.1, 0.9, 0.9];
     editor.auto_ready(worker::AutoKind::Settings, Ok(Box::new(auto)));
     assert_eq!(editor.document.edit.recipe().exposure, 0.);
     assert!(!editor.document.edit.history().can_undo());
@@ -1746,7 +1758,7 @@ fn auto_runs_again_when_it_failed_on_settings_changed_since() {
     }));
     // An estimate that failed on the uncropped photo arrives after the photo was cropped.
     editor.document.auto_input = Some(editor.document.edit.recipe().clone());
-    editor.document.edit.recipe_mut().crop = [0.1, 0.1, 0.9, 0.9];
+    editor.document.edit.setup_mut().crop = [0.1, 0.1, 0.9, 0.9];
     editor.auto_ready(
         worker::AutoKind::Settings,
         Err("Auto: no usable pixels".into()),
@@ -1773,29 +1785,29 @@ fn auto_is_off_while_its_settings_stand() {
     assert!(editor.auto_in_effect());
     // Any change, to a slider Auto sets or to what it measured, turns it back on, and
     // so does undoing Auto.
-    editor.document.edit.recipe_mut().vibrance = 0.;
+    editor.document.edit.setup_mut().vibrance = 0.;
     assert!(!editor.auto_in_effect());
-    editor.document.edit.recipe_mut().vibrance = 0.15;
+    editor.document.edit.setup_mut().vibrance = 0.15;
     assert!(editor.auto_in_effect());
-    editor.document.edit.recipe_mut().saturation = 0.;
+    editor.document.edit.setup_mut().saturation = 0.;
     assert!(!editor.auto_in_effect());
-    editor.document.edit.recipe_mut().saturation = 0.02;
+    editor.document.edit.setup_mut().saturation = 0.02;
     assert!(editor.auto_in_effect());
-    editor.document.edit.recipe_mut().exposure = 0.5;
+    editor.document.edit.setup_mut().exposure = 0.5;
     assert!(!editor.auto_in_effect());
-    editor.document.edit.recipe_mut().exposure = 1.;
+    editor.document.edit.setup_mut().exposure = 1.;
     assert!(editor.auto_in_effect());
-    editor.document.edit.recipe_mut().crop[0] = 0.1;
+    editor.document.edit.setup_mut().crop[0] = 0.1;
     assert!(!editor.auto_in_effect());
-    editor.document.edit.recipe_mut().crop[0] = 0.;
+    editor.document.edit.setup_mut().crop[0] = 0.;
     assert!(editor.auto_in_effect());
     // Adjustments Auto does not measure leave it off.
-    editor.document.edit.recipe_mut().effects.clarity = 0.3;
-    editor.document.edit.recipe_mut().curve.points[0] = [0., 0.2];
-    editor.document.edit.recipe_mut().preset_name = "Curve only".into();
+    editor.document.edit.setup_mut().effects.clarity = 0.3;
+    editor.document.edit.setup_mut().curve.points[0] = [0., 0.2];
+    editor.document.edit.setup_mut().preset_name = "Curve only".into();
     assert!(editor.auto_in_effect());
-    editor.document.edit.recipe_mut().effects.clarity = 0.;
-    editor.document.edit.recipe_mut().curve.points[0] = [0., 0.];
+    editor.document.edit.setup_mut().effects.clarity = 0.;
+    editor.document.edit.setup_mut().curve.points[0] = [0., 0.];
     editor.undo();
     assert!(!editor.auto_in_effect());
 }
@@ -1805,7 +1817,7 @@ fn undoing_an_upright_mode_turns_it_off_once_analysed() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let original = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().upright.mode = UprightMode::Vertical;
+    e.document.edit.setup_mut().upright.mode = UprightMode::Vertical;
     e.commit_edit(original, None);
     // The analysis arrives after the click that chose the mode.
     let (generation, _) = e.document.upright.start();
@@ -1837,8 +1849,8 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
     let mut guided = identity;
     guided[2] = 0.05;
-    e.document.edit.recipe_mut().upright.mode = UprightMode::Guided;
-    e.document.edit.recipe_mut().upright.corrections =
+    e.document.edit.setup_mut().upright.mode = UprightMode::Guided;
+    e.document.edit.setup_mut().upright.corrections =
         vec![identity, identity, identity, identity, identity, guided];
     // Update analyses the other modes; Lightroom's Guided correction survives.
     let (generation, _) = e.document.upright.start();
@@ -1847,7 +1859,7 @@ fn upright_analysis_stays_with_its_photo_and_keeps_imported_guided() {
     assert_eq!(e.document.edit.recipe().upright.corrections[5], guided);
     // Pasted onto another photo, the mode comes along but not the corrections: that
     // photo keeps its own, here none yet, for the editor to analyse.
-    e.document.edit.recipe_mut().upright.mode = UprightMode::Vertical;
+    e.document.edit.setup_mut().upright.mode = UprightMode::Vertical;
     e.document.metadata = Some(Metadata {
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
@@ -1865,13 +1877,13 @@ fn upright_analysis_yields_to_corrections_applied_meanwhile() {
     use crate::model::transform::UprightMode;
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    e.document.edit.recipe_mut().upright.mode = UprightMode::Level;
+    e.document.edit.setup_mut().upright.mode = UprightMode::Level;
     let (generation, _) = e.document.upright.start();
     let analysed = e.document.edit.recipe().clone();
     // A Lightroom preset with its own corrections lands before the analysis.
     let mut imported = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 6];
     imported[3][2] = 0.02;
-    e.document.edit.recipe_mut().upright.corrections = imported.clone();
+    e.document.edit.setup_mut().upright.corrections = imported.clone();
     e.upright_ready(
         generation,
         &analysed,
@@ -1902,7 +1914,7 @@ fn crop_tool_reads_each_photos_own_aspect() {
     editor.document.set_image(image);
     let open = |editor: &mut Editor, crop: [f32; 4]| {
         editor.view.tool = state::Tool::None;
-        editor.document.edit.recipe_mut().crop = crop;
+        editor.document.edit.setup_mut().crop = crop;
         editor.view.toggle(state::Tool::Crop);
         let frame = editor.begin_edit_frame();
         editor.finish_edit_frame(frame, &ctx);
@@ -1941,7 +1953,7 @@ fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::
     editor.module = Module::Develop;
     editor.document.catalog_photo = Some(id);
     editor.document.path = Some(photo.clone());
-    editor.document.edit.recipe_mut().exposure = 0.7;
+    editor.document.edit.setup_mut().exposure = 0.7;
     editor.document.edit.save_state_mut().mark_changed();
     editor.virtual_copy(library::CopyAction::Create(id));
     let library = editor.library.as_ref().unwrap();
@@ -1970,7 +1982,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
     let master = l.session.photos[0].id;
-    let copy = l.create_virtual_copy(master)?;
+    let copy = l.create_virtual_copy(master)?.value;
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
@@ -2012,7 +2024,7 @@ fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Re
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
-    let copy = l.create_virtual_copy(l.session.photos[0].id)?;
+    let copy = l.create_virtual_copy(l.session.photos[0].id)?.value;
     // A copy that is gone from the catalog cannot be renamed.
     l.session.catalog.remove_virtual_copy(copy)?;
     let mut editor =
@@ -2039,7 +2051,7 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
-    let copy = l.create_virtual_copy(l.session.photos[0].id)?;
+    let copy = l.create_virtual_copy(l.session.photos[0].id)?.value;
     l.set_copy_as_master(copy)?;
     let path = l.photo(copy).unwrap().path.clone();
     let mut editor =
@@ -2116,7 +2128,7 @@ fn undo_in_develop_reverses_the_flag_before_the_exposure() -> anyhow::Result<()>
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(d.path().join("photos/a.RAF"));
     let original = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 1.;
+    e.document.edit.setup_mut().exposure = 1.;
     e.commit_edit(original.clone(), None);
     e.library
         .as_mut()
@@ -2140,7 +2152,7 @@ fn undoing_a_history_click_returns_to_the_exact_step() {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     for exposure in [0.25, 0.5, 1.] {
         let before = e.document.edit.recipe().clone();
-        e.document.edit.recipe_mut().exposure = exposure;
+        e.document.edit.setup_mut().exposure = exposure;
         e.commit_edit(before, None);
     }
     // A click on the first state jumps three steps back as one command.
@@ -2179,12 +2191,12 @@ fn undoing_a_history_click_after_a_new_branch_restores_its_own_state() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let before = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 0.5;
+    e.document.edit.setup_mut().exposure = 0.5;
     e.commit_edit(before, None);
     // Click the opened state, then edit: History branches.
     assert!(e.document.edit.jump(0));
     let before = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 1.;
+    e.document.edit.setup_mut().exposure = 1.;
     e.commit_edit(before, None);
     e.undo();
     assert_eq!(e.document.edit.recipe().exposure, 0.);
@@ -2498,7 +2510,7 @@ fn paste_works_out_white_balance_for_this_camera_and_previous_pastes_the_last_ph
     editor.open_raw(other.clone(), None);
     editor.document.metadata = Some(first);
     editor.document.path = Some(other.clone());
-    editor.document.edit.recipe_mut().exposure = -1.;
+    editor.document.edit.setup_mut().exposure = -1.;
     editor.open_raw(other, None);
     editor.document.metadata = Some(second);
     editor.paste_previous();
@@ -2516,8 +2528,8 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     });
-    editor.document.edit.recipe_mut().exposure = 0.6;
-    editor.document.edit.recipe_mut().contrast = 0.3;
+    editor.document.edit.setup_mut().exposure = 0.6;
+    editor.document.edit.setup_mut().contrast = 0.3;
     editor.open_copy_dialog(settings_transfer::Transfer::Copy);
     // The dialog draws, with its buttons in view in the smallest window.
     for _ in 0..2 {
@@ -2552,7 +2564,7 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     };
     assert!(dialog.groups.contains(SettingGroup::Exposure));
     assert!(!dialog.groups.contains(SettingGroup::Contrast));
-    editor.document.edit.recipe_mut().exposure = -1.;
+    editor.document.edit.setup_mut().exposure = -1.;
     editor.close_copy_dialog(settings_transfer::CopyChoice::Cancel);
     editor.document.edit.replace(Recipe::default());
     editor.paste_settings();
@@ -2645,7 +2657,7 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
         scale_clipped: 0,
     }));
     let crop = [0.1, 0.2, 0.5, 0.6];
-    e.document.edit.recipe_mut().crop = crop;
+    e.document.edit.setup_mut().crop = crop;
     e.view.toggle(state::Tool::Crop);
     let ctx = e.context.clone();
     let press = |e: &mut Editor, key: egui::Key, shift: bool, typing: bool| {
@@ -2673,7 +2685,9 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
                     ui.text_edit_singleline(&mut text).request_focus();
                 }
                 e.metadata_shortcuts(&ctx);
+                let frame = e.begin_edit_frame();
                 e.develop_shortcuts(&ctx);
+                e.finish_edit_frame(frame, &ctx);
             });
             output.textures_delta.clear();
         }
@@ -2779,7 +2793,7 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
         scale_factor: 1.,
         scale_clipped: 0,
     }));
-    e.document.edit.recipe_mut().wb = [1.; 3];
+    e.document.edit.setup_mut().wb = [1.; 3];
     let upright = e.document.edit.recipe().upright.clone();
     let next = |e: &mut Editor| loop {
         match e.rx.recv_timeout(std::time::Duration::from_secs(30)) {
@@ -2798,18 +2812,18 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
     // Measured before the photo was turned: it is measured again, and nothing changes yet.
     let (generation, analysed, result) = next(&mut e);
     crate::develop::turn(
-        e.document.edit.recipe_mut(),
+        e.document.edit.setup_mut(),
         crate::develop::QuarterTurn::Right,
     );
     crate::develop::turn(
-        e.document.edit.recipe_mut(),
+        e.document.edit.setup_mut(),
         crate::develop::QuarterTurn::Left,
     );
-    e.document.edit.recipe_mut().flip_x = true;
+    e.document.edit.setup_mut().flip_x = true;
     e.auto_straighten_ready(generation, &analysed, result);
     assert_eq!(e.document.edit.recipe().straighten, 0.);
     assert!(e.document.straighten.is_running(), "measured again");
-    e.document.edit.recipe_mut().flip_x = false;
+    e.document.edit.setup_mut().flip_x = false;
     let (generation, analysed, result) = next(&mut e);
     e.auto_straighten_ready(generation, &analysed, result);
     // The stale analysis restarted once more for the flip back; take its result.
@@ -2845,7 +2859,9 @@ fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
                 },
                 |ui| {
                     ui.set_width(width);
+                    let frame = e.begin_edit_frame();
                     rect = ui.scope(|ui| e.tool_strip(ui)).response.rect;
+                    e.finish_edit_frame(frame, &ctx);
                 },
             );
             output.textures_delta.clear();
@@ -2879,7 +2895,7 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     editor.document.path = Some(photo);
     // A slider still held down when Left or Right leaves the photo.
     let frame = editor.document.edit.begin();
-    editor.document.edit.recipe_mut().exposure = 0.6;
+    editor.document.edit.setup_mut().exposure = 0.6;
     editor
         .document
         .edit
@@ -2896,7 +2912,7 @@ fn leaving_a_photo_mid_drag_saves_the_drag_as_a_history_step() -> anyhow::Result
     // A save that fails keeps the drag going, as one step.
     editor.document.catalog_photo = Some(PhotoId(id.0 + 1000));
     let frame = editor.document.edit.begin();
-    editor.document.edit.recipe_mut().exposure = 0.9;
+    editor.document.edit.setup_mut().exposure = 0.9;
     editor
         .document
         .edit
@@ -2914,7 +2930,7 @@ fn undo_during_a_drag_takes_back_the_drag_and_can_be_redone() {
     editor.module = Module::Develop;
     let edit = |editor: &mut Editor, exposure: f32, held: bool| {
         let frame = editor.document.edit.begin();
-        editor.document.edit.recipe_mut().exposure = exposure;
+        editor.document.edit.setup_mut().exposure = exposure;
         let gesture = if held {
             crate::edit_session::Gesture::Held
         } else {
@@ -2956,8 +2972,7 @@ fn guided_upright_gestures_are_one_history_step_each() {
         scale_clipped: 0,
     }));
     // The other modes analysed already, so the guides are solved at once.
-    e.document.edit.recipe_mut().upright.corrections =
-        vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
+    e.document.edit.setup_mut().upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
     e.view.tool = state::Tool::Guided;
     let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(600., 400.));
     let mut frame = |e: &mut Editor, events: Vec<egui::Event>| {
@@ -3056,7 +3071,7 @@ fn guided_upright_gestures_are_one_history_step_each() {
     // Leaving Guided by any route closes the tool, so a drag can't switch it back.
     e.view.tool = state::Tool::Guided;
     let edit = e.begin_edit_frame();
-    e.document.edit.recipe_mut().upright = Default::default();
+    e.document.edit.setup_mut().upright = Default::default();
     e.finish_edit_frame(edit, &ctx);
     assert!(!e.view.is(state::Tool::Guided));
 }
@@ -3102,7 +3117,11 @@ fn editor_with_blue_photo(
     (editor, image)
 }
 /// Runs `action` in an edit frame, as the panels and shortcuts do.
-fn in_edit_frame(ctx: &egui::Context, editor: &mut Editor, action: impl FnOnce(&mut Editor)) {
+pub(crate) fn in_edit_frame(
+    ctx: &egui::Context,
+    editor: &mut Editor,
+    action: impl FnOnce(&mut Editor),
+) {
     let frame = editor.begin_edit_frame();
     action(editor);
     editor.finish_edit_frame(frame, ctx);
@@ -3172,7 +3191,7 @@ fn v_converts_to_black_and_white_with_the_auto_mix_as_one_step() {
     // The B&W panel's Auto brings back the Auto mix after a slider moved, as one step.
     editor.redo();
     in_edit_frame(&ctx, &mut editor, |e| {
-        e.document.edit.recipe_mut().effects.gray_mix[3] = 0.6
+        e.document.edit.setup_mut().effects.gray_mix[3] = 0.6
     });
     in_edit_frame(&ctx, &mut editor, Editor::auto_black_white_mix);
     assert_eq!(editor.document.edit.recipe().effects.gray_mix, auto);
@@ -3226,7 +3245,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     editor.document.set_image(image);
     in_edit_frame(&ctx, &mut editor, |e| {
-        e.document.edit.recipe_mut().exposure = 0.3
+        e.document.edit.setup_mut().exposure = 0.3
     });
     assert!(!editor.document.edit.recipe().effects.monochrome);
     in_edit_frame(&ctx, &mut editor, |_| {});
@@ -3237,7 +3256,7 @@ fn converting_while_the_photo_decodes_waits_for_its_auto_mix() {
     let before_exposure = editor.document.edit.recipe().exposure;
     in_edit_frame(&ctx, &mut editor, Editor::toggle_treatment);
     in_edit_frame(&ctx, &mut editor, |e| {
-        e.document.edit.recipe_mut().exposure = 0.5
+        e.document.edit.setup_mut().exposure = 0.5
     });
     // Undone again before it decodes: the request still lapsed.
     in_edit_frame(&ctx, &mut editor, Editor::undo);
@@ -3285,7 +3304,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
             ),
         ],
     );
-    editor.document.edit.recipe_mut().exposure = 0.2;
+    editor.document.edit.setup_mut().exposure = 0.2;
     let frame = editor.begin_edit_frame();
     editor.apply_preset(0).unwrap();
     editor.finish_edit_frame(frame, &ctx);
@@ -3305,7 +3324,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert_eq!(steps[3].value, "50");
     // An Upright analysis landing meanwhile keeps the Amount, and the Amount keeps it.
     let analysed = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
-    editor.document.edit.recipe_mut().upright.corrections = analysed.clone();
+    editor.document.edit.setup_mut().upright.corrections = analysed.clone();
     let frame = editor.begin_edit_frame();
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_some());
@@ -3315,14 +3334,14 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     assert_eq!(editor.document.edit.recipe().upright.corrections, analysed);
     // A new Upright mode is an edit of its own.
     let frame = editor.begin_edit_frame();
-    editor.document.edit.recipe_mut().upright.mode = crate::model::transform::UprightMode::Level;
+    editor.document.edit.setup_mut().upright.mode = crate::model::transform::UprightMode::Level;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0).unwrap();
     // Any other edit ends it, as Lightroom hides the slider, even with the Presets
     // panel closed.
     let frame = editor.begin_edit_frame();
-    editor.document.edit.recipe_mut().vibrance = 0.1;
+    editor.document.edit.setup_mut().vibrance = 0.1;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     // A preset without an Amount shows none.
@@ -3353,7 +3372,7 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.set_preset_amount(0.5);
     editor.finish_edit_frame(frame, &ctx);
     let frame = editor.begin_edit_frame();
-    editor.document.edit.recipe_mut().exposure = 0.9;
+    editor.document.edit.setup_mut().exposure = 0.9;
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
     editor.apply_preset(0).unwrap();
@@ -3429,7 +3448,7 @@ fn scrolling_over_the_photo_resizes_the_brush_spot_and_red_eye_circle() {
     let brush = editor.view.masking.brushes[0];
     editor.scroll_tool_size(size(1.));
     assert_eq!(editor.view.masking.brushes[0], brush);
-    editor.document.edit.recipe_mut().masks = vec![MaskGroup {
+    editor.document.edit.setup_mut().masks = vec![MaskGroup {
         components: vec![MaskComponent::new(MaskShape::Brush {
             strokes: Vec::new(),
         })],
@@ -3519,7 +3538,7 @@ fn a_wheel_scroll_resizing_a_spot_is_one_history_step() {
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .retouch
         .push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,
@@ -3610,7 +3629,7 @@ fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .retouch
         .push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,
@@ -3632,7 +3651,7 @@ fn an_edit_right_after_a_wheel_scroll_is_its_own_history_step() {
     editor.finish_edit_frame(edit, &ctx);
     // At once, before the scroll pauses, a slider moves, naming its step.
     let edit = editor.begin_edit_frame();
-    editor.document.edit.recipe_mut().exposure = 0.5;
+    editor.document.edit.setup_mut().exposure = 0.5;
     ctx.data_mut(|d| {
         d.insert_temp(
             super::widgets::history_step_id(),
@@ -3654,7 +3673,7 @@ fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .retouch
         .push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,
@@ -3678,7 +3697,7 @@ fn a_wheel_scroll_is_its_own_step_however_late_the_next_frame_comes() {
     // The pause passes with no frame, then the next frame brings a slider change.
     std::thread::sleep(std::time::Duration::from_millis(450));
     let edit = editor.begin_edit_frame();
-    editor.document.edit.recipe_mut().exposure = 0.5;
+    editor.document.edit.setup_mut().exposure = 0.5;
     ctx.data_mut(|d| {
         d.insert_temp(
             super::widgets::history_step_id(),
@@ -3708,7 +3727,7 @@ fn a_wheel_scroll_closes_once_paused_even_while_a_button_goes_down() {
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .retouch
         .push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,
@@ -3757,7 +3776,7 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .retouch
         .push(crate::model::retouch::RetouchOp {
             mode: crate::model::retouch::RetouchMode::Heal,
@@ -3801,8 +3820,8 @@ fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
     let ctx = egui::Context::default();
     let (mut editor, _) =
         editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
-    editor.document.edit.recipe_mut().reference_curves = true;
-    editor.document.edit.recipe_mut().reference_color = true;
+    editor.document.edit.setup_mut().reference_curves = true;
+    editor.document.edit.setup_mut().reference_color = true;
     editor.view.mixer_tab = state::MixerTab::PointColor;
     editor.view.point_color.visualize = true;
     editor.view.toggle(state::Tool::PointColor);
@@ -3823,8 +3842,8 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     let (mut editor, _) =
         editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
     // The current process, which renders Point Color.
-    editor.document.edit.recipe_mut().reference_curves = true;
-    editor.document.edit.recipe_mut().reference_color = true;
+    editor.document.edit.setup_mut().reference_curves = true;
+    editor.document.edit.setup_mut().reference_color = true;
     editor.view.mixer_tab = state::MixerTab::PointColor;
     editor.view.toggle(state::Tool::PointColor);
     assert!(editor.view.picks_color());
@@ -3907,9 +3926,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
         |ui| editor.draw(ui),
     );
     output.textures_delta.clear();
-    editor.document.edit.recipe_mut().effects.monochrome = true;
+    editor.document.edit.setup_mut().effects.monochrome = true;
     assert_eq!(editor.visualized_swatch(), None);
-    editor.document.edit.recipe_mut().effects.monochrome = false;
+    editor.document.edit.setup_mut().effects.monochrome = false;
     // The preview's identity includes it, so a picker never takes it for the photo.
     editor.schedule();
     let pending = editor.preview.pending_recipe.as_ref().unwrap();
@@ -3939,9 +3958,9 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.module = Module::Library;
     assert_eq!(editor.visualized_swatch(), None);
     editor.module = Module::Develop;
-    editor.document.edit.recipe_mut().reference_curves = false;
+    editor.document.edit.setup_mut().reference_curves = false;
     assert_eq!(editor.visualized_swatch(), None);
-    editor.document.edit.recipe_mut().reference_curves = true;
+    editor.document.edit.setup_mut().reference_curves = true;
     // One History step, which Undo takes back.
     let mut recipe = editor.document.edit.recipe().clone();
     assert!(editor.document.edit.history_mut().undo(&mut recipe));
@@ -4018,7 +4037,7 @@ fn changing_a_setting_in_a_panel_that_is_off_turns_it_back_on() {
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     let frame = |editor: &mut Editor, edit: &dyn Fn(&mut crate::model::recipe::Recipe)| {
         let started = editor.begin_edit_frame();
-        edit(editor.document.edit.recipe_mut());
+        edit(editor.document.edit.setup_mut());
         editor.finish_edit_frame(started, &ctx);
     };
     frame(&mut editor, &|r| {
@@ -4468,7 +4487,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
         let last = i == ids.len() - 1;
         if last {
             // Adjusted on screen, not saved.
-            editor.document.edit.recipe_mut().exposure = -0.4;
+            editor.document.edit.setup_mut().exposure = -0.4;
         }
         let develop = dir.path().join(format!("develop/{i}.tif"));
         std::fs::create_dir_all(develop.parent().unwrap())?;
@@ -4605,12 +4624,12 @@ fn a_swatch_added_while_color_mixer_is_off_turns_it_on() {
     let ctx = egui::Context::default();
     let (mut editor, _) =
         editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
-    editor.document.edit.recipe_mut().reference_curves = true;
-    editor.document.edit.recipe_mut().reference_color = true;
+    editor.document.edit.setup_mut().reference_curves = true;
+    editor.document.edit.setup_mut().reference_color = true;
     editor
         .document
         .edit
-        .recipe_mut()
+        .setup_mut()
         .panels
         .set(Panel::ColorMixer, PanelState::Off);
     editor.view.mixer_tab = state::MixerTab::PointColor;
@@ -4668,7 +4687,7 @@ fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
     e.document.catalog_photo = Some(ids[0]);
     e.document.path = Some(path.clone());
     let before = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().exposure = 0.7;
+    e.document.edit.setup_mut().exposure = 0.7;
     e.commit_edit(before, None);
     assert!(e.document.edit.save_state().needs_save());
     eframe::App::on_exit(&mut e, None);
@@ -4710,15 +4729,93 @@ fn rating(editor: &Editor, id: PhotoId) -> i32 {
     editor.library.as_ref().unwrap().photo(id).unwrap().rating
 }
 #[test]
+fn moving_to_the_next_photo_mid_frame_edits_it_in_a_frame_of_its_own() -> anyhow::Result<()> {
+    // The editor frame's assertion stays on: the panels drawn after the
+    // filmstrip or a shortcut opened the next photo edit that photo.
+    let (_dir, ctx, mut editor, [a, b]) = two_photo_editor()?;
+    editor.module = Module::Develop;
+    editor.develop_catalog_photo(a);
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    };
+    for events in [vec![], vec![key(egui::Key::ArrowRight)], vec![]] {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1400., 900.))),
+                events,
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        output.textures_delta.clear();
+    }
+    assert_eq!(editor.document.catalog_photo, Some(b));
+    Ok(())
+}
+#[test]
+fn a_copy_removed_when_the_catalog_cannot_be_read_again_still_leaves_undo() -> anyhow::Result<()> {
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?.value;
+    library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
+    editor.sync_undo();
+    // Removing reads no collections; reading the catalog again does, and fails.
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .session
+        .catalog
+        .db_for_tests()
+        .execute_batch("ALTER TABLE collections RENAME TO collections_gone")?;
+    editor.remove_virtual_copy(copy);
+    let catalog = &editor.library.as_ref().unwrap().session.catalog;
+    assert!(
+        catalog.photos()?.iter().all(|p| p.id != copy),
+        "the copy is removed"
+    );
+    let status = editor.status.clone();
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .session
+        .catalog
+        .db_for_tests()
+        .execute_batch("ALTER TABLE collections_gone RENAME TO collections")?;
+    // The next copy, of B rated 2, is given the removed copy's id.
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
+    assert_eq!(again, copy);
+    assert_eq!(rating(&editor, again), 2);
+    editor.undo();
+    assert_eq!(rating(&editor, again), 2);
+    assert!(status.contains("could not be read again"), "{status}");
+    Ok(())
+}
+#[test]
 fn undo_never_writes_a_removed_copys_id_given_to_a_new_copy() -> anyhow::Result<()> {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(a)?;
+    let copy = library.create_virtual_copy(a)?.value;
     library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
     editor.sync_undo();
     editor.remove_virtual_copy(copy);
     // The catalog gives the removed copy's id to the next copy, of B, rated 2.
-    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
     assert_eq!(again, copy);
     assert_eq!(rating(&editor, again), 2);
     editor.undo();
@@ -4730,7 +4827,7 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
 {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(a)?;
+    let copy = library.create_virtual_copy(a)?.value;
     library.edit_photos(
         &[a, copy],
         crate::app::photo_metadata::Edit::Rating(4),
@@ -4741,7 +4838,12 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
     editor.undo();
     assert_eq!(rating(&editor, a), 0);
     editor.remove_virtual_copy(copy);
-    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
     assert_eq!(again, copy);
     // Redo rates A again and leaves the new copy as it was made.
     editor.redo();
@@ -4753,7 +4855,12 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
 fn a_rating_made_in_develop_on_a_removed_copy_still_undoes_the_photo_it_rated() -> anyhow::Result<()>
 {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
-    let copy = editor.library.as_mut().unwrap().create_virtual_copy(a)?;
+    let copy = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(a)?
+        .value;
     // The copy is open in Develop; the filmstrip menu rates B.
     editor.document.catalog_photo = Some(copy);
     editor.module = Module::Develop;
@@ -4794,7 +4901,7 @@ fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::
     // A copy shown keeps its saved name as the draft: nothing to save. A name
     // being typed is saved by the guard too.
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(id)?;
+    let copy = library.create_virtual_copy(id)?.value;
     let saved_name = library.photo(copy).unwrap().copy_name.clone();
     library.set_copy_name_draft(copy, &saved_name);
     assert!(!editor.quitting_would_cut_off_work());

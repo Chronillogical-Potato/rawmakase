@@ -286,7 +286,7 @@ impl Editor {
             }
         };
         if let Some(edit) = edit.filter(|e| *e != *self.document.edit.recipe()) {
-            self.document.edit.history_mut().label(Step::new(step, ""));
+            self.document.edit.name_next_step(Step::new(step, ""));
             self.document.edit.replace(edit);
             self.ensure_upright();
         }
@@ -641,8 +641,8 @@ mod tests {
     fn copying_before_to_after_and_swapping_are_history_steps() {
         let mut e = editor();
         let start = e.document.edit.recipe().clone();
-        e.document.edit.recipe_mut().exposure = 1.;
-        e.document.edit.recipe_mut().crop = [0.1, 0.1, 0.9, 0.9];
+        e.document.edit.setup_mut().exposure = 1.;
+        e.document.edit.setup_mut().crop = [0.1, 0.1, 0.9, 0.9];
         e.commit_edit(start, None);
         let edited = e.document.edit.recipe().clone();
         // After's settings to Before: the edit and its History are left as they are.
@@ -703,10 +703,10 @@ mod tests {
         let start = e.document.edit.recipe().clone();
         for value in [0.5, 1.] {
             let before = e.document.edit.recipe().clone();
-            e.document.edit.recipe_mut().exposure = value;
+            e.document.edit.setup_mut().exposure = value;
             e.commit_edit(before, None);
         }
-        e.document.edit.recipe_mut().straighten = 2.;
+        e.document.edit.setup_mut().straighten = 2.;
         assert_eq!(e.before_settings().exposure, start.exposure);
         assert_eq!(e.before_settings().straighten, 2.);
         // Copy History Step Settings to Before, from the first step.
@@ -732,7 +732,7 @@ mod tests {
         // again behind it.
         assert!(e.preview.before.task.is_running());
         let running = e.preview.before.task.id();
-        e.document.edit.recipe_mut().exposure = 0.5;
+        e.document.edit.setup_mut().exposure = 0.5;
         e.schedule();
         assert!(e.preview.before.task.id() > running);
         assert!(e.preview.before.submitted.is_some());
@@ -741,8 +741,8 @@ mod tests {
         e.preview.before.task.finish(rendered);
         let shown = e.before_settings();
         // Edits change After alone; Before is neither changed nor rendered again.
-        e.document.edit.recipe_mut().exposure = 1.;
-        e.document.edit.recipe_mut().contrast = 0.4;
+        e.document.edit.setup_mut().exposure = 1.;
+        e.document.edit.setup_mut().contrast = 0.4;
         e.schedule();
         assert_eq!(e.before_settings(), shown);
         assert_eq!(e.preview.before.task.id(), rendered);
@@ -754,7 +754,7 @@ mod tests {
         });
         assert_eq!(e.before_settings().crop, [0.1, 0.3, 0.6, 0.9]);
         e.presets.preview = None;
-        e.document.edit.recipe_mut().crop = [0.2, 0.2, 0.8, 0.8];
+        e.document.edit.setup_mut().crop = [0.2, 0.2, 0.8, 0.8];
         e.schedule();
         assert_eq!(e.before_settings().crop, e.document.edit.recipe().crop);
         assert_eq!(e.before_settings().exposure, shown.exposure);

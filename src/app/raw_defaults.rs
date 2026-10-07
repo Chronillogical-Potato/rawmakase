@@ -366,7 +366,7 @@ mod tests {
         editor.document.profiles = profiles(&m);
         editor.document.metadata = Some(m.clone());
         editor.raw_defaults = Arc::new(crate::raw_defaults::brighter_defaults());
-        editor.document.edit.recipe_mut().exposure = -1.;
+        editor.document.edit.setup_mut().exposure = -1.;
         editor.reset_settings();
         assert_eq!(editor.document.edit.recipe().exposure, 0.7);
         assert_eq!(
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(*editor.document.edit.recipe(), lightened);
         // Once edited and saved, the edit stays as it is.
         let before = editor.document.edit.recipe().clone();
-        editor.document.edit.recipe_mut().exposure = 0.5;
+        editor.document.edit.setup_mut().exposure = 0.5;
         editor.commit_edit(before, None);
         assert!(editor.flush());
         let edited = editor.document.edit.recipe().clone();

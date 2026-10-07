@@ -131,7 +131,6 @@ impl Editor {
         let mut commands: Vec<(u64, Command)> = self
             .document
             .edit
-            .history_mut()
             .take_recorded()
             .into_iter()
             .map(|change| {
@@ -182,6 +181,11 @@ impl Editor {
     /// its place; the rest of the drag becomes a step of its own.
     pub(super) fn finish_gesture(&mut self) {
         self.document.edit.finish_gesture();
+        self.sync_undo();
+    }
+    /// [`Self::finish_gesture`] for a gesture whose state was just saved.
+    pub(super) fn finish_saved_gesture(&mut self) {
+        self.document.edit.finish_saved_gesture();
         self.sync_undo();
     }
     /// Waits while Sync writes edits, which Undo could otherwise race.
@@ -337,7 +341,7 @@ impl Editor {
                         self.document.edit.set(target, step);
                     }
                     // Not a change of its own for the log.
-                    self.document.edit.history_mut().take_recorded();
+                    self.document.edit.take_recorded();
                     self.document.edit.save_state_mut().mark_changed();
                     self.ensure_upright();
                     self.schedule();
