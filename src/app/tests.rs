@@ -4762,6 +4762,14 @@ fn close_request() -> egui::RawInput {
     );
     input
 }
+#[test]
+fn quitting_waits_for_every_worker_it_stops() -> anyhow::Result<()> {
+    let (_d, mut e, _) = editor_with_catalog(&["a.RAF"])?;
+    let waited = e.exit_within(std::time::Duration::from_secs(20));
+    assert_eq!(waited.detached, 0);
+    assert!(waited.finished > 0);
+    Ok(())
+}
 /// A catalog of two photos, A and B, the latter rated 2, in an editor.
 fn two_photo_editor() -> anyhow::Result<(tempfile::TempDir, egui::Context, Editor, [PhotoId; 2])> {
     let dir = tempfile::tempdir()?;

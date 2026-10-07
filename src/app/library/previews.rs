@@ -9,8 +9,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender},
     },
+    thread::JoinHandle,
 };
 
 pub(super) struct PreviewResult {
@@ -19,20 +21,24 @@ pub(super) struct PreviewResult {
     pub cache_error: Option<String>,
 }
 
+/// A preview worker: where its jobs go, where its results come back, and its thread.
+pub(super) type Worker<J, R> = (J, Receiver<R>, JoinHandle<()>);
+
+/// The thumbnail worker, which ends once its requests or its results are dropped.
 pub(super) fn spawn(
     cache_path: PathBuf,
     ctx: egui::Context,
-) -> (SyncSender<PathBuf>, Receiver<PreviewResult>) {
+) -> Worker<SyncSender<PathBuf>, PreviewResult> {
     spawn_with(cache_path, ctx, super::thumbnail)
 }
 fn spawn_with(
     cache_path: PathBuf,
     ctx: egui::Context,
     thumbnail: fn(&Path) -> anyhow::Result<image::RgbImage>,
-) -> (SyncSender<PathBuf>, Receiver<PreviewResult>) {
+) -> Worker<SyncSender<PathBuf>, PreviewResult> {
     let (tx, rx) = mpsc::sync_channel::<PathBuf>(24);
     let (result_tx, result_rx) = mpsc::sync_channel(24);
-    std::thread::spawn(move || {
+    let thread = std::thread::spawn(move || {
         let open = || match PreviewCache::open(&cache_path) {
             Ok(cache) => (Some(cache), None),
             Err(error) => (None, Some(error.to_string())),
@@ -79,7 +85,7 @@ fn spawn_with(
             ctx.request_repaint();
         }
     });
-    (tx, result_rx)
+    (tx, result_rx, thread)
 }
 
 /// What an edited preview is rendered from.
@@ -149,29 +155,37 @@ pub(super) enum EditResult {
     /// A preview could not be kept in the cache; it comes besides any result.
     CacheError(String),
 }
+/// Renders a 640 px edited preview, giving up once the flag is set.
+type RenderEdited = fn(&Path, &EditSource, &AtomicBool) -> anyhow::Result<image::RgbImage>;
 /// Edited previews on their own worker, so slow renders never delay the
 /// embedded previews that fill the grid first. The latest request goes
 /// first, and renders run on two threads so browsing stays responsive.
+/// Setting `closed` cancels the render under way and ends the worker.
 pub(super) fn spawn_edited(
     cache_path: PathBuf,
     wanted: Wanted,
+    closed: Arc<AtomicBool>,
     ctx: egui::Context,
-) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
-    spawn_edited_with(cache_path, wanted, ctx, render_edited)
+) -> Worker<mpsc::Sender<EditJob>, EditResult> {
+    spawn_edited_with(cache_path, wanted, closed, ctx, render_edited)
 }
 fn spawn_edited_with(
     cache_path: PathBuf,
     wanted: Wanted,
+    closed: Arc<AtomicBool>,
     ctx: egui::Context,
-    render_edited: fn(&Path, &EditSource) -> anyhow::Result<image::RgbImage>,
-) -> (mpsc::Sender<EditJob>, Receiver<EditResult>) {
+    render_edited: RenderEdited,
+) -> Worker<mpsc::Sender<EditJob>, EditResult> {
     let (tx, rx) = mpsc::channel::<EditJob>();
     let (result_tx, result_rx) = mpsc::channel();
-    crate::raw::spawn_background(move || {
+    let thread = crate::raw::spawn_background(move || {
         let pool = crate::raw::background_pool(2, "edited-preview").ok();
         let mut cache = PreviewCache::open(&cache_path).ok();
         let mut queue = Vec::new();
         loop {
+            if closed.load(Ordering::Relaxed) {
+                break;
+            }
             if queue.is_empty() {
                 match rx.recv() {
                     Ok(job) => queue.push(job),
@@ -213,7 +227,7 @@ fn spawn_edited_with(
                         .and_then(|c| c.load_tagged(&path, &tag).ok().flatten());
                     let image = cached.or_else(|| {
                         let stamp = Stamp::read(&path).ok()?;
-                        let render = || render_edited(&path, &source);
+                        let render = || render_edited(&path, &source, &closed);
                         let image = match &pool {
                             Some(pool) => pool.install(render),
                             None => render(),
@@ -247,15 +261,19 @@ fn spawn_edited_with(
             ctx.request_repaint();
         }
     });
-    (tx, result_rx)
+    (tx, result_rx, thread)
 }
 /// A 640 px preview of `path` developed with `source`, from the fast
 /// half-size decode.
-fn render_edited(path: &Path, source: &EditSource) -> anyhow::Result<image::RgbImage> {
+fn render_edited(
+    path: &Path,
+    source: &EditSource,
+    cancel: &AtomicBool,
+) -> anyhow::Result<image::RgbImage> {
     let raw = crate::photo::open(path)?;
     let recipe = EditSource::recipe(Some(source), &raw)?;
-    let cancel = std::sync::atomic::AtomicBool::new(false);
-    let image = raw.develop(crate::camera_data::Decode::Half, &cancel)?;
+    let image = raw.develop(crate::camera_data::Decode::Half, cancel)?;
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     let out = crate::develop::render(&image, &recipe.checked()?, 640)?;
     image::RgbImage::from_raw(out.width, out.height, out.rgb8())
         .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))
@@ -342,14 +360,14 @@ mod tests {
         let source = directory.path().join("photo.png");
         image::RgbImage::new(720, 480).save(&source)?;
         let cache_path = directory.path().join("previews.sqlite3");
-        let (tx, rx) = spawn(cache_path.clone(), egui::Context::default());
+        let (tx, rx, _) = spawn(cache_path.clone(), egui::Context::default());
         tx.try_send(source.clone())?;
         let result = rx.recv_timeout(Duration::from_secs(10))?;
         assert_eq!(result.image.unwrap().dimensions(), (640, 427));
         assert!(result.cache_error.is_none());
         // Reopen through another worker: a memory-only result cannot pass this.
         std::fs::remove_file(&source)?;
-        let (tx, rx) = spawn(cache_path, egui::Context::default());
+        let (tx, rx, _) = spawn(cache_path, egui::Context::default());
         tx.try_send(source.clone())?;
         let result = rx.recv_timeout(Duration::from_secs(10))?;
         assert_eq!(result.path, source);
@@ -369,7 +387,7 @@ mod tests {
             assert!(!path.ends_with("panics.png"), "thumbnail panics");
             Ok(image::open(path)?.to_rgb8())
         }
-        let (tx, rx) = spawn_with(
+        let (tx, rx, _) = spawn_with(
             directory.path().join("previews.sqlite3"),
             egui::Context::default(),
             thumbnail,
@@ -392,15 +410,16 @@ mod tests {
         for path in [&panics, &works] {
             image::RgbImage::new(16, 16).save(path)?;
         }
-        fn render(path: &Path, _: &EditSource) -> anyhow::Result<image::RgbImage> {
+        fn render(path: &Path, _: &EditSource, _: &AtomicBool) -> anyhow::Result<image::RgbImage> {
             assert!(!path.ends_with("panics.png"), "render panics");
             Ok(image::open(path)?.to_rgb8())
         }
         let wanted = Wanted::default();
         wanted.lock().unwrap().extend([PhotoId(1), PhotoId(2)]);
-        let (tx, rx) = spawn_edited_with(
+        let (tx, rx, _) = spawn_edited_with(
             directory.path().join("previews.sqlite3"),
             wanted,
+            Arc::default(),
             egui::Context::default(),
             render,
         );
@@ -429,9 +448,10 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let source = directory.path().join("photo.png");
         image::RgbImage::new(16, 16).save(&source)?;
-        let (tx, rx) = spawn_edited(
+        let (tx, rx, _) = spawn_edited(
             directory.path().join("previews.sqlite3"),
             Wanted::default(),
+            Arc::default(),
             egui::Context::default(),
         );
         // Larger than the cache keeps.
@@ -453,7 +473,7 @@ mod tests {
         let source = directory.path().join("photo.png");
         image::RgbImage::new(16, 16).save(&source)?;
         // A directory cannot be opened as a SQLite database.
-        let (tx, rx) = spawn(directory.path().into(), egui::Context::default());
+        let (tx, rx, _) = spawn(directory.path().into(), egui::Context::default());
         let mut progress = Progress::default();
         for path in [source, directory.path().join("missing.ARW")] {
             tx.try_send(path)?;
@@ -475,6 +495,57 @@ mod tests {
             (progress.completed, progress.total, progress.failed),
             (0, 1, 0)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn closing_cancels_the_edited_preview_under_way() -> anyhow::Result<()> {
+        static STARTED: AtomicBool = AtomicBool::new(false);
+        fn render(
+            _: &Path,
+            _: &EditSource,
+            cancel: &AtomicBool,
+        ) -> anyhow::Result<image::RgbImage> {
+            STARTED.store(true, Ordering::Relaxed);
+            // A render that only a cancel ends.
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            anyhow::bail!("Cancelled")
+        }
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("photo.png");
+        image::RgbImage::new(16, 16).save(&source)?;
+        let wanted = Wanted::default();
+        wanted.lock().unwrap().insert(PhotoId(1));
+        let closed = Arc::<AtomicBool>::default();
+        let (tx, rx, thread) = spawn_edited_with(
+            directory.path().join("previews.sqlite3"),
+            wanted,
+            closed.clone(),
+            egui::Context::default(),
+            render,
+        );
+        let job = |ticket| EditJob::Render {
+            id: PhotoId(1),
+            ticket,
+            path: source.clone(),
+            source: EditSource::Recipe("{}".into()),
+        };
+        tx.send(job(0))?;
+        let started = std::time::Instant::now();
+        while !STARTED.load(Ordering::Relaxed) {
+            assert!(started.elapsed() < Duration::from_secs(20));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // Queued behind it, and never rendered.
+        tx.send(job(1))?;
+        closed.store(true, Ordering::Relaxed);
+        let stopping = crate::app::task::Stopping::new(Some(thread));
+        let waited = crate::app::task::wait_for(vec![stopping], Duration::from_secs(20));
+        assert_eq!(waited.detached, 0);
+        assert!(matches!(rx.try_recv(), Ok(EditResult::Failed)));
+        assert!(rx.try_recv().is_err());
         Ok(())
     }
 }

@@ -30,6 +30,10 @@ impl Automation {
     pub(super) fn cancel_outputs(&self) {
         self.outputs.cancel_all();
     }
+    /// The export and preview jobs commands started, cancelled, to wait for at exit.
+    pub(super) fn stop_outputs(&mut self) -> Vec<super::task::Stopping> {
+        self.outputs.stop()
+    }
 }
 pub(super) use parameter::Param;
 pub(super) use preset::PresetTarget;

@@ -25,7 +25,8 @@ impl Editor {
     pub(super) fn exit_within(&mut self, deadline: Duration) -> task::Waited {
         let until = Instant::now() + deadline;
         self.cancel_jobs();
-        let stopping = self.stop_workers();
+        self.close_channels();
+        let mut stopping = self.stop_workers();
         // Nothing but the terminal is left to say so in: the edit stays as autosave
         // last saved it.
         match self.flush_by(until) {
@@ -37,6 +38,8 @@ impl Editor {
             ),
         }
         self.remember_place(super::workspace::LayoutEdit::Settled);
+        // Only now: the save went through it.
+        stopping.push(self.autosave.close());
         task::wait_for(stopping, until.saturating_duration_since(Instant::now()))
     }
     /// Every job in progress stops at its next check.
@@ -48,13 +51,24 @@ impl Editor {
         self.prefetch_cancel.store(true, Ordering::Relaxed);
         self.automation.cancel_outputs();
     }
+    /// Drops the channel ends workers wait on, so none waits for the interface.
+    fn close_channels(&mut self) {
+        self.updates.close();
+        self.controls.close_requests();
+    }
     /// The workers the exit sequence waits for, asked to stop.
     fn stop_workers(&mut self) -> Vec<task::Stopping> {
-        vec![
-            self.loader.stop(),
+        let mut stopping = Vec::from(self.loader.stop());
+        stopping.extend([
             self.renderer.stop(),
             self.reference_loader.stop(),
             task::Stopping::new(self.exports.close()),
-        ]
+        ]);
+        stopping.extend(self.automation.stop_outputs());
+        stopping.extend(self.controls.stop());
+        if let Some(library) = &mut self.library {
+            stopping.extend(library.close_previews());
+        }
+        stopping
     }
 }

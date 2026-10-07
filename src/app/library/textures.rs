@@ -8,7 +8,12 @@ use eframe::egui;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, Sender, SyncSender},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender, SyncSender},
+    },
+    thread::JoinHandle,
 };
 
 /// Textures kept per cache; older ones are dropped first.
@@ -42,14 +47,20 @@ pub(super) struct PreviewTextures {
     /// Photos one view shows at once, e.g. a large survey; never fewer
     /// textures are kept, so none is dropped while it is shown.
     pub(super) shown_at_once: usize,
+    /// Cancels the edited preview being rendered, and ends its worker.
+    edit_closed: Arc<AtomicBool>,
+    /// The two workers, to wait for at exit.
+    threads: [Option<JoinHandle<()>>; 2],
 }
 impl PreviewTextures {
     /// Starts both preview workers on the shared disk cache.
     pub(super) fn new(ctx: &egui::Context) -> Self {
         let cache = crate::catalog::preview_cache::PreviewCache::path();
-        let (thumb_tx, thumb_rx) = previews::spawn(cache.clone(), ctx.clone());
+        let (thumb_tx, thumb_rx, thumbs) = previews::spawn(cache.clone(), ctx.clone());
         let edit_wanted = Wanted::default();
-        let (edit_tx, edit_rx) = previews::spawn_edited(cache, edit_wanted.clone(), ctx.clone());
+        let edit_closed = Arc::<AtomicBool>::default();
+        let (edit_tx, edit_rx, edits) =
+            previews::spawn_edited(cache, edit_wanted.clone(), edit_closed.clone(), ctx.clone());
         Self {
             thumbs: HashMap::new(),
             thumb_order: VecDeque::new(),
@@ -68,7 +79,21 @@ impl PreviewTextures {
             edited_order: VecDeque::new(),
             progress: Progress::default(),
             shown_at_once: 0,
+            edit_closed,
+            threads: [Some(thumbs), Some(edits)],
         }
+    }
+    /// Cancels the edited preview being rendered and drops both workers' channels,
+    /// so neither waits for the grid; the workers are then waited for at exit.
+    pub(super) fn close(&mut self) -> [crate::app::task::Stopping; 2] {
+        self.edit_closed.store(true, Ordering::Relaxed);
+        self.thumb_tx = mpsc::sync_channel(0).0;
+        self.thumb_rx = mpsc::sync_channel(0).1;
+        self.edit_tx = mpsc::channel().0;
+        self.edit_rx = mpsc::channel().1;
+        self.threads
+            .each_mut()
+            .map(|thread| crate::app::task::Stopping::new(thread.take()))
     }
     /// Takes every finished preview. Drain in every workspace so the bounded
     /// worker never waits for the grid.

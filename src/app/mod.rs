@@ -7,7 +7,7 @@
 //!
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
-use crate::app::worker::{Event, Latest, LoadJob};
+use crate::app::worker::{Event, Latest};
 use crate::catalog::PhotoId;
 #[cfg(test)]
 use crate::model::recipe::Recipe;
@@ -31,7 +31,7 @@ pub(crate) struct Editor {
     module: Module,
     tx: Sender<Event>,
     rx: Receiver<Event>,
-    loader: Latest<LoadJob>,
+    loader: worker::Loader,
     renderer: worker::Renderer,
     /// Develop's Reference View, and the worker developing its photo.
     reference: reference::ReferenceView,
@@ -188,7 +188,7 @@ impl Editor {
         );
         let last = session.last_path.clone().filter(|p| p.exists());
         let (tx, rx) = mpsc::channel();
-        let loader = worker::loader(tx.clone(), ctx.clone());
+        let loader = worker::Loader::new(tx.clone(), ctx.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
         let mut app = Self {

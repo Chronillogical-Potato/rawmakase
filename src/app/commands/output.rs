@@ -34,6 +34,7 @@ pub(in crate::app) struct OutputState {
 struct Job {
     state: Arc<Mutex<OutputState>>,
     cancel: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 #[derive(Default)]
 pub(super) struct Outputs {
@@ -75,6 +76,14 @@ impl Outputs {
         for job in self.jobs.values() {
             job.cancel.store(true, Ordering::Relaxed);
         }
+    }
+    /// Cancels every job still running, to wait for at exit.
+    pub(in crate::app) fn stop(&mut self) -> Vec<crate::app::task::Stopping> {
+        self.cancel_all();
+        self.jobs
+            .values_mut()
+            .map(|job| crate::app::task::Stopping::new(job.thread.take()))
+            .collect()
     }
     pub(crate) fn state(&self, id: u64) -> Result<OutputState> {
         self.jobs
@@ -158,7 +167,7 @@ impl Outputs {
         let state = Arc::new(Mutex::new(initial.clone()));
         let cancel = Arc::new(AtomicBool::new(false));
         let (report, stop) = (state.clone(), cancel.clone());
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("control-output".into())
             .spawn(move || {
                 let settings = ExportSettings {
@@ -193,7 +202,14 @@ impl Outputs {
                 ctx.request_repaint();
             })
             .map_err(|e| Error::new("start_failed", e.to_string()))?;
-        self.jobs.insert(id, Job { state, cancel });
+        self.jobs.insert(
+            id,
+            Job {
+                state,
+                cancel,
+                thread: Some(thread),
+            },
+        );
         Ok(initial)
     }
 }

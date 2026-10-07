@@ -105,6 +105,12 @@ impl Updates {
             !self.dismissed && self.skipped.as_deref() != Some(release.version.as_str())
         })
     }
+    /// Drops the update checker's channels at exit. It ends after the request it is
+    /// working on; a download cannot be cancelled, so it is not waited for.
+    pub(super) fn close(&mut self) {
+        self.requests = None;
+        self.replies = None;
+    }
     fn send(&self, request: Request) {
         if let Some(requests) = &self.requests {
             let _ = requests.send(request);

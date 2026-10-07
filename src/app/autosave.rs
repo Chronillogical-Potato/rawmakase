@@ -54,6 +54,8 @@ type Saver = fn(&mut Option<Catalog>, &Job) -> anyhow::Result<PathBuf>;
 struct Worker {
     jobs: Sender<Job>,
     completions: Receiver<Completion>,
+    /// None in tests that stand in for a worker.
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 pub(super) struct Autosave {
@@ -82,10 +84,14 @@ impl Autosave {
             let spawned = std::thread::Builder::new()
                 .name("autosave".into())
                 .spawn(move || run(rx, tx, ctx, saver));
-            if spawned.is_err() {
+            let Ok(thread) = spawned else {
                 return Err(Box::new(job));
-            }
-            self.worker = Some(Worker { jobs, completions });
+            };
+            self.worker = Some(Worker {
+                jobs,
+                completions,
+                thread: Some(thread),
+            });
         }
         let worker = self.worker.as_ref().expect("started above");
         if let Err(mpsc::SendError(job)) = worker.jobs.send(job) {
@@ -97,6 +103,13 @@ impl Autosave {
     }
     pub(crate) fn busy(&self) -> bool {
         self.in_flight
+    }
+    /// Drops the saver's channels at exit: it ends once the save in flight, if any,
+    /// is written, and is then waited for.
+    pub(super) fn close(&mut self) -> super::task::Stopping {
+        self.in_flight = false;
+        let thread = self.worker.take().and_then(|worker| worker.thread);
+        super::task::Stopping::new(thread)
     }
     /// The finished save, if one finished.
     pub(crate) fn poll(&mut self) -> Option<Completion> {
@@ -256,7 +269,11 @@ mod tests {
         let (jobs, _) = mpsc::channel();
         let (_, completions) = mpsc::channel();
         let mut autosave = Autosave {
-            worker: Some(Worker { jobs, completions }),
+            worker: Some(Worker {
+                jobs,
+                completions,
+                thread: None,
+            }),
             in_flight: true,
             saver: panics_on_photo_one,
         };
@@ -274,7 +291,11 @@ mod tests {
         let (jobs, _) = mpsc::channel();
         let (_, completions) = mpsc::channel();
         let mut autosave = Autosave {
-            worker: Some(Worker { jobs, completions }),
+            worker: Some(Worker {
+                jobs,
+                completions,
+                thread: None,
+            }),
             in_flight: true,
             saver: save,
         };

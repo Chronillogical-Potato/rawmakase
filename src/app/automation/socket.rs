@@ -257,15 +257,17 @@ fn spawn(
     tx: Sender<Msg>,
     ctx: egui::Context,
     stop: Arc<AtomicBool>,
-) -> std::io::Result<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("control-socket".into())
         .spawn(move || {
             let clients = Arc::new(AtomicUsize::new(0));
+            let mut connections = Vec::new();
             for stream in listener.incoming().flatten() {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
+                connections.retain(|c: &std::thread::JoinHandle<()>| !c.is_finished());
                 if clients.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
                     clients.fetch_sub(1, Ordering::SeqCst);
                     continue;
@@ -284,12 +286,19 @@ fn spawn(
                         serve(stream, &token, &tx, &ctx, &stop);
                         clients.fetch_sub(1, Ordering::SeqCst);
                     });
-                if spawned.is_err() {
-                    count.fetch_sub(1, Ordering::SeqCst);
+                match spawned {
+                    Ok(connection) => connections.push(connection),
+                    Err(_) => {
+                        count.fetch_sub(1, Ordering::SeqCst);
+                    }
                 }
             }
+            // Bounded once stopped: each connection's reply comes at once from the
+            // closed request queue, and its reads and writes time out.
+            for connection in connections {
+                let _ = connection.join();
+            }
         })
-        .map(drop)
 }
 fn new_token() -> std::io::Result<String> {
     let mut bytes = [0u8; 32];
@@ -323,14 +332,29 @@ pub(super) struct Handle {
     port: u16,
     token: String,
     path: std::path::PathBuf,
+    /// The listener, which ends after the connections it accepted.
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Handle {
+    /// Stops accepting connections, to wait for at exit. The listener sees the stop
+    /// on the wake-up connection made here; should that fail, it is never woken,
+    /// and is left to end with the process.
+    pub(in crate::app) fn stop(&mut self) -> crate::app::task::Stopping {
+        self.signal_stop();
+        crate::app::task::Stopping::new(self.thread.take())
+    }
+    fn signal_stop(&self) {
+        if !self.stop.swap(true, Ordering::SeqCst) {
+            let _ = TcpStream::connect_timeout(
+                &(Ipv4Addr::LOCALHOST, self.port).into(),
+                Duration::from_millis(100),
+            );
+        }
+    }
 }
 impl Drop for Handle {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        let _ = TcpStream::connect_timeout(
-            &(Ipv4Addr::LOCALHOST, self.port).into(),
-            Duration::from_millis(100),
-        );
+        self.signal_stop();
         let ours = std::fs::read_to_string(&self.path)
             .ok()
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
@@ -359,13 +383,15 @@ fn start_at(
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
     write_connection(&path, port, &token)?;
-    let handle = Handle {
+    // Made first, so that a listener that cannot start removes the connection file.
+    let mut handle = Handle {
         stop: stop.clone(),
         port,
         token: token.clone(),
         path,
+        thread: None,
     };
-    spawn(listener, token, tx, ctx, stop)?;
+    handle.thread = Some(spawn(listener, token, tx, ctx, stop)?);
     Ok(handle)
 }
 
@@ -608,5 +634,36 @@ mod tests {
         drop(handle);
         assert!(!path.exists());
         assert!(stop.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_stopped_listener_ends_after_the_connection_it_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::sync_channel(2);
+        let mut handle = start_at(
+            tx,
+            egui::Context::default(),
+            dir.path().join("control.json"),
+        )
+        .unwrap();
+        // A client whose request waits in the queue for the interface's reply.
+        let port = handle.port;
+        let token = handle.token.clone();
+        let client = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            writeln!(stream, r#"{{"token":"{token}","cmd":"state"}}"#).unwrap();
+            let mut reply = String::new();
+            let _ = BufReader::new(stream).read_line(&mut reply);
+            reply
+        });
+        let queued = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let stopping = handle.stop();
+        // Closing the queue answers the request at once.
+        drop(queued);
+        drop(rx);
+        let waited = crate::app::task::wait_for(vec![stopping], Duration::from_secs(10));
+        assert_eq!(waited.detached, 0);
+        let reply: Value = serde_json::from_str(&client.join().unwrap()).unwrap();
+        assert_eq!(reply["ok"], false);
     }
 }
