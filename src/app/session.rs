@@ -15,6 +15,9 @@ pub(crate) struct Session {
     /// others: "develop-left", "develop-right", "library-left", "library-right".
     #[serde(default)]
     pub solo: std::collections::BTreeSet<String>,
+    /// The panels Develop and the Library show; all of them by default.
+    #[serde(default, deserialize_with = "crate::app::panels::lenient")]
+    pub panels: crate::app::panels::WorkspacePanels,
     /// The first-run setup was completed; until then it opens on launch.
     #[serde(default)]
     pub onboarding_done: bool,

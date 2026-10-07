@@ -1,5 +1,6 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
+use super::panels::WorkspacePanel;
 use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
 use super::workflow::Flushed;
@@ -63,6 +64,9 @@ impl Editor {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
             self.preferences_shortcut(&ctx);
+            if !self.onboarding.visible && !self.activity.is_busy() {
+                self.panel_keys(&ctx);
+            }
         }
         self.workspace_bar(ui);
         // A file dialog or a running Sync: nothing behind them takes clicks, so no
@@ -84,11 +88,17 @@ impl Editor {
             // the photo and the adjustments only. Each part may open another
             // photo; what follows edits that one.
             self.follow_edit_frame(&mut frame);
-            self.status_bar(ui);
-            self.filmstrip(ui);
-            self.follow_edit_frame(&mut frame);
-            self.develop_left_panel(ui);
-            self.follow_edit_frame(&mut frame);
+            self.bottom_edge(ui);
+            if self.panel_shown(WorkspacePanel::Filmstrip) {
+                self.status_bar(ui);
+                self.filmstrip(ui);
+                self.follow_edit_frame(&mut frame);
+            }
+            self.side_edges(ui);
+            if self.panel_shown(WorkspacePanel::Left) {
+                self.develop_left_panel(ui);
+                self.follow_edit_frame(&mut frame);
+            }
             self.toolbar(ui);
             self.follow_edit_frame(&mut frame);
             self.develop_panels(ui);
@@ -532,49 +542,79 @@ impl Editor {
                 None => {}
             }
         }
-        egui::Panel::bottom("library-status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(work) = &self.catalog_work {
-                    ui.add(egui::Spinner::new().size(11.));
-                    ui.small(work);
-                } else {
-                    let shown = self
-                        .library
-                        .as_ref()
-                        .filter(|l| !l.message.is_empty())
-                        .map_or(self.status.as_str(), |l| l.message.as_str());
-                    status_text(ui, shown, self.message_detail(shown), None);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let toggle = ui
-                        .checkbox(
-                            &mut self.auto_advance,
-                            egui::RichText::new("Auto Advance").small(),
-                        )
-                        .on_hover_text(
-                            "Photo > Auto Advance: a rating, flag or label moves on to the next photo",
-                        );
-                    if toggle.changed() {
-                        let _ = self.save_session();
-                    }
-                    if let Some(library) = &self.library
-                        && library.preview_progress_active()
-                    {
-                        library.preview_progress(ui);
-                    }
-                });
-            });
-        });
+        self.bottom_edge(ui);
+        let filmstrip = self.panel_shown(WorkspacePanel::Filmstrip);
+        if filmstrip {
+            self.library_status_bar(ui);
+        }
         let mut action = crate::app::library::Action::None;
         // The filmstrip runs the window's width, under both side panels, as
-        // in Develop.
+        // in Develop. Hidden, the views are still brought up to date.
         if let Some(library) = &mut self.library {
-            action = library.library_filmstrip(ui);
+            action = if filmstrip {
+                library.library_filmstrip(ui)
+            } else {
+                library.prepare(ui.ctx());
+                crate::app::library::Action::None
+            };
         }
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         if develops != self.loupe_tried {
             self.loupe_tried = None;
         }
+        self.side_edges(ui);
+        if self.panel_shown(WorkspacePanel::Left) {
+            action = action.then(self.library_left_panel(ui, develops));
+        }
+        if self.panel_shown(WorkspacePanel::Right) {
+            action = action.then(self.library_right_panel(ui));
+        }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new())
+            .show(ui, |ui| {
+                if let Some(l) = &mut self.library {
+                    action = action.then(l.grid(ui, &mut self.view.zoom));
+                    if let Some(id) = l.loupe_develops() {
+                        self.loupe_viewport(ui, id);
+                    }
+                } else {
+                    ui.centered_and_justified(|ui| {
+                        ui.label("Your photographs, folders and collections");
+                    });
+                }
+            });
+        // A click in the view, drawn after the strip, shows there next frame.
+        // A hidden strip has nothing to catch up on.
+        if filmstrip && self.library.as_ref().is_some_and(|l| l.filmstrip_behind()) {
+            crate::app::library::filmstrip::redraw(
+                &ctx,
+                "the view changed what the filmstrip shows",
+            );
+        }
+        if !self.activity.is_busy() {
+            match action {
+                crate::app::library::Action::Develop(id) => self.develop_catalog_photo(id),
+                crate::app::library::Action::RelinkRoot(id) => {
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), &ctx)
+                }
+                crate::app::library::Action::RelinkFolder(id) => {
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), &ctx)
+                }
+                crate::app::library::Action::AddFolder => {
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx)
+                }
+                crate::app::library::Action::None => {}
+            }
+        }
+    }
+    /// The Library's left panel: Export…, the Loupe's Navigator, folders and
+    /// collections.
+    fn library_left_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        develops: Option<PhotoId>,
+    ) -> crate::app::library::Action {
+        let mut action = crate::app::library::Action::None;
         egui::Panel::left("library-sidebar")
             .default_size(260.)
             .min_size(180.)
@@ -639,6 +679,11 @@ impl Editor {
                     ui.label("Create an RAWmakase catalog or import a Lightroom catalog from the Catalog menu.");
                 }
             });
+        action
+    }
+    /// The Library's right panel: the active photo's info and metadata.
+    fn library_right_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
+        let mut action = crate::app::library::Action::None;
         egui::Panel::right("library-info")
             .default_size(270.)
             .min_size(220.)
@@ -652,42 +697,42 @@ impl Editor {
                     action = action.then(library.info_panel(ui));
                 }
             });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new())
-            .show(ui, |ui| {
-                if let Some(l) = &mut self.library {
-                    action = action.then(l.grid(ui, &mut self.view.zoom));
-                    if let Some(id) = l.loupe_develops() {
-                        self.loupe_viewport(ui, id);
-                    }
+        action
+    }
+    fn library_status_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("library-status").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(work) = &self.catalog_work {
+                    ui.add(egui::Spinner::new().size(11.));
+                    ui.small(work);
                 } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Your photographs, folders and collections");
-                    });
+                    let shown = self
+                        .library
+                        .as_ref()
+                        .filter(|l| !l.message.is_empty())
+                        .map_or(self.status.as_str(), |l| l.message.as_str());
+                    status_text(ui, shown, self.message_detail(shown), None);
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let toggle = ui
+                        .checkbox(
+                            &mut self.auto_advance,
+                            egui::RichText::new("Auto Advance").small(),
+                        )
+                        .on_hover_text(
+                            "Photo > Auto Advance: a rating, flag or label moves on to the next photo",
+                        );
+                    if toggle.changed() {
+                        let _ = self.save_session();
+                    }
+                    if let Some(library) = &self.library
+                        && library.preview_progress_active()
+                    {
+                        library.preview_progress(ui);
+                    }
+                });
             });
-        // A click in the view, drawn after the strip, shows there next frame.
-        if self.library.as_ref().is_some_and(|l| l.filmstrip_behind()) {
-            crate::app::library::filmstrip::redraw(
-                &ctx,
-                "the view changed what the filmstrip shows",
-            );
-        }
-        if !self.activity.is_busy() {
-            match action {
-                crate::app::library::Action::Develop(id) => self.develop_catalog_photo(id),
-                crate::app::library::Action::RelinkRoot(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), &ctx)
-                }
-                crate::app::library::Action::RelinkFolder(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), &ctx)
-                }
-                crate::app::library::Action::AddFolder => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx)
-                }
-                crate::app::library::Action::None => {}
-            }
-        }
+        });
     }
 
     /// Develop's zoom keys, shared with the Library's Loupe: Cmd+= and Cmd+-
@@ -1115,6 +1160,12 @@ impl Editor {
             });
     }
     fn develop_panels(&mut self, ui: &mut egui::Ui) {
+        if self.panel_shown(WorkspacePanel::Right) {
+            self.develop_right_panel(ui);
+        }
+        egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
+    }
+    fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("adjustments")
             .default_size(330.)
             .min_size(300.)
@@ -1130,7 +1181,6 @@ impl Editor {
                     ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                 });
             });
-        egui::CentralPanel::default().show(ui, |ui| self.viewport_ui(ui));
     }
 
     /// Whether quitting now would cut off work or could lose an edit: an export, Sync

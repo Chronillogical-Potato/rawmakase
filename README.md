@@ -134,10 +134,14 @@ Useful shortcuts:
 | Y / Option+Y / Shift+Y | Before and after: left and right / top and bottom / split |
 | I | Photo info over the photo: Info 1, Info 2, off |
 | Shift+R | Reference View: another photo beside the one you edit (drag it from the filmstrip) |
+| Tab / Shift+Tab | Hide or show the side panels / also the filmstrip and status bar |
+| F7 / F8 / F6 | Hide or show the left panel / right panel / filmstrip |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |
 
 Double-click a slider or a color grading wheel to reset it, type its value for precision, or hover a slider and press Up or Down (Shift for ten steps). On a grading wheel, Shift keeps a drag to hue or saturation and Cmd/Ctrl moves it finely. Drag sideways in the histogram to move Blacks, Shadows, Exposure, Highlights or Whites, whichever region you start in.
+
+Tab hides the side panels to give the photo the window; so does a click on the arrow at a window edge, which hides or shows that panel alone.
 
 The switch in a panel's header turns the panel off without losing its settings, as in Lightroom; right-click a header for Solo Mode, where opening one panel closes the others on that side.
 

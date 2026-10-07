@@ -47,6 +47,8 @@ pub(crate) struct Editor {
     collapsed: std::collections::BTreeSet<String>,
     /// The sides in Solo Mode as last saved to the session.
     solo: std::collections::BTreeSet<String>,
+    /// The panels each module shows (Tab, Shift+Tab, F6–F8).
+    panels: panels::WorkspacePanels,
     onboarding: onboarding::Onboarding,
     onboarding_done: bool,
     preferences: preferences::Preferences,
@@ -231,6 +233,7 @@ impl Editor {
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
+            panels: session.panels,
             onboarding: onboarding::Onboarding::new(show_onboarding),
             onboarding_done: session.onboarding_done,
             preferences: Default::default(),
@@ -300,6 +303,7 @@ impl Editor {
                     monitor: self.view.monitor.clone(),
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
+                    panels: self.panels,
                     onboarding_done: self.onboarding_done,
                     library_source: self.saved_place.source.clone(),
                     selected_photo: self.saved_place.photo,
@@ -616,6 +620,7 @@ mod mask_tool;
 mod navigator;
 mod onboarding;
 mod overlay;
+mod panels;
 mod photo_metadata;
 mod point_color_panel;
 mod preferences;
