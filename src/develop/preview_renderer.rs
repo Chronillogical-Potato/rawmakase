@@ -512,7 +512,7 @@ mod tests {
     /// it patch the cached pyramid correctly.
     #[test]
     fn retouch_agrees_between_fit_regions_and_export() {
-        use crate::develop::retouch::{RetouchMode, RetouchOp, RetouchShape};
+        use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
         let (w, h) = (640, 424);
         let mut im = image(w, h, 0.);
         for (i, p) in im.pixels.iter_mut().enumerate() {
