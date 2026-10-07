@@ -33,6 +33,15 @@ impl Editor {
             visualized: self.visualized_swatch(),
         }
     }
+    /// Starts `frame` again on the photo now open, when the frame so far opened
+    /// another (a shortcut or the filmstrip moved to the next photo): what is
+    /// drawn after edits the new photo, in a frame of its own. The old photo's
+    /// frame ends with its document.
+    pub(super) fn follow_edit_frame(&mut self, frame: &mut EditFrame) {
+        if frame.generation != self.load.id() {
+            *frame = self.begin_edit_frame();
+        }
+    }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
         self.sync_command_revision();
         // Before the frame looks at it, so reading it changes no crop.

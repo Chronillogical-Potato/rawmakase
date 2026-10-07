@@ -183,7 +183,7 @@ mod tests {
         let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         e.document
             .edit
-            .recipe_mut()
+            .setup_mut()
             .panels
             .set(Panel::ToneCurve, PanelState::Off);
         let before = e.document.edit.recipe().clone();
@@ -203,10 +203,10 @@ mod tests {
         assert_eq!(*e.document.edit.recipe(), before);
 
         // The same curve again, with the panel off: it turns on, as one step.
-        e.document.edit.recipe_mut().curve = BuiltinCurve::MediumContrast.curve();
+        e.document.edit.setup_mut().curve = BuiltinCurve::MediumContrast.curve();
         e.document
             .edit
-            .recipe_mut()
+            .setup_mut()
             .panels
             .set(Panel::ToneCurve, PanelState::Off);
         let frame = e.begin_edit_frame();
@@ -223,7 +223,7 @@ mod tests {
         e.finish_edit_frame(frame, &ctx);
         assert_eq!(e.document.edit.history().steps().1, 1);
         let frame = e.begin_edit_frame();
-        e.document.edit.recipe_mut().exposure = 0.5;
+        e.document.edit.setup_mut().exposure = 0.5;
         e.finish_edit_frame(frame, &ctx);
         let (steps, applied) = e.document.edit.history().steps();
         assert_eq!(applied, 2);
@@ -239,9 +239,9 @@ mod tests {
             dir: d.path().join("Curves"),
         };
         e.curves.saved = Some(Vec::new());
-        e.document.edit.recipe_mut().curve = BuiltinCurve::StrongContrast.curve();
+        e.document.edit.setup_mut().curve = BuiltinCurve::StrongContrast.curve();
         // Points on Lightroom's 0–255 steps, as saved curves keep them.
-        e.document.edit.recipe_mut().effects.channels[1].points =
+        e.document.edit.setup_mut().effects.channels[1].points =
             vec![[0., 0.], [128. / 255., 153. / 255.], [1., 1.]];
         let saved_recipe = e.document.edit.recipe().clone();
         e.save_point_curve(&store, "Green Lift");

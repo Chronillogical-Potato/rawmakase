@@ -203,7 +203,7 @@ mod tests {
                 scale_factor: 1.,
                 scale_clipped: 0,
             }));
-        e.document.edit.recipe_mut().exposure = 0.7;
+        e.document.edit.setup_mut().exposure = 0.7;
         let mut groups = GroupSelection::none();
         groups.set(SettingGroup::Exposure, GroupInclusion::Included);
         e.create_preset_in(&user, &form, &groups);

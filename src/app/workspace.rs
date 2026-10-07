@@ -75,16 +75,21 @@ impl Editor {
             self.left_develop();
             self.library_workspace(ui);
         } else {
-            let frame = self.begin_edit_frame();
+            let mut frame = self.begin_edit_frame();
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
             // The Navigator column runs full height; the toolbar sits over
-            // the photo and the adjustments only.
+            // the photo and the adjustments only. Each part may open another
+            // photo; what follows edits that one.
+            self.follow_edit_frame(&mut frame);
             self.status_bar(ui);
             self.filmstrip(ui);
+            self.follow_edit_frame(&mut frame);
             self.develop_left_panel(ui);
+            self.follow_edit_frame(&mut frame);
             self.toolbar(ui);
+            self.follow_edit_frame(&mut frame);
             self.develop_panels(ui);
             self.finish_edit_frame(frame, &ctx);
         }

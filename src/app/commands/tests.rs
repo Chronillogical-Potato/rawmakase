@@ -120,7 +120,7 @@ fn presets_are_listed_and_applied_by_name_as_one_history_step() {
     let (steps, applied) = e.document.edit.history().steps();
     assert_ne!(steps[applied - 1].name, "Preset");
     // An edit no listed preset made names none.
-    e.document.edit.recipe_mut().preset_name = "Imported Lightroom edit".into();
+    e.document.edit.setup_mut().preset_name = "Imported Lightroom edit".into();
     assert_eq!(json(e.command_state())["preset"], Value::Null);
     assert_eq!(
         e.execute_command(named("Bri"), &ctx).unwrap_err().code,
@@ -157,7 +157,7 @@ fn edits_reject_library_loading_modal_and_stale_targets() {
 #[test]
 fn explicit_mask_has_local_units_and_rejects_stale_index() {
     let (mut e, ctx) = editor();
-    e.document.edit.recipe_mut().masks.push(Default::default());
+    e.document.edit.setup_mut().masks.push(Default::default());
     let target = Target {
         mask: Some(0),
         generation: Some(e.load.id()),
@@ -198,8 +198,8 @@ fn explicit_mask_has_local_units_and_rejects_stale_index() {
 #[test]
 fn black_white_action_matches_existing_treatment_workflow() {
     let (mut e, ctx) = editor();
-    let (mut reference, _) = editor();
-    reference.toggle_treatment();
+    let (mut reference, reference_ctx) = editor();
+    crate::app::tests::in_edit_frame(&reference_ctx, &mut reference, |r| r.toggle_treatment());
     e.execute_command(Command::new(Operation::Action(Action::ToggleMono)), &ctx)
         .unwrap();
     assert_eq!(e.document.edit.recipe(), reference.document.edit.recipe());
@@ -383,7 +383,9 @@ fn save_success_means_the_catalog_contains_the_current_edit() -> anyhow::Result<
 #[test]
 fn curve_save_is_modal_for_commands_and_state() {
     let (mut e, ctx) = editor();
-    e.choose_point_curve(super::super::curve_menu::CurveChoice::Save);
+    crate::app::tests::in_edit_frame(&ctx, &mut e, |e| {
+        e.choose_point_curve(super::super::curve_menu::CurveChoice::Save)
+    });
     assert_eq!(json(e.command_state())["modal"], true);
     assert_eq!(set(&mut e, &ctx, 1.).unwrap_err().code, "busy");
     assert_eq!(
@@ -417,7 +419,7 @@ fn asynchronous_edits_and_out_of_frame_undo_invalidate_guards() {
     let after_undo = json(e.command_state())["revision"].as_u64().unwrap();
     assert!(after_undo > after_auto);
     // Direct worker-style recipe changes must also be caught before a frame snapshot.
-    e.document.edit.recipe_mut().straighten = 1.;
+    e.document.edit.setup_mut().straighten = 1.;
     let frame = e.begin_edit_frame();
     e.finish_edit_frame(frame, &ctx);
     assert!(json(e.command_state())["revision"].as_u64().unwrap() > after_undo);
@@ -429,7 +431,7 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     let exposure = e.document.edit.recipe().exposure;
     set(&mut e, &ctx, exposure).unwrap();
     let old = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().preset_name = "Example".into();
+    e.document.edit.setup_mut().preset_name = "Example".into();
     e.commit_edit(old, None);
     assert_eq!(
         e.document.edit.history().steps().0.last().unwrap().name,
@@ -444,7 +446,7 @@ fn no_op_parameters_do_not_name_the_next_unrelated_edit() {
     e.automation.end_turn();
     e.finish_gesture();
     let old = e.document.edit.recipe().clone();
-    e.document.edit.recipe_mut().preset_name = "Another".into();
+    e.document.edit.setup_mut().preset_name = "Another".into();
     e.commit_edit(old, None);
     assert_eq!(
         e.document.edit.history().steps().0.last().unwrap().name,
@@ -475,7 +477,7 @@ fn turns_group_only_the_same_parameter_and_scope() {
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
         .unwrap();
     assert_eq!(e.document.edit.recipe().exposure, 0.);
-    e.document.edit.recipe_mut().masks.push(Default::default());
+    e.document.edit.setup_mut().masks.push(Default::default());
     e.command_state();
     e.execute_command(
         Command::new(Operation::Adjust(Param::Setting(ParameterId::Exposure), 1)),
@@ -681,7 +683,7 @@ fn absolute_controls_use_parameter_ranges_and_devices_have_separate_undo() {
     e.execute_command(Command::new(Operation::Action(Action::Undo)), &ctx)
         .unwrap();
     assert_eq!(e.document.edit.recipe().exposure, 0.);
-    e.document.edit.recipe_mut().masks.push(Default::default());
+    e.document.edit.setup_mut().masks.push(Default::default());
     let state = e.command_state();
     let mut command = Command::new(Operation::ControlValue(
         Param::Setting(ParameterId::Exposure),
@@ -724,7 +726,7 @@ fn absolute_controls_preserve_endpoints_neutral_and_monotonicity() {
 fn clarity_added_by_command_takes_the_measured_operator() {
     use crate::model::operators::ClarityModel;
     let (mut e, ctx) = editor();
-    e.document.edit.recipe_mut().clarity_model = ClarityModel::Original;
+    e.document.edit.setup_mut().clarity_model = ClarityModel::Original;
     e.execute_command(
         Command::new(Operation::Set(Param::Setting(ParameterId::Clarity), 30.)),
         &ctx,
@@ -736,7 +738,7 @@ fn clarity_added_by_command_takes_the_measured_operator() {
         ClarityModel::Measured
     );
     // Clarity an old recipe already had keeps its operator.
-    e.document.edit.recipe_mut().clarity_model = ClarityModel::Original;
+    e.document.edit.setup_mut().clarity_model = ClarityModel::Original;
     e.execute_command(
         Command::new(Operation::Set(Param::Setting(ParameterId::Clarity), 50.)),
         &ctx,

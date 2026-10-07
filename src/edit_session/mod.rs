@@ -54,11 +54,16 @@ impl EditSession {
     /// records the change as a History step, marks it for saving and turns on a
     /// switched-off panel it changed. Outside a frame, [`Self::change`] does that.
     pub(crate) fn recipe_mut(&mut self) -> &mut Recipe {
-        // Tests drive the panels' handlers directly, with no frame around them.
         debug_assert!(
-            self.frame_open || cfg!(test),
+            self.frame_open,
             "the settings change in place only inside an editor frame; use change()"
         );
+        &mut self.recipe
+    }
+    /// The settings, for a test to set up the photo it then edits; records
+    /// nothing.
+    #[cfg(test)]
+    pub(crate) fn setup_mut(&mut self) -> &mut Recipe {
         &mut self.recipe
     }
     /// Changes the settings outside an editor frame (a command, a preset, a result

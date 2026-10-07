@@ -283,7 +283,7 @@ mod tests {
         e.document.catalog_photo = Some(library.session.photos[0].id);
         e.library = Some(Box::new(library));
         e.document.metadata = Some(Default::default());
-        e.document.edit.recipe_mut().exposure = 0.8;
+        e.document.edit.setup_mut().exposure = 0.8;
         // + saves the edit as it is and starts naming it.
         e.snapshot_action(SnapshotAction::New);
         let id = e.document.snapshots.list[0].id;
@@ -302,7 +302,7 @@ mod tests {
         let (steps, _) = e.document.edit.history().steps();
         assert_eq!(steps.last().unwrap().name, "Snapshot: Bright");
         // Update with Current Settings, then Delete.
-        e.document.edit.recipe_mut().exposure = -0.5;
+        e.document.edit.setup_mut().exposure = -0.5;
         e.snapshot_action(SnapshotAction::Update(id));
         e.document.edit.replace(Recipe::default());
         e.snapshot_action(SnapshotAction::Apply(id));

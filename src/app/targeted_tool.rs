@@ -391,8 +391,8 @@ mod tests {
             scale_clipped: 0,
         });
         editor.document.set_image(image);
-        editor.document.edit.recipe_mut().reference_curves = true;
-        editor.document.edit.recipe_mut().reference_color = true;
+        editor.document.edit.setup_mut().reference_curves = true;
+        editor.document.edit.setup_mut().reference_color = true;
         editor.preview.texture = Some(
             ctx.load_texture(
                 "photo",
@@ -447,7 +447,7 @@ mod tests {
         let mut e = editor(&ctx);
         e.document
             .edit
-            .recipe_mut()
+            .setup_mut()
             .panels
             .set(Panel::ColorMixer, PanelState::Off);
         e.toggle_targeted(Target::Hsl(HslChannel::Saturation));
@@ -516,7 +516,7 @@ mod tests {
         assert!(e.view.parametric_curve);
         let before = e.document.edit.recipe().clone();
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
-        e.drag_targeted(25.);
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(25.));
         e.release_targeted();
         assert_eq!(*e.document.edit.recipe(), before);
         wait_for_sample(&ctx, &mut e);
@@ -535,7 +535,7 @@ mod tests {
     fn older_processes_get_no_targeted_tool() {
         let ctx = egui::Context::default();
         let mut e = editor(&ctx);
-        e.document.edit.recipe_mut().reference_curves = false;
+        e.document.edit.setup_mut().reference_curves = false;
         e.toggle_targeted(Target::ToneCurve);
         assert_eq!(e.view.tool, Tool::None);
         assert_eq!(
@@ -550,11 +550,11 @@ mod tests {
         let mut e = editor(&ctx);
         e.toggle_targeted(Target::ToneCurve);
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
-        e.drag_targeted(25.);
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(25.));
         // The sample arrives while the button is still down; then it is released.
         wait_for_sample(&ctx, &mut e);
         assert!(e.view.targeted.is_some());
-        e.drag_targeted(0.);
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(0.));
         e.release_targeted();
         assert!(
             (e.document
@@ -576,16 +576,16 @@ mod tests {
         let mut e = editor(&ctx);
         e.toggle_targeted(Target::ToneCurve);
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
-        e.document.edit.recipe_mut().exposure = 0.7;
+        e.document.edit.setup_mut().exposure = 0.7;
         wait_for_sample(&ctx, &mut e);
         assert!(e.view.targeted.is_none());
         // Or after it arrived, while the drag goes on.
         e.start_targeted_drag(Target::ToneCurve, [0.75, 0.5]);
         wait_for_sample(&ctx, &mut e);
-        e.drag_targeted(10.);
-        e.document.edit.recipe_mut().exposure = 0.2;
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(10.));
+        e.document.edit.setup_mut().exposure = 0.2;
         let changed = e.document.edit.recipe().clone();
-        e.drag_targeted(10.);
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(10.));
         assert!(e.view.targeted.is_none());
         assert_eq!(*e.document.edit.recipe(), changed);
     }
@@ -598,14 +598,14 @@ mod tests {
         e.toggle_targeted(Target::Hsl(HslChannel::Hue));
         e.start_targeted_drag(Target::Hsl(HslChannel::Hue), [0.75, 0.5]);
         wait_for_sample(&ctx, &mut e);
-        e.drag_targeted(40.);
+        crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(40.));
         assert_eq!(*e.document.edit.recipe(), before);
         assert!(e.status.contains("Nothing to adjust"), "{}", e.status);
         // B&W's tool is for black & white photos only; converting puts the Color
         // Mixer's away.
         e.toggle_targeted(Target::BlackWhite);
         assert!(matches!(e.view.tool, Tool::Targeted(Target::Hsl(_))));
-        e.document.edit.recipe_mut().effects.monochrome = true;
+        e.document.edit.setup_mut().effects.monochrome = true;
         e.keep_targeted_tool();
         assert_eq!(e.view.tool, Tool::None);
         assert!(e.view.targeted.is_none());
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(e.view.tool, Tool::Targeted(Target::BlackWhite));
         // Hiding the sliders a tool moves puts it away, and another target drops a
         // drag still waiting for its sample.
-        e.document.edit.recipe_mut().effects.monochrome = false;
+        e.document.edit.setup_mut().effects.monochrome = false;
         e.toggle_targeted(Target::ToneCurve);
         e.view.parametric_curve = false;
         e.keep_targeted_tool();
@@ -663,7 +663,7 @@ mod tests {
         // B&W's is for black & white photos.
         press(&mut e, egui::Key::G, all);
         assert_eq!(e.view.tool, Tool::None);
-        e.document.edit.recipe_mut().effects.monochrome = true;
+        e.document.edit.setup_mut().effects.monochrome = true;
         press(&mut e, egui::Key::G, all);
         assert_eq!(e.view.tool, Tool::Targeted(Target::BlackWhite));
     }
