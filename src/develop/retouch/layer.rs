@@ -7,12 +7,12 @@ use super::{
     heal::{self, PixelRect},
 };
 use crate::{
+    camera_data::CameraImage,
     develop::{
         ImageFrame,
         color_noise::ChromaDenoise,
         red_eye::{self, RedEyeOp},
     },
-    raw::CameraImage,
 };
 use anyhow::{Result, ensure};
 use std::{

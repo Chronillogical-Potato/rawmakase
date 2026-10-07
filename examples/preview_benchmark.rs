@@ -4,8 +4,8 @@
 //! slider moves, a 100% region, and the full-resolution render used for export.
 use anyhow::{Context, Result};
 use rawmakase::{
+    camera_data,
     develop::{self, Recipe},
-    raw,
 };
 use std::{sync::atomic::AtomicBool, time::Instant};
 
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let cancel = AtomicBool::new(false);
     let start = Instant::now();
     let image = rawmakase::photo::open(std::path::Path::new(path))?
-        .develop(raw::Decode::full(Default::default()), &cancel)?;
+        .develop(camera_data::Decode::full(Default::default()), &cancel)?;
     println!(
         "Decode {}x{}: {:.1} ms",
         image.width,

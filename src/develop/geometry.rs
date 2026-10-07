@@ -1,5 +1,5 @@
 use super::Recipe;
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use serde::{Deserialize, Serialize};
 
 /// Lightroom's Transform panel (manual sliders). Applied after lens correction and
@@ -409,7 +409,7 @@ impl Geometry {
     }
     /// The geometry from metadata alone, for positions and the crop as rendered before
     /// the photo is decoded.
-    pub fn for_metadata(m: &crate::raw::Metadata, r: &Recipe) -> Self {
+    pub fn for_metadata(m: &crate::camera_data::Metadata, r: &Recipe) -> Self {
         Self::with_frame(
             super::ImageFrame::for_metadata(m),
             [m.width.max(1), m.height.max(1)],
@@ -740,7 +740,7 @@ mod manual_distortion_tests {
             width: 300,
             height: 200,
             pixels: vec![[0.2; 3]; 300 * 200],
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 300,
                 height: 200,
                 wb: [1.; 3],
@@ -880,7 +880,7 @@ mod constrain_crop_tests {
             width: 300,
             height: 200,
             pixels: vec![[0.2; 3]; 300 * 200],
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 300,
                 height: 200,
                 wb: [1.; 3],

@@ -1,9 +1,9 @@
 //! State owned by the document, preview, viewport and preset browser.
 use crate::catalog::PhotoId;
 use crate::{
+    camera_data::{CameraImage, Metadata},
     develop::Recipe,
     export_settings::ExportOptions,
-    raw::{CameraImage, Metadata},
 };
 use eframe::egui::{self, Vec2};
 use std::{path::PathBuf, sync::Arc, time::Instant};

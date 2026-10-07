@@ -2,7 +2,7 @@
 //! panels, the control socket and MIDI all change settings this way, so the side
 //! effects of a change live in one place rather than in each of them.
 use super::{Recipe, params::ParameterId};
-use crate::raw::Metadata;
+use crate::camera_data::Metadata;
 
 /// Brings the recipe in line after setting `id` changed from `previous`:
 /// - a new Temp or Tint recomputes the white balance multipliers for `photo`,

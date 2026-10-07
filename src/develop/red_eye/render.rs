@@ -7,8 +7,8 @@
 //! docs/retouching.md).
 use super::{EyeKind, RedEyeOp};
 use crate::{
+    camera_data::CameraImage,
     develop::{ImageFrame, retouch::profile},
-    raw::CameraImage,
 };
 
 /// A rectangle of decoded pixels, `[x0, y0, x1, y1)`.

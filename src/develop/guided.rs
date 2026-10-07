@@ -3,7 +3,7 @@
 //! other modes (docs/transform.md#guided-upright).
 use super::upright::{self, Displayed, IDENTITY, Mat, Segment, apply, cross, dot, unit};
 use super::{ImageFrame, Recipe, UprightGuide, UprightMode};
-use crate::raw::Metadata;
+use crate::camera_data::Metadata;
 
 /// Lightroom's limit on guides.
 pub const MAX_GUIDES: usize = 4;

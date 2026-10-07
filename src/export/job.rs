@@ -6,10 +6,11 @@ use super::{
 };
 use crate::export_settings::ExportSettings;
 use crate::{
+    camera_data::{CameraImage, Demosaic},
     decode::{DecodePolicy, FullSize},
     develop::Recipe,
     exif,
-    raw::{CameraImage, Demosaic, Raw},
+    raw::Raw,
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -67,7 +68,7 @@ pub fn run(
 /// A photo rendered for export, with what goes in the file beside its pixels.
 pub struct Prepared {
     pub rendered: crate::develop::Rendered,
-    pub metadata: crate::raw::Metadata,
+    pub metadata: crate::camera_data::Metadata,
     pub options: crate::export_settings::ExportOptions,
     pub embed: Embed,
     /// What the export has to say besides "Exported".

@@ -7,8 +7,8 @@
 //! and resolve them later, off the UI thread. Upright's analysis needs the
 //! developed photo, so it is a step of its own: [`crate::develop::upright::complete`].
 use crate::{
-    camera_profiles::CameraProfile, develop::Recipe, export_settings::ExportOptions, raw::Metadata,
-    raw_defaults::DevelopDefaults, storage::Identity,
+    camera_data::Metadata, camera_profiles::CameraProfile, develop::Recipe,
+    export_settings::ExportOptions, raw_defaults::DevelopDefaults, storage::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};

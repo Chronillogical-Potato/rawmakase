@@ -226,7 +226,7 @@ fn folder_import_is_idempotent_and_does_not_touch_photos() -> Result<()> {
 #[test]
 fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Result<()> {
     let text = r#"s = { Exposure2012 = 1.25, Contrast2012 = 15, ConvertToGrayscale = true, ToneCurvePV2012 = { 0, 12, 255, 255 }, PerspectiveUpright = 1, RetouchInfo = { { x = 0.5, y = 0.4 } }, CameraProfile = "Missing, {profile}" }"#;
-    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    let (r, w) = convert_develop(text, &crate::camera_data::Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 1.25);
     assert!(r.effects.monochrome);
     assert_eq!(r.curve.points[0], [0., 12. / 255.]);
@@ -238,7 +238,7 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     assert!(
         convert_develop(
             "s = { Exposure2012 = os.execute(\"bad\") }",
-            &crate::raw::Metadata::default(),
+            &crate::camera_data::Metadata::default(),
             &[],
             None
         )
@@ -247,14 +247,14 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     assert!(develop_fields("s = { a = 1, a = 2 }").is_err());
     // With the corrections Lightroom stores, Upright imports.
     let text = r#"s = { PerspectiveUpright = 1, UprightTransformCount = 2, UprightTransform_0 = "1,0,0,0,1,0,0,0,1", UprightTransform_1 = "1.01,0,0,0,1.01,0,0.002,0,1" }"#;
-    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    let (r, w) = convert_develop(text, &crate::camera_data::Metadata::default(), &[], None)?;
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(r.upright.corrections[1][6], 0.002);
     Ok(())
 }
 #[test]
 fn lightroom_point_colors_import() -> Result<()> {
-    let m = crate::raw::Metadata::default();
+    let m = crate::camera_data::Metadata::default();
     let swatch = "0.425300, 0.729800, 0.603400, 0.500000, -0.300000, 0.200000, 0.500000, 0.000000, 0.333333, 0.666667, 1.000000, 0.000000, 0.549800, 0.909800, 1.000000, 0.072700, 0.622700, 0.982700, 1.000000";
     let text = format!(
         r#"s = {{ ColorVariance = {{ 0.4 }}, PointColors = {{ "{swatch}" }}, Exposure2012 = 0.5 }}"#
@@ -285,7 +285,7 @@ fn lightroom_point_colors_import() -> Result<()> {
 }
 #[test]
 fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
-    let m = crate::raw::Metadata::default();
+    let m = crate::camera_data::Metadata::default();
     // Lightroom stores the mix it resolved, which renders as Camera Raw does.
     let text = r#"s = { ConvertToGrayscale = true, AutoGrayscaleMix = true, GrayMixerRed = -12, GrayMixerBlue = 30 }"#;
     let (r, w) = convert_develop(text, &m, &[], None)?;
@@ -301,7 +301,7 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
     assert_eq!(r.effects.gray_mix, Recipe::default().effects.gray_mix);
     assert!(w.is_empty(), "{w:?}");
     // With a monochrome default profile, Auto is still judged with its stored mix.
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         model: "Synthetic".into(),
         cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
@@ -322,7 +322,7 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
         let text = format!(
             "s = {{ {auto}ConvertToGrayscale = true, GrayMixerRed = -12, GrayMixerBlue = 300 }}"
         );
-        let (r, w) = convert_develop(&text, &crate::raw::Metadata::default(), &[], None)?;
+        let (r, w) = convert_develop(&text, &crate::camera_data::Metadata::default(), &[], None)?;
         assert_eq!(r.effects.gray_mix[0], -12. * 0.01);
         assert_eq!(w.len(), 1, "{w:?}");
     }
@@ -330,7 +330,7 @@ fn lightroom_auto_grayscale_mix_imports_like_a_sidecar() -> Result<()> {
 }
 #[test]
 fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
@@ -355,7 +355,7 @@ fn named_white_balance_keeps_lightroom_temperature_and_tint() -> Result<()> {
 #[test]
 fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> {
     use crate::develop::panels::{Panel, PanelState};
-    let m = crate::raw::Metadata::default();
+    let m = crate::camera_data::Metadata::default();
     // Lightroom stores every switch, on or off, with each edit.
     let all_on: Vec<String> = Panel::ALL
         .iter()
@@ -386,7 +386,7 @@ fn lightroom_panel_switches_import_and_bypass_only_their_panels() -> Result<()> 
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn lightroom_edits_fall_back_to_rawmakase_profiles() -> Result<()> {
     use crate::camera_profiles::open;
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
@@ -431,7 +431,7 @@ fn lightroom_edits_fall_back_to_rawmakase_profiles() -> Result<()> {
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn profile_amount_imports_for_looks_that_have_one() -> Result<()> {
     use crate::camera_profiles::{CameraProfile, open};
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
@@ -524,7 +524,7 @@ fn lightroom_history_text_is_bounded_by_its_declared_length() {
 #[test]
 fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> {
     let text = r#"s = { ProcessVersion = "5.7", Exposure = 0.75, Contrast = 40, Brightness = 50, Clarity = 0 }"#;
-    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    let (r, w) = convert_develop(text, &crate::camera_data::Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 0.75);
     assert!(w.iter().any(|s| s.starts_with("Contrast")));
     // Controls at their legacy defaults are not reported.
@@ -534,7 +534,7 @@ fn process_version_2010_edits_keep_exposure_and_report_the_rest() -> Result<()> 
     );
     // With 2012 keys present the legacy ones are ignored.
     let text = r#"s = { ProcessVersion = "11.0", Exposure = 0.75, Exposure2012 = 0.25 }"#;
-    let (r, _) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    let (r, _) = convert_develop(text, &crate::camera_data::Metadata::default(), &[], None)?;
     assert_eq!(r.exposure, 0.25);
     Ok(())
 }
@@ -1160,7 +1160,7 @@ fn develop_history_saves_with_the_edit_and_goes_with_the_photo() -> Result<()> {
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn develop_history_stores_each_large_setting_once() -> Result<()> {
     use crate::catalog::{SavedHistory, SavedStep};
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
@@ -1205,7 +1205,7 @@ fn develop_history_stores_each_large_setting_once() -> Result<()> {
 #[test]
 fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and_say_so()
 -> Result<()> {
-    let m = crate::raw::Metadata {
+    let m = crate::camera_data::Metadata {
         lens_model: "FE 55mm F1.8 ZA".into(),
         lens: Some(crate::optics::LensCorrection {
             source: "Sony built-in".into(),
@@ -1228,7 +1228,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
     assert!(!r.lens_profile && !r.lens_builtin);
     assert!(w.is_empty(), "{w:?}");
     // Without any correction to fall back on, it says that too.
-    let bare = crate::raw::Metadata {
+    let bare = crate::camera_data::Metadata {
         lens_model: "FE 55mm F1.8 ZA".into(),
         ..Default::default()
     };
@@ -1354,13 +1354,13 @@ fn lightroom_15_controls_at_rest_are_not_reported() -> Result<()> {
     // Lightroom 15 writes these into every Develop record. Glow's own controls do
     // nothing while Glow is 0, and the SDR and HDR values only apply in HDR editing.
     let text = r#"s = { Exposure2012 = 0.5, Glow = 0, GlowRange = 50, GlowSpread = 50, GlowStyle = 0, GlowWarmth = 0, HDREditMode = 0, HDRMaxValue = 2.3, SDRBlend = 0, SDRBrightness = 0, SDRClarity = 0, SDRContrast = 0, SDRHighlights = 0, SDRShadows = 0, SDRWhites = 0, EnableDistractionRemoval = true }"#;
-    let (r, w) = convert_develop(text, &crate::raw::Metadata::default(), &[], None)?;
+    let (r, w) = convert_develop(text, &crate::camera_data::Metadata::default(), &[], None)?;
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(r.exposure, 0.5);
     // Active, they are still reported.
     for active in ["Glow = 20", "HDREditMode = 1"] {
         let text = format!("s = {{ {active}, GlowRange = 50, HDRMaxValue = 2.3 }}");
-        let (_, w) = convert_develop(&text, &crate::raw::Metadata::default(), &[], None)?;
+        let (_, w) = convert_develop(&text, &crate::camera_data::Metadata::default(), &[], None)?;
         assert!(!w.is_empty(), "{active}");
     }
     Ok(())

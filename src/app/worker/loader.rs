@@ -1,8 +1,9 @@
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
+    camera_data::Decode,
     decode::{DecodePolicy, FullSize},
     export_settings::ExportOptions,
-    raw::{Decode, thumbnail},
+    raw::thumbnail,
 };
 use eframe::egui;
 use std::{

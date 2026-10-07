@@ -4,8 +4,9 @@
 //! prefetch of a neighbour, Reference View and export differ only in the
 //! [`DecodePolicy`] they pass.
 use crate::{
+    camera_data::{CameraImage, Decode, Demosaic, Metadata},
     decode_cache::DecodeCache,
-    raw::{CameraImage, Decode, Demosaic, Metadata, Raw},
+    raw::Raw,
 };
 use anyhow::Result;
 use std::{

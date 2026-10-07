@@ -278,7 +278,7 @@ mod tests {
     }
     #[test]
     fn new_edits_measure_positive_clarity_and_saved_recipes_keep_the_original() {
-        let m = crate::raw::Metadata::default();
+        let m = crate::camera_data::Metadata::default();
         let mut new = super::super::Recipe::with_profiles(&m, &[]);
         assert_eq!(new.clarity_model, ClarityModel::Measured);
         new.effects.clarity = 0.4;

@@ -257,7 +257,7 @@ fn render_edited(path: &Path, source: &EditSource) -> anyhow::Result<image::RgbI
     let raw = crate::photo::open(path)?;
     let recipe = EditSource::recipe(Some(source), &raw)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let image = raw.develop(crate::raw::Decode::Half, &cancel)?;
+    let image = raw.develop(crate::camera_data::Decode::Half, &cancel)?;
     let out = crate::develop::render(&image, &recipe.checked()?, 640)?;
     image::RgbImage::from_raw(out.width, out.height, out.rgb8())
         .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))

@@ -8,7 +8,7 @@
 //! modification time, so a rebuilt or updated app never reads another build's output.
 //! The directory is capped; the least recently used entries are removed first. Only
 //! derived pixels are stored: RAW files, sidecars and catalogs are never touched.
-use crate::raw::{CameraImage, Demosaic, Metadata};
+use crate::camera_data::{CameraImage, Demosaic, Metadata};
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};

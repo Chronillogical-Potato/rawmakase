@@ -1,6 +1,6 @@
 use super::detect::DetectError;
 use super::*;
-use crate::{develop::ImageFrame, raw::CameraImage};
+use crate::{camera_data::CameraImage, develop::ImageFrame};
 
 const SKIN: [f32; 3] = [0.55, 0.35, 0.25];
 const RED_PUPIL: [f32; 3] = [0.6, 0.03, 0.03];
@@ -45,7 +45,7 @@ fn image(width: u32, height: u32, flip: i32, eyes: &[Eye]) -> CameraImage {
         width,
         height,
         pixels,
-        metadata: crate::raw::Metadata {
+        metadata: crate::camera_data::Metadata {
             width,
             height,
             flip,

@@ -7,8 +7,8 @@ use crate::develop::{
     stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache, TextureKey},
 };
 use crate::{
+    camera_data::CameraImage,
     develop::{self, Geometry, Recipe, Rendered, ValidRecipe},
-    raw::CameraImage,
 };
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
@@ -132,7 +132,7 @@ mod tests {
                     [y * 0.8, y, y * 0.6]
                 })
                 .collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: 96,
                 height: 80,
                 matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],

@@ -370,7 +370,7 @@ impl Library {
     pub(in crate::app) fn develop_source(
         &self,
         id: PhotoId,
-        demosaic: crate::raw::Demosaic,
+        demosaic: crate::camera_data::Demosaic,
     ) -> Option<Result<DevelopSource, Refusal>> {
         let photo = self.photo(id)?;
         if let Some(refusal) = develop_refusal(photo, photo.path.is_file()) {

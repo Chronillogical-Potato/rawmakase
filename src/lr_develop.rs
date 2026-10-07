@@ -79,9 +79,9 @@ pub(crate) fn develop_fields(text: &str) -> Result<std::collections::BTreeMap<St
 }
 pub fn convert_develop(
     text: &str,
-    m: &crate::raw::Metadata,
+    m: &crate::camera_data::Metadata,
     profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
-    image: Option<&crate::raw::CameraImage>,
+    image: Option<&crate::camera_data::CameraImage>,
 ) -> Result<(Recipe, Vec<String>)> {
     let fields = develop_fields(text)?;
     let mut preset = crate::xmp::Preset {

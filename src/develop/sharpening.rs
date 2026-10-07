@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn new_edits_start_at_lightroom_defaults_and_old_recipes_keep_theirs() {
-        let m = crate::raw::Metadata::default();
+        let m = crate::camera_data::Metadata::default();
         let new = Recipe::with_profiles(&m, &[]);
         assert_eq!(new.sharpening_model, SharpeningModel::Measured);
         assert_eq!(

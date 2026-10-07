@@ -2,9 +2,9 @@
 //! the imported Adobe profiles that fit the photo's camera.
 use super::control_row;
 use crate::app::theme;
+use crate::camera_data::Metadata;
 use crate::develop::Recipe;
 use crate::lens::choice::{LensProfileSetup, ProfileMenus};
-use crate::raw::Metadata;
 use eframe::egui;
 
 /// Draws the menus, or the profile in use as text when no imported profile fits.

@@ -7,7 +7,7 @@
 //! file a profile name means). The rest are the photo's own and never transfer: its
 //! orientation, the preset it came from, and settings from a newer release.
 use super::{Recipe, panels::Panel};
-use crate::{camera_profiles::CameraProfile, raw::Metadata};
+use crate::{camera_data::Metadata, camera_profiles::CameraProfile};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
 

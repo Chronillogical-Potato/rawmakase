@@ -23,7 +23,7 @@ pub(crate) use range::oklab;
 /// output. Range components read `out`'s colours. `None` when the mask does not exist
 /// or has no components.
 pub fn overlay_weights(
-    image: &crate::raw::CameraImage,
+    image: &crate::camera_data::CameraImage,
     recipe: &crate::develop::Recipe,
     index: usize,
     out: &crate::develop::Rendered,

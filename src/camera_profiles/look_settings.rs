@@ -243,7 +243,7 @@ impl LookSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{camera_profiles::CameraProfile, develop::Recipe, raw::Metadata};
+    use crate::{camera_data::Metadata, camera_profiles::CameraProfile, develop::Recipe};
     use std::{collections::BTreeMap, sync::Arc};
 
     fn parse(pairs: &[(&str, &str)]) -> Result<LookSettings> {

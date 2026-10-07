@@ -345,7 +345,7 @@ pub struct Batch {
     /// The watermark chosen in the Export dialog.
     pub watermark: Option<crate::watermark::Watermark>,
     /// The demosaic each photo is decoded with.
-    pub demosaic: crate::raw::Demosaic,
+    pub demosaic: crate::camera_data::Demosaic,
 }
 
 /// How far a batch is: `done` photos of `total`, and how far the current one is.

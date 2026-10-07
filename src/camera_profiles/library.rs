@@ -3,7 +3,7 @@ use super::{
     enhanced::{LookBase, LookFile},
     from_bytes,
 };
-use crate::raw::Metadata;
+use crate::camera_data::Metadata;
 use anyhow::{Context, Result, ensure};
 use std::{path::Path, sync::Arc};
 pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {

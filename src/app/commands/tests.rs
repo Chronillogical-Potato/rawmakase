@@ -11,23 +11,24 @@ fn editor() -> (Editor, egui::Context) {
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.onboarding.visible = false;
     e.module = Module::Develop;
-    let metadata = crate::raw::Metadata {
+    let metadata = crate::camera_data::Metadata {
         width: 12,
         height: 8,
         wb: [1.; 3],
         ..Default::default()
     };
     e.document.metadata = Some(metadata.clone());
-    e.document.set_image(Arc::new(crate::raw::CameraImage {
-        recovered: Default::default(),
-        width: 12,
-        height: 8,
-        pixels: vec![[0.2, 0.1, 0.05]; 96],
-        metadata,
-        fast: false,
-        scale_factor: 1.,
-        scale_clipped: 0,
-    }));
+    e.document
+        .set_image(Arc::new(crate::camera_data::CameraImage {
+            recovered: Default::default(),
+            width: 12,
+            height: 8,
+            pixels: vec![[0.2, 0.1, 0.05]; 96],
+            metadata,
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        }));
     (e, ctx)
 }
 fn set(e: &mut Editor, ctx: &egui::Context, value: f32) -> Result<Outcome> {

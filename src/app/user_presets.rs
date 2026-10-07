@@ -193,7 +193,7 @@ mod tests {
         e.create_preset_in(&user, &form, &GroupSelection::all());
         assert!(e.status.contains("no photo"), "{}", e.status);
         e.document
-            .set_image(std::sync::Arc::new(crate::raw::CameraImage {
+            .set_image(std::sync::Arc::new(crate::camera_data::CameraImage {
                 recovered: Default::default(),
                 width: 4,
                 height: 4,

@@ -13,7 +13,7 @@
 //! compressed where it is strong and weighted, and the sum scaled by a strength that
 //! Texture sets. Fitted to the gratings within 0.04 RMS (×gain) and to the edges'
 //! halos within 2.4% of the edge's step.
-use crate::raw::CameraImage;
+use crate::camera_data::CameraImage;
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -294,7 +294,7 @@ mod tests {
             pixels: (0..w * h)
                 .map(|i| [0.1 + 0.1 * ((i % w) as f32 * 0.3).sin().abs(); 3])
                 .collect(),
-            metadata: crate::raw::Metadata {
+            metadata: crate::camera_data::Metadata {
                 width: full,
                 height: full * h / w,
                 ..Default::default()
