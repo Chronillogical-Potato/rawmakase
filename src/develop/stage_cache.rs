@@ -470,7 +470,7 @@ mod tests {
             (
                 "manual vignetting",
                 edit(&|r| {
-                    r.lens_vignette_model = crate::develop::effects::LensVignetteModel::Measured;
+                    r.lens_vignette_model = crate::model::operators::LensVignetteModel::Measured;
                     r.effects.lens_vignette = -0.5;
                 }),
                 true,

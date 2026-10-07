@@ -10,6 +10,7 @@ mod heal;
 mod layer;
 mod search;
 
+use crate::model::operators::RetouchModel;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -37,20 +38,8 @@ pub enum RetouchShape {
         radius: f32,
     },
 }
-/// Which soft edge a recipe's Heal and Clone operations render with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RetouchModel {
-    /// RAWmakase's first feather, a smoothstep over the feathered width: what recipes
-    /// saved before the measured one keep, so they render as they did.
-    #[default]
-    Original,
-    /// The feather measured in Camera Raw.
-    Measured,
-}
+
 impl RetouchModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
     pub(crate) fn feather(self) -> FeatherProfile {
         match self {
             Self::Original => FeatherProfile::Smoothstep,

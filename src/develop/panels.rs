@@ -260,7 +260,7 @@ mod tests {
         let mut before = before;
         before.sharpening = 0.35;
         let mut after = before.clone();
-        after.set_sharpening_defaults(crate::develop::sharpening::SharpeningModel::Measured);
+        after.set_sharpening_defaults(crate::model::operators::SharpeningModel::Measured);
         assert!(Panel::Detail.holds_change(&before, &after));
     }
 }

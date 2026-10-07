@@ -14,26 +14,10 @@
 //! Texture sets. Fitted to the gratings within 0.04 RMS (×gain) and to the edges'
 //! halos within 2.4% of the edge's step.
 use crate::camera_data::CameraImage;
+use crate::model::operators::TextureModel;
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Which operator renders Texture.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TextureModel {
-    /// RAWmakase's first Texture, a 3-pixel box detail: what recipes saved before the
-    /// measured one keep, so they render as they did.
-    #[default]
-    Original,
-    /// Fitted to Camera Raw 18.7.
-    Measured,
-}
-impl TextureModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// The Texture this recipe renders with the measured operator, or 0 when it takes the
 /// original one (older recipes, earlier engines).

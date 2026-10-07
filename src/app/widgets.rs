@@ -554,7 +554,7 @@ fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
 pub(super) fn parametric_curve_ui(
     ui: &mut egui::Ui,
     effects: &mut crate::develop::effects::Effects,
-    model: crate::develop::parametric::ParametricModel,
+    model: crate::model::operators::ParametricModel,
     histogram: &[[u32; 256]; 3],
     targeted: Option<usize>,
 ) {

@@ -26,7 +26,7 @@ pub(crate) use fields::*;
 pub(crate) use gpu_params::*;
 pub use legacy::*;
 pub use pickers::*;
-pub use pixel::*;
+pub(crate) use pixel::*;
 pub use render::*;
 pub use sampling::*;
 pub(crate) use tone::*;

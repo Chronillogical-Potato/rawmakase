@@ -10,7 +10,7 @@
 //!   50 for six hues and interpolated in hue; saturation scales the log gain linearly.
 //!   Only the default Blending and Balance were measured, so other settings keep the
 //!   earlier operator in `color::grade`.
-use serde::{Deserialize, Serialize};
+use crate::model::operators::GradingModel;
 
 use super::{
     Recipe,
@@ -18,23 +18,6 @@ use super::{
     color_grade_data::{BINS, LUMINANCE, TINT},
 };
 use crate::color::{mul, srgb_decode, srgb_encode};
-
-/// Which operator renders a recipe's color grading.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GradingModel {
-    /// Luminance-driven tables at the default Blending and Balance, and RAWmakase's
-    /// first approximation elsewhere: what recipes saved before the measured curves
-    /// keep, so they render as they did.
-    #[default]
-    Original,
-    /// Camera Raw 18.7's per-channel curves, for every setting.
-    Measured,
-}
-impl GradingModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// Engine 4 grading, applied to linear display RGB after the color mixer.
 pub(crate) enum ColorGrade {

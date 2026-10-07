@@ -6,31 +6,7 @@
 //! channel curved, the middle one keeping its place, so hue holds), in encoded ProPhoto
 //! RGB between the Basic panel's tone and the point curve. Recipes saved before it keep
 //! [`ParametricModel::Original`], an earlier per-channel approximation.
-use serde::{Deserialize, Serialize};
-
-/// Which operator renders a recipe's parametric curve.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ParametricModel {
-    /// RAWmakase's first approximation, applied to each channel: what recipes saved
-    /// before the measured curve keep, so they render as they did.
-    #[default]
-    Original,
-    /// The curve measured in Camera Raw, applied as DNG RGBTone; a look's own
-    /// parametric curve is added to the user's regions.
-    Measured,
-    /// As `Measured`, with a look's own parametric curve applied as a second curve
-    /// after the user's, as Camera Raw 18.7 renders it.
-    Layered,
-}
-impl ParametricModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-    /// Whether the measured curve renders the regions.
-    pub(crate) fn is_measured(&self) -> bool {
-        *self != Self::Original
-    }
-}
+use crate::model::operators::ParametricModel;
 
 const SIZE: usize = 1024;
 

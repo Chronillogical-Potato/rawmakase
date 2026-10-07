@@ -10,8 +10,6 @@ mod grain;
 mod lens_vignette;
 mod vignette;
 pub(crate) use grain::GrainField;
-pub use grain::GrainModel;
-pub use lens_vignette::LensVignetteModel;
 pub(crate) use lens_vignette::{ManualVignette, combined_table};
 pub(crate) use vignette::PostCropVignette;
 /// Lightroom's post-crop vignette styles. Recipes and XMP store Lightroom's codes:
