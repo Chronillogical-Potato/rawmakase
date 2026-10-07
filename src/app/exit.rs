@@ -10,6 +10,9 @@ use std::{
 /// hangs is worse than a render cut off; the loaders and exports write through
 /// temporary files.
 pub(super) const DEADLINE: Duration = Duration::from_secs(3);
+/// How long quitting then waits for the temporary files of cut-off exports to be
+/// deleted: they are on the folder an export stalled on, which can stall this too.
+const CLEANUP: Duration = Duration::from_millis(500);
 
 impl Editor {
     /// Quit on macOS closes the window without a close request, so the close
@@ -43,7 +46,11 @@ impl Editor {
         let waited = task::wait_for(stopping, until.saturating_duration_since(Instant::now()));
         // Exports cut off at the deadline end with the process, which leaves their
         // temporary files behind.
-        crate::export::remove_unfinished();
+        let removing = std::thread::Builder::new()
+            .name("remove-unfinished".into())
+            .spawn(crate::export::remove_unfinished)
+            .ok();
+        task::wait_for(vec![task::Stopping::new(removing)], CLEANUP);
         waited
     }
     /// Every job in progress stops at its next check.

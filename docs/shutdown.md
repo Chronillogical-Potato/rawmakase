@@ -75,6 +75,7 @@ macOS run their panel on the main thread, so they are never joined from it.
    folder change or a command output job runs, and save the edit after the
    autosave in flight, on the autosave thread. A save the catalog does not answer
    within the deadline keeps the window open, saying so, with Close without saving.
+   A close refused only to let work finish is asked for again once it has.
 2. `on_exit`, on every path, with one deadline for all of it:
    1. Cancel: the load, render, reference and prefetch tasks, the running export
       batch, the command output jobs and the library's renders.
@@ -88,7 +89,8 @@ macOS run their panel on the main thread, so they are never joined from it.
    5. Join the joinable workers above until the deadline. The renderer is among
       them, so it is done before eframe drops the device; any worker still
       running at the deadline is left detached.
-   6. Delete the temporary files of exports still being written.
+   6. Delete the temporary files of exports still being written, on a thread of
+      its own waited for 0.5 s: they are on the folder an export may have stalled on.
 3. eframe drops the editor, then the painter. The detached workers end with the
    process.
 
