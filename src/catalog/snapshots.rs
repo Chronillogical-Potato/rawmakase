@@ -3,7 +3,7 @@
 //! where snapshots belong to one image. Snapshots imported from Lightroom keep
 //! Lightroom's settings text and are converted when applied.
 use super::{Catalog, PhotoId};
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use anyhow::{Context, Result, ensure};
 use rusqlite::params;
 

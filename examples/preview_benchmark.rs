@@ -3,10 +3,8 @@
 //! Times what the desktop does: the first Fit after opening, Fit renders while a
 //! slider moves, a 100% region, and the full-resolution render used for export.
 use anyhow::{Context, Result};
-use rawmakase::{
-    camera_data,
-    develop::{self, Recipe},
-};
+use rawmakase::model::recipe::Recipe;
+use rawmakase::{camera_data, develop};
 use std::{sync::atomic::AtomicBool, time::Instant};
 
 /// Fit size of a 1600-pixel viewport, the size used by earlier measurements.
@@ -15,7 +13,7 @@ const FIT: u32 = 1600;
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.
 }
-fn mean_error(a: &develop::Rendered, b: &develop::Rendered) -> f32 {
+fn mean_error(a: &rawmakase::rendered::Rendered, b: &rawmakase::rendered::Rendered) -> f32 {
     assert_eq!((a.width, a.height), (b.width, b.height));
     let d: f32 = a
         .pixels
@@ -29,7 +27,7 @@ fn mean_error(a: &develop::Rendered, b: &develop::Rendered) -> f32 {
 /// What the desktop does with a CPU-side render before it can be drawn: 8-bit
 /// conversion and histogram on the render worker, then on the UI thread the texture
 /// image and, for whole-photo views, the Navigator thumbnail.
-fn cpu_display(out: &develop::Rendered, navigator: bool) -> usize {
+fn cpu_display(out: &rawmakase::rendered::Rendered, navigator: bool) -> usize {
     let rgb = out.rgb8();
     let histogram = out.histogram();
     let image = eframe::egui::ColorImage::from_rgb([out.width as usize, out.height as usize], &rgb);
@@ -155,7 +153,7 @@ fn main() -> Result<()> {
                 };
                 let display = develop::gpu::Display {
                     slot,
-                    clipping: develop::ClipOverlay::NONE,
+                    clipping: rawmakase::rendered::ClipOverlay::NONE,
                     monitor: None,
                     navigator: None,
                     thumbnail: None,
@@ -221,7 +219,7 @@ fn main() -> Result<()> {
                 };
                 let display = develop::gpu::Display {
                     slot,
-                    clipping: develop::ClipOverlay::NONE,
+                    clipping: rawmakase::rendered::ClipOverlay::NONE,
                     monitor: None,
                     navigator: (slot == develop::gpu::Slot::Whole).then_some(360),
                     thumbnail: None,

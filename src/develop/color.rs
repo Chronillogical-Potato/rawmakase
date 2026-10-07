@@ -5,7 +5,7 @@
 use crate::{
     camera_profiles::{PRO_TO_RGB, RGB_TO_PRO},
     color::mul,
-    develop::Recipe,
+    model::recipe::Recipe,
 };
 
 pub(crate) fn vibrance_gain(hue: f32, chroma: f32, amount: f32) -> f32 {

@@ -3,7 +3,7 @@ use super::*;
 use crate::model::red_eye::{
     DEFAULT_CATCHLIGHT, DEFAULT_DARKEN, DEFAULT_PUPIL_SIZE, RedEyeList, RedEyeOp,
 };
-use crate::{camera_data::CameraImage, develop::ImageFrame};
+use crate::{camera_data::CameraImage, model::image_frame::ImageFrame};
 
 const SKIN: [f32; 3] = [0.55, 0.35, 0.25];
 const RED_PUPIL: [f32; 3] = [0.6, 0.03, 0.03];
@@ -317,7 +317,7 @@ fn saved_corrections_from_a_later_release_are_skipped() {
         {"kind": "Red", "center": [0.5, 0.5], "radius": [0.01, 0.01], "pupil_size": 0.5, "darken": 0.5},
         {"kind": "Cat", "center": [0.2, 0.5], "radius": [0.01, 0.01], "pupil_size": 0.5, "darken": 0.5}
     ], "masks": []}"#;
-    let local: crate::develop::LocalEdits = serde_json::from_str(json).unwrap();
+    let local: crate::model::recipe::LocalEdits = serde_json::from_str(json).unwrap();
     assert_eq!(local.red_eye.len(), 1);
     assert_eq!(local.red_eye[0].center, [0.5, 0.5]);
     // Saved and read back unchanged, the later release's correction included, even
@@ -326,7 +326,7 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     edited.red_eye[0].darken = 0.8;
     let text = serde_json::to_string(&edited).unwrap();
     assert!(text.contains("\"Cat\""), "{text}");
-    let back: crate::develop::LocalEdits = serde_json::from_str(&text).unwrap();
+    let back: crate::model::recipe::LocalEdits = serde_json::from_str(&text).unwrap();
     assert_eq!(back, edited);
     // A later correction between two of ours keeps its place.
     let json = r#"[
@@ -341,7 +341,7 @@ fn saved_corrections_from_a_later_release_are_skipped() {
     assert_eq!(back[1]["kind"], "Cat");
     assert_eq!(back[2]["center"][0], 0.7);
     // Through the recipe too.
-    let recipe = crate::develop::Recipe::default().with_local(edited.clone());
+    let recipe = crate::model::recipe::Recipe::default().with_local(edited.clone());
     assert_eq!(recipe.split_local().1, edited);
 }
 

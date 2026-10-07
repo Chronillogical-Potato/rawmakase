@@ -1,3 +1,5 @@
+//! Developed pixels as values: an output image, its histogram and clipping, as
+//! the renderer, export and watermarks pass them; nothing here renders.
 /// A value from 0 to 1 as a byte, rounded; out-of-range values are clamped.
 pub(crate) fn unit_to_u8(v: f32) -> u8 {
     (v.clamp(0., 1.) * 255. + 0.5) as u8

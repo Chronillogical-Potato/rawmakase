@@ -67,7 +67,7 @@ fn presets_changing_settings_that_dont_scale_get_no_amount() {
             SettingGroup::TransformAdjustments,
         ),
         (
-            |r| r.upright.mode = crate::develop::UprightMode::Level,
+            |r| r.upright.mode = crate::model::transform::UprightMode::Level,
             SettingGroup::UprightMode,
         ),
         (|r| r.straighten = 2., SettingGroup::Crop),
@@ -209,8 +209,8 @@ fn point_curves_blend_their_outputs() {
 #[test]
 fn choices_that_arent_numbers_follow_the_preset_above_zero() {
     use crate::{
-        develop::panels::{Panel, PanelState},
         model::effects::VignetteStyle,
+        model::panels::{Panel, PanelState},
     };
     let m = metadata();
     let before = Recipe::default();

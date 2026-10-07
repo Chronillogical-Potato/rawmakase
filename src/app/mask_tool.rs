@@ -10,12 +10,12 @@ use super::widgets::{local_setting_slider, segmented, set_edit_context, slider_w
 use crate::develop::{
     ViewMapping,
     masks::{self, Space},
-    params::LocalParameterId,
 };
 use crate::model::masks::{
     BrushStroke, LocalAdjust, MAX_COMPONENTS, MAX_GROUPS, MAX_POINTS, MAX_STROKES, MaskComponent,
     MaskGroup, MaskOp, MaskShape,
 };
+use crate::model::params::LocalParameterId;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// What a new mask or component is made of.

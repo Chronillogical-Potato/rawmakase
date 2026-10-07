@@ -1,7 +1,8 @@
+use crate::model::recipe::Recipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
-    develop::{Recipe, Rendered},
     export_settings::ExportOptions,
+    rendered::Rendered,
 };
 use eframe::egui;
 use std::{
@@ -82,7 +83,7 @@ pub enum Event {
         /// The sampling task's generation; a later sample or a put-away dropper
         /// supersedes it.
         generation: u64,
-        sampled: Box<crate::develop::Recipe>,
+        sampled: Box<Recipe>,
         result: Result<[f32; 3], String>,
     },
     /// The Targeted Adjustment Tool's sample for the photo loaded as `id`, taken
@@ -91,20 +92,20 @@ pub enum Event {
         id: u64,
         /// The sampling task's generation; a later drag supersedes it.
         generation: u64,
-        sampled: Box<crate::develop::Recipe>,
+        sampled: Box<Recipe>,
         result: Result<crate::develop::targeted::TargetSample, String>,
     },
     /// An Auto estimate for the photo loaded as `id`.
     Auto {
         id: u64,
         kind: AutoKind,
-        result: Result<Box<crate::develop::Recipe>, String>,
+        result: Result<Box<Recipe>, String>,
     },
     /// Upright's corrections for the photo loaded as `id`, analysed from `analysed`.
     Upright {
         id: u64,
         generation: u64,
-        analysed: Box<crate::develop::Recipe>,
+        analysed: Box<Recipe>,
         result: Result<Vec<[f32; 9]>, String>,
     },
     /// The Crop panel's Auto straighten angle for the photo loaded as `id`, analysed
@@ -112,7 +113,7 @@ pub enum Event {
     Straighten {
         id: u64,
         generation: u64,
-        analysed: Box<crate::develop::Recipe>,
+        analysed: Box<Recipe>,
         result: Result<Option<f32>, String>,
     },
     /// The setup assistant's scan for cameras, profiles and presets.
@@ -143,7 +144,7 @@ pub enum Event {
         id: u64,
         pane: Pane,
         preview: Preview,
-        histogram: Box<crate::develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
         /// A reduced copy for the library, without overlays, when the job asked for one.
         thumbnail: Option<image::RgbImage>,
         /// The shown pixels without overlays or monitor profile, when the job asked.
@@ -154,7 +155,7 @@ pub enum Event {
     /// The whole photo's histogram, for a render that showed a 100% region.
     Histogram {
         id: u64,
-        histogram: Box<crate::develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
     },
     Failed {
         id: u64,
@@ -249,7 +250,7 @@ pub struct RenderJob {
     pub region: Option<[u32; 4]>,
     pub monitor: Option<PathBuf>,
     /// The clipping warnings painted over the shown pixels.
-    pub clipping: crate::develop::ClipOverlay,
+    pub clipping: crate::rendered::ClipOverlay,
     /// Update the Navigator (Fit views).
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.

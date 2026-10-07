@@ -3,8 +3,11 @@
 use super::LocalDelta;
 use super::brush::{self, Raster, Space};
 use super::range::{self, RangeInput};
-use crate::develop::{Geometry, ImageFrame, Recipe, unit_to_u8};
+use crate::develop::Geometry;
+use crate::model::image_frame::ImageFrame;
 use crate::model::masks::{MaskGroup, MaskOp, MaskShape};
+use crate::model::recipe::Recipe;
+use crate::rendered::unit_to_u8;
 use crate::{
     camera_data::CameraImage,
     develop::{image_space::LensMap, retouch::profile},

@@ -1,9 +1,15 @@
 //! Stateful desktop preview backend. Export remains on the reference CPU path.
 use super::{
-    Geometry, Recipe, Rendered, ValidRecipe, gpu, pyramid::Pyramid, quality, quality::Output,
+    Geometry, gpu,
+    pyramid::Pyramid,
+    quality::{self, Output},
     stage_cache::StageCache,
 };
-use crate::camera_data::CameraImage;
+use crate::rendered::Rendered;
+use crate::{
+    camera_data::CameraImage,
+    model::{recipe::Recipe, valid::ValidRecipe},
+};
 use anyhow::Result;
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -612,7 +618,7 @@ mod tests {
                 [0.5, 0.33, 0.25]
             };
         }
-        let frame = crate::develop::ImageFrame::new(&im);
+        let frame = crate::model::image_frame::ImageFrame::new(&im);
         let op = RedEyeOp {
             kind: Default::default(),
             center: frame.to_image(eye[0], eye[1]),

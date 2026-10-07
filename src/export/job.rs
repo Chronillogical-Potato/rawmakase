@@ -8,8 +8,8 @@ use crate::export_settings::ExportSettings;
 use crate::{
     camera_data::{CameraImage, Demosaic},
     decode::{DecodePolicy, FullSize},
-    develop::Recipe,
     exif,
+    model::recipe::Recipe,
     raw::Raw,
 };
 use anyhow::{Result, ensure};
@@ -67,7 +67,7 @@ pub fn run(
 
 /// A photo rendered for export, with what goes in the file beside its pixels.
 pub struct Prepared {
-    pub rendered: crate::develop::Rendered,
+    pub rendered: crate::rendered::Rendered,
     pub metadata: crate::camera_data::Metadata,
     pub options: crate::export_settings::ExportOptions,
     pub embed: Embed,
@@ -209,6 +209,10 @@ fn xmp(
             lens: fields.lens,
             settings: fields.develop,
             format: settings.mime_type().into(),
+            crop: Some(crate::develop::rendered_crop(
+                &photo.recipe,
+                &image.metadata,
+            )),
         },
     )
 }

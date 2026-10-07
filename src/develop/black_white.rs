@@ -1,7 +1,8 @@
 //! Lightroom's Treatment (Color or Black & White) and the Auto black & white mix.
-use super::Recipe;
 use crate::camera_data::{CameraImage, Metadata};
 use crate::camera_profiles::CameraProfile;
+use crate::model::recipe::Recipe;
+use crate::model::recipe::{Treatment, is_monochrome};
 use std::sync::Arc;
 
 /// How the photo's colors spread, as Auto black & white measures them: the mean and
@@ -115,13 +116,6 @@ pub(crate) fn gray(grid: &[[f32; 3]], rgb: [f32; 3]) -> f32 {
     (crate::color::luminance(scaled)).max(0.)
 }
 
-/// The Basic panel's Treatment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Treatment {
-    Color,
-    BlackWhite,
-}
-
 /// A photo's Auto black & white mix, for the settings it is converted with. Camera
 /// Raw's Auto, measured on synthetic scenes, behaves as a fixed linear function of
 /// the direction in which the photo's colors spread most: the principal axis of
@@ -232,17 +226,6 @@ impl ColorSpread {
 }
 
 impl Recipe {
-    /// The Treatment the photo renders with: Black & White by its own setting or by a
-    /// black & white profile.
-    pub fn treatment(&self) -> Treatment {
-        // As `with_profile_adjustments` renders it, without building the look.
-        if self.effects.monochrome || (self.engine >= 3 && is_monochrome(self.profile.as_deref())) {
-            Treatment::BlackWhite
-        } else {
-            Treatment::Color
-        }
-    }
-
     /// Sets the Treatment. Converting to black & white sets the Auto mix when the mix
     /// was never set and `first` gives one (Lightroom's "Apply auto mix when first
     /// converting to black and white"); a mix already set (by hand, by Auto, or kept
@@ -296,13 +279,6 @@ impl Recipe {
             self.set_treatment(Treatment::Color, first);
         }
     }
-}
-
-/// Whether a profile renders black & white (an XMP look with `ConvertToGrayscale`).
-pub fn is_monochrome(profile: Option<&CameraProfile>) -> bool {
-    profile
-        .and_then(|p| p.enhanced.as_ref())
-        .is_some_and(|look| look.monochrome)
 }
 
 #[cfg(test)]

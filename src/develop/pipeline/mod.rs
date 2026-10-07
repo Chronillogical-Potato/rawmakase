@@ -2,11 +2,15 @@ use super::masks::{
     LocalDelta, LocalMath, MaskWeights,
     local::{self, slot},
 };
-use super::{Geometry, Recipe, Rendered, ValidRecipe, mul, srgb_encode};
-use crate::color::srgb_decode;
+use super::{Geometry, mul, srgb_encode};
+use crate::rendered::Rendered;
 use crate::{
     camera_data::{CameraImage, Metadata},
     develop::curve::{CurveLut, refine_saturation},
+};
+use crate::{
+    color::srgb_decode,
+    model::{recipe::Recipe, valid::ValidRecipe},
 };
 use anyhow::{Result, ensure};
 use rayon::prelude::*;

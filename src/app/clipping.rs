@@ -2,7 +2,7 @@
 //! highlights are shown independently, hovering a triangle shows its warning
 //! while the pointer stays there, and J turns both on or off. View state only,
 //! never saved with the edit.
-use crate::develop::{ClipOverlay, Histogram};
+use crate::rendered::{ClipOverlay, Histogram};
 use eframe::egui::Color32;
 
 /// One end of the histogram.

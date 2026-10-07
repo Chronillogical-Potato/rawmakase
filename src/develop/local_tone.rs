@@ -81,7 +81,7 @@ pub(crate) struct Sliders {
     pub(crate) clarity: f32,
 }
 impl Sliders {
-    pub(crate) fn of(r: &super::Recipe) -> Self {
+    pub(crate) fn of(r: &crate::model::recipe::Recipe) -> Self {
         Self {
             shadows: r.shadows,
             highlights: r.highlights,

@@ -13,8 +13,8 @@
 //! reference photo in Before's place, rendered in the same lane.
 use super::state::{Picture, TextureMode};
 use super::{Editor, history::Step};
-use crate::camera_data::CameraImage;
-use crate::develop::{ClipOverlay, Geometry, Recipe};
+use crate::rendered::ClipOverlay;
+use crate::{camera_data::CameraImage, develop::Geometry, model::recipe::Recipe};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::{path::PathBuf, sync::Arc};
 

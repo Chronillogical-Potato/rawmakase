@@ -1,7 +1,7 @@
 //! A recipe known to be valid. Render entry points take a [`ValidRecipe`], so none
 //! renders a recipe nobody checked, and a recipe checked once is not checked again
 //! on the way down.
-use super::Recipe;
+use super::recipe::Recipe;
 use anyhow::Result;
 use std::borrow::Cow;
 

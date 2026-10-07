@@ -1,7 +1,7 @@
 //! Lightroom's Masking panel: masks built from brush, gradient and range components,
 //! each with its own local adjustment.
 //!
-//! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
+//! Positions are in image space (see [`crate::model::image_frame::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening, so masks
 //! stay on the photo when those change. Sizes are fractions of the long edge. The masks
 //! themselves are [`crate::model::masks`]'s; this module renders their weights.
@@ -21,9 +21,9 @@ pub(crate) use range::oklab;
 /// or has no components.
 pub fn overlay_weights(
     image: &crate::camera_data::CameraImage,
-    recipe: &crate::develop::Recipe,
+    recipe: &crate::model::recipe::Recipe,
     index: usize,
-    out: &crate::develop::Rendered,
+    out: &crate::rendered::Rendered,
     region: Option<[u32; 4]>,
 ) -> Option<Vec<f32>> {
     recipe

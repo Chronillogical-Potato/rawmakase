@@ -4,7 +4,7 @@
 //! later edit and export at full quality. The operations themselves are
 //! [`crate::model::retouch`]'s.
 //!
-//! Positions are in image space (see [`crate::develop::ImageFrame`]): normalised to the
+//! Positions are in image space (see [`crate::model::image_frame::ImageFrame`]): normalised to the
 //! oriented photo before lens correction, Transform, crop and straightening. Sizes are
 //! fractions of the photo's long edge.
 mod heal;
@@ -34,7 +34,7 @@ mod tests;
 /// Lightroom's Visualize Spots: a black-and-white view of fine luminance detail in a
 /// rendered preview, where dust and small blemishes stand out. `threshold` (0–1) is
 /// the panel's slider: higher shows fainter detail. Returns 8-bit RGB.
-pub fn visualize_spots(image: &crate::develop::Rendered, threshold: f32) -> Vec<u8> {
+pub fn visualize_spots(image: &crate::rendered::Rendered, threshold: f32) -> Vec<u8> {
     let (w, h) = (image.width as usize, image.height as usize);
     let lum: Vec<f32> = image
         .pixels

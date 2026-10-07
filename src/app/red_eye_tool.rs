@@ -300,7 +300,7 @@ impl Editor {
     /// Turns the Red Eye switch on, so a correction just made or changed shows, as
     /// Lightroom does.
     fn show_red_eye(&mut self) {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         self.document
             .edit
             .recipe

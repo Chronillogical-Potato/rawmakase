@@ -1,5 +1,6 @@
 use super::*;
-use crate::develop::{Geometry, Upright};
+use crate::develop::Geometry;
+use crate::model::transform::Upright;
 
 /// A 3000 × 2000 photo at the default focal length, turned by the camera `flip`.
 fn metadata(flip: i32) -> Metadata {

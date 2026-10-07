@@ -20,14 +20,11 @@
 //! Point Color swatches scale their shifts. Lens corrections, chromatic aberration,
 //! crop, geometry, Upright, spots, masks and Point Color swatches added or taken away
 //! don't scale: a preset that changes any of them gets no Amount.
+use crate::model::recipe::{Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN};
 use crate::{
     camera_data::Metadata,
     color::curve::ToneCurve,
-    develop::{
-        Recipe, TEMPERATURE_MAX, TEMPERATURE_MIN, params::ParameterId,
-        settings_groups::SettingGroup,
-    },
-    model::effects::Effects,
+    model::{effects::Effects, params::ParameterId, settings_groups::SettingGroup},
     xmp::Preset,
 };
 

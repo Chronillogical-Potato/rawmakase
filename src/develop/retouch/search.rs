@@ -2,7 +2,7 @@
 //! whose border matches the destination's border best and whose texture is similar,
 //! avoiding other spots, strong edges and clipped highlights.
 use super::{FeatherProfile, RetouchOp, heal};
-use crate::{camera_data::CameraImage, develop::ImageFrame};
+use crate::{camera_data::CameraImage, model::image_frame::ImageFrame};
 
 /// The search runs on a reduced copy of the neighbourhood, with the shape's radius at
 /// about this many pixels.

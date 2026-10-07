@@ -8,7 +8,7 @@ use crate::{
     camera_data,
     decode::{DecodePolicy, FullSize},
     decode_cache::DecodeCache,
-    develop::Recipe,
+    model::recipe::Recipe,
 };
 use eframe::egui;
 use std::{

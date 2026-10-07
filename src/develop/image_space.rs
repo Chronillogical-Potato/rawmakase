@@ -5,111 +5,10 @@
 //! crop, normalised to 0–1 on both axes, before lens correction, Transform, crop,
 //! straightening and the user's rotation and flips. A spot stays on the dust particle
 //! whatever those settings do.
-use super::{Geometry, Recipe};
+use super::Geometry;
 use crate::camera_data::CameraImage;
-
-/// Image space of one decoded image (or pyramid level) of a photo.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ImageFrame {
-    width: u32,
-    height: u32,
-    /// The camera's default crop, as fractions of the decoded image: left, top, width,
-    /// height.
-    pub(crate) inset: [f32; 4],
-    /// Quarter turns of the camera orientation.
-    pub(crate) turns: u8,
-}
-impl ImageFrame {
-    pub fn new(im: &CameraImage) -> Self {
-        Self::with_size(&im.metadata, im.width, im.height)
-    }
-    /// The frame from metadata alone, as when a Lightroom edit is converted before the
-    /// photo is decoded.
-    pub fn for_metadata(m: &crate::camera_data::Metadata) -> Self {
-        Self::with_size(m, m.width.max(1), m.height.max(1))
-    }
-    fn with_size(m: &crate::camera_data::Metadata, width: u32, height: u32) -> Self {
-        let cw = if m.crop_width > 0 && m.crop_width <= m.width {
-            m.crop_width as f32 / m.width as f32
-        } else {
-            1.
-        };
-        let ch = if m.crop_height > 0 && m.crop_height <= m.height {
-            m.crop_height as f32 / m.height as f32
-        } else {
-            1.
-        };
-        let turns = match m.flip {
-            3 => 2,
-            5 => 3,
-            6 => 1,
-            _ => 0,
-        };
-        Self {
-            width,
-            height,
-            inset: [
-                if m.crop_left.saturating_add(m.crop_width) <= m.width {
-                    m.crop_left as f32 / m.width as f32
-                } else {
-                    (1. - cw) / 2.
-                },
-                if m.crop_top.saturating_add(m.crop_height) <= m.height {
-                    m.crop_top as f32 / m.height as f32
-                } else {
-                    (1. - ch) / 2.
-                },
-                cw,
-                ch,
-            ],
-            turns,
-        }
-    }
-    /// Oriented size in decoded pixels.
-    pub fn size(&self) -> [f32; 2] {
-        let w = self.width as f32 * self.inset[2];
-        let h = self.height as f32 * self.inset[3];
-        if self.turns % 2 == 1 { [h, w] } else { [w, h] }
-    }
-    /// Width over height of the oriented photo.
-    pub fn aspect(&self) -> f32 {
-        let [w, h] = self.size();
-        w / h
-    }
-    /// Long edge in decoded pixels, the unit of image-space sizes.
-    pub fn long_edge(&self) -> f32 {
-        let [w, h] = self.size();
-        w.max(h)
-    }
-    /// Image-space position of decoded sample coordinates (pixel `i` centred at `i`).
-    pub fn to_image(&self, sx: f32, sy: f32) -> [f32; 2] {
-        let x = ((sx + 0.5) / self.width as f32 - self.inset[0]) / self.inset[2];
-        let y = ((sy + 0.5) / self.height as f32 - self.inset[1]) / self.inset[3];
-        turn((4 - self.turns) % 4, x, y)
-    }
-    /// Image-space position of a point in the unrotated frame (normalised to the
-    /// default crop, before the camera orientation), where Lightroom keeps positions.
-    pub fn from_unrotated(&self, p: [f32; 2]) -> [f32; 2] {
-        turn((4 - self.turns) % 4, p[0], p[1])
-    }
-    /// Decoded sample coordinates of an image-space position.
-    pub fn to_source(&self, p: [f32; 2]) -> [f32; 2] {
-        let [x, y] = turn(self.turns, p[0], p[1]);
-        [
-            (self.inset[0] + x * self.inset[2]) * self.width as f32 - 0.5,
-            (self.inset[1] + y * self.inset[3]) * self.height as f32 - 0.5,
-        ]
-    }
-}
-/// `turns` quarter turns of normalised coordinates, as `Geometry::source` applies them.
-pub(crate) fn turn(turns: u8, x: f32, y: f32) -> [f32; 2] {
-    match turns % 4 {
-        1 => [y, 1. - x],
-        2 => [1. - x, 1. - y],
-        3 => [1. - y, x],
-        _ => [x, y],
-    }
-}
+use crate::model::image_frame::ImageFrame;
+use crate::model::recipe::Recipe;
 
 /// Lens distortion as a map of positions: from a corrected position (what
 /// `Geometry::source` returns) to where it samples the decoded image, for green.
@@ -262,20 +161,6 @@ mod tests {
         }
     }
     #[test]
-    fn image_frame_round_trips_every_orientation() {
-        for flip in [0, 3, 5, 6] {
-            let f = ImageFrame::new(&image(flip));
-            for p in [[0.1, 0.2], [0.5, 0.5], [0.93, 0.07]] {
-                let [x, y] = f.to_source(p);
-                let q = f.to_image(x, y);
-                assert!((p[0] - q[0]).abs() < 1e-5 && (p[1] - q[1]).abs() < 1e-5);
-            }
-            let size = f.size();
-            let turned = flip == 5 || flip == 6;
-            assert_eq!(size, if turned { [190., 280.] } else { [280., 190.] });
-        }
-    }
-    #[test]
     fn view_mapping_round_trips_with_crop_rotation_and_transform() {
         let im = image(6);
         let mut r = Recipe {
@@ -287,7 +172,7 @@ mod tests {
         };
         r.transform.vertical = 0.3;
         r.transform.rotate = 2.;
-        r.upright.mode = crate::develop::UprightMode::Vertical;
+        r.upright.mode = crate::model::transform::UprightMode::Vertical;
         r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 5];
         r.upright.corrections[4] = [1.1, 0.02, -0.05, 0.03, 1.05, -0.02, 0.2, 0.01, 1.];
         let map = ViewMapping::new(&im, &r);
@@ -308,7 +193,7 @@ mod tests {
         let im = image(6);
         let plain = Recipe::default();
         let mut r = plain.clone();
-        r.upright.mode = crate::develop::UprightMode::Auto;
+        r.upright.mode = crate::model::transform::UprightMode::Auto;
         r.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 2];
         r.upright.corrections[1] = [1., 0., 0.1, 0., 1., 0., 0., 0., 1.];
         let (a, b) = (Geometry::new(&im, &plain, 0), Geometry::new(&im, &r, 0));

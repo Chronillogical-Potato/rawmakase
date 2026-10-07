@@ -1,6 +1,6 @@
 //! Device-type presets. Adding a profile does not change the queue or editor.
 use super::*;
-use crate::develop::params::ParameterId;
+use crate::model::params::ParameterId;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

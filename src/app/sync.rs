@@ -1,20 +1,18 @@
 //! Sync Settings: the open photo's settings, by group, onto the other photos selected
 //! with it, as one change that one Undo reverses. Each target's settings are worked
-//! out for its own camera (see `develop::settings_groups`), off the UI thread.
+//! out for its own camera (see `model::settings_groups`), off the UI thread.
 use super::{
     Editor,
     history::{History, Step},
     settings_transfer::Settings,
     worker::Event,
 };
+use crate::model::recipe::Recipe;
 use crate::{
     catalog::{Catalog, EditChange, EditToSave, HistoryUpdate, PhotoId, SavedHistory},
-    develop::{
-        Recipe,
-        settings_groups::{self, GroupSelection, Source, Target},
-    },
     edits::{self, Origin},
     export_settings::ExportOptions,
+    model::settings_groups::{self, GroupSelection, Source, Target},
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, ensure};
@@ -245,7 +243,7 @@ fn prepare(
             },
         ),
         BatchChange::MatchTotalExposures => settings_groups::Transferred {
-            recipe: crate::develop::Recipe {
+            recipe: crate::model::recipe::Recipe {
                 exposure: matched_exposure(source, &metadata).with_context(|| {
                     format!("{} has no aperture, shutter speed or ISO", target.name)
                 })?,
@@ -265,7 +263,7 @@ fn prepare(
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let image = raw.develop(crate::camera_data::Decode::full(demosaic), &cancel)?;
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
-            && after.upright.mode == crate::develop::UprightMode::Guided
+            && after.upright.mode == crate::model::transform::UprightMode::Guided
         {
             notes.push(issue.message().into());
         }
@@ -319,7 +317,7 @@ pub(super) fn capture_stops(m: &crate::camera_data::Metadata) -> Option<f32> {
 /// source: a photo that let in a stop more light gets a stop less Exposure.
 fn matched_exposure(source: &Settings, target: &crate::camera_data::Metadata) -> Option<f32> {
     let difference = capture_stops(&source.metadata)? - capture_stops(target)?;
-    let valid = &crate::develop::params::ParameterId::Exposure
+    let valid = &crate::model::params::ParameterId::Exposure
         .descriptor()
         .valid;
     Some((source.recipe.exposure + difference).clamp(*valid.start(), *valid.end()))
@@ -811,7 +809,7 @@ mod tests {
         } = catalog()?;
         let metadata = crate::photo::open(&photos[0].1)?.metadata;
         let mut recipe = Recipe::default();
-        recipe.upright.mode = crate::develop::UprightMode::Guided;
+        recipe.upright.mode = crate::model::transform::UprightMode::Guided;
         recipe.exposure = 0.3;
         let source = Settings { recipe, metadata };
         // Settings cut off mid-value.

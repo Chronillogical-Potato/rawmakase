@@ -1,7 +1,7 @@
+use rawmakase::model::recipe::Recipe;
 use rawmakase::{
     camera_data::{CameraImage, Metadata},
-    camera_profiles,
-    develop::{self, Recipe},
+    camera_profiles, develop,
 };
 #[test]
 #[ignore = "User-provided private DCP files; set RAWMAKASE_PROFILES"]

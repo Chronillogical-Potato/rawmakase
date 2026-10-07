@@ -4,12 +4,12 @@
 //! shown pixels for the white balance loupe come back.
 use super::{Processor, develop::Input, uniforms::PresentParams};
 use crate::develop::{
-    ClipOverlay, Histogram, Recipe,
     effects::{GrainField, PostCropVignette},
     pipeline::pixel_params::PixelParams,
     quality,
 };
-use crate::model::operators::GrainModel;
+use crate::model::{operators::GrainModel, recipe::Recipe};
+use crate::rendered::{ClipOverlay, Histogram};
 use anyhow::{Context, Result, ensure};
 use std::{
     sync::{
@@ -67,7 +67,7 @@ pub struct Frame {
     /// Changes whenever the texture is written, see [`Processor::generation`].
     pub generation: u64,
     pub navigator: Option<wgpu::Texture>,
-    /// As [`crate::develop::Rendered::histogram`] of the finished pixels.
+    /// As [`crate::rendered::Rendered::histogram`] of the finished pixels.
     pub histogram: Box<Histogram>,
     /// Width, height and RGB bytes of the reduced copy for thumbnails.
     pub thumbnail: Option<(u32, u32, Vec<u8>)>,

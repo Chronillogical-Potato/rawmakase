@@ -1,11 +1,11 @@
 //! JPEG and 16-bit TIFF encoding with an ICC profile, EXIF directories and XMP.
 use super::Embed;
 use crate::{
-    develop::Rendered,
     exif::{
         CameraExif, Field,
         tag::{EXIF_IFD, GPS_IFD, ICC_PROFILE, RESOLUTION_UNIT, X_RESOLUTION, XMP, Y_RESOLUTION},
     },
+    rendered::Rendered,
     tiff::kind::{ASCII, FLOAT, LONG, RATIONAL, SHORT, SLONG, SRATIONAL, SSHORT},
 };
 use anyhow::{Result, ensure};

@@ -9,7 +9,7 @@
 //! from its second moments (a filled ellipse has semi-axes of twice the standard
 //! deviation).
 use crate::model::red_eye::MAX_CORRELATION;
-use crate::{camera_data::CameraImage, develop::ImageFrame};
+use crate::{camera_data::CameraImage, model::image_frame::ImageFrame};
 
 /// Why no pupil was found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

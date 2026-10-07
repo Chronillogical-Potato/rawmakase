@@ -1,9 +1,7 @@
+use super::PhotoMeasures;
 use super::Preset;
-use crate::{
-    camera_data::{CameraImage, Metadata},
-    camera_profiles::CameraProfile,
-    develop::{Recipe, mul},
-};
+use crate::model::recipe::Recipe;
+use crate::{camera_data::Metadata, camera_profiles::CameraProfile, color::mul};
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -106,7 +104,7 @@ impl Preset {
         base: &Recipe,
         m: &Metadata,
         profiles: &[Arc<CameraProfile>],
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<Recipe> {
         ensure!(self.blockers.is_empty(), "{}", self.blockers.join("; "));
         let mut settings = Settings {
@@ -149,7 +147,7 @@ impl Preset {
         base: &Recipe,
         m: &Metadata,
         profiles: &[Arc<CameraProfile>],
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<(Recipe, Vec<String>)> {
         if let Ok(recipe) = self.apply(base, m, profiles, image) {
             return Ok((recipe, Vec::new()));
@@ -223,7 +221,7 @@ impl Preset {
     /// longer fit the photo: they are dropped for a new analysis, unless these settings
     /// bring Lightroom's own corrections, made with them.
     fn keep_upright_fitting(&self, base: &Recipe, r: &mut Recipe) {
-        use crate::develop::upright::LensInputs;
+        use crate::model::transform::LensInputs;
         // Whether the Upright stage installs corrections of its own: tried on a copy,
         // since a lenient apply rolls back a stage that fails.
         let mut trial = r.clone();
@@ -476,7 +474,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         let v = settings.values;
         settings.seen.insert("WhiteBalance".into());
@@ -505,9 +503,9 @@ impl Preset {
                     r.tint = tint;
                     r.update_wb(m);
                     r.auto_white_balance = Some([r.temperature, r.tint]);
-                } else if let Some(im) = image {
+                } else if let Some(photo) = image {
                     // Settings without resolved values get the WB menu's Auto.
-                    *r = crate::develop::auto_white_balance(im, r)?;
+                    *r = photo.auto_white_balance(r)?;
                 }
             }
             Some("Custom") | None => {
@@ -526,7 +524,10 @@ impl Preset {
             }
             // Lightroom's named presets. Photo settings carry the values Lightroom
             // resolved for the camera; a preset may name the mode alone.
-            Some(name) if let Some(named) = crate::develop::NamedWhiteBalance::from_name(name) => {
+            Some(name)
+                if let Some(named) =
+                    crate::model::white_balance::NamedWhiteBalance::from_name(name) =>
+            {
                 let values = named.values();
                 r.temperature = number(v, "Temperature")?.unwrap_or(values.temperature);
                 r.tint = number(v, "Tint")?.unwrap_or(values.tint);
@@ -704,7 +705,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         settings.seen.insert("AutoGrayscaleMix".into());
         if self.leaves_auto_gray_mix(r)? {
@@ -714,14 +715,9 @@ impl Preset {
             }
         }
         if self.leaves_auto_gray_mix(r)?
-            && let Some(im) = image
+            && let Some(photo) = image
         {
-            let spread = crate::develop::ColorSpread::measure(im);
-            r.effects.gray_mix = crate::develop::AutoMix {
-                spread: &spread,
-                metadata: m,
-            }
-            .for_recipe(r);
+            r.effects.gray_mix = photo.auto_gray_mix(r, m);
         }
         Ok(())
     }
@@ -965,7 +961,7 @@ impl Preset {
         settings: &mut Settings<'_>,
         r: &mut Recipe,
         m: &Metadata,
-        image: Option<&CameraImage>,
+        image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
         let v = settings.values;
         settings.seen.insert("AutoTone".into());
@@ -973,9 +969,10 @@ impl Preset {
         // so every route (open, reset, history, hover) renders the same edit.
         if boolean(v, "AutoTone")? == Some(true)
             && !v.contains_key("Exposure2012")
-            && let Some(im) = image
+            && let Some(photo) = image
         {
-            let mut l: Vec<f32> = im
+            let mut l: Vec<f32> = photo
+                .camera_image()
                 .pixels
                 .iter()
                 .step_by(64)
@@ -995,7 +992,7 @@ impl Preset {
     /// Lightroom's panel switches. A panel is off when any of its keys says so, and
     /// turned back on by a setting that says it is on.
     fn apply_panels(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
-        use crate::develop::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         for panel in Panel::ALL {
             let mut state = None;
             for key in panel.lightroom_keys() {
@@ -1070,9 +1067,9 @@ impl Preset {
         )?;
         if let Some(enable) = number(v, "LensProfileEnable")? {
             let state = if enable != 0. {
-                crate::develop::ProfileCorrections::On
+                crate::model::recipe::ProfileCorrections::On
             } else {
-                crate::develop::ProfileCorrections::Off
+                crate::model::recipe::ProfileCorrections::Off
             };
             r.set_profile_corrections(m, state);
         }
@@ -1116,7 +1113,7 @@ impl Preset {
 
     /// Lightroom's Upright mode and the corrections it stored for every mode.
     fn apply_upright(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
-        use crate::develop::UprightMode;
+        use crate::model::transform::UprightMode;
         let v = settings.values;
         settings.seen.insert("PerspectiveUpright".into());
         let mut lightroom = BTreeMap::new();
@@ -1135,9 +1132,9 @@ impl Preset {
                 let i: usize = i
                     .parse()
                     .ok()
-                    .filter(|&i| i < crate::develop::guided::MAX_GUIDES)
+                    .filter(|&i| i < crate::model::transform::MAX_GUIDES)
                     .with_context(|| format!("Unsupported {key}"))?;
-                let guide = crate::develop::guided::parse_guide(value)
+                let guide = crate::model::transform::parse_guide(value)
                     .with_context(|| format!("Invalid {key}"))?;
                 if guides.len() <= i {
                     guides.resize(i + 1, None);
@@ -1195,7 +1192,7 @@ impl Preset {
             stored || mode != UprightMode::Guided,
             "Guided Upright without Lightroom's stored correction is not supported yet"
         );
-        r.upright = crate::develop::Upright {
+        r.upright = crate::model::transform::Upright {
             mode,
             corrections,
             guides,
@@ -1210,7 +1207,10 @@ impl Preset {
         if self.local.is_empty() {
             return Vec::new();
         }
-        let edits = super::local::convert(&self.local, crate::develop::ImageFrame::for_metadata(m));
+        let edits = super::local::convert(
+            &self.local,
+            crate::model::image_frame::ImageFrame::for_metadata(m),
+        );
         if let Some(retouch) = edits.retouch {
             // Lightroom's spots mean Camera Raw's feather, also on a recipe saved before.
             r.retouch_model = crate::model::operators::RetouchModel::Measured;

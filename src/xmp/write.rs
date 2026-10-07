@@ -5,7 +5,7 @@ use crate::xml::{
     self, escape_text,
     ns::{AUX, CRS, DC, LR, PHOTOSHOP, XMP, XMP_MM},
 };
-use crate::{camera_data::Metadata, color::curve::ToneCurve, develop::Recipe};
+use crate::{camera_data::Metadata, color::curve::ToneCurve, model::recipe::Recipe};
 use std::fmt::Write;
 
 /// A keyword's path, top first, and which of its names an export writes.
@@ -52,6 +52,10 @@ pub struct Photo {
     pub settings: bool,
     /// "image/jpeg" or "image/tiff".
     pub format: String,
+    /// The crop as rendered, `[left, top, right, bottom]`: with Constrain Crop, the
+    /// crop constrained to the photo (`develop::rendered_crop`). `None` writes the
+    /// recipe's own crop.
+    pub crop: Option<[f32; 4]>,
 }
 
 /// "2018:08:26 10:39:33" as XMP's "2018-08-26T10:39:33".
@@ -142,7 +146,16 @@ fn lens_profile(s: &mut Settings, r: &Recipe, m: Option<&Metadata>) {
     }
 }
 
-pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
+/// The photo a packet's settings are written for.
+#[derive(Clone, Copy)]
+pub(super) struct Frame<'a> {
+    pub(super) metadata: &'a Metadata,
+    /// The crop as rendered (see [`Photo::crop`]).
+    pub(super) crop: Option<[f32; 4]>,
+}
+
+pub(super) fn settings(r: &Recipe, photo: Option<Frame<'_>>) -> Settings {
+    let m = photo.map(|p| p.metadata);
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
     if let Some(profile) = &r.profile {
@@ -241,7 +254,7 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
         }
     }
     // Black & white by Treatment or by a black & white profile, as Lightroom writes it.
-    let black_white = r.treatment() == crate::develop::Treatment::BlackWhite;
+    let black_white = r.treatment() == crate::model::recipe::Treatment::BlackWhite;
     s.text(
         "ConvertToGrayscale",
         if black_white { "True" } else { "False" },
@@ -459,12 +472,7 @@ pub(super) fn settings(r: &Recipe, m: Option<&Metadata>) -> Settings {
     // With Constrain Crop, the crop as rendered: Camera Raw renders the stored crop as it
     // is, and Lightroom stores the crop it constrained. Without the photo (a preset),
     // the crop as drawn, which the photo it is applied to constrains again.
-    let crop = match m {
-        Some(m) if r.constrain_crop => {
-            crate::develop::Geometry::for_metadata(m, &r.as_rendered()).crop()
-        }
-        _ => r.crop,
-    };
+    let crop = photo.and_then(|p| p.crop).unwrap_or(r.crop);
     for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
         s.put(&format!("Crop{name}"), crop[i], 1., 6, false);
     }
@@ -796,10 +804,16 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
             attributes.push(("crs:RawFileName".into(), photo.raw_name.clone()));
         }
         attributes.extend(
-            settings(r, Some(m))
-                .0
-                .into_iter()
-                .map(|(k, v)| (format!("crs:{k}"), v)),
+            settings(
+                r,
+                Some(Frame {
+                    metadata: m,
+                    crop: photo.crop,
+                }),
+            )
+            .0
+            .into_iter()
+            .map(|(k, v)| (format!("crs:{k}"), v)),
         );
         let original: Vec<_> = original_operators(r)
             .into_iter()

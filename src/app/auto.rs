@@ -4,7 +4,8 @@ use super::{
     history::Step,
     worker::{AutoKind, Event},
 };
-use crate::develop::{AutoTone, Recipe};
+use crate::develop::AutoTone;
+use crate::model::recipe::Recipe;
 
 /// Everything an estimate of `kind` was fitted against: `r` without the settings it
 /// chooses. Auto tone measures the photo before its adjustments, as its profile, white

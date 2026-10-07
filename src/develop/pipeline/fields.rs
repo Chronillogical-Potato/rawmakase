@@ -72,7 +72,7 @@ impl<'a> VignetteField<'a> {
         let (table, amount) = match (lens, r.manual_vignette()) {
             (_, Some(manual)) => {
                 // Manual Vignetting spans the photo frame, inside the camera's default crop.
-                let inset = crate::develop::ImageFrame::new(im).inset;
+                let inset = crate::model::image_frame::ImageFrame::new(im).inset;
                 let frame = (w * inset[2]).hypot(h * inset[3]) * 0.5;
                 (
                     VignetteTable::Combined(crate::develop::effects::combined_table(

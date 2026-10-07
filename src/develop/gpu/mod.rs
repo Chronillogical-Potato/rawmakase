@@ -5,7 +5,8 @@
 //! into a texture the viewport draws (`present.rs`). Headless callers (tests, the
 //! benchmark) create their own device. Buffers are bounded and reused for equal
 //! dimensions; callers retain CPU pixels for fallback.
-use super::{Recipe, Rendered};
+use crate::model::recipe::Recipe;
+use crate::rendered::Rendered;
 use anyhow::{Context, Result, ensure};
 use std::{
     sync::{

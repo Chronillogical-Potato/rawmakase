@@ -3,7 +3,7 @@
 //! "Curves" folder, laid out as the ones Lightroom and Camera Raw save in theirs, so
 //! either can read them; each file's name is the curve's.
 use crate::color::curve::ToneCurve;
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use crate::storage::Replace;
 use anyhow::{Context, Result, ensure};
 use std::path::{Path, PathBuf};

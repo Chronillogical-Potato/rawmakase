@@ -4,8 +4,8 @@
 //! synchronous, after waiting for the one in flight.
 use crate::{
     catalog::{Catalog, PhotoId, SavedHistory},
-    develop::Recipe,
     export_settings::ExportOptions,
+    model::recipe::Recipe,
 };
 use eframe::egui;
 use std::{

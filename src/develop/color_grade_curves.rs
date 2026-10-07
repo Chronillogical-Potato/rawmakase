@@ -6,7 +6,8 @@
 //! 1 + Σ A_k(x) p_k, with profiles A over the channel value that Blending and Balance
 //! shape, and per-channel coefficients p that hue and saturation set; regions
 //! multiply. Luminance is one curve for all channels, applied before the tint.
-use super::{Recipe, parametric::bracket};
+use super::parametric::bracket;
+use crate::model::recipe::Recipe;
 
 /// Samples of each curve over E = x^(1/2.2), 0–1.
 pub(crate) const SAMPLES: usize = 64;

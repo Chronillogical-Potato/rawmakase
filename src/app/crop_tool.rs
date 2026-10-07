@@ -1,5 +1,6 @@
 //! The Crop tool's guide overlays, Straighten ruler and aspect swap, as in Lightroom's
 //! Crop & Straighten (docs/transform.md#crop-and-straighten).
+use crate::model::recipe::Recipe;
 use eframe::egui::{self, Pos2, Vec2};
 
 /// Lightroom's crop guide overlays, in the order O cycles them.
@@ -345,7 +346,7 @@ impl super::Editor {
     /// The straightened photo's width and height, which the crop's 0–1 coordinates span.
     fn crop_frame(&self) -> Option<Vec2> {
         let im = self.document.full()?;
-        let r = crate::develop::Recipe {
+        let r = Recipe {
             crop: [0., 0., 1., 1.],
             constrain_crop: false,
             ..self.document.edit.recipe.clone()
@@ -439,7 +440,7 @@ impl super::Editor {
     pub(super) fn auto_straighten_ready(
         &mut self,
         generation: u64,
-        analysed: &crate::develop::Recipe,
+        analysed: &Recipe,
         result: Result<Option<f32>, String>,
     ) {
         if generation != self.document.straighten.id() {

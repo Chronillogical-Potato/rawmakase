@@ -2,10 +2,8 @@
 //! stage cache stay on the device while only the recipe changes; parameters and tables
 //! are uploaded per render. The result is read back for the CPU finishing steps.
 use super::Processor;
-use crate::develop::{
-    Rendered,
-    pipeline::{Samples, pixel_params::PixelParams},
-};
+use crate::develop::pipeline::{Samples, pixel_params::PixelParams};
+use crate::rendered::Rendered;
 use anyhow::{Context, Result, ensure};
 use std::sync::{
     Arc,

@@ -6,7 +6,7 @@ use super::widgets::{
     ButtonKind, action_button, menu_item, menu_separator, toolbar_action, toolbar_divider,
 };
 use crate::app::theme;
-use crate::develop::Recipe;
+use crate::model::recipe::Recipe;
 use eframe::egui::{self, Stroke, Vec2};
 
 impl Editor {

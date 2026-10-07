@@ -2,6 +2,7 @@
 use crate::app::widgets::plural;
 use crate::catalog::PhotoId;
 use crate::catalog::preview_cache::{PreviewCache, Stamp};
+use crate::model::recipe::Recipe;
 use eframe::egui;
 use std::{
     collections::HashSet,
@@ -94,10 +95,7 @@ pub(in crate::app) enum EditSource {
 impl EditSource {
     /// The recipe a photo is rendered with: its edit, or the defaults
     /// Develop would open it with (Adobe Default unless given).
-    pub fn recipe(
-        edit: Option<&Self>,
-        raw: &crate::raw::Raw,
-    ) -> anyhow::Result<crate::develop::Recipe> {
+    pub fn recipe(edit: Option<&Self>, raw: &crate::raw::Raw) -> anyhow::Result<Recipe> {
         let m = &raw.metadata;
         let (profiles, _) = crate::camera_profiles::installed(m);
         Ok(match edit {
@@ -106,7 +104,7 @@ impl EditSource {
                 crate::lr_develop::convert_develop(text, m, &profiles, None)?.0
             }
             Some(Self::Defaults(defaults)) => defaults.resolve(m, &profiles).recipe,
-            None => crate::develop::Recipe::with_profiles(m, &profiles),
+            None => Recipe::with_profiles(m, &profiles),
         })
     }
     /// Identifies this edit in the preview cache.

@@ -1,9 +1,7 @@
-use super::Editor;
-use super::state::Picture;
 use super::worker::{LoadJob, RenderJob};
-use crate::app::Module;
-use crate::catalog::PhotoId;
-use crate::develop::{Geometry, Recipe};
+use super::{Editor, state::Picture};
+use crate::model::recipe::Recipe;
+use crate::{app::Module, catalog::PhotoId, develop::Geometry};
 use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 

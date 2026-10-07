@@ -3,12 +3,8 @@
 use anyhow::Result;
 mod mcp;
 use clap::{Parser, Subcommand};
-use rawmakase::{
-    camera_data,
-    develop::{self, Recipe},
-    export_settings::ExportOptions,
-    raw,
-};
+use rawmakase::model::recipe::Recipe;
+use rawmakase::{camera_data, develop, export_settings::ExportOptions, raw};
 use std::{path::PathBuf, sync::atomic::AtomicBool, time::Instant};
 #[derive(Parser)]
 #[command(version, about = "A personal RAW photo editor")]
@@ -290,7 +286,12 @@ fn main() -> Result<()> {
             if let Some(path) = xmp {
                 let preset = rawmakase::xmp::parse(&path, &std::fs::read_to_string(&path)?)?;
                 let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
-                edit = preset.apply(&edit, &im.metadata, &profiles, Some(&im))?;
+                edit = preset.apply(
+                    &edit,
+                    &im.metadata,
+                    &profiles,
+                    Some(&rawmakase::develop::Measures(&im)),
+                )?;
                 if let Some(e) = exposure {
                     edit.exposure = e;
                 }

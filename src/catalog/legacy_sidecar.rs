@@ -3,12 +3,10 @@
 //! conflict protection. Adding a folder imports them; RAWmakase no longer
 //! writes them; the writer stays for the persistence tests. Not to be confused
 //! with [`sidecars`](super::sidecars), the XMP metadata files beside a photo.
-use crate::develop::saved_format::{migrate_recipe, saved_version};
+use crate::export_settings::ExportOptions;
+use crate::model::recipe::{LocalEdits, Recipe};
+use crate::model::saved_format::{migrate_recipe, saved_version};
 use crate::storage::{Identity, atomic_json, bitmaps, data_dir};
-use crate::{
-    develop::{LocalEdits, Recipe},
-    export_settings::ExportOptions,
-};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{

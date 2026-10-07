@@ -79,7 +79,7 @@ fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
         height: 4000,
         ..Default::default()
     };
-    let frame = crate::develop::ImageFrame::for_metadata(&m);
+    let frame = crate::model::image_frame::ImageFrame::for_metadata(&m);
     let (mut photos, mut spots, mut masks) = (0, 0, 0);
     let mut skipped = std::collections::BTreeMap::<String, usize>::new();
     for text in &texts {
@@ -95,7 +95,7 @@ fn supplied_catalog_spots_and_masks_convert() -> Result<()> {
         }
         let edits = convert(&local, frame);
         photos += 1;
-        let mut recipe = crate::develop::Recipe::default();
+        let mut recipe = crate::model::recipe::Recipe::default();
         if let Some(r) = edits.retouch {
             spots += r.len();
             recipe.retouch = r;

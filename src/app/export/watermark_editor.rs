@@ -5,7 +5,7 @@
 use super::super::widgets::{modal_frame, primary_button};
 use super::Editor;
 use crate::app::theme;
-use crate::develop::unit_to_u8;
+use crate::rendered::unit_to_u8;
 use crate::watermark::{self, Align, Anchor, Size, Style, Watermark};
 use eframe::egui::{self, Color32, Sense, Vec2};
 use std::path::PathBuf;

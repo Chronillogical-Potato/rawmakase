@@ -1,10 +1,8 @@
 use super::*;
 use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
-use crate::{
-    develop::{UprightMode, panels::PanelState},
-    model::effects::VignetteStyle,
-};
+use crate::model::transform::UprightMode;
+use crate::{model::effects::VignetteStyle, model::panels::PanelState};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -399,8 +397,8 @@ fn transform_keeps_what_it_shows_on_photos_turned_differently() {
         ..Default::default()
     };
     let turned = |r: &Recipe| {
-        crate::develop::display_axes(
-            (crate::develop::ImageFrame::for_metadata(&m).turns + r.rotation) % 4,
+        crate::model::transform::display_axes(
+            (crate::model::image_frame::ImageFrame::for_metadata(&m).turns + r.rotation) % 4,
             r.flip_x,
             r.flip_y,
         )
@@ -523,7 +521,7 @@ fn a_lens_panel_switched_off_or_another_process_version_needs_a_new_analysis() {
 /// Upright Transforms copies a solved correction, guides and all.
 #[test]
 fn guides_stay_with_their_photo_unless_upright_transforms_copies_the_correction() {
-    use crate::develop::UprightGuide;
+    use crate::model::transform::UprightGuide;
     let m = camera("Fujifilm", "X100F");
     let target = Target {
         metadata: &m,
@@ -597,7 +595,10 @@ fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
         ..Default::default()
     };
     assert!(!source.effects.monochrome);
-    assert_eq!(source.treatment(), crate::develop::Treatment::BlackWhite);
+    assert_eq!(
+        source.treatment(),
+        crate::model::recipe::Treatment::BlackWhite
+    );
     // The target camera has no such profile and keeps its own color one.
     let out = transfer(
         from(&source, &fuji),
@@ -610,7 +611,7 @@ fn a_black_and_white_profile_carries_its_treatment_to_another_camera() {
     );
     assert_eq!(
         out.recipe.treatment(),
-        crate::develop::Treatment::BlackWhite
+        crate::model::recipe::Treatment::BlackWhite
     );
 }
 

@@ -10,7 +10,7 @@
 //!   side of the color's Oklab hue, as the render interpolates them.
 //!
 //! The band most involved moves with the pointer and the others in proportion.
-use super::Recipe;
+use crate::model::recipe::Recipe;
 
 /// The Color Mixer's bands, in slider order.
 pub const BANDS: [&str; 8] = [
@@ -113,7 +113,7 @@ impl TargetWeights {
     /// Sets the sliders to `start`'s moved by `amount` (slider units, −1..=1) times
     /// each share, within their range, and turns their panel on.
     pub fn apply(&self, start: &Recipe, amount: f32, r: &mut Recipe) {
-        use super::panels::{Panel, PanelState};
+        use crate::model::panels::{Panel, PanelState};
         // A change in a panel that is off turns it on, as a slider's does.
         let panel = match self.target {
             Target::ToneCurve => Panel::ToneCurve,

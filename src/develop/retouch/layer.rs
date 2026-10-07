@@ -6,11 +6,11 @@ use super::{
     RetouchOp,
     heal::{self, PixelRect},
 };
-use crate::model::red_eye::RedEyeOp;
+use crate::model::image_frame::ImageFrame;
 use crate::{
     camera_data::CameraImage,
-    develop::{ImageFrame, color_noise::ChromaDenoise, red_eye},
-    model::operators::RetouchModel,
+    develop::{color_noise::ChromaDenoise, red_eye},
+    model::{operators::RetouchModel, red_eye::RedEyeOp},
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -31,7 +31,7 @@ pub(crate) struct Retouching<'a> {
     pub(crate) model: RetouchModel,
 }
 impl<'a> Retouching<'a> {
-    pub(crate) fn of(r: &'a crate::develop::Recipe) -> Self {
+    pub(crate) fn of(r: &'a crate::model::recipe::Recipe) -> Self {
         Self {
             red_eye: &r.red_eye,
             retouch: &r.retouch,
