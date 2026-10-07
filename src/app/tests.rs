@@ -4710,3 +4710,23 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
     assert_eq!(rating(&editor, again), 2);
     Ok(())
 }
+#[test]
+fn a_rating_made_in_develop_on_a_removed_copy_still_undoes_the_photo_it_rated() -> anyhow::Result<()>
+{
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let copy = editor.library.as_mut().unwrap().create_virtual_copy(a)?;
+    // The copy is open in Develop; the filmstrip menu rates B.
+    editor.document.catalog_photo = Some(copy);
+    editor.module = Module::Develop;
+    editor.library.as_mut().unwrap().edit_metadata(
+        b,
+        crate::app::photo_metadata::Edit::Rating(3),
+        false,
+    )?;
+    editor.sync_undo();
+    editor.remove_virtual_copy(copy);
+    assert_eq!(rating(&editor, b), 3);
+    editor.undo();
+    assert_eq!(rating(&editor, b), 2);
+    Ok(())
+}

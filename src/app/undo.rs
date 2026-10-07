@@ -43,12 +43,11 @@ impl Command {
     /// Takes photo `id` out of the command; false when nothing of it is left.
     fn forget_photo(&mut self, id: PhotoId) -> bool {
         match self {
-            // Undone in Develop on that photo, which is gone.
-            Command::Metadata {
-                develop: Some(photo),
-                ..
-            } if *photo == id => false,
-            Command::Metadata { change, .. } => {
+            Command::Metadata { change, develop } => {
+                // Made in Develop on that photo, which is gone: undone in the Library.
+                if *develop == Some(id) {
+                    *develop = None;
+                }
                 change.before.retain(|m| m.0 != id);
                 change.after.retain(|m| m.0 != id);
                 change.place_before.forget_photo(id);
