@@ -24,9 +24,11 @@ pub struct Cli {
     data_dir: Option<PathBuf>,
 }
 
+/// The protocol's [`rawmakase_protocol::Target`], with the guards an MCP client
+/// must always send.
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct Target {
+struct McpTarget {
     /// Catalog photo ID from get_state (omit only for an uncataloged photo).
     photo_id: Option<i64>,
     /// Document generation from the latest state.
@@ -57,24 +59,24 @@ struct Parameter {
     param: String,
     /// Absolute value in the parameter's displayed units.
     value: f32,
-    target: Target,
+    target: McpTarget,
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Action {
     /// Named action from get_capabilities, e.g. undo, redo, treatment:bw or rating:3.
     action: String,
-    target: Target,
+    target: McpTarget,
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Guarded {
-    target: Target,
+    target: McpTarget,
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Preview {
-    target: Target,
+    target: McpTarget,
     /// Long edge in pixels (16 through 2048); defaults to 1600.
     max_edge: Option<u32>,
 }
@@ -83,7 +85,7 @@ struct Preview {
 struct Export {
     /// Absolute path for a new JPEG or TIFF. Existing files are never replaced.
     path: String,
-    target: Target,
+    target: McpTarget,
     /// Optional maximum edge; omit for full size.
     max_edge: Option<u32>,
 }
@@ -93,6 +95,17 @@ struct Job {
     job_id: u64,
 }
 
+impl From<McpTarget> for rawmakase_protocol::Target {
+    fn from(t: McpTarget) -> Self {
+        Self {
+            photo_id: t.photo_id,
+            generation: Some(t.generation),
+            revision: Some(t.revision),
+            mask: t.mask,
+        }
+    }
+}
+/// The protocol's [`rawmakase_protocol::CurveChannel`], described for MCP clients.
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum CurveChannel {
@@ -101,13 +114,23 @@ enum CurveChannel {
     Green,
     Blue,
 }
+impl From<CurveChannel> for rawmakase_protocol::CurveChannel {
+    fn from(c: CurveChannel) -> Self {
+        match c {
+            CurveChannel::Rgb => Self::Rgb,
+            CurveChannel::Red => Self::Red,
+            CurveChannel::Green => Self::Green,
+            CurveChannel::Blue => Self::Blue,
+        }
+    }
+}
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ToneCurve {
     channel: CurveChannel,
     /// 2–32 [input, output] points in 0–1, with strictly increasing inputs at least 0.00049 apart. Example gentle S: [[0,0],[0.25,0.2],[0.75,0.8],[1,1]].
     points: Vec<[f32; 2]>,
-    target: Target,
+    target: McpTarget,
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -120,7 +143,7 @@ enum CurvePreset {
 #[serde(deny_unknown_fields)]
 struct Preset {
     preset: CurvePreset,
-    target: Target,
+    target: McpTarget,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -138,7 +161,7 @@ struct DevelopPreset {
     name: Option<String>,
     /// Only look for name in this group.
     group: Option<String>,
-    target: Target,
+    target: McpTarget,
 }
 
 #[derive(Clone)]
@@ -272,21 +295,21 @@ impl Server {
         description = "Set one parameter in displayed units. Requires current generation/revision; mask scope is optional. Returns updated state and guards. Values are clamped to supported ranges."
     )]
     async fn set_parameter(&self, Parameters(p): Parameters<Parameter>) -> CallToolResult {
-        self.send(json!({"cmd":"set","param":p.param,"value":p.value,"target":p.target}))
+        self.send(json!({"cmd":"set","param":p.param,"value":p.value,"target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
         description = "Run a named application action, including undo/redo, treatment, rating or reset. Requires fresh target guards. Some actions open dialogs; prefer export_photo for unattended export. Never blindly retry toggle/relative actions."
     )]
     async fn run_action(&self, Parameters(p): Parameters<Action>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":p.action,"target":p.target}))
+        self.send(json!({"cmd":"action","action":p.action,"target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
         description = "Replace the RGB, red, green or blue point curve with a natural cubic curve. Coordinates are normalized 0–1. Changes one channel as one undo step, preserving all other curves. Read get_state tone_curve before editing."
     )]
     async fn set_tone_curve(&self, Parameters(p): Parameters<ToneCurve>) -> CallToolResult {
-        self.send(json!({"cmd":"curve","channel":p.channel,"points":p.points,"target":p.target}))
+        self.send(json!({"cmd":"curve","channel":rawmakase_protocol::CurveChannel::from(p.channel),"points":p.points,"target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
@@ -298,7 +321,7 @@ impl Server {
             CurvePreset::MediumContrast => "curve:medium_contrast",
             CurvePreset::StrongContrast => "curve:strong_contrast",
         };
-        self.send(json!({"cmd":"action","action":action,"target":p.target}))
+        self.send(json!({"cmd":"action","action":action,"target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
@@ -312,28 +335,29 @@ impl Server {
         description = "Apply a develop preset to the open photo as one undo step, as clicking it in the Presets panel does. Name it by id, or by name with an optional group. Returns the settings skipped as not fitting this photo and any substituted profile."
     )]
     async fn apply_preset(&self, Parameters(p): Parameters<DevelopPreset>) -> CallToolResult {
-        self.send(json!({"cmd":"preset","id":p.id,"name":p.name,"group":p.group,"target":p.target}))
+        self.send(json!({"cmd":"preset","id":p.id,"name":p.name,"group":p.group,"target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
         description = "Start automatic tone adjustment for the current photo. Poll get_state until auto_running is false, then inspect the values and preview the result. This reply confirms starting, not successful completion."
     )]
     async fn auto_tone(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":"auto_tone","target":p.target}))
+        self.send(json!({"cmd":"action","action":"auto_tone","target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
         description = "Start automatic white balance. Poll get_state until auto_running is false, then inspect temperature/tint and preview. This reply confirms starting, not successful completion."
     )]
     async fn auto_white_balance(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"action","action":"auto_white_balance","target":p.target}))
+        self.send(json!({"cmd":"action","action":"auto_white_balance","target":rawmakase_protocol::Target::from(p.target)}))
             .await
     }
     #[tool(
         description = "Save the current Develop edit to its catalog. Success confirms persistence; protected edits return an error."
     )]
     async fn save_photo(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {
-        self.send(json!({"cmd":"save","target":p.target})).await
+        self.send(json!({"cmd":"save","target":rawmakase_protocol::Target::from(p.target)}))
+            .await
     }
     #[tool(
         description = "Render the guarded edit and return a JPEG image for visual inspection, plus its captured revision. Waits up to 120 seconds. Uses a temporary file, with no user output path."
@@ -354,7 +378,7 @@ impl Server {
         description = "Start exporting the guarded edit to a new JPEG/TIFF file. Returns a job ID; call get_job until status is completed before claiming the file exists. Does not overwrite files."
     )]
     async fn export_photo(&self, Parameters(p): Parameters<Export>) -> CallToolResult {
-        let mut request = json!({"cmd":"export","path":p.path,"target":p.target});
+        let mut request = json!({"cmd":"export","path":p.path,"target":rawmakase_protocol::Target::from(p.target)});
         if let Some(edge) = p.max_edge {
             request["max_edge"] = edge.into();
         }
@@ -371,7 +395,7 @@ impl Server {
 
 fn preview(
     c: &Connection,
-    target: Target,
+    target: McpTarget,
     edge: u32,
     cancelled: impl Fn() -> bool,
 ) -> CallToolResult {
@@ -385,7 +409,7 @@ fn preview(
     let path = dir.path().join("preview.jpg");
     let started = match ask(
         c,
-        json!({"cmd":"preview","path":path,"max_edge":edge,"target":target}),
+        json!({"cmd":"preview","path":path,"max_edge":edge,"target":rawmakase_protocol::Target::from(target)}),
     ) {
         Ok(r) => r,
         Err(e) => return e,
