@@ -128,7 +128,9 @@ The job result contains `job_id`, `status`, `path`, `generation`, `revision` and
 `progress`. Only `completed` confirms a published file; `failed` includes an
 error. Two output jobs may run concurrently. The latest 32 jobs are retained;
 IDs are scoped to the running app session. If a client stops waiting, the job
-continues and can be polled. Closing the app cancels its remaining jobs.
+continues and can be read with `job`. `wait` with `until: "job"` answers as soon as
+a job finishes, so a client need not poll. Closing the app cancels its remaining
+jobs.
 
 `save` waits for the current Develop edit to be saved to its catalog, or returns
 an error. Protected and uncataloged edits cannot report save success. Ordinary edit
@@ -169,13 +171,14 @@ use target guards for a sequence that must refer to the same edit.
 | `curve` | `channel`: `rgb`, `red`, `green` or `blue`; `points`: 2–32 normalized input/output pairs; optional `target` | Post-edit state |
 | `turn` | `param`, integer `ticks` (−1000…1000), optional `target` | Post-edit state; grouped gesture |
 | `action` | named `action`, optional `target` | Post-action state |
-| `open` | catalog `id` or `name` | `opened` identity; poll `loaded` |
+| `open` | catalog `id` or `name` | `opened` identity; `wait` for `loaded` |
 | `search` | `text` | Applied Library query |
 | `module` | `module`: `develop` or `library` | Post-action state |
 | `photo` | `step`: −1 or 1 | Selection change in Library; opened identity in Develop |
 | `save` | optional `target` | `saved: true` |
 | `preview`, `export` | absolute `path`, optional `max_edge`, optional `target` | Captured output job |
 | `job` | `job_id` | Output status |
+| `wait` | `until`: `loaded` with `photo_id`, or `job` with `job_id`; optional `timeout_ms` (1…5000, default 1000) | State once the photo is loaded (or replaced by another) or the job finished, status `applied`; or at `timeout_ms`, status `timed_out` |
 | `cc` | integer `cc`, `value` (0…127) | Legacy device mapping |
 | `note` | integer `note` (0…127), `press`: `click`, `down`, `up` | Legacy device mapping |
 

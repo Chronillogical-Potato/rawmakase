@@ -4,6 +4,7 @@ use super::crop_tool::{Attention, Guide, Ruler};
 use super::icons::{self, Icon};
 use super::navigator;
 use super::state::{TextureMode, Tool};
+use crate::app::Module;
 use crate::app::theme;
 use crate::develop::{self, Geometry};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -175,7 +176,7 @@ impl Editor {
         self.view.zoom.set(level);
         // A JPEG, TIFF or PNG in the Loupe zooms on its own; the document
         // behind it is not rendered again.
-        let raster_loupe = self.library_mode
+        let raster_loupe = self.module == Module::Library
             && self
                 .library
                 .as_ref()
@@ -196,7 +197,9 @@ impl Editor {
         let raster_fit = self
             .library
             .as_ref()
-            .filter(|l| self.library_mode && l.loupe_open() && l.loupe_develops().is_none())
+            .filter(|l| {
+                self.module == Module::Library && l.loupe_open() && l.loupe_develops().is_none()
+            })
             .map(|l| l.loupe_fit());
         // Not known until the image is decoded: no step until then.
         if raster_fit == Some(None) {
@@ -439,7 +442,7 @@ impl Editor {
         }
         // The RGB readout follows the pointer over the photo being edited, not over
         // Before (alone or beside it) or the reference, nor in the Library's Loupe.
-        let edit_shown = !self.library_mode && !self.view.compare.before_only();
+        let edit_shown = self.module == Module::Develop && !self.view.compare.before_only();
         let hover = response
             .hover_pos()
             .filter(|p| edit_shown && panes.after.clip.contains(*p));
@@ -740,7 +743,7 @@ impl Editor {
     /// The Loupe's Info overlay (I) over the photo being edited, below the Before,
     /// After or Active label when there is one. The Library's Loupe draws its own.
     fn develop_info_overlay(&mut self, ui: &egui::Ui, pane: Rect) {
-        if self.library_mode {
+        if self.module == Module::Library {
             return;
         }
         let labelled = self.view.compare != before_after::Compare::Off;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::Module;
 use crate::develop::params::ParameterId;
 mod mapping_tests {
     use super::*;
@@ -391,13 +392,13 @@ mod integration_tests {
         let first = library.photos[0].id;
         library.make_active(first);
         let second = library.navigate(first, 1).unwrap();
-        e.library_mode = true;
+        e.module = Module::Library;
         e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
-        assert!(e.library_mode);
+        assert!(e.module == Module::Library);
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
         e.library.as_mut().unwrap().open_loupe();
         e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
-        assert!(e.library_mode);
+        assert!(e.module == Module::Library);
         assert!(e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
         // Semantic API navigation and device arrows preserve Loupe too.
@@ -408,7 +409,7 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
         e.control_messages(
             vec![Msg::Command(Command::new(commands::Operation::Action(
@@ -417,7 +418,7 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
         e.library.as_mut().unwrap().show_grid();
         e.control_messages(
@@ -427,12 +428,12 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && !e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && !e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
-        e.library_mode = false;
+        e.module = Module::Develop;
         e.document.catalog_photo = Some(second);
         e.control_messages(vec![Msg::Cc(48, 127)], &ctx).unwrap();
-        assert!(!e.library_mode);
+        assert!(e.module == Module::Develop);
         assert_eq!(e.document.catalog_photo, Some(first));
         Ok(())
     }
@@ -495,6 +496,33 @@ mod integration_tests {
         e.control_commands(&ctx);
         assert_eq!(r1.recv().unwrap().unwrap_err().code, "no_document");
         assert!(r2.recv().unwrap().is_ok());
+    }
+    #[test]
+    fn a_wait_is_answered_when_it_holds_or_when_its_time_is_up() {
+        use std::time::Duration;
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        let (tx, rx) = mpsc::sync_channel(4);
+        e.controls = Hub::new(Settings::default(), rx);
+        let wait = |until, millis| {
+            socket::test_request(vec![Msg::Command(Command::new(commands::Operation::Wait(
+                until,
+                Duration::from_millis(millis),
+            )))])
+        };
+        // A job that does not exist has nothing to wait for.
+        let (done, answer) = wait(commands::Until::Job(7), 5000);
+        tx.send(Msg::Request(done)).unwrap();
+        e.control_commands(&ctx);
+        assert_eq!(answer.try_recv().unwrap().unwrap().status, "applied");
+        // No photo is opened: the wait stays until its time is up.
+        let (pending, answer) = wait(commands::Until::Loaded(1), 30);
+        tx.send(Msg::Request(pending)).unwrap();
+        e.control_commands(&ctx);
+        assert!(answer.try_recv().is_err(), "answered before it held");
+        std::thread::sleep(Duration::from_millis(40));
+        e.control_commands(&ctx);
+        assert_eq!(answer.try_recv().unwrap().unwrap().status, "timed_out");
     }
 }
 

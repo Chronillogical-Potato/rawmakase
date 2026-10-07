@@ -3,6 +3,7 @@ use super::dialogs::{CatalogDialog, FolderAction};
 use super::folder_locations::{FolderQuestion, folder_added, reopened};
 use super::widgets::confirm_modal;
 use super::worker::Event;
+use crate::app::Module;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -190,7 +191,7 @@ impl Editor {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        self.library_mode = true;
+        self.module = Module::Library;
         if let Some(id) = self.catalog_photo_at(&path) {
             self.develop_catalog_photo(id);
             return;
@@ -198,7 +199,10 @@ impl Editor {
         let Some(current) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
             if self.activity.is_dialog() {
                 // The catalog is still opening; add the photo once it is ready.
-                self.pending_photo = Some((path, false));
+                self.pending_photo = Some(super::PendingPhoto {
+                    path,
+                    folder_added: false,
+                });
             } else {
                 self.status = format!("Open or create a catalog to edit {name}");
             }
@@ -210,7 +214,10 @@ impl Editor {
         if !self.ready_for_catalog() || !self.activity.begin_dialog() {
             return;
         }
-        self.pending_photo = Some((path, true));
+        self.pending_photo = Some(super::PendingPhoto {
+            path,
+            folder_added: true,
+        });
         self.status = format!("Adding {name}'s folder to the Library…");
         let tx = self.tx.clone();
         let ctx = self.context.clone();
@@ -263,12 +270,12 @@ impl Editor {
     /// Opens the photo waiting to be added once the catalog is ready, adding
     /// its folder first if that has not happened yet.
     pub(super) fn open_pending_photo(&mut self) {
-        let Some((path, added)) = self.pending_photo.take() else {
+        let Some(super::PendingPhoto { path, folder_added }) = self.pending_photo.take() else {
             return;
         };
         if let Some(id) = self.catalog_photo_at(&path) {
             self.develop_catalog_photo(id);
-        } else if !added {
+        } else if !folder_added {
             self.add_to_library(path);
         } else {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -309,7 +316,7 @@ impl Editor {
             if self.view.zoom.on && self.view.is(super::state::Tool::Crop) {
                 self.view.tool = super::state::Tool::None;
             }
-            self.library_mode = false;
+            self.module = Module::Develop;
             return;
         }
         if !self.ready_for_catalog() {
@@ -377,7 +384,7 @@ impl Editor {
             Ok(open) => {
                 self.status = library.message.clone();
                 if let Some(id) = open
-                    && !self.library_mode
+                    && self.module == Module::Develop
                 {
                     self.develop_catalog_photo(id);
                 }
@@ -475,7 +482,7 @@ impl Editor {
                 if self.document.catalog_photo == Some(id) {
                     // Removed from Develop: show its master there instead.
                     if let Some(master) = master
-                        && !self.library_mode
+                        && self.module == Module::Develop
                     {
                         self.develop_catalog_photo(master);
                     }
@@ -483,7 +490,7 @@ impl Editor {
                     if self.document.catalog_photo == Some(id) {
                         self.document.reset(None);
                         self.preview.clear_document();
-                        self.library_mode = true;
+                        self.module = Module::Library;
                     }
                 }
             }

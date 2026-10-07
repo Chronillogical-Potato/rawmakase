@@ -157,6 +157,18 @@ fn result(reply: Value) -> CallToolResult {
         CallToolResult::structured_error(reply)
     }
 }
+/// Returns once the app reports `until` (see the `wait` command), or after a
+/// second, so a cancelled call is still noticed. An app too old to wait gets a
+/// short pause instead; the caller reads the state either way.
+fn wait_for(connection: &Connection, until: Value) {
+    let mut request = until;
+    request["cmd"] = json!("wait");
+    request["timeout_ms"] = json!(1000);
+    if ask(connection, request).is_err() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn ask(connection: &Connection, request: Value) -> Result<Value, CallToolResult> {
     let reply = connection
         .request(request)
@@ -245,6 +257,7 @@ impl Server {
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 if context.ct.is_cancelled() { return error("cancelled", "Stopped waiting; opening may already have applied"); }
+                wait_for(&c, json!({"until":"loaded","photo_id":p.id}));
                 let reply = match ask(&c, json!({"cmd":"state"})) { Ok(r) => r, Err(e) => return e };
                 let state = &reply["state"];
                 if state["photo_id"].as_i64().is_some_and(|id| id != p.id) || state["generation"] != generation || state["mode"] != "develop" {
@@ -252,7 +265,6 @@ impl Server {
                 }
                 if state["loaded"] == true && state["photo_id"].as_i64() == Some(p.id) { return result(reply); }
                 if Instant::now() >= deadline { return error("not_ready", "Opening started but decoding has not completed; inspect state before editing"); }
-                std::thread::sleep(Duration::from_millis(100));
             }
         }).await
     }
@@ -389,6 +401,7 @@ fn preview(
                 "Stopped waiting; temporary preview output will be discarded",
             );
         }
+        wait_for(c, json!({"until":"job","job_id":id}));
         let reply = match ask(c, json!({"cmd":"job","job_id":id})) {
             Ok(r) => r,
             Err(e) => return e,
@@ -416,7 +429,6 @@ fn preview(
                 "Preview has not completed; its temporary output will be discarded",
             );
         }
-        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
