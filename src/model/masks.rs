@@ -341,29 +341,35 @@ mod tests {
         group.components[1].op = MaskOp::Subtract;
         group.adjust.exposure = 0.5;
         let json = serde_json::to_value(&group).unwrap();
-        let shapes: Vec<&str> = json["components"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| {
-                c["shape"]
-                    .as_object()
-                    .unwrap()
-                    .keys()
-                    .next()
-                    .unwrap()
-                    .as_str()
-            })
-            .collect();
-        assert_eq!(
-            shapes,
-            ["Brush", "Linear", "Radial", "ColorRange", "LuminanceRange"]
-        );
-        assert_eq!(json["components"][1]["op"], "Subtract");
-        assert_eq!(
-            json["components"][0]["shape"]["Brush"]["strokes"][0]["auto_mask"],
-            true
-        );
+        let component = |op: &str, shape: serde_json::Value| serde_json::json!({"op": op, "invert": false, "opacity": 1.0, "shape": shape});
+        let adjust = serde_json::json!({
+            "temperature": 0.0, "tint": 0.0, "exposure": 0.5, "contrast": 0.0,
+            "highlights": 0.0, "shadows": 0.0, "whites": 0.0, "blacks": 0.0,
+            "texture": 0.0, "clarity": 0.0, "dehaze": 0.0, "hue": 0.0,
+            "saturation": 0.0, "sharpness": 0.0, "noise": 0.0, "color": [0.0, 0.0],
+        });
+        let expected = serde_json::json!({
+            "name": "Sky",
+            "components": [
+                component("Add", serde_json::json!({"Brush": {"strokes": [{
+                    "points": [[0.1_f32, 0.2_f32]], "radius": 0.05_f32, "feather": 0.5,
+                    "flow": 1.0, "density": 1.0, "erase": false, "auto_mask": true,
+                }]}})),
+                component("Subtract", serde_json::json!({"Linear": {"from": [0.0, 0.0], "to": [0.0, 0.5]}})),
+                component("Add", serde_json::json!({"Radial": {
+                    "center": [0.5, 0.5], "radii": [0.25, 0.5], "angle": 0.0, "feather": 0.5,
+                }})),
+                component("Add", serde_json::json!({"ColorRange": {"samples": [[0.5, 0.0, 0.0]], "amount": 0.5}})),
+                component("Add", serde_json::json!({"LuminanceRange": {
+                    "low": 0.0, "high": 0.5, "falloff": [0.0, 0.25],
+                }})),
+            ],
+            "invert": false,
+            "amount": 1.0,
+            "adjust": adjust,
+            "hidden": false,
+        });
+        assert_eq!(json, expected);
         assert_eq!(serde_json::from_value::<MaskGroup>(json).unwrap(), group);
         assert!(validate(&[group]).is_ok());
         // A group saved with only some settings takes the defaults; unknown ones fail.
