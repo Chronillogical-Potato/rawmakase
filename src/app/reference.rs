@@ -610,7 +610,8 @@ mod tests {
             .library
             .as_mut()
             .unwrap()
-            .create_virtual_copy(other)?;
+            .create_virtual_copy(other)?
+            .value;
         editor.set_reference(copy);
         wait_for_reference(editor);
         editor.remove_virtual_copy(copy);

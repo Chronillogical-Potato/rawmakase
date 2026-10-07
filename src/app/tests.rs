@@ -1970,7 +1970,7 @@ fn removing_a_copy_from_the_library_stays_in_the_library() -> anyhow::Result<()>
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
     let master = l.session.photos[0].id;
-    let copy = l.create_virtual_copy(master)?;
+    let copy = l.create_virtual_copy(master)?.value;
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     editor.library = Some(Box::new(l));
@@ -2012,7 +2012,7 @@ fn a_copy_name_that_cannot_be_saved_keeps_the_app_from_moving_on() -> anyhow::Re
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
-    let copy = l.create_virtual_copy(l.session.photos[0].id)?;
+    let copy = l.create_virtual_copy(l.session.photos[0].id)?.value;
     // A copy that is gone from the catalog cannot be renamed.
     l.session.catalog.remove_virtual_copy(copy)?;
     let mut editor =
@@ -2039,7 +2039,7 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
     let ctx = egui::Context::default();
     let mut l = library::Library::load(&catalog, ctx.clone())?;
-    let copy = l.create_virtual_copy(l.session.photos[0].id)?;
+    let copy = l.create_virtual_copy(l.session.photos[0].id)?.value;
     l.set_copy_as_master(copy)?;
     let path = l.photo(copy).unwrap().path.clone();
     let mut editor =
@@ -4710,15 +4710,65 @@ fn rating(editor: &Editor, id: PhotoId) -> i32 {
     editor.library.as_ref().unwrap().photo(id).unwrap().rating
 }
 #[test]
+fn a_copy_removed_when_the_catalog_cannot_be_read_again_still_leaves_undo() -> anyhow::Result<()> {
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?.value;
+    library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
+    editor.sync_undo();
+    // Removing reads no collections; reading the catalog again does, and fails.
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .session
+        .catalog
+        .db_for_tests()
+        .execute_batch("ALTER TABLE collections RENAME TO collections_gone")?;
+    editor.remove_virtual_copy(copy);
+    let catalog = &editor.library.as_ref().unwrap().session.catalog;
+    assert!(
+        catalog.photos()?.iter().all(|p| p.id != copy),
+        "the copy is removed"
+    );
+    let status = editor.status.clone();
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .session
+        .catalog
+        .db_for_tests()
+        .execute_batch("ALTER TABLE collections_gone RENAME TO collections")?;
+    // The next copy, of B rated 2, is given the removed copy's id.
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
+    assert_eq!(again, copy);
+    assert_eq!(rating(&editor, again), 2);
+    editor.undo();
+    assert_eq!(rating(&editor, again), 2);
+    assert!(status.contains("could not be read again"), "{status}");
+    Ok(())
+}
+#[test]
 fn undo_never_writes_a_removed_copys_id_given_to_a_new_copy() -> anyhow::Result<()> {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(a)?;
+    let copy = library.create_virtual_copy(a)?.value;
     library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
     editor.sync_undo();
     editor.remove_virtual_copy(copy);
     // The catalog gives the removed copy's id to the next copy, of B, rated 2.
-    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
     assert_eq!(again, copy);
     assert_eq!(rating(&editor, again), 2);
     editor.undo();
@@ -4730,7 +4780,7 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
 {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(a)?;
+    let copy = library.create_virtual_copy(a)?.value;
     library.edit_photos(
         &[a, copy],
         crate::app::photo_metadata::Edit::Rating(4),
@@ -4741,7 +4791,12 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
     editor.undo();
     assert_eq!(rating(&editor, a), 0);
     editor.remove_virtual_copy(copy);
-    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    let again = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(b)?
+        .value;
     assert_eq!(again, copy);
     // Redo rates A again and leaves the new copy as it was made.
     editor.redo();
@@ -4753,7 +4808,12 @@ fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() ->
 fn a_rating_made_in_develop_on_a_removed_copy_still_undoes_the_photo_it_rated() -> anyhow::Result<()>
 {
     let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
-    let copy = editor.library.as_mut().unwrap().create_virtual_copy(a)?;
+    let copy = editor
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(a)?
+        .value;
     // The copy is open in Develop; the filmstrip menu rates B.
     editor.document.catalog_photo = Some(copy);
     editor.module = Module::Develop;
@@ -4794,7 +4854,7 @@ fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::
     // A copy shown keeps its saved name as the draft: nothing to save. A name
     // being typed is saved by the guard too.
     let library = editor.library.as_mut().unwrap();
-    let copy = library.create_virtual_copy(id)?;
+    let copy = library.create_virtual_copy(id)?.value;
     let saved_name = library.photo(copy).unwrap().copy_name.clone();
     library.set_copy_name_draft(copy, &saved_name);
     assert!(!editor.quitting_would_cut_off_work());

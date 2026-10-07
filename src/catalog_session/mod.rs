@@ -7,7 +7,7 @@ mod descriptive;
 use crate::catalog::{Catalog, Collection, CollectionId, Folder, Photo, PhotoId, RootId};
 use anyhow::Result;
 pub(crate) use background::Wake;
-pub(crate) use descriptive::{DescriptiveChange, DescriptiveEdit};
+pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(session.catalog.photos()?[0].label, "Blue");
         assert_eq!(session.catalog.metadata_snapshot(&[a])?, change.before);
 
-        let copy = session.create_virtual_copy(a)?;
+        let copy = session.create_virtual_copy(a)?.value;
         assert!(session.photos.iter().any(|p| p.id == copy));
         session.set_copy_as_master(copy)?;
         assert_eq!(
