@@ -134,6 +134,8 @@ Useful shortcuts:
 | Y / Option+Y / Shift+Y | Before and after: left and right / top and bottom / split |
 | I | Photo info over the photo: Info 1, Info 2, off |
 | Shift+R | Reference View: another photo beside the one you edit (drag it from the filmstrip) |
+| Tab / Shift+Tab | Hide or show the side panels / also the filmstrip and status bar |
+| F7 / F8 / F6 | Hide or show the left panel / right panel / filmstrip |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |
 

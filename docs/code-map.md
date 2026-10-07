@@ -179,7 +179,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [bitmaps.rs](../crates/rawmakase-model/src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
 | [identity.rs](../crates/rawmakase-model/src/storage/identity.rs) | RAW fingerprints (size, modification time and a hash of the first bytes) that tie edits and cached previews to a file. |
 | [catalog/legacy_sidecar.rs](../crates/rawmakase-catalog/src/catalog/legacy_sidecar.rs) | Edits saved beside photos before editing moved into the Library: validated and imported into the catalog, with their spots and masks from the companion `*.rawmakase-local.json`, when their folder is added; also read by the CLI's `render`. The writer stays for the persistence tests. |
-| [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults and other preferences. |
+| [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults, the panels each module shows and other preferences. |
 | [catalog_session/mod.rs](../src/catalog_session/mod.rs) | The open catalog and its photos, folders, collections and roots as read, with no window; writes that change those lists (ratings, the Quick Collection, refreshed fields and keywords) keep them in step. The Library shows them. |
 | [catalog_session/descriptive.rs](../src/catalog_session/descriptive.rs) | Descriptive metadata edits, their undo, Read Metadata from Files, collection membership, and virtual copies with their Copy Names, written to the catalog and read back into the session's lists. |
 | [catalog_session/backfill.rs](../src/catalog_session/backfill.rs) | Capture times and photo info read from files added from folders, in the background, saved in the catalog and the session's photos. The Library says which photos are online and re-sorts. |
@@ -261,6 +261,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
 | [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: Red Eye and Pet Eye, finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size, Darken and the pet eye's catchlight. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
+| [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), kept in the session; a panel being hidden first saves or ends what it was doing. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application, the Amount slider and temporary hover previews. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
