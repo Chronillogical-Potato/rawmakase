@@ -1038,7 +1038,7 @@ fn red_eye_corrections_import_from_camera_raw_and_catalogs() -> Result<()> {
     assert_eq!(r.red_eye.len(), 2);
     // Pet Eye, with Lightroom's default catchlight: 0.5 is the centre and 0 or 1 a
     // semi-axis away.
-    use crate::develop::red_eye::EyeKind;
+    use crate::model::red_eye::EyeKind;
     let EyeKind::Pet {
         catchlight: Some(c),
     } = r.red_eye[1].kind

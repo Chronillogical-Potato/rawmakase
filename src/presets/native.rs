@@ -71,10 +71,8 @@ pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develop::{
-        panels::{Panel, PanelState},
-        red_eye::RedEyeOp,
-    };
+    use crate::develop::panels::{Panel, PanelState};
+    use crate::model::red_eye::RedEyeOp;
     #[test]
     fn a_preset_leaves_the_photos_red_eye_and_its_switch() {
         let mut photo = Recipe::default();

@@ -96,6 +96,14 @@ impl RetouchOp {
         self.offset = [self.offset[0] - delta[0], self.offset[1] - delta[1]];
     }
 }
+/// A long-edge fraction as normalised x and y radii.
+pub fn radii(r: f32, aspect: f32) -> (f32, f32) {
+    if aspect >= 1. {
+        (r, r * aspect)
+    } else {
+        (r / aspect, r)
+    }
+}
 pub fn validate(ops: &[RetouchOp]) -> Result<()> {
     ensure!(ops.len() <= MAX_OPS, "Too many spot removals");
     ops.iter().try_for_each(RetouchOp::validate)
@@ -146,11 +154,16 @@ mod tests {
         };
         assert!(at(0.5).validate().is_ok());
         assert!(at(0.6).validate().is_err());
-        assert!(validate(&vec![at(0.1); MAX_OPS]).is_ok());
-        assert!(validate(&vec![at(0.1); MAX_OPS + 1]).is_err());
+        assert!(validate(&vec![at(0.1); 1000]).is_ok());
+        assert!(validate(&vec![at(0.1); 1001]).is_err());
         let mut long = at(0.1);
         long.shape = RetouchShape::Brush {
-            points: vec![[0.5; 2]; MAX_POINTS + 1].into(),
+            points: vec![[0.5; 2]; 4096].into(),
+            radius: 0.1,
+        };
+        assert!(long.validate().is_ok());
+        long.shape = RetouchShape::Brush {
+            points: vec![[0.5; 2]; 4097].into(),
             radius: 0.1,
         };
         assert!(long.validate().is_err());

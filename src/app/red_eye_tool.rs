@@ -7,10 +7,8 @@ use super::Editor;
 use super::retouch_tool::{hint, indented};
 use super::theme;
 use super::widgets::{segmented, slider_with};
-use crate::develop::{
-    ViewMapping,
-    red_eye::{self, EyeKind, RedEyeOp},
-};
+use crate::develop::{ViewMapping, red_eye};
+use crate::model::red_eye::{EyeKind, RedEyeOp};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 pub(super) struct RedEyeTool {
@@ -50,7 +48,7 @@ impl PupilType {
         match self {
             PupilType::Red => EyeKind::Red,
             PupilType::Pet => EyeKind::Pet {
-                catchlight: Some(red_eye::DEFAULT_CATCHLIGHT),
+                catchlight: Some(crate::model::red_eye::DEFAULT_CATCHLIGHT),
             },
         }
     }
@@ -231,7 +229,7 @@ impl Editor {
     /// Corrects the pupil (red, or glowing for Pet Eye) found within `size` (long-edge
     /// fraction) of image position `center`, or says none was found.
     pub(super) fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
-        if self.document.edit.recipe.red_eye.len() >= red_eye::MAX_OPS {
+        if self.document.edit.recipe.red_eye.len() >= crate::model::red_eye::MAX_OPS {
             self.status = "Too many red eye corrections on this photo".into();
             return;
         }
@@ -246,7 +244,12 @@ impl Editor {
             .and_then(|i| self.document.edit.recipe.red_eye.get(i))
             .map_or(self.view.red_eye.pet, |op| PupilType::of(op.kind));
         let kind = pet.kind();
-        match red_eye::find_pupil(im, center, size.min(red_eye::MAX_RADIUS), kind.glow()) {
+        match red_eye::find_pupil(
+            im,
+            center,
+            size.min(crate::model::red_eye::MAX_RADIUS),
+            kind.glow(),
+        ) {
             Ok(pupil) => {
                 let (pupil_size, darken) = self
                     .view
@@ -254,7 +257,10 @@ impl Editor {
                     .selected
                     .and_then(|i| self.document.edit.recipe.red_eye.get(i))
                     .map_or(
-                        (red_eye::DEFAULT_PUPIL_SIZE, red_eye::DEFAULT_DARKEN),
+                        (
+                            crate::model::red_eye::DEFAULT_PUPIL_SIZE,
+                            crate::model::red_eye::DEFAULT_DARKEN,
+                        ),
                         |op| (op.pupil_size, op.darken),
                     );
                 let mut op = RedEyeOp {
@@ -365,7 +371,7 @@ impl Editor {
                     "Pupil Size",
                     &mut op.pupil_size,
                     0. ..=1.,
-                    red_eye::DEFAULT_PUPIL_SIZE,
+                    crate::model::red_eye::DEFAULT_PUPIL_SIZE,
                     Some((100., 0)),
                     None,
                 );
@@ -377,7 +383,7 @@ impl Editor {
                             "Darken",
                             &mut op.darken,
                             0. ..=1.,
-                            red_eye::DEFAULT_DARKEN,
+                            crate::model::red_eye::DEFAULT_DARKEN,
                             Some((100., 0)),
                             None,
                         );
@@ -389,7 +395,7 @@ impl Editor {
                             .on_hover_text("Drag the catchlight to place it")
                             .changed()
                         {
-                            *catchlight = on.then_some(red_eye::DEFAULT_CATCHLIGHT);
+                            *catchlight = on.then_some(crate::model::red_eye::DEFAULT_CATCHLIGHT);
                         }
                     }),
                 }
