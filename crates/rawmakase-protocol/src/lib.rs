@@ -4,11 +4,14 @@
 //! The app listens on a loopback socket and announces it in [`Endpoint`], a
 //! `control.json` file in its data folder ([`paths::data_dir`]). Clients read
 //! that file, connect, and send one JSON request per line carrying
-//! [`PROTOCOL`] and the endpoint's token.
+//! [`PROTOCOL`] and the endpoint's token, beside one [`Request`].
 //!
 //! This crate depends on nothing of the app's, so a client builds without its
 //! GUI, GPU or native decoding libraries.
 pub mod paths;
+pub mod request;
+
+pub use request::Request;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
