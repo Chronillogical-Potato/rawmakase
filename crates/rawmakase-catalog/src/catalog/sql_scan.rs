@@ -26,6 +26,18 @@ pub(super) fn catalog_statements() -> Vec<Statement> {
     let mut files = Vec::new();
     sources(&root, &mut files);
     files.sort();
+    let files: Vec<PathBuf> = files
+        .into_iter()
+        .filter(|path| {
+            let name = path.file_name().unwrap().to_string_lossy();
+            !(name == "tests.rs" || name.ends_with("_tests.rs") || name == "sql_scan.rs")
+        })
+        .collect();
+    // Fragments are used across modules (a macro_rules! exported with `use`).
+    let fragments: Vec<(String, String)> = files
+        .iter()
+        .flat_map(|path| fragments(&production(path)))
+        .collect();
     let mut found = Vec::new();
     for path in files {
         let file = path
@@ -33,11 +45,7 @@ pub(super) fn catalog_statements() -> Vec<Statement> {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        let name = file.rsplit('/').next().unwrap_or(&file);
-        if name == "tests.rs" || name.ends_with("_tests.rs") || name == "sql_scan.rs" {
-            continue;
-        }
-        for (kind, text) in statements(&production(&path)) {
+        for (kind, text) in statements(&production(&path), &fragments) {
             found.push(Statement {
                 file: file.clone(),
                 kind,
@@ -176,11 +184,12 @@ fn fragments(source: &str) -> Vec<(String, String)> {
 }
 
 /// Each statement given to `sql!` or `sqlite_sql!` in `source`: its
-/// literals and fragment macros joined in order, as `concat!` joins them.
-/// Only these statements can run, so they are all the catalog's SQL.
-pub(super) fn statements(source: &str) -> Vec<(Kind, String)> {
+/// literals and the `fragments` it calls joined in order, as `concat!`
+/// joins them. Only these statements can run, so they are all the
+/// catalog's SQL. A macro call that is neither `concat!` nor a known
+/// fragment panics rather than leave a statement incomplete.
+pub(super) fn statements(source: &str, fragments: &[(String, String)]) -> Vec<(Kind, String)> {
     let literals = literals(source);
-    let fragments = fragments(source);
     let mut found = Vec::new();
     for (at, _) in source.match_indices("sql!(") {
         let kind = if source[..at].ends_with("sqlite_") {
@@ -216,11 +225,28 @@ pub(super) fn statements(source: &str) -> Vec<(Kind, String)> {
             .filter(|(start, _, _)| (at..end).contains(start))
             .map(|(start, _, text)| (*start, text.as_str()))
             .collect();
-        for (name, text) in &fragments {
-            let call = format!("{name}!()");
-            for (offset, _) in source[at..end].match_indices(&call) {
-                pieces.push((at + offset, text));
+        let in_literal = |i: usize| literals.iter().any(|(s, e, _)| (*s..*e).contains(&i));
+        for (offset, _) in source[at + "sql!(".len()..end].match_indices("!(") {
+            let call = at + "sql!(".len() + offset;
+            if in_literal(call) {
+                continue;
             }
+            let name: String = source[..call]
+                .chars()
+                .rev()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            if name == "concat" {
+                continue;
+            }
+            let (_, text) = fragments
+                .iter()
+                .find(|(fragment, _)| *fragment == name)
+                .unwrap_or_else(|| panic!("{name}!() in a statement is not a known SQL fragment"));
+            pieces.push((call, text));
         }
         pieces.sort_by_key(|(start, _)| *start);
         found.push((kind, pieces.into_iter().map(|(_, text)| text).collect()));
@@ -242,7 +268,7 @@ fn statements_are_read_whole() {
               FROM photos")
     "##;
     assert_eq!(
-        statements(source),
+        statements(source, &fragments(source)),
         [
             (
                 Kind::Portable,
