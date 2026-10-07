@@ -52,23 +52,28 @@ impl CatalogSession {
             keyword_export,
         })
     }
-    /// Reads the photos, folders, collections and roots again.
+    /// Reads the photos, folders, collections and roots again. All or nothing:
+    /// when a read fails, the lists stay as they were, still matching each other.
     pub fn reload(&mut self) -> Result<()> {
         // Earlier imports could pick up macOS "._" metadata files; never show them.
-        self.photos = self.catalog.photos()?;
-        self.photos
-            .retain(|p| !crate::storage::is_hidden(Path::new(&p.filename)));
-        self.folders = self.catalog.folders()?;
-        for folder in &mut self.folders {
-            folder.count = self.photos.iter().filter(|p| p.folder == folder.id).count();
+        let mut photos = self.catalog.photos()?;
+        photos.retain(|p| !crate::storage::is_hidden(Path::new(&p.filename)));
+        let mut folders = self.catalog.folders()?;
+        for folder in &mut folders {
+            folder.count = photos.iter().filter(|p| p.folder == folder.id).count();
         }
-        self.collections = self.catalog.collections()?;
-        let ids: HashSet<PhotoId> = self.photos.iter().map(|p| p.id).collect();
-        self.collection_photos = self.catalog.collection_photos()?;
-        for members in self.collection_photos.values_mut() {
+        let collections = self.catalog.collections()?;
+        let ids: HashSet<PhotoId> = photos.iter().map(|p| p.id).collect();
+        let mut collection_photos = self.catalog.collection_photos()?;
+        for members in collection_photos.values_mut() {
             members.retain(|id| ids.contains(id));
         }
-        self.roots = self.catalog.roots()?;
+        let roots = self.catalog.roots()?;
+        self.photos = photos;
+        self.folders = folders;
+        self.collections = collections;
+        self.collection_photos = collection_photos;
+        self.roots = roots;
         Ok(())
     }
 }
@@ -106,6 +111,27 @@ mod tests {
         assert_eq!(session.photos.len(), 3);
         assert_eq!(session.folders[0].count, 3);
         assert!(!session.collection_photos.contains_key(&collection));
+        Ok(())
+    }
+
+    #[test]
+    fn a_reload_that_fails_partway_keeps_the_lists_as_they_were() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+        let path = directory.path().join("library.rawmakase");
+        Catalog::create(&path)?.add_folder(&folder)?;
+        let Opened { mut session, .. } = CatalogSession::open(&path)?;
+        let a = session.photos[0].id;
+
+        // The photos read again would include the copy; a later read fails.
+        session.catalog.create_virtual_copy(a)?;
+        rusqlite::Connection::open(&path)?
+            .execute_batch("ALTER TABLE roots RENAME TO roots_gone")?;
+        assert!(session.reload().is_err());
+        assert_eq!(session.photos.len(), 1);
+        assert_eq!(session.folders[0].count, 1);
         Ok(())
     }
 }
