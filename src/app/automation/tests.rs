@@ -229,6 +229,34 @@ mod mapping_tests {
         assert_eq!(parse_action("nonsense"), None);
     }
     #[test]
+    fn panel_keys_on_a_button_hide_panels_as_on_the_keyboard() {
+        use crate::app::panels::{PanelChange, WorkspacePanel};
+        let run = |spec| match supported_action(spec) {
+            Some(Action::Key(key, modifiers)) => shortcut_action(key, modifiers),
+            _ => None,
+        };
+        assert_eq!(
+            run("tab"),
+            Some(commands::Action::Panels(PanelChange::Sides))
+        );
+        assert_eq!(
+            run("shift+tab"),
+            Some(commands::Action::Panels(PanelChange::All))
+        );
+        assert_eq!(
+            run("f8"),
+            Some(commands::Action::Panels(PanelChange::Toggle(
+                WorkspacePanel::Right
+            )))
+        );
+        assert_eq!(
+            parse_action("panels:filmstrip"),
+            Some(Action::Named(commands::Action::Panels(
+                PanelChange::Toggle(WorkspacePanel::Filmstrip)
+            )))
+        );
+    }
+    #[test]
     fn saved_mapping_reads_back_without_inheriting_removed_controls() {
         let defaults = Config::defaults();
         let saved = defaults.to_json();

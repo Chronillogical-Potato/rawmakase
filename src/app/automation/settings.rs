@@ -9,7 +9,7 @@ use crate::app::{
 use mapping::supported_action as parse_action;
 /// What a button can be set to from the list: its name and the key it presses,
 /// spelled as in `midi.json`. Anything else is typed in the field beside it.
-pub(super) const PRESETS: [(&str, &str); 45] = [
+pub(super) const PRESETS: [(&str, &str); 47] = [
     ("Do nothing", ""),
     ("Undo", "cmd+z"),
     ("Redo", "cmd+shift+z"),
@@ -37,6 +37,8 @@ pub(super) const PRESETS: [(&str, &str); 45] = [
     ("Spot removal", "q"),
     ("White balance selector", "w"),
     ("Masking", "shift+w"),
+    ("Hide / show the side panels", "tab"),
+    ("Hide / show all panels", "shift+tab"),
     ("Convert to black & white or color", "toggle:bw"),
     ("Color Mixer: Hue", "mixer:hue"),
     ("Color Mixer: Saturation", "mixer:sat"),

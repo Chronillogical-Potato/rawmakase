@@ -5,6 +5,7 @@ mod parameter;
 mod preset;
 mod reply;
 use crate::app::Module;
+use crate::app::panels::{PanelChange, WorkspacePanel};
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
 };
@@ -194,6 +195,8 @@ pub(super) enum Action {
     Loupe,
     Next,
     Previous,
+    /// Hides or shows the open module's panels, as Tab, Shift+Tab and F6–F8 do.
+    Panels(PanelChange),
 }
 impl Action {
     const NAMED: &[(&'static str, Self)] = &[
@@ -250,6 +253,20 @@ impl Action {
         ("loupe", Self::Loupe),
         ("next", Self::Next),
         ("previous", Self::Previous),
+        ("panels:sides", Self::Panels(PanelChange::Sides)),
+        ("panels:all", Self::Panels(PanelChange::All)),
+        (
+            "panels:left",
+            Self::Panels(PanelChange::Toggle(WorkspacePanel::Left)),
+        ),
+        (
+            "panels:right",
+            Self::Panels(PanelChange::Toggle(WorkspacePanel::Right)),
+        ),
+        (
+            "panels:filmstrip",
+            Self::Panels(PanelChange::Toggle(WorkspacePanel::Filmstrip)),
+        ),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};
@@ -386,6 +403,7 @@ impl Editor {
             exporting: self.exporting(),
             auto_running: self.document.auto.is_running(),
             treatment_pending: self.document.pending_treatment.is_some(),
+            panels: self.panels.of(self.module),
             save_state: match self.document.edit.save_state() {
                 super::save_state::SaveState::Clean => "saved",
                 super::save_state::SaveState::Pending(_) => "pending",
@@ -820,6 +838,11 @@ impl Editor {
             Develop => return self.command_module(true),
             Next => return self.command_navigate(1),
             Previous => return self.command_navigate(-1),
+            Panels(change) => {
+                if !self.change_panels(change) {
+                    return Err(Error::new("save_failed", self.status.clone()));
+                }
+            }
             Loupe => {
                 self.command_module(false)?;
                 if let Some(library) = &mut self.library {

@@ -114,6 +114,7 @@ pub(super) fn action_spec(action: Action) -> String {
     }
 }
 pub(super) fn shortcut_action(key: Key, m: Modifiers) -> Option<commands::Action> {
+    use crate::app::panels::{PanelChange, WorkspacePanel};
     use commands::Action as A;
     Some(
         match (key, m.command || m.ctrl || m.mac_cmd, m.shift, m.alt) {
@@ -128,6 +129,13 @@ pub(super) fn shortcut_action(key: Key, m: Modifiers) -> Option<commands::Action
             (Key::E, true, true, false) => A::ExportDialog,
             (Key::E, true, true, true) => A::ExportPrevious,
             (Key::W, false, true, false) => A::Mask,
+            (Key::Tab, false, true, false) => A::Panels(PanelChange::All),
+            (Key::Tab, false, false, false) => A::Panels(PanelChange::Sides),
+            (Key::F7, false, false, false) => A::Panels(PanelChange::Toggle(WorkspacePanel::Left)),
+            (Key::F8, false, false, false) => A::Panels(PanelChange::Toggle(WorkspacePanel::Right)),
+            (Key::F6, false, false, false) => {
+                A::Panels(PanelChange::Toggle(WorkspacePanel::Filmstrip))
+            }
             (key, false, _, false) => match key {
                 Key::Num0 => A::Rating(0),
                 Key::Num1 => A::Rating(1),
