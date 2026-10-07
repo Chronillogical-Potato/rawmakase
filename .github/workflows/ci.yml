@@ -305,6 +305,42 @@ jobs:
       - run: cargo test --locked -p rawmakase-model --all-features
       - run: cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol
 
+  postgres:
+    name: Portable catalog SQL
+    # The catalog's SQL is written for SQLite and Postgres alike, so a second
+    # backend could be added behind catalog::db (issue #341). Every portable
+    # statement must prepare against schema.postgres.sql: Postgres parses and
+    # type-checks it, with no data and no backend code in the app.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-ref || github.sha }}
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Write the check
+        run: cargo test --locked -p rawmakase-catalog writes_the_postgres_check -- --ignored
+        env:
+          RAWMAKASE_POSTGRES_CHECK: ${{ runner.temp }}/postgres-check.sql
+      - name: Prepare every portable statement on Postgres
+        run: psql -X -q -f "$RUNNER_TEMP/postgres-check.sql"
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+
   audit:
     name: Dependency licenses and advisories
     runs-on: ubuntu-latest

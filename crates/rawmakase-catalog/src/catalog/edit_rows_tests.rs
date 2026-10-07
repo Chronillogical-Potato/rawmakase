@@ -25,119 +25,13 @@ fn writes_an_edit(statement: &str) -> bool {
     photos || rows
 }
 
-/// The string literals in `source`, in order, with their ends: enough to
-/// read SQL.
-fn literals(source: &str) -> Vec<(usize, usize, String)> {
-    let bytes = source.as_bytes();
-    let mut found = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        // A raw string: r"…" or r#"…"#.
-        if bytes[i] == b'r' && matches!(bytes.get(i + 1), Some(b'"' | b'#')) {
-            let hashes = bytes[i + 1..].iter().take_while(|b| **b == b'#').count();
-            if bytes.get(i + 1 + hashes) == Some(&b'"') {
-                let start = i + 2 + hashes;
-                let end = format!("\"{}", "#".repeat(hashes));
-                let close = source[start..]
-                    .find(&end)
-                    .map_or(bytes.len(), |n| start + n);
-                found.push((i, close + end.len(), source[start..close].to_string()));
-                i = close + end.len();
-                continue;
-            }
-        }
-        // A character literal can be a quote: '"'.
-        if bytes[i] == b'\'' && bytes.get(i + 2) == Some(&b'\'') {
-            i += 3;
-            continue;
-        }
-        if bytes[i] == b'"' {
-            let start = i + 1;
-            let mut end = start;
-            while end < bytes.len() && bytes[end] != b'"' {
-                end += if bytes[end] == b'\\' { 2 } else { 1 };
-            }
-            let end = end.min(bytes.len());
-            found.push((i, end + 1, source[start..end].to_string()));
-            i = end + 1;
-            continue;
-        }
-        i += 1;
-    }
-    found
-}
-
-/// Each statement given to `sql!` or `sqlite_sql!` in `source`, its
-/// literals joined as `concat!` joins them. A statement can only run as one
-/// of these, so they are all a write to an edit could be.
-fn statements(source: &str) -> Vec<String> {
-    let literals = literals(source);
-    let mut found = Vec::new();
-    for (at, _) in source.match_indices("sql!(") {
-        // The macro's arguments end at the parenthesis that closes it,
-        // outside any literal.
-        let mut depth = 0;
-        let mut end = at + "sql!".len();
-        let mut i = end;
-        while i < source.len() {
-            if let Some((_, after, _)) = literals.iter().find(|(start, _, _)| *start == i) {
-                i = *after;
-                continue;
-            }
-            match source.as_bytes()[i] {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        found.push(
-            literals
-                .iter()
-                .filter(|(start, _, _)| (at..end).contains(start))
-                .map(|(_, _, text)| text.as_str())
-                .collect(),
-        );
-    }
-    found
-}
-
 #[test]
 fn only_edit_rows_writes_a_photos_edit() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog");
-    let mut offenders = Vec::new();
-    let mut stack = vec![root.clone()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            let tests = name == "tests.rs" || name.ends_with("_tests.rs");
-            if !name.ends_with(".rs") || tests || name == "edit_rows.rs" {
-                continue;
-            }
-            let source = std::fs::read_to_string(&path).unwrap();
-            let production = source
-                .find("#[cfg(test)]\nmod ")
-                .map_or(&source[..], |at| &source[..at]);
-            for statement in statements(production) {
-                // A statement read as empty means the scan lost its place.
-                assert!(!statement.is_empty(), "{name}: a statement read as empty");
-                if writes_an_edit(&statement) {
-                    offenders.push(format!("{name}: {}", statement.trim()));
-                }
-            }
-        }
-    }
+    let offenders: Vec<String> = super::sql_scan::catalog_statements()
+        .into_iter()
+        .filter(|s| s.file != "edit_rows.rs" && writes_an_edit(&s.text))
+        .map(|s| format!("{}: {}", s.file, s.text.trim()))
+        .collect();
     assert!(
         offenders.is_empty(),
         "write edits through edit_rows: {offenders:#?}"
@@ -158,12 +52,6 @@ fn the_scan_finds_edit_writes() {
         "UPDATE develop_snapshots SET recipe=? WHERE id=?"
     ));
     assert!(!writes_an_edit("SELECT recipe FROM photos WHERE id=?"));
-    // Pieces joined by concat!, and raw strings.
-    let source = r##"sql!(concat!("UPDATE photos ", "SET recipe=? WHERE id=?")) sql!(r#"DELETE FROM local_edits WHERE "photo"=?"#) sql!("SELECT 1")"##;
-    let found = statements(source);
-    assert_eq!(found.len(), 3);
-    assert!(writes_an_edit(&found[0]) && writes_an_edit(&found[1]));
-    assert!(!writes_an_edit(&found[2]));
 }
 
 /// A catalog with one photo carrying a saved edit and a History, its file and id.

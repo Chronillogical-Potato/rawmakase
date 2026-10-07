@@ -33,13 +33,6 @@ fn is_test_file(relative: &str) -> bool {
     name == "tests.rs" || name.ends_with("_tests.rs")
 }
 
-/// `source` without its trailing `#[cfg(test)] mod …` block.
-fn production(source: &str) -> &str {
-    source
-        .find("#[cfg(test)]\nmod ")
-        .map_or(source, |at| &source[..at])
-}
-
 #[test]
 fn only_catalog_db_reaches_the_database() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -58,7 +51,7 @@ fn only_catalog_db_reaches_the_database() {
         let source = std::fs::read_to_string(&file)
             .unwrap()
             .replace("\r\n", "\n");
-        if production(&source).contains("rusqlite") {
+        if super::sql_scan::without_tests(&source).contains("rusqlite") {
             offenders.push(relative);
         }
     }

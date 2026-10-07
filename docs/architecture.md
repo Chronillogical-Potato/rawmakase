@@ -117,7 +117,11 @@ inject a temporary file, without changing the process-wide environment.
   `rusqlite` anywhere else but the preview cache and the check of a Lightroom
   file before import. Lightroom import runs inside `Db::with_lightroom`, the
   only place `SqliteSql` runs; do not expose the connection publicly or put
-  Lightroom-specific queries back into general catalog operations.
+  Lightroom-specific queries back into general catalog operations. Portable
+  SQL stays portable: CI prepares every `sql!` statement on Postgres against
+  `schema.postgres.sql` (no Postgres backend ships), so an `INSERT OR`, a
+  reserved word or a SQLite-only function fails CI the day it is
+  written.
 - The app names and reopens a catalog by its `CatalogLocation`, never by a
   path: sessions, autosave, Sync and folder jobs carry it, and behaviour that
   only makes sense for a file (its size, revealing it, the path `session.json`
