@@ -320,8 +320,8 @@ impl Editor {
                 // On launch, return to the folder, photo and module of last time.
                 let restore = self.restore.take();
                 if let Some(library) = &mut self.library {
-                    if let Some((source, photo, _)) = &restore {
-                        library.restore_source(source, *photo);
+                    if let Some(place) = &restore {
+                        library.restore_source(&place.source, place.photo);
                     }
                     // The Library as it was shown, on launch and when this
                     // catalog is loaded again (a folder added or relinked);
@@ -331,8 +331,9 @@ impl Editor {
                     }
                 }
                 // Develop reopens on its photo, even one the filters now hide.
-                if let Some((_, photo, true)) = restore
-                    && let Some(id) = photo.or_else(|| self.library.as_ref()?.selected())
+                if let Some(place) = restore
+                    && place.module == super::library::Module::Develop
+                    && let Some(id) = place.photo.or_else(|| self.library.as_ref()?.selected())
                 {
                     self.develop_catalog_photo(id);
                     // On launch, a photo gone offline leaves the Library shown
