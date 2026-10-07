@@ -93,9 +93,31 @@ impl EditSession {
     pub(crate) fn replace(&mut self, recipe: Recipe) -> Recipe {
         std::mem::replace(&mut self.recipe, recipe)
     }
-    /// Ends a gesture still held (a drag, a wheel scroll), as one History step.
+    /// Ends a gesture still held (a drag, a wheel scroll), as one History step
+    /// to be saved.
     pub(crate) fn finish_gesture(&mut self) {
-        self.history.finish_gesture(&self.recipe);
+        if self.history.in_gesture() {
+            self.history.finish_gesture(&self.recipe);
+            self.save.mark_changed();
+        }
+    }
+    /// Ends a gesture still held as the settings were when `frame` began, as one
+    /// History step to be saved: what changes later in the frame is a step of
+    /// its own.
+    pub(crate) fn finish_gesture_before(&mut self, frame: &Frame) {
+        if self.history.in_gesture() {
+            self.history.finish_gesture(frame.before());
+            self.save.mark_changed();
+        }
+    }
+    /// Names the next History step `step`, for an edit whose own name would say
+    /// less (a preset, a menu choice).
+    pub(crate) fn name_next_step(&mut self, step: Step) {
+        self.history.label(step);
+    }
+    /// The changes History recorded since the last call, for the shared Undo.
+    pub(crate) fn take_recorded(&mut self) -> Vec<history::Recorded> {
+        self.history.take_recorded()
     }
     /// The History read back from `saved`, for the current settings.
     pub(crate) fn restore_history(&mut self, saved: crate::model::saved_history::SavedHistory) {
@@ -104,11 +126,19 @@ impl EditSession {
     /// Returns the settings to `target`, the state History has at `at`, as the step
     /// `step` (Undo of a catalog command, say).
     pub(crate) fn restore(&mut self, at: history::Mark, target: &Recipe, step: Step) {
+        let changed = self.recipe != *target;
         self.history.restore(at, target, &mut self.recipe, step);
+        if changed {
+            self.save.mark_changed();
+        }
     }
-    /// Sets the settings to `target` as History step `step`.
+    /// Sets the settings to `target` as History step `step`, to be saved.
     pub(crate) fn set(&mut self, target: &Recipe, step: Step) {
+        let changed = self.recipe != *target;
         self.history.set(target, &mut self.recipe, step);
+        if changed {
+            self.save.mark_changed();
+        }
     }
     /// The settings and every state History keeps, to bring all up to date at once
     /// (Upright's analysis arriving, say).
@@ -119,8 +149,8 @@ impl EditSession {
     pub(crate) fn history(&self) -> &History {
         &self.history
     }
-    /// The History, to name, end or replace steps; stepping through it moves the
-    /// settings with it (see [`Self::undo`] and [`Self::jump`]).
+    /// The History, for a test to step through it directly.
+    #[cfg(test)]
     pub(crate) fn history_mut(&mut self) -> &mut History {
         &mut self.history
     }
@@ -129,9 +159,14 @@ impl EditSession {
     pub(crate) fn undo(&mut self) -> bool {
         self.history.undo(&mut self.recipe)
     }
-    /// Shows History state `applied` (steps applied), as a History click does.
+    /// Shows History state `applied` (steps applied), as a History click does,
+    /// to be saved.
     pub(crate) fn jump(&mut self, applied: usize) -> bool {
-        self.history.jump(applied, &mut self.recipe)
+        let moved = self.history.jump(applied, &mut self.recipe);
+        if moved {
+            self.save.mark_changed();
+        }
+        moved
     }
     /// Whether the settings still need saving, and why not if they can't be.
     pub(crate) fn save_state(&self) -> &SaveState {
@@ -235,6 +270,38 @@ mod tests {
             session.finish(frame, Gesture::Released),
             FrameOutcome::Edited
         );
+        assert_eq!(session.history().steps().1, 1);
+        assert!(session.save_state().needs_save());
+    }
+
+    #[test]
+    fn stepping_and_restoring_history_marks_the_edit_for_saving() {
+        let mut session = EditSession::default();
+        session.change(None, |r| r.exposure = 1.);
+        session.save_state_mut().saved();
+        assert!(session.jump(0));
+        assert!(session.save_state().needs_save());
+        session.save_state_mut().saved();
+        let target = Recipe {
+            exposure: 2.,
+            ..session.recipe().clone()
+        };
+        session.set(&target, Step::new("Undo", ""));
+        assert!(session.save_state().needs_save());
+        // Setting what is already there needs no save.
+        session.save_state_mut().saved();
+        session.set(&target, Step::new("Undo", ""));
+        assert!(!session.save_state().needs_save());
+    }
+
+    #[test]
+    fn a_gesture_finished_outside_a_frame_is_a_step_to_save() {
+        let mut session = EditSession::default();
+        let frame = session.begin();
+        session.recipe_mut().exposure = 1.;
+        session.finish(frame, Gesture::Held);
+        session.save_state_mut().saved();
+        session.finish_gesture();
         assert_eq!(session.history().steps().1, 1);
         assert!(session.save_state().needs_save());
     }

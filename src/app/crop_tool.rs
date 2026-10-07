@@ -465,7 +465,6 @@ impl super::Editor {
         // A drag still under way is recorded first, so undoing it keeps the angle.
         if self.document.edit.history().in_gesture() {
             self.document.edit.finish_gesture();
-            self.document.edit.save_state_mut().mark_changed();
         }
         self.change_edit(Some(super::history::Step::new("Straighten", "Auto")), |r| {
             r.straighten = angle;

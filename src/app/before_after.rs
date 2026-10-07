@@ -286,7 +286,7 @@ impl Editor {
             }
         };
         if let Some(edit) = edit.filter(|e| *e != *self.document.edit.recipe()) {
-            self.document.edit.history_mut().label(Step::new(step, ""));
+            self.document.edit.name_next_step(Step::new(step, ""));
             self.document.edit.replace(edit);
             self.ensure_upright();
         }

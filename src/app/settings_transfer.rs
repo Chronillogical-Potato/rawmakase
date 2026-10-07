@@ -241,8 +241,7 @@ impl Editor {
         );
         self.document
             .edit
-            .history_mut()
-            .label(super::history::Step::new(step, ""));
+            .name_next_step(super::history::Step::new(step, ""));
         self.document.edit.replace(out.recipe);
         self.ensure_upright();
         self.status = if out.notes.is_empty() {

@@ -201,8 +201,7 @@ impl Editor {
         }
         self.document
             .edit
-            .history_mut()
-            .label(Step::new(format!("Snapshot: {name}"), ""));
+            .name_next_step(Step::new(format!("Snapshot: {name}"), ""));
         self.document.edit.replace(recipe);
         self.ensure_upright();
     }

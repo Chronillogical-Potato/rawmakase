@@ -5,6 +5,21 @@ use super::params::ParameterId;
 use crate::camera_data::Metadata;
 use crate::model::recipe::Recipe;
 
+/// Changes setting `id` with `change`, then brings the rest of the recipe in line
+/// as [`setting_changed`] says: the one way to edit a develop setting. Returns
+/// what `change` returns.
+pub fn change_setting<T>(
+    r: &mut Recipe,
+    id: ParameterId,
+    photo: Option<&Metadata>,
+    change: impl FnOnce(&mut Recipe) -> T,
+) -> T {
+    let previous = *id.value_mut(r);
+    let out = change(r);
+    setting_changed(r, id, previous, photo);
+    out
+}
+
 /// Brings the recipe in line after setting `id` changed from `previous`:
 /// - a new Temp or Tint recomputes the white balance multipliers for `photo`,
 ///   which then no longer come from Auto;

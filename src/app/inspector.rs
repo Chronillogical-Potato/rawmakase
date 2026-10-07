@@ -1879,7 +1879,7 @@ fn setting_control(
     default: f32,
     photo: Option<&crate::camera_data::Metadata>,
 ) {
-    let previous = *id.value_mut(r);
-    setting_slider(ui, id, id.value_mut(r), default);
-    crate::model::edit::setting_changed(r, id, previous, photo);
+    crate::model::edit::change_setting(r, id, photo, |r| {
+        setting_slider(ui, id, id.value_mut(r), default)
+    });
 }

@@ -131,7 +131,6 @@ impl Editor {
         let mut commands: Vec<(u64, Command)> = self
             .document
             .edit
-            .history_mut()
             .take_recorded()
             .into_iter()
             .map(|change| {
@@ -337,7 +336,7 @@ impl Editor {
                         self.document.edit.set(target, step);
                     }
                     // Not a change of its own for the log.
-                    self.document.edit.history_mut().take_recorded();
+                    self.document.edit.take_recorded();
                     self.document.edit.save_state_mut().mark_changed();
                     self.ensure_upright();
                     self.schedule();

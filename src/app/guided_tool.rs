@@ -112,8 +112,7 @@ impl Editor {
             self.document.edit.recipe_mut().upright.mode = UprightMode::Guided;
             self.document
                 .edit
-                .history_mut()
-                .label(super::history::Step::new("Upright", "Guided"));
+                .name_next_step(super::history::Step::new("Upright", "Guided"));
         }
         let u = &self.document.edit.recipe().upright;
         if u.guides.is_empty() {
@@ -153,8 +152,7 @@ impl Editor {
         };
         self.document
             .edit
-            .history_mut()
-            .label(super::history::Step::new(step, value));
+            .name_next_step(super::history::Step::new(step, value));
     }
     /// Deletes the selected guide (Delete).
     pub(super) fn delete_guide(&mut self) {

@@ -734,13 +734,10 @@ impl Editor {
                 && angle != current
             {
                 self.document.edit.recipe_mut().straighten = angle;
-                self.document
-                    .edit
-                    .history_mut()
-                    .label(super::history::Step::new(
-                        "Straighten",
-                        format!("{angle:+.2}"),
-                    ));
+                self.document.edit.name_next_step(super::history::Step::new(
+                    "Straighten",
+                    format!("{angle:+.2}"),
+                ));
             }
         }
         true
