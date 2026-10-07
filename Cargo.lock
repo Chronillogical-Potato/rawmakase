@@ -3237,7 +3237,6 @@ name = "rawmakase-interop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "image",
  "rawmakase-model",
  "rayon",
  "roxmltree 0.21.1",
