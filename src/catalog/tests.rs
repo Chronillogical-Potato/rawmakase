@@ -125,9 +125,13 @@ fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> 
     let local = dir.path().join("local");
     std::fs::create_dir(&local)?;
     std::fs::write(local.join("image.ARW"), b"synthetic raw identity")?;
-    cat.relink_folder(20, &local)?;
+    cat.relink_folder(FolderId(20), &local)?;
     assert_eq!(
-        cat.folders()?.iter().find(|f| f.id == 21).unwrap().path,
+        cat.folders()?
+            .iter()
+            .find(|f| f.id == FolderId(21))
+            .unwrap()
+            .path,
         local.join("Day2/")
     );
     let p = cat.photos()?[0].path.clone();

@@ -7,7 +7,9 @@ use super::preferences::{gap, group, hint};
 use super::theme;
 use super::widgets::{confirm_modal, form_row, pretty_path};
 use super::worker::Event;
-use crate::catalog::{Ambiguity, Catalog, Choice, Conflict, Override, Overrides, RootLocations};
+use crate::catalog::{
+    Ambiguity, Catalog, Choice, Conflict, FolderId, Override, Overrides, RootId, RootLocations,
+};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +20,7 @@ pub enum FolderQuestion {
     /// A root moves while folders below it have their own locations here.
     Overrides {
         catalog: PathBuf,
-        root: i64,
+        root: RootId,
         path: PathBuf,
         overrides: Vec<Override>,
     },
@@ -34,7 +36,7 @@ pub enum FolderQuestion {
 /// What a folder change does once settled.
 enum FolderJob {
     Relink {
-        root: i64,
+        root: RootId,
         path: PathBuf,
         overrides: Overrides,
     },
@@ -43,7 +45,7 @@ enum FolderJob {
         choices: Vec<Choice>,
     },
     Clear {
-        root: i64,
+        root: RootId,
         relative: String,
     },
 }
@@ -53,7 +55,7 @@ enum FolderJob {
 pub(super) struct LocationsView {
     roots: Vec<RootLocations>,
     /// Folder ids by root and logical path, for Change….
-    folders: HashMap<(i64, String), i64>,
+    folders: HashMap<(RootId, String), FolderId>,
     /// This computer's name, as typed.
     computer: String,
     /// Typed and not saved yet: saved when the field or the page is left.
@@ -144,7 +146,7 @@ impl Editor {
         };
         enum Click {
             Change(FolderAction),
-            Clear(i64, String),
+            Clear(RootId, String),
         }
         let mut click = None;
         for root in &view.roots {
@@ -257,7 +259,7 @@ impl Editor {
     }
     /// Clears a location, then opens the catalog again as relinking does,
     /// so a photo open in Develop follows its new path.
-    fn clear_folder_location(&mut self, root: i64, relative: &str) {
+    fn clear_folder_location(&mut self, root: RootId, relative: &str) {
         if !self.ready_for_catalog() {
             return;
         }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 macro_rules! row_id {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(pub i64);
         impl ToSql for $name {
@@ -30,6 +30,15 @@ macro_rules! row_id {
 row_id!(
     /// A collection or collection set (`collections.id`).
     CollectionId
+);
+row_id!(
+    /// A folder of photos (`folders.id`).
+    FolderId
+);
+row_id!(
+    /// A root folder, as a catalog records it (`roots.id`); its folders are paths
+    /// under it.
+    RootId
 );
 
 #[cfg(test)]
