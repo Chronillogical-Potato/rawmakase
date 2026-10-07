@@ -118,7 +118,7 @@ pub fn auto_tone_basis(r: &Recipe) -> Recipe {
         preset_settings: d.preset_settings,
         auto_white_balance: None,
         unknown: d.unknown,
-        effects: crate::develop::effects::Effects {
+        effects: crate::model::effects::Effects {
             calibration: e.calibration,
             shadow_tint: e.shadow_tint,
             lens_vignette: e.lens_vignette,

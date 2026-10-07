@@ -116,6 +116,7 @@ lr_develop -> camera_profiles
 lr_develop -> color
 lr_develop -> develop
 lr_develop -> xmp
+model -> color
 optics -> xml
 photo -> camera_profiles
 photo -> dng
@@ -124,6 +125,7 @@ photo -> raw
 presets -> camera_data
 presets -> color
 presets -> develop
+presets -> model
 presets -> storage
 presets -> xml
 presets -> xmp

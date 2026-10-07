@@ -8,11 +8,10 @@
 //! is added to the stages that read it, or to those that only later stages read.
 use super::{
     Geometry, Recipe,
-    effects::Effects,
     pipeline::{Samples, Toned},
     quality::LocalBlurs,
 };
-use crate::camera_data::CameraImage;
+use crate::{camera_data::CameraImage, model::effects::Effects};
 use anyhow::Result;
 use std::sync::Arc;
 

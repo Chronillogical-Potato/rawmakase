@@ -1,10 +1,12 @@
 use super::*;
-use crate::develop::{
-    UprightMode,
-    effects::VignetteStyle,
-    masks::{MaskComponent, MaskGroup, MaskShape},
-    panels::PanelState,
-    retouch::{RetouchMode, RetouchOp, RetouchShape},
+use crate::{
+    develop::{
+        UprightMode,
+        masks::{MaskComponent, MaskGroup, MaskShape},
+        panels::PanelState,
+        retouch::{RetouchMode, RetouchOp, RetouchShape},
+    },
+    model::effects::VignetteStyle,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;

@@ -1379,7 +1379,7 @@ fn measured_manual_vignetting_darkens_the_photo_not_the_crop() {
     assert!(corner < centre * 0.9, "{corner} {centre}");
     // Lightroom's positive amounts lighten the corners.
     let lighter = Recipe {
-        effects: crate::develop::effects::Effects {
+        effects: crate::model::effects::Effects {
             lens_vignette: 0.5,
             ..r.effects.clone()
         },
@@ -1617,7 +1617,7 @@ fn texture_operator_is_kept_by_old_edits() {
     );
     let mut saved: Recipe = serde_json::from_value(
         serde_json::to_value(Recipe {
-            effects: crate::develop::effects::Effects {
+            effects: crate::model::effects::Effects {
                 texture: 0.4,
                 ..Default::default()
             },
