@@ -127,7 +127,9 @@ mod tests {
         let op: RetouchOp = serde_json::from_str(brush).unwrap();
         assert_eq!(op.pin(), [0.2, 0.1]);
         assert!(validate(&[spot, op]).is_ok());
-        assert!(serde_json::from_str::<RetouchOp>(&brush.replace("}", r#","extra":1}"#)).is_err());
+        let unknown = format!("{},\"extra\":1}}", &brush[..brush.len() - 1]);
+        assert!(serde_json::from_str::<serde_json::Value>(&unknown).is_ok());
+        assert!(serde_json::from_str::<RetouchOp>(&unknown).is_err());
     }
 
     #[test]
