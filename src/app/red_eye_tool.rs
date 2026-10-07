@@ -7,6 +7,7 @@ use super::Editor;
 use super::retouch_tool::{hint, indented};
 use super::theme;
 use super::widgets::{segmented, slider_with};
+use crate::develop::red_eye::PupilGlow;
 use crate::develop::{ViewMapping, red_eye};
 use crate::model::red_eye::{EyeKind, RedEyeOp};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};

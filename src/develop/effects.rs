@@ -9,10 +9,33 @@ mod vignette;
 pub(crate) use grain::GrainField;
 pub(crate) use lens_vignette::{ManualVignette, combined_table};
 pub(crate) use vignette::PostCropVignette;
-impl Effects {
+/// How the renderer applies a recipe's Effects, Calibration and Defringe settings, and the
+/// Fringe Color Selector.
+pub trait EffectsRendering {
     /// How strongly Highlights protects bright pixels. As in Lightroom, it applies only to
     /// Highlight Priority and Color Priority, and only when the vignette darkens.
-    pub(crate) fn vignette_highlight_protection(&self) -> f32 {
+    fn vignette_highlight_protection(&self) -> f32;
+    fn calibrate(&self, p: [f32; 3]) -> [f32; 3];
+    /// The parametric curve's region (0 Shadows, 1 Darks, 2 Lights, 3 Highlights) an
+    /// input `x` falls in, between the split points.
+    fn parametric_region(&self, x: f32) -> usize;
+    fn parametric(&self, x: f32) -> f32;
+    /// As [`Self::pick_fringe_hue`], for the fringe colour `rgb` (encoded sRGB, as
+    /// shown).
+    #[cfg(test)]
+    fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize>;
+    /// Lightroom's Fringe Color Selector: points the Purple or Green hue range at the
+    /// fringe colour of Oklab `hue` and `chroma`, as Defringe sees it, and turns that
+    /// Amount on if it is off. Returns which (0 purple, 1 green), or `None` when the
+    /// colour is neither.
+    fn pick_fringe_hue(&mut self, hue: f32, chroma: f32) -> Option<usize>;
+    /// Lightroom's Defringe: chroma of hues inside the Purple and Green ranges is
+    /// reduced, the more the higher Amount and the chroma (see
+    /// docs/lens-corrections.md).
+    fn defringe_color(&self, lab: [f32; 3], h: f32) -> [f32; 3];
+}
+impl EffectsRendering for Effects {
+    fn vignette_highlight_protection(&self) -> f32 {
         match self.vignette_style {
             VignetteStyle::HighlightPriority | VignetteStyle::ColorPriority
                 if self.vignette < 0. =>
@@ -22,7 +45,7 @@ impl Effects {
             _ => 0.,
         }
     }
-    pub fn calibrate(&self, mut p: [f32; 3]) -> [f32; 3] {
+    fn calibrate(&self, mut p: [f32; 3]) -> [f32; 3] {
         for c in 0..3 {
             let [h, s] = self.calibration[c];
             if h == 0. && s == 0. {
@@ -43,12 +66,10 @@ impl Effects {
         p[2] -= tint * 0.5;
         p
     }
-    /// The parametric curve's region (0 Shadows, 1 Darks, 2 Lights, 3 Highlights) an
-    /// input `x` falls in, between the split points.
-    pub fn parametric_region(&self, x: f32) -> usize {
+    fn parametric_region(&self, x: f32) -> usize {
         self.splits.iter().filter(|s| x > **s).count()
     }
-    pub fn parametric(&self, x: f32) -> f32 {
+    fn parametric(&self, x: f32) -> f32 {
         if self.parametric == [0.; 4] {
             return x;
         }
@@ -64,19 +85,13 @@ impl Effects {
         }
         (x + delta * 4. * x * (1. - x)).clamp(0., 1.)
     }
-    /// As [`Self::pick_fringe_hue`], for the fringe colour `rgb` (encoded sRGB, as
-    /// shown).
     #[cfg(test)]
-    pub fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
+    fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
         let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color::srgb_decode));
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         self.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
     }
-    /// Lightroom's Fringe Color Selector: points the Purple or Green hue range at the
-    /// fringe colour of Oklab `hue` and `chroma`, as Defringe sees it, and turns that
-    /// Amount on if it is off. Returns which (0 purple, 1 green), or `None` when the
-    /// colour is neither.
-    pub(crate) fn pick_fringe_hue(&mut self, hue: f32, chroma: f32) -> Option<usize> {
+    fn pick_fringe_hue(&mut self, hue: f32, chroma: f32) -> Option<usize> {
         if chroma < 0.02 {
             return None;
         }
@@ -97,10 +112,7 @@ impl Effects {
         }
         Some(i)
     }
-    /// Lightroom's Defringe: chroma of hues inside the Purple and Green ranges is
-    /// reduced, the more the higher Amount and the chroma (see
-    /// docs/lens-corrections.md).
-    pub fn defringe_color(&self, mut lab: [f32; 3], h: f32) -> [f32; 3] {
+    fn defringe_color(&self, mut lab: [f32; 3], h: f32) -> [f32; 3] {
         for (i, center) in DEFRINGE_CENTERS.into_iter().enumerate() {
             if self.defringe[i] == 0. {
                 continue;

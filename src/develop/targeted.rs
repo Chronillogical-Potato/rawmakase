@@ -10,6 +10,7 @@
 //!   side of the color's Oklab hue, as the render interpolates them.
 //!
 //! The band most involved moves with the pointer and the others in proportion.
+use crate::develop::effects::EffectsRendering;
 use crate::model::recipe::Recipe;
 
 /// The Color Mixer's bands, in slider order.

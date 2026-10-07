@@ -7,6 +7,7 @@
 //! whatever those settings do.
 use super::Geometry;
 use crate::camera_data::CameraImage;
+use crate::develop::recipe::RenderedRecipe;
 use crate::model::image_frame::ImageFrame;
 use crate::model::recipe::Recipe;
 

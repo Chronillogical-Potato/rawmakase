@@ -1,5 +1,6 @@
 //! The per-pixel stages: tone, the colour mixer and colour grading, then the finish into sRGB.
 use super::*;
+use crate::develop::effects::EffectsRendering;
 use crate::model::operators::GamutModel;
 
 /// A pixel's mask adjustments and the render's constants for them.
@@ -336,9 +337,13 @@ pub(super) fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f3
     })
 }
 
-impl GamutModel {
+/// How a gamut model brings colors into sRGB.
+pub(crate) trait GamutMapping {
     /// Linear sRGB inside 0–1; `lightness` is the color's Oklab lightness.
-    pub(crate) fn into_srgb(self, rgb: [f32; 3], lightness: f32) -> [f32; 3] {
+    fn into_srgb(self, rgb: [f32; 3], lightness: f32) -> [f32; 3];
+}
+impl GamutMapping for GamutModel {
+    fn into_srgb(self, rgb: [f32; 3], lightness: f32) -> [f32; 3] {
         match self {
             Self::Clip => rgb.map(|v| v.clamp(0., 1.)),
             Self::Compress => {

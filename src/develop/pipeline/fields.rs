@@ -1,5 +1,6 @@
 //! Fields over the image the geometry stage evaluates: the exposure ramp, vignetting and the lens warp.
 use super::*;
+use crate::develop::recipe::RenderedRecipe;
 
 /// Black level of the DNG SDK's exposure ramp at its default Shadows setting of 5
 /// (5 × 0.001, in scene-linear units before exposure).

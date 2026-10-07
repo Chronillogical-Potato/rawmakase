@@ -10,7 +10,8 @@ pub fn rendered_crop(r: &Recipe, m: &crate::camera_data::Metadata) -> [f32; 4] {
         r.crop
     }
 }
-impl Transform {
+/// The Transform sliders as the homography the renderer samples through.
+pub(crate) trait TransformHomography {
     /// Homography from output to source coordinates, both centred, y down, in units
     /// of the long edge. The forward (source-to-output) matrix was fitted to Camera Raw
     /// 18.6 renders (docs/transform.md): Rotate applies first, then Vertical and
@@ -18,6 +19,9 @@ impl Transform {
     /// s = |q|, Vertical and Horizontal are [[I + e(s) q qᵀ / s², 0], [−qᵀ, 1]] with
     /// e(s) = 0.0391 s² + 0.9251 s³ − 0.2827 s⁴; Aspect scales y by 2^(0.137 a) and x by
     /// the inverse; offsets move by 0.811 of the image size, positive Y upward.
+    fn inverse(&self, width: f32, height: f32) -> [[f32; 3]; 3];
+}
+impl TransformHomography for Transform {
     fn inverse(&self, width: f32, height: f32) -> [[f32; 3]; 3] {
         let (qx, qy) = (self.horizontal, self.vertical);
         let s = qx.hypot(qy);

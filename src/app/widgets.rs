@@ -1,5 +1,6 @@
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
+use crate::develop::effects::EffectsRendering;
 use crate::model::panels::PanelState;
 use crate::model::params::{self, LocalParameterId, ParameterId, format_value};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};

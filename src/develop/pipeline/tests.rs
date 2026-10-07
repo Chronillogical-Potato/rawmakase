@@ -1,5 +1,7 @@
 use super::*;
 use crate::develop::curve::ToneCurve;
+use crate::develop::effects::EffectsRendering;
+use crate::develop::recipe::RenderedRecipe;
 fn adjust(p: [f32; 3], m: &Metadata, r: &Recipe) -> [f32; 3] {
     process_pixel(
         p,

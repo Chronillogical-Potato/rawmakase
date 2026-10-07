@@ -41,9 +41,13 @@ pub(crate) type LocalDelta = [f32; LEN];
 const MIRED: f32 = 50e-6;
 const TINT: f32 = 50.;
 
-impl LocalAdjust {
+/// A mask's adjustment as the slider changes the renderer applies.
+pub(crate) trait LocalDeltas {
     /// The adjustment as slider values, times `amount`.
-    pub(crate) fn delta(&self, amount: f32) -> LocalDelta {
+    fn delta(&self, amount: f32) -> LocalDelta;
+}
+impl LocalDeltas for LocalAdjust {
+    fn delta(&self, amount: f32) -> LocalDelta {
         let mut d = [0.; LEN];
         d[slot::TEMPERATURE] = self.temperature;
         d[slot::TINT] = self.tint;

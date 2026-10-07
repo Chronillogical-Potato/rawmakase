@@ -1,5 +1,6 @@
 //! Tone preparation: the curve tables a render looks up, and what it measures from the photo first (the contrast pivot, highlights).
 use super::*;
+use crate::develop::effects::EffectsRendering;
 
 pub(super) struct CurveSet {
     /// Where the stage stops.
