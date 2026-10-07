@@ -206,7 +206,7 @@ impl Editor {
     fn holds(&self, until: commands::Until) -> bool {
         match until {
             commands::Until::Loaded(id) => {
-                let develop = !self.library_mode && self.document.metadata.is_some();
+                let develop = self.module == Module::Develop && self.document.metadata.is_some();
                 let photo = develop.then_some(self.document.catalog_photo).flatten();
                 let loaded = develop && self.document.full().is_some() && !self.load.is_running();
                 // Another photo replacing it ends the wait too: the client reads
