@@ -267,7 +267,7 @@ pub(super) fn prepare(db: &mut Connection, computer: &Computer) -> Result<()> {
     }
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
-        "INSERT OR IGNORE INTO computers(id, name) VALUES (?, ?)",
+        "INSERT INTO computers(id, name) VALUES (?, ?) ON CONFLICT DO NOTHING",
         params![computer.id, computer.name],
     )?;
     let legacy: Vec<(FolderId, String, String)> = tx
@@ -286,21 +286,27 @@ pub(super) fn prepare(db: &mut Connection, computer: &Computer) -> Result<()> {
         // Everything the legacy mapping says, the root and every folder, so
         // a later change of one folder leaves the others where they were.
         tx.execute(
-            "INSERT OR IGNORE INTO folder_locations(root, relative_path, computer, path)
-             SELECT id, '', ?, mapped_path FROM roots WHERE mapped_path IS NOT NULL",
+            "INSERT INTO folder_locations(root, relative_path, computer, path)
+             SELECT id, '', ?, mapped_path FROM roots WHERE mapped_path IS NOT NULL
+             ON CONFLICT DO NOTHING",
             [&computer.id],
         )?;
         // A folder's mapping wins over its root's, as in older releases.
+        // Folders an older release added twice share a logical path: the
+        // last one added wins.
         tx.execute(
-            "INSERT OR REPLACE INTO folder_locations(root, relative_path, computer, path)
+            "INSERT INTO folder_locations(root, relative_path, computer, path)
              SELECT f.root, p.path, ?, m.path FROM folder_mappings m
              JOIN folders f ON f.id=m.folder JOIN folder_paths p ON p.folder=f.id
-             ORDER BY f.id",
+             WHERE f.id=(SELECT MAX(f2.id) FROM folder_mappings m2
+                 JOIN folders f2 ON f2.id=m2.folder JOIN folder_paths p2 ON p2.folder=f2.id
+                 WHERE f2.root=f.root AND p2.path=p.path)
+             ON CONFLICT(root, relative_path, computer) DO UPDATE SET path=excluded.path",
             [&computer.id],
         )?;
         tx.execute(
-            "UPDATE computers SET adopted_at=CURRENT_TIMESTAMP WHERE id=?",
-            [&computer.id],
+            "UPDATE computers SET adopted_at=? WHERE id=?",
+            [&rawmakase_model::time::now_text(), &computer.id],
         )?;
     }
     tx.commit()?;
@@ -372,7 +378,7 @@ impl Catalog {
         );
         tx.execute(
             "INSERT INTO folder_locations(root, relative_path, computer, path) VALUES (?, '', ?, ?)
-             ON CONFLICT DO UPDATE SET path=excluded.path",
+             ON CONFLICT(root, relative_path, computer) DO UPDATE SET path=excluded.path",
             params![id, self.computer.id, path],
         )?;
         if overrides == Overrides::Clear {
@@ -403,7 +409,7 @@ impl Catalog {
         )?;
         tx.execute(
             "INSERT INTO folder_locations(root, relative_path, computer, path) VALUES (?, ?, ?, ?)
-             ON CONFLICT DO UPDATE SET path=excluded.path",
+             ON CONFLICT(root, relative_path, computer) DO UPDATE SET path=excluded.path",
             params![root, logical, self.computer.id, path],
         )?;
         tx.commit()?;

@@ -99,7 +99,7 @@ impl Catalog {
         let paths: std::collections::HashMap<_, _> =
             mappings.into_iter().map(|f| (f.id, f.path)).collect();
         let mut q = self.db.prepare(
-            "SELECT p.id,p.folder,p.filename,p.captured,p.rating,p.flag,p.label,p.format,p.copy_name,p.master_id, COALESCE((SELECT group_concat(k.name, ', ')
+            "SELECT p.id,p.folder,p.filename,p.captured,p.rating,p.flag,p.label,p.format,p.copy_name,p.master_id, COALESCE((SELECT string_agg(k.name, ', ')
              FROM photo_keywords pk JOIN keywords k ON k.id=pk.keyword WHERE pk.photo=p.id),''),length(COALESCE(p.lightroom_develop,''))>0
              FROM photos p
              ORDER BY p.captured,p.filename,p.id",
@@ -203,11 +203,11 @@ impl Catalog {
         if let Some(id) = found {
             return Ok(id);
         }
-        self.db.execute(
-            "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?)",
+        Ok(self.db.query_row(
+            "INSERT INTO collections(name, parent, kind) VALUES (?, NULL, ?) RETURNING id",
             params![models::QUICK_COLLECTION, KIND],
-        )?;
-        Ok(CollectionId(self.db.last_insert_rowid()))
+            |r| r.get(0),
+        )?)
     }
     /// Adds `add` to and removes `remove` from a collection, in one transaction.
     pub fn change_collection(
@@ -219,7 +219,8 @@ impl Catalog {
         let tx = self.db.transaction()?;
         for photo in add {
             tx.execute(
-                "INSERT OR IGNORE INTO collection_photos(collection, photo) VALUES (?, ?)",
+                "INSERT INTO collection_photos(collection, photo) VALUES (?, ?)
+                 ON CONFLICT DO NOTHING",
                 params![collection, photo],
             )?;
         }
@@ -318,7 +319,8 @@ impl Catalog {
 /// Records a fact about the catalog in its `meta` table.
 fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
     db.execute(
-        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+        "INSERT INTO meta(key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![key, value],
     )?;
     Ok(())
@@ -329,6 +331,8 @@ pub use sidecar::Merge;
 mod descriptive_tests;
 #[cfg(test)]
 mod locations_tests;
+#[cfg(test)]
+mod portable_sql_tests;
 pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;

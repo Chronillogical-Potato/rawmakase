@@ -99,11 +99,12 @@ pub(super) fn copy_keyword_export(db: &Connection) -> Result<usize> {
         return Ok(0);
     }
     Ok(db.execute(
-        "INSERT OR REPLACE INTO keyword_export(keyword, include, parents)
+        "INSERT INTO keyword_export(keyword, include, parents)
          SELECT id_local, COALESCE(includeOnExport, 1) <> 0, COALESCE(includeParents, 1) <> 0
          FROM lr.AgLibraryKeyword
          WHERE (includeOnExport = 0 OR includeParents = 0)
-           AND id_local IN (SELECT id FROM keywords)",
+           AND id_local IN (SELECT id FROM keywords)
+         ON CONFLICT(keyword) DO UPDATE SET include=excluded.include, parents=excluded.parents",
         [],
     )?)
 }
@@ -234,7 +235,7 @@ fn copy_tables(tx: &Connection) -> Result<()> {
         tx.execute_batch("INSERT INTO collections SELECT id_local,name,parent,creationId FROM lr.AgLibraryCollection;")?;
     }
     if has("AgLibraryCollectionImage")? {
-        tx.execute_batch("INSERT OR IGNORE INTO collection_photos SELECT collection,image,positionInCollection FROM lr.AgLibraryCollectionImage WHERE collection IN(SELECT id FROM collections) AND image IN(SELECT id FROM photos);")?;
+        tx.execute_batch("INSERT INTO collection_photos SELECT collection,image,positionInCollection FROM lr.AgLibraryCollectionImage WHERE collection IN(SELECT id FROM collections) AND image IN(SELECT id FROM photos) ON CONFLICT DO NOTHING;")?;
     }
     if has("AgLibraryKeyword")? {
         tx.execute_batch("INSERT INTO keywords SELECT id_local,COALESCE(name,''),parent FROM lr.AgLibraryKeyword;")?;
@@ -252,7 +253,7 @@ fn copy_tables(tx: &Connection) -> Result<()> {
         super::set_meta(tx, key, "1")?;
     }
     if has("AgLibraryKeywordImage")? {
-        tx.execute_batch("INSERT OR IGNORE INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords);")?;
+        tx.execute_batch("INSERT INTO photo_keywords SELECT image,tag FROM lr.AgLibraryKeywordImage WHERE image IN(SELECT id FROM photos) AND tag IN(SELECT id FROM keywords) ON CONFLICT DO NOTHING;")?;
     }
     let imported: i64 = tx.query_row("SELECT count(*) FROM photos", [], |r| r.get(0))?;
     let expected: i64 = tx.query_row("SELECT count(*) FROM lr.Adobe_images", [], |r| r.get(0))?;

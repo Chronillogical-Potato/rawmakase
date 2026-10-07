@@ -20,15 +20,16 @@ impl Catalog {
             .context("Unknown photo")?;
         let name = self.unused_copy_name(master)?;
         let tx = self.db.transaction()?;
-        tx.execute(
+        let copy: PhotoId = tx.query_row(
             "INSERT INTO photos(folder,filename,original_path,captured,rating,flag,label,format,
                 copy_name,master_id,orientation,lightroom_develop,recipe,export_options,identity,edited_at)
              SELECT folder,filename,original_path,captured,rating,flag,label,format,
                 ?,?,orientation,lightroom_develop,recipe,export_options,identity,edited_at
-             FROM photos WHERE id=?",
+             FROM photos WHERE id=?
+             RETURNING id",
             params![name, master, id],
+            |r| r.get(0),
         )?;
-        let copy = PhotoId(tx.last_insert_rowid());
         tx.execute(
             "INSERT INTO local_edits(photo,data) SELECT ?,data FROM local_edits WHERE photo=?",
             [copy, id],
@@ -93,9 +94,12 @@ impl Catalog {
         )?;
         // Photo info is kept by master; the new one takes it over.
         tx.execute(
-            "INSERT OR REPLACE INTO photo_info
+            "INSERT INTO photo_info
              SELECT ?1, camera, lens, focal, aperture, exposure, iso, width, height
-             FROM photo_info WHERE photo=?2",
+             FROM photo_info WHERE photo=?2
+             ON CONFLICT(photo) DO UPDATE SET camera=excluded.camera, lens=excluded.lens,
+                 focal=excluded.focal, aperture=excluded.aperture, exposure=excluded.exposure,
+                 iso=excluded.iso, width=excluded.width, height=excluded.height",
             [id, master],
         )?;
         tx.execute(

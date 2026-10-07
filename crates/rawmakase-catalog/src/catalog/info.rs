@@ -51,15 +51,17 @@ impl Catalog {
     /// The cameras the catalog's photos were taken with, as photo info names
     /// them, in alphabetical order.
     pub fn cameras(&self) -> Result<Vec<String>> {
-        Ok(self
+        let mut cameras: Vec<String> = self
             .db
             .prepare(
                 "SELECT DISTINCT camera FROM photo_info
-                 WHERE camera IS NOT NULL AND camera != ''
-                 ORDER BY camera COLLATE NOCASE",
+                 WHERE camera IS NOT NULL AND camera != '' ORDER BY camera",
             )?
             .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?)
+            .collect::<rusqlite::Result<_>>()?;
+        // Case folded in ASCII only, as SQLite's NOCASE does.
+        cameras.sort_by_cached_key(|camera| camera.to_ascii_lowercase());
+        Ok(cameras)
     }
     /// The cameras the catalog's RAW photos were taken with, leaving out
     /// cameras seen only in JPEGs, TIFFs and videos.
@@ -120,9 +122,12 @@ impl Catalog {
 
 fn insert(db: &Connection, id: PhotoId, info: &PhotoInfo) -> Result<()> {
     db.execute(
-        "INSERT OR REPLACE INTO photo_info
+        "INSERT INTO photo_info
          (photo, camera, lens, focal, aperture, exposure, iso, width, height)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(photo) DO UPDATE SET camera=excluded.camera, lens=excluded.lens,
+             focal=excluded.focal, aperture=excluded.aperture, exposure=excluded.exposure,
+             iso=excluded.iso, width=excluded.width, height=excluded.height",
         params![
             id,
             info.camera,

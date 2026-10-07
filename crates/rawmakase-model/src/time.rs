@@ -40,13 +40,32 @@ pub fn iso_week(seconds: i64) -> String {
     format!("{year}-W{week:02}")
 }
 
+/// Seconds since 1970 now.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
 /// Now in UTC as XMP writes it, e.g. "2026-09-27T06:12:22Z".
 pub fn now_xmp() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    let [y, mo, d, h, mi, s] = utc(seconds);
+    let [y, mo, d, h, mi, s] = utc(now());
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
+}
+
+/// `seconds` since 1970 in UTC as catalogs store times, e.g.
+/// "2026-09-27 06:12:22" (SQL's `CURRENT_TIMESTAMP` form).
+pub fn utc_text(seconds: i64) -> String {
+    let [y, mo, d, h, mi, s] = utc(seconds);
+    // Years before 1 as SQL writes them: "-0001".
+    let sign = if y < 0 { "-" } else { "" };
+    let y = y.abs();
+    format!("{sign}{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}")
+}
+
+/// Now in UTC as catalogs store times (see [`utc_text`]).
+pub fn now_text() -> String {
+    utc_text(now())
 }
 
 #[cfg(test)]
@@ -57,6 +76,8 @@ mod tests {
         assert_eq!(super::utc(0), [1970, 1, 1, 0, 0, 0]);
         let now = super::now_xmp();
         assert!(now.len() == 20 && now.ends_with('Z'));
+        assert_eq!(super::utc_text(1_469_686_444), "2016-07-28 06:14:04");
+        assert_eq!(super::now_text().len(), 19);
     }
 
     #[test]

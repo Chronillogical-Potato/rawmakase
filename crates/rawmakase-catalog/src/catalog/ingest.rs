@@ -171,13 +171,11 @@ impl Catalog {
                 Place::New(logical) => {
                     let root = match new_root {
                         Some(root) => root,
-                        None => {
-                            tx.execute(
-                                "INSERT INTO roots(original_path) VALUES(?)",
-                                [folder.to_string_lossy()],
-                            )?;
-                            *new_root.insert(RootId(tx.last_insert_rowid()))
-                        }
+                        None => *new_root.insert(tx.query_row(
+                            "INSERT INTO roots(original_path) VALUES(?) RETURNING id",
+                            [folder.to_string_lossy()],
+                            |r| r.get(0),
+                        )?),
                     };
                     (root, logical.clone())
                 }
@@ -214,11 +212,11 @@ impl Catalog {
                         None => {
                             // Older releases read the folder in this system's form.
                             let native: PathBuf = super::locations::names(logical).collect();
-                            tx.execute(
-                                "INSERT INTO folders(root,relative_path) VALUES(?,?)",
+                            let id: FolderId = tx.query_row(
+                                "INSERT INTO folders(root,relative_path) VALUES(?,?) RETURNING id",
                                 params![root, native.to_string_lossy()],
+                                |r| r.get(0),
                             )?;
-                            let id = FolderId(tx.last_insert_rowid());
                             tx.execute(
                                 "INSERT INTO folder_paths(folder,path) VALUES(?,?)",
                                 params![id, logical],
@@ -230,8 +228,9 @@ impl Catalog {
                     id
                 }
             };
-            tx.execute(
-                "INSERT INTO photos(folder,filename,original_path,format) VALUES(?,?,?,?)",
+            let id: PhotoId = tx.query_row(
+                "INSERT INTO photos(folder,filename,original_path,format) VALUES(?,?,?,?)
+                 RETURNING id",
                 params![
                     fid,
                     filename,
@@ -241,8 +240,9 @@ impl Catalog {
                         .to_string_lossy()
                         .to_ascii_uppercase()
                 ],
+                |r| r.get(0),
             )?;
-            added.push((PhotoId(tx.last_insert_rowid()), file));
+            added.push((id, file));
         }
         tx.commit()?;
         for (id, file) in &added {
