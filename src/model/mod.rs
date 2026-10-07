@@ -6,3 +6,4 @@ pub mod point_color;
 pub mod red_eye;
 pub mod retouch;
 pub mod transform;
+pub mod white_balance;

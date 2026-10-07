@@ -12,36 +12,6 @@
 use super::Recipe;
 use crate::model::operators::SharpeningModel;
 
-/// The Sharpening sliders, in recipe units (Amount 1 is Lightroom's 150).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SharpeningSliders {
-    pub amount: f32,
-    pub radius: f32,
-    pub detail: f32,
-    pub masking: f32,
-}
-impl SharpeningSliders {
-    /// A new edit's sliders for `model`: Lightroom Classic's raw defaults (in every
-    /// raw and DNG import of the catalogue sampled, process versions 2012 to 6) with
-    /// the measured operator, RAWmakase's own with the original.
-    pub fn defaults(model: SharpeningModel) -> Self {
-        match model {
-            SharpeningModel::Original => Self {
-                amount: 0.35,
-                radius: 0.8,
-                detail: 0.25,
-                masking: 0.35,
-            },
-            SharpeningModel::Measured => Self {
-                amount: 40. / 150.,
-                radius: 1.,
-                detail: 0.25,
-                masking: 0.,
-            },
-        }
-    }
-}
-
 /// Radius: the slider's values, the Gaussian sigma and a strength factor.
 const RADIUS: [f32; 6] = [0.5, 0.8, 1., 1.5, 2., 3.];
 const RADIUS_SIGMA: [f32; 6] = [0.705, 0.793, 1., 1.101, 1.342, 1.806];

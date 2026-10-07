@@ -294,6 +294,36 @@ impl GamutModel {
     }
 }
 
+/// The Sharpening sliders, in recipe units (Amount 1 is Lightroom's 150).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpeningSliders {
+    pub amount: f32,
+    pub radius: f32,
+    pub detail: f32,
+    pub masking: f32,
+}
+impl SharpeningSliders {
+    /// A new edit's sliders for `model`: Lightroom Classic's raw defaults (in every
+    /// raw and DNG import of the catalogue sampled, process versions 2012 to 6) with
+    /// the measured operator, RAWmakase's own with the original.
+    pub fn defaults(model: SharpeningModel) -> Self {
+        match model {
+            SharpeningModel::Original => Self {
+                amount: 0.35,
+                radius: 0.8,
+                detail: 0.25,
+                masking: 0.35,
+            },
+            SharpeningModel::Measured => Self {
+                amount: 40. / 150.,
+                radius: 1.,
+                detail: 0.25,
+                masking: 0.,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +432,31 @@ mod tests {
         stored_as(
             Ga::Compress,
             &[(Ga::Compress, "Compress"), (Ga::Clip, "Clip")],
+        );
+    }
+
+    #[test]
+    fn sharpening_defaults_are_lightroom_s_and_rawmakase_s_earlier_ones() {
+        let measured = SharpeningSliders::defaults(SharpeningModel::Measured);
+        // Lightroom's Amount 40 (of 150), Radius 1.0, Detail 25, Masking 0.
+        assert_eq!(
+            [
+                measured.amount,
+                measured.radius,
+                measured.detail,
+                measured.masking
+            ],
+            [40. / 150., 1., 0.25, 0.]
+        );
+        let original = SharpeningSliders::defaults(SharpeningModel::Original);
+        assert_eq!(
+            [
+                original.amount,
+                original.radius,
+                original.detail,
+                original.masking
+            ],
+            [0.35, 0.8, 0.25, 0.35]
         );
     }
 }

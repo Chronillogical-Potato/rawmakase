@@ -44,7 +44,8 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/model/retouch.rs](../src/model/retouch.rs) | Heal and Clone operations as a recipe stores them: mode, spot or brushed shape, feather, opacity and source offset, with their limits and edits (move, resize). Rendering and source search are in `develop/retouch/`. |
 | [src/model/masks.rs](../src/model/masks.rs) | Masks as a recipe stores them: groups of brush, gradient and range components with their local adjustment, Amount and visibility, and their limits. Rendering their weights is in `develop/masks/`. |
 | [src/model/transform.rs](../src/model/transform.rs) | The Transform panel's settings as a recipe stores them: the manual sliders, Upright's mode with its analysed corrections and Guided guides, and Lightroom's guides read from older edits. Rendering, analysis and solving are in `develop/geometry.rs`, `upright.rs` and `guided.rs`. |
-| [src/model/operators.rs](../src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did. The renderer picks its operator from them. |
+| [src/model/white_balance.rs](../src/model/white_balance.rs) | Fallback illuminant and as-shot temperature estimation from a RAW's metadata, and Lightroom's named white balance presets. |
+| [src/model/operators.rs](../src/model/operators.rs) | The operator versions a recipe records (Texture, Clarity, Sharpening, the color mixer, Gamut and the rest): stored names and oldest defaults that keep saved edits rendering as they did, and the Sharpening sliders' defaults for each. The renderer picks its operator from them. |
 | [src/camera_data.rs](../src/camera_data.rs) | What a camera captured, as values: a RAW's metadata as RAWmakase keeps it, the demosaic and decode choices, and the decoded camera-space image. No native code, so modules above it need not link LibRaw. |
 | [src/raw/mod.rs](../src/raw/mod.rs) | RAW files read through LibRaw: their metadata (with DNG, RAF and lens details read on top), development into camera-space images, oriented embedded thumbnails. No unsafe code. |
 | [src/raw/ffi.rs](../src/raw/ffi.rs) | The C ABI of the native bridge: declarations, the mirrored metadata struct with its layout check, and one safe wrapper per entry point with its safety contract. |
@@ -113,7 +114,6 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |
 | [calibration.rs](../src/develop/calibration.rs) | Camera-primary calibration and shadow tint. |
-| [white_balance.rs](../src/develop/white_balance.rs) | Fallback illuminant and as-shot temperature estimation. |
 | [black_white.rs](../src/develop/black_white.rs) | Treatment (Color or Black & White, kept with black & white profiles) and the Auto black & white mix, fitted to Camera Raw's Auto. See [color mixer](color-mixer.md#black--white). |
 | [auto.rs](../src/develop/auto.rs) | Auto: the Basic tone sliders, Vibrance and Saturation predicted from a reduced render of the photo by fits to Lightroom's Auto values, and white balance from gray world. |
 

@@ -1441,7 +1441,7 @@ fn new_edits_clip_out_of_gamut_channels_as_camera_raw() {
 /// original's on an old edit, Lightroom's after Detail's reset chose the measured one.
 #[test]
 fn process_update_sharpens_with_the_recipe_operator_default() {
-    use crate::{develop::sharpening::SharpeningSliders, model::operators::SharpeningModel};
+    use crate::model::operators::{SharpeningModel, SharpeningSliders};
     let mut old = Recipe {
         engine: 1,
         ..Default::default()

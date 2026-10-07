@@ -15,10 +15,11 @@ use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::{Panel, PanelState};
 use crate::develop::params::ParameterId;
-use crate::develop::sharpening::SharpeningSliders;
 use crate::develop::targeted::Target;
-use crate::develop::{NamedWhiteBalance, Recipe, Treatment};
+use crate::develop::{Recipe, Treatment};
 use crate::model::operators::SharpeningModel;
+use crate::model::operators::SharpeningSliders;
+use crate::model::white_balance::NamedWhiteBalance;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;

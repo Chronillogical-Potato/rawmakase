@@ -1,5 +1,5 @@
 use super::panels::PanelSwitches;
-use super::white_balance::{estimate_temperature, illuminant_camera};
+use crate::model::white_balance::{estimate_temperature, illuminant_camera};
 use crate::{camera_data::Metadata, develop::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -824,7 +824,7 @@ impl Recipe {
             self.profile = m.and_then(crate::camera_profiles::builtin);
             if self.sharpening == 0. {
                 self.sharpening =
-                    crate::develop::sharpening::SharpeningSliders::defaults(self.sharpening_model)
+                    crate::model::operators::SharpeningSliders::defaults(self.sharpening_model)
                         .amount;
             }
         }
@@ -873,7 +873,7 @@ impl Recipe {
     /// uses: Lightroom's for raw files (Amount 40, Radius 1.0, Detail 25, Masking 0)
     /// with the measured operator, RAWmakase's earlier ones with the original.
     pub fn set_sharpening_defaults(&mut self, model: crate::model::operators::SharpeningModel) {
-        let d = crate::develop::sharpening::SharpeningSliders::defaults(model);
+        let d = crate::model::operators::SharpeningSliders::defaults(model);
         self.sharpening_model = model;
         self.sharpening = if self.engine >= 3 { d.amount } else { 0. };
         self.sharpening_radius = d.radius;

@@ -46,7 +46,6 @@ mod valid;
 pub use valid::ValidRecipe;
 pub mod retouch;
 mod stage_cache;
-mod white_balance;
 
 pub use crate::color::{mul, srgb_encode};
 pub use auto::{
@@ -67,4 +66,3 @@ pub use recipe::{
 };
 pub(crate) use rendered::unit_to_u8;
 pub use rendered::{ClipOverlay, Histogram, Rendered};
-pub use white_balance::NamedWhiteBalance;

@@ -4,7 +4,7 @@ use crate::{
     camera_data::Metadata,
     color::{inverse, mul},
 };
-pub(super) fn illuminant_camera(t: f32, m: &Metadata) -> [f32; 3] {
+pub fn illuminant_camera(t: f32, m: &Metadata) -> [f32; 3] {
     // Planckian locus approximation in CIE xy; extrapolation avoided by UI range.
     let t = t.clamp(2000., 15000.);
     let x = if t <= 4000. {
@@ -30,7 +30,7 @@ pub(super) fn illuminant_camera(t: f32, m: &Metadata) -> [f32; 3] {
     let balanced = mul(inverse(m.matrix), rgb);
     std::array::from_fn(|c| balanced[c] / m.daylight_wb[c])
 }
-pub(super) fn estimate_temperature(m: &Metadata) -> f32 {
+pub fn estimate_temperature(m: &Metadata) -> f32 {
     (2000..=15000)
         .step_by(50)
         .min_by(|a, b| {
