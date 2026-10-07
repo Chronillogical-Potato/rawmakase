@@ -4639,3 +4639,94 @@ fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
     assert_eq!(saved.recipe.exposure, 0.7);
     Ok(())
 }
+/// A catalog of two photos, A and B, the latter rated 2, in an editor.
+fn two_photo_editor() -> anyhow::Result<(tempfile::TempDir, egui::Context, Editor, [PhotoId; 2])> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.ARW"), b"identity fixture a")?;
+    std::fs::write(photos.join("b.ARW"), b"identity fixture b")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let id = |name: &str, l: &library::Library| {
+        l.session
+            .photos
+            .iter()
+            .find(|p| p.filename.ends_with(name))
+            .unwrap()
+            .id
+    };
+    let (a, b) = (id("a.ARW", &l), id("b.ARW", &l));
+    l.edit_metadata(b, crate::app::photo_metadata::Edit::Rating(2), false)?;
+    l.take_done();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.module = Module::Library;
+    Ok((dir, ctx, editor, [a, b]))
+}
+fn rating(editor: &Editor, id: PhotoId) -> i32 {
+    editor.library.as_ref().unwrap().photo(id).unwrap().rating
+}
+#[test]
+fn undo_never_writes_a_removed_copys_id_given_to_a_new_copy() -> anyhow::Result<()> {
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?;
+    library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
+    editor.sync_undo();
+    editor.remove_virtual_copy(copy);
+    // The catalog gives the removed copy's id to the next copy, of B, rated 2.
+    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    assert_eq!(again, copy);
+    assert_eq!(rating(&editor, again), 2);
+    editor.undo();
+    assert_eq!(rating(&editor, again), 2);
+    Ok(())
+}
+#[test]
+fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() -> anyhow::Result<()>
+{
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?;
+    library.edit_photos(
+        &[a, copy],
+        crate::app::photo_metadata::Edit::Rating(4),
+        false,
+    )?;
+    editor.sync_undo();
+    // Undone, then the copy goes, and its id comes back for a copy of B.
+    editor.undo();
+    assert_eq!(rating(&editor, a), 0);
+    editor.remove_virtual_copy(copy);
+    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    assert_eq!(again, copy);
+    // Redo rates A again and leaves the new copy as it was made.
+    editor.redo();
+    assert_eq!(rating(&editor, a), 4);
+    assert_eq!(rating(&editor, again), 2);
+    Ok(())
+}
+#[test]
+fn a_rating_made_in_develop_on_a_removed_copy_still_undoes_the_photo_it_rated() -> anyhow::Result<()>
+{
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let copy = editor.library.as_mut().unwrap().create_virtual_copy(a)?;
+    // The copy is open in Develop; the filmstrip menu rates B.
+    editor.document.catalog_photo = Some(copy);
+    editor.module = Module::Develop;
+    editor.library.as_mut().unwrap().edit_metadata(
+        b,
+        crate::app::photo_metadata::Edit::Rating(3),
+        false,
+    )?;
+    editor.sync_undo();
+    editor.remove_virtual_copy(copy);
+    assert_eq!(rating(&editor, b), 3);
+    editor.undo();
+    assert_eq!(rating(&editor, b), 2);
+    Ok(())
+}
