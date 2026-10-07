@@ -69,7 +69,9 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
     };
     let param = || Param::parse(text("param")?).ok_or_else(|| invalid("Unknown parameter"));
     let target: Target = match request.get("target") {
-        Some(v) => serde_json::from_value(v.clone()).map_err(|e| invalid(e.to_string()))?,
+        Some(v) => serde_json::from_value::<rawmakase_protocol::Target>(v.clone())
+            .map_err(|e| invalid(e.to_string()))?
+            .into(),
         None => Target::default(),
     };
     let operation = match text("cmd")? {
