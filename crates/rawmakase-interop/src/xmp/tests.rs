@@ -8,6 +8,52 @@ fn xml(attrs: &str, body: &str) -> String {
         r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="{RDF}"><r:Description xmlns:c="{CRS}" {attrs}>{body}</r:Description></r:RDF></x:xmpmeta>"#
     )
 }
+/// A photo whose Auto results are fixed, recording what applying settings asked.
+struct FakeMeasures {
+    image: crate::camera_data::CameraImage,
+    white_balance_crops: std::cell::RefCell<Vec<[f32; 4]>>,
+    gray_mix_widths: std::cell::RefCell<Vec<u32>>,
+}
+impl Default for FakeMeasures {
+    fn default() -> Self {
+        Self {
+            image: crate::camera_data::CameraImage {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.2; 3]],
+                metadata: Metadata::default(),
+                recovered: Default::default(),
+                fast: false,
+                scale_factor: 1.,
+                scale_clipped: 0,
+            },
+            white_balance_crops: Default::default(),
+            gray_mix_widths: Default::default(),
+        }
+    }
+}
+impl FakeMeasures {
+    const WB: [f32; 3] = [1.5, 1., 1.25];
+    const MIX: [f32; 8] = [-0.1, -0.2, -0.2, -0.3, -0.2, 0.1, 0.2, 0.];
+}
+impl PhotoMeasures for FakeMeasures {
+    fn camera_image(&self) -> &crate::camera_data::CameraImage {
+        &self.image
+    }
+    fn auto_white_balance(&self, base: &Recipe) -> Result<Recipe> {
+        self.white_balance_crops.borrow_mut().push(base.crop);
+        Ok(Recipe {
+            wb: Self::WB,
+            temperature: 4321.,
+            tint: 12.,
+            ..base.clone()
+        })
+    }
+    fn auto_gray_mix(&self, _r: &Recipe, m: &Metadata) -> [f32; 8] {
+        self.gray_mix_widths.borrow_mut().push(m.width);
+        Self::MIX
+    }
+}
 #[test]
 fn legacy_split_toning_restores_full_overlap_but_modern_presets_preserve_it() -> Result<()> {
     let mut base = Recipe::default();
@@ -179,59 +225,29 @@ fn named_white_balance_presets_apply_their_values() -> Result<()> {
 }
 #[test]
 fn auto_white_balance_presets_use_the_wb_menus_auto() -> Result<()> {
-    let (width, height) = (32u32, 24u32);
     let m = Metadata {
-        width,
-        height,
+        width: 32,
+        height: 24,
         wb: [2., 1., 1.8],
         daylight_wb: [2., 1., 1.8],
         matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
         ..Default::default()
     };
-    let im = crate::camera_data::CameraImage {
-        recovered: Default::default(),
-        width,
-        height,
-        // A warm left half and a cool right half.
-        pixels: (0..width * height)
-            .map(|i| {
-                let x = i % width;
-                let v = 0.05 + 0.4 * x as f32 / width as f32;
-                if x < width / 2 {
-                    [v * 1.3, v, v * 0.7]
-                } else {
-                    [v * 0.7, v, v * 1.3]
-                }
-            })
-            .collect(),
-        metadata: m.clone(),
-        fast: false,
-        scale_factor: 1.,
-        scale_clipped: 0,
-    };
-    // Measured on the preset's crop: the warm half.
+    // Measured on the preset's crop.
     let attrs =
         r#"c:WhiteBalance="Auto" c:CropLeft="0" c:CropTop="0" c:CropRight="0.45" c:CropBottom="1""#;
     let preset = parse(Path::new("preset.xmp"), &xml(attrs, ""))?;
-    let result = preset.apply(
-        &Recipe::default(),
-        &m,
-        &[],
-        Some(&crate::develop::Measures(&im)),
-    )?;
+    let photo = FakeMeasures::default();
+    let result = preset.apply(&Recipe::default(), &m, &[], Some(&photo))?;
     assert_eq!(result.crop, [0., 0., 0.45, 1.]);
-    let cropped = Recipe {
-        crop: result.crop,
-        ..Default::default()
-    };
-    let auto = crate::develop::auto_white_balance(&im, &cropped)?;
-    let whole = crate::develop::auto_white_balance(&im, &Recipe::default())?;
-    assert_ne!(auto.wb, whole.wb);
+    assert_eq!(
+        photo.white_balance_crops.borrow().as_slice(),
+        [[0., 0., 0.45, 1.]]
+    );
     assert_eq!(
         (result.wb, result.temperature, result.tint),
-        (auto.wb, auto.temperature, auto.tint)
+        (FakeMeasures::WB, 4321., 12.)
     );
-    assert_eq!(result.auto_white_balance, auto.auto_white_balance);
     Ok(())
 }
 #[test]
@@ -815,45 +831,16 @@ fn auto_grayscale_mix_uses_stored_mixer_or_estimates_it() -> Result<()> {
     assert_eq!(r.exposure, 0.5);
     assert_eq!(r.effects.gray_mix, base.effects.gray_mix);
     // With the photo, Auto alone is estimated from it, as the B&W panel's Auto does.
-    let (width, height) = (16u32, 8u32);
     let photo_metadata = Metadata {
-        width,
-        height,
-        wb: [1.; 3],
-        daylight_wb: [1.; 3],
-        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        width: 16,
+        height: 8,
         ..Default::default()
     };
-    let im = crate::camera_data::CameraImage {
-        recovered: Default::default(),
-        width,
-        height,
-        pixels: (0..width * height)
-            .map(|i| {
-                let v = 0.05 + 0.3 * (i % width) as f32 / width as f32;
-                [v, v, 2. * v]
-            })
-            .collect(),
-        metadata: photo_metadata.clone(),
-        fast: false,
-        scale_factor: 1.,
-        scale_clipped: 0,
-    };
-    let r = auto.apply(
-        &base,
-        &photo_metadata,
-        &[],
-        Some(&crate::develop::Measures(&im)),
-    )?;
-    let spread = crate::develop::ColorSpread::measure(&im);
-    let expected = crate::develop::AutoMix {
-        spread: &spread,
-        metadata: &photo_metadata,
-    }
-    .for_recipe(&r);
+    let photo = FakeMeasures::default();
+    let r = auto.apply(&base, &photo_metadata, &[], Some(&photo))?;
     assert!(r.effects.monochrome);
-    assert_ne!(expected, base.effects.gray_mix);
-    assert_eq!(r.effects.gray_mix, expected);
+    assert_eq!(r.effects.gray_mix, FakeMeasures::MIX);
+    assert_eq!(photo.gray_mix_widths.borrow().as_slice(), [16]);
     // A monochrome profile makes the result black & white as well.
     let m = Metadata {
         cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],

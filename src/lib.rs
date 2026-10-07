@@ -13,6 +13,10 @@
 //! and `docs/architecture.md` records ownership rules. This library exists for the
 //! RAWmakase binary, its examples and its tests; it is not a stable public API.
 // The values a photo's edit is made of, built on their own (crates/rawmakase-model).
+// File formats and presets over the model (crates/rawmakase-interop).
+pub use rawmakase_interop::{
+    exif, export_settings, jpeg, lr_develop, presets, raw_defaults, watermark, xmp,
+};
 pub use rawmakase_model::{
     camera_data, camera_profiles, cameras, color, dng, ids, lens, metadata, model, optics,
     rendered, storage, tiff, xml,
@@ -28,19 +32,11 @@ pub mod demosaic;
 pub mod develop;
 pub mod edit_session;
 pub mod edits;
-pub mod exif;
 pub mod export;
-pub mod export_settings;
-mod jpeg;
-pub mod lr_develop;
 pub mod photo;
 pub mod platform;
-pub mod presets;
 pub mod raw;
-pub mod raw_defaults;
 #[cfg(feature = "telemetry")]
 pub mod stats;
 pub mod time;
 pub mod updates;
-pub mod watermark;
-pub mod xmp;

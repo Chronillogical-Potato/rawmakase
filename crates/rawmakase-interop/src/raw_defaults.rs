@@ -323,16 +323,16 @@ pub fn lenient_settings<'de, D: Deserializer<'de>>(d: D) -> Result<RawDefaults, 
 }
 
 /// A synthetic preset that raises Exposure by 0.7, with this id.
-#[cfg(test)]
-pub(crate) fn brighter_preset(id: &str) -> Preset {
+#[cfg(any(test, feature = "test-support"))]
+fn brighter_preset(id: &str) -> Preset {
     let text = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:PresetType="Normal" crs:Version="15.0" crs:Exposure2012="+0.70"><crs:Name><rdf:Alt><rdf:li xml:lang="x-default">Brighter</rdf:li></rdf:Alt></crs:Name></rdf:Description></rdf:RDF></x:xmpmeta>"#;
     let mut p = crate::xmp::parse(std::path::Path::new(id), text).unwrap();
     p.id = id.into();
     p
 }
 /// Raw defaults whose master is that preset.
-#[cfg(test)]
-pub(crate) fn brighter_defaults() -> DevelopDefaults {
+#[cfg(any(test, feature = "test-support"))]
+pub fn brighter_defaults() -> DevelopDefaults {
     DevelopDefaults::with_presets(
         RawDefaults {
             master: DefaultChoice::Preset {

@@ -3200,6 +3200,7 @@ dependencies = [
  "pkg-config",
  "pollster 1.0.1",
  "rawmakase-ctl",
+ "rawmakase-interop",
  "rawmakase-model",
  "rawmakase-protocol",
  "rayon",
@@ -3229,6 +3230,24 @@ dependencies = [
  "clap",
  "rawmakase-protocol",
  "serde_json",
+]
+
+[[package]]
+name = "rawmakase-interop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fastframe-fonts",
+ "image",
+ "memmap2",
+ "rawmakase-model",
+ "rayon",
+ "roxmltree 0.21.1",
+ "serde",
+ "serde_json",
+ "skrifa 0.47.0",
+ "tempfile",
+ "unicode-normalization",
 ]
 
 [[package]]

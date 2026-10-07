@@ -1,0 +1,32 @@
+[package]
+name = "rawmakase-interop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "RAWmakase's file formats and presets over its model: XMP, Lightroom Develop settings, presets, raw defaults, EXIF, watermarks, without LibRaw, the renderer or the GUI"
+license = "MIT"
+publish = false
+
+[features]
+# The model's fixtures, for tests that share them.
+test-support = ["rawmakase-model/test-support"]
+
+[dependencies]
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
+anyhow = "1"
+# Installed fonts for text watermarks, from fastframe (github.com/crmne/fastframe).
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+# Installed fonts for text watermarks are mapped, not read whole.
+memmap2 = "0.9"
+rayon = "1.12"
+roxmltree = "0.21.1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+# Glyph outlines for text watermarks.
+skrifa = "0.47"
+tempfile = "3"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0", features = ["test-support"] }

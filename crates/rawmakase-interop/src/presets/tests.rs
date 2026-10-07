@@ -82,7 +82,7 @@ fn open_profiles(
 
 #[test]
 fn every_builtin_file_is_listed_and_parses() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/presets");
     let mut on_disk = Vec::new();
     for group in fs::read_dir(&root).unwrap().flatten() {
         for file in fs::read_dir(group.path()).unwrap().flatten() {
@@ -181,7 +181,7 @@ fn builtin_presets_prefer_imported_adobe_profiles() {
 
     // The DNG's own profile comes before RAWmakase Standard.
     let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/corpus/charts/fujifilm-x100f-d65.dng");
+        .join("../../tests/corpus/charts/fujifilm-x100f-d65.dng");
     let dng = crate::camera_data::Metadata {
         embedded_dcp: crate::dng::read(&chart)
             .and_then(|d| d.profile)

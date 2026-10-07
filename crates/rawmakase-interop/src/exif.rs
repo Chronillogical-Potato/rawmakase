@@ -201,7 +201,7 @@ const SKIP: [u16; 4] = [
 ];
 /// A value this long is not capture metadata (and would crowd the 64 KB JPEG
 /// segment the EXIF must fit in).
-pub(crate) const MAX_VALUE: usize = 4096;
+pub const MAX_VALUE: usize = 4096;
 
 /// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
 /// a JPEG or TIFF, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
@@ -293,7 +293,7 @@ fn iso(exif: &CameraExif) -> Option<f64> {
 
 /// "YYYY:MM:DD HH:MM:SS" and optional subsecond digits as
 /// "YYYY-MM-DDTHH:MM:SS.fff"; `None` for a blank or zeroed date.
-pub(crate) fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
+pub fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
     let digits: Vec<u8> = date.bytes().filter(u8::is_ascii_digit).collect();
     let shape = date.trim().len() >= 19
         && date
@@ -377,7 +377,7 @@ fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<u64> {
     let mut head = vec![0u8; length.min(1 << 16)];
     f.read_exact(&mut head).ok()?;
     let mut segments = Segments::new(Cursor::new(head)).ok()??;
-    while let Some(segment) = segments.next().ok()? {
+    while let Some(segment) = segments.next_segment().ok()? {
         let mut signature = [0u8; 6];
         if segment.marker == APP1
             && segments.reader().read_exact(&mut signature).is_ok()
