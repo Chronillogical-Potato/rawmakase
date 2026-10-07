@@ -4760,6 +4760,20 @@ fn closing_during_a_folder_change_waits_for_it_then_closes() {
     assert!(commands(&mut e, Default::default()).contains(&egui::ViewportCommand::Close));
     assert!(!e.close_confirm);
 }
+#[test]
+fn closing_anyway_does_not_wait_for_a_folder_change() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    assert!(e.activity.begin_folder_change());
+    // Close anyway, as the question offers: the next close goes ahead.
+    e.close_anyway = true;
+    let mut output = ctx.run_ui(close_request(), |ui| e.pending_work(ui.ctx()));
+    output.textures_delta.clear();
+    let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+    assert!(!commands.contains(&egui::ViewportCommand::CancelClose));
+    assert!(e.quit_by.is_some());
+    assert!(!e.close_anyway, "for that close only");
+}
 /// The input of a frame in which the window is asked to close.
 fn close_request() -> egui::RawInput {
     let mut input = egui::RawInput::default();
