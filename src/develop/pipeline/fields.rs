@@ -3,7 +3,7 @@ use super::*;
 
 /// Black level of the DNG SDK's exposure ramp at its default Shadows setting of 5
 /// (5 × 0.001, in scene-linear units before exposure).
-pub(super) const DNG_SHADOWS_BLACK: f32 = 0.0015;
+const DNG_SHADOWS_BLACK: f32 = 0.0015;
 /// The ramp's black before exposure: none under a profile whose DefaultBlackRender
 /// is None, as Camera Raw renders it.
 pub(super) fn default_black(r: &Recipe) -> f32 {
@@ -51,14 +51,14 @@ impl ExposureRamp {
 /// measured manual Vignetting. Radius 1 is the half diagonal; `x`, `y` use sample
 /// coordinates, where pixel `i` is centred at `i`.
 pub(crate) struct VignetteField<'a> {
-    pub(super) table: VignetteTable<'a>,
+    table: VignetteTable<'a>,
     pub(super) center: [f32; 2],
     pub(super) half: f32,
     /// The power the table is raised to: Lightroom's profile Vignetting amount (1 =
     /// 100%), or 1 for a combined table, which holds it already.
     pub(super) amount: f32,
 }
-pub(super) enum VignetteTable<'a> {
+enum VignetteTable<'a> {
     Lens(&'a crate::optics::Radial),
     Combined(crate::optics::Radial),
 }

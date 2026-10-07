@@ -153,7 +153,7 @@ impl CurveSet {
 }
 /// The measured parametric curve: the user's regions, then (layered) a look's own
 /// curve at its Profile Amount, as Camera Raw applies it.
-pub(super) fn parametric_curve(r: &Recipe) -> Option<crate::develop::parametric::ParametricCurve> {
+fn parametric_curve(r: &Recipe) -> Option<crate::develop::parametric::ParametricCurve> {
     use crate::develop::parametric::{ParametricCurve, ParametricModel};
     let user = ParametricCurve::new(r.effects.parametric, r.effects.splits);
     let look = r
@@ -186,7 +186,7 @@ pub(crate) fn measures_whites(r: &Recipe) -> bool {
 }
 /// The photo reduced for measuring it, without Clarity's and Texture's gain: a user
 /// adjustment that depends on the preview size.
-pub(super) fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
+fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
     match (im.reduced, im.gain, im.untextured) {
         (Some(small), None, None) => std::borrow::Cow::Borrowed(small),
         _ => std::borrow::Cow::Owned(preview_source(
@@ -198,7 +198,7 @@ pub(super) fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage>
 /// The highlights positive Whites follows: the 98th percentile of the encoded
 /// luminance of the photo's reduced copy as the recipe renders it before the Basic
 /// tone sliders, its Exposure included (measured on the chart).
-pub(super) fn photo_highlights(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> f32 {
+fn photo_highlights(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> f32 {
     let small = measured_copy(im);
     let lut = CurveSet::new(r);
     let luminance: Vec<f32> = small
@@ -214,7 +214,7 @@ pub(super) fn photo_highlights(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) ->
 /// Camera Raw's Contrast pivot for this photo, from its reduced copy rendered as the
 /// recipe's profile, white balance and calibration render it, at the camera's
 /// exposure: the user's Exposure does not move it (measured on the chart).
-pub(super) fn contrast_pivot(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> f32 {
+fn contrast_pivot(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> f32 {
     let small = measured_copy(im);
     let default = Recipe {
         exposure: 0.,

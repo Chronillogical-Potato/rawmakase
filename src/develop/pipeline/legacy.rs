@@ -8,10 +8,7 @@ pub fn render_legacy(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rend
 }
 /// The camera image with the recipe's red eye corrections and spots applied, for the
 /// older engines, which develop without highlight recovery or the retouch cache.
-pub(super) fn legacy_retouched<'a>(
-    im: &'a CameraImage,
-    r: &Recipe,
-) -> std::borrow::Cow<'a, CameraImage> {
+fn legacy_retouched<'a>(im: &'a CameraImage, r: &Recipe) -> std::borrow::Cow<'a, CameraImage> {
     let shown = r.as_rendered();
     let ops = crate::develop::retouch::Retouching::of(&shown);
     if ops.is_empty() {
@@ -20,7 +17,7 @@ pub(super) fn legacy_retouched<'a>(
         std::borrow::Cow::Owned(crate::develop::retouch::apply(im, ops))
     }
 }
-pub(super) fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
+fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -> Result<Rendered> {
     let matrix = profile_matrix(&im.metadata, r);
     let lut = CurveSet::for_image(im.into(), r, matrix, false);
     let full_geometry = Geometry::new(im, r, 0);
@@ -84,7 +81,7 @@ pub(super) fn render_legacy_inner(im: &CameraImage, r: &Recipe, max_edge: u32) -
         pixels,
     })
 }
-pub(super) fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
+fn sharpen(pixels: &mut Vec<[f32; 3]>, width: u32, height: u32, amount: f32) {
     if amount <= 0. {
         return;
     }

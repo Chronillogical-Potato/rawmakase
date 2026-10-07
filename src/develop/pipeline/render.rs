@@ -278,7 +278,7 @@ impl Samples {
         self.pixels.len() * 20
     }
 }
-pub(super) fn sample_region(
+fn sample_region(
     im: Source,
     r: &Recipe,
     g: &Geometry,
@@ -355,7 +355,7 @@ pub(crate) fn stage_samples(
     let samples = detail(toned, r, samples, weights.as_deref(), None, cancel)?;
     develop_samples_to(im, r, &samples, cancel, weights.as_deref(), output)
 }
-pub(super) fn develop_samples_to(
+fn develop_samples_to(
     im: Source,
     r: &Recipe,
     samples: &Samples,

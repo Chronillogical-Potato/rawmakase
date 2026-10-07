@@ -64,8 +64,8 @@ pub(crate) fn gray_mix_shift(mix: f32, chroma: f32) -> f32 {
             GRAY_MIX_DARKEN
         }
 }
-pub(super) const GRAY_MIX_BRIGHTEN: f32 = 1.78;
-pub(super) const GRAY_MIX_DARKEN: f32 = 4.37;
+const GRAY_MIX_BRIGHTEN: f32 = 1.78;
+const GRAY_MIX_DARKEN: f32 = 4.37;
 pub(crate) fn hue_weights(hue: f32) -> [f32; 8] {
     // Centers correspond to red, orange, yellow, green, cyan, blue, purple, magenta in Oklab.
     const CENTERS: [f32; 8] = [0.081, 0.151, 0.305, 0.395, 0.541, 0.733, 0.815, 0.912];

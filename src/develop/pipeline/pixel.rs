@@ -134,7 +134,7 @@ pub(super) fn tone_stage(
 }
 /// The tone curves, the color mixer and Point Color: linear display RGB as Point
 /// Color leaves it, and Visualize Range's selection.
-pub(super) fn mixer_stage(
+fn mixer_stage(
     rgb: [f32; 3],
     r: &Recipe,
     lut: &CurveSet,
@@ -279,7 +279,7 @@ pub(super) fn color_stage(
 /// Before engine 4 the colour controls run in Oklab, after the place of the measured
 /// mixer: a look's RGB table follows them there, before Monochrome. Engine 3's point
 /// curves stay last, in encoded output, as that renderer has always applied them.
-pub(super) fn legacy_rgb_table(lab: [f32; 3], lut: &CurveSet) -> [f32; 3] {
+fn legacy_rgb_table(lab: [f32; 3], lut: &CurveSet) -> [f32; 3] {
     match &lut.rgb_table {
         Some(t) if !lut.basic_curves => srgb_to_lab(t.apply(lab_to_srgb(lab))),
         _ => lab,
