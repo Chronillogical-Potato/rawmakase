@@ -45,9 +45,9 @@ pub struct Folder {
 }
 #[derive(Clone, Debug)]
 pub struct Collection {
-    pub id: i64,
+    pub id: super::CollectionId,
     pub name: String,
-    pub parent: Option<i64>,
+    pub parent: Option<super::CollectionId>,
     pub kind: CollectionKind,
     pub count: usize,
 }

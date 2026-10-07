@@ -3,12 +3,12 @@
 //! and Lightroom's own (the Quick Collection, unsaved creations) never show.
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::catalog::{Collection, CollectionKind};
+use crate::catalog::{Collection, CollectionId, CollectionKind};
 use eframe::egui::{self, Vec2};
 use std::collections::{HashMap, HashSet};
 
 pub(super) struct CollectionNode {
-    pub id: i64,
+    pub id: CollectionId,
     pub name: String,
     pub set: bool,
     pub count: usize,
@@ -20,10 +20,10 @@ pub(super) struct CollectionNode {
 /// hidden, such as Lightroom's default "Smart Collections" set.
 pub(super) fn tree(
     collections: &[Collection],
-    counts: &HashMap<i64, HashSet<i64>>,
+    counts: &HashMap<CollectionId, HashSet<i64>>,
 ) -> Vec<CollectionNode> {
-    let mut children: HashMap<Option<i64>, Vec<&Collection>> = HashMap::new();
-    let ids: HashSet<i64> = collections.iter().map(|c| c.id).collect();
+    let mut children: HashMap<Option<CollectionId>, Vec<&Collection>> = HashMap::new();
+    let ids: HashSet<CollectionId> = collections.iter().map(|c| c.id).collect();
     for c in collections {
         // A parent that isn't in the catalog puts the collection at the top.
         let parent = c.parent.filter(|p| ids.contains(p) && *p != c.id);
@@ -34,10 +34,10 @@ pub(super) fn tree(
 }
 
 fn nodes(
-    parent: Option<i64>,
-    children: &HashMap<Option<i64>, Vec<&Collection>>,
-    counts: &HashMap<i64, HashSet<i64>>,
-    seen: &mut HashSet<i64>,
+    parent: Option<CollectionId>,
+    children: &HashMap<Option<CollectionId>, Vec<&Collection>>,
+    counts: &HashMap<CollectionId, HashSet<i64>>,
+    seen: &mut HashSet<CollectionId>,
 ) -> Vec<CollectionNode> {
     let mut out = Vec::new();
     for c in children.get(&parent).into_iter().flatten() {
@@ -75,7 +75,7 @@ fn nodes(
 }
 
 /// The key that marks a set as collapsed in the Library's expanded set.
-fn collapsed_key(id: i64) -> String {
+fn collapsed_key(id: CollectionId) -> String {
     format!("collection-set-collapsed:{id}")
 }
 
@@ -86,8 +86,8 @@ pub(super) fn collection_row(
     node: &CollectionNode,
     depth: usize,
     expanded: &mut HashSet<String>,
-    selected: Option<i64>,
-) -> Option<i64> {
+    selected: Option<CollectionId>,
+) -> Option<CollectionId> {
     use egui::{Align2, FontId, Pos2, Rect, Sense};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());

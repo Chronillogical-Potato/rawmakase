@@ -12,7 +12,7 @@ use anyhow::Result;
 pub struct CollectionCommand {
     /// Orders it among other changes made in the same frame.
     pub sequence: u64,
-    pub collection: i64,
+    pub collection: crate::catalog::CollectionId,
     pub added: Vec<i64>,
     pub removed: Vec<i64>,
     pub place_before: Place,
@@ -23,7 +23,7 @@ pub struct CollectionCommand {
 
 impl Library {
     /// The Quick Collection, once there is one.
-    pub(super) fn quick(&self) -> Option<i64> {
+    pub(super) fn quick(&self) -> Option<crate::catalog::CollectionId> {
         self.collections
             .iter()
             .find(|c| {
@@ -32,7 +32,7 @@ impl Library {
             .map(|c| c.id)
     }
     /// The Quick Collection, made if there is none yet.
-    fn ensure_quick(&mut self) -> Result<i64> {
+    fn ensure_quick(&mut self) -> Result<crate::catalog::CollectionId> {
         if let Some(id) = self.quick() {
             return Ok(id);
         }
@@ -125,7 +125,7 @@ impl Library {
     /// Makes a change and hands it to the undo log once it is saved.
     fn record_collection(
         &mut self,
-        collection: i64,
+        collection: crate::catalog::CollectionId,
         added: Vec<i64>,
         removed: Vec<i64>,
         summary: String,
@@ -148,7 +148,7 @@ impl Library {
     /// and their undo.
     pub(in crate::app) fn change_collection(
         &mut self,
-        collection: i64,
+        collection: crate::catalog::CollectionId,
         add: &[i64],
         remove: &[i64],
     ) -> Result<()> {
