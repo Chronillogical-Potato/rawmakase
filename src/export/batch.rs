@@ -26,8 +26,6 @@ use std::{
 /// One photo of a batch, as it was when Export was pressed.
 #[derive(Clone, Debug)]
 pub struct BatchPhoto {
-    /// Its catalog id; `None` for a photo opened from outside the catalog.
-    pub id: Option<crate::ids::PhotoId>,
     pub source: PathBuf,
     /// How the photo is named in a report: its file name, and a virtual copy's
     /// name after it.
@@ -62,7 +60,6 @@ impl BatchPhoto {
     /// A photo of the batch from its catalog record.
     pub fn from_record(record: PhotoRecord, source: PathBuf, name: String) -> Self {
         Self {
-            id: Some(record.id),
             source,
             name,
             captured: Some(record.captured).filter(|c| !c.is_empty()),

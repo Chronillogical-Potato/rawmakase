@@ -382,7 +382,6 @@ impl Editor {
                         chosen.name.clone(),
                     ),
                     None => BatchPhoto {
-                        id: None,
                         source: chosen.source.clone(),
                         name: chosen.name.clone(),
                         edit: Edit::Catalog(Default::default()),

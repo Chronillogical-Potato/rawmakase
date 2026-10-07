@@ -36,7 +36,6 @@ impl Catalog {
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )?;
                 Ok(PhotoRecord {
-                    id,
                     edit: self.edit_record(id)?,
                     descriptive: self.descriptive(id)?,
                     keywords: self.keywords(id)?,
