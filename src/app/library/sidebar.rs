@@ -27,11 +27,11 @@ impl Library {
                     crate::app::navigator::navigator(ui, photo, None, None);
                 }
                 section(ui, "Catalog", false, |ui| {
-                    let offline = self.photos.len() - self.available_count();
+                    let offline = self.session.photos.len() - self.available_count();
                     let all = self.filters.folder_scope.is_none()
                         && self.filters.collection.is_none()
                         && !self.filters.only_missing;
-                    if source_row(ui, "All Photographs", self.photos.len(), all).clicked() {
+                    if source_row(ui, "All Photographs", self.session.photos.len(), all).clicked() {
                         self.filters.folder_scope = None;
                         self.selected_folder.clear();
                         self.filters.collection = None;
@@ -69,7 +69,7 @@ impl Library {
                         crate::platform::volume::Volume,
                         Vec<(RootId, String, Option<String>)>,
                     > = Default::default();
-                    for root in self.roots.clone() {
+                    for root in self.session.roots.clone() {
                         let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
                         volumes
                             .entry(crate::platform::volume::volume_of(&path))
@@ -94,7 +94,8 @@ impl Library {
                         let photos: usize = roots
                             .iter()
                             .map(|(id, _, _)| {
-                                self.folders
+                                self.session
+                                    .folders
                                     .iter()
                                     .filter(|f| f.root == *id)
                                     .map(|f| f.count)
@@ -124,7 +125,7 @@ impl Library {
                                 .to_string_lossy()
                                 .to_string();
                             let mut tree = FolderNode::root(root, name, root_path.into());
-                            for f in self.folders.iter().filter(|f| f.root == root) {
+                            for f in self.session.folders.iter().filter(|f| f.root == root) {
                                 tree.insert(f);
                             }
                             tree.finish();
@@ -149,7 +150,7 @@ impl Library {
                             }
                         }
                     }
-                    if self.roots.is_empty() {
+                    if self.session.roots.is_empty() {
                         ui.add_space(4.);
                         ui.label(
                             egui::RichText::new("No folders yet")
@@ -168,7 +169,10 @@ impl Library {
                     }
                 });
                 section(ui, "Collections", false, |ui| {
-                    let tree = collections::tree(&self.collections, &self.collection_photos);
+                    let tree = collections::tree(
+                        &self.session.collections,
+                        &self.session.collection_photos,
+                    );
                     for node in &tree {
                         if let Some(id) = collections::collection_row(
                             ui,
@@ -195,7 +199,12 @@ impl Library {
     /// Shows collection `id`'s photos; the filter bar still applies.
     pub(super) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
         self.filters.collection = Some(id);
-        self.filters.members = self.collection_photos.get(&id).cloned().unwrap_or_default();
+        self.filters.members = self
+            .session
+            .collection_photos
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
         self.filters.folder_scope = None;
         self.filters.only_missing = false;
         self.selected_folder.clear();
@@ -218,6 +227,7 @@ impl Library {
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
         let root = root.parse::<i64>().ok().map(RootId)?;
         let ids: HashSet<FolderId> = self
+            .session
             .folders
             .iter()
             .filter(|f| {
@@ -236,7 +246,7 @@ impl Library {
             .strip_prefix("collection:")
             .and_then(|id| id.parse::<i64>().ok())
             .map(crate::catalog::CollectionId)
-            && self.collections.iter().any(|c| {
+            && self.session.collections.iter().any(|c| {
                 c.id == id && (c.kind == CollectionKind::Collection || self.quick() == Some(id))
             })
         {
@@ -261,7 +271,10 @@ impl Library {
         }
         self.filter();
         if let Some(id) = photo
-            && self.visible.iter().any(|i| self.photos[*i].id == id)
+            && self
+                .visible
+                .iter()
+                .any(|i| self.session.photos[*i].id == id)
         {
             self.select(Some(id));
         }
@@ -269,16 +282,21 @@ impl Library {
     /// The selected source's name, as Lightroom shows it above the filmstrip.
     pub(in crate::app) fn source_name(&self) -> String {
         if let Some(id) = self.filters.collection {
-            return self.collections.iter().find(|c| c.id == id).map_or_else(
-                || "Collection".into(),
-                |c| {
-                    if c.name == crate::catalog::QUICK_COLLECTION {
-                        "Quick Collection".into()
-                    } else {
-                        c.name.clone()
-                    }
-                },
-            );
+            return self
+                .session
+                .collections
+                .iter()
+                .find(|c| c.id == id)
+                .map_or_else(
+                    || "Collection".into(),
+                    |c| {
+                        if c.name == crate::catalog::QUICK_COLLECTION {
+                            "Quick Collection".into()
+                        } else {
+                            c.name.clone()
+                        }
+                    },
+                );
         }
         if self.selected_folder.is_empty() {
             return "All Photographs".into();
@@ -286,6 +304,7 @@ impl Library {
         match self.selected_folder.rsplit_once('/') {
             Some((_, name)) => name.into(),
             None => self
+                .session
                 .roots
                 .iter()
                 .find(|(id, _, _)| format!("root:{id}") == self.selected_folder)

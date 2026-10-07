@@ -283,21 +283,25 @@ impl Editor {
             .and_then(|id| self.library.as_ref()?.photo(id));
         let values = match (catalog, self.library.as_ref()) {
             (Some(p), Some(library)) => {
-                let read = library.catalog.descriptive(p.id).and_then(|descriptive| {
-                    let keywords = library.catalog.keywords(p.id)?;
-                    Ok(Values {
-                        descriptive,
-                        keywords: keywords
-                            .into_iter()
-                            .map(|k| crate::xmp::write::KeywordPath {
-                                path: k.path,
-                                exported: k.exported,
-                            })
-                            .collect(),
-                        rating: p.rating,
-                        label: p.label.clone(),
-                    })
-                });
+                let read = library
+                    .session
+                    .catalog
+                    .descriptive(p.id)
+                    .and_then(|descriptive| {
+                        let keywords = library.session.catalog.keywords(p.id)?;
+                        Ok(Values {
+                            descriptive,
+                            keywords: keywords
+                                .into_iter()
+                                .map(|k| crate::xmp::write::KeywordPath {
+                                    path: k.path,
+                                    exported: k.exported,
+                                })
+                                .collect(),
+                            rating: p.rating,
+                            label: p.label.clone(),
+                        })
+                    });
                 read.map_err(|e| format!("Metadata could not be read for export: {e}"))
             }
             _ => Ok(Values::default()),
@@ -368,7 +372,7 @@ impl Editor {
     fn batch_photos(&self, scope: &Scope, unsaved: bool) -> anyhow::Result<Vec<BatchPhoto>> {
         let ids: Vec<PhotoId> = scope.photos.iter().filter_map(|p| p.id).collect();
         let mut records = match &self.library {
-            Some(l) if !ids.is_empty() => l.catalog.photo_records(&ids)?.into_iter(),
+            Some(l) if !ids.is_empty() => l.session.catalog.photo_records(&ids)?.into_iter(),
             _ => Vec::new().into_iter(),
         };
         Ok(scope

@@ -249,7 +249,10 @@ impl Found {
 impl Editor {
     pub(super) fn onboarding_ui(&mut self, ui: &mut egui::Ui) {
         // Rescan when opened and whenever a different catalog is loaded.
-        let catalog = self.library.as_ref().map(|l| l.catalog.path.clone());
+        let catalog = self
+            .library
+            .as_ref()
+            .map(|l| l.session.catalog.path.clone());
         // And once the catalog has read cameras from new photos' files, when
         // the reader is done rather than at each of its saves.
         let read = self.library.as_ref().is_some_and(|l| {
@@ -297,12 +300,13 @@ impl Editor {
         let catalog = self.library.as_ref().map(|l| {
             format!(
                 "{} · {} photos",
-                l.catalog
+                l.session
+                    .catalog
                     .path
                     .file_stem()
                     .unwrap_or_default()
                     .to_string_lossy(),
-                l.photos.len()
+                l.session.photos.len()
             )
         });
         let has_catalog = catalog.is_some();
@@ -578,7 +582,7 @@ impl Editor {
         let models = self
             .library
             .as_ref()
-            .and_then(|l| l.catalog.raw_cameras().ok())
+            .and_then(|l| l.session.catalog.raw_cameras().ok())
             .unwrap_or_default();
         self.onboarding.info_saves = self.library.as_ref().map_or(0, |l| l.photo_info_saves());
         let (generation, cancel) = self.onboarding.scan.start();
