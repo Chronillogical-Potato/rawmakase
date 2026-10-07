@@ -316,6 +316,17 @@ fn read_state(dir: &Path) -> State {
     crate::storage::read_json_or_default(&state_path(dir))
 }
 
+/// A held lock file, released explicitly when dropped. Closing the file isn't
+/// enough: a process started meanwhile by any thread shares the open file
+/// until it execs, and the lock would stay held until then.
+struct Held(std::fs::File);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// Changes the state file under a short lock, rereading it first, so the
 /// answer and the reported week never overwrite each other.
 fn update_state(dir: &Path, change: impl FnOnce(&mut State)) -> anyhow::Result<()> {
@@ -325,6 +336,7 @@ fn update_state(dir: &Path, change: impl FnOnce(&mut State)) -> anyhow::Result<(
         .write(true)
         .open(dir.join("usage-stats.write.lock"))?;
     lock.lock()?;
+    let _held = Held(lock);
     let mut state = read_state(dir);
     change(&mut state);
     crate::storage::atomic_json(&state_path(dir), &state)
@@ -366,6 +378,7 @@ pub fn report_week(
     if lock.try_lock().is_err() {
         return false;
     }
+    let _held = Held(lock);
     let state = read_state(dir);
     // ISO week strings sort in time order.
     if state
@@ -638,6 +651,31 @@ mod tests {
             Outcome::Done
         });
         assert_eq!(sent, 1);
+    }
+
+    #[test]
+    fn frees_the_lock_while_other_threads_start_processes() {
+        // A process started elsewhere shares the lock's open file until it
+        // execs, so closing the file alone can leave it locked.
+        let done = Arc::new(AtomicBool::new(false));
+        let spawner = std::thread::spawn({
+            let done = done.clone();
+            move || {
+                while !done.load(Ordering::Relaxed) {
+                    let _ = std::process::Command::new("true").status();
+                }
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let skipped = (0..300)
+            .filter(|n| {
+                let week = format!("2026-W{n:03}");
+                !report_week(dir.path(), &week, "2026-W999", &report(), |_| Outcome::Done)
+            })
+            .count();
+        done.store(true, Ordering::Relaxed);
+        spawner.join().unwrap();
+        assert_eq!(skipped, 0);
     }
 
     #[test]
