@@ -2,11 +2,9 @@
 # checked by scripts/deps.py. One rule per line: `module never other...`.
 # The values a photo's edit is made of are crates/rawmakase-model, which Cargo
 # builds without LibRaw, the renderer, wgpu or the app.
-# File formats and presets are crates/rawmakase-interop, built without LibRaw, the
-# renderer or the app. The catalog reads and writes edits without decoding or
-# rendering.
-edits never raw demosaic photo develop decode decode_cache app
-catalog never raw demosaic photo develop decode decode_cache export app
+# File formats and presets are crates/rawmakase-interop, and the catalog with edit
+# resolution crates/rawmakase-catalog, both built without LibRaw, the renderer or
+# the app.
 edit_session never raw demosaic photo develop decode decode_cache app
-# Rendering never reaches the desktop app or export.
-develop never app export catalog
+# Rendering never reaches the desktop app or export (the catalog is a crate below).
+develop never app export

@@ -3199,6 +3199,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "pkg-config",
  "pollster 1.0.1",
+ "rawmakase-catalog",
  "rawmakase-ctl",
  "rawmakase-interop",
  "rawmakase-model",
@@ -3221,6 +3222,22 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
+]
+
+[[package]]
+name = "rawmakase-catalog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "getrandom 0.4.3",
+ "image",
+ "rawmakase-interop",
+ "rawmakase-model",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

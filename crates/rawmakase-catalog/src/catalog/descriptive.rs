@@ -178,7 +178,7 @@ impl Catalog {
     }
     /// The keyword at `path` (top first), made where it or its parents are
     /// missing. Names are compared in NFC, case kept.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn keyword_at(&mut self, path: &[String]) -> Result<i64> {
         ensure!(!path.is_empty(), "A keyword needs a name");
         let tx = self.db.transaction()?;
@@ -201,7 +201,7 @@ impl Catalog {
         Ok(())
     }
     /// Adds a keyword to every photo given.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn add_keyword(&mut self, ids: &[PhotoId], keyword: i64) -> Result<()> {
         let tx = self.db.transaction()?;
         for id in ids {
