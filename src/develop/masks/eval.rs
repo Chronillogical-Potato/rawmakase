@@ -4,6 +4,7 @@ use super::LocalDelta;
 use super::brush::{self, Raster, Space};
 use super::range::{self, RangeInput};
 use crate::develop::Geometry;
+use crate::develop::masks::local::LocalDeltas;
 use crate::model::image_frame::ImageFrame;
 use crate::model::masks::{MaskGroup, MaskOp, MaskShape};
 use crate::model::recipe::Recipe;

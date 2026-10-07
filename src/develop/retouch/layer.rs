@@ -6,6 +6,7 @@ use super::{
     RetouchOp,
     heal::{self, PixelRect},
 };
+use crate::develop::retouch::RetouchFeather;
 use crate::model::image_frame::ImageFrame;
 use crate::{
     camera_data::CameraImage,

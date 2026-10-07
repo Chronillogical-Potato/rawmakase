@@ -1,4 +1,5 @@
 use super::*;
+use crate::develop::masks::local::LocalDeltas;
 
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]

@@ -1,5 +1,6 @@
 //! The pickers that read a colour from the photo: the fringe color selector and the white-balance neutral.
 use super::*;
+use crate::develop::effects::EffectsRendering;
 
 /// Lightroom's Fringe Color Selector on the shown colour `rgb` (encoded sRGB): the
 /// Purple or Green range is pointed at it (see [`Effects::pick_fringe_hue`]). Defringe

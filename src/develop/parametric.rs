@@ -6,6 +6,7 @@
 //! channel curved, the middle one keeping its place, so hue holds), in encoded ProPhoto
 //! RGB between the Basic panel's tone and the point curve. Recipes saved before it keep
 //! [`ParametricModel::Original`], an earlier per-channel approximation.
+use crate::develop::effects::EffectsRendering;
 use crate::model::operators::ParametricModel;
 
 const SIZE: usize = 1024;

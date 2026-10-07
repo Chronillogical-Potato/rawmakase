@@ -1,6 +1,7 @@
 //! The Basic panel's Treatment and the B&W panel's Auto. Each runs during an edit
 //! frame, which records it as one History step under the name it gives.
 use super::{Editor, history::Step};
+use crate::develop::black_white::TreatmentChoice;
 use crate::model::recipe::Treatment;
 use crate::{
     camera_data::Metadata,

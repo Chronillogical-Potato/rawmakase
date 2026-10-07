@@ -1,5 +1,6 @@
 //! What the panels read from the developed photo: highlights recovered once, retouching applied, and the Point Color and Targeted Adjustment samples.
 use super::*;
+use crate::develop::recipe::RenderedRecipe;
 
 /// The highlight-recovered image, computed once per decoded image.
 pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImage>> {

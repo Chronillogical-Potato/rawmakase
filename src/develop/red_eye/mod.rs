@@ -17,9 +17,13 @@ use crate::model::red_eye::EyeKind;
 pub use detect::{Glow, find_pupil};
 pub(crate) use render::Placed;
 
-impl EyeKind {
+/// What a pupil of this kind glows like, for finding it.
+pub trait PupilGlow {
     /// What the pupil glows like, for finding it.
-    pub fn glow(self) -> Glow {
+    fn glow(self) -> Glow;
+}
+impl PupilGlow for EyeKind {
+    fn glow(self) -> Glow {
         match self {
             EyeKind::Red => Glow::Red,
             EyeKind::Pet { .. } => Glow::Bright,

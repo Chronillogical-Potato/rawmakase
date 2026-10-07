@@ -225,12 +225,30 @@ impl ColorSpread {
     }
 }
 
-impl Recipe {
+/// Setting a recipe's Treatment, with the Auto mix it measures.
+pub trait TreatmentChoice {
     /// Sets the Treatment. Converting to black & white sets the Auto mix when the mix
     /// was never set and `first` gives one (Lightroom's "Apply auto mix when first
     /// converting to black and white"); a mix already set (by hand, by Auto, or kept
     /// from an earlier conversion) stays, as do the color mixer's settings.
-    pub fn set_treatment(&mut self, treatment: Treatment, first: Option<AutoMix>) {
+    fn set_treatment(&mut self, treatment: Treatment, first: Option<AutoMix>);
+    /// Lightroom's Treatment switcher: as [`Recipe::set_treatment`], and choosing Color
+    /// while a black & white profile is in use changes to `color_profile`, the photo's
+    /// default, since the profile alone would keep it black & white.
+    fn choose_treatment(
+        &mut self,
+        treatment: Treatment,
+        first: Option<AutoMix>,
+        color_profile: Option<Arc<CameraProfile>>,
+        m: &Metadata,
+    );
+    /// Keeps the Treatment with the profile, as Lightroom does: choosing a black &
+    /// white profile converts to black & white, and leaving one for a color profile
+    /// converts back to color.
+    fn follow_profile_treatment(&mut self, old: Option<&CameraProfile>, first: Option<AutoMix>);
+}
+impl TreatmentChoice for Recipe {
+    fn set_treatment(&mut self, treatment: Treatment, first: Option<AutoMix>) {
         let black_white = treatment == Treatment::BlackWhite;
         if black_white
             && !self.effects.monochrome
@@ -241,11 +259,7 @@ impl Recipe {
         }
         self.effects.monochrome = black_white;
     }
-
-    /// Lightroom's Treatment switcher: as [`Recipe::set_treatment`], and choosing Color
-    /// while a black & white profile is in use changes to `color_profile`, the photo's
-    /// default, since the profile alone would keep it black & white.
-    pub fn choose_treatment(
+    fn choose_treatment(
         &mut self,
         treatment: Treatment,
         first: Option<AutoMix>,
@@ -260,15 +274,7 @@ impl Recipe {
         }
         self.set_treatment(treatment, first);
     }
-
-    /// Keeps the Treatment with the profile, as Lightroom does: choosing a black &
-    /// white profile converts to black & white, and leaving one for a color profile
-    /// converts back to color.
-    pub fn follow_profile_treatment(
-        &mut self,
-        old: Option<&CameraProfile>,
-        first: Option<AutoMix>,
-    ) {
+    fn follow_profile_treatment(&mut self, old: Option<&CameraProfile>, first: Option<AutoMix>) {
         if is_monochrome(self.profile.as_deref()) {
             // From one black & white profile to another the photo was black & white
             // already: its mix stays as it is.

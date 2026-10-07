@@ -15,10 +15,15 @@ use crate::color::mul;
 use crate::model::operators::{MixerModel, SaturationModel, VibranceModel};
 use crate::model::recipe::Recipe;
 
-impl MixerModel {
+/// The measured tables a color mixer operator renders with.
+pub(crate) trait MixerTables {
     /// How much of a slider's measured change at ±100 applies at `s`. Camera Raw's
     /// band Luminance is not linear: at −50 it applies about a third of the −100
     /// change, at +50 about 58% of the +100 one (both measured on Blue and Purple).
+    fn strength(self, kind: usize, s: f32) -> f32;
+    fn data(self) -> &'static [u8];
+}
+impl MixerTables for MixerModel {
     fn strength(self, kind: usize, s: f32) -> f32 {
         let s_abs = s.abs().min(1.);
         match self {
