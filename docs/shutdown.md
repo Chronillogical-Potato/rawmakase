@@ -97,11 +97,11 @@ then close the window as its close button does, and the guard runs.
 
 Quitting from the Dock or by logging out still sends `terminate:`. winit's app
 delegate has no `applicationShouldTerminate:`, so the app adds one
-(`platform/quit.rs`). While an export or Sync Settings runs, or an edit failed to
-save, it cancels the quit and closes the window instead, so the close guard asks
-first, restoring a minimized window to show its question. With nothing pending it
-lets the quit go at once, as before, and `on_exit` saves the edit and the
-autosave in flight synchronously. A logout the app cancels this way stops, and
+(`platform/quit.rs`). While an export or Sync Settings runs, or an edit, Copy Name
+or metadata field is not saved yet (pending, being saved or failed), it cancels the
+quit and closes the window instead, so the close guard saves first and asks if
+that fails, restoring a minimized window to show its question. With nothing
+pending it lets the quit go at once, as before. A logout the app cancels this way stops, and
 macOS says the app interrupted it.
 
 ## Where the code stands

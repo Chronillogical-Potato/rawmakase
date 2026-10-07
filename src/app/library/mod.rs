@@ -31,6 +31,12 @@ pub struct Place {
     folder: String,
     selection: selection::Selection,
 }
+impl Place {
+    /// Leaves a photo now removed out of the selection to return to.
+    pub(in crate::app) fn forget_photo(&mut self, id: PhotoId) {
+        self.selection.forget_photo(id);
+    }
+}
 pub(in crate::app) use cell::copy_suffix;
 pub use descriptive::DescriptiveCommand;
 pub use filmstrip::{DraggedPhoto, Module, Pick};
@@ -671,6 +677,10 @@ impl Library {
     #[cfg(test)]
     pub(super) fn set_copy_name_draft(&mut self, id: PhotoId, name: &str) {
         self.copy_names.draft = Some((id, name.into()));
+    }
+    /// Whether a Copy Name or metadata field holds typing not saved yet.
+    pub(super) fn has_drafts(&self) -> bool {
+        self.copy_names.is_unsaved(&self.session.photos) || self.has_unsaved_fields()
     }
     /// Drops a Copy Name or metadata field that could not be saved, e.g.
     /// closing without saving.

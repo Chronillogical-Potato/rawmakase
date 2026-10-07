@@ -3,9 +3,11 @@
 RAWmakase is the app crate with explicit domain modules, on top of
 `crates/rawmakase-model`: what an edit is, as values (the recipe and its settings,
 camera and lens profiles, colour primitives, DNG hints, output buffers, storage helpers), which
-Cargo builds without LibRaw, the renderer, wgpu or the GUI. The app crate re-exports
-the model's modules at its root (`crate::model`, `crate::camera_profiles`…), so
-paths read the same on either side. The desktop app and CLI compose these APIs;
+Cargo builds without LibRaw, the renderer, wgpu or the GUI, and
+`crates/rawmakase-interop`: the file formats and presets over it (XMP, Lightroom's
+Develop settings, presets, raw defaults, EXIF and JPEG, export settings),
+built the same way. The app crate re-exports both crates' modules at its root
+(`crate::model`, `crate::xmp`…), so paths read the same on either side. The desktop app and CLI compose these APIs;
 parsing, persistence and rendering implementations do not import the desktop UI.
 Use the domain paths below for new work.
 

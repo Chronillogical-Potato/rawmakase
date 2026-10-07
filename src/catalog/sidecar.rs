@@ -90,7 +90,7 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             let Some(mut segments) = Segments::new(std::fs::File::open(file)?)? else {
                 return Ok(None);
             };
-            while let Some(segment) = segments.next()? {
+            while let Some(segment) = segments.next_segment()? {
                 if segment.marker == APP1 && segment.length > JPEG_HEADER.len() {
                     let mut data = vec![0u8; segment.length];
                     segments.reader().read_exact(&mut data)?;

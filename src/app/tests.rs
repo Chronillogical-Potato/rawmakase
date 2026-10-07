@@ -4639,3 +4639,174 @@ fn quitting_saves_an_edit_still_waiting_for_autosave() -> anyhow::Result<()> {
     assert_eq!(saved.recipe.exposure, 0.7);
     Ok(())
 }
+/// A catalog of two photos, A and B, the latter rated 2, in an editor.
+fn two_photo_editor() -> anyhow::Result<(tempfile::TempDir, egui::Context, Editor, [PhotoId; 2])> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.ARW"), b"identity fixture a")?;
+    std::fs::write(photos.join("b.ARW"), b"identity fixture b")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let mut l = library::Library::load(&catalog, ctx.clone())?;
+    let id = |name: &str, l: &library::Library| {
+        l.session
+            .photos
+            .iter()
+            .find(|p| p.filename.ends_with(name))
+            .unwrap()
+            .id
+    };
+    let (a, b) = (id("a.ARW", &l), id("b.ARW", &l));
+    l.edit_metadata(b, crate::app::photo_metadata::Edit::Rating(2), false)?;
+    l.take_done();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.module = Module::Library;
+    Ok((dir, ctx, editor, [a, b]))
+}
+fn rating(editor: &Editor, id: PhotoId) -> i32 {
+    editor.library.as_ref().unwrap().photo(id).unwrap().rating
+}
+#[test]
+fn undo_never_writes_a_removed_copys_id_given_to_a_new_copy() -> anyhow::Result<()> {
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?;
+    library.edit_metadata(copy, crate::app::photo_metadata::Edit::Rating(5), false)?;
+    editor.sync_undo();
+    editor.remove_virtual_copy(copy);
+    // The catalog gives the removed copy's id to the next copy, of B, rated 2.
+    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    assert_eq!(again, copy);
+    assert_eq!(rating(&editor, again), 2);
+    editor.undo();
+    assert_eq!(rating(&editor, again), 2);
+    Ok(())
+}
+#[test]
+fn a_change_to_several_photos_keeps_undoing_those_left_after_one_is_removed() -> anyhow::Result<()>
+{
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(a)?;
+    library.edit_photos(
+        &[a, copy],
+        crate::app::photo_metadata::Edit::Rating(4),
+        false,
+    )?;
+    editor.sync_undo();
+    // Undone, then the copy goes, and its id comes back for a copy of B.
+    editor.undo();
+    assert_eq!(rating(&editor, a), 0);
+    editor.remove_virtual_copy(copy);
+    let again = editor.library.as_mut().unwrap().create_virtual_copy(b)?;
+    assert_eq!(again, copy);
+    // Redo rates A again and leaves the new copy as it was made.
+    editor.redo();
+    assert_eq!(rating(&editor, a), 4);
+    assert_eq!(rating(&editor, again), 2);
+    Ok(())
+}
+#[test]
+fn a_rating_made_in_develop_on_a_removed_copy_still_undoes_the_photo_it_rated() -> anyhow::Result<()>
+{
+    let (_dir, _ctx, mut editor, [a, b]) = two_photo_editor()?;
+    let copy = editor.library.as_mut().unwrap().create_virtual_copy(a)?;
+    // The copy is open in Develop; the filmstrip menu rates B.
+    editor.document.catalog_photo = Some(copy);
+    editor.module = Module::Develop;
+    editor.library.as_mut().unwrap().edit_metadata(
+        b,
+        crate::app::photo_metadata::Edit::Rating(3),
+        false,
+    )?;
+    editor.sync_undo();
+    editor.remove_virtual_copy(copy);
+    assert_eq!(rating(&editor, b), 3);
+    editor.undo();
+    assert_eq!(rating(&editor, b), 2);
+    Ok(())
+}
+/// The edit's first save fails after an earlier one succeeded: a quit from the Dock
+/// must reach the close guard, which keeps the window open and the edit unsaved.
+#[test]
+fn a_quit_with_an_edit_whose_next_save_fails_keeps_the_window_open() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let photo = photos.join("image.ARW");
+    std::fs::write(&photo, b"identity fixture")?;
+    let catalog = dir.path().join("test.rawmakase");
+    crate::catalog::Catalog::create(&catalog)?.add_folder(&photos)?;
+    let ctx = egui::Context::default();
+    let l = crate::app::library::Library::load(&catalog, ctx.clone())?;
+    let id = l.session.photos[0].id;
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.library = Some(Box::new(l));
+    editor.document.catalog_photo = Some(id);
+    editor.document.path = Some(photo.clone());
+    editor.document.edit.save.mark_changed();
+    assert!(editor.flush());
+    assert!(!editor.quitting_would_cut_off_work());
+    // A copy shown keeps its saved name as the draft: nothing to save. A name
+    // being typed is saved by the guard too.
+    let library = editor.library.as_mut().unwrap();
+    let copy = library.create_virtual_copy(id)?;
+    let saved_name = library.photo(copy).unwrap().copy_name.clone();
+    library.set_copy_name_draft(copy, &saved_name);
+    assert!(!editor.quitting_would_cut_off_work());
+    editor
+        .library
+        .as_mut()
+        .unwrap()
+        .set_copy_name_draft(copy, "B&W");
+    assert!(editor.quitting_would_cut_off_work());
+    editor.library.as_mut().unwrap().discard_drafts();
+    // The catalog stops taking edits; the next change is not saved yet.
+    editor
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .db_for_tests()
+        .execute_batch(
+            "CREATE TRIGGER no_edits BEFORE UPDATE OF recipe ON photos
+             BEGIN SELECT RAISE(ABORT, 'read-only'); END;",
+        )?;
+    editor.document.edit.recipe.exposure = 1.;
+    editor.document.edit.save.mark_changed();
+    assert!(editor.quitting_would_cut_off_work());
+    // The close the Dock's quit turns into: the guard tries to save, fails, and asks.
+    let mut input = egui::RawInput::default();
+    input.viewports.insert(
+        egui::ViewportId::ROOT,
+        egui::ViewportInfo {
+            events: vec![egui::ViewportEvent::Close],
+            ..Default::default()
+        },
+    );
+    let mut output = ctx.run_ui(input, |ui| editor.pending_work(ui.ctx()));
+    output.textures_delta.clear();
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose)
+    );
+    assert!(editor.close_confirm);
+    assert!(editor.document.edit.save.needs_save());
+    let saved = editor
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .load_edit(id, &photo)?
+        .unwrap();
+    assert_eq!(saved.recipe.exposure, 0.);
+    Ok(())
+}

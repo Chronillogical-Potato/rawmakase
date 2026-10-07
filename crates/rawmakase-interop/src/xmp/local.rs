@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail, ensure};
 use std::collections::BTreeMap;
 
 /// The Lightroom settings this module reads.
-pub(crate) const KEYS: [&str; 7] = [
+pub const KEYS: [&str; 7] = [
     "RetouchAreas",
     "RetouchInfo",
     "RedEyeInfo",
@@ -126,7 +126,7 @@ impl Node {
         Node::Record(record)
     }
     /// A Lua table literal as Lightroom serialises develop settings; data only.
-    pub(crate) fn from_lua(text: &str) -> Result<Node> {
+    pub fn from_lua(text: &str) -> Result<Node> {
         let mut p = Lua {
             s: text.as_bytes(),
             i: 0,

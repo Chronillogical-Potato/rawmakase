@@ -42,7 +42,7 @@ impl Library {
     /// With `advance` (Shift), a single photo is followed by the next one
     /// shown, which is returned. A photo the filter now hides leaves the
     /// selection; when the active one goes, the next one shown is selected.
-    pub(super) fn edit_photos(
+    pub(in crate::app) fn edit_photos(
         &mut self,
         ids: &[PhotoId],
         edit: Edit,

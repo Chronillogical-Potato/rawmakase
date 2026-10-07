@@ -12,6 +12,20 @@ pub(super) struct Selection {
     pub selected: HashSet<PhotoId>,
     pub anchor: Option<PhotoId>,
 }
+impl Selection {
+    /// Without photo `id`, which is gone. A selection left with other photos keeps
+    /// one of them active (and the anchor), as it is always selected.
+    pub(super) fn forget_photo(&mut self, id: PhotoId) {
+        self.selected.remove(&id);
+        let survivor = self.selected.iter().min().copied();
+        if self.active == Some(id) {
+            self.active = survivor;
+        }
+        if self.anchor == Some(id) {
+            self.anchor = self.active.or(survivor);
+        }
+    }
+}
 
 /// How a grid cell is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -333,4 +347,31 @@ fn presses(ctx: &egui::Context) -> Vec<Press> {
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod forget_tests {
+    use super::*;
+
+    #[test]
+    fn forgetting_the_active_photo_keeps_a_surviving_one_active() {
+        let [a, b, gone] = [PhotoId(1), PhotoId(2), PhotoId(3)];
+        let mut s = Selection {
+            active: Some(gone),
+            selected: [a, b, gone].into(),
+            anchor: Some(gone),
+        };
+        s.forget_photo(gone);
+        assert_eq!(s.active, Some(a));
+        assert_eq!(s.anchor, Some(a));
+        assert_eq!(s.selected, [a, b].into());
+        let mut alone = Selection {
+            active: Some(gone),
+            selected: [gone].into(),
+            anchor: Some(gone),
+        };
+        alone.forget_photo(gone);
+        assert_eq!((alone.active, alone.anchor), (None, None));
+        assert!(alone.selected.is_empty());
+    }
 }

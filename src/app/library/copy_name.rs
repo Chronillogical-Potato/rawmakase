@@ -21,6 +21,15 @@ impl CopyNames {
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }
+    /// Whether the draft is a name not saved yet: the field keeps the saved name
+    /// as its draft while a copy is shown, which needs no saving.
+    pub(super) fn is_unsaved(&self, photos: &[Photo]) -> bool {
+        self.draft.as_ref().is_some_and(|(id, text)| {
+            photos
+                .iter()
+                .any(|p| p.id == *id && p.master.is_some() && p.copy_name != text.trim())
+        })
+    }
     /// Saves a draft still being typed, e.g. when the Library panel goes away
     /// before the field loses focus. On failure the name stays pending, to be
     /// saved again or discarded. Returns whether a photo was renamed.

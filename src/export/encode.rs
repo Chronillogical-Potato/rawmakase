@@ -113,7 +113,7 @@ pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
     // After the APPn segments the encoder wrote.
     let mut at = 2;
     if let Some(mut s) = Segments::new(std::io::Cursor::new(&jpeg))? {
-        while let Some(segment) = s.next()?
+        while let Some(segment) = s.next_segment()?
             && (0xe0..=0xef).contains(&segment.marker)
         {
             at = segment.offset as usize + segment.length;

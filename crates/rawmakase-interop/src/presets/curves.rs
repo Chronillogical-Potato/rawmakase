@@ -201,7 +201,7 @@ impl ShownCurve {
 }
 
 /// The name the Point Curve menu shows for `r`'s curve.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn shown_name(r: &Recipe, saved: &[SavedCurve]) -> String {
     ShownCurve::of(r, saved).name(saved).to_string()
 }

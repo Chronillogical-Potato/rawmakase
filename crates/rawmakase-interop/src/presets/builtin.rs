@@ -9,7 +9,7 @@ pub const GROUPS: &[&str] = &["Color", "Creative", "B&W", "Curve", "Grain", "Vig
 
 macro_rules! files {
     ($($path:literal),* $(,)?) => {
-        &[$(($path, include_str!(concat!("../../assets/presets/", $path)))),*]
+        &[$(($path, include_str!(concat!("../../../../assets/presets/", $path)))),*]
     };
 }
 /// Every file in `assets/presets`, in panel order within each group.
