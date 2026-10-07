@@ -15,7 +15,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 
 | Work | Start here | Related work |
 | --- | --- | --- |
-| Add a develop adjustment | [Recipe](../src/develop/recipe.rs), [pipeline](../src/develop/pipeline.rs) | Inspector, XMP application, format migration and rendering regressions |
+| Add a develop adjustment | [Recipe](../src/develop/recipe.rs), [pipeline](../src/develop/pipeline/mod.rs) | Inspector, XMP application, format migration and rendering regressions |
 | Change preview quality or detail | [Quality rendering](../src/develop/quality.rs) | Worker renderer, region/fit/export consistency tests |
 | Support another XMP setting | [Parser](../src/xmp/parse.rs), [application stages](../src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../src/presets/library.rs) | Preset browser UI and shared asset paths |
@@ -75,7 +75,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [masks/brush.rs](../src/develop/masks/brush.rs) | Brush strokes rasterised in image space (flow, density, erase, Auto Mask). |
 | [masks/range.rs](../src/develop/masks/range.rs) | Color Range and Luminance Range weights from developed Oklab colours. |
 | [masks/local.rs](../src/develop/masks/local.rs) | A mask's sliders as per-pixel deltas, and where each acts in the pipeline. |
-| [pipeline.rs](../src/develop/pipeline.rs) | Color/tone processing, sampling, render entry points, neutral picking and legacy engine paths. |
+| [pipeline/](../src/develop/pipeline/mod.rs) | The CPU pipeline, one module per seam: [colour conversions](../src/develop/pipeline/color.rs), [per-pixel stages](../src/develop/pipeline/pixel.rs), [tone preparation](../src/develop/pipeline/tone.rs), [sampling](../src/develop/pipeline/sampling.rs), [the fringe and neutral pickers](../src/develop/pipeline/pickers.rs), [image fields](../src/develop/pipeline/fields.rs) (exposure ramp, vignetting, lens warp), [GPU parameters](../src/develop/pipeline/gpu_params.rs), [render entry points](../src/develop/pipeline/render.rs) and [legacy engines](../src/develop/pipeline/legacy.rs). |
 | [basic_tone.rs](../src/develop/basic_tone.rs), [basic_tone_data.rs](../src/develop/basic_tone_data.rs) | Engine 4 Contrast, Whites, Blacks and Dehaze as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md). |
 | [parametric.rs](../src/develop/parametric.rs), [parametric.bin](../src/develop/parametric.bin) | Engine 4 parametric tone curve (Shadows, Darks, Lights, Highlights and the splits) as measured Camera Raw curves, and the measured tables. See [tone controls](tone-controls.md#parametric-curve). |
 | [local_tone.rs](../src/develop/local_tone.rs), [local_tone_data.rs](../src/develop/local_tone_data.rs) | Engine 4 Shadows and Highlights: an edge-aware local operator fitted to Camera Raw, and its tables. |
