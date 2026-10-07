@@ -274,7 +274,7 @@ fn render(
         let monitor = match (&job.monitor, textures.is_some()) {
             (Some(path), true) => {
                 if lut.as_ref().is_none_or(|(p, _)| p != path) {
-                    let built = gpu::MonitorLut::new(path)
+                    let built = gpu::MonitorLut::sample(|rgb| raw::display_transform(path, rgb))
                         .map(Arc::new)
                         .map_err(|e| e.to_string());
                     *lut = Some((path.clone(), built));

@@ -44,7 +44,7 @@ impl Editor {
     /// Reads the open catalog photo's snapshots.
     pub(super) fn load_snapshots(&mut self) {
         let list = match (&self.library, self.document.catalog_photo) {
-            (Some(l), Some(photo)) => l.catalog.snapshots(photo).unwrap_or_default(),
+            (Some(l), Some(photo)) => l.session.catalog.snapshots(photo).unwrap_or_default(),
             _ => Vec::new(),
         };
         self.document.snapshots.list = list;
@@ -127,7 +127,7 @@ impl Editor {
         let (Some(library), Some(photo)) = (&self.library, self.document.catalog_photo) else {
             return;
         };
-        let catalog = &library.catalog;
+        let catalog = &library.session.catalog;
         let recipe = &self.document.edit.recipe;
         let result = match &action {
             SnapshotAction::New => {
@@ -277,7 +277,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
         let library = crate::app::library::Library::load(&path, ctx.clone())?;
-        e.document.catalog_photo = Some(library.photos[0].id);
+        e.document.catalog_photo = Some(library.session.photos[0].id);
         e.library = Some(Box::new(library));
         e.document.metadata = Some(Default::default());
         e.document.edit.recipe.exposure = 0.8;

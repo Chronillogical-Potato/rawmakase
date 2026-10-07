@@ -84,7 +84,12 @@ impl Library {
                     metadata_row(ui, "File Name", &field(|p| &p.filename));
                     match photo.as_ref().filter(|p| p.master.is_some()) {
                         Some(p) => {
-                            match self.copy_names.row(ui, p, &self.catalog, &mut self.photos) {
+                            match self.copy_names.row(
+                                ui,
+                                p,
+                                &self.session.catalog,
+                                &mut self.session.photos,
+                            ) {
                                 Ok(true) => self.filter(),
                                 Ok(false) => {}
                                 Err(e) => {
