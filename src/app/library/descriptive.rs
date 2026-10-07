@@ -133,7 +133,7 @@ impl Library {
             return Ok(());
         }
         let place_before = place.clone().unwrap_or_else(|| self.place());
-        let before = self.catalog.metadata_snapshot(&ids)?;
+        let before = self.session.catalog.metadata_snapshot(&ids)?;
         let what = match &edit {
             DescriptiveEdit::Text(TextField::Title, _) => "Title",
             DescriptiveEdit::Text(TextField::Caption, _) => "Caption",
@@ -144,14 +144,16 @@ impl Library {
             DescriptiveEdit::RemoveKeyword(_) => "Keyword removed",
         };
         let made = match edit {
-            DescriptiveEdit::Text(field, text) => self.catalog.set_text(&ids, field, &text),
-            DescriptiveEdit::Creators(names) => self.catalog.set_creators(&ids, &names),
-            DescriptiveEdit::ClearLocation => self.catalog.clear_location(&ids),
-            DescriptiveEdit::AddKeywords(paths) => self.catalog.add_keywords(&ids, &paths),
-            DescriptiveEdit::RemoveKeyword(keyword) => self.catalog.remove_keyword(&ids, keyword),
+            DescriptiveEdit::Text(field, text) => self.session.catalog.set_text(&ids, field, &text),
+            DescriptiveEdit::Creators(names) => self.session.catalog.set_creators(&ids, &names),
+            DescriptiveEdit::ClearLocation => self.session.catalog.clear_location(&ids),
+            DescriptiveEdit::AddKeywords(paths) => self.session.catalog.add_keywords(&ids, &paths),
+            DescriptiveEdit::RemoveKeyword(keyword) => {
+                self.session.catalog.remove_keyword(&ids, keyword)
+            }
         };
         made?;
-        let after = self.catalog.metadata_snapshot(&ids)?;
+        let after = self.session.catalog.metadata_snapshot(&ids)?;
         if before == after {
             return self.refresh_keywords(&ids);
         }
@@ -186,7 +188,7 @@ impl Library {
             .filter(|s| self.photo(s.photo).is_some())
             .cloned()
             .collect();
-        self.catalog.restore_metadata(&values)?;
+        self.session.catalog.restore_metadata(&values)?;
         if !ratings.is_empty() {
             self.set_metadata(ratings)?;
         }
@@ -201,6 +203,7 @@ impl Library {
     pub(in crate::app) fn read_metadata_from_files(&mut self, ids: &[PhotoId]) -> Result<()> {
         let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
         let photos: Vec<(PhotoId, std::path::PathBuf)> = self
+            .session
             .photos
             .iter()
             .filter(|p| wanted.contains(&p.id) && p.master.is_none())
@@ -269,15 +272,16 @@ impl Library {
             .filter(|id| self.photo(*id).is_some())
             .collect();
         let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
-        let before = self.catalog.metadata_snapshot(&ids)?;
+        let before = self.session.catalog.metadata_snapshot(&ids)?;
         let ratings_before = self.ratings_by_id(&wanted);
         let mut report = reread.report;
         let written = self
+            .session
             .catalog
             .apply_file_metadata(&read, crate::catalog::Merge::Overwrite)?;
         report.unreadable.extend(written.unreadable);
         self.refresh_photos(&ids)?;
-        let after = self.catalog.metadata_snapshot(&ids)?;
+        let after = self.session.catalog.metadata_snapshot(&ids)?;
         let ratings_after = self.ratings_by_id(&wanted);
         let n = ids.len();
         let mut summary = format!("Read metadata from {}", plural(n, "file", "files"));
@@ -297,8 +301,12 @@ impl Library {
     }
     /// Rating, flag and label of the photos in `wanted`, by id.
     fn ratings_by_id(&self, wanted: &std::collections::HashSet<PhotoId>) -> Vec<super::Metadata> {
-        let mut found =
-            super::metadata::ratings_of(self.photos.iter().filter(|p| wanted.contains(&p.id)));
+        let mut found = super::metadata::ratings_of(
+            self.session
+                .photos
+                .iter()
+                .filter(|p| wanted.contains(&p.id)),
+        );
         found.sort_by_key(|m| m.0);
         found
     }
@@ -307,13 +315,14 @@ impl Library {
     fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
         let wanted: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
         let fresh: std::collections::HashMap<PhotoId, crate::catalog::Photo> = self
+            .session
             .catalog
             .photos()?
             .into_iter()
             .filter(|p| wanted.contains(&p.id))
             .map(|p| (p.id, p))
             .collect();
-        for p in &mut self.photos {
+        for p in &mut self.session.photos {
             if let Some(f) = fresh.get(&p.id) {
                 p.rating = f.rating;
                 p.flag = f.flag;
@@ -324,7 +333,7 @@ impl Library {
         self.sort_keys = None;
         // A capture time read may move the photo, as the catalog sorts.
         self.resort_in_place(|library| {
-            library.photos.sort_by(|a, b| {
+            library.session.photos.sort_by(|a, b| {
                 (&a.captured, &a.filename, a.id).cmp(&(&b.captured, &b.filename, b.id))
             });
         });
@@ -340,6 +349,7 @@ impl Library {
         let mut names = std::collections::HashMap::new();
         for id in ids {
             let keywords: Vec<String> = self
+                .session
                 .catalog
                 .keywords(*id)?
                 .into_iter()
@@ -347,7 +357,7 @@ impl Library {
                 .collect();
             names.insert(*id, keywords.join(", "));
         }
-        for p in &mut self.photos {
+        for p in &mut self.session.photos {
             if let Some(n) = names.remove(&p.id) {
                 p.keywords = n;
             }

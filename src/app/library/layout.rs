@@ -139,10 +139,11 @@ impl Library {
         // A view of one photo or more opens only on a photo still shown.
         let view = View::from_key(&layout.view);
         if view != View::Grid
-            && self
-                .selection
-                .active
-                .is_some_and(|id| self.visible.iter().any(|i| self.photos[*i].id == id))
+            && self.selection.active.is_some_and(|id| {
+                self.visible
+                    .iter()
+                    .any(|i| self.session.photos[*i].id == id)
+            })
         {
             self.set_view(view);
         }

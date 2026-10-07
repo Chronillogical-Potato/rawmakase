@@ -23,7 +23,7 @@ fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>, egui::Co
         |_| None,
     ));
     let library = crate::app::library::Library::load(&catalog, ctx.clone())?;
-    let ids = library.photos.iter().map(|p| p.id).collect();
+    let ids = library.session.photos.iter().map(|p| p.id).collect();
     e.library = Some(Box::new(library));
     e.module = Module::Library;
     Ok((dir, e, ids, ctx))

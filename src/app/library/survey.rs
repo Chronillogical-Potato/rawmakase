@@ -29,7 +29,7 @@ impl Library {
     /// the only one.
     pub fn open_survey(&mut self) {
         if self.selection.active.is_none() {
-            self.select(self.visible.first().map(|i| self.photos[*i].id));
+            self.select(self.visible.first().map(|i| self.session.photos[*i].id));
         }
         if self.selection.active.is_none() {
             return;
@@ -95,7 +95,10 @@ impl Library {
         let recorded = self.done.len();
         self.edit_metadata(id, edit, false)?;
         let shown = |library: &Self, id: &PhotoId| {
-            library.visible.iter().any(|i| library.photos[*i].id == *id)
+            library
+                .visible
+                .iter()
+                .any(|i| library.session.photos[*i].id == *id)
         };
         let at = surveyed.iter().position(|i| *i == id).unwrap_or(0);
         let active = surveyed[at..]

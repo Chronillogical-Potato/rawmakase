@@ -276,7 +276,7 @@ impl Library {
     /// E, Return or a double-click: the active photo, large.
     pub fn open_loupe(&mut self) {
         if self.selection.active.is_none() {
-            self.select(self.visible.first().map(|i| self.photos[*i].id));
+            self.select(self.visible.first().map(|i| self.session.photos[*i].id));
         }
         self.loupe.open = self.selection.active.is_some();
         if self.loupe.open {
