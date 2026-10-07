@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 mod grain;
 mod lens_vignette;
 mod vignette;
-pub use crate::model::operators::GrainModel;
-pub use crate::model::operators::LensVignetteModel;
 pub(crate) use grain::GrainField;
 pub(crate) use lens_vignette::{ManualVignette, combined_table};
 pub(crate) use vignette::PostCropVignette;
