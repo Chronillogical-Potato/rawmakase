@@ -65,9 +65,12 @@ const QUICK: [Shortcut; 3] = [
     ("Cmd+B", "Show it"),
     ("Cmd+Shift+B", "Clear it"),
 ];
-const GENERAL: [Shortcut; 5] = [
+const GENERAL: [Shortcut; 8] = [
     ("G", "Library"),
     ("D", "Develop"),
+    ("Tab", "Hide / show the side panels"),
+    ("Shift+Tab", "Hide / show the side panels and filmstrip"),
+    ("F7 / F8 / F6", "Left panel / right panel / filmstrip"),
     ("Cmd+'", "Create virtual copy"),
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),

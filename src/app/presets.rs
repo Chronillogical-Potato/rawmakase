@@ -359,10 +359,14 @@ impl Editor {
                     .request_repaint_after(left + Duration::from_millis(10));
             }
         } else {
-            self.presets.hover = None;
-            if self.presets.preview.take().is_some() {
-                self.schedule();
-            }
+            self.end_preset_hover();
+        }
+    }
+    /// Ends a hover over a preset, rendering the edit again if it was previewed.
+    pub(super) fn end_preset_hover(&mut self) {
+        self.presets.hover = None;
+        if self.presets.preview.take().is_some() {
+            self.schedule();
         }
     }
 }
