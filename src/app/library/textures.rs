@@ -52,6 +52,13 @@ pub(super) struct PreviewTextures {
     /// The two workers, to wait for at exit.
     threads: [Option<JoinHandle<()>>; 2],
 }
+/// A library replaced by another catalog cancels its edited preview too; its
+/// workers end once their channels are dropped with it.
+impl Drop for PreviewTextures {
+    fn drop(&mut self) {
+        self.edit_closed.store(true, Ordering::Relaxed);
+    }
+}
 impl PreviewTextures {
     /// Starts both preview workers on the shared disk cache.
     pub(super) fn new(ctx: &egui::Context) -> Self {
