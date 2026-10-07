@@ -6,12 +6,20 @@
 #
 #     scripts/crate-closures.sh
 #
-# The catalog's bundled SQLite (libsqlite3-sys) is intended and allowed.
+# The catalog's bundled SQLite (libsqlite3-sys) is intended and allowed. The
+# renderer has wgpu for its GPU preview port. LibRaw and Little CMS are linked
+# by rawmakase-native's own build script, not a crate, so the crates above it
+# are kept from depending on rawmakase-native instead. Export reads Inter and
+# the installed-font directories from fastframe-fonts, which brings egui (but
+# no window or GPU backend) along.
 set -euo pipefail
 
-forbidden='^(rawmakase|wgpu.*|naga|egui.*|eframe|epaint|winit|lcms2.*|libraw.*|fastframe-fonts) '
+gui='egui.*|eframe|epaint|winit|fastframe-fonts'
+native='rawmakase-native|lcms2.*|libraw.*'
+leaf="rawmakase|wgpu.*|naga|$gui|$native"
 status=0
-for crate in rawmakase-model rawmakase-interop rawmakase-catalog rawmakase-protocol; do
+check() {
+    local crate=$1 forbidden="^($2) "
     # Every platform's dependencies, not only this machine's.
     found=$(cargo tree --locked -p "$crate" --all-features --target all -e normal,build \
         --prefix none --format '{p}' | sort -u | grep -E "$forbidden" || true)
@@ -20,6 +28,12 @@ for crate in rawmakase-model rawmakase-interop rawmakase-catalog rawmakase-proto
         echo "$found" | sed 's/^/    /' >&2
         status=1
     fi
+}
+for crate in rawmakase-model rawmakase-interop rawmakase-catalog rawmakase-protocol; do
+    check "$crate" "$leaf"
 done
-[ "$status" -eq 0 ] && echo "The extracted crates depend on no app, GPU, GUI or native imaging crate."
+check rawmakase-engine "rawmakase|rawmakase-catalog|rawmakase-export|$gui|$native"
+check rawmakase-native "rawmakase|rawmakase-catalog|rawmakase-export|$gui"
+check rawmakase-export "rawmakase|eframe|winit|egui-wgpu|egui-winit|egui_extras|lcms2.*|libraw.*"
+[ "$status" -eq 0 ] && echo "The extracted crates depend on no app, GPU, GUI or native imaging crate beyond their own."
 exit "$status"

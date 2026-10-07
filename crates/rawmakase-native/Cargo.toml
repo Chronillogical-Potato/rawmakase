@@ -1,0 +1,33 @@
+[package]
+name = "rawmakase-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "RAWmakase's native boundary: LibRaw and Little CMS through a small C++ bridge, RAWmakase's own demosaicing, opening a photo and its full-size decode with the decode cache"
+license = "MIT"
+publish = false
+# The C++ bridge to LibRaw and Little CMS is built and linked here, so only crates
+# that depend on this one link them.
+build = "build.rs"
+
+[features]
+# The model's fixtures, for tests that share them.
+test-support = ["rawmakase-model/test-support", "rawmakase-engine/test-support"]
+
+[dependencies]
+rawmakase-engine = { path = "../rawmakase-engine", version = "0.1.0" }
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
+anyhow = "1"
+bytemuck = { version = "1.25", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+rayon = "1.12"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+tempfile = "3"
+
+[dev-dependencies]
+rawmakase-model = { path = "../rawmakase-model", version = "0.1.0", features = ["test-support"] }
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"

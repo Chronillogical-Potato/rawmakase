@@ -1,6 +1,6 @@
 # Demosaicing
 
-By default RAWmakase demosaics full-size images itself (`src/demosaic.rs`). LibRaw only unpacks the sensor data (`ora_cfa_open` / `ora_cfa_copy` in `native/raw.cpp`), and still provides metadata, white balance, crops and previews. Black levels (including per-position patterns), white level and camera white balance are applied in RAWmakase. The colour pattern comes from LibRaw's `COLOR()` as a 48×48 tile, which covers Bayer and X-Trans periods.
+By default RAWmakase demosaics full-size images itself (`crates/rawmakase-native/src/demosaic.rs`). LibRaw only unpacks the sensor data (`ora_cfa_open` / `ora_cfa_copy` in `crates/rawmakase-native/native/raw.cpp`), and still provides metadata, white balance, crops and previews. Black levels (including per-position patterns), white level and camera white balance are applied in RAWmakase. The colour pattern comes from LibRaw's `COLOR()` as a 48×48 tile, which covers Bayer and X-Trans periods.
 
 The algorithm uses the same two passes for both sensor types:
 

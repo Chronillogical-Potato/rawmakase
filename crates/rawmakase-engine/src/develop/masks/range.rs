@@ -8,7 +8,7 @@ use crate::rendered::Rendered;
 pub(crate) type RangeInput<'a> = &'a Rendered;
 
 /// Oklab of a display pixel.
-pub(crate) fn oklab(p: [f32; 3]) -> [f32; 3] {
+pub fn oklab(p: [f32; 3]) -> [f32; 3] {
     let l = p.map(|v| srgb_decode(v.clamp(0., 1.)));
     let m = |r: [f32; 3], v: [f32; 3]| r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
     let lms = [

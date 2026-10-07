@@ -5,7 +5,7 @@ mod basic_tone_data;
 pub mod black_white;
 pub(crate) mod calibration;
 pub mod clarity;
-pub(crate) mod color;
+pub mod color;
 pub mod color_grade;
 mod color_grade_curves;
 mod color_grade_data;

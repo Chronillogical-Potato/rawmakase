@@ -3,7 +3,7 @@
 pub mod assemble;
 pub mod batch;
 mod encode;
-pub(crate) mod exif;
+pub mod exif;
 mod extended_xmp;
 pub mod job;
 mod metadata;

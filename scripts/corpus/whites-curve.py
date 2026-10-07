@@ -7,7 +7,7 @@ means in --refs (outside the repository). It refuses to start while Photoshop ha
 documents open.
 
 `table` fits each render's curve (as scripts/corpus/parametric-curve.py fits its curves)
-and prints `WHITES_ADAPTIVE` and `WHITES_EXPOSURES` for src/develop/basic_tone_data.rs
+and prints `WHITES_ADAPTIVE` and `WHITES_EXPOSURES` for crates/rawmakase-engine/src/develop/basic_tone_data.rs
 (+25, +50 and +100 at 64 bin centres in encoded ProPhoto RGB). With --rawmakase (a
 built `rawmakase` binary) it also renders the chart at each exposure and prints
 `WHITES_HIGHLIGHTS`, the 98th percentile of encoded luminance of a 512 px copy.

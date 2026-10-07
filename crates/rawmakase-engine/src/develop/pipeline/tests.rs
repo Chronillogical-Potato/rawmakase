@@ -286,7 +286,7 @@ fn point_curves_match_lightroom_ramp_references() {
     // See tests/data/README.md. These isolate curves from RAW/profile errors.
     let samples: Vec<[[u16; 3]; 5]> = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/data/lightroom-point-curves.json"
+        "/../../tests/data/lightroom-point-curves.json"
     )))
     .unwrap();
     let curve = |points: &[[f32; 2]]| ToneCurve {

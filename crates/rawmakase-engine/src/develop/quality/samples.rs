@@ -3,7 +3,7 @@ use super::*;
 use crate::develop::recipe::RenderedRecipe;
 
 /// The highlight-recovered image, computed once per decoded image.
-pub(crate) fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImage>> {
+pub fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImage>> {
     if let Some(recovered) = im.recovered.get() {
         return Ok(recovered.clone());
     }
