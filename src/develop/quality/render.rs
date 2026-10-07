@@ -224,14 +224,13 @@ fn render_resident(
 pub(crate) fn render_level(
     level: &Arc<CameraImage>,
     full: &CameraImage,
-    r: &Recipe,
+    r: &ValidRecipe,
     size: (u32, u32),
     region: [u32; 4],
     cancel: &AtomicBool,
     stages: &mut Stages,
 ) -> Result<Output> {
     check_cancel(cancel)?;
-    r.validate()?;
     let effective = r.resolved(&level.metadata);
     let r = effective.as_ref();
     if let Some(p) = &r.profile {
