@@ -22,6 +22,7 @@ mod defaults;
 mod descriptive;
 mod develop_history;
 mod edit_records;
+mod edit_rows;
 mod edits;
 mod info;
 mod ingest;
@@ -62,17 +63,27 @@ impl Catalog {
         Self::open_as(path, &locations::Computer::this())
     }
     /// Opens a catalog on `computer`, whose folder locations apply.
+    ///
+    /// The format is checked before anything is written, and a catalog this
+    /// release can't read is left as it was. An open writes only what is
+    /// missing for this computer, and a catalog that can't be readied isn't
+    /// opened.
     pub fn open_as(path: &Path, computer: &locations::Computer) -> Result<Self> {
-        let mut db = Db::open(path)?;
+        let mut catalog = Self {
+            path: path.into(),
+            db: Db::open(path)?,
+            computer: computer.clone(),
+        };
+        catalog.prepare()?;
+        Ok(catalog)
+    }
+    /// Readies an open catalog for this computer. Usually there is nothing
+    /// to do, and nothing is written.
+    fn prepare(&mut self) -> Result<()> {
         // The schema is idempotent: a catalog from an earlier release gains the
         // tables added since.
-        db.apply_schema()?;
-        locations::prepare(&mut db, computer)?;
-        Ok(Self {
-            path: path.into(),
-            db,
-            computer: computer.clone(),
-        })
+        self.db.apply_schema()?;
+        locations::prepare(&mut self.db, &self.computer)
     }
     pub fn photos(&self) -> Result<Vec<Photo>> {
         row! {
@@ -341,7 +352,11 @@ mod boundary_tests;
 #[cfg(test)]
 mod descriptive_tests;
 #[cfg(test)]
+mod edit_rows_tests;
+#[cfg(test)]
 mod locations_tests;
+#[cfg(test)]
+mod open_tests;
 #[cfg(test)]
 mod portable_sql_tests;
 pub mod preview_cache;

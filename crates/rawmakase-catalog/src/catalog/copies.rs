@@ -21,26 +21,15 @@ impl Catalog {
             let copy: PhotoId = w.insert_returning_id(
                 sql!(
                     "INSERT INTO photos(folder,filename,original_path,captured,rating,flag,label,format,
-                        copy_name,master_id,orientation,lightroom_develop,recipe,export_options,identity,edited_at)
+                        copy_name,master_id,orientation,lightroom_develop)
                      SELECT folder,filename,original_path,captured,rating,flag,label,format,
-                        ?,?,orientation,lightroom_develop,recipe,export_options,identity,edited_at
+                        ?,?,orientation,lightroom_develop
                      FROM photos WHERE id=?
                      RETURNING id"
                 ),
                 &[&name, &master, &id],
             )?;
-            w.execute(
-                sql!("INSERT INTO local_edits(photo,data) SELECT ?,data FROM local_edits WHERE photo=?"),
-                &[&copy, &id],
-            )?;
-            // The copy starts with the History of the edit it copies, then goes its own way.
-            w.execute(
-                sql!(
-                    "INSERT INTO develop_history(photo,data)
-                     SELECT ?,data FROM develop_history WHERE photo=?"
-                ),
-                &[&copy, &id],
-            )?;
+            super::edit_rows::copy_edit(w, id, copy)?;
             w.execute(
                 sql!(
                     "INSERT INTO photo_keywords(photo,keyword)
@@ -135,8 +124,8 @@ impl Catalog {
             "Only virtual copies can be removed"
         );
         self.db.write(|w| {
+            super::edit_rows::delete_edits(w, id)?;
             for delete in [
-                sql!("DELETE FROM local_edits WHERE photo=?"),
                 sql!("DELETE FROM lightroom_history WHERE photo=?"),
                 sql!("DELETE FROM photo_keywords WHERE photo=?"),
                 sql!("DELETE FROM collection_photos WHERE photo=?"),

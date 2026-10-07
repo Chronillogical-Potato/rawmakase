@@ -189,6 +189,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [catalog/db/sql.rs](../crates/rawmakase-catalog/src/catalog/db/sql.rs) | `Sql` and `SqliteSql`: one `SELECT`, `WITH`, `INSERT`, `UPDATE` or `DELETE` statement each, checked at compile time by `sql!` and `sqlite_sql!`. |
 | [catalog/value.rs](../crates/rawmakase-catalog/src/catalog/value.rs) | The values catalog queries bind and read (`ToValue`, `FromValue`, `FromRow`, `TextOrBlob`) and `row!` for named row structs, decoding as rusqlite always did. |
 | [catalog/edits.rs](../crates/rawmakase-catalog/src/catalog/edits.rs) | A photo's saved edit: recipe and export options, the spots and masks kept beside them, and bitmaps by hash. |
+| [catalog/edit_rows.rs](../crates/rawmakase-catalog/src/catalog/edit_rows.rs) | The only writes to a photo's edit rows: a checked save or clear, an exact copy for virtual copies, and removal with a copy. A test fails on any other SQL that writes them. |
 | [catalog/develop_history.rs](../crates/rawmakase-catalog/src/catalog/develop_history.rs) | A photo's Develop History (`model::saved_history`), stored in the same transaction as its edit; large settings are stored once per History. |
 | [catalog/copies.rs](../crates/rawmakase-catalog/src/catalog/copies.rs) | Virtual copies: create, set as master, rename, remove. |
 | [catalog/ingest.rs](../crates/rawmakase-catalog/src/catalog/ingest.rs) | Adding a folder of photos, with the edits earlier releases saved beside them; each folder found is matched with this computer's locations. |
