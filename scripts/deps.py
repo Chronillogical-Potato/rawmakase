@@ -297,7 +297,12 @@ def path_to(edges, source, target):
 
 def check_closures(edges):
     broken = 0
+    known = set(top_level_modules())
     for module, forbidden in read_closures():
+        for name in [module, *forbidden]:
+            if name not in known:
+                print(f"{CLOSURES.relative_to(ROOT)} names {name}, which is no top-level module")
+                broken += 1
         reached = reaches(edges, module)
         for other in forbidden:
             if other in reached:
