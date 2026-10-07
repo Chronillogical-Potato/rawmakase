@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Measure Camera Raw's parametric tone curve on the synthetic chart and write
-src/develop/parametric.bin.
+crates/rawmakase-engine/src/develop/parametric.bin.
 
 `render` has Photoshop 2026 (Camera Raw) render synthetic-d65.dng with each fitting
 case (about 380 settings of the Shadows, Darks, Lights and Highlights regions and
@@ -209,7 +209,7 @@ def fit(refs):
     tables = [t - t[..., :1] * fade((0.15 - GRID) / 0.15) - t[..., -1:] * fade((GRID - 0.85) / 0.15)
               for t in tables]
     out = np.concatenate([t.astype('<f4').ravel() for t in tables])
-    path = ROOT / 'src/develop/parametric.bin'
+    path = ROOT / 'crates/rawmakase-engine/src/develop/parametric.bin'
     path.write_bytes(out.tobytes())
     print(f'{path.relative_to(ROOT)}: {out.size} values')
 

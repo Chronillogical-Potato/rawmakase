@@ -8,7 +8,7 @@ It refuses to start while Photoshop has documents open.
 `table` fits the chart's Contrast curves (as scripts/corpus/parametric-curve.py fits its
 curves: brightest and darkest ProPhoto channel of every patch, gamma-2.2 Hermite
 spline) and prints them as `CONTRAST_CHART` and `CONTRAST_PIVOT` for
-src/develop/basic_tone_data.rs: 64 bin centres in encoded ProPhoto RGB, at the
+crates/rawmakase-engine/src/develop/basic_tone_data.rs: 64 bin centres in encoded ProPhoto RGB, at the
 engine's slider positions (-100, -50, -25, 25, 50, 100).
 
 `pivot` needs RAWMAKASE_CORPUS with the Camera Raw photo references
