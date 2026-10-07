@@ -241,13 +241,17 @@ impl Editor {
         if self.document.edit.save_state().needs_save()
             && let Some(job) = self.save_job()
         {
-            if self.autosave.submit(job, &self.context).is_err() {
-                // No saver thread: save here, as before.
-                return if self.flush() {
-                    Flushed::Saved
-                } else {
-                    Flushed::Failed
-                };
+            // A saver lost since the last save is started again by a second
+            // submit; saving here instead could stall as long as the catalog does.
+            let submitted = self
+                .autosave
+                .submit(job, &self.context)
+                .or_else(|job| self.autosave.submit(*job, &self.context));
+            if submitted.is_err() {
+                let error = "the autosave thread could not start".to_string();
+                self.document.edit.save_state_mut().failed(error.clone());
+                self.status = format!("Edits not saved: {error}");
+                return Flushed::Failed;
             }
             self.document.edit.save_state_mut().saving();
             if let Some(completion) = self.autosave.wait_until(until) {
